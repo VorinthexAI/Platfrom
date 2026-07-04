@@ -379,7 +379,18 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
-            printf '%s' "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
+            python3 - <<'PY' > ~/.ssh/deploy_key
+          import base64
+          import os
+          import sys
+
+          key_b64 = "".join(os.environ.get("EC2_SSH_KEY_B64", "").split())
+          print(f"Using EC2_SSH_KEY_B64 ({len(key_b64)} chars, mod4={len(key_b64) % 4})", file=sys.stderr)
+          try:
+              sys.stdout.buffer.write(base64.b64decode(key_b64, validate=True))
+          except Exception as exc:
+              sys.exit(f"Invalid EC2_SSH_KEY_B64: {exc}")
+          PY
           else
             python3 - <<'PY' > ~/.ssh/deploy_key
           import os
@@ -441,7 +452,18 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
-            printf '%s' "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
+            python3 - <<'PY' > ~/.ssh/deploy_key
+          import base64
+          import os
+          import sys
+
+          key_b64 = "".join(os.environ.get("EC2_SSH_KEY_B64", "").split())
+          print(f"Using EC2_SSH_KEY_B64 ({len(key_b64)} chars, mod4={len(key_b64) % 4})", file=sys.stderr)
+          try:
+              sys.stdout.buffer.write(base64.b64decode(key_b64, validate=True))
+          except Exception as exc:
+              sys.exit(f"Invalid EC2_SSH_KEY_B64: {exc}")
+          PY
           else
             python3 - <<'PY' > ~/.ssh/deploy_key
           import os
@@ -510,7 +532,18 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
-            printf '%s' "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
+            python3 - <<'PY' > ~/.ssh/deploy_key
+          import base64
+          import os
+          import sys
+
+          key_b64 = "".join(os.environ.get("EC2_SSH_KEY_B64", "").split())
+          print(f"Using EC2_SSH_KEY_B64 ({len(key_b64)} chars, mod4={len(key_b64) % 4})", file=sys.stderr)
+          try:
+              sys.stdout.buffer.write(base64.b64decode(key_b64, validate=True))
+          except Exception as exc:
+              sys.exit(f"Invalid EC2_SSH_KEY_B64: {exc}")
+          PY
           else
             python3 - <<'PY' > ~/.ssh/deploy_key
           import os
