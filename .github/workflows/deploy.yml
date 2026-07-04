@@ -177,7 +177,7 @@ jobs:
         run: |
           rm -rf "${GITHUB_WORKSPACE}/web/node_modules"
           mkdir -p "${GITHUB_WORKSPACE}/web/node_modules"
-          cp -alL "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/node_modules/"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/node_modules/"
           test -f "${GITHUB_WORKSPACE}/web/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
