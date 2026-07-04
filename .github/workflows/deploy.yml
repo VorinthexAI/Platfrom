@@ -666,6 +666,10 @@ jobs:
       - name: Register revision and optionally roll service
         run: |
           set -e
+          FAMILY="$(python3 -c 'import os; print(os.environ["FAMILY"].lstrip("\ufeff").strip())')"
+          RENDER_ECS_CLUSTER="$(python3 -c 'import os; print(os.environ["RENDER_ECS_CLUSTER"].lstrip("\ufeff").strip())')"
+          RENDER_ECS_SERVICE="$(python3 -c 'import os; print(os.environ["RENDER_ECS_SERVICE"].lstrip("\ufeff").strip())')"
+          export FAMILY RENDER_ECS_CLUSTER RENDER_ECS_SERVICE
           aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition' --output json > taskdef.json
           jq --arg IMAGE "$IMAGE" --arg AWS_REGION "$AWS_REGION" '
             .containerDefinitions |= map(
