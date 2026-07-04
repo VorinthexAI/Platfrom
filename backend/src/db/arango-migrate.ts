@@ -337,12 +337,6 @@ async function main() {
       }
   `);
   for await (const event of eventsCursor) {
-    const legacyAppSourceId = event.belongsTo === 'app' ? nonEmptyString(event.sourceId) ?? nonEmptyString(event.entityId) : null;
-    const belongsTo = legacyAppSourceId ? 'app' : 'platform';
-    const sourceId = legacyAppSourceId
-      ?? nonEmptyString(event.sourceId)
-      ?? (event.belongsTo === 'platform' ? nonEmptyString(event.entityId) : null)
-      ?? defaultPlatformId;
     const userId = await resolveEventUserId({
       targetDb,
       explicitUserId: event.userId,
@@ -350,6 +344,15 @@ async function main() {
       legacyBelongsTo: event.belongsTo,
       data: event.data,
     });
+    const legacyAppSourceId = event.belongsTo === 'app' ? nonEmptyString(event.sourceId) ?? nonEmptyString(event.entityId) : null;
+    const belongsTo = legacyAppSourceId ? 'app' : 'platform';
+    const legacyPlatformSourceId = event.belongsTo === 'platform' && event.entityId !== userId
+      ? nonEmptyString(event.entityId)
+      : null;
+    const sourceId = legacyAppSourceId
+      ?? nonEmptyString(event.sourceId)
+      ?? legacyPlatformSourceId
+      ?? defaultPlatformId;
     const embedding = typeof event.slug === 'string' && event.slug.length > 0
       ? await embed({ text: buildEventEmbedText(event._key, belongsTo, event.slug) })
       : [];
