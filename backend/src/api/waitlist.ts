@@ -101,6 +101,7 @@ export async function requestWaitlistVerification(email: string) {
   });
   trackPlatformEvent({
     slug: 'waitlist.signup_submitted',
+    userId: entry.key,
     data: {
       user_id: entry.key,
       email_hash: entry.emailHash,
@@ -141,6 +142,7 @@ export async function verifyWaitlistEmail(tokenHash: string) {
   const entry = await updateUser(challenge.userId, { isVerified: true, updatedAt: now.toISOString() });
   trackPlatformEvent({
     slug: 'waitlist.email_verified',
+    userId: entry.key,
     data: {
       user_id: entry.key,
       email_hash: entry.emailHash,

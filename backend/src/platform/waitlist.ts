@@ -32,6 +32,7 @@ export async function acceptWaitlistUser(userId: string) {
   });
   trackPlatformEvent({
     slug: 'waitlist.user_approved',
+    userId: entry.key,
     data: {
       user_id: entry.key,
       email_hash: entry.emailHash,
@@ -42,6 +43,7 @@ export async function acceptWaitlistUser(userId: string) {
   if (signInEmail.allowed) {
     trackPlatformEvent({
       slug: 'waitlist.signin_invite_sent',
+      userId: entry.key,
       data: {
         user_id: entry.key,
         email_hash: entry.emailHash,

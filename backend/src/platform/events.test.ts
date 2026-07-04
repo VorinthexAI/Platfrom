@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { eventSchema } from '@/lib/db/events.node';
 import { clientEventSlugSchema, eventSlugSchema } from './events';
 
 describe('event catalog', () => {
@@ -14,6 +15,25 @@ describe('event catalog', () => {
 
   test('rejects empty event slugs', () => {
     expect(() => eventSlugSchema.parse('')).toThrow();
+  });
+
+  test('event records separate source ownership from optional user ownership', () => {
+    expect(eventSchema.parse({
+      key: 'evt_test',
+      sourceId: 'plt_this',
+      belongsTo: 'platform',
+      slug: 'waitlist.visited',
+      createdAt: '2026-07-04T10:00:00.000Z',
+    })).toEqual({
+      key: 'evt_test',
+      sourceId: 'plt_this',
+      belongsTo: 'platform',
+      userId: null,
+      slug: 'waitlist.visited',
+      data: null,
+      embedding: [],
+      createdAt: '2026-07-04T10:00:00.000Z',
+    });
   });
 
 });

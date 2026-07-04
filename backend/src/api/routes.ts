@@ -136,9 +136,18 @@ export function registerRoutes(app: Hono) {
     const body = await parseJson(c, strictObject({
       distinctId: z.string().min(1).max(200),
       slug: clientEventSlugSchema,
+      app_id: z.string().min(1).optional(),
+      source_id: z.string().min(1).optional(),
       metadata: jsonObject.optional(),
     }));
-    trackPlatformEvent({ slug: body.slug, data: { ...body.metadata, distinct_id: body.distinctId } });
+    const userId = await getUserId(c);
+    trackPlatformEvent({
+      slug: body.slug,
+      appId: body.app_id,
+      sourceId: body.source_id,
+      userId,
+      data: { ...body.metadata, distinct_id: body.distinctId },
+    });
     return c.json({ ok: true }, 202);
   });
 
@@ -191,7 +200,13 @@ export function registerRoutes(app: Hono) {
       return c.json({ error: 'email_hash is required when no valid access token is provided' }, 400);
     }
 
-    const result = await appendUserEvents({ emailHash, events: body.events });
+    const result = await appendUserEvents({
+      userId: userId ?? undefined,
+      emailHash,
+      appId: body.app_id,
+      sourceId: body.source_id,
+      events: body.events,
+    });
     if (!result) return c.json({ error: 'user not found' }, 404);
 
     return c.json({

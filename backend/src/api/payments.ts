@@ -230,6 +230,7 @@ async function finalizeCheckoutWithProvider(c: Context, input: {
     });
     trackPlatformEvent({
       slug: 'payment.checkout_created',
+      userId: user.id,
       data: {
         checkout_id: checkoutId,
         provider_checkout_id: checkout.id,
@@ -388,6 +389,7 @@ async function fulfillOrderPaid(data: Record<string, any>) {
     await updatePaymentCheckout(checkout.key, { status: 'paid', updatedAt: new Date().toISOString() });
     trackPlatformEvent({
       slug: 'payment.checkout_completed',
+      userId: user?.key ?? null,
       data: {
         checkout_id: checkout.key,
         provider_checkout_id: checkout.providerCheckoutId,
@@ -420,6 +422,7 @@ async function fulfillOrderPaid(data: Record<string, any>) {
     if (product.productId === PRIVATE_BETA_TICKET_PRODUCT_ID) {
       trackPlatformEvent({
         slug: 'payment.ticket_purchased',
+        userId: user.key,
         data: {
           user_id: user.key,
           product_id: product.productId,

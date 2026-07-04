@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { getUserByEmailHash, getUserById, updateUser } from '@/lib/db/users.node';
 import { insertEvent } from '@/lib/db/events.node';
 import { newId } from '@/lib/ids';
+import { resolveEventSource } from '@/platform/events';
 import { strictObject } from './validation';
 
 const emailHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -16,6 +17,8 @@ export const userEventSchema = strictObject({
 
 export const postUserEventsBodySchema = strictObject({
   email_hash: emailHashSchema.optional(),
+  app_id: z.string().min(1).optional(),
+  source_id: z.string().min(1).optional(),
   events: z.array(userEventSchema).min(1),
 });
 
@@ -26,6 +29,7 @@ interface AppendUserEventsDeps {
   getUserById: typeof getUserById;
   insertEvent: typeof insertEvent;
   newId: typeof newId;
+  resolveEventSource: typeof resolveEventSource;
   updateUser: typeof updateUser;
 }
 
@@ -34,11 +38,12 @@ const defaultDeps: AppendUserEventsDeps = {
   getUserById,
   insertEvent,
   newId,
+  resolveEventSource,
   updateUser,
 };
 
 export async function appendUserEvents(
-  input: { userId?: string; emailHash?: string; events: UserEvent[] },
+  input: { userId?: string; emailHash?: string; appId?: string; sourceId?: string; events: UserEvent[] },
   deps: AppendUserEventsDeps = defaultDeps,
 ) {
   if (!input.userId && !input.emailHash) {
@@ -53,11 +58,12 @@ export async function appendUserEvents(
   if (!user) return null;
 
   const now = new Date().toISOString();
+  const source = await deps.resolveEventSource({ appId: input.appId, sourceId: input.sourceId });
   for (const event of input.events) {
     await deps.insertEvent({
       key: deps.newId(),
-      entityId: user.key,
-      belongsTo: 'user',
+      ...source,
+      userId: user.key,
       slug: event.slug,
       data: {
         distinctId: event.distinctId ?? null,

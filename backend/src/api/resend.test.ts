@@ -20,6 +20,9 @@ function mockDeps() {
       async deleteUser(id: string) {
         deletedUsers.push(id);
       },
+      async getDefaultPlatformId() {
+        return 'plt_this';
+      },
       async hashUserEmail(email: string) {
         return `hash:${email.trim().toLowerCase()}`;
       },
@@ -52,8 +55,9 @@ describe('Resend webhook payload processing', () => {
     });
     expect(opened.events[0]).toEqual({
       key: 'evt_test',
-      entityId: 'usr_test',
+      sourceId: 'plt_this',
       belongsTo: 'platform',
+      userId: 'usr_test',
       slug: 'email.opened',
       data: {
         provider: 'resend',
@@ -77,8 +81,9 @@ describe('Resend webhook payload processing', () => {
       deleted: false,
     });
     expect(delivered.events[0]).toEqual(expect.objectContaining({
-      entityId: 'usr_test',
+      sourceId: 'plt_this',
       belongsTo: 'platform',
+      userId: 'usr_test',
       slug: 'email.delivered',
     }));
     expect(delivered.events[0].data).toEqual(expect.objectContaining({
@@ -99,8 +104,9 @@ describe('Resend webhook payload processing', () => {
       deleted: true,
     });
     expect(bounced.events[0]).toEqual(expect.objectContaining({
-      entityId: 'usr_test',
+      sourceId: 'plt_this',
       belongsTo: 'platform',
+      userId: 'usr_test',
       slug: 'email.bounced',
     }));
     expect(bounced.deletedUsers).toEqual(['usr_test']);
@@ -118,8 +124,9 @@ describe('Resend webhook payload processing', () => {
       deleted: false,
     });
     expect(complained.events[0]).toEqual(expect.objectContaining({
-      entityId: 'usr_test',
+      sourceId: 'plt_this',
       belongsTo: 'platform',
+      userId: 'usr_test',
       slug: 'email.complained',
     }));
     expect(complained.deletedUsers).toEqual([]);

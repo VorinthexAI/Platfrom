@@ -5,8 +5,9 @@ export const EVENTS_COLLECTION = 'events';
 
 export const eventSchema = z.object({
   key: z.string(),
-  entityId: z.string(),
-  belongsTo: z.enum(['platform', 'app', 'user']),
+  sourceId: z.string(),
+  belongsTo: z.enum(['platform', 'app']),
+  userId: z.string().nullable().default(null),
   slug: z.string(),
   data: z.record(z.unknown()).nullable().default(null),
   embedding: z.array(z.number()).default([]),

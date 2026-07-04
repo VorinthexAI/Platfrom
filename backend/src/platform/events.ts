@@ -11,16 +11,35 @@ export const clientEventSlugSchema = eventSlugSchema;
 
 export type ClientEventSlug = z.infer<typeof clientEventSlugSchema>;
 
+type EventSourceInput = {
+  appId?: string;
+  sourceId?: string;
+};
+
+export async function resolveEventSource(input: EventSourceInput = {}) {
+  if (input.appId) {
+    return { belongsTo: 'app' as const, sourceId: input.appId };
+  }
+
+  return {
+    belongsTo: 'platform' as const,
+    sourceId: input.sourceId ?? await getDefaultPlatformId(),
+  };
+}
+
 export function trackPlatformEvent(input: {
   slug: EventSlug;
   data?: Record<string, unknown>;
-  entityId?: string;
+  sourceId?: string;
+  appId?: string;
+  userId?: string | null;
 }) {
   void (async () => {
+    const source = await resolveEventSource({ appId: input.appId, sourceId: input.sourceId });
     await insertEvent({
       key: newId(),
-      entityId: input.entityId ?? await getDefaultPlatformId(),
-      belongsTo: 'platform',
+      ...source,
+      userId: input.userId ?? null,
       slug: input.slug,
       data: input.data ?? {},
       createdAt: new Date().toISOString(),
@@ -33,7 +52,7 @@ export function trackPlatformEvent(input: {
   });
 }
 
-async function getDefaultPlatformId() {
+export async function getDefaultPlatformId() {
   const existing = await getPlatformByName('this');
   if (existing) return existing.key;
 

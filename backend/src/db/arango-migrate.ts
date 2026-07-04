@@ -21,6 +21,58 @@ function buildOutputEmbedText(key: string, type: string): string {
   return ['_outputs', key, type].join(':');
 }
 
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function emailHashFromData(data: unknown): string | null {
+  if (!data || typeof data !== 'object') return null;
+  const record = data as Record<string, unknown>;
+  return nonEmptyString(record.email_hash)
+    ?? nonEmptyString(record.emailHash)
+    ?? (record.payload && typeof record.payload === 'object'
+      ? nonEmptyString((record.payload as Record<string, unknown>).email_hash)
+        ?? nonEmptyString((record.payload as Record<string, unknown>).emailHash)
+      : null);
+}
+
+async function getUserIdByEmailHash(targetDb: Database, emailHash: string): Promise<string | null> {
+  const cursor = await targetDb.query<{ _key: string }>(
+    `
+      FOR user IN users
+        FILTER user.emailHash == @emailHash
+        LIMIT 1
+        RETURN { _key: user._key }
+    `,
+    { emailHash },
+  );
+  const user = await cursor.next();
+  return user?._key ?? null;
+}
+
+async function resolveEventUserId(input: {
+  targetDb: Database;
+  explicitUserId?: unknown;
+  legacyEntityId?: unknown;
+  legacyBelongsTo?: unknown;
+  data?: unknown;
+}): Promise<string | null> {
+  const explicitUserId = nonEmptyString(input.explicitUserId);
+  if (explicitUserId) return explicitUserId;
+
+  const data = input.data && typeof input.data === 'object' ? input.data as Record<string, unknown> : {};
+  const dataUserId = nonEmptyString(data.user_id) ?? nonEmptyString(data.userId);
+  if (dataUserId) return dataUserId;
+
+  if (input.legacyBelongsTo === 'user') {
+    const legacyUserId = nonEmptyString(input.legacyEntityId);
+    if (legacyUserId) return legacyUserId;
+  }
+
+  const emailHash = emailHashFromData(input.data);
+  return emailHash ? getUserIdByEmailHash(input.targetDb, emailHash) : null;
+}
+
 const collections: CollectionSpec[] = [
   { name: 'users', indexes: [{ fields: ['email'], unique: true }, { fields: ['emailHash'], unique: true }] },
   {
@@ -53,7 +105,7 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'events',
-    indexes: [{ fields: ['slug', 'createdAt'] }, { fields: ['belongsTo', 'entityId', 'createdAt'] }],
+    indexes: [{ fields: ['slug', 'createdAt'] }, { fields: ['belongsTo', 'sourceId', 'createdAt'] }, { fields: ['userId', 'createdAt'] }],
   },
   { name: 'outputs', indexes: [{ fields: ['type', 'createdAt'] }] },
   { name: 'outputRelations', indexes: [{ fields: ['parentOutputId'] }, { fields: ['childOutputId'] }] },
@@ -199,8 +251,9 @@ async function main() {
           : new Date().toISOString();
       await eventsCollection.save({
         _key: key,
-        entityId: user._key,
-        belongsTo: 'user',
+        sourceId: defaultPlatformId,
+        belongsTo: 'platform',
+        userId: user._key,
         slug,
         data: {
           distinctId: typeof event.distinctId === 'string' ? event.distinctId : null,
@@ -240,8 +293,9 @@ async function main() {
       await eventsCollection.save(
         {
           _key: key,
-          entityId: event.userId,
-          belongsTo: 'user',
+          sourceId: defaultPlatformId,
+          belongsTo: 'platform',
+          userId: event.userId,
           slug,
           data: event.data && typeof event.data === 'object' ? event.data : {},
           createdAt: typeof event.createdAt === 'string' ? event.createdAt : new Date().toISOString(),
@@ -262,21 +316,51 @@ async function main() {
       UPDATE event WITH { category: null } IN events OPTIONS { keepNull: false }
   `);
 
-  const eventsCursor = await targetDb.query<{ _key: string; slug?: string; entityId?: string; belongsTo?: string }>(`
+  const eventsCursor = await targetDb.query<{
+    _key: string;
+    slug?: string;
+    sourceId?: string;
+    userId?: string;
+    entityId?: string;
+    belongsTo?: string;
+    data?: Record<string, unknown> | null;
+  }>(`
     FOR event IN events
-      RETURN { _key: event._key, slug: event.slug, entityId: event.entityId, belongsTo: event.belongsTo }
+      RETURN {
+        _key: event._key,
+        slug: event.slug,
+        sourceId: event.sourceId,
+        userId: event.userId,
+        entityId: event.entityId,
+        belongsTo: event.belongsTo,
+        data: event.data
+      }
   `);
   for await (const event of eventsCursor) {
-    const belongsTo = event.belongsTo === 'app' || event.belongsTo === 'platform' || event.belongsTo === 'user' ? event.belongsTo : 'platform';
-    const entityId = belongsTo === 'platform'
-      ? defaultPlatformId
-      : typeof event.entityId === 'string' && event.entityId.length > 0
-        ? event.entityId
-        : newId();
+    const legacyAppSourceId = event.belongsTo === 'app' ? nonEmptyString(event.sourceId) ?? nonEmptyString(event.entityId) : null;
+    const belongsTo = legacyAppSourceId ? 'app' : 'platform';
+    const sourceId = legacyAppSourceId
+      ?? nonEmptyString(event.sourceId)
+      ?? (event.belongsTo === 'platform' ? nonEmptyString(event.entityId) : null)
+      ?? defaultPlatformId;
+    const userId = await resolveEventUserId({
+      targetDb,
+      explicitUserId: event.userId,
+      legacyEntityId: event.entityId,
+      legacyBelongsTo: event.belongsTo,
+      data: event.data,
+    });
     const embedding = typeof event.slug === 'string' && event.slug.length > 0
       ? await embed({ text: buildEventEmbedText(event._key, belongsTo, event.slug) })
       : [];
-    await eventsCollection.update(event._key, { entityId, belongsTo, entityType: null, embedding }, { keepNull: false });
+    await eventsCollection.update(event._key, {
+      sourceId,
+      belongsTo,
+      userId,
+      entityId: null,
+      entityType: null,
+      embedding,
+    }, { keepNull: false });
   }
 
   await targetDb.query(`
