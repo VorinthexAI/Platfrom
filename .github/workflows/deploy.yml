@@ -405,8 +405,8 @@ jobs:
           fi
           chmod 600 ~/.ssh/deploy_key
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+          ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for graph database host; SSH will use accept-new."
+          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
       - name: Copy graph-db compose file
         run: |
           ssh graphdbbox "mkdir -p ~/vorinthex-db"
@@ -478,8 +478,8 @@ jobs:
           fi
           chmod 600 ~/.ssh/deploy_key
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+          ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for graph database host; SSH will use accept-new."
+          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
       - name: Fetch ArangoDB credentials from SSM
         run: |
@@ -558,8 +558,8 @@ jobs:
           fi
           chmod 600 ~/.ssh/deploy_key
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
-          ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host appbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+          ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for app host; SSH will use accept-new."
+          printf 'Host appbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
       - name: Copy app compose and deploy script
         run: |
           ssh appbox "mkdir -p ~/vorinthex"
