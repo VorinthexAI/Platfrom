@@ -13,7 +13,7 @@ import {
   type SVGProps,
 } from "react";
 
-import { Button, InboxIcon, Spinner } from "@/shared/packages/ui";
+import { Button, InboxIcon, Spinner } from "@vorinthex/shared/ui";
 
 import { WaitlistForm } from "./waitlist-form";
 

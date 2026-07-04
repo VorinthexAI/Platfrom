@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { Card } from "@/shared/packages/ui";
+import { Card } from "@vorinthex/shared/ui";
 
 import { VerifyTotpForm } from "./verify-totp-form";
 

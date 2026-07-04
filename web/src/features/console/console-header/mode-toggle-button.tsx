@@ -8,8 +8,8 @@
 // enter the universe), and `mode === "universe"` renders the Chat-bubble
 // icon (invitation to leave the universe and return to chat).
 
-import { GlobeIcon } from "@/shared/packages/ui/icons/globe/globe.web";
-import { ChatBubbleIcon } from "@/shared/packages/ui/icons/chat-bubble/chat-bubble.web";
+import { GlobeIcon } from "@vorinthex/shared/ui";
+import { ChatBubbleIcon } from "@vorinthex/shared/ui";
 
 import type { ConsoleMode } from "../store/console-mode-store";
 

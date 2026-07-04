@@ -13,7 +13,7 @@ import {
   FormField,
   TextInput,
   ValidationMessage,
-} from "@/shared/packages/ui";
+} from "@vorinthex/shared/ui";
 import { requestMfaResetAction } from "@/app/(auth)/auth-actions";
 
 const resetSchema = z.object({

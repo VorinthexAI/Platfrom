@@ -31,10 +31,10 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
 
 Reusable code lives in the top-level `../shared` workspace package. It is not a git submodule.
 
-The shared Axios singleton is exported from `@/shared/lib`:
+The shared Axios singleton is exported from `@vorinthex/shared/lib`:
 
 ```ts
-import { apiClient } from "@/shared/lib";
+import { apiClient } from "@vorinthex/shared/lib";
 ```
 
 The client always sets `withCredentials: true`, so browser requests include
@@ -45,7 +45,7 @@ cookies for cookie-based API sessions.
 The shared UI library lives in `../shared/packages/ui` and exports:
 
 ```ts
-import { Button, HomeIcon } from "@/shared/packages/ui";
+import { Button, HomeIcon } from "@vorinthex/shared/ui";
 ```
 
 Each component and icon has a folder with web and mobile implementations:

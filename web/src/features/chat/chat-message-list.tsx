@@ -17,7 +17,7 @@
 //     scroll-anchor hook, independent of virtualization.
 import { useCallback, useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { EmptyState, Spinner } from "@/shared/packages/ui";
+import { EmptyState, Spinner } from "@vorinthex/shared/ui";
 import { ChatMessageComponent } from "./chat-message";
 import { ScrollAnchorProvider, useScrollAnchorContext } from "./scroll/scroll-anchor-provider";
 import type { ChatMessage } from "./types";

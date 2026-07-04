@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { Card } from "@/shared/packages/ui";
+import { Card } from "@vorinthex/shared/ui";
 import { validateMagicLinkAction } from "@/app/(auth)/auth-actions";
 
 export const metadata: Metadata = {

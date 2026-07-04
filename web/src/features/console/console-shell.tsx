@@ -11,7 +11,7 @@ import dynamic from "next/dynamic";
 import { usePathname, useSearchParams } from "next/navigation";
 
 import type { Session } from "@/server/dal/session";
-import { EmptyState } from "@/shared/packages/ui/components/empty-state/empty-state.web";
+import { EmptyState } from "@vorinthex/shared/ui";
 
 import { useConsoleModeStore } from "./store/console-mode-store";
 import { ConsoleHeader } from "./console-header/console-header";

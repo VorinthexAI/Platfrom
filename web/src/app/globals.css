@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "../../../shared/packages/ui/theme.css";
+@import "@vorinthex/shared/ui/theme.css";
 
 :root {
   --background: var(--vui-color-page);

@@ -7,7 +7,7 @@
 // streaming (enforced by `messagesEqual` below always treating
 // `isStreamingNow: true` as unequal).
 import { memo } from "react";
-import { Avatar } from "@/shared/packages/ui";
+import { Avatar } from "@vorinthex/shared/ui";
 import { IncrementalMarkdownRenderer } from "./markdown/incremental-markdown-renderer";
 import { ToolCallCard, flyToNodeInUniverse, type SearchResult } from "./tool-call-card";
 import type { ChatMessage } from "./types";

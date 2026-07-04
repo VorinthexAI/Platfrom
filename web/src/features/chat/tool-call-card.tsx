@@ -12,7 +12,7 @@
 // listener that triggers the §8.4 fly-to camera transition for that node id.
 // We can't import the universe engine directly (bundle-isolation, §13.4), so
 // this DOM CustomEvent is the deliberate, documented seam between the two.
-import { Badge, Card, Spinner } from "@/shared/packages/ui";
+import { Badge, Card, Spinner } from "@vorinthex/shared/ui";
 import { useConsoleModeStore } from "@/features/console/store/console-mode-store";
 
 export type SearchResult = {

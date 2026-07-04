@@ -13,7 +13,7 @@ import {
   FormField,
   TextInput,
   ValidationMessage,
-} from "@/shared/packages/ui";
+} from "@vorinthex/shared/ui";
 
 import { requestSignInEmailAction } from "../auth-actions";
 

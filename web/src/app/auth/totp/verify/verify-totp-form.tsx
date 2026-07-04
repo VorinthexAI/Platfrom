@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent } from "react";
 
-import { Alert, Button, Card, TextInput } from "@/shared/packages/ui";
+import { Alert, Button, Card, TextInput } from "@vorinthex/shared/ui";
 import { verifyTotpAction } from "@/app/(auth)/auth-actions";
 
 export function VerifyTotpForm({

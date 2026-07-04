@@ -3,8 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 
-import { Alert, Button, TextInput } from "@/shared/packages/ui";
-import { TotpSetup } from "@/shared/packages/ui/components/totp-setup/totp-setup.web";
+import { Alert, Button, TextInput } from "@vorinthex/shared/ui";
+import { TotpSetup } from "@vorinthex/shared/ui";
 
 import { confirmMfaEnrollmentAction } from "./actions";
 import type { EnrollmentPayload } from "../enrollment-cookie";

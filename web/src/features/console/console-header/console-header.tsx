@@ -7,17 +7,17 @@ import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 
 import type { Session } from "@/server/dal/session";
-import { LogoMark } from "@/shared/packages/ui/components/logo-mark/logo-mark.web";
-import { UserMenu as UserMenuFrame } from "@/shared/packages/ui/components/user-menu/user-menu.web";
+import { LogoMark } from "@vorinthex/shared/ui";
+import { UserMenu as UserMenuFrame } from "@vorinthex/shared/ui";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/shared/packages/ui/components/dropdown-menu/dropdown-menu.web";
-import { SettingsIcon } from "@/shared/packages/ui/icons/settings/settings.web";
-import { LogOutIcon } from "@/shared/packages/ui/icons/log-out/log-out.web";
+} from "@vorinthex/shared/ui";
+import { SettingsIcon } from "@vorinthex/shared/ui";
+import { LogOutIcon } from "@vorinthex/shared/ui";
 
 import { useConsoleModeStore } from "../store/console-mode-store";
 import { ModeToggleButton } from "./mode-toggle-button";

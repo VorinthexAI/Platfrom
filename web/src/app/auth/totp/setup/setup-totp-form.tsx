@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 
-import { Alert, Button, Card, TextInput } from "@/shared/packages/ui";
+import { Alert, Button, Card, TextInput } from "@vorinthex/shared/ui";
 import { completeTotpSetupAction } from "@/app/(auth)/auth-actions";
-import { TotpSetup } from "@/shared/packages/ui/components/totp-setup/totp-setup.web";
+import { TotpSetup } from "@vorinthex/shared/ui";
 
 export function SetupTotpForm({
   otpauthUrl,
