@@ -14,6 +14,7 @@
     "backend:test": "bun run --cwd backend test"
   },
   "devDependencies": {
+    "@types/bun": "^1.2.0",
     "@types/react": "^19",
     "@types/react-dom": "^19"
   }
