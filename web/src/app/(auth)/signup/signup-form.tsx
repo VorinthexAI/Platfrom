@@ -13,7 +13,7 @@ import {
   PasswordInput,
   TextInput,
   ValidationMessage,
-} from "@/shared/packages/ui";
+} from "@vorinthex/shared/ui";
 
 import { signupAction } from "./actions";
 import { signupSchema, type SignupInput } from "./schema";

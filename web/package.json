@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "bun --env-file=../environments/.env.dev next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "bun --env-file=../environments/.env.prod next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -34,6 +34,7 @@
     "@react-three/postprocessing": "^3.0.0",
     "@tanstack/react-query": "^5.101.2",
     "@tanstack/react-virtual": "^3.0.0",
+    "@vorinthex/shared": "workspace:*",
     "ai": "^6.0.0",
     "axios": "^1.18.1",
     "d3-force-3d": "^3.0.0",

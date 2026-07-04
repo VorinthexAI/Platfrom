@@ -21,7 +21,7 @@ import {
 import { usePathname } from "next/navigation";
 
 import { useConsoleChat } from "@/features/chat/use-console-chat";
-import { UploadIcon } from "@/shared/packages/ui/icons/upload/upload.web";
+import { UploadIcon } from "@vorinthex/shared/ui";
 
 import { useConsoleModeStore } from "../store/console-mode-store";
 import { usePendingChatDraftStore } from "../store/pending-chat-draft-store";

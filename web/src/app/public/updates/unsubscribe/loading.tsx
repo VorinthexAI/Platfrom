@@ -1,4 +1,4 @@
-import { Card } from "@/shared/packages/ui";
+import { Card } from "@vorinthex/shared/ui";
 
 export default function UpdatesUnsubscribeLoading() {
   return (

@@ -12,7 +12,7 @@
 // `Session = { userId, displayName, avatarUrl, mfaLevel: "totp" }`).
 
 import { verifySession } from "@/server/dal/session";
-import { Avatar, Badge, Card, DataGrid, TotpSetup } from "@/shared/packages/ui";
+import { Avatar, Badge, Card, DataGrid, TotpSetup } from "@vorinthex/shared/ui";
 
 export const metadata = {
   title: "Settings — Vorinthex Console",

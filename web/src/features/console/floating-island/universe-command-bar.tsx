@@ -15,8 +15,8 @@ import { useState } from "react";
 import { useUniverseSearch } from "@/features/universe/data/use-universe-search";
 import { useEngineSnapshot } from "@/features/universe/engine/engine-bridge";
 import { useSelectionStore } from "@/features/universe/store/selection-store";
-import { SearchIcon } from "@/shared/packages/ui/icons/search/search.web";
-import { ChatBubbleIcon } from "@/shared/packages/ui/icons/chat-bubble/chat-bubble.web";
+import { SearchIcon } from "@vorinthex/shared/ui";
+import { ChatBubbleIcon } from "@vorinthex/shared/ui";
 
 import { useConsoleModeStore } from "../store/console-mode-store";
 import { usePendingChatDraftStore } from "../store/pending-chat-draft-store";

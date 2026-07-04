@@ -14,7 +14,7 @@ import { useState } from "react";
 import dynamic from "next/dynamic";
 
 import { readCapabilitySnapshot } from "@/lib/capability-snapshot";
-import { DataGrid } from "@/shared/packages/ui";
+import { DataGrid } from "@vorinthex/shared/ui";
 import type { SerializedCameraState } from "./types";
 
 const UniverseCanvas = dynamic(

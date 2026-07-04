@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import { useForm, type FieldErrors } from "react-hook-form";
 import { z } from "zod";
 
-import { Button } from "@/shared/packages/ui";
+import { Button } from "@vorinthex/shared/ui";
 
 import { joinWaitlistAction } from "./waitlist-actions";
 

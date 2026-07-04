@@ -3,7 +3,7 @@
 // only covers the brief window before ConsoleShell itself has streamed in
 // (e.g. while `verifySession()` is resolving).
 
-import { Spinner } from "@/shared/packages/ui/components/spinner/spinner.web";
+import { Spinner } from "@vorinthex/shared/ui";
 
 export default function ConsoleLoading() {
   return (

@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const workspaceRoot = path.resolve(process.cwd(), "..");
+const appRoot = path.dirname(fileURLToPath(import.meta.url));
+const workspaceRoot = path.resolve(appRoot, "..");
 
 const nextConfig: NextConfig = {
   // Web Worker modules (§9.6, §37 of neural-map.md) are loaded via
@@ -15,7 +17,7 @@ const nextConfig: NextConfig = {
 
   images: {},
 
-  outputFileTracingRoot: workspaceRoot,
+  transpilePackages: ["@vorinthex/shared"],
 
   experimental: {
     // Required for `unauthorized()` (next/navigation) + the app/unauthorized.tsx
@@ -35,6 +37,14 @@ const nextConfig: NextConfig = {
       // for at all, hence this global rule.
       "*.glsl": { type: "raw" },
     },
+  },
+
+  webpack(config) {
+    config.module.rules.push({
+      test: /\.glsl$/,
+      type: "asset/source",
+    });
+    return config;
   },
 
   // neural-map.md §55 — a starting-point CSP for `/console`, not a final
