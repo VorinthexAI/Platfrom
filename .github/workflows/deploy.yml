@@ -377,10 +377,20 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          python3 - <<'PY' > ~/.ssh/deploy_key
+          import os
+          import sys
+
+          key = os.environ.get("EC2_SSH_KEY", "").strip()
+          if not key:
+              sys.exit("EC2_SSH_KEY is empty")
+          key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+          print(key)
+          PY
           chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2_SSH_KEY is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key."; exit 1; }
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
       - name: Copy graph-db compose file
         run: |
           ssh graphdbbox "mkdir -p ~/vorinthex-db"
@@ -424,10 +434,20 @@ jobs:
       - name: Open SSH tunnel to ArangoDB
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          python3 - <<'PY' > ~/.ssh/deploy_key
+          import os
+          import sys
+
+          key = os.environ.get("EC2_SSH_KEY", "").strip()
+          if not key:
+              sys.exit("EC2_SSH_KEY is empty")
+          key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+          print(key)
+          PY
           chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2_SSH_KEY is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key."; exit 1; }
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
       - name: Fetch ArangoDB credentials from SSM
         run: |
@@ -478,10 +498,20 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$EC2_SSH_KEY" > ~/.ssh/deploy_key
+          python3 - <<'PY' > ~/.ssh/deploy_key
+          import os
+          import sys
+
+          key = os.environ.get("EC2_SSH_KEY", "").strip()
+          if not key:
+              sys.exit("EC2_SSH_KEY is empty")
+          key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+          print(key)
+          PY
           chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2_SSH_KEY is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key."; exit 1; }
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          printf 'Host appbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+          printf 'Host appbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
       - name: Copy app compose and deploy script
         run: |
           ssh appbox "mkdir -p ~/vorinthex"

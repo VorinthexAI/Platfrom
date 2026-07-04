@@ -12,6 +12,7 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+graphify-out/
 
 terraform/**/.terraform/
 terraform/**/*.tfstate
