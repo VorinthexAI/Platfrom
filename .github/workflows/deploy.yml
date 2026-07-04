@@ -365,6 +365,7 @@ jobs:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
       EC2_USER: ${{ secrets.GRAPH_DB_EC2_USER }}
       EC2_SSH_KEY: ${{ secrets.GRAPH_DB_EC2_SSH_KEY }}
+      EC2_SSH_KEY_B64: ${{ secrets.GRAPH_DB_EC2_SSH_KEY_B64 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -377,7 +378,10 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          python3 - <<'PY' > ~/.ssh/deploy_key
+          if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
+            printf '%s' "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
+          else
+            python3 - <<'PY' > ~/.ssh/deploy_key
           import os
           import sys
 
@@ -387,8 +391,9 @@ jobs:
           key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
           print(key)
           PY
+          fi
           chmod 600 ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2_SSH_KEY is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key."; exit 1; }
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
       - name: Copy graph-db compose file
@@ -418,6 +423,7 @@ jobs:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
       EC2_USER: ${{ secrets.GRAPH_DB_EC2_USER }}
       EC2_SSH_KEY: ${{ secrets.GRAPH_DB_EC2_SSH_KEY }}
+      EC2_SSH_KEY_B64: ${{ secrets.GRAPH_DB_EC2_SSH_KEY_B64 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -434,7 +440,10 @@ jobs:
       - name: Open SSH tunnel to ArangoDB
         run: |
           mkdir -p ~/.ssh
-          python3 - <<'PY' > ~/.ssh/deploy_key
+          if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
+            printf '%s' "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
+          else
+            python3 - <<'PY' > ~/.ssh/deploy_key
           import os
           import sys
 
@@ -444,8 +453,9 @@ jobs:
           key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
           print(key)
           PY
+          fi
           chmod 600 ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2_SSH_KEY is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key."; exit 1; }
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
@@ -486,6 +496,7 @@ jobs:
       EC2_HOST: ${{ secrets.APP_EC2_HOST }}
       EC2_USER: ${{ secrets.APP_EC2_USER }}
       EC2_SSH_KEY: ${{ secrets.APP_EC2_SSH_KEY || secrets.EC2_SSH_KEY }}
+      EC2_SSH_KEY_B64: ${{ secrets.APP_EC2_SSH_KEY_B64 || secrets.EC2_SSH_KEY_B64 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -498,7 +509,10 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          python3 - <<'PY' > ~/.ssh/deploy_key
+          if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
+            printf '%s' "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/deploy_key
+          else
+            python3 - <<'PY' > ~/.ssh/deploy_key
           import os
           import sys
 
@@ -508,8 +522,9 @@ jobs:
           key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
           print(key)
           PY
+          fi
           chmod 600 ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2_SSH_KEY is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key."; exit 1; }
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
           ssh-keyscan -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           printf 'Host appbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
       - name: Copy app compose and deploy script
