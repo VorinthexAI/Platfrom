@@ -569,6 +569,56 @@ jobs:
           ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
           ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for app host; SSH will use accept-new."
           printf 'Host appbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+      - name: Ensure app host trusts deploy key
+        run: |
+          set -euo pipefail
+          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
+          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
+          PUBLIC_KEY="$(ssh-keygen -y -f ~/.ssh/deploy_key)"
+          INSTANCE_ID="$(aws ec2 describe-instances \
+            --region "$AWS_REGION" \
+            --filters "Name=ip-address,Values=$EC2_HOST" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)"
+          test -n "$INSTANCE_ID" && test "$INSTANCE_ID" != "None" || { echo "::error::Could not find running app EC2 instance for $EC2_HOST"; exit 1; }
+          PUBLIC_KEY="$PUBLIC_KEY" EC2_USER="$EC2_USER" python3 - <<'PY' > /tmp/ssm-authorized-key.json
+          import json
+          import os
+          import shlex
+
+          key = os.environ["PUBLIC_KEY"]
+          user = os.environ["EC2_USER"]
+          home = f"/home/{user}"
+          key_q = shlex.quote(key)
+          user_q = shlex.quote(user)
+          home_q = shlex.quote(home)
+          commands = [
+              "set -euo pipefail",
+              f"install -d -m 700 -o {user_q} -g {user_q} {home_q}/.ssh",
+              f"touch {home_q}/.ssh/authorized_keys",
+              f"chown {user_q}:{user_q} {home_q}/.ssh/authorized_keys",
+              f"chmod 600 {home_q}/.ssh/authorized_keys",
+              f"grep -qxF {key_q} {home_q}/.ssh/authorized_keys || printf '%s\\n' {key_q} >> {home_q}/.ssh/authorized_keys",
+          ]
+          print(json.dumps({"commands": commands}))
+          PY
+          COMMAND_ID="$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --parameters file:///tmp/ssm-authorized-key.json \
+            --query 'Command.CommandId' \
+            --output text)"
+          for i in $(seq 1 30); do
+            STATUS="$(aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || true)"
+            case "$STATUS" in
+              Success) exit 0 ;;
+              Failed|Cancelled|TimedOut) echo "::error::SSM authorized_keys repair failed with status $STATUS"; exit 1 ;;
+            esac
+            sleep 2
+          done
+          echo "::error::Timed out waiting for SSM authorized_keys repair."
+          exit 1
       - name: Copy app compose and deploy script
         run: |
           ssh appbox "mkdir -p ~/vorinthex"
