@@ -168,15 +168,17 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        working-directory: ${{ github.workspace }}
-        run: bun install --frozen-lockfile --linker=hoisted
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          bun install --frozen-lockfile --linker=hoisted
+          test -f "${GITHUB_WORKSPACE}/node_modules/next/package.json"
 
       - name: Materialize web dependencies for Vercel tracing
         run: |
-          cd "${GITHUB_WORKSPACE}/web"
-          rm -rf node_modules
-          mkdir -p node_modules
-          cp -alL "${GITHUB_WORKSPACE}/node_modules/." node_modules/
+          rm -rf "${GITHUB_WORKSPACE}/web/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/node_modules"
+          cp -alL "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/node_modules/"
+          test -f "${GITHUB_WORKSPACE}/web/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
         env:
