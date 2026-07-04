@@ -248,7 +248,7 @@ jobs:
       - name: Deploy to Vercel
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN" > deployment-url.txt
+        run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
 
       - name: Verify production is live
         env:
