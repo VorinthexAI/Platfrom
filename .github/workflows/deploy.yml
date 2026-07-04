@@ -151,9 +151,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [changes, verify-web]
     if: needs.changes.outputs.web == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
-    defaults:
-      run:
-        working-directory: web
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -162,13 +159,12 @@ jobs:
 
       - name: Strip non-app content from the build context
         run: |
-          rm -rf ../shared/brand ../shared/docs ../.claude
-          rm -f CLAUDE.md AGENTS.md admin.md ../CLAUDE.md ../AGENTS.md
+          rm -rf shared/brand shared/docs .claude
+          rm -f CLAUDE.md AGENTS.md admin.md web/CLAUDE.md web/AGENTS.md web/admin.md
 
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        working-directory: .
         run: bun install --frozen-lockfile
 
       - name: Load production env file
