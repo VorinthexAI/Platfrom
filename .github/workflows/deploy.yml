@@ -377,6 +377,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Set up SSH
         run: |
+          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
+          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
+          export EC2_HOST EC2_USER
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
             python3 - <<'PY' > ~/.ssh/deploy_key
@@ -450,6 +453,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH tunnel to ArangoDB
         run: |
+          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
+          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
+          export EC2_HOST EC2_USER
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
             python3 - <<'PY' > ~/.ssh/deploy_key
@@ -530,6 +536,9 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Set up SSH
         run: |
+          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
+          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
+          export EC2_HOST EC2_USER
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
             python3 - <<'PY' > ~/.ssh/deploy_key
