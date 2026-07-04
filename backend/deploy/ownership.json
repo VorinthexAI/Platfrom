@@ -1,0 +1,11 @@
+{
+  ".github": ["app", "render"],
+  "scripts": ["app", "render"],
+  "src/api": ["app"],
+  "src/render-worker": ["render"],
+  "src/core": ["app", "render"],
+  "src/db": ["app", "render"],
+  "src/lib": ["app", "render"],
+  "deploy": ["app", "render"]
+}
+

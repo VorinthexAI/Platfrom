@@ -1,0 +1,197 @@
+import type { Context, MiddlewareHandler } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
+import { z } from 'zod';
+import { timingSafeEqual } from '@/lib/crypto';
+import { isPolarWebhookPath } from './payments';
+import { isResendWebhookPath } from './resend';
+import { strictObject } from './validation';
+import { rotateRefreshToken, verifyAccessToken } from './auth';
+
+export const ACCESS_COOKIE = 'vorinthex_access';
+export const REFRESH_COOKIE = 'vorinthex_refresh';
+const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60;
+const REFRESH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+
+function getClientIp(c: Parameters<MiddlewareHandler>[0]) {
+  const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+  return forwarded || c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || 'unknown';
+}
+
+function getRequestApiKey(c: Parameters<MiddlewareHandler>[0]) {
+  return c.req.header('x-vorinthex-api-key')
+    ?? c.req.header('x-api-key')
+    ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+}
+
+function getBearerToken(c: Parameters<MiddlewareHandler>[0]) {
+  return c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+}
+
+function setAuthUserId(c: Parameters<MiddlewareHandler>[0], userId: string) {
+  c.set('userId', userId);
+}
+
+function cookieOptions(maxAge: number) {
+  const domain = process.env.COOKIE_DOMAIN;
+  const crossSite = Boolean(domain);
+  return {
+    httpOnly: true,
+    path: '/',
+    sameSite: crossSite ? 'None' : 'Lax',
+    secure: process.env.NODE_ENV === 'production' || crossSite,
+    domain,
+    maxAge,
+  } as const;
+}
+
+export function setSessionCookies(c: Context, tokens: { accessToken: string; refreshToken: string }) {
+  setCookie(c, ACCESS_COOKIE, tokens.accessToken, cookieOptions(ACCESS_COOKIE_MAX_AGE_SECONDS));
+  setCookie(c, REFRESH_COOKIE, tokens.refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE_SECONDS));
+}
+
+export function setSessionTokenHeaders(c: Context, tokens: { accessToken: string; refreshToken: string }) {
+  c.header('X-Access-Token', tokens.accessToken);
+  c.header('X-Refresh-Token', tokens.refreshToken);
+}
+
+function querySchemaForPath(path: string) {
+  const apiPath = path.replace(/^\/api\/v1(?=\/|$)/, '');
+  if (apiPath === '/nodes') {
+    return strictObject({
+      node: z.string().optional(),
+      limit: z.string().optional(),
+      after: z.string().optional(),
+    });
+  }
+  if (apiPath === '/updates/unsubscribe') {
+    return strictObject({ token_hash: z.string().regex(/^[a-f0-9]{64}$/).optional() });
+  }
+  if (apiPath === '/waitlist/verify') {
+    return strictObject({ token_hash: z.string().regex(/^[a-f0-9]{64}$/).optional() });
+  }
+  return strictObject({});
+}
+
+export const validateQueryParams: MiddlewareHandler = async (c, next) => {
+  const query = Object.fromEntries(new URL(c.req.url).searchParams);
+  querySchemaForPath(c.req.path).parse(query);
+  return next();
+};
+
+export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
+  // Provider webhooks authenticate via signature verification, not our API key.
+  if (isPolarWebhookPath(c.req.path) || isResendWebhookPath(c.req.path)) return next();
+  // Health checks are hit by Docker/Caddy probes that can't carry the API key.
+  if (c.req.path === '/api/v1/health') return next();
+  // Public frontend telemetry endpoint; still protected by CORS and IP rate limiting.
+  if (c.req.path === '/api/v1/platform/events') return next();
+  // Public waitlist event ingestion supports either auth or email_hash lookup in the route.
+  if (c.req.path === '/api/v1/users/events') return next();
+  // Public checkout creation supports either auth or email_hash lookup in the route.
+  if (c.req.path === '/api/v1/payments/checkout') return next();
+  // Public email verification must be callable from the frontend verification page.
+  if (c.req.path === '/api/v1/waitlist/verify') return next();
+
+  const expected = process.env.API_KEY;
+  if (!expected) {
+    if (process.env.NODE_ENV === 'production') {
+      return c.json({ error: 'API_KEY is not configured' }, 500);
+    }
+    return next();
+  }
+
+  const provided = getRequestApiKey(c);
+  if (!provided || !timingSafeEqual(provided, expected)) {
+    return c.json({ error: 'api key required' }, 401);
+  }
+
+  return next();
+};
+
+export const requestLogger: MiddlewareHandler = async (c, next) => {
+  if (c.req.path === '/api/v1/health') return next();
+
+  const startedAt = Date.now();
+  try {
+    await next();
+  } finally {
+    console.info('request', {
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res.status,
+      duration_ms: Date.now() - startedAt,
+    });
+  }
+};
+
+export const autoRefreshAuthTokens: MiddlewareHandler = async (c, next) => {
+  const bearerToken = getBearerToken(c);
+  const accessToken = bearerToken?.startsWith('vrtx_access_')
+    ? bearerToken
+    : getCookie(c, ACCESS_COOKIE);
+
+  if (accessToken) {
+    const userId = await verifyAccessToken(accessToken);
+    if (userId) {
+      setAuthUserId(c, userId);
+      return next();
+    }
+  }
+
+  const cookieRefreshToken = getCookie(c, REFRESH_COOKIE);
+  const headerRefreshToken = c.req.header('x-refresh-token');
+  const refreshToken = cookieRefreshToken ?? headerRefreshToken;
+  if (!refreshToken) return next();
+
+  const tokens = await rotateRefreshToken(refreshToken);
+  if (!tokens) return next();
+
+  const refreshedUserId = await verifyAccessToken(tokens.accessToken);
+  if (refreshedUserId) setAuthUserId(c, refreshedUserId);
+
+  setSessionTokenHeaders(c, tokens);
+
+  if (cookieRefreshToken) {
+    setSessionCookies(c, tokens);
+  }
+
+  return next();
+};
+
+export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
+  // Provider webhook retries burst from a small IP pool; rate-limiting them
+  // would drop or delay deliveries. The endpoint is protected by signatures.
+  if (isPolarWebhookPath(c.req.path) || isResendWebhookPath(c.req.path)) return next();
+
+  if (process.env.RATE_LIMIT_ENABLED !== 'true') return next();
+
+  const limit = Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60);
+  const windowSeconds = Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60);
+  if (!Number.isInteger(limit) || limit < 1) {
+    return c.json({ error: 'RATE_LIMIT_MAX_REQUESTS must be a positive integer' }, 500);
+  }
+  if (!Number.isInteger(windowSeconds) || windowSeconds < 1) {
+    return c.json({ error: 'RATE_LIMIT_WINDOW_SECONDS must be a positive integer' }, 500);
+  }
+
+  const ip = getClientIp(c);
+  const key = `rate-limit:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
+
+  try {
+    const { redisConnection } = await import('@/lib/queue');
+    const count = await redisConnection.incr(key);
+    if (count === 1) await redisConnection.expire(key, windowSeconds + 10);
+
+    c.header('X-RateLimit-Limit', String(limit));
+    c.header('X-RateLimit-Remaining', String(Math.max(limit - count, 0)));
+
+    if (count > limit) {
+      c.header('Retry-After', String(windowSeconds));
+      return c.json({ error: 'rate limit exceeded' }, 429);
+    }
+  } catch (error) {
+    console.warn('rate limit check failed', error);
+  }
+
+  return next();
+};

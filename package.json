@@ -1,0 +1,20 @@
+{
+  "name": "vorinthex-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "web",
+    "backend",
+    "shared"
+  ],
+  "scripts": {
+    "web:lint": "bun run --cwd web lint",
+    "web:typecheck": "bun run --cwd web typecheck",
+    "backend:check": "bun run --cwd backend check",
+    "backend:test": "bun run --cwd backend test"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19"
+  }
+}

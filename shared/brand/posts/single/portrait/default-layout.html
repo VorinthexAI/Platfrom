@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{title}}</title>
+    <link rel="stylesheet" href="../../../layout.css">
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        padding: 0;
+      }
+
+      body {
+        align-items: center;
+        background: var(--vtx-color-page, #faf7f2);
+        display: flex;
+        justify-content: center;
+      }
+
+      .post-canvas {
+        align-items: center;
+        background: var(--vtx-color-text, #1c1a17);
+        display: flex;
+        height: 1920px;
+        justify-content: center;
+        overflow: hidden;
+        position: relative;
+        width: 1080px;
+      }
+
+      .image-frame {
+        height: 1080px;
+        position: relative;
+        width: 1080px;
+      }
+
+      .post-image {
+        display: block;
+        height: 1080px;
+        object-fit: cover;
+        object-position: center;
+        width: 1080px;
+      }
+
+      .post-overlay {
+        bottom: 64px;
+        color: var(--vtx-color-page, #faf7f2);
+        font-family: var(--vtx-font-serif, Georgia, Cambria, "Times New Roman", serif);
+        font-size: 56px;
+        font-weight: 500;
+        left: 64px;
+        letter-spacing: 0;
+        line-height: 1.08;
+        position: absolute;
+        right: 64px;
+        text-align: center;
+      }
+
+      .post-overlay:empty {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="post-canvas" aria-label="{{title}}">
+      <div class="image-frame">
+        <img class="post-image" src="{{image_url}}" alt="{{image_alt}}">
+        <div class="post-overlay">{{overlay_text}}</div>
+      </div>
+    </main>
+  </body>
+</html>

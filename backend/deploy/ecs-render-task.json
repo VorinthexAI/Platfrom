@@ -1,0 +1,47 @@
+{
+  "family": "vorinthex-render",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "ephemeralStorage": {
+    "sizeInGiB": 30
+  },
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "containerDefinitions": [
+    {
+      "name": "render",
+      "image": "${IMAGE}",
+      "essential": true,
+      "command": ["src/render-worker/index.ts"],
+      "environment": [
+        { "name": "ROLE", "value": "render" },
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "AWS_REGION", "value": "eu-north-1" }
+      ],
+      "secrets": [
+        { "name": "REDIS_URL", "valueFrom": "/vorinthex/prod/REDIS_URL" },
+        { "name": "S3_BUCKET", "valueFrom": "/vorinthex/prod/S3_BUCKET" },
+        { "name": "AWS_ACCESS_KEY_ID", "valueFrom": "/vorinthex/prod/AWS_ACCESS_KEY_ID" },
+        { "name": "AWS_SECRET_ACCESS_KEY", "valueFrom": "/vorinthex/prod/AWS_SECRET_ACCESS_KEY" },
+        { "name": "ANTHROPIC_API_KEY", "valueFrom": "/vorinthex/prod/ANTHROPIC_API_KEY" },
+        { "name": "OPENAI_API_KEY", "valueFrom": "/vorinthex/prod/OPENAI_API_KEY" },
+        { "name": "GROK_API_KEY", "valueFrom": "/vorinthex/prod/GROK_API_KEY" },
+        { "name": "PERPLEXITY_API_KEY", "valueFrom": "/vorinthex/prod/PERPLEXITY_API_KEY" },
+        { "name": "GOOGLE_API_KEY", "valueFrom": "/vorinthex/prod/GOOGLE_API_KEY" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/vorinthex-render",
+          "awslogs-region": "eu-north-1",
+          "awslogs-stream-prefix": "render"
+        }
+      }
+    }
+  ]
+}
+

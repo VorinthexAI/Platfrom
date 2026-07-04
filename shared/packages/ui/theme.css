@@ -1,0 +1,256 @@
+:root {
+  --vui-color-page: #faf7f2;
+  --vui-color-secondary: #f0ebe2;
+  --vui-color-surface: #ffffff;
+  --vui-color-text: #1c1a17;
+  --vui-color-muted: #6b6358;
+  --vui-color-accent: #8b6f47;
+  --vui-color-accent-light: #c9a876;
+  --vui-color-border: #e3dcd0;
+  --vui-color-danger: #7f2e2e;
+  --vui-radius-sm: 6px;
+  --vui-radius-md: 9px;
+  --vui-radius-lg: 12px;
+  --vui-font-serif: var(--font-fraunces), Fraunces, Georgia, Cambria,
+    "Times New Roman", serif;
+}
+
+@theme inline {
+  --color-background: var(--vui-color-page);
+  --color-foreground: var(--vui-color-text);
+  --color-muted: var(--vui-color-muted);
+  --color-surface: var(--vui-color-surface);
+  --color-border: var(--vui-color-border);
+  --color-accent: var(--vui-color-accent);
+  --font-sans: var(--vui-font-serif);
+  --font-serif: var(--vui-font-serif);
+}
+
+.vui-button {
+  align-items: center;
+  border-radius: var(--vui-radius-md);
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--vui-font-serif);
+  font-size: 15px;
+  font-weight: 500;
+  gap: 8px;
+  justify-content: center;
+  line-height: 1.2;
+  min-height: 42px;
+  padding: 12px 26px;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.vui-button:focus-visible,
+.vui-control:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--vui-color-accent);
+}
+
+.vui-button:disabled,
+.vui-button[aria-disabled="true"] {
+  background: var(--vui-color-secondary);
+  color: var(--vui-color-muted);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.vui-button-primary {
+  background: var(--vui-color-accent);
+  color: var(--vui-color-page);
+}
+
+.vui-button-primary:hover:not(:disabled) {
+  background: var(--vui-color-accent-light);
+}
+
+.vui-button-secondary,
+.vui-button-outline {
+  background: transparent;
+  border-color: var(--vui-color-border);
+  color: var(--vui-color-muted);
+}
+
+.vui-button-secondary:hover:not(:disabled),
+.vui-button-outline:hover:not(:disabled) {
+  border-color: var(--vui-color-accent);
+  color: var(--vui-color-accent);
+}
+
+.vui-button-ghost {
+  background: transparent;
+  color: var(--vui-color-accent);
+  min-height: auto;
+  padding: 0;
+}
+
+.vui-button-danger {
+  background: var(--vui-color-danger);
+  color: var(--vui-color-page);
+}
+
+.vui-button-icon {
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  width: 42px;
+}
+
+.vui-control {
+  background: var(--vui-color-page);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-md);
+  color: var(--vui-color-text);
+  font-family: var(--vui-font-serif);
+  font-size: 16px;
+  min-height: 42px;
+  padding: 10px 12px;
+  width: 100%;
+}
+
+.vui-control::placeholder {
+  color: var(--vui-color-muted);
+}
+
+.vui-card,
+.vui-panel {
+  background: var(--vui-color-surface);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-lg);
+  color: var(--vui-color-text);
+  padding: clamp(24px, 3vw, 44px);
+}
+
+.vui-totp-setup {
+  align-items: stretch;
+  background: var(--vui-color-surface);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-lg);
+  color: var(--vui-color-text);
+  display: grid;
+  gap: 18px;
+  justify-items: start;
+  padding: clamp(24px, 3vw, 36px);
+}
+
+.vui-totp-setup-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.vui-totp-setup-copy h2 {
+  font-size: clamp(1.875rem, 4vw, 2.5rem);
+  font-weight: 400;
+  line-height: 1.05;
+}
+
+.vui-totp-setup-copy p:not(.vui-label) {
+  color: var(--vui-color-muted);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.vui-totp-setup-qr {
+  align-items: center;
+  align-self: center;
+  aspect-ratio: 1;
+  background: var(--vui-color-page);
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-md);
+  display: flex;
+  justify-content: center;
+  justify-self: center;
+  padding: 12px;
+  width: min(100%, 240px);
+}
+
+.vui-totp-setup-qr-image {
+  aspect-ratio: 1;
+  display: block;
+  height: auto;
+  image-rendering: pixelated;
+  width: 100%;
+}
+
+.vui-totp-setup-deep-link {
+  color: var(--vui-color-accent);
+  font-size: 15px;
+  font-weight: 500;
+  justify-self: center;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.vui-totp-setup-extra {
+  width: 100%;
+}
+
+.vui-label {
+  color: var(--vui-color-muted);
+  font-family: var(--vui-font-serif);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.vui-badge,
+.vui-tag {
+  align-items: center;
+  background: var(--vui-color-secondary);
+  border-radius: 999px;
+  color: var(--vui-color-muted);
+  display: inline-flex;
+  font-family: var(--vui-font-serif);
+  font-size: 13px;
+  gap: 8px;
+  padding: 6px 10px;
+}
+
+.vui-table {
+  border-collapse: collapse;
+  color: var(--vui-color-text);
+  font-family: var(--vui-font-serif);
+  width: 100%;
+}
+
+.vui-table th {
+  color: var(--vui-color-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  padding: 0 0 12px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.vui-table td {
+  border-top: 1px solid var(--vui-color-border);
+  padding: 18px 0;
+}
+
+.vui-divider {
+  background: var(--vui-color-border);
+  border: 0;
+  height: 1px;
+  width: 100%;
+}
+
+.vui-spinner {
+  animation: vui-spin 900ms linear infinite;
+  border: 1px solid var(--vui-color-border);
+  border-radius: 999px;
+  border-top-color: var(--vui-color-accent);
+  display: inline-block;
+  height: 20px;
+  width: 20px;
+}
+
+@keyframes vui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

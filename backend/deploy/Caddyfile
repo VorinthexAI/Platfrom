@@ -1,0 +1,8 @@
+api.vorinthex.com {
+	reverse_proxy app-blue:3001 {
+		health_uri /api/v1/health
+		health_interval 10s
+		health_timeout 5s
+	}
+}
+

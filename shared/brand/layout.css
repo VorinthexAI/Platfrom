@@ -1,0 +1,14 @@
+:root {
+  --vtx-color-page: #faf7f2;
+  --vtx-color-secondary: #f0ebe2;
+  --vtx-color-surface: #ffffff;
+  --vtx-color-text: #1c1a17;
+  --vtx-color-muted: #6b6358;
+  --vtx-color-accent: #8b6f47;
+  --vtx-color-accent-light: #c9a876;
+  --vtx-color-border: #e3dcd0;
+  --vtx-radius-sm: 6px;
+  --vtx-radius-md: 9px;
+  --vtx-radius-lg: 12px;
+  --vtx-font-serif: Georgia, Cambria, "Times New Roman", serif;
+}

@@ -1,0 +1,221 @@
+# Vorinthex Production Infrastructure
+
+This Terraform code provisions the production-only AWS infrastructure used by
+the existing deploy pipeline. There is intentionally no staging environment and
+no multi-environment branching.
+
+## Architecture
+
+- `app` runs on one plain EC2 instance.
+- The app EC2 host is deployed over SSH by `.github/workflows/deploy.yml`.
+- App blue-green switching happens inside Docker Compose with Caddy,
+  `app-blue`, `app-green`, and `deploy/deploy-app.sh`.
+- `render` runs as an ECS/Fargate service.
+- The app and render roles use the same ECR image.
+- ArangoDB runs self-hosted on its own plain EC2 instance with an EBS data
+  volume, ElastiCache Redis, S3, ECR, and SSM parameters are shared production
+  dependencies.
+
+Terraform does not manage the app containers after the EC2 host exists, and it
+does not own routine render task definition image updates after CI deploys.
+It also does not start the ArangoDB container itself — `.github/workflows/deploy.yml`
+deploys `deploy/docker-compose.db.yml` to the graph-db host the same way it
+deploys the app compose file, so Terraform only owns the box, EBS volume, and
+network access.
+
+## Layout
+
+```text
+terraform/
+  modules/
+    app-host/
+    cache/
+    graph-db-host/
+    network/
+    render-service/
+    storage/
+  environments/
+    production/
+```
+
+## Remote State
+
+The production environment uses a partial S3 backend:
+
+```hcl
+backend "s3" {}
+```
+
+Initialize with backend config:
+
+```bash
+terraform -chdir=terraform/environments/production init \
+  -backend-config="bucket=<state-bucket>" \
+  -backend-config="key=vorinthex/production/terraform.tfstate" \
+  -backend-config="region=eu-north-1" \
+  -backend-config="use_lockfile=true"
+```
+
+S3 native locking is used. No DynamoDB lock table is required.
+
+## Required Inputs
+
+At minimum, provide a globally unique S3 bucket name:
+
+```bash
+export TF_VAR_s3_bucket_name=<globally-unique-runtime-bucket>
+```
+
+Recommended SSH ingress input:
+
+```bash
+export TF_VAR_ssh_ingress_cidr_blocks='["<trusted-cidr>/32"]'
+```
+
+Leaving `ssh_ingress_cidr_blocks` empty creates the host without SSH ingress,
+which prevents the current GitHub-hosted deploy job from reaching it.
+
+Sizing variables have defaults and can be overridden:
+
+- `instance_type`, default `t3.small`
+- `graph_db_instance_type`, default `t3.small`
+- `graph_db_volume_size`, default `30` (GiB, EBS data volume for ArangoDB)
+- `task_cpu`, default `1024`
+- `task_memory`, default `2048`
+- `redis_node_type`, default `cache.t4g.micro`
+
+The infrastructure workflow resolves sizing in this priority order:
+
+1. `workflow_dispatch` input
+2. GitHub repository/environment variable
+3. Terraform variable default
+
+## GitHub Variables For Infra Workflow
+
+`.github/workflows/infra.yml` uses OIDC and expects:
+
+- `AWS_INFRA_ROLE_ARN`
+- `TF_STATE_BUCKET`
+- `TF_STATE_REGION`, optional; defaults to `eu-north-1`
+- `PROD_S3_BUCKET_NAME`
+- `SSM_PARAMETER_PREFIX`, optional; defaults to `vorinthex/prod`
+- `PROD_INSTANCE_TYPE`, optional
+- `PROD_GRAPH_DB_INSTANCE_TYPE`, optional
+- `PROD_GRAPH_DB_VOLUME_SIZE`, optional
+- `PROD_TASK_CPU`, optional
+- `PROD_TASK_MEMORY`, optional
+- `PROD_REDIS_NODE_TYPE`, optional
+
+The deploy workflow still uses the existing static AWS credential secrets. This
+Terraform workflow does not modify `.github/workflows/deploy.yml`.
+
+## SSM Parameters
+
+Terraform reads `prod.env` from the repository root when present and creates one
+`SecureString` parameter per key under:
+
+```text
+/vorinthex/prod/
+```
+
+The prefix must match the `SSM_PATH` value in `.github/workflows/deploy.yml`.
+
+Terraform also supplies generated infrastructure values for:
+
+- `AWS_REGION`
+- `ARANGO_URL` (`http://<graph-db private IP>:8529`)
+- `ARANGO_DATABASE`
+- `ARANGO_USERNAME`
+- `ARANGO_ROOT_PASSWORD`
+- `REDIS_URL`
+- `S3_BUCKET`
+
+Values from `prod.env` override generated values with the same key. Every SSM
+parameter uses:
+
+```hcl
+lifecycle {
+  ignore_changes = [value]
+}
+```
+
+That keeps routine applies from reverting values changed later through CI or a
+manual `aws ssm put-parameter --overwrite` rotation.
+
+Do not commit real production secrets in `prod.env`. If the file contains live
+secret values, those values will also be stored in Terraform state.
+
+## Plan
+
+Run locally:
+
+```bash
+terraform -chdir=terraform/environments/production fmt -recursive ../..
+terraform -chdir=terraform/environments/production validate
+terraform -chdir=terraform/environments/production plan
+```
+
+Or run the `Production Infrastructure` GitHub workflow with action `plan`.
+
+## Apply
+
+Do not apply production infrastructure unless the run is intentional. This
+creates billable resources including two EC2 hosts (app + graph-db), ECS,
+Redis, NAT, S3, and ECR.
+
+Run the `Production Infrastructure` GitHub workflow with action `apply`, or run:
+
+```bash
+terraform -chdir=terraform/environments/production apply
+```
+
+## Handoff To Deploy Workflow
+
+After the first apply, copy Terraform outputs into the existing deploy workflow
+configuration:
+
+| Existing GitHub name | Terraform output |
+| --- | --- |
+| `APP_HEALTH_URL` | `app_health_url` |
+| `APP_EC2_HOST` | `app_ec2_host` |
+| `APP_EC2_USER` | `app_ec2_user` |
+| `APP_EC2_SSH_KEY` | `app_ec2_ssh_private_key` |
+| `RENDER_TASK_FAMILY` | `render_task_family` |
+| `RENDER_ECS_CLUSTER` | `render_ecs_cluster` |
+| `RENDER_ECS_SERVICE` | `render_ecs_service` |
+| `GRAPH_DB_EC2_HOST` | `graph_db_ec2_host` |
+| `GRAPH_DB_EC2_USER` | `graph_db_ec2_user` |
+
+`APP_EC2_SSH_KEY` is authorized on both the app host and the graph-db host, so
+no separate key is needed for `GRAPH_DB_EC2_HOST`.
+
+Retrieve the generated SSH private key only from a secure shell:
+
+```bash
+terraform -chdir=terraform/environments/production output -raw app_ec2_ssh_private_key
+```
+
+## Design Assumptions
+
+- A new VPC is created unless `vpc_id`, `public_subnet_ids`, and
+  `private_subnet_ids` are supplied.
+- Amazon Linux 2023 is used for the app host.
+- The app host bootstrap only installs Docker and Docker Compose.
+- The app host does not receive direct SSM read access by default because the
+  existing deploy workflow renders `.env` from SSM on the GitHub runner.
+- Redis starts as a single-node replication group with failover disabled.
+- Render uses `FARGATE_SPOT` by default, matching the helper in
+  `deploy/dispatch-fargate-render.ts`.
+
+## Drift Guardrails
+
+- `aws_ecs_service.render` ignores `task_definition` changes so Terraform does
+  not roll the service back to an older task definition revision after CI deploys
+  a new image.
+- `aws_ecs_task_definition.render` ignores `container_definitions` changes so
+  routine applies do not overwrite CI-managed image updates.
+- SSM parameter values ignore changes so secret rotations are not reverted.
+
+Before treating a production change as complete, run a second plan after apply.
+It should not propose changes caused solely by CI-managed task definitions or
+SSM parameter values.

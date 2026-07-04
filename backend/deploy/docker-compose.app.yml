@@ -1,0 +1,61 @@
+# App role (ROLE=app): public API behind Caddy, deployed blue-green.
+# This file is copied to the app EC2 host as ~/vorinthex/docker-compose.yml.
+# .env is rendered from AWS SSM /vorinthex/prod/* by CI.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+
+  app-blue:
+    image: ${IMAGE:?IMAGE must be set by the deploy pipeline}
+    command: ['src/api/index.ts']
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      ROLE: app
+      COMMIT_SHA: '${COMMIT_SHA:-}'
+      REDIS_URL: ${REDIS_URL}
+      ARANGO_URL: ${ARANGO_URL}
+      ARANGO_DATABASE: ${ARANGO_DATABASE}
+      ARANGO_USERNAME: ${ARANGO_USERNAME}
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD}
+    restart: unless-stopped
+    expose: ['3001']
+    logging:
+      driver: json-file
+      options: { max-size: '20m', max-file: '5' }
+
+  app-green:
+    image: ${IMAGE:?IMAGE must be set by the deploy pipeline}
+    command: ['src/api/index.ts']
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      ROLE: app
+      COMMIT_SHA: '${COMMIT_SHA:-}'
+      REDIS_URL: ${REDIS_URL}
+      ARANGO_URL: ${ARANGO_URL}
+      ARANGO_DATABASE: ${ARANGO_DATABASE}
+      ARANGO_USERNAME: ${ARANGO_USERNAME}
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD}
+    restart: unless-stopped
+    expose: ['3001']
+    logging:
+      driver: json-file
+      options: { max-size: '20m', max-file: '5' }
+
+volumes:
+  caddydata:
+  caddyconfig:
+

@@ -1,0 +1,83 @@
+#
+# Single-host fallback compose.
+#
+# Primary production deploy uses:
+#   - deploy/docker-compose.app.yml    (app role, blue-green behind Caddy)
+#   - ECS/Fargate render service updated by .github/workflows/deploy.yml
+#
+# Keep this file only for emergency/manual single-host operation. The GitHub Actions
+# deploy pipeline does not copy or run it.
+#
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+  arangodb:
+    image: arangodb/arangodb:3.12
+    env_file: .env
+    environment:
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD}
+    restart: unless-stopped
+    volumes:
+      - arangodata:/var/lib/arangodb3
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app-blue:
+    image: ${IMAGE:?IMAGE must be set}
+    env_file: .env
+    environment:
+      ROLE: app
+      NODE_ENV: production
+      ARANGO_URL: ${ARANGO_URL}
+      ARANGO_DATABASE: ${ARANGO_DATABASE}
+      ARANGO_USERNAME: ${ARANGO_USERNAME}
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD}
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      arangodb:
+        condition: service_started
+
+  app-green:
+    image: ${IMAGE:?IMAGE must be set}
+    env_file: .env
+    environment:
+      ROLE: app
+      NODE_ENV: production
+      ARANGO_URL: ${ARANGO_URL}
+      ARANGO_DATABASE: ${ARANGO_DATABASE}
+      ARANGO_USERNAME: ${ARANGO_USERNAME}
+      ARANGO_ROOT_PASSWORD: ${ARANGO_ROOT_PASSWORD}
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      arangodb:
+        condition: service_started
+
+volumes:
+  redisdata:
+  arangodata:
+  caddydata:
+  caddyconfig:
+

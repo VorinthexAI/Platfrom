@@ -1,0 +1,128 @@
+name: Production Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform action to run'
+        type: choice
+        options: [plan, apply]
+        default: plan
+      instance_type:
+        description: 'Optional app EC2 instance type override'
+        required: false
+        type: string
+      graph_db_instance_type:
+        description: 'Optional graph-db EC2 instance type override'
+        required: false
+        type: string
+      graph_db_volume_size:
+        description: 'Optional graph-db EBS data volume size (GiB) override'
+        required: false
+        type: string
+      task_cpu:
+        description: 'Optional render task CPU override'
+        required: false
+        type: string
+      task_memory:
+        description: 'Optional render task memory override'
+        required: false
+        type: string
+      redis_node_type:
+        description: 'Optional Redis node type override'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: infra-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-north-1
+  TF_WORKING_DIR: terraform/environments/production
+  TF_VAR_aws_region: eu-north-1
+  TF_VAR_instance_type: ${{ inputs.instance_type || vars.PROD_INSTANCE_TYPE || 't3.small' }}
+  TF_VAR_graph_db_instance_type: ${{ inputs.graph_db_instance_type || vars.PROD_GRAPH_DB_INSTANCE_TYPE || 't3.small' }}
+  TF_VAR_graph_db_volume_size: ${{ inputs.graph_db_volume_size || vars.PROD_GRAPH_DB_VOLUME_SIZE || '30' }}
+  TF_VAR_task_cpu: ${{ inputs.task_cpu || vars.PROD_TASK_CPU || '1024' }}
+  TF_VAR_task_memory: ${{ inputs.task_memory || vars.PROD_TASK_MEMORY || '2048' }}
+  TF_VAR_redis_node_type: ${{ inputs.redis_node_type || vars.PROD_REDIS_NODE_TYPE || 'cache.t4g.micro' }}
+  TF_VAR_s3_bucket_name: ${{ vars.PROD_S3_BUCKET_NAME }}
+  TF_VAR_ssm_parameter_prefix: ${{ vars.SSM_PARAMETER_PREFIX || 'vorinthex/prod' }}
+
+jobs:
+  terraform:
+    name: Terraform ${{ inputs.action }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Validate required variables
+        run: |
+          test -n "${{ vars.AWS_INFRA_ROLE_ARN }}" || { echo "::error::AWS_INFRA_ROLE_ARN variable is required"; exit 1; }
+          test -n "${{ vars.TF_STATE_BUCKET }}" || { echo "::error::TF_STATE_BUCKET variable is required"; exit 1; }
+          test -n "${{ vars.PROD_S3_BUCKET_NAME }}" || { echo "::error::PROD_S3_BUCKET_NAME variable is required"; exit 1; }
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=vorinthex/production/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_STATE_REGION || env.AWS_REGION }}" \
+            -backend-config="use_lockfile=true"
+
+      - name: Terraform fmt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform fmt -check -recursive ../..
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform plan -out=tfplan
+
+      - name: Terraform apply
+        if: inputs.action == 'apply'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Deployment handoff outputs
+        if: inputs.action == 'apply'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          {
+            echo "## Production infrastructure outputs"
+            echo ""
+            echo "| GitHub name | Terraform output |"
+            echo "|---|---|"
+            echo "| APP_HEALTH_URL | $(terraform output -raw app_health_url) |"
+            echo "| APP_EC2_HOST | $(terraform output -raw app_ec2_host) |"
+            echo "| APP_EC2_USER | $(terraform output -raw app_ec2_user) |"
+            echo "| GRAPH_DB_EC2_HOST | $(terraform output -raw graph_db_ec2_host) |"
+            echo "| GRAPH_DB_EC2_USER | $(terraform output -raw graph_db_ec2_user) |"
+            echo "| RENDER_TASK_FAMILY | $(terraform output -raw render_task_family) |"
+            echo "| RENDER_ECS_CLUSTER | $(terraform output -raw render_ecs_cluster) |"
+            echo "| RENDER_ECS_SERVICE | $(terraform output -raw render_ecs_service) |"
+            echo ""
+            echo "APP_EC2_SSH_KEY is sensitive. Retrieve it from Terraform state only in a secure shell:"
+            echo ""
+            echo '```bash'
+            echo "terraform -chdir=terraform/environments/production output -raw app_ec2_ssh_private_key"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

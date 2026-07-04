@@ -1,0 +1,19 @@
+# Graph-db role: self-hosted ArangoDB on its own EC2 host, backed by an EBS
+# data volume mounted at /data/arangodb by Terraform (graph-db-host module).
+# This file is copied to the graph-db EC2 host as ~/vorinthex-db/docker-compose.yml.
+# .env is rendered from AWS SSM /vorinthex/prod/* by CI.
+
+services:
+  arangodb:
+    image: arangodb/arangodb:3.12
+    env_file: .env
+    environment:
+      - ARANGO_ROOT_PASSWORD=${ARANGO_ROOT_PASSWORD}
+    restart: unless-stopped
+    ports:
+      - '8529:8529'
+    volumes:
+      - /data/arangodb:/var/lib/arangodb3
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }

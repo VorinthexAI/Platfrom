@@ -1,0 +1,24 @@
+﻿import type { SVGProps } from "react";
+export type LinkIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type LinkIconSize = "sm" | "md" | "lg";
+export type LinkIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
+  variant?: LinkIconVariant;
+  size?: LinkIconSize;
+};
+const sizes: Record<LinkIconSize, number> = { sm: 16, md: 20, lg: 24 };
+const colors: Record<LinkIconVariant, string> = {
+  default: "var(--vui-color-text)",
+  muted: "var(--vui-color-muted)",
+  accent: "var(--vui-color-accent)",
+  danger: "var(--vui-color-danger)",
+  inverse: "var(--vui-color-page)",
+};
+export function LinkIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: LinkIconProps) {
+  const pixelSize = sizes[size];
+  return (
+    <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>
+      <path d="M5 12h14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M12 5v14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
+    </svg>
+  );
+}
