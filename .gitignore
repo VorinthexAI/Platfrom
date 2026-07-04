@@ -1,6 +1,10 @@
 .env
 *.env
 prod.env
+environments/**/.env.dev
+environments/**/.env.prod
+environments/.env.dev
+environments/.env.prod
 
 node_modules/
 .next/

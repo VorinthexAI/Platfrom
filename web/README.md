@@ -21,7 +21,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment
 
-Copy `.env.example` to `.env.local` and set:
+Copy `../environments/.env.example` to `../environments/.env.dev` and set:
 
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
@@ -29,13 +29,9 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
 
 ## Shared Module
 
-Reusable code lives in the `src/shared` git submodule, backed by:
+Reusable code lives in the top-level `../shared` workspace package. It is not a git submodule.
 
-```bash
-https://github.com/Vorinthex/Shared.git
-```
-
-The shared Axios singleton is exported from `src/shared/lib`:
+The shared Axios singleton is exported from `@/shared/lib`:
 
 ```ts
 import { apiClient } from "@/shared/lib";
@@ -46,7 +42,7 @@ cookies for cookie-based API sessions.
 
 ## UI Package
 
-The shared UI library lives in `src/shared/packages/ui` and exports:
+The shared UI library lives in `../shared/packages/ui` and exports:
 
 ```ts
 import { Button, HomeIcon } from "@/shared/packages/ui";

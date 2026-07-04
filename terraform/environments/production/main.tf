@@ -8,7 +8,7 @@ locals {
 
   normalized_ssm_prefix = trimprefix(var.ssm_parameter_prefix, "/")
   ssm_path              = "/${local.normalized_ssm_prefix}"
-  prod_env_path         = abspath("${path.root}/../../../prod.env")
+  prod_env_path         = abspath("${path.root}/../../../environments/.env.prod")
   prod_env_lines        = fileexists(local.prod_env_path) ? split("\n", file(local.prod_env_path)) : []
   prod_env_entries = [
     for raw_line in local.prod_env_lines : {

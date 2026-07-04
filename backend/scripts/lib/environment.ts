@@ -24,8 +24,8 @@ export async function chooseEnvironment(rl: Interface): Promise<EnvironmentName>
 
 function resolveEnvironmentFile(environment: EnvironmentName) {
   const candidates = environment === 'dev'
-    ? ['.env']
-    : ['prod.env', '.env.prod', '.env.production'];
+    ? ['../environments/.env.dev']
+    : ['../environments/.env.prod', '../environments/.env.production'];
 
   return candidates.find((file) => existsSync(file));
 }
@@ -39,10 +39,10 @@ export function loadEnvironment(environment: EnvironmentName) {
   }
 
   if (environment === 'prod') {
-    throw new Error('No prod.env, .env.prod, or .env.production file found. Copy prod.env.example to prod.env and set ARANGO_URL.');
+    throw new Error('No environments/.env.prod or environments/.env.production file found. Copy environments/.env.example to environments/.env.prod and set ARANGO_URL.');
   }
 
-  console.log('No .env file found. Using current process environment.');
+  console.log('No environments/.env.dev file found. Using current process environment.');
   return null;
 }
 

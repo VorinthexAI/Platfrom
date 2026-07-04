@@ -10,7 +10,7 @@ Agents own managers. Managers validate role completion against their assignment 
 
 ## Local Development
 
-1. Copy `.env.example` to `.env`.
+1. Copy `../environments/.env.example` to `../environments/.env.dev`.
 2. Run `bun install`.
 3. Start local dev with `bun start`. This brings up Docker Compose infra, applies dev migrations, and starts the API.
 4. Reset local dev data with `bun reset`. This runs `docker compose down -v`.
@@ -48,4 +48,3 @@ Add a new Manager, Task, or Role as data by writing to a company graph through t
 ## Security
 
 Every mode call is constrained by three layers: `allowed_modes` controls which tools an agent can use, `allowed_member_ids` controls which original human may access an agent even through delegation, and `allowed_app_ids` filters every data read at the database query level before model reasoning can see it.
-
