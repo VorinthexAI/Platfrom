@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 import path from "node:path";
 
+const workspaceRoot = path.resolve(process.cwd(), "..");
+
 const nextConfig: NextConfig = {
   // Web Worker modules (§9.6, §37 of neural-map.md) are loaded via
   // `new Worker(new URL(...))` — Turbopack (Next 16's default bundler)
@@ -13,6 +15,8 @@ const nextConfig: NextConfig = {
 
   images: {},
 
+  outputFileTracingRoot: workspaceRoot,
+
   experimental: {
     // Required for `unauthorized()` (next/navigation) + the app/unauthorized.tsx
     // convention used by the DAL's verifySession() (neural-map.md §4.4).
@@ -20,7 +24,7 @@ const nextConfig: NextConfig = {
   },
 
   turbopack: {
-    root: path.resolve(process.cwd(), ".."),
+    root: workspaceRoot,
     rules: {
       // GLSL shader sources (§30) are imported as raw strings (e.g.
       // `import frag from "./x.frag.glsl"`) by the universe engine's
