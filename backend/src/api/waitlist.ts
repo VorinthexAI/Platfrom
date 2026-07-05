@@ -96,7 +96,6 @@ export async function requestWaitlistVerification(email: string) {
   const normalized = normalizeWaitlistEmail(email);
   const entry = await upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
-    isOnWaitlist: true,
     is_subscribed_to_updates: true,
   });
   trackPlatformEvent({

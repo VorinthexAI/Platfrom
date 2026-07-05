@@ -1,5 +1,11 @@
 import { getAuthChallengeByTokenHash, insertAuthChallenge, updateAuthChallenge } from '@/lib/db/auth-challenges.node';
-import { getUserByEmail, getUserById, getUserByRefreshTokenHash, updateUser } from '@/lib/db/users.node';
+import {
+  getMemberByEmail,
+  getMemberByRefreshTokenHash,
+  getMemberByUserId,
+  updateMember,
+} from '@/lib/db/members.node';
+import { getUserById, updateUser } from '@/lib/db/users.node';
 import { decryptSecret, encryptSecret, randomToken, sha256, timingSafeEqual } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
 import { verify as verifyTotpToken } from '@otplib/totp';
@@ -8,7 +14,7 @@ import { crypto as otpCrypto } from '@otplib/plugin-crypto-noble';
 import { generateSecret, generateURI } from 'otplib';
 import QRCode from 'qrcode';
 import { sendBrandedEmail } from './email';
-import { defaultNameFromEmail, normalizeEmail, upsertUserByEmail } from './users';
+import { defaultNameFromEmail, normalizeEmail, upsertMemberForUser, upsertUserByEmail } from './users';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -76,15 +82,18 @@ export async function issueTokens(userId: string): Promise<SessionTokens> {
   const accessToken = await createAccessToken(userId);
   const refreshToken = randomToken('vrtx_refresh_');
   const refreshTokenHash = await sha256(refreshToken);
+  const member = await getMemberByUserId(userId);
+  if (!member) throw new Error('cannot issue tokens for non-member user');
+  await updateMember(member.key, { refreshTokenHash, updatedAt: new Date().toISOString() });
   await updateUser(userId, { refreshTokenHash, updatedAt: new Date().toISOString() });
   return { accessToken, refreshToken };
 }
 
 export async function rotateRefreshToken(refreshToken: string): Promise<SessionTokens | null> {
   const tokenHash = await sha256(refreshToken);
-  const user = await getUserByRefreshTokenHash(tokenHash);
-  if (!user) return null;
-  return issueTokens(user.key);
+  const member = await getMemberByRefreshTokenHash(tokenHash);
+  if (!member) return null;
+  return issueTokens(member.userId);
 }
 
 export async function createChallengeTokenHash(rawToken: string) {
@@ -177,12 +186,12 @@ async function deliverMfaResetEmail(input: { email: string; magicLink: string; e
 
 export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
-  const user = await getUserByEmail(normalized);
-  if (!user?.isWaitlistApproved) {
+  const member = await getMemberByEmail(normalized);
+  if (!member) {
     return { allowed: false as const };
   }
 
-  const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS);
+  const challenge = await createChallenge(member.userId, 'email', EMAIL_LINK_TTL_MS);
   const magicLink = buildMagicLink(challenge.tokenHash);
   await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
   return {
@@ -193,8 +202,8 @@ export async function requestSignInEmail(email: string) {
 
 export async function requestMfaResetEmail(email: string) {
   const normalized = normalizeEmail(email);
-  const user = await getUserByEmail(normalized);
-  if (!user?.isMfaEnabled) {
+  const member = await getMemberByEmail(normalized);
+  if (!member?.isMfaEnabled) {
     return {
       ok: true as const,
       emailSent: false,
@@ -203,13 +212,13 @@ export async function requestMfaResetEmail(email: string) {
   }
 
   const requestedAt = new Date();
-  await updateUser(user.key, {
+  await updateMember(member.key, {
     has_request_mfa_reset_link: true,
     requested_mfa_reset_link_at: requestedAt.toISOString(),
     updatedAt: requestedAt.toISOString(),
   });
 
-  const challenge = await createChallenge(user.key, 'email', MFA_RESET_LINK_TTL_MS);
+  const challenge = await createChallenge(member.userId, 'email', MFA_RESET_LINK_TTL_MS);
   const magicLink = buildMagicLink(challenge.tokenHash);
   await deliverMfaResetEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
   return {
@@ -225,7 +234,7 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
 
   await updateUser(emailChallenge.userId, { isVerified: true, updatedAt: new Date().toISOString() });
 
-  const auth = await getUserById(emailChallenge.userId);
+  const auth = await getMemberByUserId(emailChallenge.userId);
   if (!auth) return null;
 
   const totpChallenge = await createChallenge(emailChallenge.userId, 'totp', TOTP_CHALLENGE_TTL_MS);
@@ -242,6 +251,7 @@ export async function createUserWithAuth(input: { email: string; name?: string; 
     name: input.name ?? defaultNameFromEmail(normalized),
     profileUrl: input.profile_url ?? null,
   });
+  await upsertMemberForUser(user);
   return { userId: user.key };
 }
 
@@ -249,10 +259,11 @@ export async function startTotpSetup(challengeToken: string) {
   const challenge = await consumeChallenge(challengeToken, 'totp');
   if (!challenge) return null;
   const user = await getUserById(challenge.userId);
-  if (!user || (user.isMfaEnabled && !user.has_request_mfa_reset_link)) return null;
+  const member = await getMemberByUserId(challenge.userId);
+  if (!user || !member || (member.isMfaEnabled && !member.has_request_mfa_reset_link)) return null;
 
   const secret = generateSecret();
-  await updateUser(challenge.userId, {
+  await updateMember(member.key, {
     totpSecret: await encryptSecret(secret),
     isMfaEnabled: false,
     lastTotpTimeStep: null,
@@ -296,7 +307,7 @@ export async function verifySuccessiveTotpCodes(secret: string, codes: [string, 
 export async function completeTotpSetup(challengeToken: string, codes: [string, string]) {
   const challenge = await consumeChallenge(challengeToken, 'totp');
   if (!challenge) return { ok: false as const, error: 'invalid challenge' };
-  const auth = await getUserById(challenge.userId);
+  const auth = await getMemberByUserId(challenge.userId);
   if (!auth?.totpSecret) return { ok: false as const, error: 'setup unavailable' };
   if (auth.has_request_mfa_reset_link) {
     if (!hasUsableMfaResetRequest(auth)) {
@@ -309,12 +320,16 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
   const lastTimeStep = await verifySuccessiveTotpCodes(await decryptSecret(auth.totpSecret), codes);
   if (!lastTimeStep) return { ok: false as const, error: 'invalid totp codes' };
 
-  await updateUser(challenge.userId, {
+  await updateMember(auth.key, {
     isMfaEnabled: true,
     has_request_mfa_reset_link: false,
     requested_mfa_reset_link_at: null,
     lastLoginAt: new Date().toISOString(),
     lastTotpTimeStep: lastTimeStep,
+    updatedAt: new Date().toISOString(),
+  });
+  await updateUser(challenge.userId, {
+    lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
 
@@ -324,7 +339,7 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
 export async function verifyTotpAndIssueSession(challengeToken: string, code: string) {
   const challenge = await consumeChallenge(challengeToken, 'totp');
   if (!challenge) return null;
-  const auth = await getUserById(challenge.userId);
+  const auth = await getMemberByUserId(challenge.userId);
   if (!auth?.totpSecret || !auth.isMfaEnabled) return null;
 
   const result = await verifyTotpToken({
@@ -338,9 +353,13 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
   });
   if (!result.valid) return null;
 
-  await updateUser(challenge.userId, {
+  await updateMember(auth.key, {
     lastLoginAt: new Date().toISOString(),
     lastTotpTimeStep: result.timeStep,
+    updatedAt: new Date().toISOString(),
+  });
+  await updateUser(challenge.userId, {
+    lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
 

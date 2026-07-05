@@ -1,6 +1,7 @@
 import type { Page } from './base';
 import { getAllAuthChallengesChunked, listAuthChallengesPage } from './auth-challenges.node';
 import { getAllEventsChunked, listEventsPage } from './events.node';
+import { getAllMembersChunked, listMembersPage } from './members.node';
 import { getAllOutputAnalyticsChunked, listOutputAnalyticsPage } from './output-analytics.node';
 import { getAllOutputRelationsChunked, listOutputRelationsPage } from './output-relations.node';
 import { getAllOutputsChunked, listOutputsPage } from './outputs.node';
@@ -29,6 +30,7 @@ export interface NodeAccessors {
 export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   authChallenges: { listPage: listAuthChallengesPage, getAllChunked: getAllAuthChallengesChunked },
   events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked },
+  members: { listPage: listMembersPage, getAllChunked: getAllMembersChunked },
   outputAnalytics: { listPage: listOutputAnalyticsPage, getAllChunked: getAllOutputAnalyticsChunked },
   outputRelations: { listPage: listOutputRelationsPage, getAllChunked: getAllOutputRelationsChunked },
   outputs: { listPage: listOutputsPage, getAllChunked: getAllOutputsChunked },

@@ -12,18 +12,10 @@ export const userSchema = z.object({
   name: z.string().nullable().default(null),
   profileUrl: z.string().nullable().default(null),
   isVerified: z.boolean().default(false),
-  isOnWaitlist: z.boolean().default(false),
-  isWaitlistApproved: z.boolean().default(false),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),
-  isMfaEnabled: z.boolean().default(false),
-  has_request_mfa_reset_link: z.boolean().default(false),
-  isSuperAdmin: z.boolean().default(false),
   refreshTokenHash: z.string().nullable().default(null),
-  totpSecret: z.string().nullable().default(null),
-  lastTotpTimeStep: z.number().nullable().default(null),
-  requested_mfa_reset_link_at: z.string().nullable().default(null),
   lastLoginAt: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -32,8 +24,7 @@ export const userSchema = z.object({
 
 export type User = z.infer<typeof userSchema>;
 
-// Identity text only: profileUrl (URL), all booleans, secrets/hashes
-// (refreshTokenHash, totpSecret, emailHash), and timestamps are excluded — they add
+// Identity text only: profileUrl (URL), booleans, hashes, and timestamps are excluded — they add
 // no semantic search value and belong in an AQL FILTER instead.
 export const usersEmbedKeys = z.enum(['email', 'name']);
 
@@ -68,17 +59,6 @@ export async function getUserByEmailHash(emailHash: string): Promise<User | null
   return doc ? userSchema.parse(withArangoKey(doc)) : null;
 }
 
-export async function getUserByRefreshTokenHash(refreshTokenHash: string): Promise<User | null> {
-  const cursor = await db.query(aql`
-    FOR u IN ${db.collection(USERS_COLLECTION)}
-      FILTER u.refreshTokenHash == ${refreshTokenHash}
-      LIMIT 1
-      RETURN u
-  `);
-  const doc = await cursor.next();
-  return doc ? userSchema.parse(withArangoKey(doc)) : null;
-}
-
 export async function getUserByUpdatesUnsubscribeTokenHash(tokenHash: string): Promise<User | null> {
   const cursor = await db.query(aql`
     FOR u IN ${db.collection(USERS_COLLECTION)}
@@ -93,7 +73,7 @@ export async function getUserByUpdatesUnsubscribeTokenHash(tokenHash: string): P
 export async function listUnverifiedWaitlistUsers(): Promise<User[]> {
   const cursor = await db.query(aql`
     FOR u IN ${db.collection(USERS_COLLECTION)}
-      FILTER u.isOnWaitlist == true && u.isVerified != true
+      FILTER u.isVerified != true
       RETURN u
   `);
   const docs = await cursor.all();

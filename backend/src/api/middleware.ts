@@ -178,7 +178,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   const key = `rate-limit:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
 
   try {
-    const { redisConnection } = await import('@/lib/queue');
+    const { redisConnection } = await import('@/lib/redis');
     const count = await redisConnection.incr(key);
     if (count === 1) await redisConnection.expire(key, windowSeconds + 10);
 

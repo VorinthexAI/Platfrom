@@ -40,7 +40,8 @@ async function main() {
 
   try {
     const { upsertUserByEmail } = await import('@/api/users');
-    const { updateUser } = await import('@/lib/db/users.node');
+    const { upsertMemberForUser } = await import('@/api/users');
+    const { updateMember } = await import('@/lib/db/members.node');
     const { encryptSecret } = await import('@/lib/crypto');
     const { verifySuccessiveTotpCodes } = await import('@/api/auth');
 
@@ -48,11 +49,10 @@ async function main() {
 
     console.log(`\nCreating/updating super admin user for ${email} in ${environment}...`);
     const user = await upsertUserByEmail(email, {
-      isSuperAdmin: true,
       isVerified: true,
-      isWaitlistApproved: true,
     });
-    console.log(`User ${user.key} ready.`);
+    const member = await upsertMemberForUser(user, { isSuperAdmin: true });
+    console.log(`User ${user.key} and member ${member.key} ready.`);
 
     const secret = generateSecret();
     const otpauthUrl = generateURI({ issuer: ISSUER, label: user.email, secret });
@@ -65,7 +65,7 @@ async function main() {
 
     const lastTotpTimeStep = await verifyTwoCodes(secret, verifySuccessiveTotpCodes);
 
-    await updateUser(user.key, {
+    await updateMember(member.key, {
       totpSecret: await encryptSecret(secret),
       isMfaEnabled: true,
       lastTotpTimeStep,
