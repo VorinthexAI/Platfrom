@@ -188,7 +188,7 @@ export function LandingPage() {
                 className="h-8 w-8"
                 height={32}
                 priority
-                src="/logos/logo-symbol-64.png"
+                src="/logos/logo-transparent.png"
                 width={32}
               />
               <span className="text-lg font-medium">Vorinthex AI</span>

@@ -15,7 +15,7 @@ export const size = {
 
 export default async function OpenGraphImage() {
   const [logo, appScreenshot] = await Promise.all([
-    readFile(join(process.cwd(), "public", "logos", "logo-symbol-512.png")),
+    readFile(join(process.cwd(), "public", "logos", "logo-transparent.png")),
     readFile(
       join(process.cwd(), "public", "social", "mobile-apps-screenshot.jpg"),
     ),

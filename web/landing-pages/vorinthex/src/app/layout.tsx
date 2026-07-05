@@ -78,8 +78,8 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       { url: "/icon.png", type: "image/png" },
-      { url: "/logos/logo-symbol-64.png", sizes: "64x64", type: "image/png" },
-      { url: "/logos/logo-symbol-256.png", sizes: "256x256", type: "image/png" },
+      { url: "/logos/logo-transparent.png", sizes: "64x64", type: "image/png" },
+      { url: "/logos/logo-transparent.png", sizes: "256x256", type: "image/png" },
     ],
     apple: [{ url: "/apple-icon.png", type: "image/png" }],
   },
@@ -110,7 +110,7 @@ export default function RootLayout({
     "@type": "Organization",
     name: "Vorinthex AI",
     url: siteUrl.toString(),
-    logo: new URL("/logos/logo-symbol-512.png", siteUrl).toString(),
+    logo: new URL("/logos/logo-transparent.png", siteUrl).toString(),
     sameAs: [],
   };
 
