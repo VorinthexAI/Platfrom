@@ -1,19 +1,20 @@
 #!/usr/bin/env bun
-// Builds the JSON payload for the GitHub `CONFIG` secret from
-// environments/.env.prod plus the handful of deployment values that don't
-// live in that file (Vercel token/team, per-project Vercel project id, and
-// each app's production URL).
+// Builds the JSON payload for .github/.configs/secrets.json (gitignored,
+// local-only — see .github/.configs/secrets.json.example for the schema)
+// from environments/.env.prod plus the handful of deployment values that
+// don't live in that file (Vercel token/team, per-project Vercel project
+// id, and each app's production URL).
 //
 // Usage:
 //   bun environments/scripts/build-config.ts \
 //     --vercel-token=... \
 //     --vorinthex-project-id=prj_... \
 //     --orbit-project-id=prj_... \
-//     > /tmp/config.json
-//   gh secret set CONFIG < /tmp/config.json
+//     > .github/.configs/secrets.json
+//   bash environments/scripts/sync-configs.sh secrets
 //
-// deploy.yml reads this via fromJSON(secrets.CONFIG), e.g.
-// fromJSON(secrets.CONFIG).vorinthex.url or .vercel.team_id.
+// deploy.yml reads the resulting CONFIG secret via fromJSON(secrets.CONFIG),
+// e.g. fromJSON(secrets.CONFIG).vorinthex.url or .vercel.team_id.
 // Re-run this whenever environments/.env.prod changes.
 
 import { readFileSync } from "node:fs";

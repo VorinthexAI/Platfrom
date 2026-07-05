@@ -5,7 +5,7 @@ environments/**/.env.dev
 environments/**/.env.prod
 environments/.env.dev
 environments/.env.prod
-environments/.config.*.json
+.github/.configs/secrets.json
 
 node_modules/
 .next/

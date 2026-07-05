@@ -1,0 +1,11 @@
+{
+  "APP_HEALTH_URL": "https://api.vorinthex.com/api/v1/health",
+  "AWS_DEPLOY_ROLE_ARN": "arn:aws:iam::938565868704:role/vorinthex-backend-deploy",
+  "AWS_INFRA_ROLE_ARN": "arn:aws:iam::938565868704:role/vorinthex-ai-infra",
+  "PROD_INSTANCE_TYPE": "t3.micro",
+  "PROD_S3_BUCKET_NAME": "vorinthex-ai-prod-storage",
+  "RENDER_ECS_CLUSTER": "vorinthex-production",
+  "RENDER_ECS_SERVICE": "vorinthex-render",
+  "RENDER_TASK_FAMILY": "vorinthex-render",
+  "TF_STATE_BUCKET": "vorinthex-ai-terraform-state"
+}
