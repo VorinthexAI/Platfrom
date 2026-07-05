@@ -7,6 +7,7 @@ export const USERS_COLLECTION = 'users';
 
 export const userSchema = z.object({
   key: z.string(),
+  platformId: z.string(),
   email: z.string(),
   emailHash: z.string(),
   name: z.string().nullable().default(null),

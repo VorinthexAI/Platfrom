@@ -42,6 +42,7 @@ async function main() {
     const { upsertUserByEmail } = await import('@/api/users');
     const { upsertMemberForUser } = await import('@/api/users');
     const { updateMember } = await import('@/lib/db/members.node');
+    const { getSuperAdminByUserId, insertSuperAdmin, updateSuperAdmin } = await import('@/lib/db/super-admins.node');
     const { encryptSecret } = await import('@/lib/crypto');
     const { verifySuccessiveTotpCodes } = await import('@/api/auth');
 
@@ -51,7 +52,27 @@ async function main() {
     const user = await upsertUserByEmail(email, {
       isVerified: true,
     });
-    const member = await upsertMemberForUser(user, { isSuperAdmin: true });
+    const member = await upsertMemberForUser(user, { role: 'owner' });
+    const existingSuperAdmin = await getSuperAdminByUserId(user.key);
+    const now = new Date().toISOString();
+    if (existingSuperAdmin) {
+      await updateSuperAdmin(existingSuperAdmin.key, {
+        memberId: member.key,
+        email: user.email,
+        emailHash: user.emailHash,
+        updatedAt: now,
+      });
+    } else {
+      await insertSuperAdmin({
+        key: `super_admin_${user.key}`,
+        userId: user.key,
+        memberId: member.key,
+        email: user.email,
+        emailHash: user.emailHash,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
     console.log(`User ${user.key} and member ${member.key} ready.`);
 
     const secret = generateSecret();

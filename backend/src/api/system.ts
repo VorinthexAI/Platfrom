@@ -14,6 +14,7 @@ import {
   updateCapability,
 } from '@/lib/db/capabilities.node';
 import { getMemberByUserId } from '@/lib/db/members.node';
+import { getSuperAdminByUserId } from '@/lib/db/super-admins.node';
 import {
   deleteMindCapability,
   getMindCapabilityByPair,
@@ -117,8 +118,11 @@ async function requireSuperAdmin(c: Context) {
   const auth = await requireUserId(c);
   if ('error' in auth) return auth;
 
-  const member = await getMemberByUserId(auth.userId);
-  if (!member?.isSuperAdmin) {
+  const [member, superAdmin] = await Promise.all([
+    getMemberByUserId(auth.userId),
+    getSuperAdminByUserId(auth.userId),
+  ]);
+  if (!member || !superAdmin) {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
   return { userId: auth.userId, member };

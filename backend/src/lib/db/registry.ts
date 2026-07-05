@@ -16,6 +16,7 @@ import { getAllPlatformsChunked, listPlatformsPage } from './platforms.node';
 import { getAllProcessedWebhookEventsChunked, listProcessedWebhookEventsPage } from './processed-webhook-events.node';
 import { getAllProductsChunked, listProductsPage } from './products.node';
 import { getAllSubscriptionsChunked, listSubscriptionsPage } from './subscriptions.node';
+import { getAllSuperAdminsChunked, listSuperAdminsPage } from './super-admins.node';
 import { getAllUserEntitlementsChunked, listUserEntitlementsPage } from './user-entitlements.node';
 import { getAllUsersChunked, listUsersPage } from './users.node';
 
@@ -50,6 +51,7 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked },
   products: { listPage: listProductsPage, getAllChunked: getAllProductsChunked },
   subscriptions: { listPage: listSubscriptionsPage, getAllChunked: getAllSubscriptionsChunked },
+  superAdmins: { listPage: listSuperAdminsPage, getAllChunked: getAllSuperAdminsChunked },
   userEntitlements: { listPage: listUserEntitlementsPage, getAllChunked: getAllUserEntitlementsChunked },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked },
 };

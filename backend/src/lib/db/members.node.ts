@@ -5,16 +5,19 @@ import { createNodeHelpers, withArangoKey } from './base';
 
 export const MEMBERS_COLLECTION = 'members';
 
+export const memberRoleSchema = z.enum(['owner', 'admin', 'moderator', 'viewer']);
+
 export const memberSchema = z.object({
   key: z.string(),
+  platformId: z.string(),
   userId: z.string(),
   email: z.string(),
   emailHash: z.string(),
   name: z.string().nullable().default(null),
   profileUrl: z.string().nullable().default(null),
+  role: memberRoleSchema.default('viewer'),
   isMfaEnabled: z.boolean().default(false),
   has_request_mfa_reset_link: z.boolean().default(false),
-  isSuperAdmin: z.boolean().default(false),
   refreshTokenHash: z.string().nullable().default(null),
   totpSecret: z.string().nullable().default(null),
   lastTotpTimeStep: z.number().nullable().default(null),
@@ -84,4 +87,3 @@ export async function getMemberByRefreshTokenHash(refreshTokenHash: string): Pro
   const doc = await cursor.next();
   return doc ? memberSchema.parse(withArangoKey(doc)) : null;
 }
-
