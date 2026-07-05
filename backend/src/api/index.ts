@@ -6,7 +6,6 @@ import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, 
 import { handlePolarWebhook, POLAR_WEBHOOK_PATH } from './payments';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { registerRoutes } from './routes';
-import { closeAppWorkers, startAppWorkers } from '@/lib/workers';
 
 if (process.env.NODE_ENV === 'production' && process.env.POLAR_ACCESS_TOKEN && !process.env.POLAR_WEBHOOK_SECRET) {
   throw new Error('POLAR_WEBHOOK_SECRET is required in production when POLAR_ACCESS_TOKEN is configured');
@@ -53,7 +52,7 @@ app.use('*', requireEnvApiKey);
 app.use('*', autoRefreshAuthTokens);
 app.use('*', validateQueryParams);
 app.onError(errorHandler);
-api.get('/health', (c) => c.json({ ok: true, role: process.env.ROLE ?? 'app' }));
+api.get('/health', (c) => c.json({ ok: true }));
 registerRoutes(api);
 app.post(POLAR_WEBHOOK_PATH, handlePolarWebhook);
 app.post(`${POLAR_WEBHOOK_PATH}/`, handlePolarWebhook);
@@ -68,17 +67,8 @@ if (import.meta.main) {
   });
   console.log(`vorinthex app listening on ${port}`);
 
-  void startAppWorkers()
-    .then((workers) => {
-      console.log(`background workers started: ${workers.join(', ') || 'none'}`);
-    })
-    .catch((error) => {
-      console.error('background worker startup failed', error);
-    });
-
   const shutdown = async () => {
     server.stop();
-    await closeAppWorkers();
     process.exit(0);
   };
 

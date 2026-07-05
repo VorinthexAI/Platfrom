@@ -1,7 +1,9 @@
 import { aql } from 'arangojs';
 import { db } from '@/lib/db/client';
+import { MEMBERS_COLLECTION } from '@/lib/db/members.node';
 import { getUserById, updateUser, USERS_COLLECTION } from '@/lib/db/users.node';
 import { requestSignInEmail } from '@/api/auth';
+import { upsertMemberForUser } from '@/api/users';
 import { trackPlatformEvent } from './events';
 
 export interface PendingWaitlistUser {
@@ -14,7 +16,13 @@ export interface PendingWaitlistUser {
 export async function listPendingWaitlistUsers(): Promise<PendingWaitlistUser[]> {
   const cursor = await db.query(aql`
     FOR u IN ${db.collection(USERS_COLLECTION)}
-      FILTER u.isOnWaitlist == true
+      LET member = FIRST(
+        FOR m IN ${db.collection(MEMBERS_COLLECTION)}
+          FILTER m.userId == u._key
+          LIMIT 1
+          RETURN 1
+      )
+      FILTER member == null
       SORT u.email
       RETURN { id: u._key, email: u.email, name: u.name, isVerified: u.isVerified }
   `);
@@ -25,11 +33,8 @@ export async function acceptWaitlistUser(userId: string) {
   const entry = await getUserById(userId);
   if (!entry) return null;
 
-  await updateUser(entry.key, {
-    isOnWaitlist: false,
-    isWaitlistApproved: true,
-    updatedAt: new Date().toISOString(),
-  });
+  await updateUser(entry.key, { updatedAt: new Date().toISOString() });
+  await upsertMemberForUser(entry);
   trackPlatformEvent({
     slug: 'waitlist.user_approved',
     userId: entry.key,

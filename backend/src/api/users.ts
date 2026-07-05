@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { getMemberByUserId, insertMember, updateMember, type Member } from '@/lib/db/members.node';
 import { getUserByEmailHash, insertUser, updateUser, type User } from '@/lib/db/users.node';
 import { sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
@@ -37,6 +38,33 @@ export async function upsertUserByEmail(email: string, values: Partial<Omit<User
     emailHash,
     name: values.name ?? defaultNameFromEmail(normalized),
     createdAt: now,
+    updatedAt: now,
+  });
+}
+
+export async function upsertMemberForUser(
+  user: Pick<User, 'key' | 'email' | 'emailHash' | 'name' | 'profileUrl' | 'createdAt'>,
+  values: Partial<Omit<Member, 'key' | 'userId' | 'email' | 'emailHash' | 'embedding' | 'createdAt' | 'updatedAt'>> = {},
+): Promise<Member> {
+  const now = new Date().toISOString();
+  const existing = await getMemberByUserId(user.key);
+  const base = {
+    email: user.email,
+    emailHash: user.emailHash,
+    name: values.name ?? user.name,
+    profileUrl: values.profileUrl ?? user.profileUrl,
+  };
+
+  if (existing) {
+    return updateMember(existing.key, { ...base, ...values, updatedAt: now });
+  }
+
+  return insertMember({
+    key: newId(),
+    userId: user.key,
+    ...base,
+    ...values,
+    createdAt: user.createdAt,
     updatedAt: now,
   });
 }

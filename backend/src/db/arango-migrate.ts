@@ -21,6 +21,10 @@ function buildOutputEmbedText(key: string, type: string): string {
   return ['_outputs', key, type].join(':');
 }
 
+function buildMemberEmbedText(key: string, email: string, name?: string | null): string {
+  return ['_members', key, email, name].filter(Boolean).join(':');
+}
+
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -74,7 +78,23 @@ async function resolveEventUserId(input: {
 }
 
 const collections: CollectionSpec[] = [
-  { name: 'users', indexes: [{ fields: ['email'], unique: true }, { fields: ['emailHash'], unique: true }] },
+  {
+    name: 'users',
+    indexes: [
+      { fields: ['email'], unique: true },
+      { fields: ['emailHash'], unique: true },
+      { fields: ['refreshTokenHash'], unique: true, sparse: true },
+    ],
+  },
+  {
+    name: 'members',
+    indexes: [
+      { fields: ['userId'], unique: true },
+      { fields: ['email'], unique: true },
+      { fields: ['emailHash'], unique: true },
+      { fields: ['refreshTokenHash'], unique: true, sparse: true },
+    ],
+  },
   {
     name: 'products',
     indexes: [
@@ -169,6 +189,101 @@ async function main() {
       { '@collection': spec.name },
     );
   }
+
+  const membersCollection = targetDb.collection('members');
+  const usersToPromoteCursor = await targetDb.query<{
+    _key: string;
+    email?: string;
+    emailHash?: string;
+    name?: string | null;
+    profileUrl?: string | null;
+    isMfaEnabled?: boolean;
+    has_request_mfa_reset_link?: boolean;
+    isSuperAdmin?: boolean;
+    refreshTokenHash?: string | null;
+    totpSecret?: string | null;
+    lastTotpTimeStep?: number | null;
+    requested_mfa_reset_link_at?: string | null;
+    lastLoginAt?: string | null;
+    isWaitlistApproved?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+  }>(`
+    FOR u IN users
+      FILTER u.isWaitlistApproved == true
+        || u.isSuperAdmin == true
+        || u.isMfaEnabled == true
+        || HAS(u, "totpSecret")
+        || u.refreshTokenHash != null
+      RETURN u
+  `);
+  for await (const user of usersToPromoteCursor) {
+    if (!user.email || !user.emailHash) continue;
+    const existingMemberCursor = await targetDb.query<{
+      _key: string;
+      isMfaEnabled?: boolean;
+      has_request_mfa_reset_link?: boolean;
+      isSuperAdmin?: boolean;
+      refreshTokenHash?: string | null;
+      totpSecret?: string | null;
+      lastTotpTimeStep?: number | null;
+      requested_mfa_reset_link_at?: string | null;
+      lastLoginAt?: string | null;
+      createdAt?: string;
+      updatedAt?: string;
+    }>(
+      `
+        FOR m IN members
+          FILTER m.userId == @userId
+          LIMIT 1
+          RETURN m
+      `,
+      { userId: user._key },
+    );
+    const existingMember = await existingMemberCursor.next();
+    const key = existingMember?._key ?? newId();
+    const now = new Date().toISOString();
+    await membersCollection.save(
+      {
+        _key: key,
+        userId: user._key,
+        email: user.email,
+        emailHash: user.emailHash,
+        name: user.name ?? null,
+        profileUrl: user.profileUrl ?? null,
+        isMfaEnabled: existingMember?.isMfaEnabled ?? user.isMfaEnabled ?? false,
+        has_request_mfa_reset_link: existingMember?.has_request_mfa_reset_link ?? user.has_request_mfa_reset_link ?? false,
+        isSuperAdmin: existingMember?.isSuperAdmin ?? user.isSuperAdmin ?? false,
+        refreshTokenHash: existingMember?.refreshTokenHash ?? user.refreshTokenHash ?? null,
+        totpSecret: existingMember?.totpSecret ?? user.totpSecret ?? null,
+        lastTotpTimeStep: existingMember?.lastTotpTimeStep ?? user.lastTotpTimeStep ?? null,
+        requested_mfa_reset_link_at: existingMember?.requested_mfa_reset_link_at ?? user.requested_mfa_reset_link_at ?? null,
+        lastLoginAt: existingMember?.lastLoginAt ?? user.lastLoginAt ?? null,
+        createdAt: existingMember?.createdAt ?? user.createdAt ?? now,
+        updatedAt: existingMember?.updatedAt ?? user.updatedAt ?? now,
+        embedding: await embed({ text: buildMemberEmbedText(key, user.email, user.name) }),
+      },
+      { overwriteMode: 'update' },
+    );
+  }
+
+  await targetDb.query(`
+    FOR u IN users
+      FILTER HAS(u, "isMfaEnabled")
+        || HAS(u, "has_request_mfa_reset_link")
+        || HAS(u, "isSuperAdmin")
+        || HAS(u, "totpSecret")
+        || HAS(u, "lastTotpTimeStep")
+        || HAS(u, "requested_mfa_reset_link_at")
+      UPDATE u WITH {
+        isMfaEnabled: null,
+        has_request_mfa_reset_link: null,
+        isSuperAdmin: null,
+        totpSecret: null,
+        lastTotpTimeStep: null,
+        requested_mfa_reset_link_at: null
+      } IN users OPTIONS { keepNull: false }
+  `);
 
   const platformsCollection = targetDb.collection('platforms');
   let defaultPlatformId: string | null = null;
@@ -368,19 +483,23 @@ async function main() {
 
   await targetDb.query(`
     FOR u IN users
-      FILTER !HAS(u, "has_request_mfa_reset_link")
-        || !HAS(u, "requested_mfa_reset_link_at")
-        || !HAS(u, "is_subscribed_to_updates")
+      FILTER !HAS(u, "is_subscribed_to_updates")
         || !HAS(u, "is_subscribed_to_updates_unsubscribe_token_hash")
         || !HAS(u, "is_subscribed_to_updates_unsubscribe_requested_at")
+        || !HAS(u, "refreshTokenHash")
+        || !HAS(u, "lastLoginAt")
+        || HAS(u, "isOnWaitlist")
+        || HAS(u, "isWaitlistApproved")
         || HAS(u, "events")
       UPDATE u WITH {
         events: null,
-        has_request_mfa_reset_link: HAS(u, "has_request_mfa_reset_link") ? u.has_request_mfa_reset_link : false,
-        requested_mfa_reset_link_at: HAS(u, "requested_mfa_reset_link_at") ? u.requested_mfa_reset_link_at : null,
+        isOnWaitlist: null,
+        isWaitlistApproved: null,
         is_subscribed_to_updates: HAS(u, "is_subscribed_to_updates") ? u.is_subscribed_to_updates : (HAS(u, "isSubscribedToNewsletter") ? u.isSubscribedToNewsletter : true),
         is_subscribed_to_updates_unsubscribe_token_hash: HAS(u, "is_subscribed_to_updates_unsubscribe_token_hash") ? u.is_subscribed_to_updates_unsubscribe_token_hash : null,
-        is_subscribed_to_updates_unsubscribe_requested_at: HAS(u, "is_subscribed_to_updates_unsubscribe_requested_at") ? u.is_subscribed_to_updates_unsubscribe_requested_at : null
+        is_subscribed_to_updates_unsubscribe_requested_at: HAS(u, "is_subscribed_to_updates_unsubscribe_requested_at") ? u.is_subscribed_to_updates_unsubscribe_requested_at : null,
+        refreshTokenHash: HAS(u, "refreshTokenHash") ? u.refreshTokenHash : null,
+        lastLoginAt: HAS(u, "lastLoginAt") ? u.lastLoginAt : null
       } IN users OPTIONS { keepNull: false }
   `);
 
