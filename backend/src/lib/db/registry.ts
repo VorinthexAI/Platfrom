@@ -1,10 +1,15 @@
 import type { Page } from './base';
+import { getAllAgentsChunked, listAgentsPage } from './agents.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage } from './auth-challenges.node';
+import { getAllCapabilitiesChunked, listCapabilitiesPage } from './capabilities.node';
 import { getAllEventsChunked, listEventsPage } from './events.node';
 import { getAllMembersChunked, listMembersPage } from './members.node';
+import { getAllMindCapabilitiesChunked, listMindCapabilitiesPage } from './mind-capabilities.node';
+import { getAllMindsChunked, listMindsPage } from './minds.node';
 import { getAllOutputAnalyticsChunked, listOutputAnalyticsPage } from './output-analytics.node';
 import { getAllOutputRelationsChunked, listOutputRelationsPage } from './output-relations.node';
 import { getAllOutputsChunked, listOutputsPage } from './outputs.node';
+import { getAllOrchestratorsChunked, listOrchestratorsPage } from './orchestrators.node';
 import { getAllPaymentCheckoutsChunked, listPaymentCheckoutsPage } from './payment-checkouts.node';
 import { getAllPaymentOrdersChunked, listPaymentOrdersPage } from './payment-orders.node';
 import { getAllPlatformsChunked, listPlatformsPage } from './platforms.node';
@@ -28,12 +33,17 @@ export interface NodeAccessors {
  * once and it shows up in both automatically.
  */
 export const NODE_REGISTRY: Record<string, NodeAccessors> = {
+  agents: { listPage: listAgentsPage, getAllChunked: getAllAgentsChunked },
   authChallenges: { listPage: listAuthChallengesPage, getAllChunked: getAllAuthChallengesChunked },
+  capabilities: { listPage: listCapabilitiesPage, getAllChunked: getAllCapabilitiesChunked },
   events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked },
   members: { listPage: listMembersPage, getAllChunked: getAllMembersChunked },
+  mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked },
+  minds: { listPage: listMindsPage, getAllChunked: getAllMindsChunked },
   outputAnalytics: { listPage: listOutputAnalyticsPage, getAllChunked: getAllOutputAnalyticsChunked },
   outputRelations: { listPage: listOutputRelationsPage, getAllChunked: getAllOutputRelationsChunked },
   outputs: { listPage: listOutputsPage, getAllChunked: getAllOutputsChunked },
+  orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked },
   paymentCheckouts: { listPage: listPaymentCheckoutsPage, getAllChunked: getAllPaymentCheckoutsChunked },
   paymentOrders: { listPage: listPaymentOrdersPage, getAllChunked: getAllPaymentOrdersChunked },
   platforms: { listPage: listPlatformsPage, getAllChunked: getAllPlatformsChunked },
