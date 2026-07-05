@@ -494,11 +494,7 @@ jobs:
             key=$(printf '%s' "$key" | tr -d '\r')
             value=$(printf '%s' "$value" | tr -d '\r')
             case "$key" in ''|'#'*) continue ;; esac
-            case "$key" in
-              NODE_ENV) : ;;
-              BACKEND_*) key="${key#BACKEND_}" ;;
-              *) continue ;;
-            esac
+            case "$key" in VORINTHEX_*|ORBIT_*) continue ;; esac
             case "$key" in PROD_SSH_*|PROD_ARANGO_*|APP_HOST_PUBLIC_IP) skipped=$((skipped + 1)); continue ;; esac
             if ! printf '%s' "$key" | grep -Eq '^[A-Z][A-Z0-9_]*$'; then
               echo "::error::Invalid PROD_ENV_FILE key '$key'."
