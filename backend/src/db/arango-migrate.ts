@@ -95,6 +95,24 @@ const collections: CollectionSpec[] = [
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
+  { name: 'minds', indexes: [{ fields: ['userId'], unique: true }] },
+  { name: 'orchestrators', indexes: [{ fields: ['name'] }] },
+  {
+    name: 'agents',
+    indexes: [
+      { fields: ['orchestratorId'] },
+      { fields: ['orchestratorId', 'name'], unique: true },
+    ],
+  },
+  { name: 'capabilities', indexes: [{ fields: ['name'] }] },
+  {
+    name: 'mindCapabilities',
+    indexes: [
+      { fields: ['mindId'] },
+      { fields: ['capabilityId'] },
+      { fields: ['mindId', 'capabilityId'], unique: true },
+    ],
+  },
   {
     name: 'products',
     indexes: [
