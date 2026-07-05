@@ -24,6 +24,22 @@ import { unsubscribeFromUpdates } from './updates';
 import { hashUserEmail } from './users';
 import { clientEventSlugSchema, trackPlatformEvent } from '@/platform/events';
 import { listNodes } from './nodes';
+import {
+  attachCurrentMindCapability,
+  createSystemAgent,
+  createSystemCapability,
+  createSystemOrchestrator,
+  detachCurrentMindCapability,
+  getCurrentMind,
+  listCurrentMindCapabilities,
+  listSystemAgents,
+  listSystemCapabilities,
+  listSystemOrchestrators,
+  updateSystemAgent,
+  updateSystemCapability,
+  updateSystemOrchestrator,
+  upsertCurrentMind,
+} from './system';
 
 const jsonObject = z.record(z.string(), z.unknown()).default({});
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -218,6 +234,23 @@ export function registerRoutes(app: Hono) {
   });
 
   app.get('/nodes', listNodes);
+
+  app.get('/mind', getCurrentMind);
+  app.post('/mind', upsertCurrentMind);
+  app.put('/mind', upsertCurrentMind);
+  app.get('/mind/capabilities', listCurrentMindCapabilities);
+  app.post('/mind/capabilities', attachCurrentMindCapability);
+  app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
+
+  app.get('/system/orchestrators', listSystemOrchestrators);
+  app.post('/system/orchestrators', createSystemOrchestrator);
+  app.patch('/system/orchestrators/:orchestratorId', updateSystemOrchestrator);
+  app.get('/system/agents', listSystemAgents);
+  app.post('/system/orchestrators/:orchestratorId/agents', createSystemAgent);
+  app.patch('/system/agents/:agentId', updateSystemAgent);
+  app.get('/system/capabilities', listSystemCapabilities);
+  app.post('/system/capabilities', createSystemCapability);
+  app.patch('/system/capabilities/:capabilityId', updateSystemCapability);
 
   app.get('/products', async (c) => {
     const rows = await listAllProducts();
