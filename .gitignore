@@ -3,8 +3,6 @@
 prod.env
 environments/**/.env.dev
 environments/**/.env.prod
-environments/.env.dev
-environments/.env.prod
 .github/.configs/secrets.json
 
 node_modules/

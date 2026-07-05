@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 // Builds the JSON payload for .github/.configs/secrets.json (gitignored,
 // local-only — see .github/.configs/secrets.json.example for the schema)
-// from environments/.env.prod plus the handful of deployment values that
-// don't live in that file (Vercel token/team, per-project Vercel project
-// id, and each app's production URL).
+// from environments/{vorinthex,orbit,backend}/.env.prod plus the handful of
+// deployment values that don't live in those files (Vercel token/team,
+// per-project Vercel project id, and each app's production URL).
 //
 // Usage:
 //   bun environments/scripts/build-config.ts \
@@ -14,8 +14,8 @@
 //   bash environments/scripts/sync-configs.sh secrets
 //
 // deploy.yml reads the resulting CONFIG secret via fromJSON(secrets.CONFIG),
-// e.g. fromJSON(secrets.CONFIG).vorinthex.url or .vercel.team_id.
-// Re-run this whenever environments/.env.prod changes.
+// e.g. fromJSON(secrets.CONFIG).vorinthex.url, .vorinthex.env, or
+// .vercel.team_id. Re-run this whenever any .env.prod file changes.
 
 import { readFileSync } from "node:fs";
 
@@ -45,8 +45,10 @@ function parseEnvFile(path: string) {
 }
 
 const args = parseArgs();
-const envFile = args["env-file"] ?? "environments/.env.prod";
-const env = parseEnvFile(envFile);
+
+const vorinthexEnv = parseEnvFile(args["vorinthex-env-file"] ?? "environments/vorinthex/.env.prod");
+const orbitEnv = parseEnvFile(args["orbit-env-file"] ?? "environments/orbit/.env.prod");
+const backendEnv = parseEnvFile(args["backend-env-file"] ?? "environments/backend/.env.prod");
 
 const config = {
   vercel: {
@@ -54,14 +56,16 @@ const config = {
     team_id: args["vercel-team-id"] ?? DEFAULT_VERCEL_TEAM_ID,
   },
   vorinthex: {
-    url: args["vorinthex-url"] ?? env.VORINTHEX_NEXT_PUBLIC_SITE_URL ?? "",
+    url: args["vorinthex-url"] ?? vorinthexEnv.NEXT_PUBLIC_SITE_URL ?? "",
     vercel_project_id: args["vorinthex-project-id"] ?? "",
+    env: vorinthexEnv,
   },
   orbit: {
-    url: args["orbit-url"] ?? env.ORBIT_NEXT_PUBLIC_SITE_URL ?? "",
+    url: args["orbit-url"] ?? orbitEnv.NEXT_PUBLIC_SITE_URL ?? "",
     vercel_project_id: args["orbit-project-id"] ?? "",
+    env: orbitEnv,
   },
-  env,
+  env: backendEnv,
 };
 
 console.log(JSON.stringify(config, null, 2));

@@ -23,11 +23,13 @@ Install dependencies from the repository root:
 bun install
 ```
 
-Environment files live under `environments/`:
+Environment files live under `environments/`, one directory per workspace since
+vorinthex, orbit, and backend each have their own separate config with no
+shared/prefixed keys:
 
-- `environments/.env.example`
-- `environments/.env.dev`
-- `environments/.env.prod`
+- `environments/vorinthex/.env.example` / `.env.dev` / `.env.prod`
+- `environments/orbit/.env.example` / `.env.dev` / `.env.prod`
+- `environments/backend/.env.example` / `.env.dev` / `.env.prod`
 
 Only `.env.example` files should be committed. `.env.dev` and `.env.prod` are local secret-bearing files and must stay ignored.
 

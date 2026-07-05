@@ -24,8 +24,8 @@ export async function chooseEnvironment(rl: Interface): Promise<EnvironmentName>
 
 function resolveEnvironmentFile(environment: EnvironmentName) {
   const candidates = environment === 'dev'
-    ? ['../environments/.env.dev']
-    : ['../environments/.env.prod', '../environments/.env.production'];
+    ? ['../environments/backend/.env.dev']
+    : ['../environments/backend/.env.prod', '../environments/backend/.env.production'];
 
   return candidates.find((file) => existsSync(file));
 }

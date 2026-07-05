@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "bun ../../../environments/scripts/scoped-env.ts ORBIT ../../../environments/.env.dev -- next dev",
+    "dev": "bun --env-file=../../../environments/orbit/.env.dev next dev",
     "build": "next build --webpack",
-    "start": "bun ../../../environments/scripts/scoped-env.ts ORBIT ../../../environments/.env.prod -- next start",
+    "start": "bun --env-file=../../../environments/orbit/.env.prod next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit"
   },

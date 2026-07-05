@@ -228,15 +228,11 @@ jobs:
 
       - name: Load production env file
         env:
-          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).env) }}
+          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).vorinthex.env) }}
         run: |
           set -euo pipefail
-          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.env is not configured."; exit 1; }
-          echo "$CONFIG_ENV" | jq -r '
-            to_entries[]
-            | select(.key == "NODE_ENV" or (.key | startswith("VORINTHEX_")))
-            | (.key | sub("^VORINTHEX_"; "")) + "=" + (.value // "")
-          ' > prod.env
+          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.vorinthex.env is not configured."; exit 1; }
+          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
           chmod 600 prod.env
 
       - name: Validate deployment secrets
@@ -364,15 +360,11 @@ jobs:
 
       - name: Load production env file
         env:
-          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).env) }}
+          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).orbit.env) }}
         run: |
           set -euo pipefail
-          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.env is not configured."; exit 1; }
-          echo "$CONFIG_ENV" | jq -r '
-            to_entries[]
-            | select(.key == "NODE_ENV" or (.key | startswith("ORBIT_")))
-            | (.key | sub("^ORBIT_"; "")) + "=" + (.value // "")
-          ' > prod.env
+          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.orbit.env is not configured."; exit 1; }
+          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
           chmod 600 prod.env
 
       - name: Validate deployment secrets
@@ -486,7 +478,6 @@ jobs:
           while IFS= read -r entry; do
             key=$(printf '%s' "$entry" | jq -r '.key')
             value=$(printf '%s' "$entry" | jq -r '.value // ""')
-            case "$key" in VORINTHEX_*|ORBIT_*) continue ;; esac
             case "$key" in PROD_SSH_*|PROD_ARANGO_*|APP_HOST_PUBLIC_IP) skipped=$((skipped + 1)); continue ;; esac
             if ! printf '%s' "$key" | grep -Eq '^[A-Z][A-Z0-9_]*$'; then
               echo "::error::Invalid config.env key '$key'."

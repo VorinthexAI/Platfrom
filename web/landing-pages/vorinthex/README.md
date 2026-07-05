@@ -24,7 +24,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment
 
-Copy `../../../environments/.env.example` to `../../../environments/.env.dev` and set:
+Copy `../../../environments/vorinthex/.env.example` to `../../../environments/vorinthex/.env.dev` and set:
 
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
