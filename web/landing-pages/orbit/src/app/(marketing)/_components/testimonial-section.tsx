@@ -15,7 +15,7 @@ export function TestimonialSection() {
       <div className="cui-container relative grid items-center gap-16 lg:grid-cols-[1.3fr_1fr]">
         <Reveal>
           <p className="max-w-xl text-2xl leading-snug font-normal text-foreground sm:text-3xl">
-            &ldquo;Cortex Orbit changed the way we work. It&rsquo;s like having a
+            &ldquo;Orbit changed the way we work. It&rsquo;s like having a
             team of experts, available 24/7.&rdquo;
           </p>
 

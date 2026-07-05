@@ -3,7 +3,7 @@
 Next.js app scaffolded for Bun, TypeScript, Tailwind CSS, TanStack Query, Zod,
 date-fns, and Axios.
 
-Lives at `web/landing-pages/vorinthex` — a sibling of `web/landing-pages/cortex-orbit`,
+Lives at `web/landing-pages/vorinthex` — a sibling of `web/landing-pages/orbit`,
 both consuming the same top-level `shared` workspace package.
 
 ## Getting Started

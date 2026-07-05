@@ -14,7 +14,7 @@ export default async function ConsoleLayout({
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <header className="flex items-center justify-between border-b border-border px-6 py-4">
-        <span className="cui-label">Cortex Orbit</span>
+        <span className="cui-label">Orbit</span>
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted">{session.displayName}</span>
           <SignOutButton />

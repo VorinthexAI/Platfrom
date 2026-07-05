@@ -7,7 +7,7 @@ Guidance for AI coding agents working in this repository.
 Vorinthex platform monorepo. Top-level workspaces:
 
 - `web/landing-pages/vorinthex`: Vorinthex's Next.js app (the "universe" product).
-- `web/landing-pages/cortex-orbit`: Cortex Orbit's Next.js app — a second, separate
+- `web/landing-pages/orbit`: Orbit's Next.js app — a second, separate
   landing-page product living in this same monorepo so it can share `shared/`.
   `web/` itself is not a workspace — it's just the parent folder for
   `web/landing-pages/*`.
@@ -36,8 +36,8 @@ Only `.env.example` files should be committed. `.env.dev` and `.env.prod` are lo
 ```bash
 bun run vorinthex:lint
 bun run vorinthex:typecheck
-bun run cortex-orbit:lint
-bun run cortex-orbit:typecheck
+bun run orbit:lint
+bun run orbit:typecheck
 bun run backend:check
 bun run backend:test
 ```
@@ -46,7 +46,7 @@ Run app-specific commands through their workspace folders when needed:
 
 ```bash
 bun run --cwd web/landing-pages/vorinthex dev
-bun run --cwd web/landing-pages/cortex-orbit dev
+bun run --cwd web/landing-pages/orbit dev
 bun run --cwd backend dev
 ```
 
@@ -78,4 +78,4 @@ Order:
 
 - Run the relevant checks before considering a task complete.
 - Ask before introducing a new major dependency or framework.
-- This repo is its own monorepo; do not add git submodules for `web/landing-pages/vorinthex`, `web/landing-pages/cortex-orbit`, `backend`, or `shared`.
+- This repo is its own monorepo; do not add git submodules for `web/landing-pages/vorinthex`, `web/landing-pages/orbit`, `backend`, or `shared`.

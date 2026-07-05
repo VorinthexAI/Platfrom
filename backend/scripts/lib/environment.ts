@@ -30,10 +30,25 @@ function resolveEnvironmentFile(environment: EnvironmentName) {
   return candidates.find((file) => existsSync(file));
 }
 
+const BACKEND_ENV_PREFIX = 'BACKEND_';
+
+// environments/.env.* is shared by vorinthex, orbit, and backend, with
+// each project's keys prefixed (e.g. BACKEND_ARANGO_URL). Strip the backend
+// prefix after loading so the rest of the backend can keep reading plain
+// names like ARANGO_URL.
+function applyBackendScope() {
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && key.startsWith(BACKEND_ENV_PREFIX)) {
+      process.env[key.slice(BACKEND_ENV_PREFIX.length)] = value;
+    }
+  }
+}
+
 export function loadEnvironment(environment: EnvironmentName) {
   const envFile = resolveEnvironmentFile(environment);
   if (envFile) {
     loadEnv({ path: envFile, override: true });
+    applyBackendScope();
     console.log(`Loaded ${envFile}`);
     return envFile;
   }

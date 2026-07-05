@@ -3,20 +3,20 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 const siteUrl = new URL(
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://cortexorbit.ai",
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://orbit.ai",
 );
 
 export const metadata: Metadata = {
   metadataBase: siteUrl,
-  applicationName: "Cortex Orbit",
+  applicationName: "Orbit",
   title: {
-    default: "Cortex Orbit",
-    template: "%s | Cortex Orbit",
+    default: "Orbit",
+    template: "%s | Orbit",
   },
-  description: "Cortex Orbit.",
-  authors: [{ name: "Cortex Orbit" }],
-  creator: "Cortex Orbit",
-  publisher: "Cortex Orbit",
+  description: "Orbit.",
+  authors: [{ name: "Orbit" }],
+  creator: "Orbit",
+  publisher: "Orbit",
   alternates: {
     canonical: "/",
   },
@@ -24,14 +24,14 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: "/",
-    siteName: "Cortex Orbit",
-    title: "Cortex Orbit",
-    description: "Cortex Orbit.",
+    siteName: "Orbit",
+    title: "Orbit",
+    description: "Orbit.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Cortex Orbit",
-    description: "Cortex Orbit.",
+    title: "Orbit",
+    description: "Orbit.",
   },
   robots: {
     index: true,

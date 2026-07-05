@@ -29,7 +29,7 @@ export function SiteFooter() {
           <div className="flex items-center gap-2.5">
             <SpinningLogo size={22} />
             <span className="text-sm font-medium tracking-[0.16em] text-foreground uppercase">
-              Cortex Orbit
+              Orbit
             </span>
           </div>
           <p className="mt-4 max-w-xs text-sm leading-6 text-muted">
@@ -72,7 +72,7 @@ export function SiteFooter() {
       </div>
 
       <div className="cui-container relative mt-14 flex flex-col gap-2 border-t border-border pt-6 text-xs text-muted sm:flex-row sm:justify-between">
-        <span>© {new Date().getFullYear()} Cortex Orbit. All rights reserved.</span>
+        <span>© {new Date().getFullYear()} Orbit. All rights reserved.</span>
       </div>
     </footer>
   );

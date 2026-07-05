@@ -29,7 +29,7 @@ function buildUrl(path: string): string {
 /**
  * Forwards the incoming request's cookies to the backend (the backend owns
  * session validation; we just relay whatever `cxo_session` etc. the browser
- * sent us) and injects the server-only `x-cortex-orbit-api-key` header.
+ * sent us) and injects the server-only `x-orbit-api-key` header.
  */
 async function buildHeaders(init: RequestInit | undefined): Promise<Headers> {
   const headers = new Headers(init?.headers);
@@ -41,7 +41,7 @@ async function buildHeaders(init: RequestInit | undefined): Promise<Headers> {
     .join("; ");
   if (cookieHeader) headers.set("Cookie", cookieHeader);
 
-  if (BACKEND_API_KEY) headers.set("x-cortex-orbit-api-key", BACKEND_API_KEY);
+  if (BACKEND_API_KEY) headers.set("x-orbit-api-key", BACKEND_API_KEY);
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
 
   return headers;

@@ -26,7 +26,7 @@ export const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SESSION_SECRET =
   process.env.SESSION_COOKIE_SECRET ??
   process.env.SESSION_SECRET ??
-  "cortex-orbit-dev-insecure-session-secret-change-me";
+  "orbit-dev-insecure-session-secret-change-me";
 
 let cachedKey: Promise<CryptoKey> | null = null;
 
