@@ -39,10 +39,10 @@ export function loadEnvironment(environment: EnvironmentName) {
   }
 
   if (environment === 'prod') {
-    throw new Error('No environments/.env.prod or environments/.env.production file found. Copy environments/.env.example to environments/.env.prod and set ARANGO_URL.');
+    throw new Error('No environments/backend/.env.prod or environments/backend/.env.production file found. Copy environments/backend/.env.example to environments/backend/.env.prod and set ARANGO_URL.');
   }
 
-  console.log('No environments/.env.dev file found. Using current process environment.');
+  console.log('No environments/backend/.env.dev file found. Using current process environment.');
   return null;
 }
 
