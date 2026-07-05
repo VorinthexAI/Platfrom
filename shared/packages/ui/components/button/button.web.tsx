@@ -29,18 +29,29 @@ export function Button({
   variant = "secondary",
   ...props
 }: ButtonProps) {
-  const Component = asChild ? Slot : "button";
+  const classes = cn("vui-button", `vui-button-${variant}`, className);
+
+  // Slot (Radix) requires exactly one child element to merge props onto, so
+  // asChild can't also render an icon/spinner as a sibling — pass the
+  // wrapped child straight through.
+  if (asChild) {
+    return (
+      <Slot className={classes} {...props}>
+        {children}
+      </Slot>
+    );
+  }
 
   return (
-    <Component
+    <button
       aria-busy={loading || undefined}
-      className={cn("vui-button", `vui-button-${variant}`, className)}
-      disabled={asChild ? undefined : disabled || loading}
-      type={asChild ? undefined : type}
+      className={classes}
+      disabled={disabled || loading}
+      type={type}
       {...props}
     >
       {loading ? <span aria-hidden="true" className="vui-spinner" /> : icon}
       {variant === "icon" ? <span className="sr-only">{children}</span> : children}
-    </Component>
+    </button>
   );
 }
