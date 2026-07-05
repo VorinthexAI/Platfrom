@@ -650,6 +650,7 @@ jobs:
       && needs.backend-migrate.result == 'success'
       && needs.backend-app.result != 'failure' && needs.backend-app.result != 'cancelled'
       && vars.RENDER_TASK_FAMILY != ''
+    environment: production
     env:
       IMAGE: ${{ needs.backend-image.outputs.image }}
       FAMILY: ${{ vars.RENDER_TASK_FAMILY }}
