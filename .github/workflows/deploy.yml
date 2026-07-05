@@ -9,7 +9,7 @@ on:
       target:
         description: 'Deployment target'
         type: choice
-        options: [all, web, backend, selective]
+        options: [all, vorinthex, cortex-orbit, backend, selective]
         default: all
       deploy:
         description: 'Deploy after verification'
@@ -38,7 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     outputs:
-      web: ${{ steps.decide.outputs.web }}
+      vorinthex: ${{ steps.decide.outputs.vorinthex }}
+      cortex_orbit: ${{ steps.decide.outputs.cortex_orbit }}
       backend: ${{ steps.decide.outputs.backend }}
       changed_files: ${{ steps.decide.outputs.changed_files }}
     steps:
@@ -55,68 +56,80 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             case "${{ inputs.target }}" in
               all)
-                web=true
+                vorinthex=true
+                cortex_orbit=true
                 backend=true
                 ;;
-              web)
-                web=true
+              vorinthex)
+                vorinthex=true
+                cortex_orbit=false
+                backend=false
+                ;;
+              cortex-orbit)
+                vorinthex=false
+                cortex_orbit=true
                 backend=false
                 ;;
               backend)
-                web=false
+                vorinthex=false
+                cortex_orbit=false
                 backend=true
                 ;;
               selective)
                 files="$(git diff --name-only HEAD~1 HEAD || true)"
-                web=false
+                vorinthex=false
+                cortex_orbit=false
                 backend=false
                 shared=false
                 while IFS= read -r file; do
                   [ -n "$file" ] || continue
                   case "$file" in
-                    web/*) web=true ;;
+                    web/landing-pages/vorinthex/*) vorinthex=true ;;
+                    web/landing-pages/cortex-orbit/*) cortex_orbit=true ;;
                     backend/*) backend=true ;;
                     shared/*) shared=true ;;
-                    .github/workflows/deploy.yml) web=true; backend=true ;;
+                    .github/workflows/deploy.yml) vorinthex=true; cortex_orbit=true; backend=true ;;
                   esac
                 done <<< "$files"
-                if [ "$shared" = true ] && [ "$backend" = false ]; then web=true; fi
+                if [ "$shared" = true ]; then vorinthex=true; cortex_orbit=true; fi
                 ;;
             esac
           else
             base='${{ github.event.pull_request.base.sha }}'
             files="$(git diff --name-only "$base" "${{ env.COMMIT_SHA }}")"
-            web=false
+            vorinthex=false
+            cortex_orbit=false
             backend=false
             shared=false
             while IFS= read -r file; do
               [ -n "$file" ] || continue
               case "$file" in
-                web/*) web=true ;;
+                web/landing-pages/vorinthex/*) vorinthex=true ;;
+                web/landing-pages/cortex-orbit/*) cortex_orbit=true ;;
                 backend/*) backend=true ;;
                 shared/*) shared=true ;;
-                .github/workflows/deploy.yml) web=true; backend=true ;;
+                .github/workflows/deploy.yml) vorinthex=true; cortex_orbit=true; backend=true ;;
               esac
             done <<< "$files"
 
-            # Shared-only or shared+web deploys web. Shared+backend deploys backend.
-            # When web and backend are both dirty, both deploy.
-            if [ "$shared" = true ] && [ "$backend" = false ]; then web=true; fi
+            # shared/ is consumed by both landing-page apps.
+            if [ "$shared" = true ]; then vorinthex=true; cortex_orbit=true; fi
           fi
 
           {
-            echo "web=$web"
+            echo "vorinthex=$vorinthex"
+            echo "cortex_orbit=$cortex_orbit"
             echo "backend=$backend"
             echo "changed_files<<EOF"
             printf '%s\n' "${files:-manual:${{ inputs.target || 'all' }}}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-  verify-web:
-    name: Verify web
+  verify-vorinthex:
+    name: Verify vorinthex web
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: needs.changes.outputs.vorinthex == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -125,9 +138,26 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --linker=hoisted
       - name: Lint
-        run: bun run web:lint
+        run: bun run vorinthex:lint
       - name: Typecheck
-        run: bun run web:typecheck
+        run: bun run vorinthex:typecheck
+
+  verify-cortex-orbit:
+    name: Verify cortex-orbit web
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.cortex_orbit == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --linker=hoisted
+      - name: Lint
+        run: bun run cortex-orbit:lint
+      - name: Typecheck
+        run: bun run cortex-orbit:typecheck
 
   verify-backend:
     name: Verify backend
@@ -146,14 +176,14 @@ jobs:
       - name: Test
         run: bun run backend:test
 
-  deploy-web:
-    name: Build and deploy web
+  deploy-vorinthex:
+    name: Build and deploy vorinthex web
     runs-on: ubuntu-latest
-    needs: [changes, verify-web]
-    if: needs.changes.outputs.web == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    needs: [changes, verify-vorinthex]
+    if: needs.changes.outputs.vorinthex == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     defaults:
       run:
-        working-directory: web
+        working-directory: web/landing-pages/vorinthex
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -162,8 +192,8 @@ jobs:
 
       - name: Strip non-app content from the build context
         run: |
-          rm -rf ../shared/brand ../shared/docs ../.claude
-          rm -f CLAUDE.md AGENTS.md admin.md ../CLAUDE.md ../AGENTS.md
+          rm -rf ../../../shared/brand ../../../shared/docs ../../../.claude
+          rm -f CLAUDE.md AGENTS.md admin.md ../../../CLAUDE.md ../../../AGENTS.md
 
       - uses: oven-sh/setup-bun@v2
 
@@ -175,10 +205,10 @@ jobs:
 
       - name: Materialize web dependencies for Vercel tracing
         run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/node_modules"
-          mkdir -p "${GITHUB_WORKSPACE}/web/node_modules"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/node_modules/"
-          test -f "${GITHUB_WORKSPACE}/web/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+          rm -rf "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules/"
+          test -f "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
         env:
@@ -262,6 +292,138 @@ jobs:
       - name: Verify production is live
         env:
           PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+        run: |
+          URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
+          for i in $(seq 1 24); do
+            CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
+            if [ "$CODE" = "200" ]; then
+              echo "Production is live (HTTP 200) at $URL on attempt $i/24"
+              exit 0
+            fi
+            echo "attempt $i/24: HTTP $CODE; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::Production health check failed after 4 minutes ($URL)"
+          exit 1
+
+  deploy-cortex-orbit:
+    name: Build and deploy cortex-orbit web
+    runs-on: ubuntu-latest
+    needs: [changes, verify-cortex-orbit]
+    if: needs.changes.outputs.cortex_orbit == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    defaults:
+      run:
+        working-directory: web/landing-pages/cortex-orbit
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+
+      - name: Strip non-app content from the build context
+        run: |
+          rm -rf ../../../shared/brand ../../../shared/docs ../../../.claude
+          rm -f CLAUDE.md AGENTS.md admin.md ../../../CLAUDE.md ../../../AGENTS.md
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          bun install --frozen-lockfile --linker=hoisted
+          test -f "${GITHUB_WORKSPACE}/node_modules/next/package.json"
+
+      - name: Materialize web dependencies for Vercel tracing
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules/"
+          test -f "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+
+      - name: Load production env file
+        env:
+          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE_CORTEX_ORBIT }}
+        run: |
+          set -euo pipefail
+          test -n "$PROD_ENV_FILE" || { echo "::error::PROD_ENV_FILE_CORTEX_ORBIT is not configured."; exit 1; }
+          printf '%s\n' "$PROD_ENV_FILE" > prod.env
+          chmod 600 prod.env
+
+      - name: Validate deployment secrets
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_CORTEX_ORBIT }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CORTEX_ORBIT }}
+          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE_CORTEX_ORBIT }}
+        run: |
+          missing=0
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID PROD_ENV_FILE; do
+            if [ -z "${!name}" ]; then
+              echo "::error::${name}_CORTEX_ORBIT is not configured."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Sync prod.env to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CORTEX_ORBIT }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID_CORTEX_ORBIT }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in ''|\#*) continue ;; esac
+            [[ "$line" == *=* ]] || { echo "::error::Malformed prod.env line."; exit 1; }
+            key="${line%%=*}"
+            value="${line#*=}"
+            test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
+            payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
+            curl -sf -X POST \
+              "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$payload" > /dev/null
+          done < prod.env
+
+      - name: Pull Vercel project settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_CORTEX_ORBIT }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CORTEX_ORBIT }}
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Verify excluded content is not in the deploy artifact
+        run: |
+          forbidden=$(find .vercel/output \
+            \( -ipath '*shared/brand*' \
+            -o -ipath '*shared/docs*' \
+            -o -iname 'CLAUDE.md' \
+            -o -iname 'AGENTS.md' \
+            -o -iname 'admin.md' \
+            -o -iname '.claude' \) -print)
+          if [ -n "$forbidden" ]; then
+            echo "::error::Excluded content found in the build output:"
+            echo "$forbidden"
+            exit 1
+          fi
+
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
+        run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
+
+      - name: Verify production is live
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL_CORTEX_ORBIT }}
         run: |
           URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
           for i in $(seq 1 24); do
@@ -695,7 +857,7 @@ jobs:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-web, backend-app, backend-render]
+    needs: [changes, deploy-vorinthex, deploy-cortex-orbit, backend-app, backend-render]
     steps:
       - name: Write deploy audit
         run: |
@@ -704,7 +866,8 @@ jobs:
             echo ""
             echo "| Service | Selected | Result |"
             echo "|---|---:|---|"
-            echo "| web | ${{ needs.changes.outputs.web }} | ${{ needs.deploy-web.result }} |"
+            echo "| vorinthex | ${{ needs.changes.outputs.vorinthex }} | ${{ needs.deploy-vorinthex.result }} |"
+            echo "| cortex-orbit | ${{ needs.changes.outputs.cortex_orbit }} | ${{ needs.deploy-cortex-orbit.result }} |"
             echo "| backend-app | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-app.result }} |"
             echo "| backend-render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo ""

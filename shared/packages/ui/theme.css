@@ -239,6 +239,25 @@
   width: 100%;
 }
 
+.vui-alert {
+  border: 1px solid var(--vui-color-border);
+  border-radius: var(--vui-radius-md);
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 12px 16px;
+}
+
+.vui-alert-info {
+  background: var(--vui-color-secondary);
+  color: var(--vui-color-text);
+}
+
+.vui-alert-danger {
+  background: var(--vui-color-page);
+  border-color: var(--vui-color-danger);
+  color: var(--vui-color-danger);
+}
+
 .vui-spinner {
   animation: vui-spin 900ms linear infinite;
   border: 1px solid var(--vui-color-border);
