@@ -267,6 +267,7 @@ jobs:
             key="${line%%=*}"
             value="${line#*=}"
             test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
+            [ -n "$value" ] || continue
             payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
             curl -sf -X POST \
               "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
@@ -399,6 +400,7 @@ jobs:
             key="${line%%=*}"
             value="${line#*=}"
             test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
+            [ -n "$value" ] || continue
             payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
             curl -sf -X POST \
               "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \

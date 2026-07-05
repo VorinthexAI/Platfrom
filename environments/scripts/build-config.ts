@@ -39,7 +39,14 @@ function parseEnvFile(path: string) {
     if (!line || line.startsWith("#")) continue;
     const eq = line.indexOf("=");
     if (eq === -1) continue;
-    env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+    const key = line.slice(0, eq).trim();
+    const value = line.slice(eq + 1).trim();
+    // An unset key and a key set to "" behave differently downstream (code
+    // that does `process.env.X ?? fallback` only falls through on
+    // null/undefined, not ""), so drop empty values rather than ship a
+    // literal empty string that can silently shadow a working fallback.
+    if (!value) continue;
+    env[key] = value;
   }
   return env;
 }
