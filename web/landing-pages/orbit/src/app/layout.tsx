@@ -3,7 +3,7 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 const siteUrl = new URL(
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://orbit.ai",
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://orbit.vorinthex.com",
 );
 
 export const metadata: Metadata = {

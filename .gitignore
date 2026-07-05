@@ -5,6 +5,7 @@ environments/**/.env.dev
 environments/**/.env.prod
 environments/.env.dev
 environments/.env.prod
+environments/.config.*.json
 
 node_modules/
 .next/
