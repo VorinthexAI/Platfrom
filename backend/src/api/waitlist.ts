@@ -1,4 +1,9 @@
-import { insertAuthChallenge, getAuthChallengeByTokenHash, updateAuthChallenge } from '@/lib/db/auth-challenges.node';
+import {
+  consumeActiveAuthChallengesByUserAndKind,
+  getAuthChallengeByTokenHash,
+  insertAuthChallenge,
+  updateAuthChallenge,
+} from '@/lib/db/auth-challenges.node';
 import { updateUser, type User } from '@/lib/db/users.node';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
@@ -6,7 +11,7 @@ import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, normalizeEmail, upsertUserByEmail } from './users';
 import { trackPlatformEvent } from '@/platform/events';
 
-const WAITLIST_VERIFY_TTL_MS = 48 * 60 * 60 * 1000;
+const WAITLIST_VERIFY_TTL_MS = 12 * 60 * 60 * 1000;
 
 export function normalizeWaitlistEmail(email: string) {
   return normalizeEmail(email);
@@ -33,10 +38,13 @@ function firstName(input: { email: string; name?: string | null }) {
 }
 
 async function createWaitlistEmailChallenge(userId: string) {
+  const now = new Date();
   const token = randomToken('vrtx_waitlist_');
   const publicTokenHash = await sha256(token);
   const storedTokenHash = await sha256(publicTokenHash);
   const expiresAt = new Date(Date.now() + WAITLIST_VERIFY_TTL_MS);
+
+  await consumeActiveAuthChallengesByUserAndKind(userId, 'waitlist', now.toISOString());
 
   await insertAuthChallenge({
     key: newId(),
@@ -44,7 +52,7 @@ async function createWaitlistEmailChallenge(userId: string) {
     kind: 'waitlist',
     tokenHash: storedTokenHash,
     expiresAt: expiresAt.toISOString(),
-    createdAt: new Date().toISOString(),
+    createdAt: now.toISOString(),
   });
 
   return { tokenHash: publicTokenHash, expiresAt };
@@ -71,7 +79,7 @@ export async function deliverWaitlistVerifyEmail(input: { email: string; name?: 
     ].join(''),
     actionUrl: input.verifyLink,
     actionLabel: 'Verify email',
-    supportingHtml: `Confirm your email to keep your waitlist place. This link expires in 48 hours at ${input.expiresAt.toISOString()}.`,
+    supportingHtml: `Confirm your email to keep your waitlist place. This link expires in 12 hours at ${input.expiresAt.toISOString()}.`,
     footerHtml: 'You received this because this email address was used to join the Vorinthex waitlist.',
     extraPayload: {
       verification_link: input.verifyLink,

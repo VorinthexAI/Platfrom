@@ -49,3 +49,13 @@ export async function listAuthChallengesByUserAndKind(userId: string, kind: stri
   const docs = await cursor.all();
   return docs.map((doc) => authChallengeSchema.parse(withArangoKey(doc)));
 }
+
+export async function consumeActiveAuthChallengesByUserAndKind(userId: string, kind: string, consumedAt: string): Promise<void> {
+  await db.query(aql`
+    FOR c IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      FILTER c.userId == ${userId}
+        && c.kind == ${kind}
+        && (!HAS(c, "consumedAt") || c.consumedAt == null)
+      UPDATE c WITH { consumedAt: ${consumedAt} } IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+  `);
+}
