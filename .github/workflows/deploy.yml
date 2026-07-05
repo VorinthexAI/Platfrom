@@ -29,7 +29,7 @@ env:
   ECR_REPOSITORY: vorinthex-backend
   COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
   SSM_PATH: /vorinthex/prod/
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_VORINTHEX }}
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_VORINTHEX }}
 
 jobs:
@@ -234,25 +234,21 @@ jobs:
       - name: Validate deployment secrets
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_VORINTHEX }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_VORINTHEX }}
           PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
         run: |
           missing=0
-          for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::VERCEL_PROJECT_ID_VORINTHEX is not configured."
+            missing=1
+          fi
+          for name in VERCEL_TOKEN VERCEL_ORG_ID PROD_ENV_FILE; do
             if [ -z "${!name}" ]; then
-              echo "::error::${name}_VORINTHEX is not configured."
+              echo "::error::$name is not configured."
               missing=1
             fi
           done
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::error::VERCEL_TOKEN is not configured."
-            missing=1
-          fi
-          if [ -z "$PROD_ENV_FILE" ]; then
-            echo "::error::PROD_ENV_FILE is not configured."
-            missing=1
-          fi
           [ "$missing" -eq 0 ]
 
       - name: Install Vercel CLI
@@ -262,7 +258,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_VORINTHEX }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID_VORINTHEX }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID }}
         run: |
           set -euo pipefail
           while IFS= read -r line || [ -n "$line" ]; do
@@ -384,25 +380,21 @@ jobs:
       - name: Validate deployment secrets
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_ORBIT }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_ORBIT }}
           PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
         run: |
           missing=0
-          for name in VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::VERCEL_PROJECT_ID_ORBIT is not configured."
+            missing=1
+          fi
+          for name in VERCEL_TOKEN VERCEL_ORG_ID PROD_ENV_FILE; do
             if [ -z "${!name}" ]; then
-              echo "::error::${name}_ORBIT is not configured."
+              echo "::error::$name is not configured."
               missing=1
             fi
           done
-          if [ -z "$VERCEL_TOKEN" ]; then
-            echo "::error::VERCEL_TOKEN is not configured."
-            missing=1
-          fi
-          if [ -z "$PROD_ENV_FILE" ]; then
-            echo "::error::PROD_ENV_FILE is not configured."
-            missing=1
-          fi
           [ "$missing" -eq 0 ]
 
       - name: Install Vercel CLI
@@ -412,7 +404,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_ORBIT }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID_ORBIT }}
+          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID }}
         run: |
           set -euo pipefail
           while IFS= read -r line || [ -n "$line" ]; do
@@ -432,7 +424,7 @@ jobs:
       - name: Pull Vercel project settings
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_ORBIT }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_ORBIT }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
