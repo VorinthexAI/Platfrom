@@ -13,7 +13,7 @@ export function CtaSection({ onJoinWaitlist }: { onJoinWaitlist: () => void }) {
           className="rounded-dialog border border-border bg-secondary px-6 py-16 text-center sm:px-12 sm:py-20"
         >
           <h2 className="text-3xl font-normal text-foreground sm:text-4xl">
-            Be the first to experience Cortex Orbit.
+            Be the first to experience Orbit.
           </h2>
 
           <motion.button

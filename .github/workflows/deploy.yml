@@ -9,7 +9,7 @@ on:
       target:
         description: 'Deployment target'
         type: choice
-        options: [all, vorinthex, cortex-orbit, backend, selective]
+        options: [all, vorinthex, orbit, backend, selective]
         default: all
       deploy:
         description: 'Deploy after verification'
@@ -29,8 +29,6 @@ env:
   ECR_REPOSITORY: vorinthex-backend
   COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
   SSM_PATH: /vorinthex/prod/
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
 jobs:
   changes:
@@ -39,7 +37,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     outputs:
       vorinthex: ${{ steps.decide.outputs.vorinthex }}
-      cortex_orbit: ${{ steps.decide.outputs.cortex_orbit }}
+      orbit: ${{ steps.decide.outputs.orbit }}
       backend: ${{ steps.decide.outputs.backend }}
       changed_files: ${{ steps.decide.outputs.changed_files }}
     steps:
@@ -57,73 +55,91 @@ jobs:
             case "${{ inputs.target }}" in
               all)
                 vorinthex=true
-                cortex_orbit=true
+                orbit=true
                 backend=true
                 ;;
               vorinthex)
                 vorinthex=true
-                cortex_orbit=false
+                orbit=false
                 backend=false
                 ;;
-              cortex-orbit)
+              orbit)
                 vorinthex=false
-                cortex_orbit=true
+                orbit=true
                 backend=false
                 ;;
               backend)
                 vorinthex=false
-                cortex_orbit=false
+                orbit=false
                 backend=true
                 ;;
               selective)
                 files="$(git diff --name-only HEAD~1 HEAD || true)"
                 vorinthex=false
-                cortex_orbit=false
+                orbit=false
                 backend=false
                 shared=false
                 while IFS= read -r file; do
                   [ -n "$file" ] || continue
                   case "$file" in
                     web/landing-pages/vorinthex/*) vorinthex=true ;;
-                    web/landing-pages/cortex-orbit/*) cortex_orbit=true ;;
+                    web/landing-pages/orbit/*) orbit=true ;;
                     backend/*) backend=true ;;
                     shared/*) shared=true ;;
-                    .github/workflows/deploy.yml) vorinthex=true; cortex_orbit=true; backend=true ;;
+                    .github/workflows/deploy.yml) vorinthex=true; orbit=true; backend=true ;;
                   esac
                 done <<< "$files"
-                if [ "$shared" = true ]; then vorinthex=true; cortex_orbit=true; fi
+                if [ "$shared" = true ]; then vorinthex=true; orbit=true; fi
                 ;;
             esac
           else
             base='${{ github.event.pull_request.base.sha }}'
             files="$(git diff --name-only "$base" "${{ env.COMMIT_SHA }}")"
             vorinthex=false
-            cortex_orbit=false
+            orbit=false
             backend=false
             shared=false
             while IFS= read -r file; do
               [ -n "$file" ] || continue
               case "$file" in
                 web/landing-pages/vorinthex/*) vorinthex=true ;;
-                web/landing-pages/cortex-orbit/*) cortex_orbit=true ;;
+                web/landing-pages/orbit/*) orbit=true ;;
                 backend/*) backend=true ;;
                 shared/*) shared=true ;;
-                .github/workflows/deploy.yml) vorinthex=true; cortex_orbit=true; backend=true ;;
+                .github/workflows/deploy.yml) vorinthex=true; orbit=true; backend=true ;;
               esac
             done <<< "$files"
 
             # shared/ is consumed by both landing-page apps.
-            if [ "$shared" = true ]; then vorinthex=true; cortex_orbit=true; fi
+            if [ "$shared" = true ]; then vorinthex=true; orbit=true; fi
           fi
 
           {
             echo "vorinthex=$vorinthex"
-            echo "cortex_orbit=$cortex_orbit"
+            echo "orbit=$orbit"
             echo "backend=$backend"
             echo "changed_files<<EOF"
             printf '%s\n' "${files:-manual:${{ inputs.target || 'all' }}}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+  sync-configs:
+    name: Sync configs to GitHub
+    runs-on: ubuntu-latest
+    needs: changes
+    if: >-
+      (needs.changes.outputs.vorinthex == 'true' || needs.changes.outputs.orbit == 'true' || needs.changes.outputs.backend == 'true')
+      && (github.event_name == 'pull_request' || inputs.deploy)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - name: Sync .github/.configs/vars.json to repo Variables
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          test -n "$GH_TOKEN" || { echo "::error::GH_PAT is not configured (needed to manage repo Variables/Secrets — the default GITHUB_TOKEN can't)."; exit 1; }
+          bash environments/scripts/sync-configs.sh vars
 
   verify-vorinthex:
     name: Verify vorinthex web
@@ -142,11 +158,11 @@ jobs:
       - name: Typecheck
         run: bun run vorinthex:typecheck
 
-  verify-cortex-orbit:
-    name: Verify cortex-orbit web
+  verify-orbit:
+    name: Verify orbit web
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.cortex_orbit == 'true'
+    if: needs.changes.outputs.orbit == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -155,9 +171,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --linker=hoisted
       - name: Lint
-        run: bun run cortex-orbit:lint
+        run: bun run orbit:lint
       - name: Typecheck
-        run: bun run cortex-orbit:typecheck
+        run: bun run orbit:typecheck
 
   verify-backend:
     name: Verify backend
@@ -179,7 +195,7 @@ jobs:
   deploy-vorinthex:
     name: Build and deploy vorinthex web
     runs-on: ubuntu-latest
-    needs: [changes, verify-vorinthex]
+    needs: [changes, sync-configs, verify-vorinthex]
     if: needs.changes.outputs.vorinthex == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     defaults:
       run:
@@ -212,27 +228,27 @@ jobs:
 
       - name: Load production env file
         env:
-          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).vorinthex.env) }}
         run: |
           set -euo pipefail
-          test -n "$PROD_ENV_FILE" || { echo "::error::PROD_ENV_FILE is not configured."; exit 1; }
-          printf '%s\n' "$PROD_ENV_FILE" > prod.env
+          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.vorinthex.env is not configured."; exit 1; }
+          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
           chmod 600 prod.env
 
       - name: Validate deployment secrets
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).vorinthex.vercel_project_id }}
         run: |
           missing=0
-          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID PROD_ENV_FILE; do
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
             if [ -z "${!name}" ]; then
-              echo "::error::$name is not configured."
+              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / vorinthex.vercel_project_id)."
               missing=1
             fi
           done
+          test -s prod.env || { echo "::error::config.env produced no vorinthex values."; missing=1; }
           [ "$missing" -eq 0 ]
 
       - name: Install Vercel CLI
@@ -240,9 +256,9 @@ jobs:
 
       - name: Sync prod.env to Vercel
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).vorinthex.vercel_project_id }}
+          VERCEL_TEAM_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
         run: |
           set -euo pipefail
           while IFS= read -r line || [ -n "$line" ]; do
@@ -251,6 +267,7 @@ jobs:
             key="${line%%=*}"
             value="${line#*=}"
             test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
+            [ -n "$value" ] || continue
             payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
             curl -sf -X POST \
               "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
@@ -261,12 +278,14 @@ jobs:
 
       - name: Pull Vercel project settings
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).vorinthex.vercel_project_id }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
         run: vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Verify excluded content is not in the deploy artifact
@@ -286,12 +305,12 @@ jobs:
 
       - name: Deploy to Vercel
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
         run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
 
       - name: Verify production is live
         env:
-          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
+          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).vorinthex.url }}
         run: |
           URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
           for i in $(seq 1 24); do
@@ -306,14 +325,14 @@ jobs:
           echo "::error::Production health check failed after 4 minutes ($URL)"
           exit 1
 
-  deploy-cortex-orbit:
-    name: Build and deploy cortex-orbit web
+  deploy-orbit:
+    name: Build and deploy orbit web
     runs-on: ubuntu-latest
-    needs: [changes, verify-cortex-orbit]
-    if: needs.changes.outputs.cortex_orbit == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    needs: [changes, sync-configs, verify-orbit]
+    if: needs.changes.outputs.orbit == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     defaults:
       run:
-        working-directory: web/landing-pages/cortex-orbit
+        working-directory: web/landing-pages/orbit
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -335,34 +354,34 @@ jobs:
 
       - name: Materialize web dependencies for Vercel tracing
         run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules"
-          mkdir -p "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules/"
-          test -f "${GITHUB_WORKSPACE}/web/landing-pages/cortex-orbit/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+          rm -rf "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules/"
+          test -f "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
         env:
-          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE_CORTEX_ORBIT }}
+          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).orbit.env) }}
         run: |
           set -euo pipefail
-          test -n "$PROD_ENV_FILE" || { echo "::error::PROD_ENV_FILE_CORTEX_ORBIT is not configured."; exit 1; }
-          printf '%s\n' "$PROD_ENV_FILE" > prod.env
+          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.orbit.env is not configured."; exit 1; }
+          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
           chmod 600 prod.env
 
       - name: Validate deployment secrets
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_CORTEX_ORBIT }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CORTEX_ORBIT }}
-          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE_CORTEX_ORBIT }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).orbit.vercel_project_id }}
         run: |
           missing=0
-          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID PROD_ENV_FILE; do
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
             if [ -z "${!name}" ]; then
-              echo "::error::${name}_CORTEX_ORBIT is not configured."
+              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / orbit.vercel_project_id)."
               missing=1
             fi
           done
+          test -s prod.env || { echo "::error::config.env produced no orbit values."; missing=1; }
           [ "$missing" -eq 0 ]
 
       - name: Install Vercel CLI
@@ -370,9 +389,9 @@ jobs:
 
       - name: Sync prod.env to Vercel
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CORTEX_ORBIT }}
-          VERCEL_TEAM_ID: ${{ secrets.VERCEL_ORG_ID_CORTEX_ORBIT }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).orbit.vercel_project_id }}
+          VERCEL_TEAM_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
         run: |
           set -euo pipefail
           while IFS= read -r line || [ -n "$line" ]; do
@@ -381,6 +400,7 @@ jobs:
             key="${line%%=*}"
             value="${line#*=}"
             test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
+            [ -n "$value" ] || continue
             payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
             curl -sf -X POST \
               "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
@@ -391,14 +411,14 @@ jobs:
 
       - name: Pull Vercel project settings
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID_CORTEX_ORBIT }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_CORTEX_ORBIT }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).orbit.vercel_project_id }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
         run: vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Verify excluded content is not in the deploy artifact
@@ -418,12 +438,12 @@ jobs:
 
       - name: Deploy to Vercel
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN_CORTEX_ORBIT }}
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
         run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
 
       - name: Verify production is live
         env:
-          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL_CORTEX_ORBIT }}
+          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).orbit.url }}
         run: |
           URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
           for i in $(seq 1 24); do
@@ -441,7 +461,7 @@ jobs:
   backend-secrets:
     name: Sync backend secrets
     runs-on: ubuntu-latest
-    needs: [changes, verify-backend]
+    needs: [changes, sync-configs, verify-backend]
     if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     environment: production
     steps:
@@ -450,28 +470,25 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Sync PROD_ENV_FILE secret into SSM
+      - name: Sync config.env into SSM
         env:
-          PROD_ENV_FILE: ${{ secrets.PROD_ENV_FILE }}
+          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).env) }}
         run: |
-          test -n "$PROD_ENV_FILE" || { echo "::error::PROD_ENV_FILE secret is not set"; exit 1; }
-          printf '%s\n' "$PROD_ENV_FILE" > /tmp/prod-sync.env
+          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.env is not configured."; exit 1; }
           count=0
           skipped=0
-          while IFS='=' read -r key value; do
-            key=$(printf '%s' "$key" | tr -d '\r')
-            value=$(printf '%s' "$value" | tr -d '\r')
-            case "$key" in ''|'#'*) continue ;; esac
+          while IFS= read -r entry; do
+            key=$(printf '%s' "$entry" | jq -r '.key')
+            value=$(printf '%s' "$entry" | jq -r '.value // ""')
             case "$key" in PROD_SSH_*|PROD_ARANGO_*|APP_HOST_PUBLIC_IP) skipped=$((skipped + 1)); continue ;; esac
             if ! printf '%s' "$key" | grep -Eq '^[A-Z][A-Z0-9_]*$'; then
-              echo "::error::Invalid PROD_ENV_FILE key '$key'."
+              echo "::error::Invalid config.env key '$key'."
               exit 1
             fi
             if [ -z "$value" ]; then skipped=$((skipped + 1)); continue; fi
             aws ssm put-parameter --region "$AWS_REGION" --name "${SSM_PATH}${key}" --type SecureString --value "$value" --overwrite >/dev/null
             count=$((count + 1))
-          done < /tmp/prod-sync.env
-          rm -f /tmp/prod-sync.env
+          done < <(echo "$CONFIG_ENV" | jq -c 'to_entries[]')
           echo "Synced $count parameter(s) to $SSM_PATH, skipped $skipped value(s)"
 
   backend-image:
@@ -857,7 +874,7 @@ jobs:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-vorinthex, deploy-cortex-orbit, backend-app, backend-render]
+    needs: [changes, deploy-vorinthex, deploy-orbit, backend-app, backend-render]
     steps:
       - name: Write deploy audit
         run: |
@@ -867,7 +884,7 @@ jobs:
             echo "| Service | Selected | Result |"
             echo "|---|---:|---|"
             echo "| vorinthex | ${{ needs.changes.outputs.vorinthex }} | ${{ needs.deploy-vorinthex.result }} |"
-            echo "| cortex-orbit | ${{ needs.changes.outputs.cortex_orbit }} | ${{ needs.deploy-cortex-orbit.result }} |"
+            echo "| orbit | ${{ needs.changes.outputs.orbit }} | ${{ needs.deploy-orbit.result }} |"
             echo "| backend-app | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-app.result }} |"
             echo "| backend-render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo ""

@@ -3,7 +3,7 @@
 Next.js app scaffolded for Bun, TypeScript, Tailwind CSS, TanStack Query, Zod,
 date-fns, and Axios.
 
-Lives at `web/landing-pages/vorinthex` — a sibling of `web/landing-pages/cortex-orbit`,
+Lives at `web/landing-pages/vorinthex` — a sibling of `web/landing-pages/orbit`,
 both consuming the same top-level `shared` workspace package.
 
 ## Getting Started
@@ -24,7 +24,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Environment
 
-Copy `../../../environments/.env.example` to `../../../environments/.env.dev` and set:
+Copy `../../../environments/vorinthex/.env.example` to `../../../environments/vorinthex/.env.dev` and set:
 
 ```bash
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3000

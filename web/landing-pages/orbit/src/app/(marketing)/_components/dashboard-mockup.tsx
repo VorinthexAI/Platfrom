@@ -28,7 +28,7 @@ export function DashboardMockup() {
           <div className="mb-4 flex items-center gap-2 px-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="text-xs font-medium tracking-wide text-foreground-secondary">
-              Cortex Orbit
+              Orbit
             </span>
           </div>
           {SIDEBAR_LINKS.map((link) => (

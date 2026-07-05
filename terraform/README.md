@@ -111,7 +111,7 @@ Terraform workflow does not modify `.github/workflows/deploy.yml`.
 
 ## SSM Parameters
 
-Terraform reads `environments/.env.prod` from the repository root when present and creates one
+Terraform reads `environments/backend/.env.prod` from the repository root when present and creates one
 `SecureString` parameter per key under:
 
 ```text
@@ -130,7 +130,7 @@ Terraform also supplies generated infrastructure values for:
 - `REDIS_URL`
 - `S3_BUCKET`
 
-Values from `environments/.env.prod` override generated values with the same key. Every SSM
+Values from `environments/backend/.env.prod` override generated values with the same key. Every SSM
 parameter uses:
 
 ```hcl
@@ -142,7 +142,7 @@ lifecycle {
 That keeps routine applies from reverting values changed later through CI or a
 manual `aws ssm put-parameter --overwrite` rotation.
 
-Do not commit real production secrets in `environments/.env.prod`. If the file contains live
+Do not commit real production secrets in `environments/backend/.env.prod`. If the file contains live
 secret values, those values will also be stored in Terraform state.
 
 ## Plan

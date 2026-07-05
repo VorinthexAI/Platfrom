@@ -35,7 +35,7 @@ export function HeroSection({
         <motion.div variants={container} initial="hidden" animate="show">
           <motion.div variants={item}>
             <span className="cui-label inline-flex rounded-full border border-border px-3 py-1.5">
-              Introducing Cortex Orbit
+              Introducing Orbit
             </span>
           </motion.div>
 
@@ -50,7 +50,7 @@ export function HeroSection({
             variants={item}
             className="mt-5 max-w-md text-base leading-7 text-foreground-secondary"
           >
-            Cortex Orbit brings all your AI intelligences, data and workflows
+            Orbit brings all your AI intelligences, data and workflows
             together in one beautiful, powerful and private workspace.
           </motion.p>
 

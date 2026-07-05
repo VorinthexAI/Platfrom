@@ -44,7 +44,7 @@ export function SiteNavbar({ onJoinWaitlist }: { onJoinWaitlist: () => void }) {
           >
             <SpinningLogo size={26} />
             <span className="text-sm font-medium tracking-[0.16em] text-foreground uppercase">
-              Cortex Orbit
+              Orbit
             </span>
           </Link>
 
