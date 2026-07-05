@@ -3,13 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "web",
+    "web/landing-pages/*",
     "backend",
     "shared"
   ],
   "scripts": {
-    "web:lint": "bun run --cwd web lint",
-    "web:typecheck": "bun run --cwd web typecheck",
+    "vorinthex:lint": "bun run --cwd web/landing-pages/vorinthex lint",
+    "vorinthex:typecheck": "bun run --cwd web/landing-pages/vorinthex typecheck",
+    "cortex-orbit:lint": "bun run --cwd web/landing-pages/cortex-orbit lint",
+    "cortex-orbit:typecheck": "bun run --cwd web/landing-pages/cortex-orbit typecheck",
     "backend:check": "bun run --cwd backend check",
     "backend:test": "bun run --cwd backend test"
   },
