@@ -78,6 +78,12 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "gem",
     approachLabel: "Opening the Accord Vault",
   },
+  leaderboard: {
+    ...rolledAnchor(),
+    interior: [720, -240, 0],
+    theme: "gem",
+    approachLabel: "Approaching the Galaxy Leaderboard",
+  },
   // Any ordinary belt rock: the anchor here is a fallback — the real
   // bearing comes from the clicked rock (store.rockAnchor), and the
   // chamber theme rolls from the visit seed.
@@ -116,7 +122,7 @@ export function randomRockAnchor(): RockAnchor {
 }
 
 /** Story caves an ordinary-looking asteroid can secretly host. */
-const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "members", "join"];
+const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "members", "join", "leaderboard"];
 
 /**
  * Does this belt bearing sit on one of the hidden story vaults? Diving

@@ -35,7 +35,7 @@ export const postFragmentsBodySchema = strictObject({
   explorer_id: z.string().min(8).max(80),
   name: z.string().min(1).max(120),
   rarity: z.string().min(1).max(40),
-  fragments: z.number().int().min(1).max(100000),
+  fragments: z.number().int().min(1).max(1_000_000),
   mesh: meshBodySchema.optional(),
   email_hash: emailHashSchema.optional(),
   temp_email_hash: tempEmailHashSchema.optional(),
@@ -87,6 +87,9 @@ export async function collectFragment(c: Context) {
       rarity: body.rarity,
       fragments: body.fragments,
       mesh: body.mesh ?? null,
+      // Where this piece will mount in the leaderboard asteroid — rolled
+      // once at collection so every surface renders it in the same spot.
+      placementSeed: Math.floor(Math.random() * 0x7fffffff),
       createdAt: new Date().toISOString(),
     });
   } catch (err) {

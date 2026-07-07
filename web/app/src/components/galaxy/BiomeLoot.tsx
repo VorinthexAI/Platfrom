@@ -17,6 +17,7 @@ import {
   CRYSTAL_VARIANTS,
   EDGY_CRYSTAL_GENERATOR,
 } from "@/lib/three/crystal";
+import { rollCrystalValue } from "@/lib/loot/crystal-tiers";
 import { getDotTexture } from "@/lib/three/dot-texture";
 import { mulberry32 } from "@/lib/three/procedural";
 import { CHAMBER_RADIUS } from "./BiomeChamber";
@@ -220,32 +221,32 @@ const CRYSTAL_NAMES = [
   "Deep Relic",
 ];
 
-interface CenterCrystalRoll {
+export interface CenterCrystalRoll {
   present: boolean;
   value: number;
+  tierIndex: number;
   name: string;
   seed: number;
   scale: number;
 }
 
-/** Deterministic per-biome roll: 3 in 5 asteroid biomes grow one. */
+/**
+ * Deterministic per-biome roll. EVERY asteroid grows a center crystal;
+ * the weighted tier roll (10 tiers, 10 → 1,000,000 fragments) decides
+ * how big the day gets.
+ */
 export function rollCenterCrystal(lootSeed: number): CenterCrystalRoll {
   const random = mulberry32(lootSeed ^ 0xc0ffee);
-  const present = random() < 0.6;
-  const tier = random();
-  const value =
-    tier < 0.06
-      ? 5000 + Math.round((random() * 5000) / 100) * 100
-      : tier < 0.24
-        ? 1000 + Math.round((random() * 2000) / 50) * 50
-        : 100 + Math.round((random() * 400) / 10) * 10;
+  const { tier, value } = rollCrystalValue(lootSeed);
   return {
-    present,
+    present: true,
     value,
+    tierIndex: tier.index,
     name: CRYSTAL_NAMES[Math.floor(random() * CRYSTAL_NAMES.length)]!,
     seed: Math.floor(random() * 0x7fffffff),
-    // Value → size: 100 ≈ 1.1, 1,000 ≈ 3, 10,000 ≈ 4.9 (fills the room).
-    scale: 1.1 + Math.log10(Math.max(value, 100) / 100) * 1.9,
+    // Value → size across five decades: 10 ≈ 0.55, 1k ≈ 2.4, 1M ≈ 5.2
+    // (the million-class vault fills the whole chamber).
+    scale: 0.55 + Math.log10(Math.max(value, 10) / 10) * 0.93,
   };
 }
 
@@ -340,19 +341,20 @@ export function CenterCrystal({
       );
     });
 
-    // Assembled: loop a slow full-3D rotation.
+    // Assembled: pulse and rotate freely around every axis.
     const spin = spinRef.current;
     if (spin) {
       const assembled = t > 0.55 + ERUPT_DURATION + pieces.length * PIECE_STAGGER;
       if (assembled && !taken) {
         spin.rotation.y += delta * 0.45;
-        spin.rotation.x = Math.sin(t * 0.32) * 0.3;
-        spin.rotation.z = Math.cos(t * 0.21) * 0.14;
+        spin.rotation.x += delta * 0.19;
+        spin.rotation.z += delta * 0.11;
       }
     }
 
-    // Claimed: dissolve into light.
-    const target = taken ? 0.001 : roll.scale;
+    // Claimed: dissolve into light. Alive: breathe.
+    const pulse = taken ? 1 : 1 + Math.sin(t * 1.7) * 0.045;
+    const target = taken ? 0.001 : roll.scale * pulse;
     const scale = THREE.MathUtils.lerp(group.scale.x, target, delta * 3.2);
     group.scale.setScalar(scale);
     if (taken && scale < 0.02) setGone(true);
@@ -447,7 +449,9 @@ export function CenterCrystal({
         }}
       >
         <sphereGeometry args={[1.05, 12, 12]} />
-        <meshBasicMaterial />
+        {/* Double-sided: a room-filling crystal's hit sphere can enclose
+            the camera, and front-side raycasts miss from inside. */}
+        <meshBasicMaterial side={THREE.DoubleSide} />
       </mesh>
     </group>
   );

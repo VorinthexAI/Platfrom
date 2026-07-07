@@ -113,23 +113,33 @@ export function CameraRig({ reducedMotion }: { reducedMotion: boolean }) {
 
     if (mode === "belt") {
       // Slow circle outside the belt, looking inward at the small system.
-      galaxyMotion.beltAngle += galaxyMotion.beltVelocity * delta;
-      // Velocity flows back toward the idle drift unless scrolling feeds
-      // it — the faster it spins, the harder it bleeds off, so easing off
-      // at lightning speed settles back to a comfortable glide quickly.
-      galaxyMotion.beltVelocity = THREE.MathUtils.damp(
-        galaxyMotion.beltVelocity,
-        galaxyMotion.beltBaseVelocity,
-        0.25 + galaxyMotion.beltVelocity * 0.45,
-        delta,
-      );
+      // While a sideways drag holds the ring, the pointer writes the angle
+      // directly — the rig only integrates velocity between gestures.
+      if (!galaxyMotion.dragging) {
+        galaxyMotion.beltAngle += galaxyMotion.beltVelocity * delta;
+        // Velocity flows back toward the idle drift unless scrolling feeds
+        // it — the faster it spins, the harder it bleeds off, so easing off
+        // at lightning speed settles back to a comfortable glide quickly.
+        galaxyMotion.beltVelocity = THREE.MathUtils.damp(
+          galaxyMotion.beltVelocity,
+          galaxyMotion.beltBaseVelocity,
+          0.25 + Math.abs(galaxyMotion.beltVelocity) * 0.45,
+          delta,
+        );
+      }
       scratchPosition.set(
         Math.cos(galaxyMotion.beltAngle) * BELT_CAMERA_RADIUS,
         BELT_CAMERA_HEIGHT,
         Math.sin(galaxyMotion.beltAngle) * BELT_CAMERA_RADIUS,
       );
       scratchTarget.set(0, 0.4, 0);
-      easing.damp3(camera.position, scratchPosition, reducedMotion ? 0.01 : 1.1, delta);
+      easing.damp3(
+        camera.position,
+        scratchPosition,
+        // A held drag follows the hand nearly 1:1; released motion glides.
+        reducedMotion ? 0.01 : galaxyMotion.dragging ? 0.12 : 1.1,
+        delta,
+      );
       easing.damp3(lookTarget.current, scratchTarget, 0.7, delta);
       camera.lookAt(lookTarget.current);
       return;
@@ -217,7 +227,26 @@ export function CameraRig({ reducedMotion }: { reducedMotion: boolean }) {
         beginEnter("visit");
       }
     } else {
-      scratchPosition.copy(OVERVIEW_POSITION);
+      // Overview: sideways drags/swipes yaw the camera around the whole
+      // solar system. Held drags write the angle 1:1; a released flick
+      // keeps spinning at flick speed and bleeds off.
+      if (!galaxyMotion.dragging) {
+        galaxyMotion.orbitAngle += galaxyMotion.orbitVelocity * delta;
+        galaxyMotion.orbitVelocity = THREE.MathUtils.damp(
+          galaxyMotion.orbitVelocity,
+          0,
+          1.3,
+          delta,
+        );
+      }
+      const baseYaw = Math.atan2(OVERVIEW_POSITION.z, OVERVIEW_POSITION.x);
+      const orbitRadius = Math.hypot(OVERVIEW_POSITION.x, OVERVIEW_POSITION.z);
+      const yaw = baseYaw + galaxyMotion.orbitAngle;
+      scratchPosition.set(
+        Math.cos(yaw) * orbitRadius,
+        OVERVIEW_POSITION.y,
+        Math.sin(yaw) * orbitRadius,
+      );
       scratchTarget.copy(OVERVIEW_TARGET);
     }
 
@@ -231,7 +260,12 @@ export function CameraRig({ reducedMotion }: { reducedMotion: boolean }) {
       camera.position.copy(scratchPosition);
       lookTarget.current.copy(scratchTarget);
     } else {
-      easing.damp3(camera.position, scratchPosition, 0.9, delta);
+      easing.damp3(
+        camera.position,
+        scratchPosition,
+        galaxyMotion.dragging ? 0.12 : 0.9,
+        delta,
+      );
       easing.damp3(lookTarget.current, scratchTarget, 0.7, delta);
     }
     camera.lookAt(lookTarget.current);

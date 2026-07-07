@@ -75,12 +75,18 @@ function voiceElement(): HTMLAudioElement {
   return voice;
 }
 
+/** The page's single automatic mission play (retried after autoplay block). */
+let missionAutoPlayed = false;
+let missionAutoPending = false;
+
 interface AudioState {
   missionPlaying: boolean;
   ambientStarted: boolean;
   pendingVoiceSrc: string | null;
   /** Tap once → hear once; tap mid-voice → cancel. */
   toggleMission: () => void;
+  /** Play the mission once on page load (falls back to first gesture). */
+  autoPlayMission: () => void;
   startAmbient: () => void;
   playVoice: (src: string) => void;
   stopVoice: () => void;
@@ -89,39 +95,21 @@ interface AudioState {
   resumePending: () => void;
 }
 
-export const useAudioStore = create<AudioState>((set, get) => ({
-  missionPlaying: false,
-  ambientStarted: false,
-  pendingVoiceSrc: null,
-
-  toggleMission: () => {
+export const useAudioStore = create<AudioState>((set, get) => {
+  /** Start the mission voice from the top; pauses/queues the biome voice. */
+  const startMission = (onBlocked?: () => void) => {
     const audio = missionElement();
 
-    if (!audio.paused) {
-      // Tap mid-voice: cancel outright and hand the floor back.
-      audio.pause();
-      audio.currentTime = 0;
-      set({ missionPlaying: false });
-      trackLandingEvent({
-        slug: "landing.mission_voice_cancelled",
-        metadata: { src: MISSION_AUDIO_SRC },
-      });
-      if (voiceHeldForMission) {
-        voiceHeldForMission = false;
-        get().resumeVoice();
-      } else if (voiceQueuedBehindMission) {
-        const queued = voiceQueuedBehindMission;
-        voiceQueuedBehindMission = null;
-        get().playVoice(queued);
-      }
-      settleAmbientVolume();
-      return;
-    }
-
-    // A biome voice mid-line steps aside and continues afterwards.
+    // A biome voice mid-line steps aside and continues afterwards — and a
+    // voice that autoplay held back gets its turn after the mission.
     if (voice && !voice.paused) {
       voiceHeldForMission = true;
       voice.pause();
+    }
+    const pendingSrc = get().pendingVoiceSrc;
+    if (pendingSrc) {
+      voiceQueuedBehindMission = pendingSrc;
+      set({ pendingVoiceSrc: null });
     }
 
     const finish = () => {
@@ -156,7 +144,51 @@ export const useAudioStore = create<AudioState>((set, get) => ({
           voiceHeldForMission = false;
           get().resumeVoice();
         }
+        onBlocked?.();
       });
+  };
+
+  return {
+  missionPlaying: false,
+  ambientStarted: false,
+  pendingVoiceSrc: null,
+
+  toggleMission: () => {
+    const audio = missionElement();
+
+    if (!audio.paused) {
+      // Tap mid-voice: cancel outright and hand the floor back.
+      audio.pause();
+      audio.currentTime = 0;
+      set({ missionPlaying: false });
+      trackLandingEvent({
+        slug: "landing.mission_voice_cancelled",
+        metadata: { src: MISSION_AUDIO_SRC },
+      });
+      if (voiceHeldForMission) {
+        voiceHeldForMission = false;
+        get().resumeVoice();
+      } else if (voiceQueuedBehindMission) {
+        const queued = voiceQueuedBehindMission;
+        voiceQueuedBehindMission = null;
+        get().playVoice(queued);
+      }
+      settleAmbientVolume();
+      return;
+    }
+
+    startMission();
+  },
+
+  autoPlayMission: () => {
+    // Once per page load: either it plays now, or the first user gesture
+    // (via resumePending) retries it. A manual tap counts as played.
+    if (missionAutoPlayed || (mission && !mission.paused)) return;
+    missionAutoPlayed = true;
+    startMission(() => {
+      missionAutoPending = true;
+      missionAutoPlayed = false;
+    });
   },
 
   startAmbient: () => {
@@ -214,7 +246,14 @@ export const useAudioStore = create<AudioState>((set, get) => ({
   },
 
   resumePending: () => {
+    // The gesture that unlocks audio also fires the deferred auto-play.
+    if (missionAutoPending) {
+      missionAutoPending = false;
+      get().autoPlayMission();
+      return;
+    }
     const pending = get().pendingVoiceSrc;
     if (pending) get().playVoice(pending);
   },
-}));
+  };
+});

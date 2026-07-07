@@ -127,6 +127,17 @@ export function SiteNav() {
               {missionPlaying ? "Stop the Mission" : "Hear the Mission"}
             </span>
           </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              trackCtaClick("leaderboard_open", { placement: "nav" });
+              enterCave("leaderboard");
+            }}
+            className="min-h-0 px-4 py-2.5 text-[0.65rem] uppercase"
+          >
+            <span className="hidden sm:inline">View Leaderboard</span>
+            <span className="sr-only sm:hidden">View Leaderboard</span>
+          </Button>
         </div>
       </nav>
     </header>

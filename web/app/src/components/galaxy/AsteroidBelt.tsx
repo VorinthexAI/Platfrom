@@ -199,6 +199,8 @@ function RockLayer({
   const handleClick = clickable
     ? (event: ThreeEvent<MouseEvent>) => {
         event.stopPropagation();
+        // Camera drags that end on a rock are not clicks.
+        if (event.delta > 8) return;
         const state = useGalaxyStore.getState();
         // From the solar system AND from the belt, a click dives INTO the
         // rock: every ordinary asteroid hides its own hollow biome (and a
@@ -375,6 +377,8 @@ function GrowthLayer({ paused, dense }: { paused: boolean; dense: boolean }) {
       // Even the freshly condensed rocks are enterable worlds.
       onClick={(event) => {
         event.stopPropagation();
+        // Camera drags that end on a rock are not clicks.
+        if (event.delta > 8) return;
         const state = useGalaxyStore.getState();
         if (state.mode !== "system" && state.mode !== "belt") return;
         state.enterRock({

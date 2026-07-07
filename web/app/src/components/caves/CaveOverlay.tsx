@@ -7,17 +7,22 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Button, TextInput } from "@vorinthex/shared/ui/components";
+import { rollCenterCrystal } from "@/components/galaxy/BiomeLoot";
 import { EruptAssembly } from "@/components/ui/EruptAssembly";
 import { CloseIcon } from "@/components/ui/icons";
 import { trackCtaClick, trackLandingEvent } from "@/lib/analytics";
 import { takeMagicHandoff } from "@/lib/auth/magic-handoff";
 import { CAVE_CONFIGS } from "@/lib/cave-config";
 import { normalizeEmailInput, parseApiError } from "@/lib/email";
+import { formatFragments } from "@/lib/format";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
-import { syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
+import { caveLootIdentity, syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
+import { galaxyPulseLine } from "@/lib/leaderboard/copy";
+import { useLeaderboardStore } from "@/lib/leaderboard/leaderboard-store";
 import { PRIVACY_COPY, TERMS_COPY } from "@/lib/legal-copy";
+import { crystalOpener, tierForValue } from "@/lib/loot/crystal-tiers";
 
 /**
  * The DOM half of the asteroid-cave stories. While the camera flies to
@@ -77,83 +82,260 @@ export function CaveOverlay() {
          , a smooth obsidian fade, no flash. */}
 
       {cavePhase === "inside" ? (
-        <div
-          className={`pointer-events-none absolute inset-0 flex justify-center px-4 ${
-            // The rock's message parks high so the floor — and its
-            // scavengeable crystals — stays in view and clickable.
-            caveKind === "rock" ? "items-start pt-28 sm:pt-32" : "items-center"
-          }`}
-        >
-          {/* the WHOLE card arrives like the emblem: shattered into grid
-              shards, blasted out of the floor, fused in place — fresh on
-              every entry */}
-          <EruptAssembly
-            key={`${caveKind}-${visitSeed}`}
-            seed={visitSeed}
-            className="pointer-events-auto w-full max-w-md"
-          >
-            <div
-              className="chrome-border card-depth relative w-full rounded-3xl p-7 sm:p-9"
-              style={{ background: "var(--gradient-panel)" }}
-              data-scroll-safe
+        caveKind === "rock" ? (
+          // Uncharted rocks get a slim bottom drawer (same hold-then-slide
+          // beat as the planet drawer) so the crystal stays center stage.
+          <RockDrawer key={`rock-${visitSeed}`} />
+        ) : (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
+            {/* the WHOLE card arrives like the emblem: shattered into grid
+                shards, blasted out of the floor, fused in place — fresh on
+                every entry */}
+            <EruptAssembly
+              key={`${caveKind}-${visitSeed}`}
+              seed={visitSeed}
+              className="pointer-events-auto w-full max-w-md"
             >
-              <button
-                type="button"
-                onClick={() => {
-                  trackCtaClick("cave_close", { cave_kind: caveKind });
-                  exitCave();
-                  syncEntityUrl("/");
-                }}
-                aria-label="Leave the cave"
-                className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+              <div
+                className="chrome-border card-depth relative w-full rounded-3xl p-7 sm:p-9"
+                style={{ background: "var(--gradient-panel)" }}
+                data-scroll-safe
               >
-                <CloseIcon width={12} height={12} />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    trackCtaClick("cave_close", { cave_kind: caveKind });
+                    exitCave();
+                    syncEntityUrl("/");
+                  }}
+                  aria-label="Leave the cave"
+                  className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+                >
+                  <CloseIcon width={12} height={12} />
+                </button>
 
-              {caveKind === "join" ? <JoinFlow /> : null}
-              {caveKind === "signin" ? <ExplorerSigninFlow /> : null}
-              {caveKind === "members" ? <MembersFlow /> : null}
-              {caveKind === "waitlist-verify" ? <WaitlistVerifyFlow /> : null}
-              {caveKind === "magic" ? <MagicFlow /> : null}
-              {caveKind === "privacy" ? <LegalFlow copy={PRIVACY_COPY} /> : null}
-              {caveKind === "terms" ? <LegalFlow copy={TERMS_COPY} /> : null}
-              {caveKind === "rock" ? <RockFlow /> : null}
-            </div>
-          </EruptAssembly>
-        </div>
+                {caveKind === "join" ? <JoinFlow /> : null}
+                {caveKind === "signin" ? <ExplorerSigninFlow /> : null}
+                {caveKind === "members" ? <MembersFlow /> : null}
+                {caveKind === "waitlist-verify" ? <WaitlistVerifyFlow /> : null}
+                {caveKind === "magic" ? <MagicFlow /> : null}
+                {caveKind === "privacy" ? <LegalFlow copy={PRIVACY_COPY} /> : null}
+                {caveKind === "terms" ? <LegalFlow copy={TERMS_COPY} /> : null}
+                {caveKind === "leaderboard" ? <LeaderboardFlow /> : null}
+              </div>
+            </EruptAssembly>
+          </div>
+        )
       ) : null}
     </div>
   );
 }
 
 /* ---------------------------------------------------------------- */
-/* the uncharted rock — hollow, quiet, a little generous              */
+/* the uncharted rock — a slim drawer under the crystal               */
 /* ---------------------------------------------------------------- */
 
-function RockFlow() {
+/** The drawer waits below the fold this long before sliding into place. */
+const ROCK_DRAWER_HOLD_SECONDS = 3;
+
+/**
+ * Slim bottom drawer for asteroid dives: held down for three seconds
+ * (the eruption finishes, the crystal assembles), then one smooth slide
+ * up — mirroring the planet drawer — with a tier-toned opener (one of
+ * 500: 10 tiers × 50 unique lines), the vault's exact value, and the
+ * standing order: claim it and keep exploring to climb the leaderboard.
+ */
+function RockDrawer() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
+  const visitSeed = useGalaxyStore((s) => s.visitSeed);
+  const rockBiomeSeed = useGalaxyStore((s) => s.rockBiomeSeed);
+  const lootClaimedIds = useFragmentsStore((s) => s.lootClaimedIds);
+  const reducedMotion = useReducedMotion();
+
+  const { biomeKey, lootSeed } = caveLootIdentity("rock", rockBiomeSeed, visitSeed);
+  const roll = rollCenterCrystal(lootSeed);
+  const tier = tierForValue(roll.value);
+  const opener = crystalOpener(tier, lootSeed);
+  const claimed = lootClaimedIds.includes(`loot-${biomeKey}-crystal`);
+  const amount = formatFragments(roll.value);
+
+  return (
+    <motion.section
+      role="dialog"
+      aria-label="Asteroid vault"
+      initial={reducedMotion ? { opacity: 0 } : { y: "130%" }}
+      animate={
+        reducedMotion
+          ? { opacity: 1, transition: { delay: ROCK_DRAWER_HOLD_SECONDS, duration: 0.5 } }
+          : {
+              y: 0,
+              transition: {
+                delay: ROCK_DRAWER_HOLD_SECONDS,
+                duration: 0.85,
+                ease: [0.16, 1, 0.3, 1],
+              },
+            }
+      }
+      exit={
+        reducedMotion
+          ? { opacity: 0, transition: { duration: 0.3 } }
+          : { y: "130%", transition: { duration: 0.6, ease: [0.4, 0, 0.6, 1] } }
+      }
+      className="pointer-events-auto absolute inset-x-2 bottom-2 z-30 sm:inset-x-6 lg:inset-x-8 lg:bottom-10"
+    >
+      <div
+        className="chrome-border card-depth relative mx-auto w-full max-w-2xl rounded-3xl px-6 py-4 sm:px-8"
+        style={{ background: "var(--gradient-panel)" }}
+        data-scroll-safe
+      >
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+          <div className="min-w-0 flex-1">
+            <p className="micro-label">
+              {tier.name} · Vault of {amount} fragments
+            </p>
+            <p className="mt-1.5 text-[0.82rem] leading-relaxed text-silver-300">
+              {claimed ? (
+                <>Vault claimed. Keep exploring other asteroids to find more
+                fragments and climb the leaderboard.</>
+              ) : (
+                <>
+                  {opener}{" "}
+                  <span className="text-silver-50">
+                    Tap the crystal to claim {amount} Intelligence Fragments
+                  </span>{" "}
+                  — then keep exploring other asteroids to find more and
+                  climb the leaderboard.
+                </>
+              )}
+            </p>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => exitCave()}
+            className="min-h-0 shrink-0 px-5 py-2.5 text-[0.6rem] uppercase"
+          >
+            Return
+          </Button>
+        </div>
+      </div>
+    </motion.section>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/* the galaxy leaderboard — live ranks inside the crystal cave        */
+/* ---------------------------------------------------------------- */
+
+const STANDING_TITLES = {
+  win: "You are climbing",
+  draw: "You are holding",
+  lose: "You are falling",
+} as const;
+
+/**
+ * The live board: top ten collectors (never including you), your own
+ * standalone row with a climbing/holding/falling read that re-rolls on
+ * every SSE update, the galaxy totals, and the active-explorer pulse.
+ * The chamber around it mounts every claimed piece in real time — new
+ * finds toast in as they land.
+ */
+function LeaderboardFlow() {
+  const connect = useLeaderboardStore((s) => s.connect);
+  const disconnect = useLeaderboardStore((s) => s.disconnect);
+  const rows = useLeaderboardStore((s) => s.rows);
+  const fragmentsTotal = useLeaderboardStore((s) => s.fragmentsTotal);
+  const activeExplorers = useLeaderboardStore((s) => s.activeExplorers);
+  const myRank = useLeaderboardStore((s) => s.myRank);
+  const standingTier = useLeaderboardStore((s) => s.standingTier);
+  const standingText = useLeaderboardStore((s) => s.standingText);
+  const updateNonce = useLeaderboardStore((s) => s.updateNonce);
+  const balance = useFragmentsStore((s) => s.balance);
+  const [alias, setAlias] = useState<string | null>(null);
+
+  useEffect(() => {
+    connect();
+    return () => disconnect();
+  }, [connect, disconnect]);
+
+  useEffect(() => {
+    (async () => {
+      await Promise.resolve();
+      try {
+        const raw = window.localStorage.getItem("vx_profile");
+        const profile = raw ? (JSON.parse(raw) as { alias?: string | null }) : null;
+        setAlias(profile?.alias ?? null);
+      } catch {
+        setAlias(null);
+      }
+    })();
+  }, []);
+
+  // Top ten OTHER explorers: the visitor never appears twice — their own
+  // standing renders in the standalone row below.
+  const visibleRows = rows
+    .filter((row) => !alias || row.alias !== alias)
+    .slice(0, 10);
+
   return (
     <div>
-      <p className="micro-label">Uncharted Asteroid</p>
+      <p className="micro-label">Galaxy Leaderboard</p>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        You made it all the way out here.
+        The great collectors.
       </h2>
-      <p className="mt-3 text-sm leading-relaxed text-silver-300">
-        No vault. No gate. Just a hollow rock drifting through the dark —
-        whatever was hidden here is long gone. Still, a few Intelligence
-        Fragments glitter in the dust below. Take them, explorer. The belt
-        won&apos;t miss them.
+
+      <div className="mt-4 space-y-1" data-scroll-safe>
+        {visibleRows.length === 0 ? (
+          <p className="py-4 text-center text-[0.72rem] text-silver-500">
+            The board is still forming — be the first name on it.
+          </p>
+        ) : (
+          visibleRows.map((row, index) => (
+            <p
+              key={row.userId}
+              className="flex items-baseline gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-1.5 text-sm"
+            >
+              <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-500">
+                {index + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-200">
+                {row.alias ?? "Unnamed Explorer"}
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                {formatFragments(row.total)}
+              </span>
+            </p>
+          ))
+        )}
+      </div>
+
+      {/* the visitor's own standing — always its own row */}
+      <div className="mt-3 rounded-xl border border-white/15 bg-white/[0.05] px-3.5 py-2.5">
+        <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
+          {STANDING_TITLES[standingTier]}
+        </p>
+        <p className="mt-1 flex items-baseline gap-3 text-sm">
+          <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
+            {myRank !== null && myRank <= rows.length ? myRank : "—"}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+            {alias ?? "You"}
+          </span>
+          <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+            {formatFragments(balance)}
+          </span>
+        </p>
+        <p className="mt-1.5 text-[0.7rem] leading-relaxed text-silver-300">
+          {standingText ||
+            "Claim fragments across the galaxy to take your place on the board."}
+        </p>
+      </div>
+
+      <p className="mt-4 text-center font-mono text-[0.55rem] tracking-[0.22em] text-silver-300 uppercase">
+        {formatFragments(fragmentsTotal)} total fragments claimed across the galaxy
       </p>
-      <p className="mt-4 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-        Tap the glowing crystals to scavenge
+      <p className="mt-1.5 text-center text-[0.7rem] leading-relaxed text-silver-500">
+        {galaxyPulseLine(activeExplorers, updateNonce * 48271 + 7)}
       </p>
-      <Button
-        variant="secondary"
-        onClick={() => exitCave()}
-        className="mt-6 w-full px-5 py-3.5 text-xs uppercase"
-      >
-        Return to the belt
-      </Button>
     </div>
   );
 }

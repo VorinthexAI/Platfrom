@@ -24,8 +24,8 @@ export function ScrollHint() {
 
   if (mode === "belt") {
     return (
-      <div className="absolute inset-x-0 bottom-10 z-20 flex flex-col items-center gap-3 sm:bottom-12">
-        <p className="font-mono text-[0.55rem] tracking-[0.3em] text-silver-500 uppercase">
+      <div className="absolute inset-x-0 bottom-10 z-20 flex flex-col items-center gap-3 px-10 sm:bottom-12">
+        <p className="text-center font-mono text-[0.55rem] tracking-[0.3em] text-silver-500 uppercase">
           You are beyond the belt, scroll to ride it faster
         </p>
         <Button

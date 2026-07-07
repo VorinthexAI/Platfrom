@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { products, type ProductKey } from "@/data/products";
 import { caveKindAtAnchor } from "@/lib/cave-config";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
+import { hashString } from "@/lib/three/procedural";
 import {
   getChildren,
   getEntityRenderState,
@@ -35,6 +36,7 @@ export type CaveKind =
   | "magic" // arrived via /public/auth/token?token_hash=… (TOTP setup/verify)
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault
+  | "leaderboard" // the galaxy leaderboard hall — live ranks + crystal cave
   | "rock"; // any ordinary belt asteroid — hollow, near-empty, a few fragments
 
 /** Where the camera anchors when diving into an ordinary belt rock. */
@@ -122,6 +124,12 @@ export const galaxyMotion = {
   beltBaseVelocity: 0.02,
   /** Camera angle around the belt while in belt mode. */
   beltAngle: Math.PI * 0.35,
+  /** Sideways drag/swipe: camera yaw offset around the solar system. */
+  orbitAngle: 0,
+  /** rad/s — free-orbit spin left over when a sideways drag lets go. */
+  orbitVelocity: 0,
+  /** True while a pointer is actively dragging — the camera follows 1:1. */
+  dragging: false,
   /** ms timestamp of the last scroll input (for momentum decay). */
   lastScrollAt: 0,
   /** ms timestamp of the last interior-to-interior warp (streak burst). */
@@ -352,6 +360,24 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
   },
   startJump: (target) => set({ mode: "jump", jumpTarget: target }),
 }));
+
+/**
+ * The stable loot identity of the currently-open cave: quantized asteroid
+ * bearing for rocks, the story kind for vault caves. Shared by the scene
+ * (what spawns) and the overlay (what the drawer announces), so both
+ * always describe the same crystal.
+ */
+export function caveLootIdentity(
+  caveKind: CaveKind,
+  rockBiomeSeed: number | null,
+  visitSeed: number,
+): { biomeKey: string; lootSeed: number } {
+  if (caveKind === "rock") {
+    const lootSeed = rockBiomeSeed ?? visitSeed;
+    return { biomeKey: `rock-${(lootSeed >>> 0).toString(36)}`, lootSeed };
+  }
+  return { biomeKey: caveKind, lootSeed: hashString(`cave-${caveKind}`) };
+}
 
 /** Convert a registry entity into a step index. */
 export function stepForEntity(entity: GalaxyEntity): number {

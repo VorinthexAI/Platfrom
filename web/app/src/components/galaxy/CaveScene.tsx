@@ -1,18 +1,20 @@
 "use client";
 
 import { CAVE_CONFIGS, ROCK_THEMES } from "@/lib/cave-config";
-import { useGalaxyStore } from "@/lib/galaxy-store";
-import { hashString } from "@/lib/three/procedural";
+import { caveLootIdentity, useGalaxyStore } from "@/lib/galaxy-store";
 import { BiomeChamber } from "./BiomeChamber";
 import { BiomeLootField, CenterCrystal } from "./BiomeLoot";
+import { CrystalCave } from "./CrystalCave";
 
 /**
  * The asteroid caves: each auth flow opens the seeded interior of a belt
  * asteroid — and every ORDINARY belt rock is enterable too. Every biome
- * scatters 10–25 small fragments across its floor, and 3-in-5 asteroid
- * biomes grow a rare center crystal worth 100–10,000 fragments. Loot is
- * keyed to the asteroid's stable identity, so collected pieces never
+ * scatters 10–25 small fragments across its floor, and EVERY asteroid
+ * biome grows a center crystal worth 10 up to 1,000,000 fragments. Loot
+ * is keyed to the asteroid's stable identity, so collected pieces never
  * respawn — while the cavern itself still re-rolls its look per entry.
+ * The leaderboard asteroid is the exception: no loot of its own — its
+ * walls carry every piece the whole galaxy has claimed, live.
  */
 
 export function CaveScene() {
@@ -29,10 +31,8 @@ export function CaveScene() {
   // the story kind for vault caves. Loot keys off it, so nothing
   // collected here ever respawns on re-entry.
   const isRock = caveKind === "rock";
-  const lootSeed = isRock
-    ? (rockBiomeSeed ?? visitSeed)
-    : hashString(`cave-${caveKind}`);
-  const biomeKey = isRock ? `rock-${(lootSeed >>> 0).toString(36)}` : caveKind;
+  const isLeaderboard = caveKind === "leaderboard";
+  const { biomeKey, lootSeed } = caveLootIdentity(caveKind, rockBiomeSeed, visitSeed);
   // Uncharted rocks roll their chamber theme from their identity and get
   // far noisier cavern walls than the curated planet biomes.
   const theme = isRock
@@ -48,7 +48,11 @@ export function CaveScene() {
       position={config.interior}
       distortion={distortion}
     >
-      <BiomeLootField biomeKey={biomeKey} lootSeed={lootSeed} />
+      {isLeaderboard ? (
+        <CrystalCave />
+      ) : (
+        <BiomeLootField biomeKey={biomeKey} lootSeed={lootSeed} />
+      )}
       {isRock ? (
         <CenterCrystal biomeKey={biomeKey} lootSeed={lootSeed} />
       ) : null}

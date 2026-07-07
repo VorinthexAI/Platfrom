@@ -88,6 +88,8 @@ interface FragmentsState {
   lootClaimedIds: string[];
   /** Collect a procedural biome fragment or crystal (persists its mesh). */
   collectBiomeLoot: (loot: BiomeLootInput) => void;
+  /** Show a toast from outside the claim flow (live leaderboard FOMO). */
+  pushToast: (title: string, detail: string) => void;
   dismissToast: () => void;
 }
 
@@ -313,6 +315,8 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
       set({ claiming: false });
     }
   },
+
+  pushToast: (title, detail) => set({ toast: { title, detail } }),
 
   dismissToast: () => set({ toast: null }),
 }));
