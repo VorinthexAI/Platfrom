@@ -125,6 +125,8 @@ const core: GalaxyEntity = {
     headline: "Your AI Brain.",
     subheadline: "A personal AI Brain that grows with you.",
     body: "Core is your central intelligence. It learns, remembers and evolves with you. Expand it with powerful Capabilities that orbit your Brain.",
+    drawerLine:
+      "Your central intelligence. It learns, remembers, and evolves with you.",
     primaryCta: "Join Waitlist",
     secondaryCta: "Explore Core",
   },
@@ -180,6 +182,18 @@ const command: GalaxyEntity = {
   aeo: {
     summary:
       "Command is an AI command center with executive orchestrators for founders, builders, and companies. Its orchestrators include Atlas, Hermes, Metis, Apollo, Iris, Ledger, Orbit, Mercury, Sentinel, Athena, Forge, and Themis.",
+    questions: [
+      {
+        question: "What is Command by Vorinthex AI?",
+        answer:
+          "Command is an upcoming AI command center from Vorinthex AI. It gives founders, operators, and builders a suite of autonomous executive orchestrators, including Atlas (CEO), Hermes (COO), Metis (CIO), Ledger (CFO), and eight more, that think, plan, and execute while the human leads the vision.",
+      },
+      {
+        question: "How is Command priced?",
+        answer:
+          "Command runs on monthly coin based plans, from Starter at $99.99 per month up to Sovereign at $29,999.99 per month, plus custom enterprise terms. Each orchestrator workspace consumes coins as it works.",
+      },
+    ],
     llmsText: "AI orchestrator suite for founders and builders.",
   },
   content: {
@@ -187,6 +201,8 @@ const command: GalaxyEntity = {
     headline: "Your AI command center.",
     subheadline: "Executive AI orchestrators that think, plan, and execute.",
     body: "Command gives founders and builders access to AI orchestrators such as Atlas, Hermes, Metis, Orbit, Mercury, Sentinel, Athena, Forge, and Themis.",
+    drawerLine:
+      "Executive AI orchestrators that think, plan, and execute while you lead.",
     primaryCta: "Join Waitlist",
     secondaryCta: "Explore Orchestrators",
     statusNote:
@@ -250,6 +266,13 @@ const studio: GalaxyEntity = {
   aeo: {
     summary:
       "Studio is a unified AI workspace for chat, images, video, music, voice, code, research, and documents.",
+    questions: [
+      {
+        question: "What is Studio by Vorinthex AI?",
+        answer:
+          "Studio is an upcoming unified AI workspace from Vorinthex AI that puts every leading AI model in one interface: chat, image, video, music, voice, code, documents, and research in a single creative workspace.",
+      },
+    ],
     llmsText: "A unified AI workspace.",
   },
   content: {
@@ -257,6 +280,7 @@ const studio: GalaxyEntity = {
     headline: "Create without limits.",
     subheadline: "One interface. Every AI model.",
     body: "Every leading AI model in one interface, chat, image, video, music, voice, code, documents, and research in a single creative workspace.",
+    drawerLine: "Every leading AI model in one creative workspace.",
     primaryCta: "Join Waitlist",
     statusNote:
       "Studio joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
@@ -306,6 +330,13 @@ const launch: GalaxyEntity = {
   aeo: {
     summary:
       "Launch is a lightweight platform to build, automate, and deploy AI agents.",
+    questions: [
+      {
+        question: "What is Launch by Vorinthex AI?",
+        answer:
+          "Launch is an upcoming lightweight platform from Vorinthex AI for creating AI agents, automations, and workflows, then deploying them everywhere your work happens.",
+      },
+    ],
     llmsText: "Build and deploy AI agents.",
   },
   content: {
@@ -313,6 +344,8 @@ const launch: GalaxyEntity = {
     headline: "Deploy everywhere.",
     subheadline: "Power your AI at scale.",
     body: "A lightweight platform to create agents, automations, and workflows, then deploy them everywhere your work happens.",
+    drawerLine:
+      "Create agents, automations, and workflows, then deploy them everywhere.",
     primaryCta: "Join Waitlist",
     statusNote:
       "Launch joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
@@ -396,6 +429,7 @@ const archive = capability({
     eyebrow: "Core Capability",
     headline: "Your second brain.",
     subheadline: "Save, organize, and connect everything that matters.",
+    drawerLine: "Capture, organize, and connect everything you know.",
     bullets: [
       "Capture ideas, research, meeting notes, and daily thoughts.",
       "Organize notes into folders and labels.",
@@ -443,12 +477,20 @@ const gallery = capability({
   aeo: {
     summary:
       "Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI powered discovery.",
+    questions: [
+      {
+        question: "What is Gallery in Core?",
+        answer:
+          "Gallery is a Core capability that turns your images and memories into a smart library: AI generated albums and clusters, sharing links, QR invites, and search by people, places, dates, and events. It costs $19.99 per month.",
+      },
+    ],
     llmsText: "Memories and images organized by AI.",
   },
   content: {
     eyebrow: "Core Capability",
     headline: "Your memories, organized.",
     subheadline: "Store, search and relive your most important moments.",
+    drawerLine: "Your memories, organized into living albums by AI.",
     bullets: [
       "Organize images into AI generated albums and clusters.",
       "Invite others to albums with QR codes or links.",
@@ -496,12 +538,20 @@ const signal = capability({
   aeo: {
     summary:
       "Signal is an AI inbox guard that filters noise, prioritizes important email and messages, and can reply in the user's tone.",
+    questions: [
+      {
+        question: "What is Signal in Core?",
+        answer:
+          "Signal is a Core capability that guards your inbox: it connects multiple inboxes, filters noise, prioritizes the messages that matter, and can reply in your tone when you approve. It costs $29.99 per month.",
+      },
+    ],
     llmsText: "Inbox guard and communication intelligence.",
   },
   content: {
     eyebrow: "Core Capability",
     headline: "Only what matters reaches you.",
     subheadline: "AI powered email that keeps you ahead and in control.",
+    drawerLine: "An AI guard for your inbox. Only what matters reaches you.",
     bullets: [
       "Connect multiple inboxes.",
       "Filter noise and prioritize important messages.",
@@ -549,12 +599,20 @@ const compass = capability({
   aeo: {
     summary:
       "Compass maps visited places, future destinations, travel memories, and plans on an interactive 3D globe.",
+    questions: [
+      {
+        question: "What is Compass in Core?",
+        answer:
+          "Compass is a Core capability that maps your life on an interactive 3D globe: places visited, cities and countries to visit, travel memories, and future plans, all pinned and explorable. It costs $14.99 per month.",
+      },
+    ],
     llmsText: "Travel, memories, and journeys on a 3D globe.",
   },
   content: {
     eyebrow: "Core Capability",
     headline: "Map where you have been and where you are going.",
     subheadline: "Understand your context and navigate what matters most.",
+    drawerLine: "Your places, memories, and journeys on a living globe.",
     bullets: [
       "Add cities, countries, places visited, and future destinations.",
       "Save memories and plans to an interactive 3D globe.",
@@ -602,12 +660,20 @@ const ascend = capability({
   aeo: {
     summary:
       "Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI generated audio books.",
+    questions: [
+      {
+        question: "What is Ascend in Core?",
+        answer:
+          "Ascend is a Core capability that coaches your growth: goals for fitness, mental growth, money, and habits, custom AI generated audio books and learning journeys, and progress tracking with coaching grounded in your real context. It costs $24.99 per month.",
+      },
+    ],
     llmsText: "AI coach for growth, habits, and goals.",
   },
   content: {
     eyebrow: "Core Capability",
     headline: "Build the person you are becoming.",
     subheadline: "Track your progress and become your best self.",
+    drawerLine: "A personal AI coach for goals, habits, health, and growth.",
     bullets: [
       "Define goals for fitness, mental growth, money, and habits.",
       "Generate custom audio books and learning journeys.",
@@ -685,6 +751,12 @@ function orchestrator(input: OrchestratorInput): GalaxyEntity {
     },
     aeo: {
       summary: `${input.name} is the ${input.role} (${input.fullTitle}) inside Command, the AI orchestrator suite from Vorinthex AI. Scope: ${input.scope}`,
+      questions: [
+        {
+          question: `What is ${input.name} in Vorinthex Command?`,
+          answer: `${input.name} is the ${input.role} (${input.fullTitle}) inside Command, the AI orchestrator suite from Vorinthex AI. Its scope: ${input.scope}`,
+        },
+      ],
       llmsText: `${input.role} orchestrator in Command, ${input.scope}`,
     },
     content: {

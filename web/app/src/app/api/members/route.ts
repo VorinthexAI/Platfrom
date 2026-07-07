@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
+import {
+  randomDecoyHandoff,
+  setHandoffCookies,
+} from "@/lib/auth/handoff-cookies";
 import { emailSchema } from "@/lib/email";
 import { collectCollectible } from "@/lib/fragments/fragments-server";
 
@@ -109,6 +113,11 @@ export async function POST(request: Request) {
       );
     }
     const devResponse = NextResponse.json({ ok: true, collect });
+    setHandoffCookies(
+      devResponse,
+      randomDecoyHandoff(),
+      new Date(Date.now() + 35 * 60 * 1000),
+    );
     if (isNewExplorer) {
       devResponse.cookies.set(EXPLORER_COOKIE, explorerId, {
         httpOnly: true,
@@ -120,7 +129,10 @@ export async function POST(request: Request) {
     return devResponse;
   }
 
-  const result = await backendFetch("/auth/login", {
+  const result = await backendFetch<{
+    handoff_token_hash?: string;
+    handoff_expires_at?: string;
+  }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email: parsed.data.email }),
   });
@@ -138,6 +150,13 @@ export async function POST(request: Request) {
   }
 
   const response = NextResponse.json({ ok: true, collect });
+  // Park the cross-device handoff secret. Unknown emails get a decoy so
+  // the response — headers included — never reveals who exists.
+  const handoff = result.data?.handoff_token_hash;
+  const handoffExpiresAt = result.data?.handoff_expires_at
+    ? new Date(result.data.handoff_expires_at)
+    : new Date(Date.now() + 35 * 60 * 1000);
+  setHandoffCookies(response, handoff ?? randomDecoyHandoff(), handoffExpiresAt);
   if (isNewExplorer) {
     response.cookies.set(EXPLORER_COOKIE, explorerId, {
       httpOnly: true,

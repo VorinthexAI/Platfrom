@@ -84,6 +84,15 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "gem",
     approachLabel: "Approaching the Galaxy Leaderboard",
   },
+  // Where every tapped email link lands: a chamber with no way out. It
+  // only confirms the action worked and points back to where the link
+  // was requested — the session belongs to that surface, not this one.
+  sealed: {
+    ...rolledAnchor(),
+    interior: [810, -240, 0],
+    theme: "ocean",
+    approachLabel: "Sealing the passage behind you",
+  },
   // Any ordinary belt rock: the anchor here is a fallback — the real
   // bearing comes from the clicked rock (store.rockAnchor), and the
   // chamber theme rolls from the visit seed.

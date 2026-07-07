@@ -2,15 +2,24 @@
 
 import { useEffect, useRef, useState } from "react";
 import { trackLandingEvent } from "@/lib/analytics";
+import { hasPendingHandoff } from "@/lib/auth/handoff-client";
+import { setLinkLanding } from "@/lib/auth/link-landing";
 import { setMagicHandoff } from "@/lib/auth/magic-handoff";
 import { useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
- * Deep-link arrivals that should never open a biome: the visitor travels
- * into the solar system exactly like a fresh landing while the token is
- * verified in the background, then hyper-jumps straight to their public
- * galaxy. Only a failed token falls back into the asteroid cave, where
- * the existing story explains what went wrong.
+ * Deep-link arrivals. The visitor travels into the solar system exactly
+ * like a fresh landing while the token is verified in the background.
+ *
+ * Where a SUCCESSFUL tap ends up depends on which surface opened it:
+ * - The surface that requested the link (its handoff marker cookie is
+ *   here) hyper-jumps straight into the galaxy, as always.
+ * - Any other surface — a mail app's built-in view, another device —
+ *   lands in the sealed chamber: the action worked, the session belongs
+ *   to the surface that requested it, and there is no way out.
+ *
+ * Only a failed token falls back into the asteroid cave, where the
+ * existing story explains what went wrong and offers a fresh link.
  *
  * - "waitlist-verify": /public/waitlist/verify?token_hash=…
  * - "magic": /public/auth/token?token_hash=…&flow=user (explorer session;
@@ -21,6 +30,7 @@ type ArrivalKind = "waitlist-verify" | "magic";
 
 type ArrivalResult =
   | { outcome: "jump" }
+  | { outcome: "sealed" }
   | { outcome: "cave" }
   | { outcome: "totp" };
 
@@ -33,6 +43,16 @@ async function verifyWaitlistToken(token: string): Promise<ArrivalResult> {
   );
   const data = await response.json().catch(() => null);
   if (!response.ok || !data?.ok) return { outcome: "cave" };
+  if (!hasPendingHandoff()) {
+    // A foreign surface: confirm, seal, point home. The surface that
+    // requested the link claims its own session over the handoff.
+    setLinkLanding({
+      action: "waitlist-verify",
+      alias: data.alias ?? null,
+      waitlistNumber: data.waitlistNumber ?? null,
+    });
+    return { outcome: "sealed" };
+  }
   window.localStorage.setItem(
     "vx_profile",
     JSON.stringify({
@@ -42,6 +62,9 @@ async function verifyWaitlistToken(token: string): Promise<ArrivalResult> {
       welcomeLine: data.welcomeLine,
     }),
   );
+  // Same surface that requested the link: consume the parked handoff so
+  // its cookies clear instead of lingering until expiry.
+  void fetch("/api/auth/handoff/claim", { method: "POST" }).catch(() => {});
   return { outcome: "jump" };
 }
 
@@ -55,6 +78,18 @@ async function validateMagicToken(token: string): Promise<ArrivalResult> {
   if (!response.ok || !data?.ok) return { outcome: "cave" };
 
   if (data.status === "authenticated") {
+    trackLandingEvent({
+      slug: "auth.magic_link_authenticated",
+      metadata: { flow: "user" },
+    });
+    if (!hasPendingHandoff()) {
+      setLinkLanding({
+        action: "signin",
+        alias: data.alias ?? null,
+        waitlistNumber: data.waitlist_number ?? null,
+      });
+      return { outcome: "sealed" };
+    }
     window.localStorage.setItem(
       "vx_profile",
       JSON.stringify({
@@ -63,10 +98,9 @@ async function validateMagicToken(token: string): Promise<ArrivalResult> {
         welcomeLine: data.welcome_line ?? null,
       }),
     );
-    trackLandingEvent({
-      slug: "auth.magic_link_authenticated",
-      metadata: { flow: "user" },
-    });
+    // Same surface that requested the link: consume the parked handoff
+    // so its cookies clear instead of lingering until expiry.
+    void fetch("/api/auth/handoff/claim", { method: "POST" }).catch(() => {});
     return { outcome: "jump" };
   }
 
@@ -138,6 +172,8 @@ export function ArrivalJump({ kind }: { kind: ArrivalKind }) {
         metadata: { kind },
       });
       store.startJump("public");
+    } else if (result.outcome === "sealed") {
+      store.enterCave("sealed");
     } else if (result.outcome === "totp") {
       store.enterCave("magic");
     } else {

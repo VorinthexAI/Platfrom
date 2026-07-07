@@ -9,6 +9,7 @@ import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
+import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
 import { sendBrandedEmail } from './email';
 import { notifyCountersDirty } from './live-bus';
 import { defaultNameFromEmail, normalizeEmail, upsertUserByEmail } from './users';
@@ -46,6 +47,9 @@ async function createWaitlistEmailChallenge(userId: string) {
   const token = randomToken('vrtx_waitlist_');
   const publicTokenHash = await sha256(token);
   const storedTokenHash = await sha256(publicTokenHash);
+  // The joining browser parks a handoff secret so verifying from any
+  // other surface (a phone's mail view) still opens THIS browser's galaxy.
+  const handoff = await createHandoffSecret();
   const expiresAt = new Date(Date.now() + WAITLIST_VERIFY_TTL_MS);
 
   await consumeActiveAuthChallengesByUserAndKind(userId, 'waitlist', now.toISOString());
@@ -58,9 +62,15 @@ async function createWaitlistEmailChallenge(userId: string) {
     tokenHash: storedTokenHash,
     expiresAt: expiresAt.toISOString(),
     createdAt: now.toISOString(),
+    handoffTokenHash: handoff.storedTokenHash,
   });
 
-  return { tokenHash: publicTokenHash, expiresAt };
+  return {
+    tokenHash: publicTokenHash,
+    expiresAt,
+    handoffTokenHash: handoff.publicTokenHash,
+    handoffExpiresAt: new Date(expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
+  };
 }
 
 export async function deliverWaitlistVerifyEmail(input: { email: string; name?: string | null; verifyLink: string; expiresAt: Date }) {
@@ -98,7 +108,12 @@ export async function sendWaitlistVerificationEmailForUser(user: Pick<User, 'key
     verifyLink,
     expiresAt: challenge.expiresAt,
   });
-  return { verifyLink, expiresAt: challenge.expiresAt };
+  return {
+    verifyLink,
+    expiresAt: challenge.expiresAt,
+    handoffTokenHash: challenge.handoffTokenHash,
+    handoffExpiresAt: challenge.handoffExpiresAt,
+  };
 }
 
 export async function requestWaitlistVerification(email: string, explorerId?: string, distinctId?: string, tempEmailHash?: string) {
@@ -142,6 +157,8 @@ export async function requestWaitlistVerification(email: string, explorerId?: st
     waitlistNumber: entry.waitlistNumber,
     verificationEmailSent: true,
     expiresAt: delivery.expiresAt,
+    handoffTokenHash: delivery.handoffTokenHash,
+    handoffExpiresAt: delivery.handoffExpiresAt,
     devVerifyLink: process.env.NODE_ENV === 'production' ? undefined : delivery.verifyLink,
   };
 }
@@ -162,6 +179,9 @@ export async function verifyWaitlistEmail(tokenHash: string) {
   await updateAuthChallenge(challenge.key, { consumedAt: now.toISOString() });
 
   if (challenge.identityType !== 'user') return null;
+
+  // Verifying from any surface wakes the browser that joined the waitlist.
+  await approveHandoff({ key: challenge.key, handoffTokenHash: challenge.handoffTokenHash });
 
   const entry = await updateUser(challenge.identityKey, { isVerified: true, updatedAt: now.toISOString() });
   trackPlatformEvent({
