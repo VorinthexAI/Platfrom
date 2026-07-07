@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FragmentGlobe, type GlobeData } from "@/components/fragments/FragmentGlobe";
+import { useGalaxyStore } from "@/lib/galaxy-store";
 
 interface StoredProfile {
   email: string;
@@ -18,6 +19,7 @@ interface StoredProfile {
  * pricing when the doors open.
  */
 export function PublicGalaxy() {
+  const router = useRouter();
   const [profile, setProfile] = useState<StoredProfile | null>(null);
   const [balance, setBalance] = useState(0);
   const [globe, setGlobe] = useState<GlobeData>({ points: [], colors: [] });
@@ -45,6 +47,13 @@ export function PublicGalaxy() {
   // (all state updates above happen in async continuations, never sync in the effect)
 
   const displayName = profile?.alias ?? "Explorer";
+  const returnToGalaxy = () => {
+    useGalaxyStore.getState().resetToSystem();
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", "/");
+    }
+    router.replace("/");
+  };
 
   return (
     <main className="obsidian-noise flex min-h-svh flex-col items-center justify-center px-5 py-16 text-center">
@@ -82,12 +91,13 @@ export function PublicGalaxy() {
         Vorinthex launches, keep exploring.
       </p>
 
-      <Link
-        href="/"
+      <button
+        type="button"
+        onClick={returnToGalaxy}
         className="vui-button vui-button-secondary mt-10 min-h-0 px-7 py-3 text-xs uppercase"
       >
         Return to the galaxy
-      </Link>
+      </button>
     </main>
   );
 }

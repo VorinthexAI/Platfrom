@@ -170,6 +170,7 @@ interface GalaxyState {
    * the next interior instead of flying back out. */
   enterRock: (anchor: RockAnchor, options?: { warp?: boolean }) => void;
   exitCave: () => void;
+  resetToSystem: () => void;
   startJump: (target: JumpTarget) => void;
 }
 
@@ -301,6 +302,21 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
       caveKind: null,
       cavePhase: "fly",
       rockAnchor: null,
+    });
+  },
+  resetToSystem: () => {
+    set({
+      mode: "system",
+      step: 0,
+      focus: null,
+      child: null,
+      drawerOpen: false,
+      hovered: null,
+      caveKind: null,
+      cavePhase: "fly",
+      rockAnchor: null,
+      visitPhase: "fly",
+      jumpTarget: null,
     });
   },
   startJump: (target) => set({ mode: "jump", jumpTarget: target }),
