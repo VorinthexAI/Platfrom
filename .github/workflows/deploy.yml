@@ -727,8 +727,8 @@ jobs:
   seed-db-secrets:
     name: Upsert db.seeds.secrets.json to production
     runs-on: ubuntu-latest
-    needs: changes
-    if: github.event_name == 'pull_request' || inputs.deploy
+    needs: [changes, backend-migrate]
+    if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}

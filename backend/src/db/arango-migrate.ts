@@ -14,6 +14,12 @@ interface CollectionSpec {
   indexes?: Array<{ fields: string[]; unique?: boolean; sparse?: boolean }>;
 }
 
+const legacyIndexesToDrop: Record<string, string[][]> = {
+  members: [['userId']],
+  superAdmins: [['userId'], ['memberId']],
+  authChallenges: [['userId', 'kind']],
+};
+
 function buildEventEmbedText(key: string, belongsTo: string, slug: string): string {
   return ['_events', key, belongsTo, slug].join(':');
 }
@@ -224,6 +230,17 @@ async function main() {
     if (!exists) {
       await collection.create();
       console.log(`Created collection ${spec.name}`);
+    }
+    const legacyIndexes = legacyIndexesToDrop[spec.name] ?? [];
+    if (legacyIndexes.length > 0) {
+      const existingIndexes = await collection.indexes();
+      for (const index of existingIndexes) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields : [];
+        if (legacyIndexes.some((legacy) => legacy.length === fields.length && legacy.every((field, i) => fields[i] === field))) {
+          await collection.dropIndex(index.id);
+          console.log(`Dropped legacy index ${index.id} on ${spec.name}(${fields.join(', ')})`);
+        }
+      }
     }
     for (const index of spec.indexes ?? []) {
       await collection.ensureIndex({
