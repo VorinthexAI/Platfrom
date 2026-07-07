@@ -140,8 +140,10 @@ function RockLayer({
       );
       matrices.push(matrix.compose(position, quaternion, scale).clone());
       // The planets' trick, instanced: every rock gets a generous invisible
-      // hit sphere (never smaller than a comfortable tap target).
-      hitScale.setScalar(Math.max(s * 1.45, 0.5));
+      // hit sphere. Sized for thumbs, not cursors — diving into a rock has
+      // to land on the first tap, so the target is roughly double the rock
+      // and never below a real minimum.
+      hitScale.setScalar(Math.max(s * 2.1, 0.85));
       hitMatrices.push(
         matrix.compose(position, identityQuaternion, hitScale).clone(),
       );
@@ -262,6 +264,7 @@ const GROWTH_EASE_SECONDS = 2.4;
 
 function GrowthLayer({ paused, dense }: { paused: boolean; dense: boolean }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const hitRef = useRef<THREE.InstancedMesh>(null);
   const mode = useGalaxyStore((s) => s.mode);
   const stateRef = useRef<{
     random: () => number;
@@ -298,6 +301,10 @@ function GrowthLayer({ paused, dense }: { paused: boolean; dense: boolean }) {
     const mesh = meshRef.current;
     if (!mesh) return;
     mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 150);
+    const hit = hitRef.current;
+    if (hit) {
+      hit.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 150);
+    }
   }, []);
 
   useFrame((_, delta) => {
@@ -349,12 +356,14 @@ function GrowthLayer({ paused, dense }: { paused: boolean; dense: boolean }) {
       state.born[slot] = state.clock;
     }
 
+    const hit = hitRef.current;
     const matrix = new THREE.Matrix4();
     const scaleMatrix = new THREE.Matrix4();
     for (let i = 0; i < capacity; i++) {
       if (state.born[i] < 0) {
         matrix.makeScale(0.0001, 0.0001, 0.0001);
         mesh.setMatrixAt(i, matrix);
+        hit?.setMatrixAt(i, matrix);
         continue;
       }
       const age = state.clock - state.born[i];
@@ -364,40 +373,65 @@ function GrowthLayer({ paused, dense }: { paused: boolean; dense: boolean }) {
       scaleMatrix.makeScale(s, s, s);
       matrix.multiplyMatrices(state.matrixBases[i], scaleMatrix);
       mesh.setMatrixAt(i, matrix);
+      if (hit) {
+        // Same thumb-sized invisible target as the fixed belt layers —
+        // fresh rocks are small, their tap targets must not be.
+        const hs = Math.max(s * 2.1, eased * 0.85, 0.0001);
+        scaleMatrix.makeScale(hs, hs, hs);
+        matrix.multiplyMatrices(state.matrixBases[i], scaleMatrix);
+        hit.setMatrixAt(i, matrix);
+      }
     }
     mesh.instanceMatrix.needsUpdate = true;
     mesh.rotation.y += delta * 0.0018;
+    if (hit) {
+      hit.instanceMatrix.needsUpdate = true;
+      // The hit shell mirrors the visible pool's slow drift exactly.
+      hit.rotation.y = mesh.rotation.y;
+    }
   });
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[geometry, material, capacity]}
-      frustumCulled={false}
-      // Even the freshly condensed rocks are enterable worlds.
-      onClick={(event) => {
-        event.stopPropagation();
-        // Camera drags that end on a rock are not clicks.
-        if (event.delta > 8) return;
-        const state = useGalaxyStore.getState();
-        if (state.mode !== "system" && state.mode !== "belt") return;
-        state.enterRock({
-          angle: Math.atan2(event.point.z, event.point.x),
-          radius: Math.hypot(event.point.x, event.point.z),
-        });
-      }}
-      onPointerOver={
-        mode === "system" || mode === "belt"
-          ? (event) => {
-              event.stopPropagation();
-              document.body.style.cursor = "pointer";
-            }
-          : undefined
-      }
-      onPointerOut={() => {
-        document.body.style.cursor = "auto";
-      }}
-    />
+    <group>
+      <instancedMesh
+        ref={meshRef}
+        args={[geometry, material, capacity]}
+        frustumCulled={false}
+      />
+      {/* Even the freshly condensed rocks are enterable worlds — via the
+          same generous invisible hit shells as the fixed belt layers. */}
+      <instancedMesh
+        ref={hitRef}
+        args={[undefined, undefined, capacity]}
+        visible={false}
+        frustumCulled={false}
+        onClick={(event) => {
+          event.stopPropagation();
+          // Camera drags that end on a rock are not clicks.
+          if (event.delta > 8) return;
+          const state = useGalaxyStore.getState();
+          if (state.mode !== "system" && state.mode !== "belt") return;
+          state.enterRock({
+            angle: Math.atan2(event.point.z, event.point.x),
+            radius: Math.hypot(event.point.x, event.point.z),
+          });
+        }}
+        onPointerOver={
+          mode === "system" || mode === "belt"
+            ? (event) => {
+                event.stopPropagation();
+                document.body.style.cursor = "pointer";
+              }
+            : undefined
+        }
+        onPointerOut={() => {
+          document.body.style.cursor = "auto";
+        }}
+      >
+        <sphereGeometry args={[1, 8, 8]} />
+        <meshBasicMaterial />
+      </instancedMesh>
+    </group>
   );
 }
 

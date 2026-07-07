@@ -13,6 +13,11 @@ import { rollCenterCrystal } from "@/components/galaxy/BiomeLoot";
 import { EruptAssembly } from "@/components/ui/EruptAssembly";
 import { CloseIcon } from "@/components/ui/icons";
 import { trackCtaClick, trackLandingEvent } from "@/lib/analytics";
+import {
+  claimHandoffSession,
+  watchHandoff,
+} from "@/lib/auth/handoff-client";
+import { peekLinkLanding } from "@/lib/auth/link-landing";
 import { takeMagicHandoff } from "@/lib/auth/magic-handoff";
 import { CAVE_CONFIGS } from "@/lib/cave-config";
 import { normalizeEmailInput, parseApiError } from "@/lib/email";
@@ -86,6 +91,18 @@ export function CaveOverlay() {
           // Uncharted rocks get a slim bottom drawer (same hold-then-slide
           // beat as the planet drawer) so the crystal stays center stage.
           <RockDrawer key={`rock-${visitSeed}`} />
+        ) : caveKind === "leaderboard" ? (
+          // The leaderboard breaks out of the single card: three floating
+          // islands — the call, the board, the galaxy pulse.
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
+            <EruptAssembly
+              key={`leaderboard-${visitSeed}`}
+              seed={visitSeed}
+              className="pointer-events-auto w-full max-w-md"
+            >
+              <LeaderboardFlow />
+            </EruptAssembly>
+          </div>
         ) : (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
             {/* the WHOLE card arrives like the emblem: shattered into grid
@@ -101,19 +118,24 @@ export function CaveOverlay() {
                 style={{ background: "var(--gradient-panel)" }}
                 data-scroll-safe
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    trackCtaClick("cave_close", { cave_kind: caveKind });
-                    exitCave();
-                    syncEntityUrl("/");
-                  }}
-                  aria-label="Leave the cave"
-                  className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
-                >
-                  <CloseIcon width={12} height={12} />
-                </button>
+                {/* The sealed chamber has no exit: no close, no escape —
+                    the visitor's session lives where they requested it. */}
+                {caveKind === "sealed" ? null : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      trackCtaClick("cave_close", { cave_kind: caveKind });
+                      exitCave();
+                      syncEntityUrl("/");
+                    }}
+                    aria-label="Leave the cave"
+                    className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+                  >
+                    <CloseIcon width={12} height={12} />
+                  </button>
+                )}
 
+                {caveKind === "sealed" ? <SealedFlow /> : null}
                 {caveKind === "join" ? <JoinFlow /> : null}
                 {caveKind === "signin" ? <ExplorerSigninFlow /> : null}
                 {caveKind === "members" ? <MembersFlow /> : null}
@@ -121,12 +143,73 @@ export function CaveOverlay() {
                 {caveKind === "magic" ? <MagicFlow /> : null}
                 {caveKind === "privacy" ? <LegalFlow copy={PRIVACY_COPY} /> : null}
                 {caveKind === "terms" ? <LegalFlow copy={TERMS_COPY} /> : null}
-                {caveKind === "leaderboard" ? <LeaderboardFlow /> : null}
               </div>
             </EruptAssembly>
           </div>
         )
       ) : null}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/* the sealed chamber — where tapped email links end                  */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Success state for a link opened on a surface that did not request it.
+ * There is deliberately no exit: the session belongs to the screen where
+ * the link was requested, and the copy sends the visitor back there.
+ */
+function SealedFlow() {
+  const landing = peekLinkLanding();
+  const action = landing?.action ?? "signin";
+
+  return (
+    <div>
+      <p className="micro-label">Passage Sealed</p>
+      {action === "waitlist-verify" ? (
+        <>
+          <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.08em] text-silver-50">
+            Your spot is secured.
+          </h2>
+          {landing?.waitlistNumber ? (
+            <p className="mt-3 text-sm leading-relaxed text-silver-300">
+              You are{" "}
+              <span className="text-silver-50">
+                galaxy explorer #{landing.waitlistNumber.toLocaleString("en-US")}
+              </span>
+              . Verification is complete.
+            </p>
+          ) : (
+            <p className="mt-3 text-sm leading-relaxed text-silver-300">
+              Verification is complete.
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.08em] text-silver-50">
+            The light was received.
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-silver-300">
+            Your sign in is confirmed
+            {landing?.alias ? (
+              <>
+                , <span className="text-silver-50">{landing.alias}</span>
+              </>
+            ) : null}
+            .
+          </p>
+        </>
+      )}
+      <p className="mt-4 text-sm leading-relaxed text-silver-300">
+        Now return to where you requested this link. Your galaxy is
+        already opening there, signed in and waiting for you.
+      </p>
+      <p className="mt-5 font-mono text-[0.55rem] leading-relaxed tracking-[0.24em] text-silver-500 uppercase">
+        This passage has served its purpose and sealed itself
+      </p>
     </div>
   );
 }
@@ -195,16 +278,15 @@ function RockDrawer() {
             </p>
             <p className="mt-1.5 text-[0.82rem] leading-relaxed text-silver-300">
               {collected ? (
-                <>Vault collected. Keep exploring other asteroids to find more
-                fragments and climb the leaderboard.</>
+                <>Vault collected. Dive into more asteroids to climb the
+                leaderboard.</>
               ) : (
                 <>
                   {opener}{" "}
                   <span className="text-silver-50">
-                    Tap the crystal to collect {amount} Intelligence Fragments
-                  </span>
-                  , then keep exploring other asteroids to find more and
-                  climb the leaderboard.
+                    Tap the crystal to collect {amount} fragments
+                  </span>{" "}
+                  and climb the leaderboard.
                 </>
               )}
             </p>
@@ -233,14 +315,16 @@ const STANDING_TITLES = {
 } as const;
 
 /**
- * The live board: ten fixed seats for the top collectors (open seats
- * render as quiet placeholders until claimed), plus your own standing
- * card with a climbing/holding/falling read that re-rolls on every SSE
- * update, the galaxy totals, and the active-explorer pulse — always
- * eleven cards. The chamber around it mounts every collected piece in
- * real time; new finds toast in as they land.
+ * The live board, split across three floating islands:
+ *
+ *  1. The call — title plus the glowing reason to collect and climb.
+ *  2. The board — ten fixed seats as pure rows (open seats render as
+ *     quiet placeholders until claimed) plus your own standing row,
+ *     with the only close control.
+ *  3. The pulse — galaxy totals and the active-explorer heartbeat.
  */
 function LeaderboardFlow() {
+  const exitCave = useGalaxyStore((s) => s.exitCave);
   const connect = useLeaderboardStore((s) => s.connect);
   const disconnect = useLeaderboardStore((s) => s.disconnect);
   const rows = useLeaderboardStore((s) => s.rows);
@@ -248,7 +332,6 @@ function LeaderboardFlow() {
   const activeExplorers = useLeaderboardStore((s) => s.activeExplorers);
   const myRank = useLeaderboardStore((s) => s.myRank);
   const standingTier = useLeaderboardStore((s) => s.standingTier);
-  const standingText = useLeaderboardStore((s) => s.standingText);
   const updateNonce = useLeaderboardStore((s) => s.updateNonce);
   const balance = useFragmentsStore((s) => s.balance);
   const [alias, setAlias] = useState<string | null>(null);
@@ -279,18 +362,42 @@ function LeaderboardFlow() {
   const myPlace = myRank ?? Math.max(rows.length, topRows.length) + 1;
 
   return (
-    <div>
-      <p className="micro-label">Galaxy Leaderboard</p>
-      <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        The great collectors.
-      </h2>
-
-      <div className="mt-4" data-scroll-safe>
-        <p className="flex items-baseline gap-3 px-3.5 pb-1.5 font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
-          <span className="w-6 shrink-0">Place</span>
-          <span className="min-w-0 flex-1">Alias</span>
-          <span className="shrink-0">Fragments</span>
+    <div className="flex max-h-[88dvh] flex-col gap-4 sm:gap-6">
+      {/* island 1 — the call */}
+      <div
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <p className="micro-label">Galaxy Leaderboard</p>
+        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
+          The great collectors
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-silver-100 [text-shadow:0_0_14px_rgba(196,204,212,0.6),0_0_34px_rgba(196,204,212,0.25)]">
+          Every fragment you collect feeds the Nexus. The higher you stand
+          at launch, the greater your prizes, offers, and early access.
         </p>
+      </div>
+
+      {/* island 2 — the board: pure rows, and the only close control */}
+      <div
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+        data-scroll-safe
+      >
+        <button
+          type="button"
+          onClick={() => {
+            trackCtaClick("cave_close", { cave_kind: "leaderboard" });
+            exitCave();
+            syncEntityUrl("/");
+          }}
+          aria-label="Leave the leaderboard"
+          className="absolute top-4 right-4 z-10 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+        >
+          <CloseIcon width={12} height={12} />
+        </button>
+
+        <div className="scrollbar-hide max-h-[46dvh] overflow-y-auto pr-1">
         <div className="space-y-1">
           {Array.from({ length: 10 }, (_, index) => {
             const row = topRows[index];
@@ -330,12 +437,7 @@ function LeaderboardFlow() {
                     isMe ? "text-silver-50" : "text-silver-200"
                   }`}
                 >
-                  {row.alias ?? "Unnamed Explorer"}
-                  {isMe ? (
-                    <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
-                      You
-                    </span>
-                  ) : null}
+                  {isMe ? "You" : (row.alias ?? "Unnamed Explorer")}
                 </span>
                 <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
                   {formatFragments(row.total)}
@@ -344,39 +446,39 @@ function LeaderboardFlow() {
             );
           })}
         </div>
-      </div>
 
-      {/* the visitor's standing always gets its own card under the board */}
-      <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
-        <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
-          {STANDING_TITLES[standingTier]}
-        </p>
-        <p className="mt-1 flex items-baseline gap-3 text-sm">
-          <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
-            {myPlace}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
-            {alias ?? "You"}
-            <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
+        {/* the visitor's standing: one pure row under the board */}
+        <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
+          <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
+            {STANDING_TITLES[standingTier]}
+          </p>
+          <p className="mt-1 flex items-baseline gap-3 text-sm">
+            <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
+              {myPlace}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
               You
             </span>
-          </span>
-          <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-            {formatFragments(balance)}
-          </span>
-        </p>
-        <p className="mt-1.5 text-[0.7rem] leading-relaxed text-silver-300">
-          {standingText ||
-            "Collect fragments across the galaxy to take your place on the board."}
-        </p>
+            <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+              {formatFragments(balance)}
+            </span>
+          </p>
+        </div>
+        </div>
       </div>
 
-      <p className="mt-4 text-center font-mono text-[0.55rem] tracking-[0.22em] text-silver-300 uppercase">
-        {formatFragments(fragmentsTotal)} total fragments collected across the galaxy
-      </p>
-      <p className="mt-1.5 text-center text-[0.7rem] leading-relaxed text-silver-500">
-        {galaxyPulseLine(activeExplorers, updateNonce * 48271 + 7)}
-      </p>
+      {/* island 3 — the galaxy pulse */}
+      <div
+        className="chrome-border card-depth relative w-full rounded-3xl px-6 py-4 sm:px-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <p className="text-center font-mono text-[0.55rem] tracking-[0.22em] text-silver-300 uppercase">
+          {formatFragments(fragmentsTotal)} total fragments collected across the galaxy
+        </p>
+        <p className="mt-1.5 text-center text-[0.7rem] leading-relaxed text-silver-500">
+          {galaxyPulseLine(activeExplorers, updateNonce * 48271 + 7)}
+        </p>
+      </div>
     </div>
   );
 }
@@ -412,6 +514,31 @@ function LegalFlow({
 /* 1+2 — join the waitlist inside the Reservation Vault              */
 /* ---------------------------------------------------------------- */
 
+/**
+ * While a "check your inbox" screen waits, ride the handoff stream: the
+ * moment the emailed link is tapped — on any device, in any mail app —
+ * this browser claims its own session and jumps into the galaxy.
+ */
+function useHandoffJump(active: boolean, placement: string) {
+  const claimed = useRef(false);
+  useEffect(() => {
+    if (!active) return;
+    return watchHandoff(() => {
+      void (async () => {
+        if (claimed.current) return;
+        const profile = await claimHandoffSession();
+        if (!profile || claimed.current) return;
+        claimed.current = true;
+        trackLandingEvent({
+          slug: "auth.magic_link_authenticated",
+          metadata: { flow: "handoff", placement },
+        });
+        useGalaxyStore.getState().startJump("public");
+      })();
+    });
+  }, [active, placement]);
+}
+
 function JoinFlow() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "error">(
@@ -422,6 +549,7 @@ function JoinFlow() {
   const pendingCollect = useFragmentsStore((s) => s.pendingCollect);
   const markJoined = useFragmentsStore((s) => s.markJoined);
   const applyCollect = useFragmentsStore((s) => s.applyCollect);
+  useHandoffJump(status === "sent", "join_cave");
 
   function updateEmail(value: string) {
     if (!formStarted.current) {
@@ -502,6 +630,10 @@ function JoinFlow() {
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
           Your spot is reserved, but not secured. Verify your email within
           12 hours to lock it in, or your place drifts back into the belt.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-silver-500">
+          Verify on any device. Keep this screen open and your galaxy
+          opens right here.
         </p>
         <p className="mt-4 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
           Sent to {email}
@@ -584,6 +716,7 @@ function ExplorerSigninFlow() {
   );
   const [error, setError] = useState("");
   const formStarted = useRef(false);
+  useHandoffJump(status === "sent", "signin_cave");
 
   useEffect(() => {
     (async () => {
@@ -734,8 +867,11 @@ function ExplorerSigninFlow() {
           Check your inbox.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          A light is on its way to {email}. Follow it to restore
-          your spot and see everything you have collected.
+          A light is on its way to {email}. Tap it on any device you like.
+        </p>
+        <p className="mt-2 text-sm leading-relaxed text-silver-500">
+          Keep this screen open and it signs itself in the moment the
+          light lands.
         </p>
       </div>
     );
@@ -1174,8 +1310,18 @@ function MagicFlow() {
         <Button
           variant="secondary"
           onClick={() => {
-            trackCtaClick("member_gate_open", { placement: "magic_failed" });
-            useGalaxyStore.getState().enterCave("members");
+            // Route by the link's flow: explorers belong in the sign-in
+            // grove, only members go to the cipher gate.
+            const flow = new URLSearchParams(window.location.search).get(
+              "flow",
+            );
+            if (flow === "member") {
+              trackCtaClick("member_gate_open", { placement: "magic_failed" });
+              useGalaxyStore.getState().enterCave("members");
+            } else {
+              trackCtaClick("signin_gate_open", { placement: "magic_failed" });
+              useGalaxyStore.getState().enterCave("signin");
+            }
           }}
           className="mt-5 min-h-0 px-6 py-3 text-[0.62rem] uppercase"
         >

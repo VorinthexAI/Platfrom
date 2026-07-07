@@ -18,6 +18,12 @@ export const authChallengeSchema = z.object({
   consumedAt: z.string().nullable().default(null),
   createdAt: z.string(),
   embedding: z.array(z.number()).default([]),
+  // Cross-device handoff: the requesting browser parks a second secret and
+  // claims a session once the emailed link is tapped anywhere. Double
+  // hashed at rest exactly like tokenHash.
+  handoffTokenHash: z.string().nullable().default(null),
+  approvedAt: z.string().nullable().default(null),
+  handoffClaimedAt: z.string().nullable().default(null),
 });
 
 export type AuthChallenge = z.infer<typeof authChallengeSchema>;
@@ -82,6 +88,17 @@ export async function getAuthChallengeByTokenHash(tokenHash: string): Promise<Au
   const cursor = await db.query(aql`
     FOR c IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
       FILTER c.tokenHash == ${tokenHash}
+      LIMIT 1
+      RETURN c
+  `);
+  const doc = await cursor.next();
+  return doc ? parseAuthChallenge(withArangoKey(doc)) : null;
+}
+
+export async function getAuthChallengeByHandoffTokenHash(handoffTokenHash: string): Promise<AuthChallenge | null> {
+  const cursor = await db.query(aql`
+    FOR c IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      FILTER c.handoffTokenHash == ${handoffTokenHash}
       LIMIT 1
       RETURN c
   `);

@@ -100,6 +100,11 @@ export interface EntityContent {
   secondaryCta?: string;
   /** One-liner shown on dormant/teaser panels ("Joins the Nexus after Core…"). */
   statusNote?: string;
+  /**
+   * The bottom drawer's single line: 15 words max, no hyphens or dashes.
+   * `body` stays the long form for pages, SEO, and llms surfaces.
+   */
+  drawerLine?: string;
 }
 
 export interface EntityPrice {

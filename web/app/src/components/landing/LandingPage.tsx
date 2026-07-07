@@ -11,6 +11,7 @@ import { AeoSections } from "./AeoSections";
 import { AnalyticsConductor } from "./AnalyticsConductor";
 import { AudioConductor } from "./AudioConductor";
 import { FooterStrip } from "./FooterStrip";
+import { HandoffConductor } from "./HandoffConductor";
 import { HeroContent } from "./HeroContent";
 import { InteriorOverlay } from "./InteriorOverlay";
 import { IntroCurtain } from "./IntroCurtain";
@@ -68,6 +69,8 @@ export function LandingPage({
         <AnalyticsConductor />
         <AudioConductor />
         <PresenceConductor />
+        {/* Arrival deep links own their own auth choreography. */}
+        <HandoffConductor disabled={Boolean(arrival || initialCave)} />
         <FooterStrip />
         {intro ? <IntroCurtain /> : null}
       </UniverseStage>

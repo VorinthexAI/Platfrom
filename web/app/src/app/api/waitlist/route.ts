@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
+import {
+  randomDecoyHandoff,
+  setHandoffCookies,
+} from "@/lib/auth/handoff-cookies";
 import { emailSchema } from "@/lib/email";
 import { collectCollectible } from "@/lib/fragments/fragments-server";
 
@@ -22,6 +26,8 @@ interface BackendWaitlistResponse {
   waitlist_number?: number | null;
   verificationEmailSent?: boolean;
   expiresAt?: string;
+  handoffTokenHash?: string;
+  handoffExpiresAt?: string;
   devVerifyLink?: string;
 }
 
@@ -102,6 +108,7 @@ export async function POST(request: Request) {
   }
 
   let payload: Record<string, unknown>;
+  let handoff: { hash: string; expiresAt: Date } | null = null;
   if (backendConfigured()) {
     const result = await backendFetch<BackendWaitlistResponse>("/waitlist", {
       method: "POST",
@@ -125,6 +132,14 @@ export async function POST(request: Request) {
       waitlistNumber: result.data.waitlist_number ?? null,
       collect,
     };
+    if (result.data.handoffTokenHash) {
+      handoff = {
+        hash: result.data.handoffTokenHash,
+        expiresAt: result.data.handoffExpiresAt
+          ? new Date(result.data.handoffExpiresAt)
+          : new Date(Date.now() + 12 * 60 * 60 * 1000),
+      };
+    }
   } else {
     if (isProduction) {
       return NextResponse.json(
@@ -143,6 +158,13 @@ export async function POST(request: Request) {
   }
 
   const response = NextResponse.json(payload);
+  // Park the cross-device handoff: verifying from any surface signs THIS
+  // browser in. Already-verified joins get a decoy so headers stay uniform.
+  setHandoffCookies(
+    response,
+    handoff?.hash ?? randomDecoyHandoff(),
+    handoff?.expiresAt ?? new Date(Date.now() + 12 * 60 * 60 * 1000),
+  );
   if (isNewExplorer) {
     response.cookies.set(EXPLORER_COOKIE, explorerId, {
       httpOnly: true,

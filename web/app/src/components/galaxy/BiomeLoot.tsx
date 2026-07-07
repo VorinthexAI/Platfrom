@@ -28,10 +28,12 @@ import { CHAMBER_RADIUS } from "./BiomeChamber";
  * - BiomeLootField: 10–25 small fragments (worth 1–3 each) scattered on
  *   the floor. Ids are stable per biome, so collected pieces never
  *   respawn on re-entry, and every collect persists its exact mesh recipe.
- * - CenterCrystal: 3-in-5 asteroid biomes grow a rare crystal in the
- *   middle — worth 100 up to 10,000 fragments, sized with its value (the
- *   largest fill the whole chamber). It assembles from shards erupting
- *   out of the floor, then rotates on a full-3D loop until collected.
+ * - CenterCrystal: every asteroid biome grows a rare crystal at its
+ *   heart, floating at the same spot and size as a world's emblem so it
+ *   always reads as THE tappable centerpiece. Its value speaks through
+ *   tint, glow, and light — never through scale. It assembles from
+ *   shards erupting out of the floor, then rotates on a full-3D loop
+ *   until collected.
  *
  * Collection uses pointer-DOWN on an always-full-size invisible hit
  * sphere: taps register the instant a finger lands, even while the
@@ -221,6 +223,13 @@ const CRYSTAL_NAMES = [
   "Deep Relic",
 ];
 
+/** Same visual weight as InteriorEmblem's EMBLEM_SIZE (1.25). */
+const CENTER_CRYSTAL_SCALE = 1.15;
+/** Chamber-heart height the assembled crystal floats at (world units). */
+const CRYSTAL_HEART_Y = -0.3;
+/** Group-local floor height, so shards still erupt out of the ground. */
+const ERUPT_START_Y = (FLOOR_Y + 0.1 - CRYSTAL_HEART_Y) / CENTER_CRYSTAL_SCALE;
+
 export interface CenterCrystalRoll {
   present: boolean;
   value: number;
@@ -244,9 +253,10 @@ export function rollCenterCrystal(lootSeed: number): CenterCrystalRoll {
     tierIndex: tier.index,
     name: CRYSTAL_NAMES[Math.floor(random() * CRYSTAL_NAMES.length)]!,
     seed: Math.floor(random() * 0x7fffffff),
-    // Value → size across five decades: 10 ≈ 0.55, 1k ≈ 2.4, 1M ≈ 5.2
-    // (the million-class vault fills the whole chamber).
-    scale: 0.55 + Math.log10(Math.max(value, 10) / 10) * 0.93,
+    // Fixed display size, matched to the world emblem: a room-filling
+    // crystal reads as scenery, not a collectible. Value shows through
+    // tint, glow, and light instead.
+    scale: CENTER_CRYSTAL_SCALE,
   };
 }
 
@@ -330,7 +340,7 @@ export function CenterCrystal({
       const arc = Math.sin(eased * Math.PI);
       ref.position.set(
         piece.position[0] + wobble.x * (1 - eased),
-        THREE.MathUtils.lerp(FLOOR_Y * 0.35, piece.position[1], eased) +
+        THREE.MathUtils.lerp(ERUPT_START_Y, piece.position[1], eased) +
           arc * wobble.apex * 0.25,
         piece.position[2] + wobble.z * (1 - eased),
       );
@@ -390,7 +400,9 @@ export function CenterCrystal({
   return (
     <group
       ref={groupRef}
-      position={[0, FLOOR_Y + 0.18, 0]}
+      // Float at the chamber heart — the exact spot the camera rests on
+      // and where world emblems live — so it reads as the centerpiece.
+      position={[0, CRYSTAL_HEART_Y, 0]}
       scale={roll.scale}
     >
       <group ref={spinRef}>
@@ -448,9 +460,9 @@ export function CenterCrystal({
           document.body.style.cursor = "auto";
         }}
       >
-        <sphereGeometry args={[1.05, 12, 12]} />
-        {/* Double-sided: a room-filling crystal's hit sphere can enclose
-            the camera, and front-side raycasts miss from inside. */}
+        {/* Generous tap target — noticeably larger than the crystal so a
+            thumb lands it first try on mobile. */}
+        <sphereGeometry args={[1.55, 12, 12]} />
         <meshBasicMaterial side={THREE.DoubleSide} />
       </mesh>
     </group>

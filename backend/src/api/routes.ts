@@ -13,6 +13,7 @@ import {
   validateMagicLink,
   verifyTotpAndIssueSession,
 } from './auth';
+import { claimHandoff, getHandoffStatus, streamHandoff } from './auth-handoff';
 import { getUserId } from './security';
 import { REFRESH_COOKIE, setSessionCookies, setSessionTokenHeaders } from './middleware';
 import { joinNewsletter } from './newsletter';
@@ -70,6 +71,37 @@ export function registerRoutes(app: Hono) {
       ok: true,
       email_sent: true,
       expires_at: result.expiresAt.toISOString(),
+      ...('handoffTokenHash' in result && result.handoffTokenHash
+        ? {
+          handoff_token_hash: result.handoffTokenHash,
+          handoff_expires_at: result.handoffExpiresAt.toISOString(),
+        }
+        : {}),
+    });
+  });
+
+  // Cross-device handoff: the browser that requested a link waits here,
+  // then trades its approved secret for a session of its own.
+  app.get('/auth/handoff/stream', streamHandoff);
+
+  app.get('/auth/handoff/status', async (c) => {
+    const query = parseQuery(c, strictObject({ handoff: challengeHash }));
+    return c.json({ status: await getHandoffStatus(query.handoff) });
+  });
+
+  app.post('/auth/handoff/claim', async (c) => {
+    const body = await parseJson(c, strictObject({ handoff_token_hash: challengeHash }));
+    const result = await claimHandoff(body.handoff_token_hash);
+    if (!result) return c.json({ error: 'handoff is not claimable' }, 401);
+    setSessionTokenHeaders(c, result);
+    setSessionCookies(c, result);
+    return c.json({
+      status: result.status,
+      access_token: result.accessToken,
+      refresh_token: result.refreshToken,
+      alias: result.alias,
+      waitlist_number: result.waitlistNumber,
+      welcome_line: result.welcomeLine,
     });
   });
 

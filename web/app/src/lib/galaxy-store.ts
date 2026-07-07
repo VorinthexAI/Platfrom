@@ -37,6 +37,7 @@ export type CaveKind =
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault
   | "leaderboard" // the galaxy leaderboard hall — live ranks + crystal cave
+  | "sealed" // tapped-email-link landing: success state, no way out
   | "rock"; // any ordinary belt asteroid — hollow, near-empty, a few fragments
 
 /** Where the camera anchors when diving into an ordinary belt rock. */
@@ -330,6 +331,9 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
     // belt, or the solar system when the asteroid was clicked from there.
     // Auth-story caves always return to the solar system.
     const state = get();
+    // The sealed chamber has no exit by design: a tapped email link ends
+    // here, and the visitor returns to where they requested it.
+    if (state.caveKind === "sealed") return;
     const wasRock = state.caveKind === "rock";
     const returnMode = wasRock ? state.rockReturnMode : "system";
     if (returnMode === "belt") {

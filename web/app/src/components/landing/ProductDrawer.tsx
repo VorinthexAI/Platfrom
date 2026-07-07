@@ -168,7 +168,8 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
           {entity.fullTitle ?? entity.label ?? entity.tagline}
         </p>
         <p className="mt-3 max-w-xl text-[0.85rem] leading-relaxed text-silver-300">
-          {entity.content?.body ??
+          {entity.content?.drawerLine ??
+            entity.content?.body ??
             entity.longDescription ??
             entity.shortDescription}
         </p>

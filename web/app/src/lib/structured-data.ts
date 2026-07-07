@@ -36,20 +36,23 @@ export function entityJsonLd(entity: GalaxyEntity) {
     description: entity.seo.description,
     url: absoluteUrl(entity.routes.path),
   };
-  if (schemaType === "SoftwareApplication" && entity.type === "product") {
+  if (schemaType === "SoftwareApplication") {
+    // Live entities with a registry price advertise it; everything else
+    // is a pre-order at no cost (waitlist access).
+    const offers = {
+      "@type": "Offer",
+      availability: entity.isLive
+        ? "https://schema.org/InStock"
+        : "https://schema.org/PreOrder",
+      price: entity.price ? entity.price.amount.toFixed(2) : "0",
+      priceCurrency: entity.price?.currency ?? "USD",
+    };
     return {
       ...base,
       applicationCategory: "ProductivityApplication",
       operatingSystem: "iOS, Android, Web",
       publisher: { "@type": "Organization", name: SITE_NAME, url: SITE_URL },
-      offers: {
-        "@type": "Offer",
-        availability: entity.isLive
-          ? "https://schema.org/PreOrder"
-          : "https://schema.org/PreOrder",
-        price: "0",
-        priceCurrency: "USD",
-      },
+      offers,
     };
   }
   if (schemaType === "Service") {

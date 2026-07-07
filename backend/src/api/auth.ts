@@ -25,6 +25,7 @@ import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail 
 import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { trackPlatformEvent } from '@/platform/events';
+import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
 import { notifyCountersDirty } from './live-bus';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
@@ -230,10 +231,14 @@ export async function createChallenge(
   kind: 'email' | 'totp' | 'waitlist',
   ttlMs: number,
   identityType: ChallengeIdentityType = 'user',
+  options: { withHandoff?: boolean } = {},
 ) {
   const token = randomToken(`vrtx_${kind}_`);
   const publicTokenHash = await createChallengeTokenHash(token);
   const storedTokenHash = await sha256(publicTokenHash);
+  // The requesting browser's cross-device secret: parked on the same doc,
+  // approved when the link is tapped, claimed once by the origin browser.
+  const handoff = options.withHandoff ? await createHandoffSecret() : null;
   const expiresAt = new Date(Date.now() + ttlMs);
   await insertAuthChallenge({
     key: newId(),
@@ -243,8 +248,13 @@ export async function createChallenge(
     tokenHash: storedTokenHash,
     expiresAt: expiresAt.toISOString(),
     createdAt: new Date().toISOString(),
+    ...(handoff ? { handoffTokenHash: handoff.storedTokenHash } : {}),
   });
-  return { tokenHash: publicTokenHash, expiresAt };
+  return {
+    tokenHash: publicTokenHash,
+    expiresAt,
+    handoffTokenHash: handoff?.publicTokenHash ?? null,
+  };
 }
 
 export async function consumeChallenge(tokenHash: string, kind: 'email' | 'totp' | 'waitlist') {
@@ -267,6 +277,7 @@ export async function consumeChallenge(tokenHash: string, kind: 'email' | 'totp'
     userId: updated.identityType === 'user' ? updated.identityKey : undefined,
     expiresAt: new Date(updated.expiresAt),
     consumedAt: updated.consumedAt ? new Date(updated.consumedAt) : null,
+    handoffTokenHash: updated.handoffTokenHash,
   };
 }
 
@@ -343,7 +354,7 @@ export async function requestSignInEmail(email: string) {
     return { allowed: false as const };
   }
 
-  const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user');
+  const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true });
   const magicLink = buildMagicLink(challenge.tokenHash, 'user');
   await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
   trackPlatformEvent({
@@ -354,6 +365,10 @@ export async function requestSignInEmail(email: string) {
   return {
     allowed: true as const,
     expiresAt: challenge.expiresAt,
+    handoffTokenHash: challenge.handoffTokenHash,
+    // The origin browser may claim for the full link TTL plus the
+    // approval window after a last-second tap.
+    handoffExpiresAt: new Date(challenge.expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
   };
 }
 
@@ -392,6 +407,9 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
   if (emailChallenge.identityType === 'user') {
     const user = await getUserById(emailChallenge.identityKey);
     if (!user) return null;
+    // The tap proves inbox ownership: wake the browser that requested the
+    // link, wherever this one happens to be running.
+    await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
     const tokens = await issueUserTokens(user);
     // Signing in proves inbox ownership — it verifies the email too.
     const wasUnverified = !user.isVerified;
