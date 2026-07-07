@@ -796,10 +796,15 @@ jobs:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
           SEEDS_FILE: ${{ github.workspace }}/environments/backend/db.seeds.secrets.json
+          DB_SEEDS_SECRETS_JSON: ${{ secrets.DB_SEEDS_SECRETS_JSON }}
         run: |
           if [ ! -f "$SEEDS_FILE" ]; then
-            echo "::notice::$SEEDS_FILE is absent; skipping secret seed upsert."
-            exit 0
+            if [ -z "$DB_SEEDS_SECRETS_JSON" ]; then
+              echo "::notice::$SEEDS_FILE is absent and DB_SEEDS_SECRETS_JSON is not configured; skipping secret seed upsert."
+              exit 0
+            fi
+            mkdir -p "$(dirname "$SEEDS_FILE")"
+            printf '%s' "$DB_SEEDS_SECRETS_JSON" > "$SEEDS_FILE"
           fi
           bun run --cwd backend seed:secrets
 
