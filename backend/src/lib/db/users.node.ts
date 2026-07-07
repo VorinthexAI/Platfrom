@@ -63,6 +63,17 @@ export async function getUserByEmailHash(emailHash: string): Promise<User | null
   return doc ? userSchema.parse(withArangoKey(doc)) : null;
 }
 
+export async function getUserByRefreshTokenHash(refreshTokenHash: string): Promise<User | null> {
+  const cursor = await db.query(aql`
+    FOR u IN ${db.collection(USERS_COLLECTION)}
+      FILTER u.refreshTokenHash == ${refreshTokenHash}
+      LIMIT 1
+      RETURN u
+  `);
+  const doc = await cursor.next();
+  return doc ? userSchema.parse(withArangoKey(doc)) : null;
+}
+
 export async function getUserByUpdatesUnsubscribeTokenHash(tokenHash: string): Promise<User | null> {
   const cursor = await db.query(aql`
     FOR u IN ${db.collection(USERS_COLLECTION)}

@@ -45,13 +45,15 @@ describe('formatNodesForThree', () => {
     expect(colors[2]).not.toEqual([0.7, 0.75, 0.78]);
   });
 
-  test('meta carries keys and optional labels', () => {
-    const { meta } = formatNodesForThree(docs);
+  test('meta carries keys, optional labels, and optional mesh recipes', () => {
+    const meshDoc = { key: 'frag_e', name: 'Edge Crystal', rarity: 'rare', mesh: { generator: 'crystal-v1', seed: 42 } };
+    const { meta } = formatNodesForThree([...docs, meshDoc]);
     expect(meta).toEqual([
-      { key: 'frag_a', label: 'Nexus Shard' },
-      { key: 'frag_b', label: 'Founder Core' },
-      { key: 'frag_c', label: 'Legendary Prism' },
-      { key: 'frag_d', label: null },
+      { key: 'frag_a', label: 'Nexus Shard', mesh: null },
+      { key: 'frag_b', label: 'Founder Core', mesh: null },
+      { key: 'frag_c', label: 'Legendary Prism', mesh: null },
+      { key: 'frag_d', label: null, mesh: null },
+      { key: 'frag_e', label: 'Edge Crystal', mesh: { generator: 'crystal-v1', seed: 42 } },
     ]);
   });
 

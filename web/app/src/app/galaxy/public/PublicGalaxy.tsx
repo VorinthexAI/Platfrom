@@ -22,7 +22,11 @@ export function PublicGalaxy() {
   const router = useRouter();
   const [profile, setProfile] = useState<StoredProfile | null>(null);
   const [balance, setBalance] = useState(0);
-  const [globe, setGlobe] = useState<GlobeData>({ points: [], colors: [] });
+  const [globe, setGlobe] = useState<GlobeData>({
+    points: [],
+    colors: [],
+    meta: [],
+  });
 
   useEffect(() => {
     (async () => {

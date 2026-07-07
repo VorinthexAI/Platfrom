@@ -4,32 +4,63 @@ import { create } from "zustand";
 import { trackLandingEvent } from "@/lib/analytics";
 
 /**
- * The galaxy's sound has two channels:
- * MUSIC is the mission soundtrack started by the header CTA.
+ * The galaxy's sound has three channels:
+ * AMBIENT is the master-brand bed — very subtle, starts on the first user
+ *   gesture (scroll/tap/click) and loops forever underneath everything.
+ * MISSION is the mission voice started by the header CTA. It plays exactly
+ *   once per tap (no loop); tapping again mid-play cancels it. While it
+ *   speaks, any biome voice is paused and resumes where it left off.
  * VOICE is the current world's voiceover.
  */
 
 export const MISSION_AUDIO_SRC = "/audio/brand/mission.mp3";
+export const AMBIENT_AUDIO_SRC = "/audio/brand/master-brand-vorinthex-ai-v1.mp3";
 
 export function entityAudioUrl(type: string, slug: string): string {
   return `/audio/entities/${type}-${slug}.mp3`;
 }
 
-const MUSIC_VOLUME = 0.18;
-const MUSIC_DUCKED = 0.07;
+const AMBIENT_VOLUME = 0.055;
+const AMBIENT_DUCKED = 0.02;
+const MISSION_VOLUME = 0.55;
 const VOICE_VOLUME = 0.9;
 
-let music: HTMLAudioElement | null = null;
+let ambient: HTMLAudioElement | null = null;
+let mission: HTMLAudioElement | null = null;
 let voice: HTMLAudioElement | null = null;
 
-function musicElement(): HTMLAudioElement {
-  if (!music) {
-    music = new Audio(MISSION_AUDIO_SRC);
-    music.loop = true;
-    music.preload = "auto";
-    music.volume = MUSIC_VOLUME;
+/** The biome voice line the mission interrupted; resumed when it ends. */
+let voiceHeldForMission = false;
+/** A voice requested while the mission speaks; starts once it finishes. */
+let voiceQueuedBehindMission: string | null = null;
+
+function anyForegroundAudioPlaying() {
+  return Boolean((mission && !mission.paused) || (voice && !voice.paused));
+}
+
+function settleAmbientVolume() {
+  if (!ambient) return;
+  ambient.volume = anyForegroundAudioPlaying() ? AMBIENT_DUCKED : AMBIENT_VOLUME;
+}
+
+function ambientElement(): HTMLAudioElement {
+  if (!ambient) {
+    ambient = new Audio(AMBIENT_AUDIO_SRC);
+    ambient.loop = true;
+    ambient.preload = "auto";
+    ambient.volume = AMBIENT_VOLUME;
   }
-  return music;
+  return ambient;
+}
+
+function missionElement(): HTMLAudioElement {
+  if (!mission) {
+    mission = new Audio(MISSION_AUDIO_SRC);
+    mission.loop = false;
+    mission.preload = "auto";
+    mission.volume = MISSION_VOLUME;
+  }
+  return mission;
 }
 
 function voiceElement(): HTMLAudioElement {
@@ -37,44 +68,119 @@ function voiceElement(): HTMLAudioElement {
     voice = new Audio();
     voice.preload = "auto";
     voice.volume = VOICE_VOLUME;
-    voice.addEventListener("play", () => {
-      if (music) music.volume = MUSIC_DUCKED;
-    });
-    const restore = () => {
-      if (music) music.volume = MUSIC_VOLUME;
-    };
-    voice.addEventListener("ended", restore);
-    voice.addEventListener("pause", restore);
+    voice.addEventListener("play", settleAmbientVolume);
+    voice.addEventListener("ended", settleAmbientVolume);
+    voice.addEventListener("pause", settleAmbientVolume);
   }
   return voice;
 }
 
 interface AudioState {
+  missionPlaying: boolean;
+  ambientStarted: boolean;
   pendingVoiceSrc: string | null;
-  playMission: () => void;
+  /** Tap once → hear once; tap mid-voice → cancel. */
+  toggleMission: () => void;
+  startAmbient: () => void;
   playVoice: (src: string) => void;
   stopVoice: () => void;
+  pauseVoice: () => void;
+  resumeVoice: () => void;
   resumePending: () => void;
 }
 
 export const useAudioStore = create<AudioState>((set, get) => ({
+  missionPlaying: false,
+  ambientStarted: false,
   pendingVoiceSrc: null,
 
-  playMission: () => {
-    const audio = musicElement();
+  toggleMission: () => {
+    const audio = missionElement();
+
+    if (!audio.paused) {
+      // Tap mid-voice: cancel outright and hand the floor back.
+      audio.pause();
+      audio.currentTime = 0;
+      set({ missionPlaying: false });
+      trackLandingEvent({
+        slug: "landing.mission_voice_cancelled",
+        metadata: { src: MISSION_AUDIO_SRC },
+      });
+      if (voiceHeldForMission) {
+        voiceHeldForMission = false;
+        get().resumeVoice();
+      } else if (voiceQueuedBehindMission) {
+        const queued = voiceQueuedBehindMission;
+        voiceQueuedBehindMission = null;
+        get().playVoice(queued);
+      }
+      settleAmbientVolume();
+      return;
+    }
+
+    // A biome voice mid-line steps aside and continues afterwards.
+    if (voice && !voice.paused) {
+      voiceHeldForMission = true;
+      voice.pause();
+    }
+
+    const finish = () => {
+      audio.removeEventListener("ended", finish);
+      set({ missionPlaying: false });
+      if (voiceHeldForMission) {
+        voiceHeldForMission = false;
+        get().resumeVoice();
+      } else if (voiceQueuedBehindMission) {
+        const queued = voiceQueuedBehindMission;
+        voiceQueuedBehindMission = null;
+        get().playVoice(queued);
+      }
+      settleAmbientVolume();
+    };
+    audio.addEventListener("ended", finish);
+
     audio.currentTime = 0;
     audio
       .play()
       .then(() => {
+        set({ missionPlaying: true });
+        settleAmbientVolume();
         trackLandingEvent({
-          slug: "landing.audio_played",
-          metadata: { audio_kind: "mission", src: MISSION_AUDIO_SRC },
+          slug: "landing.mission_voice_played",
+          metadata: { src: MISSION_AUDIO_SRC },
+        });
+      })
+      .catch(() => {
+        audio.removeEventListener("ended", finish);
+        if (voiceHeldForMission) {
+          voiceHeldForMission = false;
+          get().resumeVoice();
+        }
+      });
+  },
+
+  startAmbient: () => {
+    if (get().ambientStarted) return;
+    const audio = ambientElement();
+    audio
+      .play()
+      .then(() => {
+        set({ ambientStarted: true });
+        settleAmbientVolume();
+        trackLandingEvent({
+          slug: "landing.ambient_audio_started",
+          metadata: { src: AMBIENT_AUDIO_SRC },
         });
       })
       .catch(() => {});
   },
 
   playVoice: (src) => {
+    // The mission voice has the floor; the biome line waits its turn.
+    if (mission && !mission.paused) {
+      voiceQueuedBehindMission = src;
+      return;
+    }
     const audio = voiceElement();
     audio.src = src;
     audio.currentTime = 0;
@@ -92,7 +198,19 @@ export const useAudioStore = create<AudioState>((set, get) => ({
 
   stopVoice: () => {
     if (voice && !voice.paused) voice.pause();
+    voiceHeldForMission = false;
+    voiceQueuedBehindMission = null;
     set({ pendingVoiceSrc: null });
+  },
+
+  pauseVoice: () => {
+    if (voice && !voice.paused) voice.pause();
+  },
+
+  resumeVoice: () => {
+    if (voice && voice.paused && voice.src && voice.currentTime > 0 && !voice.ended) {
+      voice.play().catch(() => {});
+    }
   },
 
   resumePending: () => {

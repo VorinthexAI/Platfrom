@@ -71,6 +71,129 @@ export function createCrystalGeometry(variant: number): THREE.BufferGeometry {
   return cluster;
 }
 
+/**
+ * Rare biome crystals: very noisy, edgy shard clusters — nothing globe-
+ * like. Built as discrete pieces so the assembly animation can erupt each
+ * shard from the floor and fuse it into its exact final slot; rendering
+ * the same pieces afterwards preserves the exact mesh, and the (generator,
+ * seed) pair is what gets persisted to the backend as the mesh recipe.
+ */
+
+export const EDGY_CRYSTAL_GENERATOR = "edgy-crystal-v1";
+
+export interface CrystalPiece {
+  geometry: THREE.BufferGeometry;
+  /** Final resting position of the piece inside the cluster. */
+  position: [number, number, number];
+  rotation: [number, number, number];
+}
+
+/** One jagged shard: a low-poly spike with heavy random vertex jitter. */
+function createJaggedShard(random: () => number, length: number, radius: number) {
+  const sides = 4 + Math.floor(random() * 3);
+  const body = new THREE.CylinderGeometry(
+    radius * (0.2 + random() * 0.4),
+    radius,
+    length,
+    sides,
+    2,
+  );
+  body.translate(0, length * 0.5, 0);
+  const position = body.getAttribute("position") as THREE.BufferAttribute;
+  for (let i = 0; i < position.count; i++) {
+    position.setXYZ(
+      i,
+      position.getX(i) + (random() - 0.5) * radius * 0.9,
+      position.getY(i) + (random() - 0.5) * length * 0.14,
+      position.getZ(i) + (random() - 0.5) * radius * 0.9,
+    );
+  }
+  // Deliberately unwelded, flat-shaded facets: hard edges everywhere.
+  body.computeVertexNormals();
+  return body;
+}
+
+/**
+ * A seeded edgy crystal cluster split into pieces. Deterministic: the same
+ * seed always reproduces the exact same shards in the exact same slots.
+ */
+export function createEdgyCrystalPieces(seed: number): CrystalPiece[] {
+  const random = mulberry32(seed ^ 0xed6ec1);
+  const pieces: CrystalPiece[] = [];
+
+  // Towering main shards.
+  const mains = 2 + Math.floor(random() * 3);
+  for (let i = 0; i < mains; i++) {
+    const length = 0.7 + random() * 0.6;
+    pieces.push({
+      geometry: createJaggedShard(random, length, 0.12 + random() * 0.09),
+      position: [
+        (random() - 0.5) * 0.24,
+        -0.05 + random() * 0.05,
+        (random() - 0.5) * 0.24,
+      ],
+      rotation: [
+        (random() - 0.5) * 0.5,
+        random() * Math.PI * 2,
+        (random() - 0.5) * 0.5,
+      ],
+    });
+  }
+
+  // A skirt of splayed satellites.
+  const satellites = 5 + Math.floor(random() * 7);
+  for (let i = 0; i < satellites; i++) {
+    const yaw = (i / satellites) * Math.PI * 2 + random() * 0.9;
+    const spread = 0.14 + random() * 0.22;
+    pieces.push({
+      geometry: createJaggedShard(
+        random,
+        0.22 + random() * 0.45,
+        0.05 + random() * 0.07,
+      ),
+      position: [Math.cos(yaw) * spread, -0.04, Math.sin(yaw) * spread],
+      rotation: [
+        0.4 + random() * 0.8,
+        yaw + (random() - 0.5) * 0.6,
+        (random() - 0.5) * 0.5,
+      ],
+    });
+  }
+
+  // Chaotic debris chunks wedged between the shards.
+  const chunks = 3 + Math.floor(random() * 5);
+  for (let i = 0; i < chunks; i++) {
+    const chunk = new THREE.TetrahedronGeometry(0.06 + random() * 0.1, 0);
+    const position = chunk.getAttribute("position") as THREE.BufferAttribute;
+    for (let v = 0; v < position.count; v++) {
+      position.setXYZ(
+        v,
+        position.getX(v) * (0.7 + random() * 0.8),
+        position.getY(v) * (0.7 + random() * 0.8),
+        position.getZ(v) * (0.7 + random() * 0.8),
+      );
+    }
+    chunk.computeVertexNormals();
+    const yaw = random() * Math.PI * 2;
+    const spread = 0.1 + random() * 0.3;
+    pieces.push({
+      geometry: chunk,
+      position: [Math.cos(yaw) * spread, random() * 0.12, Math.sin(yaw) * spread],
+      rotation: [random() * Math.PI, random() * Math.PI, random() * Math.PI],
+    });
+  }
+
+  return pieces;
+}
+
+/** Crystal value → luminous tint tier. */
+export function crystalTintForValue(value: number): CrystalTint {
+  if (value >= 5000) return crystalTintForRarity("founder");
+  if (value >= 1000) return crystalTintForRarity("rare");
+  if (value >= 300) return crystalTintForRarity("uncommon");
+  return crystalTintForRarity("common");
+}
+
 export interface CrystalTint {
   color: string;
   emissive: string;

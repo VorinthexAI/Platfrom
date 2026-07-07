@@ -412,8 +412,13 @@ export function prewarmChamberTextures() {
 /**
  * The cavern wall: a displaced sphere (UVs intact for the rock texture)
  * viewed from inside. Every seed rolls different bulges and alcoves.
+ * `distortion` (default 1) scales the noise amplitudes — asteroid caves
+ * roll far wilder interiors than the curated planet biomes.
  */
-export function createChamberWallGeometry(seed: number): THREE.BufferGeometry {
+export function createChamberWallGeometry(
+  seed: number,
+  distortion = 1,
+): THREE.BufferGeometry {
   const geometry = new THREE.SphereGeometry(1, 96, 64);
   const position = geometry.getAttribute("position") as THREE.BufferAttribute;
   const dir = new THREE.Vector3();
@@ -421,7 +426,10 @@ export function createChamberWallGeometry(seed: number): THREE.BufferGeometry {
     dir.fromBufferAttribute(position, i).normalize();
     const lumps = fbm3(dir.x * 1.9, dir.y * 1.9, dir.z * 1.9, seed);
     const detail = fbm3(dir.x * 5.2, dir.y * 5.2, dir.z * 5.2, seed + 7, 3);
-    const r = 1 + lumps * 0.2 + detail * 0.07;
+    const jag = distortion > 1
+      ? fbm3(dir.x * 9.1, dir.y * 9.1, dir.z * 9.1, seed + 19, 2) * 0.05 * (distortion - 1)
+      : 0;
+    const r = 1 + (lumps * 0.2 + detail * 0.07) * distortion + jag;
     position.setXYZ(i, dir.x * r, dir.y * r, dir.z * r);
   }
   geometry.computeVertexNormals();

@@ -8,10 +8,11 @@ export const metadata: Metadata = {
 };
 
 /**
- * Waitlist verification deep link (?token_hash=…): the galaxy loads and
- * the camera dives straight into the Ember Vault, where the token is
- * verified and the explorer's alias and waitlist number are revealed.
+ * Waitlist verification deep link (?token_hash=…): the visitor travels
+ * into the solar system while the token verifies in the background, then
+ * hyper-jumps straight into their public galaxy. Only a dead link falls
+ * back into the Ember Vault story.
  */
 export default function WaitlistVerifyPage() {
-  return <LandingPage initialCave="waitlist-verify" />;
+  return <LandingPage arrival="waitlist-verify" />;
 }

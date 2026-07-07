@@ -7,14 +7,24 @@ import { ORBIT_STEPS, useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
  * Conducts the galaxy's soundtrack (no UI of its own):
- * - the mission music plays only on request — the "Hear the Mission"
- *   CTA in the header — then loops quietly underneath everything;
+ * - the master-brand ambient bed starts on the very first interaction
+ *   (scroll, tap, click, or key) and loops subtly forever;
+ * - the mission voice plays only on request — the "Hear the Mission"
+ *   CTA in the header — once per tap, never looping;
  * - every voiced world (product, orchestrator, capability) speaks its
- *   line the moment its biome is entered, ducking the music while it
+ *   line the moment its biome is entered, ducking the ambient while it
  *   talks; leaving the biome cuts it off.
  */
 
 const VOICED_TYPES = new Set(["product", "orchestrator", "capability"]);
+
+const FIRST_INTERACTION_EVENTS = [
+  "pointerdown",
+  "keydown",
+  "wheel",
+  "touchstart",
+  "scroll",
+] as const;
 
 export function AudioConductor() {
   const mode = useGalaxyStore((s) => s.mode);
@@ -24,17 +34,27 @@ export function AudioConductor() {
   const playVoice = useAudioStore((s) => s.playVoice);
   const stopVoice = useAudioStore((s) => s.stopVoice);
   const resumePending = useAudioStore((s) => s.resumePending);
+  const startAmbient = useAudioStore((s) => s.startAmbient);
+  const ambientStarted = useAudioStore((s) => s.ambientStarted);
 
-  // The first gesture releases whatever autoplay held back.
+  // The first gesture starts the ambient bed and releases whatever
+  // autoplay held back. Listeners stay attached until a gesture the
+  // browser accepts actually starts playback.
   useEffect(() => {
-    const release = () => resumePending();
-    window.addEventListener("pointerdown", release);
-    window.addEventListener("keydown", release);
-    return () => {
-      window.removeEventListener("pointerdown", release);
-      window.removeEventListener("keydown", release);
+    if (ambientStarted) return;
+    const release = () => {
+      startAmbient();
+      resumePending();
     };
-  }, [resumePending]);
+    for (const event of FIRST_INTERACTION_EVENTS) {
+      window.addEventListener(event, release, { passive: true });
+    }
+    return () => {
+      for (const event of FIRST_INTERACTION_EVENTS) {
+        window.removeEventListener(event, release);
+      }
+    };
+  }, [ambientStarted, startAmbient, resumePending]);
 
   // Each voiced world speaks on biome entry; leaving cuts it off.
   const inside = mode === "system" && step > 0 && visitPhase === "inside";

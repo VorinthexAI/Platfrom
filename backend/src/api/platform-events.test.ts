@@ -3,10 +3,12 @@ import { platformEventsBodySchema } from './platform-events';
 import { landingEventSlugSchema, landingEventSlugs } from '@/platform/events';
 
 describe('platform event schemas', () => {
-  test('catalog contains the 20 landing events', () => {
-    expect(landingEventSlugs).toHaveLength(20);
+  test('catalog contains the 30 landing events', () => {
+    expect(landingEventSlugs).toHaveLength(30);
     expect(landingEventSlugSchema.parse('landing.product_entered')).toBe('landing.product_entered');
     expect(landingEventSlugSchema.parse('fragments.collected')).toBe('fragments.collected');
+    expect(landingEventSlugSchema.parse('landing.crystal_collected')).toBe('landing.crystal_collected');
+    expect(landingEventSlugSchema.parse('auth.magic_link_authenticated')).toBe('auth.magic_link_authenticated');
   });
 
   test('accepts temporary email hash for anonymous frontend events', () => {

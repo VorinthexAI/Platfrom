@@ -4,6 +4,8 @@ import { create } from "zustand";
 import { trackLandingEvent } from "@/lib/analytics";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { CollectibleDef } from "@/lib/galaxy/registry-types";
+import { CRYSTAL_VARIANTS } from "@/lib/three/crystal";
+import { hashString } from "@/lib/three/procedural";
 
 interface FragmentToastData {
   title: string;
@@ -14,6 +16,9 @@ const JOINED_FLAG = "vx_joined";
 /** Fragments scavenged from ordinary belt rocks — device-local ledger
  * (uncharted rocks have no registry ids for the backend to verify). */
 const LOOSE_KEY = "vx_loose_fragments";
+/** Procedural biome loot (fragments + crystals) already collected on this
+ * device — the ids are stable per biome, so nothing ever respawns. */
+const LOOT_CLAIMED_KEY = "vx_loot_claimed";
 
 function readLooseFragments(): number {
   try {
@@ -21,6 +26,35 @@ function readLooseFragments(): number {
   } catch {
     return 0;
   }
+}
+
+function readClaimedLootIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(LOOT_CLAIMED_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Deterministic mesh recipe captured with every collected piece. */
+export interface LootMeshRecipe {
+  generator: string;
+  seed: number;
+  variant?: number;
+  scale?: number;
+  params?: Record<string, number | string>;
+}
+
+export interface BiomeLootInput {
+  /** Stable id: `loot-<biomeKey>-<index>` — same biome, same id, forever. */
+  id: string;
+  name: string;
+  rarity: string;
+  fragments: number;
+  kind: "fragment" | "crystal";
+  mesh: LootMeshRecipe;
 }
 
 interface FragmentsState {
@@ -47,9 +81,13 @@ interface FragmentsState {
     result: { fragmentsAwarded: number; balance: number; globalTotal: number },
   ) => void;
   hydrateProgress: () => Promise<void>;
-  claim: (collectible: CollectibleDef) => Promise<void>;
+  claim: (collectible: CollectibleDef, mesh?: LootMeshRecipe) => Promise<void>;
   /** Scavenge a few loose fragments from an uncharted belt rock. */
   collectLoose: (amount: number) => void;
+  /** Ids of procedural biome loot already collected (never respawns). */
+  lootClaimedIds: string[];
+  /** Collect a procedural biome fragment or crystal (persists its mesh). */
+  collectBiomeLoot: (loot: BiomeLootInput) => void;
   dismissToast: () => void;
 }
 
@@ -63,6 +101,7 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
   claiming: false,
   hasJoined: false,
   pendingClaim: null,
+  lootClaimedIds: [],
   select: (selected) => {
     if (selected) {
       trackLandingEvent({
@@ -123,6 +162,9 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
     // before (or without) a backend ledger.
     const loose = readLooseFragments();
     if (loose > 0) set((state) => ({ balance: state.balance + loose }));
+    // Procedural biome loot never respawns: restore the claimed set.
+    const lootClaimed = readClaimedLootIds();
+    if (lootClaimed.length > 0) set({ lootClaimedIds: lootClaimed });
     try {
       const response = await fetch("/api/fragments/progress");
       if (!response.ok) return;
@@ -136,6 +178,61 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
     } catch {
       // Progress is decorative — stay quiet on network failure.
     }
+  },
+
+  collectBiomeLoot: (loot) => {
+    if (get().lootClaimedIds.includes(loot.id)) return;
+
+    // Optimistic and final: the collectible is decorative, so the local
+    // ledger wins immediately and the backend persists in the background.
+    const nextClaimed = [...get().lootClaimedIds, loot.id];
+    try {
+      window.localStorage.setItem(LOOT_CLAIMED_KEY, JSON.stringify(nextClaimed));
+    } catch {
+      // Storage may be blocked — the session set still applies.
+    }
+    set((state) => ({
+      lootClaimedIds: nextClaimed,
+      balance: state.balance + loot.fragments,
+      toast: {
+        title:
+          loot.kind === "crystal"
+            ? `${loot.name} Claimed`
+            : `+${loot.fragments} Intelligence Fragments`,
+        detail:
+          loot.kind === "crystal"
+            ? `+${loot.fragments.toLocaleString("en-US")} Intelligence Fragments — added to your collection.`
+            : "Scavenged from the biome floor.",
+      },
+    }));
+    trackLandingEvent({
+      slug:
+        loot.kind === "crystal"
+          ? "landing.crystal_collected"
+          : "landing.biome_fragment_collected",
+      metadata: {
+        loot_id: loot.id,
+        rarity: loot.rarity,
+        fragments: loot.fragments,
+        mesh_generator: loot.mesh.generator,
+        mesh_seed: loot.mesh.seed,
+      },
+    });
+
+    void fetch("/api/fragments/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        collectibleId: loot.id,
+        loot: {
+          kind: loot.kind,
+          name: loot.name,
+          rarity: loot.rarity,
+          fragments: loot.fragments,
+          mesh: loot.mesh,
+        },
+      }),
+    }).catch(() => {});
   },
 
   collectLoose: (amount) => {
@@ -160,7 +257,7 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
     });
   },
 
-  claim: async (collectible) => {
+  claim: async (collectible, mesh) => {
     if (get().claiming) return;
     trackLandingEvent({
       slug: "landing.fragment_claim_clicked",
@@ -173,11 +270,23 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
       },
     });
     set({ claiming: true });
+    // Every collected piece keeps its exact mesh: registry treasures are
+    // rendered from a hash of their id, so that recipe is what persists.
+    const variant = hashString(collectible.id) % CRYSTAL_VARIANTS;
+    const meshRecipe: LootMeshRecipe = mesh ?? {
+      generator: "crystal-v1",
+      seed: variant,
+      variant,
+      scale: 0.5,
+    };
     try {
       const response = await fetch("/api/fragments/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ collectibleId: collectible.id }),
+        body: JSON.stringify({
+          collectibleId: collectible.id,
+          mesh: meshRecipe,
+        }),
       });
       const data = await response.json();
       if (!response.ok || !data.ok) {

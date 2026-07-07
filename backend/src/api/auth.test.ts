@@ -23,6 +23,15 @@ describe('auth helpers', () => {
     expect(link).not.toContain(rawToken);
   });
 
+  test('builds user-flow magic links for waitlist explorer sign-in', async () => {
+    process.env.FRONTEND_URL = 'https://app.example.com';
+
+    const tokenHash = await createChallengeTokenHash('vrtx_email_user');
+    const link = buildMagicLink(tokenHash, 'user');
+
+    expect(link).toBe(`https://app.example.com/public/auth/token?token_hash=${tokenHash}&flow=user`);
+  });
+
   test('encrypts and decrypts TOTP secrets', async () => {
     process.env.TOTP_SECRET_ENCRYPTION_KEY = 'test-key';
 
