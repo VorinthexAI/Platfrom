@@ -9,7 +9,6 @@ import {
   getOwningProduct,
   getStatusPrefix,
 } from "@/lib/galaxy/registry-helpers";
-import { EruptAssembly } from "@/components/ui/EruptAssembly";
 import { CloseIcon, LockIcon } from "@/components/ui/icons";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { trackCtaClick } from "@/lib/analytics";
@@ -21,12 +20,14 @@ import {
   useGalaxyStore,
 } from "@/lib/galaxy-store";
 
+/** The drawer waits below the fold this long before sliding into place. */
+const DRAWER_HOLD_SECONDS = 3;
+
 export function ProductDrawer() {
   const step = useGalaxyStore((s) => s.step);
   const mode = useGalaxyStore((s) => s.mode);
   const drawerOpen = useGalaxyStore((s) => s.drawerOpen);
   const setStep = useGalaxyStore((s) => s.setStep);
-  const visitSeed = useGalaxyStore((s) => s.visitSeed);
   const visitPhase = useGalaxyStore((s) => s.visitPhase);
   const reducedMotion = useReducedMotion();
 
@@ -49,10 +50,32 @@ export function ProductDrawer() {
           key={entity.id}
           role="dialog"
           aria-label={`${entity.name} details`}
-          initial={false}
-          animate={reducedMotion ? { opacity: 1 } : { y: 0 }}
-          exit={reducedMotion ? { opacity: 0 } : { y: "110%" }}
-          transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
+          // Held below the fold for a beat, then one smooth slide up into
+          // place; leaving slides it back down immediately.
+          initial={reducedMotion ? { opacity: 0 } : { y: "115%" }}
+          animate={
+            reducedMotion
+              ? {
+                  opacity: 1,
+                  transition: { delay: DRAWER_HOLD_SECONDS, duration: 0.5 },
+                }
+              : {
+                  y: 0,
+                  transition: {
+                    delay: DRAWER_HOLD_SECONDS,
+                    duration: 0.85,
+                    ease: [0.16, 1, 0.3, 1],
+                  },
+                }
+          }
+          exit={
+            reducedMotion
+              ? { opacity: 0, transition: { duration: 0.3 } }
+              : {
+                  y: "115%",
+                  transition: { duration: 0.6, ease: [0.4, 0, 0.6, 1] },
+                }
+          }
           drag={reducedMotion ? false : "y"}
           dragConstraints={{ top: 0, bottom: 0 }}
           dragElastic={{ top: 0, bottom: 0.55 }}
@@ -63,10 +86,7 @@ export function ProductDrawer() {
           }}
           className="absolute inset-x-2 bottom-2 z-30 flex max-h-[70dvh] flex-col sm:inset-x-6 lg:inset-x-8 lg:bottom-12 lg:max-h-[32dvh]"
         >
-          <EruptAssembly
-            seed={visitSeed}
-            className="flex min-h-0 flex-1 flex-col"
-          >
+          <div className="flex min-h-0 flex-1 flex-col">
             <div
               className="chrome-border card-depth relative flex min-h-0 flex-1 flex-col rounded-3xl"
               style={{ background: "var(--gradient-panel)" }}
@@ -94,7 +114,7 @@ export function ProductDrawer() {
                 <EntityPanel entity={entity} />
               </div>
             </div>
-          </EruptAssembly>
+          </div>
         </motion.section>
       ) : null}
     </AnimatePresence>
