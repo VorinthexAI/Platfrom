@@ -305,6 +305,12 @@ jobs:
           VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
         run: vercel build --prod --token="$VERCEL_TOKEN"
 
+      - name: Materialize Vercel trace paths
+        run: |
+          mkdir -p web/app/.next
+          cp -al .next/. web/app/.next/
+          test -d web/app/.next/server/chunks
+
       - name: Verify excluded content is not in the deploy artifact
         run: |
           forbidden=$(find .vercel/output \
@@ -440,6 +446,12 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
         run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Materialize Vercel trace paths
+        run: |
+          mkdir -p web/app/.next
+          cp -al .next/. web/app/.next/
+          test -d web/app/.next/server/chunks
 
       - name: Verify excluded content is not in the deploy artifact
         run: |
@@ -796,16 +808,22 @@ jobs:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
           SEEDS_FILE: ${{ github.workspace }}/environments/backend/db.seeds.secrets.json
+          DB_SEEDS_SECRETS_JSON_B64: ${{ secrets.DB_SEEDS_SECRETS_JSON_B64 }}
           DB_SEEDS_SECRETS_JSON: ${{ secrets.DB_SEEDS_SECRETS_JSON }}
         run: |
           if [ ! -f "$SEEDS_FILE" ]; then
-            if [ -z "$DB_SEEDS_SECRETS_JSON" ]; then
-              echo "::notice::$SEEDS_FILE is absent and DB_SEEDS_SECRETS_JSON is not configured; skipping secret seed upsert."
+            if [ -n "$DB_SEEDS_SECRETS_JSON_B64" ]; then
+              mkdir -p "$(dirname "$SEEDS_FILE")"
+              printf '%s' "$DB_SEEDS_SECRETS_JSON_B64" | base64 -d > "$SEEDS_FILE"
+            elif [ -n "$DB_SEEDS_SECRETS_JSON" ]; then
+              mkdir -p "$(dirname "$SEEDS_FILE")"
+              printf '%s' "$DB_SEEDS_SECRETS_JSON" > "$SEEDS_FILE"
+            else
+              echo "::notice::$SEEDS_FILE is absent and DB_SEEDS_SECRETS_JSON_B64 is not configured; skipping secret seed upsert."
               exit 0
             fi
-            mkdir -p "$(dirname "$SEEDS_FILE")"
-            printf '%s' "$DB_SEEDS_SECRETS_JSON" > "$SEEDS_FILE"
           fi
+          python3 -m json.tool "$SEEDS_FILE" > /dev/null
           bun run --cwd backend seed:secrets
 
   backend-app:
