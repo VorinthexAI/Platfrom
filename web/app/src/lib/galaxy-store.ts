@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { products, type ProductKey } from "@/data/products";
+import { caveKindAtAnchor } from "@/lib/cave-config";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import {
   getChildren,
@@ -143,6 +144,14 @@ interface GalaxyState {
   cavePhase: InteriorPhase;
   /** Anchor of the clicked belt rock while a "rock" cave is playing. */
   rockAnchor: RockAnchor | null;
+  /** Where leaving the current rock cave returns to (dive origin). */
+  rockReturnMode: "belt" | "system";
+  /**
+   * Stable identity of the dived asteroid (quantized anchor). Loot inside
+   * a biome keys off this, so a collected crystal never respawns when the
+   * same asteroid is entered again.
+   */
+  rockBiomeSeed: number | null;
   /** Phase of the current world visit (entering a product/moon interior). */
   visitPhase: InteriorPhase;
   /** World-gen seed for the current interior — new on every visit. */
@@ -185,6 +194,8 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
   caveKind: null,
   cavePhase: "fly",
   rockAnchor: null,
+  rockReturnMode: "belt",
+  rockBiomeSeed: null,
   visitPhase: "fly",
   visitSeed: 1,
   jumpTarget: null,
@@ -259,10 +270,19 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
     });
   },
   enterRock: (anchor, options) => {
+    // Some belt asteroids ARE the story vaults: diving into a rock that
+    // sits on a special anchor opens that cave (terms/privacy/auth) —
+    // this is how explorers stumble onto them.
+    const special = caveKindAtAnchor(anchor);
+    if (special) {
+      get().enterCave(special);
+      return;
+    }
     const warping = Boolean(options?.warp);
     if (warping) {
       galaxyMotion.warpAt = performance.now();
     }
+    const currentMode = get().mode;
     // Re-anchor the belt orbit at this rock, so leaving the cave circles
     // out right where you dove in.
     galaxyMotion.beltAngle = anchor.angle;
@@ -271,6 +291,13 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
       caveKind: "rock",
       cavePhase: warping ? "enter" : "fly",
       rockAnchor: anchor,
+      // Dive origin decides where exit returns: system stays system,
+      // everything else circles back out into the belt.
+      rockReturnMode: currentMode === "system" ? "system" : "belt",
+      // Quantized bearing = this asteroid's permanent identity.
+      rockBiomeSeed:
+        (Math.round(anchor.angle * 40) * 73856093) ^
+        (Math.round(anchor.radius * 8) * 19349663),
       visitSeed: nextVisitSeed(),
       drawerOpen: false,
       hovered: null,
@@ -291,17 +318,21 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
     }
   },
   exitCave: () => {
-    // Leaving an ordinary rock returns to circling the belt where it was
-    // found; leaving an auth-story cave returns to the solar system.
-    const wasRock = get().caveKind === "rock";
-    if (wasRock) {
+    // Leaving a rock returns to wherever the dive began — circling the
+    // belt, or the solar system when the asteroid was clicked from there.
+    // Auth-story caves always return to the solar system.
+    const state = get();
+    const wasRock = state.caveKind === "rock";
+    const returnMode = wasRock ? state.rockReturnMode : "system";
+    if (returnMode === "belt") {
       galaxyMotion.beltVelocity = galaxyMotion.beltBaseVelocity;
     }
     set({
-      mode: wasRock ? "belt" : "system",
+      mode: returnMode,
       caveKind: null,
       cavePhase: "fly",
       rockAnchor: null,
+      rockBiomeSeed: null,
     });
   },
   resetToSystem: () => {

@@ -5,7 +5,9 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import {
   createAsteroidGeometry,
+  createAsteroidLookMaterial,
   createAsteroidMaterial,
+  rollAsteroidLook,
   type AsteroidTone,
 } from "@/lib/three/asteroid";
 import { getDotTexture } from "@/lib/three/dot-texture";
@@ -43,6 +45,8 @@ interface RockLayerProps {
   innerBias?: boolean;
   /** Main-belt rocks are clickable anchors into belt-exploration mode. */
   clickable?: boolean;
+  /** Seeded exterior look (archetype/palette/PBR); omit for classic rock. */
+  lookSeed?: number;
 }
 
 function RockLayer({
@@ -59,6 +63,7 @@ function RockLayer({
   thickness,
   innerBias = false,
   clickable = false,
+  lookSeed,
 }: RockLayerProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const mode = useGalaxyStore((s) => s.mode);
@@ -66,14 +71,31 @@ function RockLayer({
   const half = (outer - inner) / 2;
   const center = (inner + outer) / 2;
 
+  // A rolled look gives this rock family its own archetype (rocky,
+  // metallic, glossy, glass, icy, gold, lava, …), palette, and noise
+  // profile; without one, the classic obsidian rock renders.
+  const look = useMemo(
+    () => (lookSeed !== undefined ? rollAsteroidLook(lookSeed) : null),
+    [lookSeed],
+  );
   const geometry = useMemo(
-    () => createAsteroidGeometry(seed, { detail, tone, craters: 3 }),
-    [seed, detail, tone],
+    () =>
+      createAsteroidGeometry(seed, {
+        detail,
+        tone,
+        craters: look?.craters ?? 3,
+        amp: look?.amp,
+        palette: look?.palette,
+      }),
+    [seed, detail, tone, look],
   );
   const material = useMemo(
     // Low rim so rocks read as diffuse-lit stone, not glass bubbles.
-    () => createAsteroidMaterial({ tone, rim: 0.14 }),
-    [tone],
+    () =>
+      look
+        ? createAsteroidLookMaterial(look, 0.14)
+        : createAsteroidMaterial({ tone, rim: 0.14 }),
+    [tone, look],
   );
 
   const instances = useMemo(() => {
@@ -399,6 +421,12 @@ function DustLayer({
   );
 }
 
+// Every page load re-rolls the whole population: geometry seeds AND
+// exterior looks (rocky, metallic, glossy, glass, icy, gold, lava, …)
+// shift each visit, so the belt is never the same twice. Rolled at module
+// scope — only client-side Canvas children ever read it.
+const SESSION_SALT = Math.floor(Math.random() * 0x7ffffff);
+
 export function AsteroidBelt({
   paused,
   dense,
@@ -408,6 +436,7 @@ export function AsteroidBelt({
 }) {
   const scale = dense ? 1 : 0.35;
   const n = (count: number) => Math.max(4, Math.round(count * scale));
+  const salt = SESSION_SALT;
 
   // Layer recipes: {seed, count, detail, min, max, tone, speed, region}.
   // Ten distinct geometry seeds inside the main belt alone.
@@ -443,7 +472,7 @@ export function AsteroidBelt({
       {mainBelt.map(([seed, count, detail, min, max, tone, speed, innerBias]) => (
         <RockLayer
           key={seed}
-          seed={seed}
+          seed={seed ^ salt}
           count={n(count)}
           detail={detail}
           minScale={min}
@@ -456,12 +485,13 @@ export function AsteroidBelt({
           thickness={2.6}
           innerBias={innerBias}
           clickable
+          lookSeed={seed ^ salt ^ 0x5eed}
         />
       ))}
       {scatter.map(([seed, count, detail, min, max, tone, speed]) => (
         <RockLayer
           key={seed}
-          seed={seed}
+          seed={seed ^ salt}
           count={n(count)}
           detail={detail}
           minScale={min}
@@ -473,12 +503,13 @@ export function AsteroidBelt({
           outer={30}
           thickness={5}
           clickable
+          lookSeed={seed ^ salt ^ 0x5eed}
         />
       ))}
       {deep.map(([seed, count, detail, min, max, tone, speed]) => (
         <RockLayer
           key={seed}
-          seed={seed}
+          seed={seed ^ salt}
           count={n(count)}
           detail={detail}
           minScale={min}
@@ -490,6 +521,7 @@ export function AsteroidBelt({
           outer={64}
           thickness={10}
           clickable
+          lookSeed={seed ^ salt ^ 0x5eed}
         />
       ))}
 

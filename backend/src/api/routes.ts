@@ -86,6 +86,19 @@ export function registerRoutes(app: Hono) {
     const body = await parseJson(c, tokenHashBodyBase);
     const result = await validateMagicLink(body.token_hash);
     if (!result) return c.json({ error: 'invalid or expired sign-in link' }, 401);
+    if (result.status === 'authenticated') {
+      setSessionTokenHeaders(c, result);
+      setSessionCookies(c, result);
+      return c.json({
+        status: result.status,
+        identity: result.identity,
+        access_token: result.accessToken,
+        refresh_token: result.refreshToken,
+        alias: result.alias,
+        waitlist_number: result.waitlistNumber,
+        welcome_line: result.welcomeLine,
+      });
+    }
     return c.json({
       status: result.status,
       totp_challenge_token_hash: result.totpChallengeToken,

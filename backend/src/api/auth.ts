@@ -21,7 +21,10 @@ import { crypto as otpCrypto } from '@otplib/plugin-crypto-noble';
 import { generateSecret, generateURI } from 'otplib';
 import QRCode from 'qrcode';
 import { sendBrandedEmail } from './email';
-import { defaultNameFromEmail, normalizeEmail, upsertUserByEmail } from './users';
+import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
+import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
+import { generateAlias, pickWelcomeLine } from '@/lib/alias';
+import { trackPlatformEvent } from '@/platform/events';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -58,7 +61,16 @@ type ChallengeIdentityType = typeof authIdentityTypeSchema._type;
 
 export type MagicLinkValidationResult =
   | { status: 'totp_setup_required'; totpChallengeToken: string; expiresAt: Date }
-  | { status: 'totp_required'; totpChallengeToken: string; expiresAt: Date };
+  | { status: 'totp_required'; totpChallengeToken: string; expiresAt: Date }
+  | {
+    status: 'authenticated';
+    identity: AuthIdentity;
+    accessToken: string;
+    refreshToken: string;
+    alias: string;
+    waitlistNumber: number | null;
+    welcomeLine: string;
+  };
 
 export function hasUsableMfaResetRequest(input: {
   has_request_mfa_reset_link: boolean;
@@ -188,11 +200,24 @@ export async function issueTokens(identity: LoginIdentity): Promise<SessionToken
   return { accessToken, refreshToken };
 }
 
+export async function issueUserTokens(user: Pick<User, 'key'>): Promise<SessionTokens> {
+  const accessToken = await createAccessToken({ key: user.key, identityType: 'user' });
+  const refreshToken = randomToken('vrtx_refresh_');
+  const refreshTokenHash = await sha256(refreshToken);
+  await updateUser(user.key, {
+    refreshTokenHash,
+    updatedAt: new Date().toISOString(),
+  });
+  return { accessToken, refreshToken };
+}
+
 export async function rotateRefreshToken(refreshToken: string): Promise<SessionTokens | null> {
   const tokenHash = await sha256(refreshToken);
   const identity = await getLoginIdentityByRefreshTokenHash(tokenHash);
-  if (!identity) return null;
-  return issueTokens(identity);
+  if (identity) return issueTokens(identity);
+  const user = await getUserByRefreshTokenHash(tokenHash);
+  if (user) return issueUserTokens(user);
+  return null;
 }
 
 export async function createChallengeTokenHash(rawToken: string) {
@@ -244,11 +269,11 @@ export async function consumeChallenge(tokenHash: string, kind: 'email' | 'totp'
   };
 }
 
-export function buildMagicLink(tokenHash: string) {
+export function buildMagicLink(tokenHash: string, flow: 'member' | 'user' = 'member') {
   const frontendUrl = process.env.FRONTEND_URL ?? process.env.FRONTEND_AUTH_URL ?? 'http://localhost:3000';
   const url = new URL('/public/auth/token', frontendUrl);
   url.searchParams.set('token_hash', tokenHash);
-  url.searchParams.set('flow', 'member');
+  url.searchParams.set('flow', flow);
   return url.toString();
 }
 
@@ -295,13 +320,35 @@ async function deliverMfaResetEmail(input: { email: string; magicLink: string; e
 export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
-  if (!identity) {
+  if (identity) {
+    const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type);
+    const magicLink = buildMagicLink(challenge.tokenHash, 'member');
+    await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
+    trackPlatformEvent({
+      slug: 'auth.signin_email_sent',
+      data: { identity_type: identity.type, email_hash: identity.emailHash },
+    });
+    return {
+      allowed: true as const,
+      expiresAt: challenge.expiresAt,
+    };
+  }
+
+  // Verified waitlist users sign in with the same magic-link email; they get a
+  // direct session (no TOTP) that lands in their public galaxy.
+  const user = await getUserByEmailHash(await hashUserEmail(normalized));
+  if (!user?.isVerified) {
     return { allowed: false as const };
   }
 
-  const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type);
-  const magicLink = buildMagicLink(challenge.tokenHash);
+  const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user');
+  const magicLink = buildMagicLink(challenge.tokenHash, 'user');
   await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
+  trackPlatformEvent({
+    slug: 'auth.signin_email_sent',
+    userId: user.key,
+    data: { identity_type: 'user', user_id: user.key, email_hash: user.emailHash },
+  });
   return {
     allowed: true as const,
     expiresAt: challenge.expiresAt,
@@ -338,7 +385,28 @@ export async function requestMfaResetEmail(email: string) {
 
 export async function validateMagicLink(token: string): Promise<MagicLinkValidationResult | null> {
   const emailChallenge = await consumeChallenge(token, 'email');
-  if (!emailChallenge || emailChallenge.identityType === 'user') return null;
+  if (!emailChallenge) return null;
+
+  if (emailChallenge.identityType === 'user') {
+    const user = await getUserById(emailChallenge.identityKey);
+    if (!user?.isVerified) return null;
+    const tokens = await issueUserTokens(user);
+    await updateUser(user.key, { lastLoginAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    const alias = user.alias ?? generateAlias(user.key);
+    trackPlatformEvent({
+      slug: 'auth.magic_link_authenticated',
+      userId: user.key,
+      data: { user_id: user.key, email_hash: user.emailHash },
+    });
+    return {
+      status: 'authenticated',
+      identity: { key: user.key, identityType: 'user' },
+      ...tokens,
+      alias,
+      waitlistNumber: user.waitlistNumber,
+      welcomeLine: pickWelcomeLine(user.key, alias),
+    };
+  }
 
   const auth = await getLoginIdentity(emailChallenge.identityType, emailChallenge.identityKey);
   if (!auth) return null;

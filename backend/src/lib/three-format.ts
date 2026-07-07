@@ -23,7 +23,7 @@ export interface ThreeFormatOptions {
 export interface ThreeFormatPayload {
   points: Array<[number, number, number]>;
   colors: Array<[number, number, number]>;
-  meta: Array<{ key: string; label: string | null }>;
+  meta: Array<{ key: string; label: string | null; mesh: Record<string, unknown> | null }>;
 }
 
 /** Neutral silver used for every node without a special rarity. */
@@ -71,6 +71,12 @@ function labelForDoc(doc: Record<string, unknown>): string | null {
   return typeof doc.name === 'string' && doc.name.length > 0 ? doc.name : null;
 }
 
+function meshForDoc(doc: Record<string, unknown>): Record<string, unknown> | null {
+  return doc.mesh && typeof doc.mesh === 'object' && !Array.isArray(doc.mesh)
+    ? doc.mesh as Record<string, unknown>
+    : null;
+}
+
 /**
  * Formats node documents into a three.js points payload. Deterministic: the
  * same `docs` (by `key`) always produce the same positions and colors.
@@ -84,12 +90,12 @@ export function formatNodesForThree(
 
   const points: Array<[number, number, number]> = [];
   const colors: Array<[number, number, number]> = [];
-  const meta: Array<{ key: string; label: string | null }> = [];
+  const meta: Array<{ key: string; label: string | null; mesh: Record<string, unknown> | null }> = [];
 
   for (const doc of docs) {
     points.push(positionForKey(doc.key, radiusMin, radiusMax));
     colors.push(colorForDoc(doc));
-    meta.push({ key: doc.key, label: labelForDoc(doc) });
+    meta.push({ key: doc.key, label: labelForDoc(doc), mesh: meshForDoc(doc) });
   }
 
   return { points, colors, meta };

@@ -50,10 +50,10 @@ export function HeroContent() {
             </OpenModalButton>
             <OpenModalButton
               modal="signin"
-              className="text-sm font-normal tracking-normal normal-case text-silver-500 transition-colors hover:text-silver-100"
+              variant="secondary"
+              className="px-8 py-4 text-xs"
             >
-              Already on waitlist?{" "}
-              <span className="underline underline-offset-4">Sign in</span>
+              Sign in
             </OpenModalButton>
           </div>
           <WaitlistLiveCounter />

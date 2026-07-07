@@ -12,6 +12,7 @@ import { Button, TextInput } from "@vorinthex/shared/ui/components";
 import { EruptAssembly } from "@/components/ui/EruptAssembly";
 import { CloseIcon } from "@/components/ui/icons";
 import { trackCtaClick, trackLandingEvent } from "@/lib/analytics";
+import { takeMagicHandoff } from "@/lib/auth/magic-handoff";
 import { CAVE_CONFIGS } from "@/lib/cave-config";
 import { normalizeEmailInput, parseApiError } from "@/lib/email";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
@@ -435,8 +436,9 @@ function ExplorerSigninFlow() {
     );
   }
 
-  // No profile on this device: re-send the verification light so they can
-  // restore their spot (and their fragment ledger follows the explorer).
+  // No profile on this device: send a sign-in light (magic link). The
+  // link validates as an explorer session and hyper-jumps straight into
+  // their public galaxy — spot, alias, and fragment ledger restored.
   function updateEmail(value: string) {
     if (!formStarted.current) {
       formStarted.current = true;
@@ -466,7 +468,7 @@ function ExplorerSigninFlow() {
     setStatus("submitting");
     setError("");
     try {
-      const response = await fetch("/api/waitlist", {
+      const response = await fetch("/api/members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: normalizedEmail }),
@@ -477,7 +479,7 @@ function ExplorerSigninFlow() {
         setStatus("sent");
       } else {
         setError(
-          parseApiError(data, "Could not send a verification link. Try again."),
+          parseApiError(data, "Could not send a sign-in link. Try again."),
         );
         setStatus("error");
       }
@@ -495,8 +497,8 @@ function ExplorerSigninFlow() {
           Check your inbox.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          A fresh verification light is on its way to {email}. Follow it to
-          restore your spot and see everything you have collected.
+          A sign-in light is on its way to {email}. Follow it to restore
+          your spot and see everything you have collected.
         </p>
       </div>
     );
@@ -834,6 +836,19 @@ function MagicFlow() {
     requested.current = true;
     (async () => {
       await Promise.resolve();
+
+      // The arrival flow may have already validated this (single-use)
+      // token while the visitor flew through the solar system.
+      const handoff = takeMagicHandoff();
+      if (handoff) {
+        if (handoff.status === "totp_setup_required") {
+          await beginSetup(handoff.challengeTokenHash);
+        } else {
+          setState({ phase: "verify", challenge: handoff.challengeTokenHash });
+        }
+        return;
+      }
+
       const token = new URLSearchParams(window.location.search).get(
         "token_hash",
       );
@@ -858,6 +873,23 @@ function MagicFlow() {
           });
           return;
         }
+        if (data.status === "authenticated") {
+          // An explorer session: same hyper jump as email verification.
+          window.localStorage.setItem(
+            "vx_profile",
+            JSON.stringify({
+              alias: data.alias ?? null,
+              waitlistNumber: data.waitlist_number ?? null,
+              welcomeLine: data.welcome_line ?? null,
+            }),
+          );
+          trackLandingEvent({
+            slug: "auth.magic_link_authenticated",
+            metadata: { flow: "user", placement: "cipher_chamber" },
+          });
+          startJump("public");
+          return;
+        }
         if (data.status === "totp_setup_required") {
           await beginSetup(data.totp_challenge_token_hash);
         } else {
@@ -870,7 +902,7 @@ function MagicFlow() {
         setState({ phase: "failed", message: "The chamber did not answer." });
       }
     })();
-  }, [beginSetup]);
+  }, [beginSetup, startJump]);
 
   if (state.phase === "validating") {
     return (

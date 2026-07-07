@@ -9,7 +9,12 @@ const EXPLORER_COOKIE = "vx_explorer";
 interface ThreePayload {
   points: Array<[number, number, number]>;
   colors: Array<[number, number, number]>;
-  meta: Array<{ key: string; label: string | null }>;
+  meta: Array<{
+    key: string;
+    label: string | null;
+    /** Persisted mesh recipe — lets the jar render the exact collected crystal. */
+    mesh?: Record<string, unknown> | null;
+  }>;
 }
 
 /**
@@ -55,7 +60,7 @@ export async function GET() {
       Math.sin(theta) * h * radius,
     ]);
     three.colors.push([0.7, 0.75, 0.78]);
-    three.meta.push({ key: id, label: null });
+    three.meta.push({ key: id, label: null, mesh: null });
   }
   return NextResponse.json({
     ok: true,

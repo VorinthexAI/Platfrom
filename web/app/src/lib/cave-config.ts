@@ -21,52 +21,59 @@ export interface CaveConfig {
   approachLabel: string;
 }
 
+/**
+ * The story vaults hide inside ordinary-looking belt asteroids, and they
+ * move: every page load rolls a fresh bearing for each vault, so the
+ * terms/privacy/auth asteroids are never in the same place twice. The
+ * bearings live only in the client bundle's module state — nothing
+ * server-rendered depends on them.
+ */
+function rolledAnchor(): { anchorAngle: number; anchorRadius: number } {
+  return {
+    anchorAngle: Math.random() * Math.PI * 2,
+    anchorRadius: 15.8 + Math.random() * 3.6,
+  };
+}
+
 export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
   join: {
-    anchorAngle: 0.6,
-    anchorRadius: 17.2,
+    ...rolledAnchor(),
     interior: [0, -240, 0],
     theme: "gem",
     approachLabel: "Approaching the Reservation Vault",
   },
   "waitlist-verify": {
-    anchorAngle: 3.6,
-    anchorRadius: 17.8,
+    ...rolledAnchor(),
     interior: [90, -240, 0],
     theme: "ember",
     approachLabel: "Opening the Ember Vault",
   },
   signin: {
-    anchorAngle: 2.2,
-    anchorRadius: 16.8,
+    ...rolledAnchor(),
     interior: [180, -240, 0],
     theme: "lush",
     approachLabel: "Descending into the Grove",
   },
   members: {
-    anchorAngle: 2.9,
-    anchorRadius: 17.9,
+    ...rolledAnchor(),
     interior: [540, -240, 0],
     theme: "violet",
     approachLabel: "Approaching the Members Gate",
   },
   magic: {
-    anchorAngle: 4.9,
-    anchorRadius: 17.5,
+    ...rolledAnchor(),
     interior: [270, -240, 0],
     theme: "violet",
     approachLabel: "Unsealing the Cipher Chamber",
   },
   privacy: {
-    anchorAngle: 1.5,
-    anchorRadius: 16.5,
+    ...rolledAnchor(),
     interior: [360, -240, 0],
     theme: "ice",
     approachLabel: "Opening the Records Vault",
   },
   terms: {
-    anchorAngle: 5.7,
-    anchorRadius: 18.2,
+    ...rolledAnchor(),
     interior: [450, -240, 0],
     theme: "gem",
     approachLabel: "Opening the Accord Vault",
@@ -106,4 +113,27 @@ export function randomRockAnchor(): RockAnchor {
     angle: Math.random() * Math.PI * 2,
     radius: 15.4 + Math.random() * (19.8 - 15.4),
   };
+}
+
+/** Story caves an ordinary-looking asteroid can secretly host. */
+const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "members", "join"];
+
+/**
+ * Does this belt bearing sit on one of the hidden story vaults? Diving
+ * into a rock close enough to a vault's rolled anchor opens that story.
+ */
+export function caveKindAtAnchor(anchor: RockAnchor): CaveKind | null {
+  for (const kind of ANCHORED_CAVE_KINDS) {
+    const config = CAVE_CONFIGS[kind];
+    const angleDelta = Math.abs(
+      Math.atan2(
+        Math.sin(anchor.angle - config.anchorAngle),
+        Math.cos(anchor.angle - config.anchorAngle),
+      ),
+    );
+    if (angleDelta < 0.1 && Math.abs(anchor.radius - config.anchorRadius) < 0.7) {
+      return kind;
+    }
+  }
+  return null;
 }

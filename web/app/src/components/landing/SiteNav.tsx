@@ -21,7 +21,8 @@ export function SiteNav() {
   const focus = useGalaxyStore((s) => s.focus);
   const setStep = useGalaxyStore((s) => s.setStep);
   const enterCave = useGalaxyStore((s) => s.enterCave);
-  const playMission = useAudioStore((s) => s.playMission);
+  const toggleMission = useAudioStore((s) => s.toggleMission);
+  const missionPlaying = useAudioStore((s) => s.missionPlaying);
 
   return (
     <header className="absolute inset-x-0 top-0 z-40">
@@ -114,13 +115,17 @@ export function SiteNav() {
             variant="secondary"
             onClick={() => {
               trackCtaClick("mission_audio", { placement: "nav" });
-              playMission();
+              toggleMission();
             }}
-            icon={<SpeakerIcon animated />}
+            icon={<SpeakerIcon animated={missionPlaying} />}
             className="min-h-0 px-4 py-2.5 text-[0.65rem] uppercase"
           >
-            <span className="hidden sm:inline">Hear the Mission</span>
-            <span className="sr-only sm:hidden">Hear the Mission</span>
+            <span className="hidden sm:inline">
+              {missionPlaying ? "Stop the Mission" : "Hear the Mission"}
+            </span>
+            <span className="sr-only sm:hidden">
+              {missionPlaying ? "Stop the Mission" : "Hear the Mission"}
+            </span>
           </Button>
         </div>
       </nav>

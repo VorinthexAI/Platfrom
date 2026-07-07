@@ -66,16 +66,21 @@ function floorPoint(random: () => number): THREE.Vector3 {
 function ChamberRock({
   styleKey,
   seed,
+  distortion = 1,
 }: {
   styleKey: ChamberStyleKey;
   seed: number;
+  distortion?: number;
 }) {
   const style = CHAMBER_STYLES[styleKey];
   const textures = getRockTextures(styleKey);
   const spikesRef = useRef<THREE.InstancedMesh>(null);
   const rubbleRef = useRef<THREE.InstancedMesh>(null);
 
-  const wallGeometry = useMemo(() => createChamberWallGeometry(seed), [seed]);
+  const wallGeometry = useMemo(
+    () => createChamberWallGeometry(seed, distortion),
+    [seed, distortion],
+  );
   const floorGeometry = useMemo(
     () => createChamberFloorGeometry(seed ^ 0xf100, CHAMBER_RADIUS * 0.92),
     [seed],
@@ -1684,11 +1689,14 @@ export function BiomeChamber({
   styleKey,
   seed,
   position,
+  distortion = 1,
   children,
 }: {
   styleKey: ChamberStyleKey;
   seed: number;
   position: [number, number, number];
+  /** Wall-noise multiplier: >1 rolls wilder, jaggier caverns. */
+  distortion?: number;
   /** Extra chamber content (entity emblem, hidden treasures, …). */
   children?: React.ReactNode;
 }) {
@@ -1697,7 +1705,7 @@ export function BiomeChamber({
   return (
     <group position={position}>
       {children}
-      <ChamberRock styleKey={styleKey} seed={seed} />
+      <ChamberRock styleKey={styleKey} seed={seed} distortion={distortion} />
       <CrystalGrowth styleKey={styleKey} seed={seed} />
 
       {/* the volcanic welcome — every entry erupts fresh */}

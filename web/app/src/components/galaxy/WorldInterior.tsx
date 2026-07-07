@@ -26,6 +26,7 @@ import { getDotTexture } from "@/lib/three/dot-texture";
 import { biomeForEntity } from "@/lib/three/planet";
 import { hashString, mulberry32 } from "@/lib/three/procedural";
 import { BiomeChamber, CHAMBER_RADIUS } from "./BiomeChamber";
+import { BiomeLootField } from "./BiomeLoot";
 
 /**
  * The inside of the focused world. Stepping onto a product, orchestrator,
@@ -261,40 +262,44 @@ function TreasureCrystal({
 
   if (gone) return null;
 
-  const handleSelect = (event: ThreeEvent<MouseEvent>) => {
+  const handleSelect = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
     if (!claimed) select(collectible);
   };
 
   return (
-    <group ref={groupRef} position={position} scale={0.001}>
-      <mesh geometry={geometry} scale={0.5}>
-        <meshStandardMaterial
-          color={tint.color}
-          metalness={0.25}
-          roughness={0.15}
-          emissive={tint.emissive}
-          emissiveIntensity={isSelected ? 1.8 : hovered ? 1.3 : 0.9}
-          transparent
-          opacity={0.96}
-        />
-      </mesh>
-      {/* additive glow instead of a real light: treasure count varies
-          per visit, and a varying light count forces a full shader
-          recompile mid-entry — the very hitch the warm-up removes. */}
-      <sprite scale={[1.7, 1.7, 1]}>
-        <spriteMaterial
-          map={getDotTexture()}
-          color={tint.glow}
-          transparent
-          opacity={isSelected ? 0.5 : 0.28}
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-        />
-      </sprite>
+    <group position={position}>
+      {/* visual grows in; the hit sphere stays full-size from frame 1 so
+          taps land even mid-eruption or under camera sway */}
+      <group ref={groupRef} scale={0.001}>
+        <mesh geometry={geometry} scale={0.5}>
+          <meshStandardMaterial
+            color={tint.color}
+            metalness={0.25}
+            roughness={0.15}
+            emissive={tint.emissive}
+            emissiveIntensity={isSelected ? 1.8 : hovered ? 1.3 : 0.9}
+            transparent
+            opacity={0.96}
+          />
+        </mesh>
+        {/* additive glow instead of a real light: treasure count varies
+            per visit, and a varying light count forces a full shader
+            recompile mid-entry — the very hitch the warm-up removes. */}
+        <sprite scale={[1.7, 1.7, 1]}>
+          <spriteMaterial
+            map={getDotTexture()}
+            color={tint.glow}
+            transparent
+            opacity={isSelected ? 0.5 : 0.28}
+            depthWrite={false}
+            blending={THREE.AdditiveBlending}
+          />
+        </sprite>
+      </group>
       <mesh
         visible={false}
-        onClick={handleSelect}
+        onPointerDown={handleSelect}
         onPointerOver={(event) => {
           event.stopPropagation();
           setHovered(true);
@@ -305,7 +310,7 @@ function TreasureCrystal({
           document.body.style.cursor = "auto";
         }}
       >
-        <sphereGeometry args={[0.7, 12, 12]} />
+        <sphereGeometry args={[0.85, 12, 12]} />
         <meshBasicMaterial />
       </mesh>
     </group>
@@ -401,6 +406,11 @@ export function WorldInterior() {
         <InteriorEmblem entity={entity} seed={visitSeed} />
       </Suspense>
       <InteriorTreasures entity={entity} seed={visitSeed} paused={false} />
+      {/* the scavengeable floor: 10–25 small fragments, stable per world */}
+      <BiomeLootField
+        biomeKey={`world-${entityId}`}
+        lootSeed={hashString(`world-${entityId}`)}
+      />
     </BiomeChamber>
   );
 }

@@ -5,6 +5,22 @@ import { createNodeHelpers, withArangoKey } from './base';
 
 export const INTELLIGENCE_FRAGMENTS_COLLECTION = 'intelligenceFragments';
 
+/**
+ * Deterministic recipe for the exact 3D mesh a collectible was rendered with.
+ * The frontend regenerates the identical geometry from generator + seed +
+ * params, so storing the recipe preserves the exact mesh without persisting
+ * megabytes of vertex data.
+ */
+export const fragmentMeshSchema = z.object({
+  generator: z.string().min(1).max(60),
+  seed: z.number().int(),
+  variant: z.number().int().optional(),
+  scale: z.number().optional(),
+  params: z.record(z.string().max(40), z.union([z.number(), z.string().max(60)])).optional(),
+});
+
+export type FragmentMesh = z.infer<typeof fragmentMeshSchema>;
+
 export const intelligenceFragmentSchema = z.object({
   key: z.string(),
   /** Null until the anonymous explorer joins the waitlist and the entry is adopted. */
@@ -15,6 +31,8 @@ export const intelligenceFragmentSchema = z.object({
   name: z.string(),
   rarity: z.string(),
   fragments: z.number().int().min(1),
+  /** Exact 3D mesh recipe captured at collection time (null for legacy entries). */
+  mesh: fragmentMeshSchema.nullable().default(null),
   createdAt: z.string(),
   embedding: z.array(z.number()).default([]),
 });

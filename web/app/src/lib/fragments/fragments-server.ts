@@ -83,6 +83,67 @@ export function claimCollectible(
   };
 }
 
+export interface ProceduralLootInput {
+  lootId: string;
+  kind: "fragment" | "crystal";
+  name: string;
+  rarity: string;
+  fragments: number;
+}
+
+/** Value bounds the server will honor for procedural biome loot. */
+const LOOT_BOUNDS: Record<ProceduralLootInput["kind"], { min: number; max: number }> = {
+  fragment: { min: 1, max: 3 },
+  crystal: { min: 100, max: 10000 },
+};
+
+/** Rapid floor-scavenging is the point — a much shorter cooldown here. */
+const LOOT_COOLDOWN_MS = 200;
+
+export type ProceduralClaimResult =
+  | { ok: true; fragmentsAwarded: number; balance: number; globalTotal: number }
+  | { ok: false; status: number; error: string };
+
+/**
+ * Claims procedurally generated biome loot (floor fragments and center
+ * crystals). These have no registry entry — the id encodes the biome and
+ * slot — so validation is bounds-based: the client is trusted only within
+ * the marketing-collectible value ranges.
+ */
+export function claimProceduralLoot(
+  explorerId: string,
+  input: ProceduralLootInput,
+): ProceduralClaimResult {
+  const bounds = LOOT_BOUNDS[input.kind];
+  if (input.fragments < bounds.min || input.fragments > bounds.max) {
+    return { ok: false, status: 400, error: "Loot value out of range." };
+  }
+
+  const last = ledger.lastClaimAt.get(explorerId) ?? 0;
+  if (Date.now() - last < LOOT_COOLDOWN_MS) {
+    return { ok: false, status: 429, error: "Slow down, explorer." };
+  }
+
+  const claimed = ledger.claims.get(explorerId) ?? new Set<string>();
+  if (claimed.has(input.lootId)) {
+    return { ok: false, status: 409, error: "Already claimed." };
+  }
+
+  claimed.add(input.lootId);
+  ledger.claims.set(explorerId, claimed);
+  ledger.lastClaimAt.set(explorerId, Date.now());
+  const balance = (ledger.balances.get(explorerId) ?? 0) + input.fragments;
+  ledger.balances.set(explorerId, balance);
+  ledger.globalTotal += input.fragments;
+
+  return {
+    ok: true,
+    fragmentsAwarded: input.fragments,
+    balance,
+    globalTotal: ledger.globalTotal,
+  };
+}
+
 export function getProgress(explorerId?: string) {
   return {
     total: ledger.globalTotal,

@@ -22,12 +22,21 @@ const tempEmailHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
 
 // The collectible values come from the landing page registry — this is a
 // marketing collectible, not money, so bounded validation is all we need.
+const meshBodySchema = strictObject({
+  generator: z.string().min(1).max(60),
+  seed: z.number().int(),
+  variant: z.number().int().optional(),
+  scale: z.number().optional(),
+  params: z.record(z.string().max(40), z.union([z.number(), z.string().max(60)])).optional(),
+});
+
 export const postFragmentsBodySchema = strictObject({
   collectible_id: z.string().min(1).max(120),
   explorer_id: z.string().min(8).max(80),
   name: z.string().min(1).max(120),
   rarity: z.string().min(1).max(40),
   fragments: z.number().int().min(1).max(100000),
+  mesh: meshBodySchema.optional(),
   email_hash: emailHashSchema.optional(),
   temp_email_hash: tempEmailHashSchema.optional(),
 });
@@ -77,6 +86,7 @@ export async function collectFragment(c: Context) {
       name: body.name,
       rarity: body.rarity,
       fragments: body.fragments,
+      mesh: body.mesh ?? null,
       createdAt: new Date().toISOString(),
     });
   } catch (err) {

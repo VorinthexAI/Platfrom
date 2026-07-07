@@ -295,6 +295,19 @@ async function main() {
     { defaultPlatformId },
   );
 
+  await targetDb.query(`
+    FOR c IN authChallenges
+      FILTER (!HAS(c, "identityKey") || c.identityKey == null || c.identityKey == "")
+        && HAS(c, "userId")
+        && c.userId != null
+        && c.userId != ""
+      UPDATE c WITH {
+        identityKey: c.userId,
+        identityType: "user",
+        userId: null
+      } IN authChallenges OPTIONS { keepNull: false }
+  `);
+
   await targetDb.query(
     `
     FOR m IN members
