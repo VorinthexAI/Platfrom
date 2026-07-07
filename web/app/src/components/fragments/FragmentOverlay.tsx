@@ -34,8 +34,8 @@ export function FragmentOverlay() {
 /**
  * The Intelligence Fragments count as a quiet badge below the nav — no
  * goal, no threshold, just the living number. It rides along everywhere
- * (solar system, belt, every biome); only the arrival flight and the
- * hyper jump fly without it.
+ * (solar system and belt); biome interiors, arrival, caves, and the hyper
+ * jump fly without it.
  */
 function FragmentBadge() {
   const localTotal = useFragmentsStore((s) => s.globalTotal);
@@ -44,13 +44,15 @@ function FragmentBadge() {
   // current session before the first live frame arrives.
   const globalTotal = Math.max(localTotal, liveTotal);
   const mode = useGalaxyStore((s) => s.mode);
+  const visitPhase = useGalaxyStore((s) => s.visitPhase);
 
-  if (mode === "intro" || mode === "jump") return null;
+  if (mode === "intro" || mode === "jump" || mode === "cave") return null;
+  if (mode === "system" && visitPhase !== "fly") return null;
 
   return (
     <div
       role="status"
-      className="pointer-events-none absolute top-24 right-5 z-30 flex items-center gap-2.5 rounded-full border border-white/10 bg-black/40 px-4 py-2 backdrop-blur-md sm:right-10"
+      className="pointer-events-none absolute top-20 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-white/10 bg-black/40 px-4 py-2 backdrop-blur-md sm:top-24 sm:right-10 sm:left-auto sm:translate-x-0"
     >
       <span className="block h-1.5 w-1.5 rotate-45 bg-silver-100 shadow-[0_0_8px_rgba(221,226,229,0.8)]" />
       <span className="font-mono text-[0.55rem] tracking-[0.24em] text-silver-300 uppercase">

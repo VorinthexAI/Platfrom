@@ -26,7 +26,7 @@ export function HeroContent() {
         atOverview ? "" : "pointer-events-none opacity-0"
       }`}
     >
-      <div className="mx-auto w-full max-w-7xl px-5 pt-24 sm:px-10 sm:pt-32">
+      <div className="mx-auto w-full max-w-7xl px-5 pt-36 sm:px-10 sm:pt-32">
         <div className="max-w-xl">
           <h1 className="chrome-text text-4xl leading-[1.08] font-extralight tracking-[0.04em] uppercase sm:text-6xl">
             {headlineTop}
