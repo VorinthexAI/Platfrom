@@ -13,6 +13,7 @@ const waitlistSchema = z.strictObject({
 
 const EXPLORER_COOKIE = "vx_explorer";
 const TEMP_EMAIL_HASH_COOKIE = "vx_temp_email_hash";
+const isProduction = process.env.NODE_ENV === "production";
 
 interface BackendWaitlistResponse {
   email: string;
@@ -125,6 +126,12 @@ export async function POST(request: Request) {
       claim,
     };
   } else {
+    if (isProduction) {
+      return NextResponse.json(
+        { ok: false, error: "Waitlist signup is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
     // Frontend-only development: accept the signup so the cave flow completes.
     payload = {
       ok: true,

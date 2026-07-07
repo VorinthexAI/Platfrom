@@ -13,7 +13,7 @@ const BASE_URL = (
   ?? process.env.API_BASE_URL
   ?? process.env.NEXT_PUBLIC_API_BASE_URL
 )?.replace(/\/$/, "");
-const API_KEY = process.env.BACKEND_API_KEY;
+const API_KEY = process.env.BACKEND_API_KEY ?? process.env.NEXT_PUBLIC_BACKEND_API_KEY;
 
 export function backendConfigured(): boolean {
   return Boolean(BASE_URL && API_KEY);
