@@ -202,8 +202,8 @@ function RockDrawer() {
                   {opener}{" "}
                   <span className="text-silver-50">
                     Tap the crystal to collect {amount} Intelligence Fragments
-                  </span>{" "}
-                  — then keep exploring other asteroids to find more and
+                  </span>
+                  , then keep exploring other asteroids to find more and
                   climb the leaderboard.
                 </>
               )}
@@ -233,11 +233,12 @@ const STANDING_TITLES = {
 } as const;
 
 /**
- * The live board: top ten collectors (never including you), your own
- * standalone row with a climbing/holding/falling read that re-rolls on
- * every SSE update, the galaxy totals, and the active-explorer pulse.
- * The chamber around it mounts every collected piece in real time — new
- * finds toast in as they land.
+ * The live board: ten fixed seats for the top collectors (open seats
+ * render as quiet placeholders until claimed), plus your own standing
+ * card with a climbing/holding/falling read that re-rolls on every SSE
+ * update, the galaxy totals, and the active-explorer pulse — always
+ * eleven cards. The chamber around it mounts every collected piece in
+ * real time; new finds toast in as they land.
  */
 function LeaderboardFlow() {
   const connect = useLeaderboardStore((s) => s.connect);
@@ -270,11 +271,11 @@ function LeaderboardFlow() {
     })();
   }, []);
 
-  // The top ten, exactly as the galaxy stands. If the visitor is one of
-  // them they render right there among the rows, unmistakably marked;
-  // otherwise their standing gets its own card under the board.
+  // The board always shows eleven cards: ten fixed seats (filled by the
+  // top collectors, open seats waiting below them) plus the visitor's own
+  // standing card under the board. If the visitor is in the top ten they
+  // also render among the rows, unmistakably marked.
   const topRows = rows.slice(0, 10);
-  const inTopRows = Boolean(alias) && topRows.some((row) => row.alias === alias);
   const myPlace = myRank ?? Math.max(rows.length, topRows.length) + 1;
 
   return (
@@ -291,78 +292,84 @@ function LeaderboardFlow() {
           <span className="shrink-0">Fragments</span>
         </p>
         <div className="space-y-1">
-          {topRows.length === 0 ? (
-            <p className="py-4 text-center text-[0.72rem] text-silver-500">
-              The board is still forming. Be the first name on it.
-            </p>
-          ) : (
-            topRows.map((row, index) => {
-              const isMe = Boolean(alias) && row.alias === alias;
+          {Array.from({ length: 10 }, (_, index) => {
+            const row = topRows[index];
+            if (!row) {
               return (
                 <p
-                  key={row.userId}
-                  className={`flex items-baseline gap-3 rounded-xl border px-3.5 py-1.5 text-sm ${
-                    isMe
-                      ? "border-silver-300/40 bg-white/[0.07]"
-                      : "border-white/8 bg-white/[0.02]"
-                  }`}
+                  key={`seat-${index}`}
+                  className="flex items-baseline gap-3 rounded-xl border border-white/5 bg-white/[0.01] px-3.5 py-1.5 text-sm"
                 >
-                  <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-500">
+                  <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-600">
                     {index + 1}
                   </span>
-                  <span
-                    className={`min-w-0 flex-1 truncate text-[0.82rem] ${
-                      isMe ? "text-silver-50" : "text-silver-200"
-                    }`}
-                  >
-                    {row.alias ?? "Unnamed Explorer"}
-                    {isMe ? (
-                      <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
-                        You
-                      </span>
-                    ) : null}
+                  <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-600">
+                    Open seat
                   </span>
-                  <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-                    {formatFragments(row.total)}
+                  <span className="shrink-0 font-mono text-[0.72rem] text-silver-600 tabular-nums">
+                    ···
                   </span>
                 </p>
               );
-            })
-          )}
+            }
+            const isMe = Boolean(alias) && row.alias === alias;
+            return (
+              <p
+                key={row.userId}
+                className={`flex items-baseline gap-3 rounded-xl border px-3.5 py-1.5 text-sm ${
+                  isMe
+                    ? "border-silver-300/40 bg-white/[0.07]"
+                    : "border-white/8 bg-white/[0.02]"
+                }`}
+              >
+                <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-500">
+                  {index + 1}
+                </span>
+                <span
+                  className={`min-w-0 flex-1 truncate text-[0.82rem] ${
+                    isMe ? "text-silver-50" : "text-silver-200"
+                  }`}
+                >
+                  {row.alias ?? "Unnamed Explorer"}
+                  {isMe ? (
+                    <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
+                      You
+                    </span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                  {formatFragments(row.total)}
+                </span>
+              </p>
+            );
+          })}
         </div>
       </div>
 
-      {/* outside the top ten, the visitor's standing gets its own card */}
-      {!inTopRows ? (
-        <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
-          <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
-            {STANDING_TITLES[standingTier]}
-          </p>
-          <p className="mt-1 flex items-baseline gap-3 text-sm">
-            <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
-              {myPlace}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
-              {alias ?? "You"}
-              <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
-                You
-              </span>
-            </span>
-            <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-              {formatFragments(balance)}
-            </span>
-          </p>
-          <p className="mt-1.5 text-[0.7rem] leading-relaxed text-silver-300">
-            {standingText ||
-              "Collect fragments across the galaxy to take your place on the board."}
-          </p>
-        </div>
-      ) : (
-        <p className="mt-2.5 text-center text-[0.7rem] leading-relaxed text-silver-300">
-          {standingText ||
-            "Collect fragments across the galaxy to defend your place on the board."}
+      {/* the visitor's standing always gets its own card under the board */}
+      <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
+        <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
+          {STANDING_TITLES[standingTier]}
         </p>
-      )}
+        <p className="mt-1 flex items-baseline gap-3 text-sm">
+          <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
+            {myPlace}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+            {alias ?? "You"}
+            <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
+              You
+            </span>
+          </span>
+          <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+            {formatFragments(balance)}
+          </span>
+        </p>
+        <p className="mt-1.5 text-[0.7rem] leading-relaxed text-silver-300">
+          {standingText ||
+            "Collect fragments across the galaxy to take your place on the board."}
+        </p>
+      </div>
 
       <p className="mt-4 text-center font-mono text-[0.55rem] tracking-[0.22em] text-silver-300 uppercase">
         {formatFragments(fragmentsTotal)} total fragments collected across the galaxy
@@ -709,7 +716,7 @@ function ExplorerSigninFlow() {
         setStatus("sent");
       } else {
         setError(
-          parseApiError(data, "Could not send a sign-in link. Try again."),
+          parseApiError(data, "Could not send your link. Try again."),
         );
         setStatus("error");
       }
@@ -727,7 +734,7 @@ function ExplorerSigninFlow() {
           Check your inbox.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          A sign-in light is on its way to {email}. Follow it to restore
+          A light is on its way to {email}. Follow it to restore
           your spot and see everything you have collected.
         </p>
       </div>
@@ -825,7 +832,7 @@ function MembersFlow() {
         setStatus("sent");
       } else {
         setError(
-          parseApiError(data, "Could not send a sign-in link. Try again."),
+          parseApiError(data, "Could not send your link. Try again."),
         );
         setStatus("error");
       }
@@ -843,7 +850,7 @@ function MembersFlow() {
           A light is on its way.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          If this address belongs to a member, a sign-in link is heading to
+          If this address belongs to a member, a link is heading to
           the inbox now. It burns out in 15 minutes and leads to your
           private galaxy.
         </p>
@@ -1091,7 +1098,7 @@ function MagicFlow() {
       if (!token) {
         setState({
           phase: "failed",
-          message: "This sign-in link is malformed.",
+          message: "This link is malformed.",
         });
         return;
       }
@@ -1105,7 +1112,7 @@ function MagicFlow() {
         if (!response.ok || !data.ok) {
           setState({
             phase: "failed",
-            message: "This sign-in link is invalid or has expired.",
+            message: "This link is invalid or has expired.",
           });
           return;
         }
@@ -1148,7 +1155,7 @@ function MagicFlow() {
           Unsealing…
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-500">
-          Verifying your sign-in light against the member ledger.
+          Verifying your light against the member ledger.
         </p>
       </div>
     );

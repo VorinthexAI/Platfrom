@@ -33,13 +33,14 @@ export const metadata: Metadata = {
     template: `%s | ${SITE_NAME}`,
   },
   description:
-    "Vorinthex AI is a premium AI ecosystem. Core is your personal AI Brain, built to grow with you through Capabilities.",
+    "Vorinthex AI is the Nexus of Intelligence: your personal AI for everything, with infinite memory. Core is your personal AI Brain, built to grow with you through Capabilities.",
   alternates: {
     canonical: "/",
   },
   openGraph: {
     title: `${SITE_NAME} | ${SITE_TAGLINE}`,
-    description: "Core is your personal AI Brain. Build it, expand it, and make it yours.",
+    description:
+      "Your personal AI for everything, with infinite memory. Explore the Vorinthex galaxy and grow your own AI Brain.",
     url: SITE_URL,
     siteName: SITE_NAME,
     type: "website",
@@ -47,7 +48,8 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: `${SITE_NAME} | ${SITE_TAGLINE}`,
-    description: "Core is your personal AI Brain. Build it, expand it, and make it yours.",
+    description:
+      "Your personal AI for everything, with infinite memory. Explore the Vorinthex galaxy and grow your own AI Brain.",
   },
 };
 

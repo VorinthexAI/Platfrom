@@ -17,6 +17,10 @@ interface StoredProfile {
  * spinning neural globe of every Intelligence Fragment they've collected.
  * Collecting matters — fragments earn better offers and early-access
  * pricing when the doors open.
+ *
+ * The galaxy only opens for a verified profile — one written after the
+ * visitor pressed the sign-in light in their email. Anyone else who lands
+ * here is sent to the sign-in asteroid instead.
  */
 export function PublicGalaxy() {
   const router = useRouter();
@@ -31,12 +35,18 @@ export function PublicGalaxy() {
   useEffect(() => {
     (async () => {
       await Promise.resolve();
+      let stored: StoredProfile | null = null;
       try {
         const raw = window.localStorage.getItem("vx_profile");
-        if (raw) setProfile(JSON.parse(raw));
+        if (raw) stored = JSON.parse(raw) as StoredProfile;
       } catch {
-        // Corrupt local profile — greet anonymously.
+        // Corrupt local profile — treat as unverified.
       }
+      if (!stored) {
+        router.replace("/signin");
+        return;
+      }
+      setProfile(stored);
       try {
         const response = await fetch("/api/fragments/globe");
         if (!response.ok) return;
@@ -47,8 +57,12 @@ export function PublicGalaxy() {
         // The globe is decorative — stay quiet on failure.
       }
     })();
-  }, []);
+  }, [router]);
   // (all state updates above happen in async continuations, never sync in the effect)
+
+  // Nothing renders until the profile check settles: verified explorers
+  // get their galaxy, everyone else is already on their way to sign in.
+  if (!profile) return null;
 
   const displayName = profile?.alias ?? "Explorer";
   const returnToGalaxy = () => {
