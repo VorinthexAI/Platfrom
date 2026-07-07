@@ -9,7 +9,7 @@ on:
       target:
         description: 'Deployment target'
         type: choice
-        options: [all, vorinthex, orbit, backend, selective]
+        options: [all, vorinthex, orbit, waitlist-leaderboard, backend, selective]
         default: all
       deploy:
         description: 'Deploy after verification'
@@ -38,6 +38,7 @@ jobs:
     outputs:
       vorinthex: ${{ steps.decide.outputs.vorinthex }}
       orbit: ${{ steps.decide.outputs.orbit }}
+      waitlist_leaderboard: ${{ steps.decide.outputs.waitlist_leaderboard }}
       backend: ${{ steps.decide.outputs.backend }}
       changed_files: ${{ steps.decide.outputs.changed_files }}
     steps:
@@ -56,41 +57,52 @@ jobs:
               all)
                 vorinthex=true
                 orbit=true
+                waitlist_leaderboard=true
                 backend=true
                 ;;
               vorinthex)
                 vorinthex=true
                 orbit=false
+                waitlist_leaderboard=false
                 backend=false
                 ;;
               orbit)
                 vorinthex=false
                 orbit=true
+                waitlist_leaderboard=false
+                backend=false
+                ;;
+              waitlist-leaderboard)
+                vorinthex=false
+                orbit=false
+                waitlist_leaderboard=true
                 backend=false
                 ;;
               backend)
                 vorinthex=false
                 orbit=false
+                waitlist_leaderboard=false
                 backend=true
                 ;;
               selective)
                 files="$(git diff --name-only HEAD~1 HEAD || true)"
                 vorinthex=false
                 orbit=false
+                waitlist_leaderboard=false
                 backend=false
                 shared=false
                 while IFS= read -r file; do
                   [ -n "$file" ] || continue
                   case "$file" in
-                    web/app/*) vorinthex=true; orbit=true ;;
+                    web/app/*) vorinthex=true; orbit=true; waitlist_leaderboard=true ;;
                     web/landing-pages/vorinthex/*) vorinthex=true ;;
                     web/landing-pages/orbit/*) orbit=true ;;
                     backend/*) backend=true ;;
                     shared/*) shared=true ;;
-                    .github/workflows/deploy.yml) vorinthex=true; orbit=true; backend=true ;;
+                    .github/workflows/deploy.yml) vorinthex=true; orbit=true; waitlist_leaderboard=true; backend=true ;;
                   esac
                 done <<< "$files"
-                if [ "$shared" = true ]; then vorinthex=true; orbit=true; fi
+                if [ "$shared" = true ]; then vorinthex=true; orbit=true; waitlist_leaderboard=true; fi
                 ;;
             esac
           else
@@ -98,27 +110,29 @@ jobs:
             files="$(git diff --name-only "$base" "${{ env.COMMIT_SHA }}")"
             vorinthex=false
             orbit=false
+            waitlist_leaderboard=false
             backend=false
             shared=false
             while IFS= read -r file; do
               [ -n "$file" ] || continue
               case "$file" in
-                web/app/*) vorinthex=true; orbit=true ;;
+                web/app/*) vorinthex=true; orbit=true; waitlist_leaderboard=true ;;
                 web/landing-pages/vorinthex/*) vorinthex=true ;;
                 web/landing-pages/orbit/*) orbit=true ;;
                 backend/*) backend=true ;;
                 shared/*) shared=true ;;
-                .github/workflows/deploy.yml) vorinthex=true; orbit=true; backend=true ;;
+                .github/workflows/deploy.yml) vorinthex=true; orbit=true; waitlist_leaderboard=true; backend=true ;;
               esac
             done <<< "$files"
 
-            # shared/ is consumed by both landing-page apps.
-            if [ "$shared" = true ]; then vorinthex=true; orbit=true; fi
+            # shared/ is consumed by every landing-page app.
+            if [ "$shared" = true ]; then vorinthex=true; orbit=true; waitlist_leaderboard=true; fi
           fi
 
           {
             echo "vorinthex=$vorinthex"
             echo "orbit=$orbit"
+            echo "waitlist_leaderboard=$waitlist_leaderboard"
             echo "backend=$backend"
             echo "changed_files<<EOF"
             printf '%s\n' "${files:-manual:${{ inputs.target || 'all' }}}"
@@ -130,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: >-
-      (needs.changes.outputs.vorinthex == 'true' || needs.changes.outputs.orbit == 'true' || needs.changes.outputs.backend == 'true')
+      (needs.changes.outputs.vorinthex == 'true' || needs.changes.outputs.orbit == 'true' || needs.changes.outputs.waitlist_leaderboard == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event_name == 'pull_request' || inputs.deploy)
     steps:
       - uses: actions/checkout@v4
@@ -177,6 +191,23 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.orbit == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --linker=hoisted
+      - name: Lint
+        run: bun run web:lint
+      - name: Typecheck
+        run: bun run web:typecheck
+
+  verify-waitlist-leaderboard:
+    name: Verify waitlist-leaderboard web
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.waitlist_leaderboard == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -476,6 +507,148 @@ jobs:
       - name: Verify production is live
         env:
           PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).orbit.url }}
+        run: |
+          URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
+          for i in $(seq 1 24); do
+            CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
+            if [ "$CODE" = "200" ]; then
+              echo "Production is live (HTTP 200) at $URL on attempt $i/24"
+              exit 0
+            fi
+            echo "attempt $i/24: HTTP $CODE; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::Production health check failed after 4 minutes ($URL)"
+          exit 1
+
+  deploy-waitlist-leaderboard:
+    name: Build and deploy waitlist-leaderboard web
+    runs-on: ubuntu-latest
+    needs: [changes, sync-configs, verify-waitlist-leaderboard]
+    if: needs.changes.outputs.waitlist_leaderboard == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    defaults:
+      run:
+        working-directory: web/app
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+
+      - name: Strip non-app content from the build context
+        run: |
+          rm -rf ../../shared/brand ../../shared/docs ../../.claude
+          rm -f CLAUDE.md AGENTS.md admin.md ../../CLAUDE.md ../../AGENTS.md
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: |
+          cd "${GITHUB_WORKSPACE}"
+          bun install --frozen-lockfile --linker=hoisted
+          test -f "${GITHUB_WORKSPACE}/node_modules/next/package.json"
+
+      - name: Materialize web dependencies for Vercel tracing
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules" "${GITHUB_WORKSPACE}/web/app/web"
+          mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/app/web/app/node_modules"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/"
+          test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+          test -f "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+
+      - name: Load production env file
+        env:
+          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).waitlist_leaderboard.env) }}
+        run: |
+          set -euo pipefail
+          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.waitlist_leaderboard.env is not configured."; exit 1; }
+          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
+          chmod 600 prod.env
+
+      - name: Validate deployment secrets
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.vercel_project_id }}
+        run: |
+          missing=0
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / waitlist_leaderboard.vercel_project_id)."
+              missing=1
+            fi
+          done
+          test -s prod.env || { echo "::error::config.env produced no waitlist_leaderboard values."; missing=1; }
+          [ "$missing" -eq 0 ]
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Sync prod.env to Vercel
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.vercel_project_id }}
+          VERCEL_TEAM_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r line || [ -n "$line" ]; do
+            case "$line" in ''|\#*) continue ;; esac
+            [[ "$line" == *=* ]] || { echo "::error::Malformed prod.env line."; exit 1; }
+            key="${line%%=*}"
+            value="${line#*=}"
+            test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
+            [ -n "$value" ] || continue
+            payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
+            curl -sf -X POST \
+              "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "$payload" > /dev/null
+          done < prod.env
+
+      - name: Pull Vercel project settings
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.vercel_project_id }}
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Materialize Vercel trace paths
+        run: |
+          mkdir -p web/app/.next
+          cp -al .next/. web/app/.next/
+          test -d web/app/.next/server/chunks
+
+      - name: Verify excluded content is not in the deploy artifact
+        run: |
+          forbidden=$(find .vercel/output \
+            \( -ipath '*shared/brand*' \
+            -o -ipath '*shared/docs*' \
+            -o -iname 'CLAUDE.md' \
+            -o -iname 'AGENTS.md' \
+            -o -iname 'admin.md' \
+            -o -iname '.claude' \) -print)
+          if [ -n "$forbidden" ]; then
+            echo "::error::Excluded content found in the build output:"
+            echo "$forbidden"
+            exit 1
+          fi
+
+      - name: Deploy to Vercel
+        env:
+          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
+        run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
+
+      - name: Verify production is live
+        env:
+          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.url }}
         run: |
           URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
           for i in $(seq 1 24); do
@@ -1008,7 +1181,7 @@ jobs:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-vorinthex, deploy-orbit, backend-app, backend-render]
+    needs: [changes, deploy-vorinthex, deploy-orbit, deploy-waitlist-leaderboard, backend-app, backend-render]
     steps:
       - name: Write deploy audit
         run: |
@@ -1019,6 +1192,7 @@ jobs:
             echo "|---|---:|---|"
             echo "| vorinthex | ${{ needs.changes.outputs.vorinthex }} | ${{ needs.deploy-vorinthex.result }} |"
             echo "| orbit | ${{ needs.changes.outputs.orbit }} | ${{ needs.deploy-orbit.result }} |"
+            echo "| waitlist-leaderboard | ${{ needs.changes.outputs.waitlist_leaderboard }} | ${{ needs.deploy-waitlist-leaderboard.result }} |"
             echo "| backend-app | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-app.result }} |"
             echo "| backend-render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo ""

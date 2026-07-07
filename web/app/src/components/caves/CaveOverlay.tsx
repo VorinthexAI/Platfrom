@@ -12,7 +12,9 @@ import { Button, TextInput } from "@vorinthex/shared/ui/components";
 import { rollCenterCrystal } from "@/components/galaxy/BiomeLoot";
 import { EruptAssembly } from "@/components/ui/EruptAssembly";
 import { CloseIcon } from "@/components/ui/icons";
+import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { trackCtaClick, trackLandingEvent } from "@/lib/analytics";
+import { useAudioStore } from "@/lib/audio/audio-store";
 import {
   claimHandoffSession,
   watchHandoff,
@@ -325,6 +327,8 @@ const STANDING_TITLES = {
  */
 function LeaderboardFlow() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
+  const toggleMission = useAudioStore((s) => s.toggleMission);
+  const missionPlaying = useAudioStore((s) => s.missionPlaying);
   const connect = useLeaderboardStore((s) => s.connect);
   const disconnect = useLeaderboardStore((s) => s.disconnect);
   const rows = useLeaderboardStore((s) => s.rows);
@@ -363,18 +367,32 @@ function LeaderboardFlow() {
 
   return (
     <div className="flex max-h-[88dvh] flex-col gap-4 sm:gap-6">
+      {/* the mission voice — the first thing an arriving explorer sees */}
+      <Button
+        variant="primary"
+        onClick={() => {
+          trackCtaClick("mission_audio", { placement: "leaderboard" });
+          toggleMission();
+        }}
+        icon={<SpeakerIcon animated={missionPlaying} />}
+        className="w-full px-5 py-3.5 text-xs uppercase"
+      >
+        {missionPlaying ? "Stop the Mission" : "Hear the Mission"}
+      </Button>
+
       {/* island 1 — the call */}
       <div
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
-        <p className="micro-label">Galaxy Leaderboard</p>
+        <p className="micro-label">The Intelligence Hunt</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
           The great collectors
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-100 [text-shadow:0_0_14px_rgba(196,204,212,0.6),0_0_34px_rgba(196,204,212,0.25)]">
-          Every fragment you collect feeds the Nexus. The higher you stand
-          at launch, the greater your prizes, offers, and early access.
+          Collect Intelligence Fragments hidden across the Vorinthex galaxy.
+          The higher you stand at launch, the greater your prizes, offers,
+          and early access.
         </p>
       </div>
 
