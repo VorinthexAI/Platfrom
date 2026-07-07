@@ -24,6 +24,7 @@ export function buildWaitlistVerifyLink(tokenHash: string) {
   const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
   const url = new URL('/public/waitlist/verify', frontendUrl);
   url.searchParams.set('token_hash', tokenHash);
+  url.searchParams.set('flow', 'waitlist');
   return url.toString();
 }
 

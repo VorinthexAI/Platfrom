@@ -248,6 +248,7 @@ export function buildMagicLink(tokenHash: string) {
   const frontendUrl = process.env.FRONTEND_URL ?? process.env.FRONTEND_AUTH_URL ?? 'http://localhost:3000';
   const url = new URL('/public/auth/token', frontendUrl);
   url.searchParams.set('token_hash', tokenHash);
+  url.searchParams.set('flow', 'member');
   return url.toString();
 }
 

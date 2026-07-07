@@ -19,7 +19,7 @@ describe('auth helpers', () => {
     const link = buildMagicLink(tokenHash);
 
     expect(tokenHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(link).toBe(`https://app.example.com/public/auth/token?token_hash=${tokenHash}`);
+    expect(link).toBe(`https://app.example.com/public/auth/token?token_hash=${tokenHash}&flow=member`);
     expect(link).not.toContain(rawToken);
   });
 

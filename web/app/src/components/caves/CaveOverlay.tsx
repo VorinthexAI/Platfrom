@@ -699,11 +699,12 @@ function WaitlistVerifyFlow() {
         };
         window.localStorage.setItem("vx_profile", JSON.stringify(profile));
         setState({ phase: "verified", profile });
+        window.setTimeout(() => startJump("public"), 450);
       } catch {
         setState({ phase: "failed" });
       }
     })();
-  }, []);
+  }, [startJump]);
   // (all updates above run in async continuations, never sync in the effect)
 
   if (state.phase === "verifying") {
@@ -775,13 +776,9 @@ function WaitlistVerifyFlow() {
           Registered as {profile.alias}
         </p>
       ) : null}
-      <Button
-        variant="primary"
-        onClick={() => startJump("public")}
-        className="mt-6 w-full px-5 py-3.5 text-xs"
-      >
-        Enter your galaxy
-      </Button>
+      <p className="mt-6 font-mono text-[0.55rem] tracking-[0.24em] text-silver-500 uppercase">
+        Opening your public galaxy
+      </p>
     </div>
   );
 }

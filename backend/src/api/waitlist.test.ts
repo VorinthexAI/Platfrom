@@ -9,6 +9,6 @@ describe('waitlist helpers', () => {
   test('builds frontend verification links with token hash query param', () => {
     process.env.FRONTEND_URL = 'https://app.example.com';
 
-    expect(buildWaitlistVerifyLink('abc123')).toBe('https://app.example.com/public/waitlist/verify?token_hash=abc123');
+    expect(buildWaitlistVerifyLink('abc123')).toBe('https://app.example.com/public/waitlist/verify?token_hash=abc123&flow=waitlist');
   });
 });
