@@ -369,7 +369,9 @@ async function main() {
       FOR render IN postRenders
         RETURN render
     `);
-    for await (const render of cursor) {
+    // Drain before the slow embed() work — see the legacy-events note.
+    const renders = await cursor.all();
+    for (const render of renders) {
       const key = newId();
       const type = 'post.render';
       await outputs.save(
@@ -402,7 +404,9 @@ async function main() {
       RETURN { _key: user._key, events: user.events }
   `);
   const eventsCollection = targetDb.collection('events');
-  for await (const user of usersWithEventsCursor) {
+  // Drain before the slow embed() work — see the legacy-events note.
+  const usersWithEvents = await usersWithEventsCursor.all();
+  for (const user of usersWithEvents) {
     for (const event of user.events ?? []) {
       const slug = typeof event.slug === 'string' && event.slug.length > 0 ? event.slug : 'unknown';
       const key = newId();
@@ -447,7 +451,9 @@ async function main() {
     `);
 
     let migratedUserEvents = 0;
-    for await (const event of cursor) {
+    // Drain before the slow embed() work — see the legacy-events note.
+    const legacyUserEvents = await cursor.all();
+    for (const event of legacyUserEvents) {
       if (typeof event.userId !== 'string' || event.userId.length === 0) continue;
 
       const slug = typeof event.slug === 'string' && event.slug.length > 0 ? event.slug : 'unknown';
@@ -478,6 +484,12 @@ async function main() {
       UPDATE event WITH { category: null } IN events OPTIONS { keepNull: false }
   `);
 
+  // Only events still carrying the LEGACY shape need this pass. Selecting
+  // everything re-embedded the whole collection on every deploy — and once
+  // the collection grew, one batch of embed() calls outlived the server's
+  // cursor TTL and the next batch fetch died with "cursor not found"
+  // (errorNum 1600). Filter to the legacy rows and drain the cursor fully
+  // BEFORE the slow per-event work so no server cursor stays open.
   const eventsCursor = await targetDb.query<{
     _key: string;
     slug?: string;
@@ -488,6 +500,10 @@ async function main() {
     data?: Record<string, unknown> | null;
   }>(`
     FOR event IN events
+      FILTER HAS(event, "entityId")
+        || HAS(event, "entityType")
+        || !HAS(event, "sourceId") || event.sourceId == null
+        || !HAS(event, "belongsTo") || event.belongsTo == null
       RETURN {
         _key: event._key,
         slug: event.slug,
@@ -498,7 +514,11 @@ async function main() {
         data: event.data
       }
   `);
-  for await (const event of eventsCursor) {
+  const legacyEvents = await eventsCursor.all();
+  if (legacyEvents.length > 0) {
+    console.log(`Migrating ${legacyEvents.length} legacy events`);
+  }
+  for (const event of legacyEvents) {
     const userId = await resolveEventUserId({
       targetDb,
       explicitUserId: event.userId,
@@ -570,7 +590,8 @@ async function main() {
       SORT u.createdAt ASC
       RETURN { _key: u._key, alias: u.alias, waitlistNumber: u.waitlistNumber }
   `);
-  for await (const user of usersMissingAliasCursor) {
+  const usersMissingAlias = await usersMissingAliasCursor.all();
+  for (const user of usersMissingAlias) {
     const patch: Record<string, unknown> = {};
     if (user.alias == null) patch.alias = generateAlias(user._key);
     if (user.waitlistNumber == null) {
