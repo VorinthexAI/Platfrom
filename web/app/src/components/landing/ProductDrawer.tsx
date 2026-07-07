@@ -177,6 +177,7 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
             {entity.content.statusNote}
           </p>
         ) : null}
+        <div className="flex flex-wrap items-center gap-3">
         {/* One truth: you're on the waitlist or you're not. */}
         <Button
           variant="primary"
@@ -189,7 +190,7 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
             });
             enterCave("join");
           }}
-          className="w-fit min-h-0 px-6 py-3 text-[0.62rem]"
+          className="min-h-0 flex-1 px-5 py-3 text-[0.62rem] sm:flex-none sm:px-6"
         >
           {entity.content?.primaryCta ?? "Join Waitlist"}
         </Button>
@@ -206,10 +207,11 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
             playVoice(entityAudioUrl(entity.type, entity.slug));
           }}
           icon={<SpeakerIcon animated />}
-          className="w-fit min-h-0 px-6 py-3 text-[0.62rem] uppercase"
+          className="min-h-0 flex-1 px-5 py-3 text-[0.62rem] uppercase sm:flex-none sm:px-6"
         >
           Hear the Story
         </Button>
+        </div>
       </div>
     </div>
   );

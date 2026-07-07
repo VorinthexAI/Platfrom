@@ -235,10 +235,13 @@ jobs:
 
       - name: Materialize web dependencies for Vercel tracing
         run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules"
+          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules" "${GITHUB_WORKSPACE}/web/app/web"
           mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/app/web/app/node_modules"
           cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/"
           test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+          test -f "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
         env:
@@ -368,10 +371,13 @@ jobs:
 
       - name: Materialize web dependencies for Vercel tracing
         run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules"
+          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules" "${GITHUB_WORKSPACE}/web/app/web"
           mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/app/web/app/node_modules"
           cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/"
           test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+          test -f "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
         env:
