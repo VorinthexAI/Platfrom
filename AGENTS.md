@@ -6,14 +6,14 @@ Guidance for AI coding agents working in this repository.
 
 Vorinthex platform monorepo. Top-level workspaces:
 
-- `web/landing-pages/vorinthex`: Vorinthex's Next.js app (the "universe" product).
-- `web/landing-pages/orbit`: Orbit's Next.js app — a second, separate
-  landing-page product living in this same monorepo so it can share `shared/`.
-  `web/` itself is not a workspace — it's just the parent folder for
-  `web/landing-pages/*`.
+- `web/app`: the single Next.js app (the "universe" landing experience).
+  `web/` itself is not a workspace — it's just the parent folder. The app
+  is deployed to BOTH Vercel projects (vorinthex and orbit) by the
+  Unified Deploy workflow; entity subdomains (orbit.vorinthex.com, …) are
+  routed inside the app via `web/app/src/proxy.ts`.
 - `backend`: Bun backend service.
-- `shared`: shared UI, brand, and library code used by both `web/landing-pages/*`
-  apps and backend.
+- `shared`: shared UI, brand, and library code used by the web app and
+  backend.
 
 ## Setup
 
@@ -36,10 +36,9 @@ Only `.env.example` files should be committed. `.env.dev` and `.env.prod` are lo
 ## Common Commands
 
 ```bash
-bun run vorinthex:lint
-bun run vorinthex:typecheck
-bun run orbit:lint
-bun run orbit:typecheck
+bun run web:lint
+bun run web:typecheck
+bun run web:build
 bun run backend:check
 bun run backend:test
 ```
@@ -47,8 +46,7 @@ bun run backend:test
 Run app-specific commands through their workspace folders when needed:
 
 ```bash
-bun run --cwd web/landing-pages/vorinthex dev
-bun run --cwd web/landing-pages/orbit dev
+bun run --cwd web/app dev
 bun run --cwd backend dev
 ```
 
@@ -72,7 +70,7 @@ Order:
 - Keep changes scoped and match the surrounding code style.
 - Add or update tests for behavior changes.
 - Do not commit secrets. Use the ignored files under `environments/`.
-- Keep shared code in the top-level `shared/` folder, not nested inside either `web/landing-pages/*/src/shared` app or `backend/src/shared`.
+- Keep shared code in the top-level `shared/` folder, not nested inside `web/app/src/shared` or `backend/src/shared`.
 - Validate backend endpoint JSON payloads and query parameters with Zod strict object schemas; reject unknown fields instead of silently accepting them.
 - Keep backend HTTP endpoints behind the env API key middleware and Redis-backed per-IP rate limiting unless a task explicitly changes that security model.
 
@@ -80,4 +78,5 @@ Order:
 
 - Run the relevant checks before considering a task complete.
 - Ask before introducing a new major dependency or framework.
-- This repo is its own monorepo; do not add git submodules for `web/landing-pages/vorinthex`, `web/landing-pages/orbit`, `backend`, or `shared`.
+- This repo is its own monorepo; do not add git submodules for `web/app`, `backend`, or `shared`.
+- Vercel deployments happen ONLY through the Unified Deploy GitHub workflow (prebuilt `vercel deploy`); the Vercel projects are intentionally not git-connected, so do not reconnect them — git-triggered builds cannot build this monorepo and will fail.
