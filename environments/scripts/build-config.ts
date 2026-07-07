@@ -57,6 +57,14 @@ const vorinthexEnv = parseEnvFile(args["vorinthex-env-file"] ?? "environments/vo
 const orbitEnv = parseEnvFile(args["orbit-env-file"] ?? "environments/orbit/.env.prod");
 const backendEnv = parseEnvFile(args["backend-env-file"] ?? "environments/backend/.env.prod");
 
+function withServerBackendEnv(env: Record<string, string>) {
+  return {
+    ...env,
+    BACKEND_API_URL: env.BACKEND_API_URL ?? env.API_BASE_URL ?? env.NEXT_PUBLIC_API_BASE_URL ?? "",
+    BACKEND_API_KEY: env.BACKEND_API_KEY ?? env.NEXT_PUBLIC_BACKEND_API_KEY ?? "",
+  };
+}
+
 const config = {
   vercel: {
     token: args["vercel-token"] ?? "",
@@ -65,12 +73,12 @@ const config = {
   vorinthex: {
     url: args["vorinthex-url"] ?? vorinthexEnv.NEXT_PUBLIC_SITE_URL ?? "",
     vercel_project_id: args["vorinthex-project-id"] ?? "",
-    env: vorinthexEnv,
+    env: withServerBackendEnv(vorinthexEnv),
   },
   orbit: {
     url: args["orbit-url"] ?? orbitEnv.NEXT_PUBLIC_SITE_URL ?? "",
     vercel_project_id: args["orbit-project-id"] ?? "",
-    env: orbitEnv,
+    env: withServerBackendEnv(orbitEnv),
   },
   env: backendEnv,
 };
