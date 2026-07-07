@@ -18,8 +18,8 @@ import { hashString, mulberry32 } from "@/lib/three/procedural";
  * Hidden Intelligence Fragments drifting through the galaxy — luminous
  * crystal clusters, unmistakably not asteroids: sharp hexagonal spikes,
  * inner glow, a soft halo, slow hovering drift. Click to inspect and
- * claim; claimed crystals dissolve into light. Positions and rewards come
- * from the registry; claims are validated server-side.
+ * collect; collected crystals dissolve into light. Positions and rewards come
+ * from the registry; collects are validated server-side.
  */
 
 function CrystalShard({
@@ -35,8 +35,8 @@ function CrystalShard({
   const [gone, setGone] = useState(false);
   const [hovered, setHovered] = useState(false);
   const select = useFragmentsStore((s) => s.select);
-  const claimed = useFragmentsStore((s) =>
-    s.claimedIds.includes(collectible.id),
+  const collected = useFragmentsStore((s) =>
+    s.collectedIds.includes(collectible.id),
   );
   const isSelected = useFragmentsStore(
     (s) => s.selected?.id === collectible.id,
@@ -67,15 +67,15 @@ function CrystalShard({
     groupRef.current.rotation.y += delta * baseTilt.spin;
     groupRef.current.position.y =
       collectible.position[1] + Math.sin(timeRef.current * 0.6) * 0.22;
-    // Claimed crystals dissolve toward light, then unmount.
-    const target = claimed ? 0.001 : 1;
+    // Collected crystals dissolve toward light, then unmount.
+    const target = collected ? 0.001 : 1;
     const scale = THREE.MathUtils.lerp(
       groupRef.current.scale.x,
       target,
       delta * 3,
     );
     groupRef.current.scale.setScalar(scale);
-    if (claimed && scale < 0.01) setGone(true);
+    if (collected && scale < 0.01) setGone(true);
 
     if (crystalRef.current) {
       const material = crystalRef.current.material as THREE.MeshStandardMaterial;
@@ -93,7 +93,7 @@ function CrystalShard({
 
   const handleSelect = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (!claimed) select(collectible);
+    if (!collected) select(collectible);
   };
 
   return (
@@ -130,7 +130,7 @@ function CrystalShard({
         distance={3}
         decay={2}
       />
-      {/* generous invisible hit target — fragments must be easy to claim */}
+      {/* generous invisible hit target — fragments must be easy to collect */}
       <mesh
         visible={false}
         onClick={handleSelect}

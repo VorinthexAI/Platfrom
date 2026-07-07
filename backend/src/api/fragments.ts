@@ -13,6 +13,7 @@ import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { formatNodesForThree } from '@/lib/three-format';
 import { newId } from '@/lib/ids';
 import { trackPlatformEvent } from '@/platform/events';
+import { trackUserPlaceChange } from '@/platform/leaderboard-digest';
 import { getUserId } from './security';
 import { notifyCountersDirty } from './live-bus';
 import { parseJson, parseQuery, strictObject } from './validation';
@@ -56,15 +57,15 @@ export function dedupeFragmentEntries<T extends Pick<IntelligenceFragment, 'key'
   });
 }
 
-/** Reduces deduped entries to a fragment balance and the claimed collectible ids. */
+/** Reduces deduped entries to a fragment balance and the collected collectible ids. */
 export function summarizeFragmentEntries(entries: Array<Pick<IntelligenceFragment, 'key' | 'collectibleId' | 'fragments'>>) {
-  const claimed = new Set<string>();
+  const collected = new Set<string>();
   let balance = 0;
   for (const entry of dedupeFragmentEntries(entries)) {
     balance += entry.fragments;
-    claimed.add(entry.collectibleId);
+    collected.add(entry.collectibleId);
   }
-  return { balance, claimed: [...claimed] };
+  return { balance, collected: [...collected] };
 }
 
 export async function collectFragment(c: Context) {
@@ -95,10 +96,14 @@ export async function collectFragment(c: Context) {
   } catch (err) {
     // The (explorerId, collectibleId) unique index is the duplicate gate.
     if (isArangoUniqueConstraintError(err)) {
-      return c.json({ error: 'collectible already claimed by this explorer' }, 409);
+      return c.json({ error: 'collectible already collected by this explorer' }, 409);
     }
     throw err;
   }
+
+  // A collect can move the collector on the waitlist leaderboard; the
+  // movement ledger feeds the daily digest email.
+  if (userId) trackUserPlaceChange(userId);
 
   trackPlatformEvent({
     slug: 'fragments.collected',

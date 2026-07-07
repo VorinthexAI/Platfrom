@@ -143,20 +143,20 @@ const ROCK_DRAWER_HOLD_SECONDS = 3;
  * (the eruption finishes, the crystal assembles), then one smooth slide
  * up — mirroring the planet drawer — with a tier-toned opener (one of
  * 500: 10 tiers × 50 unique lines), the vault's exact value, and the
- * standing order: claim it and keep exploring to climb the leaderboard.
+ * standing order: collect it and keep exploring to climb the leaderboard.
  */
 function RockDrawer() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
   const visitSeed = useGalaxyStore((s) => s.visitSeed);
   const rockBiomeSeed = useGalaxyStore((s) => s.rockBiomeSeed);
-  const lootClaimedIds = useFragmentsStore((s) => s.lootClaimedIds);
+  const lootCollectedIds = useFragmentsStore((s) => s.lootCollectedIds);
   const reducedMotion = useReducedMotion();
 
   const { biomeKey, lootSeed } = caveLootIdentity("rock", rockBiomeSeed, visitSeed);
   const roll = rollCenterCrystal(lootSeed);
   const tier = tierForValue(roll.value);
   const opener = crystalOpener(tier, lootSeed);
-  const claimed = lootClaimedIds.includes(`loot-${biomeKey}-crystal`);
+  const collected = lootCollectedIds.includes(`loot-${biomeKey}-crystal`);
   const amount = formatFragments(roll.value);
 
   return (
@@ -194,14 +194,14 @@ function RockDrawer() {
               {tier.name} · Vault of {amount} fragments
             </p>
             <p className="mt-1.5 text-[0.82rem] leading-relaxed text-silver-300">
-              {claimed ? (
-                <>Vault claimed. Keep exploring other asteroids to find more
+              {collected ? (
+                <>Vault collected. Keep exploring other asteroids to find more
                 fragments and climb the leaderboard.</>
               ) : (
                 <>
                   {opener}{" "}
                   <span className="text-silver-50">
-                    Tap the crystal to claim {amount} Intelligence Fragments
+                    Tap the crystal to collect {amount} Intelligence Fragments
                   </span>{" "}
                   — then keep exploring other asteroids to find more and
                   climb the leaderboard.
@@ -236,7 +236,7 @@ const STANDING_TITLES = {
  * The live board: top ten collectors (never including you), your own
  * standalone row with a climbing/holding/falling read that re-rolls on
  * every SSE update, the galaxy totals, and the active-explorer pulse.
- * The chamber around it mounts every claimed piece in real time — new
+ * The chamber around it mounts every collected piece in real time — new
  * finds toast in as they land.
  */
 function LeaderboardFlow() {
@@ -270,11 +270,12 @@ function LeaderboardFlow() {
     })();
   }, []);
 
-  // Top ten OTHER explorers: the visitor never appears twice — their own
-  // standing renders in the standalone row below.
-  const visibleRows = rows
-    .filter((row) => !alias || row.alias !== alias)
-    .slice(0, 10);
+  // The top ten, exactly as the galaxy stands. If the visitor is one of
+  // them they render right there among the rows, unmistakably marked;
+  // otherwise their standing gets its own card under the board.
+  const topRows = rows.slice(0, 10);
+  const inTopRows = Boolean(alias) && topRows.some((row) => row.alias === alias);
+  const myPlace = myRank ?? Math.max(rows.length, topRows.length) + 1;
 
   return (
     <div>
@@ -283,55 +284,88 @@ function LeaderboardFlow() {
         The great collectors.
       </h2>
 
-      <div className="mt-4 space-y-1" data-scroll-safe>
-        {visibleRows.length === 0 ? (
-          <p className="py-4 text-center text-[0.72rem] text-silver-500">
-            The board is still forming — be the first name on it.
-          </p>
-        ) : (
-          visibleRows.map((row, index) => (
-            <p
-              key={row.userId}
-              className="flex items-baseline gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-1.5 text-sm"
-            >
-              <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-500">
-                {index + 1}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-200">
-                {row.alias ?? "Unnamed Explorer"}
-              </span>
-              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-                {formatFragments(row.total)}
-              </span>
+      <div className="mt-4" data-scroll-safe>
+        <p className="flex items-baseline gap-3 px-3.5 pb-1.5 font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
+          <span className="w-6 shrink-0">Place</span>
+          <span className="min-w-0 flex-1">Alias</span>
+          <span className="shrink-0">Fragments</span>
+        </p>
+        <div className="space-y-1">
+          {topRows.length === 0 ? (
+            <p className="py-4 text-center text-[0.72rem] text-silver-500">
+              The board is still forming. Be the first name on it.
             </p>
-          ))
-        )}
+          ) : (
+            topRows.map((row, index) => {
+              const isMe = Boolean(alias) && row.alias === alias;
+              return (
+                <p
+                  key={row.userId}
+                  className={`flex items-baseline gap-3 rounded-xl border px-3.5 py-1.5 text-sm ${
+                    isMe
+                      ? "border-silver-300/40 bg-white/[0.07]"
+                      : "border-white/8 bg-white/[0.02]"
+                  }`}
+                >
+                  <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-500">
+                    {index + 1}
+                  </span>
+                  <span
+                    className={`min-w-0 flex-1 truncate text-[0.82rem] ${
+                      isMe ? "text-silver-50" : "text-silver-200"
+                    }`}
+                  >
+                    {row.alias ?? "Unnamed Explorer"}
+                    {isMe ? (
+                      <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
+                        You
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                    {formatFragments(row.total)}
+                  </span>
+                </p>
+              );
+            })
+          )}
+        </div>
       </div>
 
-      {/* the visitor's own standing — always its own row */}
-      <div className="mt-3 rounded-xl border border-white/15 bg-white/[0.05] px-3.5 py-2.5">
-        <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
-          {STANDING_TITLES[standingTier]}
-        </p>
-        <p className="mt-1 flex items-baseline gap-3 text-sm">
-          <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
-            {myRank !== null && myRank <= rows.length ? myRank : "—"}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
-            {alias ?? "You"}
-          </span>
-          <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-            {formatFragments(balance)}
-          </span>
-        </p>
-        <p className="mt-1.5 text-[0.7rem] leading-relaxed text-silver-300">
+      {/* outside the top ten, the visitor's standing gets its own card */}
+      {!inTopRows ? (
+        <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
+          <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
+            {STANDING_TITLES[standingTier]}
+          </p>
+          <p className="mt-1 flex items-baseline gap-3 text-sm">
+            <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
+              {myPlace}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+              {alias ?? "You"}
+              <span className="ml-2 rounded-full border border-silver-300/40 px-2 py-0.5 font-mono text-[0.5rem] tracking-[0.2em] text-silver-100 uppercase">
+                You
+              </span>
+            </span>
+            <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+              {formatFragments(balance)}
+            </span>
+          </p>
+          <p className="mt-1.5 text-[0.7rem] leading-relaxed text-silver-300">
+            {standingText ||
+              "Collect fragments across the galaxy to take your place on the board."}
+          </p>
+        </div>
+      ) : (
+        <p className="mt-2.5 text-center text-[0.7rem] leading-relaxed text-silver-300">
           {standingText ||
-            "Claim fragments across the galaxy to take your place on the board."}
+            "Collect fragments across the galaxy to defend your place on the board."}
         </p>
-      </div>
+      )}
 
       <p className="mt-4 text-center font-mono text-[0.55rem] tracking-[0.22em] text-silver-300 uppercase">
-        {formatFragments(fragmentsTotal)} total fragments claimed across the galaxy
+        {formatFragments(fragmentsTotal)} total fragments collected across the galaxy
       </p>
       <p className="mt-1.5 text-center text-[0.7rem] leading-relaxed text-silver-500">
         {galaxyPulseLine(activeExplorers, updateNonce * 48271 + 7)}
@@ -378,9 +412,9 @@ function JoinFlow() {
   );
   const [error, setError] = useState("");
   const formStarted = useRef(false);
-  const pendingClaim = useFragmentsStore((s) => s.pendingClaim);
+  const pendingCollect = useFragmentsStore((s) => s.pendingCollect);
   const markJoined = useFragmentsStore((s) => s.markJoined);
-  const applyClaim = useFragmentsStore((s) => s.applyClaim);
+  const applyCollect = useFragmentsStore((s) => s.applyCollect);
 
   function updateEmail(value: string) {
     if (!formStarted.current) {
@@ -389,7 +423,7 @@ function JoinFlow() {
         slug: "waitlist.form_started",
         metadata: {
           form: "join",
-          pending_collectible_id: pendingClaim?.id ?? null,
+          pending_collectible_id: pendingCollect?.id ?? null,
         },
       });
     }
@@ -403,7 +437,7 @@ function JoinFlow() {
       slug: "waitlist.submit_clicked",
       metadata: {
         form: "join",
-        pending_collectible_id: pendingClaim?.id ?? null,
+        pending_collectible_id: pendingCollect?.id ?? null,
       },
     });
     let normalizedEmail: string;
@@ -422,7 +456,7 @@ function JoinFlow() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: normalizedEmail,
-          ...(pendingClaim ? { collectibleId: pendingClaim.id } : {}),
+          ...(pendingCollect ? { collectibleId: pendingCollect.id } : {}),
         }),
       });
       const data = await response.json().catch(() => null);
@@ -435,13 +469,13 @@ function JoinFlow() {
       }
       setEmail(normalizedEmail);
       markJoined();
-      // The treasure is claimed for this explorer the moment they join —
+      // The treasure is collected for this explorer the moment they join —
       // the backend stores the node right away, before email verification.
-      if (pendingClaim && data.claim?.ok) {
-        applyClaim(pendingClaim, {
-          fragmentsAwarded: data.claim.fragmentsAwarded,
-          balance: data.claim.balance,
-          globalTotal: data.claim.globalTotal,
+      if (pendingCollect && data.collect?.ok) {
+        applyCollect(pendingCollect, {
+          fragmentsAwarded: data.collect.fragmentsAwarded,
+          balance: data.collect.balance,
+          globalTotal: data.collect.globalTotal,
         });
       }
       setStatus("sent");
@@ -473,16 +507,16 @@ function JoinFlow() {
     <form onSubmit={handleSubmit}>
       <p className="micro-label">Reservation Vault</p>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        Claim your place in the galaxy.
+        Collect your place in the galaxy.
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-silver-500">
         This vault holds every reserved seat for Core. Leave your email and
         the Nexus will carve yours into the rock.
       </p>
-      {pendingClaim ? (
+      {pendingCollect ? (
         <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 font-mono text-[0.55rem] tracking-[0.2em] text-silver-300 uppercase">
-          Claiming: {pendingClaim.name} · +
-          {pendingClaim.fragments.toLocaleString("en-US")} fragments
+          Collecting: {pendingCollect.name} · +
+          {pendingCollect.fragments.toLocaleString("en-US")} fragments
         </p>
       ) : null}
       <label className="mt-6 block">
@@ -531,7 +565,9 @@ interface StoredProfile {
 function ExplorerSigninFlow() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
   const balance = useFragmentsStore((s) => s.balance);
-  const claimedCount = useFragmentsStore((s) => s.claimedIds.length);
+  const collectedCount = useFragmentsStore((s) => s.collectedIds.length);
+  const pendingCollect = useFragmentsStore((s) => s.pendingCollect);
+  const applyCollect = useFragmentsStore((s) => s.applyCollect);
   const [profile, setProfile] = useState<StoredProfile | null | "loading">(
     "loading",
   );
@@ -586,7 +622,7 @@ function ExplorerSigninFlow() {
             <span className="font-mono text-[0.55rem] tracking-[0.2em] text-silver-500 uppercase">
               Treasures found
             </span>
-            <span className="text-silver-50">{claimedCount}</span>
+            <span className="text-silver-50">{collectedCount}</span>
           </p>
         </div>
         {profile.alias ? (
@@ -653,10 +689,22 @@ function ExplorerSigninFlow() {
       const response = await fetch("/api/members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail }),
+        body: JSON.stringify({
+          email: normalizedEmail,
+          // The carried treasure is stored against this email right away,
+          // so the fragment survives even an abandoned magic link.
+          ...(pendingCollect ? { collectibleId: pendingCollect.id } : {}),
+        }),
       });
       const data = await response.json().catch(() => null);
       if (response.ok) {
+        if (pendingCollect && data?.collect?.ok) {
+          applyCollect(pendingCollect, {
+            fragmentsAwarded: data.collect.fragmentsAwarded,
+            balance: data.collect.balance,
+            globalTotal: data.collect.globalTotal,
+          });
+        }
         setEmail(normalizedEmail);
         setStatus("sent");
       } else {
@@ -696,6 +744,12 @@ function ExplorerSigninFlow() {
         Enter the email you joined with and the Grove will send a light to
         restore your spot, your alias, and your fragments on this device.
       </p>
+      {pendingCollect ? (
+        <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 font-mono text-[0.55rem] tracking-[0.2em] text-silver-300 uppercase">
+          Collecting: {pendingCollect.name} · +
+          {pendingCollect.fragments.toLocaleString("en-US")} fragments
+        </p>
+      ) : null}
       <label className="mt-6 block">
         <span className="sr-only">Email address</span>
         <TextInput

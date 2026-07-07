@@ -2,6 +2,22 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getEntityBySubdomain } from "@/lib/galaxy/registry-helpers";
 
 /**
+ * Anchored experiences that are caves, not registry entities: hostnames
+ * here rewrite straight to their page route, exactly like planets do —
+ * `waitlist-leaderboard.vorinthex.com` dives into the leaderboard
+ * asteroid the way `orbit.vorinthex.com` enters the Orbit world.
+ */
+const CAVE_SUBDOMAIN_PATHS: Record<string, string> = {
+  "waitlist-leaderboard": "/leaderboard",
+};
+
+function caveSubdomainPath(hostname: string): string | null {
+  const host = hostname.split(":")[0] ?? "";
+  const label = host.split(".")[0] ?? "";
+  return CAVE_SUBDOMAIN_PATHS[label] ?? null;
+}
+
+/**
  * Campaign subdomain router: `atlas.vorinthex.com` and friends internally
  * rewrite to the entity's canonical path (the registry decides which
  * hostnames exist). Canonical URLs in metadata prevent duplicate-content
@@ -9,12 +25,21 @@ import { getEntityBySubdomain } from "@/lib/galaxy/registry-helpers";
  */
 export function proxy(request: NextRequest) {
   const hostname = request.headers.get("host") ?? "";
-  const entity = getEntityBySubdomain(hostname);
 
-  if (entity && request.nextUrl.pathname === "/") {
-    const url = request.nextUrl.clone();
-    url.pathname = entity.routes.path;
-    return NextResponse.rewrite(url);
+  if (request.nextUrl.pathname === "/") {
+    const cavePath = caveSubdomainPath(hostname);
+    if (cavePath) {
+      const url = request.nextUrl.clone();
+      url.pathname = cavePath;
+      return NextResponse.rewrite(url);
+    }
+
+    const entity = getEntityBySubdomain(hostname);
+    if (entity) {
+      const url = request.nextUrl.clone();
+      url.pathname = entity.routes.path;
+      return NextResponse.rewrite(url);
+    }
   }
 
   return NextResponse.next();

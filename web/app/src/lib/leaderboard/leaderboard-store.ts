@@ -11,7 +11,7 @@ import { standingLine, type StandingTier } from "./copy";
  * explorer's rank from the fragments ledger (their balance vs the top
  * rows), rolls a standing tier (climbing / steady / falling) against the
  * previous rank, and surfaces FOMO toasts for pieces other explorers
- * claim in real time.
+ * collect in real time.
  */
 
 export interface LeaderboardRow {
@@ -112,13 +112,13 @@ export const useLeaderboardStore = create<LeaderboardState>((set, get) => ({
         alias: entry.alias,
       }));
 
-      // FOMO toasts: pieces that appeared since the last frame, claimed by
+      // FOMO toasts: pieces that appeared since the last frame, collected by
       // somebody else. Skipped on the very first frame (nothing is "new").
       const fragments = useFragmentsStore.getState();
       if (seenEntryKeys) {
         const fresh = entries.filter((entry) => !seenEntryKeys!.has(entry.key));
         const loudest = fresh
-          .filter((entry) => !fragments.lootClaimedIds.includes(entry.key))
+          .filter((entry) => !fragments.lootCollectedIds.includes(entry.key))
           .sort((a, b) => b.fragments - a.fragments)[0];
         if (loudest) {
           fragments.pushToast(

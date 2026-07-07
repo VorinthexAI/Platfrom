@@ -24,8 +24,8 @@ export const landingEventSlugs = [
   'landing.crystal_collected',
   'landing.crystal_room_filled',
   'landing.fragment_discovered',
-  'landing.fragment_claim_clicked',
-  'landing.fragment_join_to_claim_clicked',
+  'landing.fragment_collect_clicked',
+  'landing.fragment_join_to_collect_clicked',
   'waitlist.form_started',
   'waitlist.submit_clicked',
   'waitlist.signup_submitted',
@@ -36,6 +36,7 @@ export const landingEventSlugs = [
   'auth.signin_authed_jump',
   'auth.member_gate_opened',
   'waitlist.verify_jump_started',
+  'leaderboard.daily_digest_sent',
   'legal.opened',
   'fragments.collected',
 ] as const;

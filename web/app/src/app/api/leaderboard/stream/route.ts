@@ -38,7 +38,7 @@ export async function GET() {
             { user_id: "demo-5", alias: "Dust Pilot", total: 443 },
           ],
           fragments_total: Math.max(progress.total, 189430),
-          fragments_entries: Math.max(progress.claimed.length, 42),
+          fragments_entries: Math.max(progress.collected.length, 42),
           active_explorers: 52,
           recent: [],
         });

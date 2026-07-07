@@ -3,8 +3,8 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
 import {
-  claimCollectible,
-  claimProceduralLoot,
+  collectCollectible,
+  collectProceduralLoot,
 } from "@/lib/fragments/fragments-server";
 
 const meshSchema = z.strictObject({
@@ -17,7 +17,7 @@ const meshSchema = z.strictObject({
     .optional(),
 });
 
-const claimSchema = z.strictObject({
+const collectSchema = z.strictObject({
   collectibleId: z.string().min(1).max(120),
   /** Mesh recipe for registry collectibles (exact-mesh persistence). */
   mesh: meshSchema.optional(),
@@ -47,10 +47,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = claimSchema.safeParse(body);
+  const parsed = collectSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { ok: false, error: "Invalid claim." },
+      { ok: false, error: "Invalid collect." },
       { status: 400 },
     );
   }
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
   let name: string;
   let rarity: string;
   if (loot) {
-    const result = claimProceduralLoot(explorerId, {
+    const result = collectProceduralLoot(explorerId, {
       lootId: collectibleId,
       kind: loot.kind,
       name: loot.name,
@@ -86,7 +86,7 @@ export async function POST(request: Request) {
     name = loot.name;
     rarity = loot.rarity;
   } else {
-    const result = claimCollectible(explorerId, collectibleId);
+    const result = collectCollectible(explorerId, collectibleId);
     if (!result.ok) {
       return NextResponse.json(
         { ok: false, error: result.error },
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
   }
   const mesh = loot?.mesh ?? parsed.data.mesh;
 
-  // Persist the claim in the platform backend (durable ledger + SSE bump).
+  // Persist the collect in the platform backend (durable ledger + SSE bump).
   // The local in-memory ledger stays authoritative for this session's UX
   // so a backend hiccup never breaks the treasure hunt.
   let globalTotal = outcome.globalTotal;

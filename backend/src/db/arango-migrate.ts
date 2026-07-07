@@ -194,6 +194,13 @@ const collections: CollectionSpec[] = [
       { fields: ['userId', 'createdAt'] },
     ],
   },
+  {
+    name: 'userWaitlistLeaderboardChanges',
+    indexes: [
+      { fields: ['userId', 'createdAt'] },
+      { fields: ['createdAt'] },
+    ],
+  },
 ];
 
 const droppedCollections = [
