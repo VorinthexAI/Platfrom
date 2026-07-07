@@ -20,7 +20,7 @@ export function JumpOverlay() {
   useEffect(() => {
     if (mode !== "jump" || !jumpTarget) return;
     const timer = setTimeout(() => {
-      router.push(jumpTarget === "private" ? "/galaxy/private" : "/galaxy/public");
+      router.replace(jumpTarget === "private" ? "/galaxy/private" : "/galaxy/public");
     }, JUMP_DURATION_MS);
     return () => clearTimeout(timer);
   }, [mode, jumpTarget, router]);
