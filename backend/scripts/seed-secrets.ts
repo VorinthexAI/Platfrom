@@ -5,6 +5,8 @@ import { newId } from '@/lib/ids';
 import { getDefaultPlatformId } from '@/platform/events';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
+import { getMemberByEmailHash } from '@/lib/db/members.node';
+import { getSuperAdminByEmailHash } from '@/lib/db/super-admins.node';
 
 const SEEDS_FILE = process.env.SEEDS_FILE ?? '../environments/backend/db.seeds.secrets.json';
 
@@ -18,6 +20,13 @@ function generateEmailHash(email: string): Promise<string> {
 
 function generateCuidKey(): string {
   return newId();
+}
+
+async function existingIdentityKey(nodeName: string, emailHash: unknown): Promise<string | null> {
+  if (typeof emailHash !== 'string' || emailHash.length === 0) return null;
+  if (nodeName === 'members') return (await getMemberByEmailHash(emailHash))?.key ?? null;
+  if (nodeName === 'superAdmins') return (await getSuperAdminByEmailHash(emailHash))?.key ?? null;
+  return null;
 }
 
 function resolveRefs(value: unknown, idMap: Map<string, string>): unknown {
@@ -59,10 +68,10 @@ async function main() {
       const localId = doc.$id as string | undefined;
       delete doc.$id;
 
-      if (!doc.key) doc.key = generateCuidKey();
       if (typeof doc.email === 'string' && !doc.emailHash) {
         doc.emailHash = await generateEmailHash(doc.email);
       }
+      doc.key = await existingIdentityKey(nodeName, doc.emailHash) ?? doc.key ?? generateCuidKey();
       const now = new Date().toISOString();
       if (!doc.createdAt) doc.createdAt = now;
       if (!doc.updatedAt) doc.updatedAt = now;
