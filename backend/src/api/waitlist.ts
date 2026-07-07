@@ -51,7 +51,8 @@ async function createWaitlistEmailChallenge(userId: string) {
 
   await insertAuthChallenge({
     key: newId(),
-    userId,
+    identityKey: userId,
+    identityType: 'user',
     kind: 'waitlist',
     tokenHash: storedTokenHash,
     expiresAt: expiresAt.toISOString(),
@@ -161,7 +162,9 @@ export async function verifyWaitlistEmail(tokenHash: string) {
   }
   await updateAuthChallenge(challenge.key, { consumedAt: now.toISOString() });
 
-  const entry = await updateUser(challenge.userId, { isVerified: true, updatedAt: now.toISOString() });
+  if (challenge.identityType !== 'user') return null;
+
+  const entry = await updateUser(challenge.identityKey, { isVerified: true, updatedAt: now.toISOString() });
   trackPlatformEvent({
     slug: 'waitlist.email_verified',
     userId: entry.key,

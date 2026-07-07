@@ -10,7 +10,6 @@ export const memberRoleSchema = z.enum(['owner', 'admin', 'moderator', 'viewer']
 export const memberSchema = z.object({
   key: z.string(),
   platformId: z.string(),
-  userId: z.string(),
   email: z.string(),
   emailHash: z.string(),
   name: z.string().nullable().default(null),
@@ -43,17 +42,6 @@ export const deleteMember = helpers.deleteById;
 export const upsertMemberByKey = helpers.upsertByKey;
 export const getAllMembersChunked = helpers.getAllChunked;
 export const listMembersPage = helpers.listPage;
-
-export async function getMemberByUserId(userId: string): Promise<Member | null> {
-  const cursor = await db.query(aql`
-    FOR m IN ${db.collection(MEMBERS_COLLECTION)}
-      FILTER m.userId == ${userId}
-      LIMIT 1
-      RETURN m
-  `);
-  const doc = await cursor.next();
-  return doc ? memberSchema.parse(withArangoKey(doc)) : null;
-}
 
 export async function getMemberByEmail(email: string): Promise<Member | null> {
   const cursor = await db.query(aql`

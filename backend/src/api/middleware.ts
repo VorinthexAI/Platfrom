@@ -5,7 +5,7 @@ import { timingSafeEqual } from '@/lib/crypto';
 import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
 import { strictObject } from './validation';
-import { rotateRefreshToken, verifyAccessToken } from './auth';
+import { rotateRefreshToken, verifyAccessToken, type AuthIdentity } from './auth';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
@@ -27,8 +27,9 @@ function getBearerToken(c: Parameters<MiddlewareHandler>[0]) {
   return c.req.header('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
 }
 
-function setAuthUserId(c: Parameters<MiddlewareHandler>[0], userId: string) {
-  c.set('userId', userId);
+function setAuthIdentity(c: Parameters<MiddlewareHandler>[0], identity: AuthIdentity) {
+  c.set('authIdentity', identity);
+  if (identity.identityType === 'user') c.set('userId', identity.key);
 }
 
 function cookieOptions(maxAge: number) {
@@ -137,9 +138,9 @@ export const autoRefreshAuthTokens: MiddlewareHandler = async (c, next) => {
     : getCookie(c, ACCESS_COOKIE);
 
   if (accessToken) {
-    const userId = await verifyAccessToken(accessToken);
-    if (userId) {
-      setAuthUserId(c, userId);
+    const identity = await verifyAccessToken(accessToken);
+    if (identity) {
+      setAuthIdentity(c, identity);
       return next();
     }
   }
@@ -152,8 +153,8 @@ export const autoRefreshAuthTokens: MiddlewareHandler = async (c, next) => {
   const tokens = await rotateRefreshToken(refreshToken);
   if (!tokens) return next();
 
-  const refreshedUserId = await verifyAccessToken(tokens.accessToken);
-  if (refreshedUserId) setAuthUserId(c, refreshedUserId);
+  const refreshedIdentity = await verifyAccessToken(tokens.accessToken);
+  if (refreshedIdentity) setAuthIdentity(c, refreshedIdentity);
 
   setSessionTokenHeaders(c, tokens);
 

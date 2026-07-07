@@ -4,10 +4,12 @@ import { db } from './client';
 import { createNodeHelpers, withArangoKey } from './base';
 
 export const AUTH_CHALLENGES_COLLECTION = 'authChallenges';
+export const authIdentityTypeSchema = z.enum(['user', 'member', 'superAdmin']);
 
 export const authChallengeSchema = z.object({
   key: z.string(),
-  userId: z.string(),
+  identityKey: z.string(),
+  identityType: authIdentityTypeSchema,
   kind: z.string(),
   tokenHash: z.string(),
   expiresAt: z.string(),
@@ -42,9 +44,13 @@ export async function getAuthChallengeByTokenHash(tokenHash: string): Promise<Au
 }
 
 export async function listAuthChallengesByUserAndKind(userId: string, kind: string): Promise<AuthChallenge[]> {
+  return listAuthChallengesByIdentityAndKind(userId, 'user', kind);
+}
+
+export async function listAuthChallengesByIdentityAndKind(identityKey: string, identityType: z.infer<typeof authIdentityTypeSchema>, kind: string): Promise<AuthChallenge[]> {
   const cursor = await db.query(aql`
     FOR c IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
-      FILTER c.userId == ${userId} && c.kind == ${kind}
+      FILTER c.identityKey == ${identityKey} && c.identityType == ${identityType} && c.kind == ${kind}
       RETURN c
   `);
   const docs = await cursor.all();
@@ -52,9 +58,14 @@ export async function listAuthChallengesByUserAndKind(userId: string, kind: stri
 }
 
 export async function consumeActiveAuthChallengesByUserAndKind(userId: string, kind: string, consumedAt: string): Promise<void> {
+  return consumeActiveAuthChallengesByIdentityAndKind(userId, 'user', kind, consumedAt);
+}
+
+export async function consumeActiveAuthChallengesByIdentityAndKind(identityKey: string, identityType: z.infer<typeof authIdentityTypeSchema>, kind: string, consumedAt: string): Promise<void> {
   await db.query(aql`
     FOR c IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
-      FILTER c.userId == ${userId}
+      FILTER c.identityKey == ${identityKey}
+        && c.identityType == ${identityType}
         && c.kind == ${kind}
         && (!HAS(c, "consumedAt") || c.consumedAt == null)
       UPDATE c WITH { consumedAt: ${consumedAt} } IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}

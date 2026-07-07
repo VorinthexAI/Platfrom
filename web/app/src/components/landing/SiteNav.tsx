@@ -100,27 +100,6 @@ export function SiteNav() {
         </div>
 
         <div className="flex items-center gap-3 justify-self-end sm:gap-6">
-          <button
-            type="button"
-            onClick={() => {
-              trackCtaClick("signin_open", { placement: "nav_desktop" });
-              enterCave("signin");
-            }}
-            className="hidden text-xs tracking-[0.06em] text-silver-500 transition-colors hover:text-silver-100 md:block"
-          >
-            Already on waitlist?{" "}
-            <span className="underline underline-offset-4">Sign in</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              trackCtaClick("signin_open", { placement: "nav_mobile" });
-              enterCave("signin");
-            }}
-            className="text-xs tracking-[0.06em] text-silver-500 transition-colors hover:text-silver-100 md:hidden"
-          >
-            Sign in
-          </button>
           <Button
             variant="primary"
             onClick={() => {

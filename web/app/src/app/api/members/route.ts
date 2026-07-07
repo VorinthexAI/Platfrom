@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
+import { emailSchema } from "@/lib/email";
 
 const membersSchema = z.strictObject({
-  email: z.string().trim().toLowerCase().email().max(254),
+  email: emailSchema,
 });
 
 /**

@@ -38,7 +38,7 @@ describe('auth helpers', () => {
 
     const token = await createAccessToken('usr_test');
 
-    expect(await verifyAccessToken(token)).toBe('usr_test');
+    expect(await verifyAccessToken(token)).toEqual({ key: 'usr_test', identityType: 'user' });
     expect(await verifyAccessToken(`${token}tampered`)).toBeNull();
     expect(timingSafeEqual('abcdef', 'abcdef')).toBe(true);
     expect(timingSafeEqual('abcdef', 'abcdeg')).toBe(false);

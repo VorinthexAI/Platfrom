@@ -39,44 +39,39 @@ async function main() {
   if (environment === 'prod') await verifyProdDatabaseConnection();
 
   try {
-    const { upsertUserByEmail } = await import('@/api/users');
-    const { upsertMemberForUser } = await import('@/api/users');
-    const { updateMember } = await import('@/lib/db/members.node');
-    const { getSuperAdminByUserId, insertSuperAdmin, updateSuperAdmin } = await import('@/lib/db/super-admins.node');
+    const { hashUserEmail } = await import('@/api/users');
+    const { getSuperAdminByEmail, updateSuperAdmin } = await import('@/lib/db/super-admins.node');
+    const { upsertSuperAdminByKeyGuarded } = await import('@/lib/db/identity-guard');
     const { encryptSecret } = await import('@/lib/crypto');
+    const { newId } = await import('@/lib/ids');
+    const { getDefaultPlatformId } = await import('@/platform/events');
     const { verifySuccessiveTotpCodes } = await import('@/api/auth');
 
     const email = await askEmail();
 
-    console.log(`\nCreating/updating super admin user for ${email} in ${environment}...`);
-    const user = await upsertUserByEmail(email, {
-      isVerified: true,
-    });
-    const member = await upsertMemberForUser(user, { role: 'owner' });
-    const existingSuperAdmin = await getSuperAdminByUserId(user.key);
+    console.log(`\nCreating/updating super admin identity for ${email} in ${environment}...`);
+    const existingSuperAdmin = await getSuperAdminByEmail(email);
     const now = new Date().toISOString();
-    if (existingSuperAdmin) {
-      await updateSuperAdmin(existingSuperAdmin.key, {
-        memberId: member.key,
-        email: user.email,
-        emailHash: user.emailHash,
-        updatedAt: now,
-      });
-    } else {
-      await insertSuperAdmin({
-        key: `super_admin_${user.key}`,
-        userId: user.key,
-        memberId: member.key,
-        email: user.email,
-        emailHash: user.emailHash,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-    console.log(`User ${user.key} and member ${member.key} ready.`);
+    const superAdmin = existingSuperAdmin ?? await upsertSuperAdminByKeyGuarded({
+      key: newId(),
+      platformId: await getDefaultPlatformId(),
+      email,
+      emailHash: await hashUserEmail(email),
+      isMfaEnabled: false,
+      has_request_mfa_reset_link: false,
+      refreshTokenHash: null,
+      totpSecret: null,
+      lastTotpTimeStep: null,
+      requested_mfa_reset_link_at: null,
+      lastLoginAt: null,
+      createdAt: now,
+      updatedAt: now,
+      embedding: [],
+    });
+    console.log(`Super admin identity ${superAdmin.key} ready.`);
 
     const secret = generateSecret();
-    const otpauthUrl = generateURI({ issuer: ISSUER, label: user.email, secret });
+    const otpauthUrl = generateURI({ issuer: ISSUER, label: email, secret });
     const qr = await QRCode.toString(otpauthUrl, { type: 'terminal', small: true });
 
     console.log('\nScan this QR code with your authenticator app:\n');
@@ -86,7 +81,7 @@ async function main() {
 
     const lastTotpTimeStep = await verifyTwoCodes(secret, verifySuccessiveTotpCodes);
 
-    await updateMember(member.key, {
+    await updateSuperAdmin(superAdmin.key, {
       totpSecret: await encryptSecret(secret),
       isMfaEnabled: true,
       lastTotpTimeStep,

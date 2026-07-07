@@ -22,14 +22,6 @@ function buildOutputEmbedText(key: string, type: string): string {
   return ['_outputs', key, type].join(':');
 }
 
-function buildMemberEmbedText(key: string, email: string, name?: string | null): string {
-  return ['_members', key, email, name].filter(Boolean).join(':');
-}
-
-function buildSuperAdminEmbedText(key: string, email: string): string {
-  return ['_superAdmins', key, email].filter(Boolean).join(':');
-}
-
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -97,7 +89,6 @@ const collections: CollectionSpec[] = [
     indexes: [
       { fields: ['platformId'] },
       { fields: ['platformId', 'role'] },
-      { fields: ['userId'], unique: true },
       { fields: ['email'], unique: true },
       { fields: ['emailHash'], unique: true },
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
@@ -106,9 +97,10 @@ const collections: CollectionSpec[] = [
   {
     name: 'superAdmins',
     indexes: [
-      { fields: ['userId'], unique: true },
-      { fields: ['memberId'], unique: true, sparse: true },
+      { fields: ['platformId'] },
+      { fields: ['email'], unique: true },
       { fields: ['emailHash'], unique: true },
+      { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
   { name: 'minds', indexes: [{ fields: ['userId'], unique: true }] },
@@ -155,7 +147,7 @@ const collections: CollectionSpec[] = [
   { name: 'processedWebhookEvents', indexes: [{ fields: ['provider', 'eventId'], unique: true }] },
   {
     name: 'authChallenges',
-    indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['userId', 'kind'] }, { fields: ['expiresAt'] }],
+    indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['identityKey', 'identityType', 'kind'] }, { fields: ['expiresAt'] }],
   },
   {
     name: 'events',
@@ -273,135 +265,6 @@ async function main() {
       updatedAt: now,
       embedding: await embed({ text: ['_platforms', defaultPlatformId, 'this'].join(':') }),
     });
-  }
-
-  const membersCollection = targetDb.collection('members');
-  const superAdminsCollection = targetDb.collection('superAdmins');
-  const usersToPromoteCursor = await targetDb.query<{
-    _key: string;
-    platformId?: string;
-    email?: string;
-    emailHash?: string;
-    name?: string | null;
-    profileUrl?: string | null;
-    isMfaEnabled?: boolean;
-    has_request_mfa_reset_link?: boolean;
-    isSuperAdmin?: boolean;
-    refreshTokenHash?: string | null;
-    totpSecret?: string | null;
-    lastTotpTimeStep?: number | null;
-    requested_mfa_reset_link_at?: string | null;
-    lastLoginAt?: string | null;
-    isWaitlistApproved?: boolean;
-    createdAt?: string;
-    updatedAt?: string;
-  }>(`
-    FOR u IN users
-      FILTER u.isWaitlistApproved == true
-        || u.isSuperAdmin == true
-        || u.isMfaEnabled == true
-        || HAS(u, "totpSecret")
-        || u.refreshTokenHash != null
-      RETURN u
-  `);
-  for await (const user of usersToPromoteCursor) {
-    if (!user.email || !user.emailHash) continue;
-    const existingMemberCursor = await targetDb.query<{
-      _key: string;
-      platformId?: string;
-      role?: string;
-      isMfaEnabled?: boolean;
-      has_request_mfa_reset_link?: boolean;
-      isSuperAdmin?: boolean;
-      refreshTokenHash?: string | null;
-      totpSecret?: string | null;
-      lastTotpTimeStep?: number | null;
-      requested_mfa_reset_link_at?: string | null;
-      lastLoginAt?: string | null;
-      createdAt?: string;
-      updatedAt?: string;
-    }>(
-      `
-        FOR m IN members
-          FILTER m.userId == @userId
-          LIMIT 1
-          RETURN m
-      `,
-      { userId: user._key },
-    );
-    const existingMember = await existingMemberCursor.next();
-    const key = existingMember?._key ?? newId();
-    const now = new Date().toISOString();
-    const memberWasSuperAdmin = existingMember?.isSuperAdmin == true || user.isSuperAdmin == true;
-    await membersCollection.save(
-      {
-        _key: key,
-        platformId: existingMember?.platformId ?? user.platformId ?? defaultPlatformId,
-        userId: user._key,
-        email: user.email,
-        emailHash: user.emailHash,
-        name: user.name ?? null,
-        profileUrl: user.profileUrl ?? null,
-        role: existingMember?.role ?? (memberWasSuperAdmin ? 'owner' : 'viewer'),
-        isMfaEnabled: existingMember?.isMfaEnabled ?? user.isMfaEnabled ?? false,
-        has_request_mfa_reset_link: existingMember?.has_request_mfa_reset_link ?? user.has_request_mfa_reset_link ?? false,
-        refreshTokenHash: existingMember?.refreshTokenHash ?? user.refreshTokenHash ?? null,
-        totpSecret: existingMember?.totpSecret ?? user.totpSecret ?? null,
-        lastTotpTimeStep: existingMember?.lastTotpTimeStep ?? user.lastTotpTimeStep ?? null,
-        requested_mfa_reset_link_at: existingMember?.requested_mfa_reset_link_at ?? user.requested_mfa_reset_link_at ?? null,
-        lastLoginAt: existingMember?.lastLoginAt ?? user.lastLoginAt ?? null,
-        createdAt: existingMember?.createdAt ?? user.createdAt ?? now,
-        updatedAt: existingMember?.updatedAt ?? user.updatedAt ?? now,
-        embedding: await embed({ text: buildMemberEmbedText(key, user.email, user.name) }),
-      },
-      { overwriteMode: 'update' },
-    );
-
-    if (memberWasSuperAdmin) {
-      await superAdminsCollection.save(
-        {
-          _key: `super_admin_${user._key}`,
-          userId: user._key,
-          memberId: key,
-          email: user.email,
-          emailHash: user.emailHash,
-          createdAt: existingMember?.createdAt ?? user.createdAt ?? now,
-          updatedAt: now,
-          embedding: await embed({ text: buildSuperAdminEmbedText(`super_admin_${user._key}`, user.email) }),
-        },
-        { overwriteMode: 'update' },
-      );
-    }
-  }
-
-  const existingSuperAdminMembersCursor = await targetDb.query<{
-    _key: string;
-    userId?: string;
-    email?: string;
-    emailHash?: string;
-    createdAt?: string;
-  }>(`
-    FOR member IN members
-      FILTER member.isSuperAdmin == true
-      RETURN member
-  `);
-  for await (const member of existingSuperAdminMembersCursor) {
-    if (!member.userId || !member.email || !member.emailHash) continue;
-    const key = `super_admin_${member.userId}`;
-    const now = new Date().toISOString();
-    await superAdminsCollection.save(
-      {
-        _key: key,
-        userId: member.userId,
-        memberId: member._key,
-        email: member.email,
-        emailHash: member.emailHash,
-        createdAt: member.createdAt ?? now,
-        updatedAt: now,
-        embedding: await embed({ text: buildSuperAdminEmbedText(key, member.email) }),
-      },
-      { overwriteMode: 'update' },
-    );
   }
 
   await targetDb.query(

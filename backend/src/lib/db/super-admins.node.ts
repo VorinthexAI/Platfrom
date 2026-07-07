@@ -7,10 +7,16 @@ export const SUPER_ADMINS_COLLECTION = 'superAdmins';
 
 export const superAdminSchema = z.object({
   key: z.string(),
-  userId: z.string(),
-  memberId: z.string().nullable().default(null),
+  platformId: z.string(),
   email: z.string(),
   emailHash: z.string(),
+  isMfaEnabled: z.boolean().default(false),
+  has_request_mfa_reset_link: z.boolean().default(false),
+  refreshTokenHash: z.string().nullable().default(null),
+  totpSecret: z.string().nullable().default(null),
+  lastTotpTimeStep: z.number().nullable().default(null),
+  requested_mfa_reset_link_at: z.string().nullable().default(null),
+  lastLoginAt: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),
   embedding: z.array(z.number()).default([]),
@@ -30,10 +36,21 @@ export const upsertSuperAdminByKey = helpers.upsertByKey;
 export const getAllSuperAdminsChunked = helpers.getAllChunked;
 export const listSuperAdminsPage = helpers.listPage;
 
-export async function getSuperAdminByUserId(userId: string): Promise<SuperAdmin | null> {
+export async function getSuperAdminByEmail(email: string): Promise<SuperAdmin | null> {
   const cursor = await db.query(aql`
     FOR admin IN ${db.collection(SUPER_ADMINS_COLLECTION)}
-      FILTER admin.userId == ${userId}
+      FILTER admin.email == ${email}
+      LIMIT 1
+      RETURN admin
+  `);
+  const doc = await cursor.next();
+  return doc ? superAdminSchema.parse(withArangoKey(doc)) : null;
+}
+
+export async function getSuperAdminByRefreshTokenHash(refreshTokenHash: string): Promise<SuperAdmin | null> {
+  const cursor = await db.query(aql`
+    FOR admin IN ${db.collection(SUPER_ADMINS_COLLECTION)}
+      FILTER admin.refreshTokenHash == ${refreshTokenHash}
       LIMIT 1
       RETURN admin
   `);

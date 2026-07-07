@@ -50,11 +50,12 @@ const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
 const challengeTokenHashBodyBase = strictObject({
   challenge_token_hash: challengeHash,
 });
-const emailBody = strictObject({ email: z.string().email() });
+const emailSchema = z.string().trim().toLowerCase().email().max(254);
+const emailBody = strictObject({ email: emailSchema });
 
 export function registerRoutes(app: Hono) {
   app.post('/auth/signup', async (c) => {
-    const body = await parseJson(c, strictObject({ email: z.string().email(), name: z.string().optional(), profile_url: z.string().url().optional() }));
+    const body = await parseJson(c, strictObject({ email: emailSchema, name: z.string().optional(), profile_url: z.string().url().optional() }));
     return c.json(await createUserWithAuth(body), 201);
   });
 
@@ -129,7 +130,7 @@ export function registerRoutes(app: Hono) {
     return c.json({
       ok: true,
       authenticated: true,
-      userId: result.userId,
+      identity: result.identity,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
     });
@@ -148,7 +149,7 @@ export function registerRoutes(app: Hono) {
 
   app.post('/waitlist', async (c) => {
     const body = await parseJson(c, strictObject({
-      email: z.string().email(),
+      email: emailSchema,
       explorer_id: z.string().min(8).max(80).optional(),
       distinct_id: z.string().min(8).max(80).optional(),
       temp_email_hash: tempEmailHash.optional(),

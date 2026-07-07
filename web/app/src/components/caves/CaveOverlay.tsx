@@ -13,6 +13,7 @@ import { EruptAssembly } from "@/components/ui/EruptAssembly";
 import { CloseIcon } from "@/components/ui/icons";
 import { trackCtaClick, trackLandingEvent } from "@/lib/analytics";
 import { CAVE_CONFIGS } from "@/lib/cave-config";
+import { normalizeEmailInput, parseApiError } from "@/lib/email";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
 import { syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
 import { PRIVACY_COPY, TERMS_COPY } from "@/lib/legal-copy";
@@ -192,6 +193,7 @@ function JoinFlow() {
   const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "error">(
     "idle",
   );
+  const [error, setError] = useState("");
   const formStarted = useRef(false);
   const pendingClaim = useFragmentsStore((s) => s.pendingClaim);
   const markJoined = useFragmentsStore((s) => s.markJoined);
@@ -221,21 +223,34 @@ function JoinFlow() {
         pending_collectible_id: pendingClaim?.id ?? null,
       },
     });
+    let normalizedEmail: string;
+    try {
+      normalizedEmail = normalizeEmailInput(email);
+    } catch {
+      setError("Use a valid email address.");
+      setStatus("error");
+      return;
+    }
     setStatus("submitting");
+    setError("");
     try {
       const response = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email,
+          email: normalizedEmail,
           ...(pendingClaim ? { collectibleId: pendingClaim.id } : {}),
         }),
       });
+      const data = await response.json().catch(() => null);
       if (!response.ok) {
+        setError(
+          parseApiError(data, "Could not join the waitlist. Try again."),
+        );
         setStatus("error");
         return;
       }
-      const data = await response.json();
+      setEmail(normalizedEmail);
       markJoined();
       // The treasure is claimed for this explorer the moment they join —
       // the backend stores the node right away, before email verification.
@@ -248,6 +263,7 @@ function JoinFlow() {
       }
       setStatus("sent");
     } catch {
+      setError("Could not reach the Nexus. Try again.");
       setStatus("error");
     }
   }
@@ -307,7 +323,7 @@ function JoinFlow() {
         Join Waitlist
       </Button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error" ? "Use a valid email address." : ""}
+        {status === "error" ? error : ""}
       </p>
     </form>
   );
@@ -340,6 +356,7 @@ function ExplorerSigninFlow() {
   const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "error">(
     "idle",
   );
+  const [error, setError] = useState("");
   const formStarted = useRef(false);
 
   useEffect(() => {
@@ -438,16 +455,34 @@ function ExplorerSigninFlow() {
       slug: "waitlist.submit_clicked",
       metadata: { form: "signin_restore" },
     });
+    let normalizedEmail: string;
+    try {
+      normalizedEmail = normalizeEmailInput(email);
+    } catch {
+      setError("Use a valid email address.");
+      setStatus("error");
+      return;
+    }
     setStatus("submitting");
+    setError("");
     try {
       const response = await fetch("/api/waitlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: normalizedEmail }),
       });
-      if (response.ok) setStatus("sent");
-      else setStatus("error");
+      const data = await response.json().catch(() => null);
+      if (response.ok) {
+        setEmail(normalizedEmail);
+        setStatus("sent");
+      } else {
+        setError(
+          parseApiError(data, "Could not send a verification link. Try again."),
+        );
+        setStatus("error");
+      }
     } catch {
+      setError("Could not reach the Nexus. Try again.");
       setStatus("error");
     }
   }
@@ -498,7 +533,7 @@ function ExplorerSigninFlow() {
         Sign in
       </Button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error" ? "Use a valid email address." : ""}
+        {status === "error" ? error : ""}
       </p>
       <button
         type="button"
@@ -523,25 +558,41 @@ function MembersFlow() {
   const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "error">(
     "idle",
   );
+  const [error, setError] = useState("");
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (status === "submitting") return;
+    let normalizedEmail: string;
+    try {
+      normalizedEmail = normalizeEmailInput(email);
+    } catch {
+      setError("Use a valid email address.");
+      setStatus("error");
+      return;
+    }
     setStatus("submitting");
+    setError("");
     try {
       const response = await fetch("/api/members", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: normalizedEmail }),
       });
+      const data = await response.json().catch(() => null);
       if (response.ok) {
         // Remember who asked, so /galaxy/private can greet them by name.
-        window.localStorage.setItem("vx_member_email", email);
+        window.localStorage.setItem("vx_member_email", normalizedEmail);
+        setEmail(normalizedEmail);
         setStatus("sent");
       } else {
+        setError(
+          parseApiError(data, "Could not send a sign-in link. Try again."),
+        );
         setStatus("error");
       }
     } catch {
+      setError("Could not reach the Nexus. Try again.");
       setStatus("error");
     }
   }
@@ -593,9 +644,7 @@ function MembersFlow() {
         Continue
       </Button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error"
-          ? "Use a valid email address."
-          : "Only available for approved members."}
+        {status === "error" ? error : "Only available for approved members."}
       </p>
     </form>
   );
@@ -944,6 +993,12 @@ function TotpSetupPanel({
           </p>
         </div>
       </div>
+      <a
+        href={data.otpauthUrl}
+        className="vui-button vui-button-secondary mt-4 inline-flex min-h-0 w-full justify-center px-5 py-3 text-[0.62rem] uppercase"
+      >
+        On mobile? Tap here to open in your auth app
+      </a>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <label>
           <span className="font-mono text-[0.5rem] tracking-[0.2em] text-silver-500 uppercase">
@@ -1001,7 +1056,7 @@ function TotpVerifyPanel({
   onSuccess: () => void;
 }) {
   const [code, setCode] = useState("");
-  const [status, setStatus] = useState<"idle" | "submitting" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "submitting" | "error" | "reset-sent">("idle");
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1019,6 +1074,25 @@ function TotpVerifyPanel({
         return;
       }
       onSuccess();
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  async function requestReset() {
+    const email = window.localStorage.getItem("vx_member_email");
+    if (!email) {
+      useGalaxyStore.getState().enterCave("members");
+      return;
+    }
+    setStatus("submitting");
+    try {
+      await fetch("/api/auth/totp/reset/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      setStatus("reset-sent");
     } catch {
       setStatus("error");
     }
@@ -1056,8 +1130,19 @@ function TotpVerifyPanel({
       >
         Enter
       </Button>
+      <button
+        type="button"
+        onClick={requestReset}
+        className="mt-3 w-full text-center text-[0.68rem] text-silver-500 underline-offset-4 hover:text-silver-300 hover:underline"
+      >
+        Reset MFA
+      </button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error" ? "Invalid code, try the next one." : ""}
+        {status === "reset-sent"
+          ? "Check your inbox for a new secure link to reset your authenticator."
+          : status === "error"
+            ? "Invalid code, try the next one."
+            : ""}
       </p>
     </form>
   );

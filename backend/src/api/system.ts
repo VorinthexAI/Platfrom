@@ -13,7 +13,7 @@ import {
   listCapabilitiesPage,
   updateCapability,
 } from '@/lib/db/capabilities.node';
-import { getSuperAdminByUserId } from '@/lib/db/super-admins.node';
+import { getSuperAdminById } from '@/lib/db/super-admins.node';
 import {
   deleteMindCapability,
   getMindCapabilityByPair,
@@ -29,7 +29,7 @@ import {
 } from '@/lib/db/orchestrators.node';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
-import { getUserId } from './security';
+import { getAuthIdentity, getUserId } from './security';
 import { parseJson, parseQuery, strictObject } from './validation';
 
 const DEFAULT_LIMIT = 50;
@@ -114,14 +114,18 @@ async function requireUserId(c: Context) {
 }
 
 async function requireSuperAdmin(c: Context) {
-  const auth = await requireUserId(c);
-  if ('error' in auth) return auth;
-
-  const superAdmin = await getSuperAdminByUserId(auth.userId);
+  const auth = await getAuthIdentity(c);
+  if (!auth) {
+    return { error: c.json({ error: 'authentication required' }, 401) };
+  }
+  if (auth.identityType !== 'superAdmin') {
+    return { error: c.json({ error: 'super admin required' }, 403) };
+  }
+  const superAdmin = await getSuperAdminById(auth.key);
   if (!superAdmin) {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
-  return { userId: auth.userId, superAdmin };
+  return { key: auth.key, superAdmin };
 }
 
 function uniqueConflict(c: Context, err: unknown, message: string) {

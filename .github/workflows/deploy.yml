@@ -140,7 +140,10 @@ jobs:
         env:
           GIT_CRYPT_KEY_B64: ${{ secrets.GIT_CRYPT_KEY }}
         run: |
-          test -n "$GIT_CRYPT_KEY_B64" || { echo "::error::GIT_CRYPT_KEY is not configured."; exit 1; }
+          if [ -z "$GIT_CRYPT_KEY_B64" ]; then
+            echo "::warning::GIT_CRYPT_KEY is not configured; continuing because production env files are provided by GitHub/Vercel/AWS secrets."
+            exit 0
+          fi
           sudo apt-get update && sudo apt-get install -y git-crypt
           echo "$GIT_CRYPT_KEY_B64" | base64 -d > /tmp/git-crypt.key
           git-crypt unlock /tmp/git-crypt.key
@@ -721,7 +724,10 @@ jobs:
           ref: ${{ env.COMMIT_SHA }}
       - name: Unlock encrypted environments/**/.env.* and db.seeds.secrets.json
         run: |
-          test -n "$GIT_CRYPT_KEY_B64" || { echo "::error::GIT_CRYPT_KEY is not configured."; exit 1; }
+          if [ -z "$GIT_CRYPT_KEY_B64" ]; then
+            echo "::warning::GIT_CRYPT_KEY is not configured; continuing and seed step will skip if db.seeds.secrets.json is absent."
+            exit 0
+          fi
           sudo apt-get update && sudo apt-get install -y git-crypt
           echo "$GIT_CRYPT_KEY_B64" | base64 -d > /tmp/git-crypt.key
           git-crypt unlock /tmp/git-crypt.key
@@ -784,7 +790,12 @@ jobs:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
           SEEDS_FILE: ${{ github.workspace }}/environments/backend/db.seeds.secrets.json
-        run: bun run --cwd backend seed:secrets
+        run: |
+          if [ ! -f "$SEEDS_FILE" ]; then
+            echo "::notice::$SEEDS_FILE is absent; skipping secret seed upsert."
+            exit 0
+          fi
+          bun run --cwd backend seed:secrets
 
   backend-app:
     name: Deploy backend app role

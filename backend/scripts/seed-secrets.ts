@@ -9,7 +9,7 @@ import { sha256 } from '@/lib/crypto';
 const SEEDS_FILE = process.env.SEEDS_FILE ?? '../environments/backend/db.seeds.secrets.json';
 
 // These are the only node schemas with a required (non-nullable) platformId.
-const NODES_WITH_PLATFORM_ID = new Set(['users', 'members']);
+const NODES_WITH_PLATFORM_ID = new Set(['users', 'members', 'superAdmins']);
 
 /** Same derivation the app uses at signup (see hashUserEmail in api/users.ts) — kept local so seed docs only need a plaintext "email". */
 function generateEmailHash(email: string): Promise<string> {
@@ -63,6 +63,9 @@ async function main() {
       if (typeof doc.email === 'string' && !doc.emailHash) {
         doc.emailHash = await generateEmailHash(doc.email);
       }
+      const now = new Date().toISOString();
+      if (!doc.createdAt) doc.createdAt = now;
+      if (!doc.updatedAt) doc.updatedAt = now;
       if (NODES_WITH_PLATFORM_ID.has(nodeName) && !doc.platformId) {
         defaultPlatformId ??= await getDefaultPlatformId();
         doc.platformId = defaultPlatformId;

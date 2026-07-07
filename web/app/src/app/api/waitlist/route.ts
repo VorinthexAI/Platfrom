@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
+import { emailSchema } from "@/lib/email";
 import { claimCollectible } from "@/lib/fragments/fragments-server";
 
 const waitlistSchema = z.strictObject({
-  email: z.string().trim().toLowerCase().email().max(254),
+  email: emailSchema,
   /** Treasure the visitor is claiming by joining ("Join Waitlist to claim"). */
   collectibleId: z.string().min(1).max(120).optional(),
 });

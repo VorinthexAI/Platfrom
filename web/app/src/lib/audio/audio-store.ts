@@ -9,7 +9,7 @@ import { trackLandingEvent } from "@/lib/analytics";
  * VOICE is the current world's voiceover.
  */
 
-export const MISSION_AUDIO_SRC = "/audio/brand/vorinthex-ai.mp3";
+export const MISSION_AUDIO_SRC = "/audio/brand/mission.mp3";
 
 export function entityAudioUrl(type: string, slug: string): string {
   return `/audio/entities/${type}-${slug}.mp3`;
