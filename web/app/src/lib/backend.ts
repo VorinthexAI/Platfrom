@@ -8,7 +8,11 @@ import "server-only";
  * the landing page stays fully explorable.
  */
 
-const BASE_URL = process.env.BACKEND_API_URL?.replace(/\/$/, "");
+const BASE_URL = (
+  process.env.BACKEND_API_URL
+  ?? process.env.API_BASE_URL
+  ?? process.env.NEXT_PUBLIC_API_BASE_URL
+)?.replace(/\/$/, "");
 const API_KEY = process.env.BACKEND_API_KEY;
 
 export function backendConfigured(): boolean {

@@ -6,11 +6,12 @@ import { emailSchema } from "@/lib/email";
 const membersSchema = z.strictObject({
   email: emailSchema,
 });
+const isProduction = process.env.NODE_ENV === "production";
 
 /**
  * Members sign-in: requests a short-lived magic link from the backend.
- * The response is deliberately identical whether or not the email is a
- * member — membership can never be probed from here.
+ * The response is deliberately identical for unknown members, but production
+ * must not claim success if the backend bridge itself is unavailable.
  */
 export async function POST(request: Request) {
   let body: unknown;
@@ -31,12 +32,31 @@ export async function POST(request: Request) {
     );
   }
 
-  if (backendConfigured()) {
-    // Fire the request; swallow the outcome — generic success either way.
-    await backendFetch("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ email: parsed.data.email }),
+  if (!backendConfigured()) {
+    if (isProduction) {
+      return NextResponse.json(
+        { ok: false, error: "Members sign-in is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  const result = await backendFetch("/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email: parsed.data.email }),
+  });
+
+  if (!result.ok && result.status !== 403) {
+    console.error("members sign-in backend request failed", {
+      status: result.status,
     });
+    if (isProduction) {
+      return NextResponse.json(
+        { ok: false, error: "Could not send a sign-in link. Try again." },
+        { status: 502 },
+      );
+    }
   }
 
   return NextResponse.json({ ok: true });
