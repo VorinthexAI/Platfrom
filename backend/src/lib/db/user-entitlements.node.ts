@@ -29,6 +29,7 @@ export const insertUserEntitlement = helpers.insert;
 export const getUserEntitlementById = helpers.getById;
 export const updateUserEntitlement = helpers.updateById;
 export const deleteUserEntitlement = helpers.deleteById;
+export const upsertUserEntitlementByKey = helpers.upsertByKey;
 export const getAllUserEntitlementsChunked = helpers.getAllChunked;
 export const listUserEntitlementsPage = helpers.listPage;
 

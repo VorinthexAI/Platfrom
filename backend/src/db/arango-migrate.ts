@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
 import { embed } from '../core/actions/embed';
+import { generateAlias } from '../lib/alias';
 import { newId } from '../lib/ids';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
@@ -164,6 +165,33 @@ const collections: CollectionSpec[] = [
   { name: 'outputRelations', indexes: [{ fields: ['parentOutputId'] }, { fields: ['childOutputId'] }] },
   { name: 'outputAnalytics', indexes: [{ fields: ['outputId', 'snapshotAt'] }] },
   { name: 'platforms', indexes: [{ fields: ['name'], unique: true }] },
+  {
+    name: 'visitors',
+    indexes: [
+      { fields: ['platformId'] },
+      { fields: ['emailHash'], unique: true, sparse: true },
+      { fields: ['distinctId'], unique: true, sparse: true },
+      { fields: ['userId'], sparse: true },
+    ],
+  },
+  {
+    name: 'activeVisitors',
+    indexes: [
+      { fields: ['visitorId'] },
+      { fields: ['sessionKey'], unique: true },
+      { fields: ['disconnectedAt'] },
+      { fields: ['platformId', 'connectedAt'] },
+    ],
+  },
+  {
+    name: 'intelligenceFragments',
+    indexes: [
+      { fields: ['userId'] },
+      { fields: ['explorerId'] },
+      { fields: ['explorerId', 'collectibleId'], unique: true },
+      { fields: ['collectibleId'] },
+    ],
+  },
 ];
 
 const droppedCollections = [
@@ -617,6 +645,36 @@ async function main() {
         lastLoginAt: HAS(u, "lastLoginAt") ? u.lastLoginAt : null
       } IN users OPTIONS { keepNull: false }
   `);
+
+  const maxWaitlistNumberCursor = await targetDb.query<number | null>(`
+    RETURN MAX(
+      FOR u IN users
+        FILTER HAS(u, "waitlistNumber") && u.waitlistNumber != null
+        RETURN u.waitlistNumber
+    )
+  `);
+  let nextWaitlistNumber = (await maxWaitlistNumberCursor.next()) ?? 0;
+  const usersCollection = targetDb.collection('users');
+  const usersMissingAliasCursor = await targetDb.query<{
+    _key: string;
+    alias?: string | null;
+    waitlistNumber?: number | null;
+  }>(`
+    FOR u IN users
+      FILTER !HAS(u, "alias") || u.alias == null
+        || !HAS(u, "waitlistNumber") || u.waitlistNumber == null
+      SORT u.createdAt ASC
+      RETURN { _key: u._key, alias: u.alias, waitlistNumber: u.waitlistNumber }
+  `);
+  for await (const user of usersMissingAliasCursor) {
+    const patch: Record<string, unknown> = {};
+    if (user.alias == null) patch.alias = generateAlias(user._key);
+    if (user.waitlistNumber == null) {
+      nextWaitlistNumber += 1;
+      patch.waitlistNumber = nextWaitlistNumber;
+    }
+    await usersCollection.update(user._key, patch);
+  }
 
   console.log('ArangoDB schema is up to date.');
   systemDb.close();

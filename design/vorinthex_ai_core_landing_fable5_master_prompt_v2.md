@@ -1,0 +1,4268 @@
+# Vorinthex AI — Core Landing Page Master Prompt for Fable 5
+
+```text
+You are Fable 5, acting as a world-class product engineer, creative technologist, motion designer, Three.js specialist, senior frontend architect, premium brand designer, and conversion-focused landing page strategist.
+Your task is to design and implement an exceptional landing page for Vorinthex AI, focused primarily on Core, with the broader ecosystem teased as coming soon.
+This page must feel like a million-SEK flagship digital experience, not a generic SaaS landing page.
+It must combine a premium obsidian/chrome brand system with a cinematic interactive 3D galaxy and solar-system metaphor.
+The core concept: Vorinthex AI is the Nexus of Intelligence, visualized as a dark chrome-orange sun at the center of an intelligent galaxy.
+Each Vorinthex AI product is a planet orbiting that sun: Core, Command, Studio, and Launch.
+Core is the first product and must receive the deepest narrative focus.
+Command, Studio, and Launch are visible as planets but treated as coming soon / ecosystem teasers.
+Users can join the waitlist, sign in if already on the waitlist, and access a members modal from the footer.
+Build everything in English.
+Do not use colorful accent palettes.
+Use only obsidian black, near-black, graphite, silver, chrome, white, muted grey, and one extremely restrained dark chrome-orange glow for the central Nexus sun.
+No purple, no blue neon, no rainbow gradients, no colorful SaaS cards.
+The whole experience must feel dark, premium, metallic, precise, futuristic, spacious, and cinematic.
+```
+
+## 0. How to Use This Prompt
+
+- Paste everything inside the main prompt block into Fable 5.
+- Tell Fable 5 to implement it directly in the target codebase.
+- If the codebase already exists, Fable 5 should inspect the stack and adapt the implementation.
+- If the codebase is empty, Fable 5 should create a modern React/Next.js implementation.
+- The prompt is intentionally prescriptive because the design must stay premium, consistent, and precise.
+- The expected result is a production-grade landing page, not just a static mockup.
+
+## 1. Master Prompt
+
+> Copy from here into Fable 5.
+
+```md
+# ROLE
+
+You are Fable 5.
+You are an elite multidisciplinary builder: senior frontend engineer, creative technologist, Three.js engineer, motion designer, design-system architect, brand strategist, and conversion-focused product designer.
+You will create a premium landing page for Vorinthex AI.
+The page is for the master brand Vorinthex AI and its first product: Core.
+Core is a mobile consumer app where every user receives a personal AI Brain.
+Users can expand their AI Brain by subscribing to different Capabilities.
+The landing page must focus on Core and invite users to join the waitlist.
+The page may tease Command, Studio, and Launch as coming-soon products, but it must not distract from Core.
+
+# ABSOLUTE OBJECTIVE
+
+Build a flagship interactive landing page that feels like a premium cinematic digital universe.
+The experience should visually communicate that Vorinthex AI is the Nexus of Intelligence.
+The concept must be a solar system / galaxy interface.
+At the center is the Nexus sun: a dark chrome-orange intelligent star.
+Around it orbit planets representing Vorinthex AI products.
+Core is the innermost and most important planet.
+Command, Studio, and Launch are farther out and labeled as coming soon.
+The user can scroll, zoom, click, and navigate through this cosmic product ecosystem.
+The website must feel like it could sell for 1,000,000 SEK as a bespoke premium landing page.
+
+# PRIMARY CTA
+
+The primary call to action is: Join Waitlist
+The secondary call to action is: Already on waitlist? Sign in
+The footer must contain a Members link.
+The Members link opens a modal.
+The modal contains an email input for members to sign in.
+The modal copy should say: Only available for approved members.
+Do not show pricing on this landing page.
+Do not make the page feel like a pricing page.
+Do not make the page feel like a dashboard.
+This is a premium launch/waitlist experience.
+
+# BRAND POSITIONING
+
+Vorinthex AI is the Nexus of Intelligence.
+Vorinthex AI is not just another AI app.
+Vorinthex AI is a unified intelligence ecosystem.
+Core is the first product.
+Core is a mobile app for regular users.
+Core gives each user a personal AI Brain.
+Core can be expanded with Capabilities.
+Capabilities are not small features.
+Capabilities are app-like AI powers that become part of the user's Brain.
+The first five Core Capabilities are Archive, Gallery, Signal, Compass, and Ascend.
+More Capabilities are coming soon.
+
+# PRODUCT UNIVERSE
+
+## Product: Core
+- Type: Consumer mobile app
+- Short promise: Your AI Brain
+- Description: Each user gets a personal AI Brain and expands it with Capabilities.
+- Visual state: Inner orbit, primary focus, active.
+
+## Product: Command
+- Type: AI orchestration command center
+- Short promise: AI leadership and orchestrators
+- Description: A command center with AI C-suite orchestrators such as Atlas, Hermes, Metis, Iris, Ledger and more.
+- Visual state: Outer orbit, coming soon teaser.
+
+## Product: Studio
+- Type: AI creation workspace
+- Short promise: Every AI model in one interface
+- Description: A unified studio for chat, image, video, music, voice, code, documents, and research.
+- Visual state: Outer orbit, coming soon teaser.
+
+## Product: Launch
+- Type: Agent deployment platform
+- Short promise: Build and deploy agents
+- Description: A lightweight platform to create agents, automations, workflows, and deploy them everywhere.
+- Visual state: Outer orbit, coming soon teaser.
+
+# CORE CAPABILITIES
+
+## Capability: Archive
+- Tagline: Your second brain
+- Purpose: Capture notes, ideas, research, labels, folders, semantic search, and graph-based knowledge connections.
+- Visual style: simple monochrome chrome icon, less complex than orchestrator logos.
+- Card style: premium black glass panel, thin border, soft chrome highlight, no colorful accent.
+
+## Capability: Gallery
+- Tagline: Your memories, organized
+- Purpose: A smart image and memory library with albums, clusters, sharing links, QR invites, and AI-powered discovery.
+- Visual style: simple monochrome chrome icon, less complex than orchestrator logos.
+- Card style: premium black glass panel, thin border, soft chrome highlight, no colorful accent.
+
+## Capability: Signal
+- Tagline: Your inbox, optimized
+- Purpose: An AI inbox guard across email and messages that filters noise, prioritizes what matters, and can reply in your tone.
+- Visual style: simple monochrome chrome icon, less complex than orchestrator logos.
+- Card style: premium black glass panel, thin border, soft chrome highlight, no colorful accent.
+
+## Capability: Compass
+- Tagline: Your world
+- Purpose: A 3D life map for memories, places visited, cities to visit, countries planned, and journeys rendered as a globe.
+- Visual style: simple monochrome chrome icon, less complex than orchestrator logos.
+- Card style: premium black glass panel, thin border, soft chrome highlight, no colorful accent.
+
+## Capability: Ascend
+- Tagline: Your growth
+- Purpose: A personal AI coach for mental goals, habits, health, routines, finance, and custom AI-generated audio books.
+- Visual style: simple monochrome chrome icon, less complex than orchestrator logos.
+- Card style: premium black glass panel, thin border, soft chrome highlight, no colorful accent.
+
+# NON-NEGOTIABLE DESIGN RULES
+
+- The page must be dark, premium, spacious, and cinematic.
+- Use obsidian black as the base background.
+- Use silver, chrome, graphite, and white for typography and outlines.
+- Use the dark chrome-orange Nexus sun as the only warm accent.
+- The orange must be subtle, metallic, and restrained, not bright, not neon, not flat.
+- No blue gradients.
+- No purple glows.
+- No rainbow colors.
+- No generic SaaS pastel illustrations.
+- No playful cartoon design.
+- No cheap glassmorphism overload.
+- No clutter.
+- No generic AI robot imagery.
+- No stock-photo humans.
+- No marketing clichés like '10x your workflow' unless used very sparingly.
+- No pricing on this landing page.
+- No fake user testimonials.
+- No invented awards.
+- Every section should have breathing room.
+- The experience should feel more like a product reveal than a sales page.
+- Every piece of motion must feel intentional.
+- The hero should immediately communicate a premium cosmic intelligence system.
+- The Core product should be the emotional center of the page.
+- The 3D scene must be responsive and performant.
+- The site must work on mobile.
+- The site must support reduced motion.
+- The site must support keyboard navigation.
+- The site must have a graceful fallback if WebGL is not available.
+
+# TECH STACK
+
+- Use Next.js with React and TypeScript if creating from scratch.
+- Use Tailwind CSS or CSS Modules for layout styling, depending on the existing codebase.
+- Use Three.js through @react-three/fiber for the 3D galaxy and solar system.
+- Use @react-three/drei for helpers such as Stars, Environment, Text, Html, OrbitControls where appropriate.
+- Use Framer Motion for UI reveal animations.
+- Use GSAP only if it meaningfully improves scroll or camera sequencing.
+- Use Zustand or React state for scene navigation state if needed.
+- Use Lenis or native smooth scrolling for premium scroll feel, only if dependency is acceptable.
+- Use CSS variables for the brand color system.
+- Use modular components.
+- Do not hardcode repeated product data in multiple places.
+- Create a structured data file for products and capabilities.
+
+# VISUAL LANGUAGE
+
+- Base background: #020304 or equivalent near-black obsidian.
+- Panel background: rgba(255,255,255,0.025) with subtle border.
+- Border: rgba(255,255,255,0.10) to rgba(255,255,255,0.18).
+- Primary text: #F3F3F0 or near-white.
+- Secondary text: #A8A8A0 or muted graphite silver.
+- Tertiary text: #676762 or dark silver.
+- Chrome highlight: linear gradients with white/silver/grey, not color.
+- Nexus sun: dark burnt chrome-orange glow, close to #8A4B24 but desaturated and metallic.
+- Core planet: metallic black sphere with silver orbital rings.
+- Command planet: faceted hexagonal chrome structure, distant and locked.
+- Studio planet: sharp triangular crystalline metallic prism, distant and locked.
+- Launch planet: rocket/arrow-like orbital object, distant and locked.
+
+# TYPOGRAPHY
+
+- Use a modern premium sans-serif.
+- Recommended: Inter, Satoshi, Neue Haas Grotesk, SF Pro style, or system sans.
+- Use wide tracking for brand/product labels.
+- Use large quiet typography, not loud sales typography.
+- Hero title should feel monumental but not crowded.
+- Button text should be uppercase or title case with confident spacing.
+- Keep line length readable.
+- Use smaller labels for cosmic UI metadata.
+- Use numbers and data sparingly; this landing page is emotional and aspirational.
+
+# PAGE STRUCTURE
+
+- Navigation: Minimal top nav with Vorinthex AI mark, product links, Join Waitlist, and Sign In.
+- Hero: Full viewport cosmic scene with Nexus sun, product planets, Core highlighted, and primary waitlist CTA.
+- Interactive Solar System: A section or persistent hero layer where users can zoom into planets; Core receives the primary deep-dive.
+- Core Reveal: Explain Core as the personal AI Brain in your pocket.
+- Capability Cards: Show Archive, Gallery, Signal, Compass, Ascend as premium cards.
+- 3D Brain Globe: A brain in the center of a transparent globe, connected to capability satellites.
+- Everything Connects: Demonstrate how all capabilities share the user's Brain, memory, context, and insights.
+- More Coming Soon: Show Command, Studio, and Launch as distant locked planets/cards.
+- Waitlist CTA: A minimal strong final CTA.
+- Footer: Company, Products, Members link, legal links.
+- Members Modal: Email input sign-in modal opened from footer Members link and Sign In link.
+
+# HERO COPY
+
+- Exact or near-exact copy: "Vorinthex AI"
+- Exact or near-exact copy: "The Nexus of Intelligence."
+- Exact or near-exact copy: "Core is your personal AI Brain."
+- Exact or near-exact copy: "It grows with you."
+- Exact or near-exact copy: "Learns with you."
+- Exact or near-exact copy: "Built by you."
+- Exact or near-exact copy: "Join Waitlist"
+- Exact or near-exact copy: "Already on waitlist? Sign in"
+
+# CORE COPY
+
+- Headline: One Brain. Everything connects.
+- Subheadline: Core brings your notes, memories, inbox, world, and growth into one personal AI Brain.
+- Supporting line: Add Capabilities. Build your intelligence. Make it yours.
+- Waitlist CTA: Join Waitlist
+- Member CTA: Already on waitlist? Sign in
+
+# THREE.JS SOLAR SYSTEM REQUIREMENTS
+
+- Create a central Nexus sun at the origin.
+- The sun should be a dark metallic sphere or star-like energy object with subtle burnt-orange inner glow.
+- Use shader-like noise or animated material for living energy.
+- The sun should not be bright yellow or cartoonish.
+- Create orbit rings around the sun.
+- Core must be the innermost planet.
+- Command must be farther out than Core.
+- Studio must be farther out than Command.
+- Launch must be farther out than Studio.
+- The planetary order must be: Core, Command, Studio, Launch.
+- Planets should orbit slowly and elegantly.
+- Orbit paths should be thin, chrome, subtle, and semi-transparent.
+- No saturated colors for planets.
+- Each planet should have a metallic identity based on the product logo.
+- Core should look like a dark intelligence sphere with orbital rings.
+- Command should look like a faceted command cube/hexagonal star structure.
+- Studio should look like a sharp metallic prism/triangular spacecraft form.
+- Launch should look like a sleek launch arrow/rocket emblem with a circular arc.
+- Show product labels in 3D or screen-space UI close to planets.
+- When hovering a planet, pause or slow its orbit and show a compact info card.
+- When clicking Core, zoom toward the Core planet and transition into the Core section.
+- When clicking other planets, show locked/coming soon information without navigating away.
+- Support scroll-driven zoom toward the Core planet.
+- Support smooth camera transitions between galaxy overview and Core close-up.
+- Use a starfield backdrop with depth.
+- Use faint dust, particles, and asteroid belts.
+- Use a few orbiting moons/asteroids around Core as capability markers.
+- Use floating moon/asteroid cards as advertising leaves / info fragments.
+- These floating fragments may contain small screenshots, text snippets, or visual hints.
+- Fragments must feel premium and subtle, not cluttered.
+- Fragments should drift slowly with parallax.
+- The entire galaxy should support an infinite-zoom feeling.
+- Infinite zoom can be faked with camera depth, scale interpolation, starfield layers, and content transitions.
+
+# INFINITE ZOOM EXPERIENCE
+
+- State 0: Brand overview: user sees Vorinthex AI, Nexus sun, planets in orbit, Join Waitlist CTA.
+- State 1: Scroll begins: camera glides closer to Core while other planets drift outward.
+- State 2: Core close-up: Core planet dominates the scene, orbiting capability moons become visible.
+- State 3: Brain globe: transparent globe appears around a chrome-black brain, capability nodes orbit it.
+- State 4: Capability cards: UI cards rise from the galaxy as if they are physical panels.
+- State 5: Everything connects: lines from capabilities flow into the Brain, showing context, memory, automation, and insight.
+- State 6: More coming soon: camera pulls back slightly to show Command, Studio, Launch as distant locked planets.
+- State 7: Final CTA: the Nexus sun returns subtly in the background with a clean waitlist form.
+
+# MOTION STYLE
+
+- Motion must be slow, precise, premium, and intentional.
+- Avoid bouncy animations.
+- Avoid cartoon easing.
+- Use ease-out cubic, expo, or similar luxury motion curves.
+- UI elements should fade and slide with small distances.
+- 3D objects should rotate slowly.
+- Particles should drift subtly.
+- Planets should orbit gently, not spin wildly.
+- Hover interactions should feel like revealing hidden intelligence.
+- Buttons should have subtle chrome sheen, not colorful glow.
+- Scroll transitions should feel cinematic and fluid.
+- Use intersection observers or motion hooks to reveal sections.
+- Use reduced-motion mode to disable camera fly-through and replace with static sections.
+
+# CORE PLANET DETAIL
+
+- Core is the innermost planet and the first active product.
+- Core should be visually tied to a personal AI Brain.
+- Core should have elegant orbital rings, matching the chosen Core logo direction.
+- Core may be represented as a polished black sphere with chrome rings and a faint inner glow.
+- When focused, Core reveals five orbiting capability moons: Archive, Gallery, Signal, Compass, Ascend.
+- Each capability moon uses a simplified monochrome icon.
+- The capability moons should orbit Core or orbit the brain globe, not the Nexus sun.
+- Each capability moon should open a small info card on hover/click.
+- Archive moon: folder/archive icon.
+- Gallery moon: image/frame icon.
+- Signal moon: envelope/signal icon.
+- Compass moon: compass needle or globe pin icon.
+- Ascend moon: upward arrow/mountain/trajectory icon.
+
+# CAPABILITY CARD COPY
+
+## Archive
+- Title: Archive
+- Short label: Your second brain
+- Description: Capture notes, ideas, research, labels, folders, semantic search, and graph-based knowledge connections.
+- Use case 1: Capture ideas, research, meeting notes, and daily thoughts.
+- Use case 2: Organize notes into folders and labels.
+- Use case 3: Search semantically and traverse knowledge relationships.
+- Visual hint: a clean folder card connected to small knowledge nodes.
+
+## Gallery
+- Title: Gallery
+- Short label: Your memories, organized
+- Description: A smart image and memory library with albums, clusters, sharing links, QR invites, and AI-powered discovery.
+- Use case 1: Organize images into AI-generated albums and clusters.
+- Use case 2: Invite others to albums with QR codes or links.
+- Use case 3: Search memories by people, places, dates, emotions, and events.
+- Visual hint: photo tiles floating like memory fragments around a moon.
+
+## Signal
+- Title: Signal
+- Short label: Your inbox, optimized
+- Description: An AI inbox guard across email and messages that filters noise, prioritizes what matters, and can reply in your tone.
+- Use case 1: Connect multiple inboxes.
+- Use case 2: Filter noise and prioritize important messages.
+- Use case 3: Reply in the user's tone and notify only when it matters.
+- Visual hint: minimal envelope with signal arcs and priority tags.
+
+## Compass
+- Title: Compass
+- Short label: Your world
+- Description: A 3D life map for memories, places visited, cities to visit, countries planned, and journeys rendered as a globe.
+- Use case 1: Add cities, countries, places visited, and future destinations.
+- Use case 2: Save memories and plans to an interactive 3D globe.
+- Use case 3: Click pins to relive trips or build future itineraries.
+- Visual hint: miniature globe with pins and thin orbit lines.
+
+## Ascend
+- Title: Ascend
+- Short label: Your growth
+- Description: A personal AI coach for mental goals, habits, health, routines, finance, and custom AI-generated audio books.
+- Use case 1: Define goals for fitness, mental growth, money, habits, and personal development.
+- Use case 2: Generate custom audio books and learning journeys.
+- Use case 3: Track progress and receive coaching based on real context.
+- Visual hint: upward trajectory, mountain, or target mark.
+
+# 3D BRAIN GLOBE REQUIREMENTS
+
+- Create a central 3D brain object or premium stylized brain silhouette.
+- If using a model is not available, create a procedural brain-like form or elegant abstract neural sphere.
+- The brain must sit inside a transparent globe or energy sphere.
+- The globe should have subtle latitude/longitude lines, constellation nodes, and chrome arcs.
+- Capability nodes orbit around the globe.
+- Lines connect capability nodes to the brain.
+- The brain should glow faintly from within.
+- No biological gore or realistic wet brain textures.
+- It should be polished, metallic, premium, and abstract enough to feel brand-safe.
+- The brain globe can be used in the hero or second section.
+
+# ASTEROIDS, MOONS, AND AD FRAGMENTS
+
+- Add small asteroids or moons that drift around product planets.
+- Some asteroids should act as floating information components.
+- These components can contain a short line of text, a tiny UI mockup, an icon, or a thumbnail placeholder.
+- They should feel like premium holographic information leaves or fragments.
+- Do not make them look like banner ads.
+- Do not use colorful marketing cards.
+- They should be sparse.
+- They should never cover important text.
+- They should move slowly with parallax.
+- They should be clickable where appropriate.
+
+# CONTENT FOR FLOATING FRAGMENTS
+
+- Archive: Find any thought instantly.
+- Gallery: Your memories, organized.
+- Signal: Only what matters reaches you.
+- Compass: Map where you have been and where you are going.
+- Ascend: Build the person you are becoming.
+- Core: One Brain. Your context. Your intelligence.
+- Command: AI orchestrators for builders and founders. Coming soon.
+- Studio: Every model. One workspace. Coming soon.
+- Launch: Build and deploy agents. Coming soon.
+
+# NAVIGATION
+
+- Top-left: Vorinthex AI wordmark or minimal logo mark.
+- Top-center or hidden: Products anchor links if layout allows.
+- Top-right: Already on waitlist? Sign in and primary Join Waitlist button.
+- Navigation should be transparent over the hero at first.
+- On scroll, navigation can become a subtle dark glass bar.
+- No heavy nav menu.
+- Mobile nav should be simple and clean.
+
+# WAITLIST MODAL
+
+- Opening Join Waitlist should show a premium modal or inline form.
+- Required field: email.
+- Optional field: role or interest, only if it does not add friction.
+- Primary button: Join Waitlist.
+- Success state: You're on the list.
+- Error state: Use a valid email address.
+- The modal should be dark, chrome-bordered, minimal, and elegant.
+- No bright colors.
+- Closing should be possible by Escape key, close button, and backdrop click.
+
+# MEMBERS MODAL
+
+- The Members link in the footer opens a sign-in modal.
+- The Already on waitlist? Sign in link opens the same or a similar modal.
+- Modal title: Members
+- Subtitle: Sign in with your email.
+- Input placeholder: Enter your email.
+- Button: Continue
+- Small note: Only available for approved members.
+- The modal must feel exclusive, not like a generic login form.
+
+# FOOTER
+
+- Footer must be minimal.
+- Include Vorinthex AI logo and tagline: Nexus of Intelligence.
+- Include Company links: About, Contact, Careers, Blog.
+- Include Products links: Core, Command, Studio, Launch.
+- Command, Studio, Launch may show Coming Soon labels.
+- Include Members link that opens the members modal.
+- Include Privacy and Terms.
+- Do not overload the footer.
+
+# IMPLEMENTATION ARCHITECTURE
+
+- app/page.tsx
+- app/layout.tsx
+- components/landing/Hero.tsx
+- components/landing/GalaxyScene.tsx
+- components/landing/NexusSun.tsx
+- components/landing/ProductPlanet.tsx
+- components/landing/CoreBrainGlobe.tsx
+- components/landing/CapabilityMoon.tsx
+- components/landing/CapabilityCards.tsx
+- components/landing/EverythingConnects.tsx
+- components/landing/ComingSoonProducts.tsx
+- components/landing/WaitlistCTA.tsx
+- components/landing/Footer.tsx
+- components/modals/WaitlistModal.tsx
+- components/modals/MembersModal.tsx
+- components/ui/Button.tsx
+- components/ui/GlassPanel.tsx
+- components/ui/ChromeIcon.tsx
+- data/products.ts
+- data/capabilities.ts
+- lib/useReducedMotion.ts
+- lib/useWebGLSupport.ts
+- lib/cameraStates.ts
+- styles/brand.css
+
+# DATA MODEL
+
+Use a structured data model similar to this:
+
+```ts
+export type ProductStatus = 'active' | 'coming-soon';
+export type ProductKey = 'core' | 'command' | 'studio' | 'launch';
+
+export interface ProductPlanetData {
+  key: ProductKey;
+  name: string;
+  tagline: string;
+  description: string;
+  status: ProductStatus;
+  orbitRadius: number;
+  orbitSpeed: number;
+  initialAngle: number;
+  scale: number;
+}
+
+export interface CapabilityData {
+  key: string;
+  name: string;
+  tagline: string;
+  description: string;
+  useCases: string[];
+  icon: string;
+}
+```
+
+# PRODUCT DATA
+
+Use product data exactly like this or equivalent:
+
+```ts
+export const products = [
+  {
+    key: 'core',
+    name: 'Core',
+    tagline: 'Your AI Brain',
+    description: 'Each user gets a personal AI Brain and expands it with Capabilities.',
+    status: 'active',
+    orbitRadius: 4,
+    orbitSpeed: 0.12,
+  },
+  {
+    key: 'command',
+    name: 'Command',
+    tagline: 'AI leadership and orchestrators',
+    description: 'A command center with AI C-suite orchestrators such as Atlas, Hermes, Metis, Iris, Ledger and more.',
+    status: 'coming-soon',
+    orbitRadius: 7,
+    orbitSpeed: 0.07,
+  },
+  {
+    key: 'studio',
+    name: 'Studio',
+    tagline: 'Every AI model in one interface',
+    description: 'A unified studio for chat, image, video, music, voice, code, documents, and research.',
+    status: 'coming-soon',
+    orbitRadius: 10,
+    orbitSpeed: 0.05,
+  },
+  {
+    key: 'launch',
+    name: 'Launch',
+    tagline: 'Build and deploy agents',
+    description: 'A lightweight platform to create agents, automations, workflows, and deploy them everywhere.',
+    status: 'coming-soon',
+    orbitRadius: 13,
+    orbitSpeed: 0.035,
+  },
+] as const;
+```
+
+# CAPABILITY DATA
+
+Use capability data exactly like this or equivalent:
+
+```ts
+export const coreCapabilities = [
+  {
+    key: 'archive',
+    name: 'Archive',
+    tagline: 'Your second brain',
+    description: 'Capture notes, ideas, research, labels, folders, semantic search, and graph-based knowledge connections.',
+    useCases: [
+      'Capture notes and ideas.',
+      'Organize with folders and labels.',
+      'Search semantically and discover connections.',
+    ],
+  },
+  {
+    key: 'gallery',
+    name: 'Gallery',
+    tagline: 'Your memories, organized',
+    description: 'A smart image and memory library with albums, clusters, sharing links, QR invites, and AI-powered discovery.',
+    useCases: [
+      'Organize memories into albums.',
+      'Invite people with QR codes or links.',
+      'Find moments by people, places, and events.',
+    ],
+  },
+  {
+    key: 'signal',
+    name: 'Signal',
+    tagline: 'Your inbox, optimized',
+    description: 'An AI inbox guard across email and messages that filters noise, prioritizes what matters, and can reply in your tone.',
+    useCases: [
+      'Connect multiple inboxes.',
+      'Filter noise and prioritize important messages.',
+      'Reply in your tone when approved.',
+    ],
+  },
+  {
+    key: 'compass',
+    name: 'Compass',
+    tagline: 'Your world',
+    description: 'A 3D life map for memories, places visited, cities to visit, countries planned, and journeys rendered as a globe.',
+    useCases: [
+      'Map visited cities and countries.',
+      'Plan future journeys.',
+      'Explore memories on a 3D globe.',
+    ],
+  },
+  {
+    key: 'ascend',
+    name: 'Ascend',
+    tagline: 'Your growth',
+    description: 'A personal AI coach for mental goals, habits, health, routines, finance, and custom AI-generated audio books.',
+    useCases: [
+      'Set personal goals.',
+      'Build habits and routines.',
+      'Generate personal audio books and coaching plans.',
+    ],
+  },
+] as const;
+```
+
+# COMPONENT RESPONSIBILITIES
+
+## Hero
+- Render headline, tagline, CTA, sign-in link, and hero galaxy canvas.
+- Keep hero copy minimal and cinematic.
+- Coordinate with GalaxyScene for scroll/camera state.
+
+## GalaxyScene
+- Render Canvas from @react-three/fiber.
+- Render NexusSun, ProductPlanets, orbit rings, particles, and starfield.
+- Expose interactions for clicking Core and coming-soon planets.
+
+## NexusSun
+- Render central dark chrome-orange sun.
+- Use shader or animated material for subtle inner energy.
+- Keep warm glow restrained.
+
+## ProductPlanet
+- Render product-specific planet geometry.
+- Render labels and hover cards.
+- Support active and coming-soon status.
+
+## CoreBrainGlobe
+- Render a brain/globe visualization.
+- Render capability nodes around the brain.
+- Connect nodes to the brain using thin lines.
+
+## CapabilityCards
+- Render Archive, Gallery, Signal, Compass, Ascend cards.
+- Use simple icons and premium UI mockups.
+- Do not show capability pricing on landing page.
+
+## EverythingConnects
+- Explain that all capabilities share one Brain.
+- Show Memory, Context, Automation, Insights as outcomes.
+
+## ComingSoonProducts
+- Show Command, Studio, Launch as locked future products.
+- Core is available first.
+
+## WaitlistCTA
+- Render strong final waitlist CTA.
+- Open waitlist modal.
+
+## Footer
+- Render minimal footer with Members link.
+- Open members modal.
+
+# INTERACTION DETAILS
+
+- Hovering Core should reveal 'Your AI Brain' and the five capability moons.
+- Clicking Core should smoothly zoom into the Core detail section.
+- Hovering Command should reveal 'AI leadership. Coming soon.'
+- Hovering Studio should reveal 'Every model. One workspace. Coming soon.'
+- Hovering Launch should reveal 'Build and deploy agents. Coming soon.'
+- Clicking a coming-soon planet should open a small teaser panel, not navigate away.
+- Clicking Archive/Gallery/Signal/Compass/Ascend cards should highlight the corresponding moon in the brain globe.
+- Hovering capability cards should show a subtle chrome sheen and raise the card slightly.
+- The Join Waitlist button should open the waitlist modal.
+- The Sign In link should open the members modal.
+
+# UI MOCKUP REQUIREMENTS
+
+- Include at least one Core mobile app mockup.
+- The mobile mockup should show a dark UI with a central AI Brain visual.
+- Show connected capabilities inside the mobile UI.
+- Show Archive as a notes/list screen.
+- Show Gallery as a memory grid screen.
+- Show Signal as priority inbox categories.
+- Show Compass as a globe/pins screen.
+- Show Ascend as a goals/coaching plan screen.
+- Mockups can be small cards or phone screens.
+- Use only dark UI and monochrome accents.
+
+# COPY BANK
+
+- "The Nexus of Intelligence."
+- "Your AI Brain."
+- "Build it. Expand it. Make it yours."
+- "Core is your personal AI Brain in your pocket."
+- "Add Capabilities to unlock new ways to think, create, remember, organize, and grow."
+- "Every capability becomes part of the same Brain."
+- "One Brain. Everything connects."
+- "Your data. Your context. Your intelligence."
+- "Core is only the beginning."
+- "More products are coming soon."
+- "Command. Studio. Launch."
+- "Join Waitlist."
+- "Already on waitlist? Sign in."
+- "Members."
+- "Sign in with your email."
+- "Only available for approved members."
+
+# RESPONSIVE DESIGN
+
+- Desktop: full cinematic 3D hero with product planets visible.
+- Large desktop: use wide spacing and max-width content containers.
+- Tablet: reduce starfield complexity and stack sections cleanly.
+- Mobile: simplify 3D scene and prioritize Core narrative.
+- Mobile hero should show Core planet/brain rather than the full solar system if necessary.
+- On mobile, capability cards should become a horizontal carousel or single-column stack.
+- Navigation should collapse into simple buttons.
+- Modals must fit mobile screens.
+- All text must remain readable.
+
+# PERFORMANCE REQUIREMENTS
+
+- Initial page load must be fast.
+- Lazy-load heavy 3D assets.
+- Use instanced particles for stars/asteroids where possible.
+- Avoid huge textures.
+- Keep shader complexity reasonable.
+- Use device pixel ratio caps for WebGL.
+- Pause or reduce animation when tab is hidden.
+- Disable expensive postprocessing on low-power devices.
+- Provide static fallback for WebGL unsupported environments.
+- Use Suspense/loading states for 3D scene.
+
+# ACCESSIBILITY
+
+- All buttons must be keyboard accessible.
+- Modals must trap focus.
+- Escape key must close modals.
+- Use semantic HTML for content sections.
+- Canvas content must have HTML equivalents so the page is understandable without WebGL.
+- Use ARIA labels for icon-only buttons.
+- Respect prefers-reduced-motion.
+- Ensure text contrast is high.
+- Do not rely on color to communicate status.
+
+# FALLBACK EXPERIENCE
+
+- If WebGL is unavailable, show a static premium hero with a stylized Core brain/globe image built with CSS/SVG.
+- Keep all text and CTAs available.
+- Show product planets as static cards.
+- Show Core capability cards normally.
+- No broken canvas should appear.
+
+# QUALITY BAR
+
+- This must not look like a template.
+- This must not look like a dashboard page.
+- This must not look like a generic AI startup site.
+- This must look like an exclusive product reveal.
+- Spacing must be generous.
+- Typography must be precise.
+- Motion must be slow and cinematic.
+- 3D visuals must be premium and restrained.
+- The Core concept must be immediately understandable.
+- The waitlist CTA must be obvious but not desperate.
+- The page must make users want access before seeing pricing.
+
+# DO NOT DO
+
+- Do not create fake prices.
+- Do not create fake testimonials.
+- Do not create fake enterprise logos.
+- Do not use colorful planets.
+- Do not use blue/purple neon.
+- Do not overload the screen with text.
+- Do not make Command/Studio/Launch look more important than Core.
+- Do not call Capabilities 'plugins'.
+- Do not call Core a chatbot.
+- Do not call Vorinthex AI an app store directly in the hero.
+- Do not show too many future features.
+- Do not create a long pricing section.
+- Do not use childish space imagery.
+- Do not use cartoon rockets.
+- Do not use stock galaxy backgrounds as the main design.
+
+# EXPECTED DELIVERABLE
+
+- Implement the full landing page.
+- Implement the 3D scene or a strong initial Three.js version.
+- Implement waitlist modal.
+- Implement members modal.
+- Implement responsive layout.
+- Implement reduced-motion fallback.
+- Implement product and capability data files.
+- Implement production-ready styling.
+- Run lint/build if possible.
+- Explain what was built and how to run it.
+
+# DETAILED IMPLEMENTATION DIRECTIVES
+
+- [0001] Brand: Preserve the obsidian/chrome mood in every component.
+- [0002] Brand: Make every border subtle and intentional.
+- [0003] Brand: Keep all CTAs premium and quiet.
+- [0004] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0005] Brand: Use wide letter spacing for product names.
+- [0006] Brand: Avoid obvious AI clichés.
+- [0007] Brand: Create a sense of mystery without sacrificing clarity.
+- [0008] Brand: Make the product feel exclusive but not arrogant.
+- [0009] Brand: Prioritize precision over decoration.
+- [0010] Brand: Let negative space do real work.
+- [0011] Brand: Preserve the obsidian/chrome mood in every component.
+- [0012] Brand: Make every border subtle and intentional.
+- [0013] Brand: Keep all CTAs premium and quiet.
+- [0014] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0015] Brand: Use wide letter spacing for product names.
+- [0016] Brand: Avoid obvious AI clichés.
+- [0017] Brand: Create a sense of mystery without sacrificing clarity.
+- [0018] Brand: Make the product feel exclusive but not arrogant.
+- [0019] Brand: Prioritize precision over decoration.
+- [0020] Brand: Let negative space do real work.
+- [0021] Brand: Preserve the obsidian/chrome mood in every component.
+- [0022] Brand: Make every border subtle and intentional.
+- [0023] Brand: Keep all CTAs premium and quiet.
+- [0024] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0025] Brand: Use wide letter spacing for product names.
+- [0026] Brand: Avoid obvious AI clichés.
+- [0027] Brand: Create a sense of mystery without sacrificing clarity.
+- [0028] Brand: Make the product feel exclusive but not arrogant.
+- [0029] Brand: Prioritize precision over decoration.
+- [0030] Brand: Let negative space do real work.
+- [0031] Brand: Preserve the obsidian/chrome mood in every component.
+- [0032] Brand: Make every border subtle and intentional.
+- [0033] Brand: Keep all CTAs premium and quiet.
+- [0034] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0035] Brand: Use wide letter spacing for product names.
+- [0036] Brand: Avoid obvious AI clichés.
+- [0037] Brand: Create a sense of mystery without sacrificing clarity.
+- [0038] Brand: Make the product feel exclusive but not arrogant.
+- [0039] Brand: Prioritize precision over decoration.
+- [0040] Brand: Let negative space do real work.
+- [0041] Brand: Preserve the obsidian/chrome mood in every component.
+- [0042] Brand: Make every border subtle and intentional.
+- [0043] Brand: Keep all CTAs premium and quiet.
+- [0044] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0045] Brand: Use wide letter spacing for product names.
+- [0046] Brand: Avoid obvious AI clichés.
+- [0047] Brand: Create a sense of mystery without sacrificing clarity.
+- [0048] Brand: Make the product feel exclusive but not arrogant.
+- [0049] Brand: Prioritize precision over decoration.
+- [0050] Brand: Let negative space do real work.
+- [0051] Brand: Preserve the obsidian/chrome mood in every component.
+- [0052] Brand: Make every border subtle and intentional.
+- [0053] Brand: Keep all CTAs premium and quiet.
+- [0054] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0055] Brand: Use wide letter spacing for product names.
+- [0056] Brand: Avoid obvious AI clichés.
+- [0057] Brand: Create a sense of mystery without sacrificing clarity.
+- [0058] Brand: Make the product feel exclusive but not arrogant.
+- [0059] Brand: Prioritize precision over decoration.
+- [0060] Brand: Let negative space do real work.
+- [0061] Brand: Preserve the obsidian/chrome mood in every component.
+- [0062] Brand: Make every border subtle and intentional.
+- [0063] Brand: Keep all CTAs premium and quiet.
+- [0064] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0065] Brand: Use wide letter spacing for product names.
+- [0066] Brand: Avoid obvious AI clichés.
+- [0067] Brand: Create a sense of mystery without sacrificing clarity.
+- [0068] Brand: Make the product feel exclusive but not arrogant.
+- [0069] Brand: Prioritize precision over decoration.
+- [0070] Brand: Let negative space do real work.
+- [0071] Brand: Preserve the obsidian/chrome mood in every component.
+- [0072] Brand: Make every border subtle and intentional.
+- [0073] Brand: Keep all CTAs premium and quiet.
+- [0074] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0075] Brand: Use wide letter spacing for product names.
+- [0076] Brand: Avoid obvious AI clichés.
+- [0077] Brand: Create a sense of mystery without sacrificing clarity.
+- [0078] Brand: Make the product feel exclusive but not arrogant.
+- [0079] Brand: Prioritize precision over decoration.
+- [0080] Brand: Let negative space do real work.
+- [0081] Brand: Preserve the obsidian/chrome mood in every component.
+- [0082] Brand: Make every border subtle and intentional.
+- [0083] Brand: Keep all CTAs premium and quiet.
+- [0084] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0085] Brand: Use wide letter spacing for product names.
+- [0086] Brand: Avoid obvious AI clichés.
+- [0087] Brand: Create a sense of mystery without sacrificing clarity.
+- [0088] Brand: Make the product feel exclusive but not arrogant.
+- [0089] Brand: Prioritize precision over decoration.
+- [0090] Brand: Let negative space do real work.
+- [0091] Brand: Preserve the obsidian/chrome mood in every component.
+- [0092] Brand: Make every border subtle and intentional.
+- [0093] Brand: Keep all CTAs premium and quiet.
+- [0094] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0095] Brand: Use wide letter spacing for product names.
+- [0096] Brand: Avoid obvious AI clichés.
+- [0097] Brand: Create a sense of mystery without sacrificing clarity.
+- [0098] Brand: Make the product feel exclusive but not arrogant.
+- [0099] Brand: Prioritize precision over decoration.
+- [0100] Brand: Let negative space do real work.
+- [0101] Brand: Preserve the obsidian/chrome mood in every component.
+- [0102] Brand: Make every border subtle and intentional.
+- [0103] Brand: Keep all CTAs premium and quiet.
+- [0104] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0105] Brand: Use wide letter spacing for product names.
+- [0106] Brand: Avoid obvious AI clichés.
+- [0107] Brand: Create a sense of mystery without sacrificing clarity.
+- [0108] Brand: Make the product feel exclusive but not arrogant.
+- [0109] Brand: Prioritize precision over decoration.
+- [0110] Brand: Let negative space do real work.
+- [0111] Brand: Preserve the obsidian/chrome mood in every component.
+- [0112] Brand: Make every border subtle and intentional.
+- [0113] Brand: Keep all CTAs premium and quiet.
+- [0114] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0115] Brand: Use wide letter spacing for product names.
+- [0116] Brand: Avoid obvious AI clichés.
+- [0117] Brand: Create a sense of mystery without sacrificing clarity.
+- [0118] Brand: Make the product feel exclusive but not arrogant.
+- [0119] Brand: Prioritize precision over decoration.
+- [0120] Brand: Let negative space do real work.
+- [0121] Brand: Preserve the obsidian/chrome mood in every component.
+- [0122] Brand: Make every border subtle and intentional.
+- [0123] Brand: Keep all CTAs premium and quiet.
+- [0124] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0125] Brand: Use wide letter spacing for product names.
+- [0126] Brand: Avoid obvious AI clichés.
+- [0127] Brand: Create a sense of mystery without sacrificing clarity.
+- [0128] Brand: Make the product feel exclusive but not arrogant.
+- [0129] Brand: Prioritize precision over decoration.
+- [0130] Brand: Let negative space do real work.
+- [0131] Brand: Preserve the obsidian/chrome mood in every component.
+- [0132] Brand: Make every border subtle and intentional.
+- [0133] Brand: Keep all CTAs premium and quiet.
+- [0134] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0135] Brand: Use wide letter spacing for product names.
+- [0136] Brand: Avoid obvious AI clichés.
+- [0137] Brand: Create a sense of mystery without sacrificing clarity.
+- [0138] Brand: Make the product feel exclusive but not arrogant.
+- [0139] Brand: Prioritize precision over decoration.
+- [0140] Brand: Let negative space do real work.
+- [0141] Brand: Preserve the obsidian/chrome mood in every component.
+- [0142] Brand: Make every border subtle and intentional.
+- [0143] Brand: Keep all CTAs premium and quiet.
+- [0144] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0145] Brand: Use wide letter spacing for product names.
+- [0146] Brand: Avoid obvious AI clichés.
+- [0147] Brand: Create a sense of mystery without sacrificing clarity.
+- [0148] Brand: Make the product feel exclusive but not arrogant.
+- [0149] Brand: Prioritize precision over decoration.
+- [0150] Brand: Let negative space do real work.
+- [0151] Brand: Preserve the obsidian/chrome mood in every component.
+- [0152] Brand: Make every border subtle and intentional.
+- [0153] Brand: Keep all CTAs premium and quiet.
+- [0154] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0155] Brand: Use wide letter spacing for product names.
+- [0156] Brand: Avoid obvious AI clichés.
+- [0157] Brand: Create a sense of mystery without sacrificing clarity.
+- [0158] Brand: Make the product feel exclusive but not arrogant.
+- [0159] Brand: Prioritize precision over decoration.
+- [0160] Brand: Let negative space do real work.
+- [0161] Brand: Preserve the obsidian/chrome mood in every component.
+- [0162] Brand: Make every border subtle and intentional.
+- [0163] Brand: Keep all CTAs premium and quiet.
+- [0164] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0165] Brand: Use wide letter spacing for product names.
+- [0166] Brand: Avoid obvious AI clichés.
+- [0167] Brand: Create a sense of mystery without sacrificing clarity.
+- [0168] Brand: Make the product feel exclusive but not arrogant.
+- [0169] Brand: Prioritize precision over decoration.
+- [0170] Brand: Let negative space do real work.
+- [0171] Brand: Preserve the obsidian/chrome mood in every component.
+- [0172] Brand: Make every border subtle and intentional.
+- [0173] Brand: Keep all CTAs premium and quiet.
+- [0174] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0175] Brand: Use wide letter spacing for product names.
+- [0176] Brand: Avoid obvious AI clichés.
+- [0177] Brand: Create a sense of mystery without sacrificing clarity.
+- [0178] Brand: Make the product feel exclusive but not arrogant.
+- [0179] Brand: Prioritize precision over decoration.
+- [0180] Brand: Let negative space do real work.
+- [0181] Brand: Preserve the obsidian/chrome mood in every component.
+- [0182] Brand: Make every border subtle and intentional.
+- [0183] Brand: Keep all CTAs premium and quiet.
+- [0184] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0185] Brand: Use wide letter spacing for product names.
+- [0186] Brand: Avoid obvious AI clichés.
+- [0187] Brand: Create a sense of mystery without sacrificing clarity.
+- [0188] Brand: Make the product feel exclusive but not arrogant.
+- [0189] Brand: Prioritize precision over decoration.
+- [0190] Brand: Let negative space do real work.
+- [0191] Brand: Preserve the obsidian/chrome mood in every component.
+- [0192] Brand: Make every border subtle and intentional.
+- [0193] Brand: Keep all CTAs premium and quiet.
+- [0194] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0195] Brand: Use wide letter spacing for product names.
+- [0196] Brand: Avoid obvious AI clichés.
+- [0197] Brand: Create a sense of mystery without sacrificing clarity.
+- [0198] Brand: Make the product feel exclusive but not arrogant.
+- [0199] Brand: Prioritize precision over decoration.
+- [0200] Brand: Let negative space do real work.
+- [0201] Brand: Preserve the obsidian/chrome mood in every component.
+- [0202] Brand: Make every border subtle and intentional.
+- [0203] Brand: Keep all CTAs premium and quiet.
+- [0204] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0205] Brand: Use wide letter spacing for product names.
+- [0206] Brand: Avoid obvious AI clichés.
+- [0207] Brand: Create a sense of mystery without sacrificing clarity.
+- [0208] Brand: Make the product feel exclusive but not arrogant.
+- [0209] Brand: Prioritize precision over decoration.
+- [0210] Brand: Let negative space do real work.
+- [0211] Brand: Preserve the obsidian/chrome mood in every component.
+- [0212] Brand: Make every border subtle and intentional.
+- [0213] Brand: Keep all CTAs premium and quiet.
+- [0214] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0215] Brand: Use wide letter spacing for product names.
+- [0216] Brand: Avoid obvious AI clichés.
+- [0217] Brand: Create a sense of mystery without sacrificing clarity.
+- [0218] Brand: Make the product feel exclusive but not arrogant.
+- [0219] Brand: Prioritize precision over decoration.
+- [0220] Brand: Let negative space do real work.
+- [0221] Brand: Preserve the obsidian/chrome mood in every component.
+- [0222] Brand: Make every border subtle and intentional.
+- [0223] Brand: Keep all CTAs premium and quiet.
+- [0224] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0225] Brand: Use wide letter spacing for product names.
+- [0226] Brand: Avoid obvious AI clichés.
+- [0227] Brand: Create a sense of mystery without sacrificing clarity.
+- [0228] Brand: Make the product feel exclusive but not arrogant.
+- [0229] Brand: Prioritize precision over decoration.
+- [0230] Brand: Let negative space do real work.
+- [0231] Brand: Preserve the obsidian/chrome mood in every component.
+- [0232] Brand: Make every border subtle and intentional.
+- [0233] Brand: Keep all CTAs premium and quiet.
+- [0234] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0235] Brand: Use wide letter spacing for product names.
+- [0236] Brand: Avoid obvious AI clichés.
+- [0237] Brand: Create a sense of mystery without sacrificing clarity.
+- [0238] Brand: Make the product feel exclusive but not arrogant.
+- [0239] Brand: Prioritize precision over decoration.
+- [0240] Brand: Let negative space do real work.
+- [0241] Brand: Preserve the obsidian/chrome mood in every component.
+- [0242] Brand: Make every border subtle and intentional.
+- [0243] Brand: Keep all CTAs premium and quiet.
+- [0244] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0245] Brand: Use wide letter spacing for product names.
+- [0246] Brand: Avoid obvious AI clichés.
+- [0247] Brand: Create a sense of mystery without sacrificing clarity.
+- [0248] Brand: Make the product feel exclusive but not arrogant.
+- [0249] Brand: Prioritize precision over decoration.
+- [0250] Brand: Let negative space do real work.
+- [0251] Brand: Preserve the obsidian/chrome mood in every component.
+- [0252] Brand: Make every border subtle and intentional.
+- [0253] Brand: Keep all CTAs premium and quiet.
+- [0254] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0255] Brand: Use wide letter spacing for product names.
+- [0256] Brand: Avoid obvious AI clichés.
+- [0257] Brand: Create a sense of mystery without sacrificing clarity.
+- [0258] Brand: Make the product feel exclusive but not arrogant.
+- [0259] Brand: Prioritize precision over decoration.
+- [0260] Brand: Let negative space do real work.
+- [0261] Brand: Preserve the obsidian/chrome mood in every component.
+- [0262] Brand: Make every border subtle and intentional.
+- [0263] Brand: Keep all CTAs premium and quiet.
+- [0264] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0265] Brand: Use wide letter spacing for product names.
+- [0266] Brand: Avoid obvious AI clichés.
+- [0267] Brand: Create a sense of mystery without sacrificing clarity.
+- [0268] Brand: Make the product feel exclusive but not arrogant.
+- [0269] Brand: Prioritize precision over decoration.
+- [0270] Brand: Let negative space do real work.
+- [0271] Brand: Preserve the obsidian/chrome mood in every component.
+- [0272] Brand: Make every border subtle and intentional.
+- [0273] Brand: Keep all CTAs premium and quiet.
+- [0274] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0275] Brand: Use wide letter spacing for product names.
+- [0276] Brand: Avoid obvious AI clichés.
+- [0277] Brand: Create a sense of mystery without sacrificing clarity.
+- [0278] Brand: Make the product feel exclusive but not arrogant.
+- [0279] Brand: Prioritize precision over decoration.
+- [0280] Brand: Let negative space do real work.
+- [0281] Brand: Preserve the obsidian/chrome mood in every component.
+- [0282] Brand: Make every border subtle and intentional.
+- [0283] Brand: Keep all CTAs premium and quiet.
+- [0284] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0285] Brand: Use wide letter spacing for product names.
+- [0286] Brand: Avoid obvious AI clichés.
+- [0287] Brand: Create a sense of mystery without sacrificing clarity.
+- [0288] Brand: Make the product feel exclusive but not arrogant.
+- [0289] Brand: Prioritize precision over decoration.
+- [0290] Brand: Let negative space do real work.
+- [0291] Brand: Preserve the obsidian/chrome mood in every component.
+- [0292] Brand: Make every border subtle and intentional.
+- [0293] Brand: Keep all CTAs premium and quiet.
+- [0294] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0295] Brand: Use wide letter spacing for product names.
+- [0296] Brand: Avoid obvious AI clichés.
+- [0297] Brand: Create a sense of mystery without sacrificing clarity.
+- [0298] Brand: Make the product feel exclusive but not arrogant.
+- [0299] Brand: Prioritize precision over decoration.
+- [0300] Brand: Let negative space do real work.
+- [0301] Brand: Preserve the obsidian/chrome mood in every component.
+- [0302] Brand: Make every border subtle and intentional.
+- [0303] Brand: Keep all CTAs premium and quiet.
+- [0304] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0305] Brand: Use wide letter spacing for product names.
+- [0306] Brand: Avoid obvious AI clichés.
+- [0307] Brand: Create a sense of mystery without sacrificing clarity.
+- [0308] Brand: Make the product feel exclusive but not arrogant.
+- [0309] Brand: Prioritize precision over decoration.
+- [0310] Brand: Let negative space do real work.
+- [0311] Brand: Preserve the obsidian/chrome mood in every component.
+- [0312] Brand: Make every border subtle and intentional.
+- [0313] Brand: Keep all CTAs premium and quiet.
+- [0314] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0315] Brand: Use wide letter spacing for product names.
+- [0316] Brand: Avoid obvious AI clichés.
+- [0317] Brand: Create a sense of mystery without sacrificing clarity.
+- [0318] Brand: Make the product feel exclusive but not arrogant.
+- [0319] Brand: Prioritize precision over decoration.
+- [0320] Brand: Let negative space do real work.
+- [0321] Brand: Preserve the obsidian/chrome mood in every component.
+- [0322] Brand: Make every border subtle and intentional.
+- [0323] Brand: Keep all CTAs premium and quiet.
+- [0324] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0325] Brand: Use wide letter spacing for product names.
+- [0326] Brand: Avoid obvious AI clichés.
+- [0327] Brand: Create a sense of mystery without sacrificing clarity.
+- [0328] Brand: Make the product feel exclusive but not arrogant.
+- [0329] Brand: Prioritize precision over decoration.
+- [0330] Brand: Let negative space do real work.
+- [0331] Brand: Preserve the obsidian/chrome mood in every component.
+- [0332] Brand: Make every border subtle and intentional.
+- [0333] Brand: Keep all CTAs premium and quiet.
+- [0334] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0335] Brand: Use wide letter spacing for product names.
+- [0336] Brand: Avoid obvious AI clichés.
+- [0337] Brand: Create a sense of mystery without sacrificing clarity.
+- [0338] Brand: Make the product feel exclusive but not arrogant.
+- [0339] Brand: Prioritize precision over decoration.
+- [0340] Brand: Let negative space do real work.
+- [0341] Brand: Preserve the obsidian/chrome mood in every component.
+- [0342] Brand: Make every border subtle and intentional.
+- [0343] Brand: Keep all CTAs premium and quiet.
+- [0344] Brand: Use warm chrome-orange only for the Nexus sun and very subtle energy reflection.
+- [0345] Brand: Use wide letter spacing for product names.
+- [0346] Brand: Avoid obvious AI clichés.
+- [0347] Brand: Create a sense of mystery without sacrificing clarity.
+- [0348] Brand: Make the product feel exclusive but not arrogant.
+- [0349] Brand: Prioritize precision over decoration.
+- [0350] Brand: Let negative space do real work.
+- [0351] ThreeScene: Use a deterministic product order in the scene.
+- [0352] ThreeScene: Keep Core closest to the Nexus sun.
+- [0353] ThreeScene: Use the same product names everywhere.
+- [0354] ThreeScene: Keep orbit rings thin and faint.
+- [0355] ThreeScene: Animate the sun material slowly.
+- [0356] ThreeScene: Use layered starfields to create depth.
+- [0357] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0358] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0359] ThreeScene: Make hover labels readable over the canvas.
+- [0360] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0361] ThreeScene: Use a deterministic product order in the scene.
+- [0362] ThreeScene: Keep Core closest to the Nexus sun.
+- [0363] ThreeScene: Use the same product names everywhere.
+- [0364] ThreeScene: Keep orbit rings thin and faint.
+- [0365] ThreeScene: Animate the sun material slowly.
+- [0366] ThreeScene: Use layered starfields to create depth.
+- [0367] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0368] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0369] ThreeScene: Make hover labels readable over the canvas.
+- [0370] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0371] ThreeScene: Use a deterministic product order in the scene.
+- [0372] ThreeScene: Keep Core closest to the Nexus sun.
+- [0373] ThreeScene: Use the same product names everywhere.
+- [0374] ThreeScene: Keep orbit rings thin and faint.
+- [0375] ThreeScene: Animate the sun material slowly.
+- [0376] ThreeScene: Use layered starfields to create depth.
+- [0377] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0378] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0379] ThreeScene: Make hover labels readable over the canvas.
+- [0380] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0381] ThreeScene: Use a deterministic product order in the scene.
+- [0382] ThreeScene: Keep Core closest to the Nexus sun.
+- [0383] ThreeScene: Use the same product names everywhere.
+- [0384] ThreeScene: Keep orbit rings thin and faint.
+- [0385] ThreeScene: Animate the sun material slowly.
+- [0386] ThreeScene: Use layered starfields to create depth.
+- [0387] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0388] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0389] ThreeScene: Make hover labels readable over the canvas.
+- [0390] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0391] ThreeScene: Use a deterministic product order in the scene.
+- [0392] ThreeScene: Keep Core closest to the Nexus sun.
+- [0393] ThreeScene: Use the same product names everywhere.
+- [0394] ThreeScene: Keep orbit rings thin and faint.
+- [0395] ThreeScene: Animate the sun material slowly.
+- [0396] ThreeScene: Use layered starfields to create depth.
+- [0397] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0398] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0399] ThreeScene: Make hover labels readable over the canvas.
+- [0400] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0401] ThreeScene: Use a deterministic product order in the scene.
+- [0402] ThreeScene: Keep Core closest to the Nexus sun.
+- [0403] ThreeScene: Use the same product names everywhere.
+- [0404] ThreeScene: Keep orbit rings thin and faint.
+- [0405] ThreeScene: Animate the sun material slowly.
+- [0406] ThreeScene: Use layered starfields to create depth.
+- [0407] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0408] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0409] ThreeScene: Make hover labels readable over the canvas.
+- [0410] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0411] ThreeScene: Use a deterministic product order in the scene.
+- [0412] ThreeScene: Keep Core closest to the Nexus sun.
+- [0413] ThreeScene: Use the same product names everywhere.
+- [0414] ThreeScene: Keep orbit rings thin and faint.
+- [0415] ThreeScene: Animate the sun material slowly.
+- [0416] ThreeScene: Use layered starfields to create depth.
+- [0417] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0418] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0419] ThreeScene: Make hover labels readable over the canvas.
+- [0420] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0421] ThreeScene: Use a deterministic product order in the scene.
+- [0422] ThreeScene: Keep Core closest to the Nexus sun.
+- [0423] ThreeScene: Use the same product names everywhere.
+- [0424] ThreeScene: Keep orbit rings thin and faint.
+- [0425] ThreeScene: Animate the sun material slowly.
+- [0426] ThreeScene: Use layered starfields to create depth.
+- [0427] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0428] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0429] ThreeScene: Make hover labels readable over the canvas.
+- [0430] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0431] ThreeScene: Use a deterministic product order in the scene.
+- [0432] ThreeScene: Keep Core closest to the Nexus sun.
+- [0433] ThreeScene: Use the same product names everywhere.
+- [0434] ThreeScene: Keep orbit rings thin and faint.
+- [0435] ThreeScene: Animate the sun material slowly.
+- [0436] ThreeScene: Use layered starfields to create depth.
+- [0437] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0438] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0439] ThreeScene: Make hover labels readable over the canvas.
+- [0440] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0441] ThreeScene: Use a deterministic product order in the scene.
+- [0442] ThreeScene: Keep Core closest to the Nexus sun.
+- [0443] ThreeScene: Use the same product names everywhere.
+- [0444] ThreeScene: Keep orbit rings thin and faint.
+- [0445] ThreeScene: Animate the sun material slowly.
+- [0446] ThreeScene: Use layered starfields to create depth.
+- [0447] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0448] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0449] ThreeScene: Make hover labels readable over the canvas.
+- [0450] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0451] ThreeScene: Use a deterministic product order in the scene.
+- [0452] ThreeScene: Keep Core closest to the Nexus sun.
+- [0453] ThreeScene: Use the same product names everywhere.
+- [0454] ThreeScene: Keep orbit rings thin and faint.
+- [0455] ThreeScene: Animate the sun material slowly.
+- [0456] ThreeScene: Use layered starfields to create depth.
+- [0457] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0458] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0459] ThreeScene: Make hover labels readable over the canvas.
+- [0460] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0461] ThreeScene: Use a deterministic product order in the scene.
+- [0462] ThreeScene: Keep Core closest to the Nexus sun.
+- [0463] ThreeScene: Use the same product names everywhere.
+- [0464] ThreeScene: Keep orbit rings thin and faint.
+- [0465] ThreeScene: Animate the sun material slowly.
+- [0466] ThreeScene: Use layered starfields to create depth.
+- [0467] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0468] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0469] ThreeScene: Make hover labels readable over the canvas.
+- [0470] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0471] ThreeScene: Use a deterministic product order in the scene.
+- [0472] ThreeScene: Keep Core closest to the Nexus sun.
+- [0473] ThreeScene: Use the same product names everywhere.
+- [0474] ThreeScene: Keep orbit rings thin and faint.
+- [0475] ThreeScene: Animate the sun material slowly.
+- [0476] ThreeScene: Use layered starfields to create depth.
+- [0477] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0478] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0479] ThreeScene: Make hover labels readable over the canvas.
+- [0480] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0481] ThreeScene: Use a deterministic product order in the scene.
+- [0482] ThreeScene: Keep Core closest to the Nexus sun.
+- [0483] ThreeScene: Use the same product names everywhere.
+- [0484] ThreeScene: Keep orbit rings thin and faint.
+- [0485] ThreeScene: Animate the sun material slowly.
+- [0486] ThreeScene: Use layered starfields to create depth.
+- [0487] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0488] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0489] ThreeScene: Make hover labels readable over the canvas.
+- [0490] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0491] ThreeScene: Use a deterministic product order in the scene.
+- [0492] ThreeScene: Keep Core closest to the Nexus sun.
+- [0493] ThreeScene: Use the same product names everywhere.
+- [0494] ThreeScene: Keep orbit rings thin and faint.
+- [0495] ThreeScene: Animate the sun material slowly.
+- [0496] ThreeScene: Use layered starfields to create depth.
+- [0497] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0498] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0499] ThreeScene: Make hover labels readable over the canvas.
+- [0500] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0501] ThreeScene: Use a deterministic product order in the scene.
+- [0502] ThreeScene: Keep Core closest to the Nexus sun.
+- [0503] ThreeScene: Use the same product names everywhere.
+- [0504] ThreeScene: Keep orbit rings thin and faint.
+- [0505] ThreeScene: Animate the sun material slowly.
+- [0506] ThreeScene: Use layered starfields to create depth.
+- [0507] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0508] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0509] ThreeScene: Make hover labels readable over the canvas.
+- [0510] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0511] ThreeScene: Use a deterministic product order in the scene.
+- [0512] ThreeScene: Keep Core closest to the Nexus sun.
+- [0513] ThreeScene: Use the same product names everywhere.
+- [0514] ThreeScene: Keep orbit rings thin and faint.
+- [0515] ThreeScene: Animate the sun material slowly.
+- [0516] ThreeScene: Use layered starfields to create depth.
+- [0517] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0518] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0519] ThreeScene: Make hover labels readable over the canvas.
+- [0520] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0521] ThreeScene: Use a deterministic product order in the scene.
+- [0522] ThreeScene: Keep Core closest to the Nexus sun.
+- [0523] ThreeScene: Use the same product names everywhere.
+- [0524] ThreeScene: Keep orbit rings thin and faint.
+- [0525] ThreeScene: Animate the sun material slowly.
+- [0526] ThreeScene: Use layered starfields to create depth.
+- [0527] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0528] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0529] ThreeScene: Make hover labels readable over the canvas.
+- [0530] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0531] ThreeScene: Use a deterministic product order in the scene.
+- [0532] ThreeScene: Keep Core closest to the Nexus sun.
+- [0533] ThreeScene: Use the same product names everywhere.
+- [0534] ThreeScene: Keep orbit rings thin and faint.
+- [0535] ThreeScene: Animate the sun material slowly.
+- [0536] ThreeScene: Use layered starfields to create depth.
+- [0537] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0538] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0539] ThreeScene: Make hover labels readable over the canvas.
+- [0540] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0541] ThreeScene: Use a deterministic product order in the scene.
+- [0542] ThreeScene: Keep Core closest to the Nexus sun.
+- [0543] ThreeScene: Use the same product names everywhere.
+- [0544] ThreeScene: Keep orbit rings thin and faint.
+- [0545] ThreeScene: Animate the sun material slowly.
+- [0546] ThreeScene: Use layered starfields to create depth.
+- [0547] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0548] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0549] ThreeScene: Make hover labels readable over the canvas.
+- [0550] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0551] ThreeScene: Use a deterministic product order in the scene.
+- [0552] ThreeScene: Keep Core closest to the Nexus sun.
+- [0553] ThreeScene: Use the same product names everywhere.
+- [0554] ThreeScene: Keep orbit rings thin and faint.
+- [0555] ThreeScene: Animate the sun material slowly.
+- [0556] ThreeScene: Use layered starfields to create depth.
+- [0557] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0558] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0559] ThreeScene: Make hover labels readable over the canvas.
+- [0560] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0561] ThreeScene: Use a deterministic product order in the scene.
+- [0562] ThreeScene: Keep Core closest to the Nexus sun.
+- [0563] ThreeScene: Use the same product names everywhere.
+- [0564] ThreeScene: Keep orbit rings thin and faint.
+- [0565] ThreeScene: Animate the sun material slowly.
+- [0566] ThreeScene: Use layered starfields to create depth.
+- [0567] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0568] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0569] ThreeScene: Make hover labels readable over the canvas.
+- [0570] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0571] ThreeScene: Use a deterministic product order in the scene.
+- [0572] ThreeScene: Keep Core closest to the Nexus sun.
+- [0573] ThreeScene: Use the same product names everywhere.
+- [0574] ThreeScene: Keep orbit rings thin and faint.
+- [0575] ThreeScene: Animate the sun material slowly.
+- [0576] ThreeScene: Use layered starfields to create depth.
+- [0577] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0578] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0579] ThreeScene: Make hover labels readable over the canvas.
+- [0580] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0581] ThreeScene: Use a deterministic product order in the scene.
+- [0582] ThreeScene: Keep Core closest to the Nexus sun.
+- [0583] ThreeScene: Use the same product names everywhere.
+- [0584] ThreeScene: Keep orbit rings thin and faint.
+- [0585] ThreeScene: Animate the sun material slowly.
+- [0586] ThreeScene: Use layered starfields to create depth.
+- [0587] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0588] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0589] ThreeScene: Make hover labels readable over the canvas.
+- [0590] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0591] ThreeScene: Use a deterministic product order in the scene.
+- [0592] ThreeScene: Keep Core closest to the Nexus sun.
+- [0593] ThreeScene: Use the same product names everywhere.
+- [0594] ThreeScene: Keep orbit rings thin and faint.
+- [0595] ThreeScene: Animate the sun material slowly.
+- [0596] ThreeScene: Use layered starfields to create depth.
+- [0597] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0598] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0599] ThreeScene: Make hover labels readable over the canvas.
+- [0600] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0601] ThreeScene: Use a deterministic product order in the scene.
+- [0602] ThreeScene: Keep Core closest to the Nexus sun.
+- [0603] ThreeScene: Use the same product names everywhere.
+- [0604] ThreeScene: Keep orbit rings thin and faint.
+- [0605] ThreeScene: Animate the sun material slowly.
+- [0606] ThreeScene: Use layered starfields to create depth.
+- [0607] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0608] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0609] ThreeScene: Make hover labels readable over the canvas.
+- [0610] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0611] ThreeScene: Use a deterministic product order in the scene.
+- [0612] ThreeScene: Keep Core closest to the Nexus sun.
+- [0613] ThreeScene: Use the same product names everywhere.
+- [0614] ThreeScene: Keep orbit rings thin and faint.
+- [0615] ThreeScene: Animate the sun material slowly.
+- [0616] ThreeScene: Use layered starfields to create depth.
+- [0617] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0618] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0619] ThreeScene: Make hover labels readable over the canvas.
+- [0620] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0621] ThreeScene: Use a deterministic product order in the scene.
+- [0622] ThreeScene: Keep Core closest to the Nexus sun.
+- [0623] ThreeScene: Use the same product names everywhere.
+- [0624] ThreeScene: Keep orbit rings thin and faint.
+- [0625] ThreeScene: Animate the sun material slowly.
+- [0626] ThreeScene: Use layered starfields to create depth.
+- [0627] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0628] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0629] ThreeScene: Make hover labels readable over the canvas.
+- [0630] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0631] ThreeScene: Use a deterministic product order in the scene.
+- [0632] ThreeScene: Keep Core closest to the Nexus sun.
+- [0633] ThreeScene: Use the same product names everywhere.
+- [0634] ThreeScene: Keep orbit rings thin and faint.
+- [0635] ThreeScene: Animate the sun material slowly.
+- [0636] ThreeScene: Use layered starfields to create depth.
+- [0637] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0638] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0639] ThreeScene: Make hover labels readable over the canvas.
+- [0640] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0641] ThreeScene: Use a deterministic product order in the scene.
+- [0642] ThreeScene: Keep Core closest to the Nexus sun.
+- [0643] ThreeScene: Use the same product names everywhere.
+- [0644] ThreeScene: Keep orbit rings thin and faint.
+- [0645] ThreeScene: Animate the sun material slowly.
+- [0646] ThreeScene: Use layered starfields to create depth.
+- [0647] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0648] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0649] ThreeScene: Make hover labels readable over the canvas.
+- [0650] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0651] ThreeScene: Use a deterministic product order in the scene.
+- [0652] ThreeScene: Keep Core closest to the Nexus sun.
+- [0653] ThreeScene: Use the same product names everywhere.
+- [0654] ThreeScene: Keep orbit rings thin and faint.
+- [0655] ThreeScene: Animate the sun material slowly.
+- [0656] ThreeScene: Use layered starfields to create depth.
+- [0657] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0658] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0659] ThreeScene: Make hover labels readable over the canvas.
+- [0660] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0661] ThreeScene: Use a deterministic product order in the scene.
+- [0662] ThreeScene: Keep Core closest to the Nexus sun.
+- [0663] ThreeScene: Use the same product names everywhere.
+- [0664] ThreeScene: Keep orbit rings thin and faint.
+- [0665] ThreeScene: Animate the sun material slowly.
+- [0666] ThreeScene: Use layered starfields to create depth.
+- [0667] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0668] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0669] ThreeScene: Make hover labels readable over the canvas.
+- [0670] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0671] ThreeScene: Use a deterministic product order in the scene.
+- [0672] ThreeScene: Keep Core closest to the Nexus sun.
+- [0673] ThreeScene: Use the same product names everywhere.
+- [0674] ThreeScene: Keep orbit rings thin and faint.
+- [0675] ThreeScene: Animate the sun material slowly.
+- [0676] ThreeScene: Use layered starfields to create depth.
+- [0677] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0678] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0679] ThreeScene: Make hover labels readable over the canvas.
+- [0680] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0681] ThreeScene: Use a deterministic product order in the scene.
+- [0682] ThreeScene: Keep Core closest to the Nexus sun.
+- [0683] ThreeScene: Use the same product names everywhere.
+- [0684] ThreeScene: Keep orbit rings thin and faint.
+- [0685] ThreeScene: Animate the sun material slowly.
+- [0686] ThreeScene: Use layered starfields to create depth.
+- [0687] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0688] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0689] ThreeScene: Make hover labels readable over the canvas.
+- [0690] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0691] ThreeScene: Use a deterministic product order in the scene.
+- [0692] ThreeScene: Keep Core closest to the Nexus sun.
+- [0693] ThreeScene: Use the same product names everywhere.
+- [0694] ThreeScene: Keep orbit rings thin and faint.
+- [0695] ThreeScene: Animate the sun material slowly.
+- [0696] ThreeScene: Use layered starfields to create depth.
+- [0697] ThreeScene: Use camera transitions rather than abrupt section jumps.
+- [0698] ThreeScene: Keep planets visually distinct through silhouette, not color.
+- [0699] ThreeScene: Make hover labels readable over the canvas.
+- [0700] ThreeScene: Use device capability detection to simplify the scene on weaker hardware.
+- [0701] Core: Explain that Core is a mobile app.
+- [0702] Core: Explain that every user gets their own AI Brain.
+- [0703] Core: Explain that users expand their Brain with Capabilities.
+- [0704] Core: Show the five initial Capabilities.
+- [0705] Core: Do not show pricing for Capabilities here.
+- [0706] Core: Use one clear phone mockup at minimum.
+- [0707] Core: Use a brain/globe visual as the central metaphor.
+- [0708] Core: Show capability nodes connecting to the Brain.
+- [0709] Core: Make Archive and Signal feel practical.
+- [0710] Core: Make Gallery and Compass feel emotional/visual.
+- [0711] Core: Make Ascend feel aspirational and personal.
+- [0712] Core: Explain that Core is a mobile app.
+- [0713] Core: Explain that every user gets their own AI Brain.
+- [0714] Core: Explain that users expand their Brain with Capabilities.
+- [0715] Core: Show the five initial Capabilities.
+- [0716] Core: Do not show pricing for Capabilities here.
+- [0717] Core: Use one clear phone mockup at minimum.
+- [0718] Core: Use a brain/globe visual as the central metaphor.
+- [0719] Core: Show capability nodes connecting to the Brain.
+- [0720] Core: Make Archive and Signal feel practical.
+- [0721] Core: Make Gallery and Compass feel emotional/visual.
+- [0722] Core: Make Ascend feel aspirational and personal.
+- [0723] Core: Explain that Core is a mobile app.
+- [0724] Core: Explain that every user gets their own AI Brain.
+- [0725] Core: Explain that users expand their Brain with Capabilities.
+- [0726] Core: Show the five initial Capabilities.
+- [0727] Core: Do not show pricing for Capabilities here.
+- [0728] Core: Use one clear phone mockup at minimum.
+- [0729] Core: Use a brain/globe visual as the central metaphor.
+- [0730] Core: Show capability nodes connecting to the Brain.
+- [0731] Core: Make Archive and Signal feel practical.
+- [0732] Core: Make Gallery and Compass feel emotional/visual.
+- [0733] Core: Make Ascend feel aspirational and personal.
+- [0734] Core: Explain that Core is a mobile app.
+- [0735] Core: Explain that every user gets their own AI Brain.
+- [0736] Core: Explain that users expand their Brain with Capabilities.
+- [0737] Core: Show the five initial Capabilities.
+- [0738] Core: Do not show pricing for Capabilities here.
+- [0739] Core: Use one clear phone mockup at minimum.
+- [0740] Core: Use a brain/globe visual as the central metaphor.
+- [0741] Core: Show capability nodes connecting to the Brain.
+- [0742] Core: Make Archive and Signal feel practical.
+- [0743] Core: Make Gallery and Compass feel emotional/visual.
+- [0744] Core: Make Ascend feel aspirational and personal.
+- [0745] Core: Explain that Core is a mobile app.
+- [0746] Core: Explain that every user gets their own AI Brain.
+- [0747] Core: Explain that users expand their Brain with Capabilities.
+- [0748] Core: Show the five initial Capabilities.
+- [0749] Core: Do not show pricing for Capabilities here.
+- [0750] Core: Use one clear phone mockup at minimum.
+- [0751] Core: Use a brain/globe visual as the central metaphor.
+- [0752] Core: Show capability nodes connecting to the Brain.
+- [0753] Core: Make Archive and Signal feel practical.
+- [0754] Core: Make Gallery and Compass feel emotional/visual.
+- [0755] Core: Make Ascend feel aspirational and personal.
+- [0756] Core: Explain that Core is a mobile app.
+- [0757] Core: Explain that every user gets their own AI Brain.
+- [0758] Core: Explain that users expand their Brain with Capabilities.
+- [0759] Core: Show the five initial Capabilities.
+- [0760] Core: Do not show pricing for Capabilities here.
+- [0761] Core: Use one clear phone mockup at minimum.
+- [0762] Core: Use a brain/globe visual as the central metaphor.
+- [0763] Core: Show capability nodes connecting to the Brain.
+- [0764] Core: Make Archive and Signal feel practical.
+- [0765] Core: Make Gallery and Compass feel emotional/visual.
+- [0766] Core: Make Ascend feel aspirational and personal.
+- [0767] Core: Explain that Core is a mobile app.
+- [0768] Core: Explain that every user gets their own AI Brain.
+- [0769] Core: Explain that users expand their Brain with Capabilities.
+- [0770] Core: Show the five initial Capabilities.
+- [0771] Core: Do not show pricing for Capabilities here.
+- [0772] Core: Use one clear phone mockup at minimum.
+- [0773] Core: Use a brain/globe visual as the central metaphor.
+- [0774] Core: Show capability nodes connecting to the Brain.
+- [0775] Core: Make Archive and Signal feel practical.
+- [0776] Core: Make Gallery and Compass feel emotional/visual.
+- [0777] Core: Make Ascend feel aspirational and personal.
+- [0778] Core: Explain that Core is a mobile app.
+- [0779] Core: Explain that every user gets their own AI Brain.
+- [0780] Core: Explain that users expand their Brain with Capabilities.
+- [0781] Core: Show the five initial Capabilities.
+- [0782] Core: Do not show pricing for Capabilities here.
+- [0783] Core: Use one clear phone mockup at minimum.
+- [0784] Core: Use a brain/globe visual as the central metaphor.
+- [0785] Core: Show capability nodes connecting to the Brain.
+- [0786] Core: Make Archive and Signal feel practical.
+- [0787] Core: Make Gallery and Compass feel emotional/visual.
+- [0788] Core: Make Ascend feel aspirational and personal.
+- [0789] Core: Explain that Core is a mobile app.
+- [0790] Core: Explain that every user gets their own AI Brain.
+- [0791] Core: Explain that users expand their Brain with Capabilities.
+- [0792] Core: Show the five initial Capabilities.
+- [0793] Core: Do not show pricing for Capabilities here.
+- [0794] Core: Use one clear phone mockup at minimum.
+- [0795] Core: Use a brain/globe visual as the central metaphor.
+- [0796] Core: Show capability nodes connecting to the Brain.
+- [0797] Core: Make Archive and Signal feel practical.
+- [0798] Core: Make Gallery and Compass feel emotional/visual.
+- [0799] Core: Make Ascend feel aspirational and personal.
+- [0800] Core: Explain that Core is a mobile app.
+- [0801] Core: Explain that every user gets their own AI Brain.
+- [0802] Core: Explain that users expand their Brain with Capabilities.
+- [0803] Core: Show the five initial Capabilities.
+- [0804] Core: Do not show pricing for Capabilities here.
+- [0805] Core: Use one clear phone mockup at minimum.
+- [0806] Core: Use a brain/globe visual as the central metaphor.
+- [0807] Core: Show capability nodes connecting to the Brain.
+- [0808] Core: Make Archive and Signal feel practical.
+- [0809] Core: Make Gallery and Compass feel emotional/visual.
+- [0810] Core: Make Ascend feel aspirational and personal.
+- [0811] Core: Explain that Core is a mobile app.
+- [0812] Core: Explain that every user gets their own AI Brain.
+- [0813] Core: Explain that users expand their Brain with Capabilities.
+- [0814] Core: Show the five initial Capabilities.
+- [0815] Core: Do not show pricing for Capabilities here.
+- [0816] Core: Use one clear phone mockup at minimum.
+- [0817] Core: Use a brain/globe visual as the central metaphor.
+- [0818] Core: Show capability nodes connecting to the Brain.
+- [0819] Core: Make Archive and Signal feel practical.
+- [0820] Core: Make Gallery and Compass feel emotional/visual.
+- [0821] Core: Make Ascend feel aspirational and personal.
+- [0822] Core: Explain that Core is a mobile app.
+- [0823] Core: Explain that every user gets their own AI Brain.
+- [0824] Core: Explain that users expand their Brain with Capabilities.
+- [0825] Core: Show the five initial Capabilities.
+- [0826] Core: Do not show pricing for Capabilities here.
+- [0827] Core: Use one clear phone mockup at minimum.
+- [0828] Core: Use a brain/globe visual as the central metaphor.
+- [0829] Core: Show capability nodes connecting to the Brain.
+- [0830] Core: Make Archive and Signal feel practical.
+- [0831] Core: Make Gallery and Compass feel emotional/visual.
+- [0832] Core: Make Ascend feel aspirational and personal.
+- [0833] Core: Explain that Core is a mobile app.
+- [0834] Core: Explain that every user gets their own AI Brain.
+- [0835] Core: Explain that users expand their Brain with Capabilities.
+- [0836] Core: Show the five initial Capabilities.
+- [0837] Core: Do not show pricing for Capabilities here.
+- [0838] Core: Use one clear phone mockup at minimum.
+- [0839] Core: Use a brain/globe visual as the central metaphor.
+- [0840] Core: Show capability nodes connecting to the Brain.
+- [0841] Core: Make Archive and Signal feel practical.
+- [0842] Core: Make Gallery and Compass feel emotional/visual.
+- [0843] Core: Make Ascend feel aspirational and personal.
+- [0844] Core: Explain that Core is a mobile app.
+- [0845] Core: Explain that every user gets their own AI Brain.
+- [0846] Core: Explain that users expand their Brain with Capabilities.
+- [0847] Core: Show the five initial Capabilities.
+- [0848] Core: Do not show pricing for Capabilities here.
+- [0849] Core: Use one clear phone mockup at minimum.
+- [0850] Core: Use a brain/globe visual as the central metaphor.
+- [0851] Core: Show capability nodes connecting to the Brain.
+- [0852] Core: Make Archive and Signal feel practical.
+- [0853] Core: Make Gallery and Compass feel emotional/visual.
+- [0854] Core: Make Ascend feel aspirational and personal.
+- [0855] Core: Explain that Core is a mobile app.
+- [0856] Core: Explain that every user gets their own AI Brain.
+- [0857] Core: Explain that users expand their Brain with Capabilities.
+- [0858] Core: Show the five initial Capabilities.
+- [0859] Core: Do not show pricing for Capabilities here.
+- [0860] Core: Use one clear phone mockup at minimum.
+- [0861] Core: Use a brain/globe visual as the central metaphor.
+- [0862] Core: Show capability nodes connecting to the Brain.
+- [0863] Core: Make Archive and Signal feel practical.
+- [0864] Core: Make Gallery and Compass feel emotional/visual.
+- [0865] Core: Make Ascend feel aspirational and personal.
+- [0866] Core: Explain that Core is a mobile app.
+- [0867] Core: Explain that every user gets their own AI Brain.
+- [0868] Core: Explain that users expand their Brain with Capabilities.
+- [0869] Core: Show the five initial Capabilities.
+- [0870] Core: Do not show pricing for Capabilities here.
+- [0871] Core: Use one clear phone mockup at minimum.
+- [0872] Core: Use a brain/globe visual as the central metaphor.
+- [0873] Core: Show capability nodes connecting to the Brain.
+- [0874] Core: Make Archive and Signal feel practical.
+- [0875] Core: Make Gallery and Compass feel emotional/visual.
+- [0876] Core: Make Ascend feel aspirational and personal.
+- [0877] Core: Explain that Core is a mobile app.
+- [0878] Core: Explain that every user gets their own AI Brain.
+- [0879] Core: Explain that users expand their Brain with Capabilities.
+- [0880] Core: Show the five initial Capabilities.
+- [0881] Core: Do not show pricing for Capabilities here.
+- [0882] Core: Use one clear phone mockup at minimum.
+- [0883] Core: Use a brain/globe visual as the central metaphor.
+- [0884] Core: Show capability nodes connecting to the Brain.
+- [0885] Core: Make Archive and Signal feel practical.
+- [0886] Core: Make Gallery and Compass feel emotional/visual.
+- [0887] Core: Make Ascend feel aspirational and personal.
+- [0888] Core: Explain that Core is a mobile app.
+- [0889] Core: Explain that every user gets their own AI Brain.
+- [0890] Core: Explain that users expand their Brain with Capabilities.
+- [0891] Core: Show the five initial Capabilities.
+- [0892] Core: Do not show pricing for Capabilities here.
+- [0893] Core: Use one clear phone mockup at minimum.
+- [0894] Core: Use a brain/globe visual as the central metaphor.
+- [0895] Core: Show capability nodes connecting to the Brain.
+- [0896] Core: Make Archive and Signal feel practical.
+- [0897] Core: Make Gallery and Compass feel emotional/visual.
+- [0898] Core: Make Ascend feel aspirational and personal.
+- [0899] Core: Explain that Core is a mobile app.
+- [0900] Core: Explain that every user gets their own AI Brain.
+- [0901] Core: Explain that users expand their Brain with Capabilities.
+- [0902] Core: Show the five initial Capabilities.
+- [0903] Core: Do not show pricing for Capabilities here.
+- [0904] Core: Use one clear phone mockup at minimum.
+- [0905] Core: Use a brain/globe visual as the central metaphor.
+- [0906] Core: Show capability nodes connecting to the Brain.
+- [0907] Core: Make Archive and Signal feel practical.
+- [0908] Core: Make Gallery and Compass feel emotional/visual.
+- [0909] Core: Make Ascend feel aspirational and personal.
+- [0910] Core: Explain that Core is a mobile app.
+- [0911] Core: Explain that every user gets their own AI Brain.
+- [0912] Core: Explain that users expand their Brain with Capabilities.
+- [0913] Core: Show the five initial Capabilities.
+- [0914] Core: Do not show pricing for Capabilities here.
+- [0915] Core: Use one clear phone mockup at minimum.
+- [0916] Core: Use a brain/globe visual as the central metaphor.
+- [0917] Core: Show capability nodes connecting to the Brain.
+- [0918] Core: Make Archive and Signal feel practical.
+- [0919] Core: Make Gallery and Compass feel emotional/visual.
+- [0920] Core: Make Ascend feel aspirational and personal.
+- [0921] Core: Explain that Core is a mobile app.
+- [0922] Core: Explain that every user gets their own AI Brain.
+- [0923] Core: Explain that users expand their Brain with Capabilities.
+- [0924] Core: Show the five initial Capabilities.
+- [0925] Core: Do not show pricing for Capabilities here.
+- [0926] Core: Use one clear phone mockup at minimum.
+- [0927] Core: Use a brain/globe visual as the central metaphor.
+- [0928] Core: Show capability nodes connecting to the Brain.
+- [0929] Core: Make Archive and Signal feel practical.
+- [0930] Core: Make Gallery and Compass feel emotional/visual.
+- [0931] Core: Make Ascend feel aspirational and personal.
+- [0932] Core: Explain that Core is a mobile app.
+- [0933] Core: Explain that every user gets their own AI Brain.
+- [0934] Core: Explain that users expand their Brain with Capabilities.
+- [0935] Core: Show the five initial Capabilities.
+- [0936] Core: Do not show pricing for Capabilities here.
+- [0937] Core: Use one clear phone mockup at minimum.
+- [0938] Core: Use a brain/globe visual as the central metaphor.
+- [0939] Core: Show capability nodes connecting to the Brain.
+- [0940] Core: Make Archive and Signal feel practical.
+- [0941] Core: Make Gallery and Compass feel emotional/visual.
+- [0942] Core: Make Ascend feel aspirational and personal.
+- [0943] Core: Explain that Core is a mobile app.
+- [0944] Core: Explain that every user gets their own AI Brain.
+- [0945] Core: Explain that users expand their Brain with Capabilities.
+- [0946] Core: Show the five initial Capabilities.
+- [0947] Core: Do not show pricing for Capabilities here.
+- [0948] Core: Use one clear phone mockup at minimum.
+- [0949] Core: Use a brain/globe visual as the central metaphor.
+- [0950] Core: Show capability nodes connecting to the Brain.
+- [0951] Core: Make Archive and Signal feel practical.
+- [0952] Core: Make Gallery and Compass feel emotional/visual.
+- [0953] Core: Make Ascend feel aspirational and personal.
+- [0954] Core: Explain that Core is a mobile app.
+- [0955] Core: Explain that every user gets their own AI Brain.
+- [0956] Core: Explain that users expand their Brain with Capabilities.
+- [0957] Core: Show the five initial Capabilities.
+- [0958] Core: Do not show pricing for Capabilities here.
+- [0959] Core: Use one clear phone mockup at minimum.
+- [0960] Core: Use a brain/globe visual as the central metaphor.
+- [0961] Core: Show capability nodes connecting to the Brain.
+- [0962] Core: Make Archive and Signal feel practical.
+- [0963] Core: Make Gallery and Compass feel emotional/visual.
+- [0964] Core: Make Ascend feel aspirational and personal.
+- [0965] Core: Explain that Core is a mobile app.
+- [0966] Core: Explain that every user gets their own AI Brain.
+- [0967] Core: Explain that users expand their Brain with Capabilities.
+- [0968] Core: Show the five initial Capabilities.
+- [0969] Core: Do not show pricing for Capabilities here.
+- [0970] Core: Use one clear phone mockup at minimum.
+- [0971] Core: Use a brain/globe visual as the central metaphor.
+- [0972] Core: Show capability nodes connecting to the Brain.
+- [0973] Core: Make Archive and Signal feel practical.
+- [0974] Core: Make Gallery and Compass feel emotional/visual.
+- [0975] Core: Make Ascend feel aspirational and personal.
+- [0976] Core: Explain that Core is a mobile app.
+- [0977] Core: Explain that every user gets their own AI Brain.
+- [0978] Core: Explain that users expand their Brain with Capabilities.
+- [0979] Core: Show the five initial Capabilities.
+- [0980] Core: Do not show pricing for Capabilities here.
+- [0981] Core: Use one clear phone mockup at minimum.
+- [0982] Core: Use a brain/globe visual as the central metaphor.
+- [0983] Core: Show capability nodes connecting to the Brain.
+- [0984] Core: Make Archive and Signal feel practical.
+- [0985] Core: Make Gallery and Compass feel emotional/visual.
+- [0986] Core: Make Ascend feel aspirational and personal.
+- [0987] Core: Explain that Core is a mobile app.
+- [0988] Core: Explain that every user gets their own AI Brain.
+- [0989] Core: Explain that users expand their Brain with Capabilities.
+- [0990] Core: Show the five initial Capabilities.
+- [0991] Core: Do not show pricing for Capabilities here.
+- [0992] Core: Use one clear phone mockup at minimum.
+- [0993] Core: Use a brain/globe visual as the central metaphor.
+- [0994] Core: Show capability nodes connecting to the Brain.
+- [0995] Core: Make Archive and Signal feel practical.
+- [0996] Core: Make Gallery and Compass feel emotional/visual.
+- [0997] Core: Make Ascend feel aspirational and personal.
+- [0998] Core: Explain that Core is a mobile app.
+- [0999] Core: Explain that every user gets their own AI Brain.
+- [1000] Core: Explain that users expand their Brain with Capabilities.
+- [1001] Core: Show the five initial Capabilities.
+- [1002] Core: Do not show pricing for Capabilities here.
+- [1003] Core: Use one clear phone mockup at minimum.
+- [1004] Core: Use a brain/globe visual as the central metaphor.
+- [1005] Core: Show capability nodes connecting to the Brain.
+- [1006] Core: Make Archive and Signal feel practical.
+- [1007] Core: Make Gallery and Compass feel emotional/visual.
+- [1008] Core: Make Ascend feel aspirational and personal.
+- [1009] Core: Explain that Core is a mobile app.
+- [1010] Core: Explain that every user gets their own AI Brain.
+- [1011] Core: Explain that users expand their Brain with Capabilities.
+- [1012] Core: Show the five initial Capabilities.
+- [1013] Core: Do not show pricing for Capabilities here.
+- [1014] Core: Use one clear phone mockup at minimum.
+- [1015] Core: Use a brain/globe visual as the central metaphor.
+- [1016] Core: Show capability nodes connecting to the Brain.
+- [1017] Core: Make Archive and Signal feel practical.
+- [1018] Core: Make Gallery and Compass feel emotional/visual.
+- [1019] Core: Make Ascend feel aspirational and personal.
+- [1020] Core: Explain that Core is a mobile app.
+- [1021] Core: Explain that every user gets their own AI Brain.
+- [1022] Core: Explain that users expand their Brain with Capabilities.
+- [1023] Core: Show the five initial Capabilities.
+- [1024] Core: Do not show pricing for Capabilities here.
+- [1025] Core: Use one clear phone mockup at minimum.
+- [1026] Core: Use a brain/globe visual as the central metaphor.
+- [1027] Core: Show capability nodes connecting to the Brain.
+- [1028] Core: Make Archive and Signal feel practical.
+- [1029] Core: Make Gallery and Compass feel emotional/visual.
+- [1030] Core: Make Ascend feel aspirational and personal.
+- [1031] Core: Explain that Core is a mobile app.
+- [1032] Core: Explain that every user gets their own AI Brain.
+- [1033] Core: Explain that users expand their Brain with Capabilities.
+- [1034] Core: Show the five initial Capabilities.
+- [1035] Core: Do not show pricing for Capabilities here.
+- [1036] Core: Use one clear phone mockup at minimum.
+- [1037] Core: Use a brain/globe visual as the central metaphor.
+- [1038] Core: Show capability nodes connecting to the Brain.
+- [1039] Core: Make Archive and Signal feel practical.
+- [1040] Core: Make Gallery and Compass feel emotional/visual.
+- [1041] Core: Make Ascend feel aspirational and personal.
+- [1042] Core: Explain that Core is a mobile app.
+- [1043] Core: Explain that every user gets their own AI Brain.
+- [1044] Core: Explain that users expand their Brain with Capabilities.
+- [1045] Core: Show the five initial Capabilities.
+- [1046] Core: Do not show pricing for Capabilities here.
+- [1047] Core: Use one clear phone mockup at minimum.
+- [1048] Core: Use a brain/globe visual as the central metaphor.
+- [1049] Core: Show capability nodes connecting to the Brain.
+- [1050] Core: Make Archive and Signal feel practical.
+- [1051] Core: Make Gallery and Compass feel emotional/visual.
+- [1052] Core: Make Ascend feel aspirational and personal.
+- [1053] Core: Explain that Core is a mobile app.
+- [1054] Core: Explain that every user gets their own AI Brain.
+- [1055] Core: Explain that users expand their Brain with Capabilities.
+- [1056] Core: Show the five initial Capabilities.
+- [1057] Core: Do not show pricing for Capabilities here.
+- [1058] Core: Use one clear phone mockup at minimum.
+- [1059] Core: Use a brain/globe visual as the central metaphor.
+- [1060] Core: Show capability nodes connecting to the Brain.
+- [1061] Core: Make Archive and Signal feel practical.
+- [1062] Core: Make Gallery and Compass feel emotional/visual.
+- [1063] Core: Make Ascend feel aspirational and personal.
+- [1064] Core: Explain that Core is a mobile app.
+- [1065] Core: Explain that every user gets their own AI Brain.
+- [1066] Core: Explain that users expand their Brain with Capabilities.
+- [1067] Core: Show the five initial Capabilities.
+- [1068] Core: Do not show pricing for Capabilities here.
+- [1069] Core: Use one clear phone mockup at minimum.
+- [1070] Core: Use a brain/globe visual as the central metaphor.
+- [1071] Core: Show capability nodes connecting to the Brain.
+- [1072] Core: Make Archive and Signal feel practical.
+- [1073] Core: Make Gallery and Compass feel emotional/visual.
+- [1074] Core: Make Ascend feel aspirational and personal.
+- [1075] Core: Explain that Core is a mobile app.
+- [1076] Core: Explain that every user gets their own AI Brain.
+- [1077] Core: Explain that users expand their Brain with Capabilities.
+- [1078] Core: Show the five initial Capabilities.
+- [1079] Core: Do not show pricing for Capabilities here.
+- [1080] Core: Use one clear phone mockup at minimum.
+- [1081] Core: Use a brain/globe visual as the central metaphor.
+- [1082] Core: Show capability nodes connecting to the Brain.
+- [1083] Core: Make Archive and Signal feel practical.
+- [1084] Core: Make Gallery and Compass feel emotional/visual.
+- [1085] Core: Make Ascend feel aspirational and personal.
+- [1086] CTA: Join Waitlist must be visible above the fold.
+- [1087] CTA: Do not make Join Waitlist aggressively colored.
+- [1088] CTA: Use white/chrome button treatment.
+- [1089] CTA: Include secondary sign-in link near the hero CTA.
+- [1090] CTA: Repeat CTA near the bottom.
+- [1091] CTA: Keep forms short.
+- [1092] CTA: Show success state after email submission.
+- [1093] CTA: Validate email client-side.
+- [1094] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1095] CTA: Join Waitlist must be visible above the fold.
+- [1096] CTA: Do not make Join Waitlist aggressively colored.
+- [1097] CTA: Use white/chrome button treatment.
+- [1098] CTA: Include secondary sign-in link near the hero CTA.
+- [1099] CTA: Repeat CTA near the bottom.
+- [1100] CTA: Keep forms short.
+- [1101] CTA: Show success state after email submission.
+- [1102] CTA: Validate email client-side.
+- [1103] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1104] CTA: Join Waitlist must be visible above the fold.
+- [1105] CTA: Do not make Join Waitlist aggressively colored.
+- [1106] CTA: Use white/chrome button treatment.
+- [1107] CTA: Include secondary sign-in link near the hero CTA.
+- [1108] CTA: Repeat CTA near the bottom.
+- [1109] CTA: Keep forms short.
+- [1110] CTA: Show success state after email submission.
+- [1111] CTA: Validate email client-side.
+- [1112] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1113] CTA: Join Waitlist must be visible above the fold.
+- [1114] CTA: Do not make Join Waitlist aggressively colored.
+- [1115] CTA: Use white/chrome button treatment.
+- [1116] CTA: Include secondary sign-in link near the hero CTA.
+- [1117] CTA: Repeat CTA near the bottom.
+- [1118] CTA: Keep forms short.
+- [1119] CTA: Show success state after email submission.
+- [1120] CTA: Validate email client-side.
+- [1121] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1122] CTA: Join Waitlist must be visible above the fold.
+- [1123] CTA: Do not make Join Waitlist aggressively colored.
+- [1124] CTA: Use white/chrome button treatment.
+- [1125] CTA: Include secondary sign-in link near the hero CTA.
+- [1126] CTA: Repeat CTA near the bottom.
+- [1127] CTA: Keep forms short.
+- [1128] CTA: Show success state after email submission.
+- [1129] CTA: Validate email client-side.
+- [1130] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1131] CTA: Join Waitlist must be visible above the fold.
+- [1132] CTA: Do not make Join Waitlist aggressively colored.
+- [1133] CTA: Use white/chrome button treatment.
+- [1134] CTA: Include secondary sign-in link near the hero CTA.
+- [1135] CTA: Repeat CTA near the bottom.
+- [1136] CTA: Keep forms short.
+- [1137] CTA: Show success state after email submission.
+- [1138] CTA: Validate email client-side.
+- [1139] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1140] CTA: Join Waitlist must be visible above the fold.
+- [1141] CTA: Do not make Join Waitlist aggressively colored.
+- [1142] CTA: Use white/chrome button treatment.
+- [1143] CTA: Include secondary sign-in link near the hero CTA.
+- [1144] CTA: Repeat CTA near the bottom.
+- [1145] CTA: Keep forms short.
+- [1146] CTA: Show success state after email submission.
+- [1147] CTA: Validate email client-side.
+- [1148] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1149] CTA: Join Waitlist must be visible above the fold.
+- [1150] CTA: Do not make Join Waitlist aggressively colored.
+- [1151] CTA: Use white/chrome button treatment.
+- [1152] CTA: Include secondary sign-in link near the hero CTA.
+- [1153] CTA: Repeat CTA near the bottom.
+- [1154] CTA: Keep forms short.
+- [1155] CTA: Show success state after email submission.
+- [1156] CTA: Validate email client-side.
+- [1157] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1158] CTA: Join Waitlist must be visible above the fold.
+- [1159] CTA: Do not make Join Waitlist aggressively colored.
+- [1160] CTA: Use white/chrome button treatment.
+- [1161] CTA: Include secondary sign-in link near the hero CTA.
+- [1162] CTA: Repeat CTA near the bottom.
+- [1163] CTA: Keep forms short.
+- [1164] CTA: Show success state after email submission.
+- [1165] CTA: Validate email client-side.
+- [1166] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1167] CTA: Join Waitlist must be visible above the fold.
+- [1168] CTA: Do not make Join Waitlist aggressively colored.
+- [1169] CTA: Use white/chrome button treatment.
+- [1170] CTA: Include secondary sign-in link near the hero CTA.
+- [1171] CTA: Repeat CTA near the bottom.
+- [1172] CTA: Keep forms short.
+- [1173] CTA: Show success state after email submission.
+- [1174] CTA: Validate email client-side.
+- [1175] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1176] CTA: Join Waitlist must be visible above the fold.
+- [1177] CTA: Do not make Join Waitlist aggressively colored.
+- [1178] CTA: Use white/chrome button treatment.
+- [1179] CTA: Include secondary sign-in link near the hero CTA.
+- [1180] CTA: Repeat CTA near the bottom.
+- [1181] CTA: Keep forms short.
+- [1182] CTA: Show success state after email submission.
+- [1183] CTA: Validate email client-side.
+- [1184] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1185] CTA: Join Waitlist must be visible above the fold.
+- [1186] CTA: Do not make Join Waitlist aggressively colored.
+- [1187] CTA: Use white/chrome button treatment.
+- [1188] CTA: Include secondary sign-in link near the hero CTA.
+- [1189] CTA: Repeat CTA near the bottom.
+- [1190] CTA: Keep forms short.
+- [1191] CTA: Show success state after email submission.
+- [1192] CTA: Validate email client-side.
+- [1193] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1194] CTA: Join Waitlist must be visible above the fold.
+- [1195] CTA: Do not make Join Waitlist aggressively colored.
+- [1196] CTA: Use white/chrome button treatment.
+- [1197] CTA: Include secondary sign-in link near the hero CTA.
+- [1198] CTA: Repeat CTA near the bottom.
+- [1199] CTA: Keep forms short.
+- [1200] CTA: Show success state after email submission.
+- [1201] CTA: Validate email client-side.
+- [1202] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1203] CTA: Join Waitlist must be visible above the fold.
+- [1204] CTA: Do not make Join Waitlist aggressively colored.
+- [1205] CTA: Use white/chrome button treatment.
+- [1206] CTA: Include secondary sign-in link near the hero CTA.
+- [1207] CTA: Repeat CTA near the bottom.
+- [1208] CTA: Keep forms short.
+- [1209] CTA: Show success state after email submission.
+- [1210] CTA: Validate email client-side.
+- [1211] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1212] CTA: Join Waitlist must be visible above the fold.
+- [1213] CTA: Do not make Join Waitlist aggressively colored.
+- [1214] CTA: Use white/chrome button treatment.
+- [1215] CTA: Include secondary sign-in link near the hero CTA.
+- [1216] CTA: Repeat CTA near the bottom.
+- [1217] CTA: Keep forms short.
+- [1218] CTA: Show success state after email submission.
+- [1219] CTA: Validate email client-side.
+- [1220] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1221] CTA: Join Waitlist must be visible above the fold.
+- [1222] CTA: Do not make Join Waitlist aggressively colored.
+- [1223] CTA: Use white/chrome button treatment.
+- [1224] CTA: Include secondary sign-in link near the hero CTA.
+- [1225] CTA: Repeat CTA near the bottom.
+- [1226] CTA: Keep forms short.
+- [1227] CTA: Show success state after email submission.
+- [1228] CTA: Validate email client-side.
+- [1229] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1230] CTA: Join Waitlist must be visible above the fold.
+- [1231] CTA: Do not make Join Waitlist aggressively colored.
+- [1232] CTA: Use white/chrome button treatment.
+- [1233] CTA: Include secondary sign-in link near the hero CTA.
+- [1234] CTA: Repeat CTA near the bottom.
+- [1235] CTA: Keep forms short.
+- [1236] CTA: Show success state after email submission.
+- [1237] CTA: Validate email client-side.
+- [1238] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1239] CTA: Join Waitlist must be visible above the fold.
+- [1240] CTA: Do not make Join Waitlist aggressively colored.
+- [1241] CTA: Use white/chrome button treatment.
+- [1242] CTA: Include secondary sign-in link near the hero CTA.
+- [1243] CTA: Repeat CTA near the bottom.
+- [1244] CTA: Keep forms short.
+- [1245] CTA: Show success state after email submission.
+- [1246] CTA: Validate email client-side.
+- [1247] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1248] CTA: Join Waitlist must be visible above the fold.
+- [1249] CTA: Do not make Join Waitlist aggressively colored.
+- [1250] CTA: Use white/chrome button treatment.
+- [1251] CTA: Include secondary sign-in link near the hero CTA.
+- [1252] CTA: Repeat CTA near the bottom.
+- [1253] CTA: Keep forms short.
+- [1254] CTA: Show success state after email submission.
+- [1255] CTA: Validate email client-side.
+- [1256] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1257] CTA: Join Waitlist must be visible above the fold.
+- [1258] CTA: Do not make Join Waitlist aggressively colored.
+- [1259] CTA: Use white/chrome button treatment.
+- [1260] CTA: Include secondary sign-in link near the hero CTA.
+- [1261] CTA: Repeat CTA near the bottom.
+- [1262] CTA: Keep forms short.
+- [1263] CTA: Show success state after email submission.
+- [1264] CTA: Validate email client-side.
+- [1265] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1266] CTA: Join Waitlist must be visible above the fold.
+- [1267] CTA: Do not make Join Waitlist aggressively colored.
+- [1268] CTA: Use white/chrome button treatment.
+- [1269] CTA: Include secondary sign-in link near the hero CTA.
+- [1270] CTA: Repeat CTA near the bottom.
+- [1271] CTA: Keep forms short.
+- [1272] CTA: Show success state after email submission.
+- [1273] CTA: Validate email client-side.
+- [1274] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1275] CTA: Join Waitlist must be visible above the fold.
+- [1276] CTA: Do not make Join Waitlist aggressively colored.
+- [1277] CTA: Use white/chrome button treatment.
+- [1278] CTA: Include secondary sign-in link near the hero CTA.
+- [1279] CTA: Repeat CTA near the bottom.
+- [1280] CTA: Keep forms short.
+- [1281] CTA: Show success state after email submission.
+- [1282] CTA: Validate email client-side.
+- [1283] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1284] CTA: Join Waitlist must be visible above the fold.
+- [1285] CTA: Do not make Join Waitlist aggressively colored.
+- [1286] CTA: Use white/chrome button treatment.
+- [1287] CTA: Include secondary sign-in link near the hero CTA.
+- [1288] CTA: Repeat CTA near the bottom.
+- [1289] CTA: Keep forms short.
+- [1290] CTA: Show success state after email submission.
+- [1291] CTA: Validate email client-side.
+- [1292] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1293] CTA: Join Waitlist must be visible above the fold.
+- [1294] CTA: Do not make Join Waitlist aggressively colored.
+- [1295] CTA: Use white/chrome button treatment.
+- [1296] CTA: Include secondary sign-in link near the hero CTA.
+- [1297] CTA: Repeat CTA near the bottom.
+- [1298] CTA: Keep forms short.
+- [1299] CTA: Show success state after email submission.
+- [1300] CTA: Validate email client-side.
+- [1301] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1302] CTA: Join Waitlist must be visible above the fold.
+- [1303] CTA: Do not make Join Waitlist aggressively colored.
+- [1304] CTA: Use white/chrome button treatment.
+- [1305] CTA: Include secondary sign-in link near the hero CTA.
+- [1306] CTA: Repeat CTA near the bottom.
+- [1307] CTA: Keep forms short.
+- [1308] CTA: Show success state after email submission.
+- [1309] CTA: Validate email client-side.
+- [1310] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1311] CTA: Join Waitlist must be visible above the fold.
+- [1312] CTA: Do not make Join Waitlist aggressively colored.
+- [1313] CTA: Use white/chrome button treatment.
+- [1314] CTA: Include secondary sign-in link near the hero CTA.
+- [1315] CTA: Repeat CTA near the bottom.
+- [1316] CTA: Keep forms short.
+- [1317] CTA: Show success state after email submission.
+- [1318] CTA: Validate email client-side.
+- [1319] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1320] CTA: Join Waitlist must be visible above the fold.
+- [1321] CTA: Do not make Join Waitlist aggressively colored.
+- [1322] CTA: Use white/chrome button treatment.
+- [1323] CTA: Include secondary sign-in link near the hero CTA.
+- [1324] CTA: Repeat CTA near the bottom.
+- [1325] CTA: Keep forms short.
+- [1326] CTA: Show success state after email submission.
+- [1327] CTA: Validate email client-side.
+- [1328] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1329] CTA: Join Waitlist must be visible above the fold.
+- [1330] CTA: Do not make Join Waitlist aggressively colored.
+- [1331] CTA: Use white/chrome button treatment.
+- [1332] CTA: Include secondary sign-in link near the hero CTA.
+- [1333] CTA: Repeat CTA near the bottom.
+- [1334] CTA: Keep forms short.
+- [1335] CTA: Show success state after email submission.
+- [1336] CTA: Validate email client-side.
+- [1337] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1338] CTA: Join Waitlist must be visible above the fold.
+- [1339] CTA: Do not make Join Waitlist aggressively colored.
+- [1340] CTA: Use white/chrome button treatment.
+- [1341] CTA: Include secondary sign-in link near the hero CTA.
+- [1342] CTA: Repeat CTA near the bottom.
+- [1343] CTA: Keep forms short.
+- [1344] CTA: Show success state after email submission.
+- [1345] CTA: Validate email client-side.
+- [1346] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1347] CTA: Join Waitlist must be visible above the fold.
+- [1348] CTA: Do not make Join Waitlist aggressively colored.
+- [1349] CTA: Use white/chrome button treatment.
+- [1350] CTA: Include secondary sign-in link near the hero CTA.
+- [1351] CTA: Repeat CTA near the bottom.
+- [1352] CTA: Keep forms short.
+- [1353] CTA: Show success state after email submission.
+- [1354] CTA: Validate email client-side.
+- [1355] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1356] CTA: Join Waitlist must be visible above the fold.
+- [1357] CTA: Do not make Join Waitlist aggressively colored.
+- [1358] CTA: Use white/chrome button treatment.
+- [1359] CTA: Include secondary sign-in link near the hero CTA.
+- [1360] CTA: Repeat CTA near the bottom.
+- [1361] CTA: Keep forms short.
+- [1362] CTA: Show success state after email submission.
+- [1363] CTA: Validate email client-side.
+- [1364] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1365] CTA: Join Waitlist must be visible above the fold.
+- [1366] CTA: Do not make Join Waitlist aggressively colored.
+- [1367] CTA: Use white/chrome button treatment.
+- [1368] CTA: Include secondary sign-in link near the hero CTA.
+- [1369] CTA: Repeat CTA near the bottom.
+- [1370] CTA: Keep forms short.
+- [1371] CTA: Show success state after email submission.
+- [1372] CTA: Validate email client-side.
+- [1373] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1374] CTA: Join Waitlist must be visible above the fold.
+- [1375] CTA: Do not make Join Waitlist aggressively colored.
+- [1376] CTA: Use white/chrome button treatment.
+- [1377] CTA: Include secondary sign-in link near the hero CTA.
+- [1378] CTA: Repeat CTA near the bottom.
+- [1379] CTA: Keep forms short.
+- [1380] CTA: Show success state after email submission.
+- [1381] CTA: Validate email client-side.
+- [1382] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1383] CTA: Join Waitlist must be visible above the fold.
+- [1384] CTA: Do not make Join Waitlist aggressively colored.
+- [1385] CTA: Use white/chrome button treatment.
+- [1386] CTA: Include secondary sign-in link near the hero CTA.
+- [1387] CTA: Repeat CTA near the bottom.
+- [1388] CTA: Keep forms short.
+- [1389] CTA: Show success state after email submission.
+- [1390] CTA: Validate email client-side.
+- [1391] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1392] CTA: Join Waitlist must be visible above the fold.
+- [1393] CTA: Do not make Join Waitlist aggressively colored.
+- [1394] CTA: Use white/chrome button treatment.
+- [1395] CTA: Include secondary sign-in link near the hero CTA.
+- [1396] CTA: Repeat CTA near the bottom.
+- [1397] CTA: Keep forms short.
+- [1398] CTA: Show success state after email submission.
+- [1399] CTA: Validate email client-side.
+- [1400] CTA: Leave backend integration as a clear TODO if no API exists.
+- [1401] Motion: Use scroll progress to influence camera position.
+- [1402] Motion: Use opacity transitions for UI overlays.
+- [1403] Motion: Keep motion consistent across components.
+- [1404] Motion: Do not animate every element at once.
+- [1405] Motion: Use staggered reveals for capability cards.
+- [1406] Motion: Reduce motion automatically when preferred by user.
+- [1407] Motion: Make hover effects subtle.
+- [1408] Motion: Avoid distracting particle density.
+- [1409] Motion: Use scroll progress to influence camera position.
+- [1410] Motion: Use opacity transitions for UI overlays.
+- [1411] Motion: Keep motion consistent across components.
+- [1412] Motion: Do not animate every element at once.
+- [1413] Motion: Use staggered reveals for capability cards.
+- [1414] Motion: Reduce motion automatically when preferred by user.
+- [1415] Motion: Make hover effects subtle.
+- [1416] Motion: Avoid distracting particle density.
+- [1417] Motion: Use scroll progress to influence camera position.
+- [1418] Motion: Use opacity transitions for UI overlays.
+- [1419] Motion: Keep motion consistent across components.
+- [1420] Motion: Do not animate every element at once.
+- [1421] Motion: Use staggered reveals for capability cards.
+- [1422] Motion: Reduce motion automatically when preferred by user.
+- [1423] Motion: Make hover effects subtle.
+- [1424] Motion: Avoid distracting particle density.
+- [1425] Motion: Use scroll progress to influence camera position.
+- [1426] Motion: Use opacity transitions for UI overlays.
+- [1427] Motion: Keep motion consistent across components.
+- [1428] Motion: Do not animate every element at once.
+- [1429] Motion: Use staggered reveals for capability cards.
+- [1430] Motion: Reduce motion automatically when preferred by user.
+- [1431] Motion: Make hover effects subtle.
+- [1432] Motion: Avoid distracting particle density.
+- [1433] Motion: Use scroll progress to influence camera position.
+- [1434] Motion: Use opacity transitions for UI overlays.
+- [1435] Motion: Keep motion consistent across components.
+- [1436] Motion: Do not animate every element at once.
+- [1437] Motion: Use staggered reveals for capability cards.
+- [1438] Motion: Reduce motion automatically when preferred by user.
+- [1439] Motion: Make hover effects subtle.
+- [1440] Motion: Avoid distracting particle density.
+- [1441] Motion: Use scroll progress to influence camera position.
+- [1442] Motion: Use opacity transitions for UI overlays.
+- [1443] Motion: Keep motion consistent across components.
+- [1444] Motion: Do not animate every element at once.
+- [1445] Motion: Use staggered reveals for capability cards.
+- [1446] Motion: Reduce motion automatically when preferred by user.
+- [1447] Motion: Make hover effects subtle.
+- [1448] Motion: Avoid distracting particle density.
+- [1449] Motion: Use scroll progress to influence camera position.
+- [1450] Motion: Use opacity transitions for UI overlays.
+- [1451] Motion: Keep motion consistent across components.
+- [1452] Motion: Do not animate every element at once.
+- [1453] Motion: Use staggered reveals for capability cards.
+- [1454] Motion: Reduce motion automatically when preferred by user.
+- [1455] Motion: Make hover effects subtle.
+- [1456] Motion: Avoid distracting particle density.
+- [1457] Motion: Use scroll progress to influence camera position.
+- [1458] Motion: Use opacity transitions for UI overlays.
+- [1459] Motion: Keep motion consistent across components.
+- [1460] Motion: Do not animate every element at once.
+- [1461] Motion: Use staggered reveals for capability cards.
+- [1462] Motion: Reduce motion automatically when preferred by user.
+- [1463] Motion: Make hover effects subtle.
+- [1464] Motion: Avoid distracting particle density.
+- [1465] Motion: Use scroll progress to influence camera position.
+- [1466] Motion: Use opacity transitions for UI overlays.
+- [1467] Motion: Keep motion consistent across components.
+- [1468] Motion: Do not animate every element at once.
+- [1469] Motion: Use staggered reveals for capability cards.
+- [1470] Motion: Reduce motion automatically when preferred by user.
+- [1471] Motion: Make hover effects subtle.
+- [1472] Motion: Avoid distracting particle density.
+- [1473] Motion: Use scroll progress to influence camera position.
+- [1474] Motion: Use opacity transitions for UI overlays.
+- [1475] Motion: Keep motion consistent across components.
+- [1476] Motion: Do not animate every element at once.
+- [1477] Motion: Use staggered reveals for capability cards.
+- [1478] Motion: Reduce motion automatically when preferred by user.
+- [1479] Motion: Make hover effects subtle.
+- [1480] Motion: Avoid distracting particle density.
+- [1481] Motion: Use scroll progress to influence camera position.
+- [1482] Motion: Use opacity transitions for UI overlays.
+- [1483] Motion: Keep motion consistent across components.
+- [1484] Motion: Do not animate every element at once.
+- [1485] Motion: Use staggered reveals for capability cards.
+- [1486] Motion: Reduce motion automatically when preferred by user.
+- [1487] Motion: Make hover effects subtle.
+- [1488] Motion: Avoid distracting particle density.
+- [1489] Motion: Use scroll progress to influence camera position.
+- [1490] Motion: Use opacity transitions for UI overlays.
+- [1491] Motion: Keep motion consistent across components.
+- [1492] Motion: Do not animate every element at once.
+- [1493] Motion: Use staggered reveals for capability cards.
+- [1494] Motion: Reduce motion automatically when preferred by user.
+- [1495] Motion: Make hover effects subtle.
+- [1496] Motion: Avoid distracting particle density.
+- [1497] Motion: Use scroll progress to influence camera position.
+- [1498] Motion: Use opacity transitions for UI overlays.
+- [1499] Motion: Keep motion consistent across components.
+- [1500] Motion: Do not animate every element at once.
+- [1501] Motion: Use staggered reveals for capability cards.
+- [1502] Motion: Reduce motion automatically when preferred by user.
+- [1503] Motion: Make hover effects subtle.
+- [1504] Motion: Avoid distracting particle density.
+- [1505] Motion: Use scroll progress to influence camera position.
+- [1506] Motion: Use opacity transitions for UI overlays.
+- [1507] Motion: Keep motion consistent across components.
+- [1508] Motion: Do not animate every element at once.
+- [1509] Motion: Use staggered reveals for capability cards.
+- [1510] Motion: Reduce motion automatically when preferred by user.
+- [1511] Motion: Make hover effects subtle.
+- [1512] Motion: Avoid distracting particle density.
+- [1513] Motion: Use scroll progress to influence camera position.
+- [1514] Motion: Use opacity transitions for UI overlays.
+- [1515] Motion: Keep motion consistent across components.
+- [1516] Motion: Do not animate every element at once.
+- [1517] Motion: Use staggered reveals for capability cards.
+- [1518] Motion: Reduce motion automatically when preferred by user.
+- [1519] Motion: Make hover effects subtle.
+- [1520] Motion: Avoid distracting particle density.
+- [1521] Motion: Use scroll progress to influence camera position.
+- [1522] Motion: Use opacity transitions for UI overlays.
+- [1523] Motion: Keep motion consistent across components.
+- [1524] Motion: Do not animate every element at once.
+- [1525] Motion: Use staggered reveals for capability cards.
+- [1526] Motion: Reduce motion automatically when preferred by user.
+- [1527] Motion: Make hover effects subtle.
+- [1528] Motion: Avoid distracting particle density.
+- [1529] Motion: Use scroll progress to influence camera position.
+- [1530] Motion: Use opacity transitions for UI overlays.
+- [1531] Motion: Keep motion consistent across components.
+- [1532] Motion: Do not animate every element at once.
+- [1533] Motion: Use staggered reveals for capability cards.
+- [1534] Motion: Reduce motion automatically when preferred by user.
+- [1535] Motion: Make hover effects subtle.
+- [1536] Motion: Avoid distracting particle density.
+- [1537] Motion: Use scroll progress to influence camera position.
+- [1538] Motion: Use opacity transitions for UI overlays.
+- [1539] Motion: Keep motion consistent across components.
+- [1540] Motion: Do not animate every element at once.
+- [1541] Motion: Use staggered reveals for capability cards.
+- [1542] Motion: Reduce motion automatically when preferred by user.
+- [1543] Motion: Make hover effects subtle.
+- [1544] Motion: Avoid distracting particle density.
+- [1545] Motion: Use scroll progress to influence camera position.
+- [1546] Motion: Use opacity transitions for UI overlays.
+- [1547] Motion: Keep motion consistent across components.
+- [1548] Motion: Do not animate every element at once.
+- [1549] Motion: Use staggered reveals for capability cards.
+- [1550] Motion: Reduce motion automatically when preferred by user.
+- [1551] Motion: Make hover effects subtle.
+- [1552] Motion: Avoid distracting particle density.
+- [1553] Motion: Use scroll progress to influence camera position.
+- [1554] Motion: Use opacity transitions for UI overlays.
+- [1555] Motion: Keep motion consistent across components.
+- [1556] Motion: Do not animate every element at once.
+- [1557] Motion: Use staggered reveals for capability cards.
+- [1558] Motion: Reduce motion automatically when preferred by user.
+- [1559] Motion: Make hover effects subtle.
+- [1560] Motion: Avoid distracting particle density.
+- [1561] Motion: Use scroll progress to influence camera position.
+- [1562] Motion: Use opacity transitions for UI overlays.
+- [1563] Motion: Keep motion consistent across components.
+- [1564] Motion: Do not animate every element at once.
+- [1565] Motion: Use staggered reveals for capability cards.
+- [1566] Motion: Reduce motion automatically when preferred by user.
+- [1567] Motion: Make hover effects subtle.
+- [1568] Motion: Avoid distracting particle density.
+- [1569] Motion: Use scroll progress to influence camera position.
+- [1570] Motion: Use opacity transitions for UI overlays.
+- [1571] Motion: Keep motion consistent across components.
+- [1572] Motion: Do not animate every element at once.
+- [1573] Motion: Use staggered reveals for capability cards.
+- [1574] Motion: Reduce motion automatically when preferred by user.
+- [1575] Motion: Make hover effects subtle.
+- [1576] Motion: Avoid distracting particle density.
+- [1577] Motion: Use scroll progress to influence camera position.
+- [1578] Motion: Use opacity transitions for UI overlays.
+- [1579] Motion: Keep motion consistent across components.
+- [1580] Motion: Do not animate every element at once.
+- [1581] Motion: Use staggered reveals for capability cards.
+- [1582] Motion: Reduce motion automatically when preferred by user.
+- [1583] Motion: Make hover effects subtle.
+- [1584] Motion: Avoid distracting particle density.
+- [1585] Motion: Use scroll progress to influence camera position.
+- [1586] Motion: Use opacity transitions for UI overlays.
+- [1587] Motion: Keep motion consistent across components.
+- [1588] Motion: Do not animate every element at once.
+- [1589] Motion: Use staggered reveals for capability cards.
+- [1590] Motion: Reduce motion automatically when preferred by user.
+- [1591] Motion: Make hover effects subtle.
+- [1592] Motion: Avoid distracting particle density.
+- [1593] Motion: Use scroll progress to influence camera position.
+- [1594] Motion: Use opacity transitions for UI overlays.
+- [1595] Motion: Keep motion consistent across components.
+- [1596] Motion: Do not animate every element at once.
+- [1597] Motion: Use staggered reveals for capability cards.
+- [1598] Motion: Reduce motion automatically when preferred by user.
+- [1599] Motion: Make hover effects subtle.
+- [1600] Motion: Avoid distracting particle density.
+- [1601] Motion: Use scroll progress to influence camera position.
+- [1602] Motion: Use opacity transitions for UI overlays.
+- [1603] Motion: Keep motion consistent across components.
+- [1604] Motion: Do not animate every element at once.
+- [1605] Motion: Use staggered reveals for capability cards.
+- [1606] Motion: Reduce motion automatically when preferred by user.
+- [1607] Motion: Make hover effects subtle.
+- [1608] Motion: Avoid distracting particle density.
+- [1609] Motion: Use scroll progress to influence camera position.
+- [1610] Motion: Use opacity transitions for UI overlays.
+- [1611] Motion: Keep motion consistent across components.
+- [1612] Motion: Do not animate every element at once.
+- [1613] Motion: Use staggered reveals for capability cards.
+- [1614] Motion: Reduce motion automatically when preferred by user.
+- [1615] Motion: Make hover effects subtle.
+- [1616] Motion: Avoid distracting particle density.
+- [1617] Motion: Use scroll progress to influence camera position.
+- [1618] Motion: Use opacity transitions for UI overlays.
+- [1619] Motion: Keep motion consistent across components.
+- [1620] Motion: Do not animate every element at once.
+- [1621] Motion: Use staggered reveals for capability cards.
+- [1622] Motion: Reduce motion automatically when preferred by user.
+- [1623] Motion: Make hover effects subtle.
+- [1624] Motion: Avoid distracting particle density.
+- [1625] Motion: Use scroll progress to influence camera position.
+- [1626] Motion: Use opacity transitions for UI overlays.
+- [1627] Motion: Keep motion consistent across components.
+- [1628] Motion: Do not animate every element at once.
+- [1629] Motion: Use staggered reveals for capability cards.
+- [1630] Motion: Reduce motion automatically when preferred by user.
+- [1631] Motion: Make hover effects subtle.
+- [1632] Motion: Avoid distracting particle density.
+- [1633] Motion: Use scroll progress to influence camera position.
+- [1634] Motion: Use opacity transitions for UI overlays.
+- [1635] Motion: Keep motion consistent across components.
+- [1636] Motion: Do not animate every element at once.
+- [1637] Motion: Use staggered reveals for capability cards.
+- [1638] Motion: Reduce motion automatically when preferred by user.
+- [1639] Motion: Make hover effects subtle.
+- [1640] Motion: Avoid distracting particle density.
+- [1641] Motion: Use scroll progress to influence camera position.
+- [1642] Motion: Use opacity transitions for UI overlays.
+- [1643] Motion: Keep motion consistent across components.
+- [1644] Motion: Do not animate every element at once.
+- [1645] Motion: Use staggered reveals for capability cards.
+- [1646] Motion: Reduce motion automatically when preferred by user.
+- [1647] Motion: Make hover effects subtle.
+- [1648] Motion: Avoid distracting particle density.
+- [1649] Motion: Use scroll progress to influence camera position.
+- [1650] Motion: Use opacity transitions for UI overlays.
+- [1651] Motion: Keep motion consistent across components.
+- [1652] Motion: Do not animate every element at once.
+- [1653] Motion: Use staggered reveals for capability cards.
+- [1654] Motion: Reduce motion automatically when preferred by user.
+- [1655] Motion: Make hover effects subtle.
+- [1656] Motion: Avoid distracting particle density.
+- [1657] Motion: Use scroll progress to influence camera position.
+- [1658] Motion: Use opacity transitions for UI overlays.
+- [1659] Motion: Keep motion consistent across components.
+- [1660] Motion: Do not animate every element at once.
+- [1661] Motion: Use staggered reveals for capability cards.
+- [1662] Motion: Reduce motion automatically when preferred by user.
+- [1663] Motion: Make hover effects subtle.
+- [1664] Motion: Avoid distracting particle density.
+- [1665] Motion: Use scroll progress to influence camera position.
+- [1666] Motion: Use opacity transitions for UI overlays.
+- [1667] Motion: Keep motion consistent across components.
+- [1668] Motion: Do not animate every element at once.
+- [1669] Motion: Use staggered reveals for capability cards.
+- [1670] Motion: Reduce motion automatically when preferred by user.
+- [1671] Motion: Make hover effects subtle.
+- [1672] Motion: Avoid distracting particle density.
+- [1673] Motion: Use scroll progress to influence camera position.
+- [1674] Motion: Use opacity transitions for UI overlays.
+- [1675] Motion: Keep motion consistent across components.
+- [1676] Motion: Do not animate every element at once.
+- [1677] Motion: Use staggered reveals for capability cards.
+- [1678] Motion: Reduce motion automatically when preferred by user.
+- [1679] Motion: Make hover effects subtle.
+- [1680] Motion: Avoid distracting particle density.
+- [1681] Engineering: Prefer typed props.
+- [1682] Engineering: Keep components small and readable.
+- [1683] Engineering: Centralize data.
+- [1684] Engineering: Centralize brand constants.
+- [1685] Engineering: Avoid magic numbers when possible.
+- [1686] Engineering: Comment complex camera math.
+- [1687] Engineering: Avoid unnecessary dependencies.
+- [1688] Engineering: Keep build warnings minimal.
+- [1689] Engineering: Use lazy loading for heavy components.
+- [1690] Engineering: Use SSR carefully around WebGL components.
+- [1691] Engineering: Prefer typed props.
+- [1692] Engineering: Keep components small and readable.
+- [1693] Engineering: Centralize data.
+- [1694] Engineering: Centralize brand constants.
+- [1695] Engineering: Avoid magic numbers when possible.
+- [1696] Engineering: Comment complex camera math.
+- [1697] Engineering: Avoid unnecessary dependencies.
+- [1698] Engineering: Keep build warnings minimal.
+- [1699] Engineering: Use lazy loading for heavy components.
+- [1700] Engineering: Use SSR carefully around WebGL components.
+- [1701] Engineering: Prefer typed props.
+- [1702] Engineering: Keep components small and readable.
+- [1703] Engineering: Centralize data.
+- [1704] Engineering: Centralize brand constants.
+- [1705] Engineering: Avoid magic numbers when possible.
+- [1706] Engineering: Comment complex camera math.
+- [1707] Engineering: Avoid unnecessary dependencies.
+- [1708] Engineering: Keep build warnings minimal.
+- [1709] Engineering: Use lazy loading for heavy components.
+- [1710] Engineering: Use SSR carefully around WebGL components.
+- [1711] Engineering: Prefer typed props.
+- [1712] Engineering: Keep components small and readable.
+- [1713] Engineering: Centralize data.
+- [1714] Engineering: Centralize brand constants.
+- [1715] Engineering: Avoid magic numbers when possible.
+- [1716] Engineering: Comment complex camera math.
+- [1717] Engineering: Avoid unnecessary dependencies.
+- [1718] Engineering: Keep build warnings minimal.
+- [1719] Engineering: Use lazy loading for heavy components.
+- [1720] Engineering: Use SSR carefully around WebGL components.
+- [1721] Engineering: Prefer typed props.
+- [1722] Engineering: Keep components small and readable.
+- [1723] Engineering: Centralize data.
+- [1724] Engineering: Centralize brand constants.
+- [1725] Engineering: Avoid magic numbers when possible.
+- [1726] Engineering: Comment complex camera math.
+- [1727] Engineering: Avoid unnecessary dependencies.
+- [1728] Engineering: Keep build warnings minimal.
+- [1729] Engineering: Use lazy loading for heavy components.
+- [1730] Engineering: Use SSR carefully around WebGL components.
+- [1731] Engineering: Prefer typed props.
+- [1732] Engineering: Keep components small and readable.
+- [1733] Engineering: Centralize data.
+- [1734] Engineering: Centralize brand constants.
+- [1735] Engineering: Avoid magic numbers when possible.
+- [1736] Engineering: Comment complex camera math.
+- [1737] Engineering: Avoid unnecessary dependencies.
+- [1738] Engineering: Keep build warnings minimal.
+- [1739] Engineering: Use lazy loading for heavy components.
+- [1740] Engineering: Use SSR carefully around WebGL components.
+- [1741] Engineering: Prefer typed props.
+- [1742] Engineering: Keep components small and readable.
+- [1743] Engineering: Centralize data.
+- [1744] Engineering: Centralize brand constants.
+- [1745] Engineering: Avoid magic numbers when possible.
+- [1746] Engineering: Comment complex camera math.
+- [1747] Engineering: Avoid unnecessary dependencies.
+- [1748] Engineering: Keep build warnings minimal.
+- [1749] Engineering: Use lazy loading for heavy components.
+- [1750] Engineering: Use SSR carefully around WebGL components.
+- [1751] Engineering: Prefer typed props.
+- [1752] Engineering: Keep components small and readable.
+- [1753] Engineering: Centralize data.
+- [1754] Engineering: Centralize brand constants.
+- [1755] Engineering: Avoid magic numbers when possible.
+- [1756] Engineering: Comment complex camera math.
+- [1757] Engineering: Avoid unnecessary dependencies.
+- [1758] Engineering: Keep build warnings minimal.
+- [1759] Engineering: Use lazy loading for heavy components.
+- [1760] Engineering: Use SSR carefully around WebGL components.
+- [1761] Engineering: Prefer typed props.
+- [1762] Engineering: Keep components small and readable.
+- [1763] Engineering: Centralize data.
+- [1764] Engineering: Centralize brand constants.
+- [1765] Engineering: Avoid magic numbers when possible.
+- [1766] Engineering: Comment complex camera math.
+- [1767] Engineering: Avoid unnecessary dependencies.
+- [1768] Engineering: Keep build warnings minimal.
+- [1769] Engineering: Use lazy loading for heavy components.
+- [1770] Engineering: Use SSR carefully around WebGL components.
+- [1771] Engineering: Prefer typed props.
+- [1772] Engineering: Keep components small and readable.
+- [1773] Engineering: Centralize data.
+- [1774] Engineering: Centralize brand constants.
+- [1775] Engineering: Avoid magic numbers when possible.
+- [1776] Engineering: Comment complex camera math.
+- [1777] Engineering: Avoid unnecessary dependencies.
+- [1778] Engineering: Keep build warnings minimal.
+- [1779] Engineering: Use lazy loading for heavy components.
+- [1780] Engineering: Use SSR carefully around WebGL components.
+- [1781] Engineering: Prefer typed props.
+- [1782] Engineering: Keep components small and readable.
+- [1783] Engineering: Centralize data.
+- [1784] Engineering: Centralize brand constants.
+- [1785] Engineering: Avoid magic numbers when possible.
+- [1786] Engineering: Comment complex camera math.
+- [1787] Engineering: Avoid unnecessary dependencies.
+- [1788] Engineering: Keep build warnings minimal.
+- [1789] Engineering: Use lazy loading for heavy components.
+- [1790] Engineering: Use SSR carefully around WebGL components.
+- [1791] Engineering: Prefer typed props.
+- [1792] Engineering: Keep components small and readable.
+- [1793] Engineering: Centralize data.
+- [1794] Engineering: Centralize brand constants.
+- [1795] Engineering: Avoid magic numbers when possible.
+- [1796] Engineering: Comment complex camera math.
+- [1797] Engineering: Avoid unnecessary dependencies.
+- [1798] Engineering: Keep build warnings minimal.
+- [1799] Engineering: Use lazy loading for heavy components.
+- [1800] Engineering: Use SSR carefully around WebGL components.
+- [1801] Engineering: Prefer typed props.
+- [1802] Engineering: Keep components small and readable.
+- [1803] Engineering: Centralize data.
+- [1804] Engineering: Centralize brand constants.
+- [1805] Engineering: Avoid magic numbers when possible.
+- [1806] Engineering: Comment complex camera math.
+- [1807] Engineering: Avoid unnecessary dependencies.
+- [1808] Engineering: Keep build warnings minimal.
+- [1809] Engineering: Use lazy loading for heavy components.
+- [1810] Engineering: Use SSR carefully around WebGL components.
+- [1811] Engineering: Prefer typed props.
+- [1812] Engineering: Keep components small and readable.
+- [1813] Engineering: Centralize data.
+- [1814] Engineering: Centralize brand constants.
+- [1815] Engineering: Avoid magic numbers when possible.
+- [1816] Engineering: Comment complex camera math.
+- [1817] Engineering: Avoid unnecessary dependencies.
+- [1818] Engineering: Keep build warnings minimal.
+- [1819] Engineering: Use lazy loading for heavy components.
+- [1820] Engineering: Use SSR carefully around WebGL components.
+- [1821] Engineering: Prefer typed props.
+- [1822] Engineering: Keep components small and readable.
+- [1823] Engineering: Centralize data.
+- [1824] Engineering: Centralize brand constants.
+- [1825] Engineering: Avoid magic numbers when possible.
+- [1826] Engineering: Comment complex camera math.
+- [1827] Engineering: Avoid unnecessary dependencies.
+- [1828] Engineering: Keep build warnings minimal.
+- [1829] Engineering: Use lazy loading for heavy components.
+- [1830] Engineering: Use SSR carefully around WebGL components.
+- [1831] Engineering: Prefer typed props.
+- [1832] Engineering: Keep components small and readable.
+- [1833] Engineering: Centralize data.
+- [1834] Engineering: Centralize brand constants.
+- [1835] Engineering: Avoid magic numbers when possible.
+- [1836] Engineering: Comment complex camera math.
+- [1837] Engineering: Avoid unnecessary dependencies.
+- [1838] Engineering: Keep build warnings minimal.
+- [1839] Engineering: Use lazy loading for heavy components.
+- [1840] Engineering: Use SSR carefully around WebGL components.
+- [1841] Engineering: Prefer typed props.
+- [1842] Engineering: Keep components small and readable.
+- [1843] Engineering: Centralize data.
+- [1844] Engineering: Centralize brand constants.
+- [1845] Engineering: Avoid magic numbers when possible.
+- [1846] Engineering: Comment complex camera math.
+- [1847] Engineering: Avoid unnecessary dependencies.
+- [1848] Engineering: Keep build warnings minimal.
+- [1849] Engineering: Use lazy loading for heavy components.
+- [1850] Engineering: Use SSR carefully around WebGL components.
+- [1851] Engineering: Prefer typed props.
+- [1852] Engineering: Keep components small and readable.
+- [1853] Engineering: Centralize data.
+- [1854] Engineering: Centralize brand constants.
+- [1855] Engineering: Avoid magic numbers when possible.
+- [1856] Engineering: Comment complex camera math.
+- [1857] Engineering: Avoid unnecessary dependencies.
+- [1858] Engineering: Keep build warnings minimal.
+- [1859] Engineering: Use lazy loading for heavy components.
+- [1860] Engineering: Use SSR carefully around WebGL components.
+- [1861] Engineering: Prefer typed props.
+- [1862] Engineering: Keep components small and readable.
+- [1863] Engineering: Centralize data.
+- [1864] Engineering: Centralize brand constants.
+- [1865] Engineering: Avoid magic numbers when possible.
+- [1866] Engineering: Comment complex camera math.
+- [1867] Engineering: Avoid unnecessary dependencies.
+- [1868] Engineering: Keep build warnings minimal.
+- [1869] Engineering: Use lazy loading for heavy components.
+- [1870] Engineering: Use SSR carefully around WebGL components.
+- [1871] Engineering: Prefer typed props.
+- [1872] Engineering: Keep components small and readable.
+- [1873] Engineering: Centralize data.
+- [1874] Engineering: Centralize brand constants.
+- [1875] Engineering: Avoid magic numbers when possible.
+- [1876] Engineering: Comment complex camera math.
+- [1877] Engineering: Avoid unnecessary dependencies.
+- [1878] Engineering: Keep build warnings minimal.
+- [1879] Engineering: Use lazy loading for heavy components.
+- [1880] Engineering: Use SSR carefully around WebGL components.
+- [1881] Engineering: Prefer typed props.
+- [1882] Engineering: Keep components small and readable.
+- [1883] Engineering: Centralize data.
+- [1884] Engineering: Centralize brand constants.
+- [1885] Engineering: Avoid magic numbers when possible.
+- [1886] Engineering: Comment complex camera math.
+- [1887] Engineering: Avoid unnecessary dependencies.
+- [1888] Engineering: Keep build warnings minimal.
+- [1889] Engineering: Use lazy loading for heavy components.
+- [1890] Engineering: Use SSR carefully around WebGL components.
+- [1891] Engineering: Prefer typed props.
+- [1892] Engineering: Keep components small and readable.
+- [1893] Engineering: Centralize data.
+- [1894] Engineering: Centralize brand constants.
+- [1895] Engineering: Avoid magic numbers when possible.
+- [1896] Engineering: Comment complex camera math.
+- [1897] Engineering: Avoid unnecessary dependencies.
+- [1898] Engineering: Keep build warnings minimal.
+- [1899] Engineering: Use lazy loading for heavy components.
+- [1900] Engineering: Use SSR carefully around WebGL components.
+- [1901] Engineering: Prefer typed props.
+- [1902] Engineering: Keep components small and readable.
+- [1903] Engineering: Centralize data.
+- [1904] Engineering: Centralize brand constants.
+- [1905] Engineering: Avoid magic numbers when possible.
+- [1906] Engineering: Comment complex camera math.
+- [1907] Engineering: Avoid unnecessary dependencies.
+- [1908] Engineering: Keep build warnings minimal.
+- [1909] Engineering: Use lazy loading for heavy components.
+- [1910] Engineering: Use SSR carefully around WebGL components.
+- [1911] Engineering: Prefer typed props.
+- [1912] Engineering: Keep components small and readable.
+- [1913] Engineering: Centralize data.
+- [1914] Engineering: Centralize brand constants.
+- [1915] Engineering: Avoid magic numbers when possible.
+- [1916] Engineering: Comment complex camera math.
+- [1917] Engineering: Avoid unnecessary dependencies.
+- [1918] Engineering: Keep build warnings minimal.
+- [1919] Engineering: Use lazy loading for heavy components.
+- [1920] Engineering: Use SSR carefully around WebGL components.
+- [1921] Engineering: Prefer typed props.
+- [1922] Engineering: Keep components small and readable.
+- [1923] Engineering: Centralize data.
+- [1924] Engineering: Centralize brand constants.
+- [1925] Engineering: Avoid magic numbers when possible.
+- [1926] Engineering: Comment complex camera math.
+- [1927] Engineering: Avoid unnecessary dependencies.
+- [1928] Engineering: Keep build warnings minimal.
+- [1929] Engineering: Use lazy loading for heavy components.
+- [1930] Engineering: Use SSR carefully around WebGL components.
+- [1931] Engineering: Prefer typed props.
+- [1932] Engineering: Keep components small and readable.
+- [1933] Engineering: Centralize data.
+- [1934] Engineering: Centralize brand constants.
+- [1935] Engineering: Avoid magic numbers when possible.
+- [1936] Engineering: Comment complex camera math.
+- [1937] Engineering: Avoid unnecessary dependencies.
+- [1938] Engineering: Keep build warnings minimal.
+- [1939] Engineering: Use lazy loading for heavy components.
+- [1940] Engineering: Use SSR carefully around WebGL components.
+- [1941] Engineering: Prefer typed props.
+- [1942] Engineering: Keep components small and readable.
+- [1943] Engineering: Centralize data.
+- [1944] Engineering: Centralize brand constants.
+- [1945] Engineering: Avoid magic numbers when possible.
+- [1946] Engineering: Comment complex camera math.
+- [1947] Engineering: Avoid unnecessary dependencies.
+- [1948] Engineering: Keep build warnings minimal.
+- [1949] Engineering: Use lazy loading for heavy components.
+- [1950] Engineering: Use SSR carefully around WebGL components.
+- [1951] Engineering: Prefer typed props.
+- [1952] Engineering: Keep components small and readable.
+- [1953] Engineering: Centralize data.
+- [1954] Engineering: Centralize brand constants.
+- [1955] Engineering: Avoid magic numbers when possible.
+- [1956] Engineering: Comment complex camera math.
+- [1957] Engineering: Avoid unnecessary dependencies.
+- [1958] Engineering: Keep build warnings minimal.
+- [1959] Engineering: Use lazy loading for heavy components.
+- [1960] Engineering: Use SSR carefully around WebGL components.
+- [1961] Engineering: Prefer typed props.
+- [1962] Engineering: Keep components small and readable.
+- [1963] Engineering: Centralize data.
+- [1964] Engineering: Centralize brand constants.
+- [1965] Engineering: Avoid magic numbers when possible.
+- [1966] Engineering: Comment complex camera math.
+- [1967] Engineering: Avoid unnecessary dependencies.
+- [1968] Engineering: Keep build warnings minimal.
+- [1969] Engineering: Use lazy loading for heavy components.
+- [1970] Engineering: Use SSR carefully around WebGL components.
+- [1971] Engineering: Prefer typed props.
+- [1972] Engineering: Keep components small and readable.
+- [1973] Engineering: Centralize data.
+- [1974] Engineering: Centralize brand constants.
+- [1975] Engineering: Avoid magic numbers when possible.
+- [1976] Engineering: Comment complex camera math.
+- [1977] Engineering: Avoid unnecessary dependencies.
+- [1978] Engineering: Keep build warnings minimal.
+- [1979] Engineering: Use lazy loading for heavy components.
+- [1980] Engineering: Use SSR carefully around WebGL components.
+- [1981] Engineering: Prefer typed props.
+- [1982] Engineering: Keep components small and readable.
+- [1983] Engineering: Centralize data.
+- [1984] Engineering: Centralize brand constants.
+- [1985] Engineering: Avoid magic numbers when possible.
+- [1986] Engineering: Comment complex camera math.
+- [1987] Engineering: Avoid unnecessary dependencies.
+- [1988] Engineering: Keep build warnings minimal.
+- [1989] Engineering: Use lazy loading for heavy components.
+- [1990] Engineering: Use SSR carefully around WebGL components.
+- [1991] Engineering: Prefer typed props.
+- [1992] Engineering: Keep components small and readable.
+- [1993] Engineering: Centralize data.
+- [1994] Engineering: Centralize brand constants.
+- [1995] Engineering: Avoid magic numbers when possible.
+- [1996] Engineering: Comment complex camera math.
+- [1997] Engineering: Avoid unnecessary dependencies.
+- [1998] Engineering: Keep build warnings minimal.
+- [1999] Engineering: Use lazy loading for heavy components.
+- [2000] Engineering: Use SSR carefully around WebGL components.
+- [2001] Engineering: Prefer typed props.
+- [2002] Engineering: Keep components small and readable.
+- [2003] Engineering: Centralize data.
+- [2004] Engineering: Centralize brand constants.
+- [2005] Engineering: Avoid magic numbers when possible.
+- [2006] Engineering: Comment complex camera math.
+- [2007] Engineering: Avoid unnecessary dependencies.
+- [2008] Engineering: Keep build warnings minimal.
+- [2009] Engineering: Use lazy loading for heavy components.
+- [2010] Engineering: Use SSR carefully around WebGL components.
+- [2011] Engineering: Prefer typed props.
+- [2012] Engineering: Keep components small and readable.
+- [2013] Engineering: Centralize data.
+- [2014] Engineering: Centralize brand constants.
+- [2015] Engineering: Avoid magic numbers when possible.
+- [2016] Engineering: Comment complex camera math.
+- [2017] Engineering: Avoid unnecessary dependencies.
+- [2018] Engineering: Keep build warnings minimal.
+- [2019] Engineering: Use lazy loading for heavy components.
+- [2020] Engineering: Use SSR carefully around WebGL components.
+- [2021] Engineering: Prefer typed props.
+- [2022] Engineering: Keep components small and readable.
+- [2023] Engineering: Centralize data.
+- [2024] Engineering: Centralize brand constants.
+- [2025] Engineering: Avoid magic numbers when possible.
+- [2026] Engineering: Comment complex camera math.
+- [2027] Engineering: Avoid unnecessary dependencies.
+- [2028] Engineering: Keep build warnings minimal.
+- [2029] Engineering: Use lazy loading for heavy components.
+- [2030] Engineering: Use SSR carefully around WebGL components.
+
+# SECTION-BY-SECTION BUILD SPEC
+
+## Hero Section
+- Full viewport or near-full viewport.
+- Contains Vorinthex AI brand, tagline, Core headline, and CTA.
+- Three.js scene sits behind or beside content.
+- Nexus sun and product planets visible.
+- Core visually emphasized.
+
+## Solar System Exploration
+- Allow click/hover on product planets.
+- Click Core to continue deeper.
+- Click coming-soon products to show teaser overlay.
+- Show orbit labels only when useful.
+- Keep labels readable and restrained.
+
+## Core Brain Section
+- Display brain globe visual.
+- Capability nodes orbit the brain.
+- Short copy explains personal AI Brain.
+- No pricing.
+- CTA remains waitlist-focused.
+
+## Capability Cards Section
+- Five cards: Archive, Gallery, Signal, Compass, Ascend.
+- Each card has an icon, tagline, description, and subtle mockup hint.
+- Cards should be beautiful and simple.
+- Cards should feel like app-like powers inside Core.
+
+## Everything Connects Section
+- Show a diagram: Archive/Gallery/Signal/Compass/Ascend flowing into one Brain.
+- Show outputs: Memory, Context, Insights, Automation.
+- Explain that value grows as capabilities connect.
+
+## Coming Soon Section
+- Show Command, Studio, Launch with coming soon status.
+- Keep them lower emphasis than Core.
+- Use locked/distant planet visuals.
+
+## Final CTA Section
+- Strong, simple closing message.
+- Repeat Join Waitlist.
+- Include Sign In link.
+
+# TESTING CHECKLIST
+
+- QA-001: Page renders without JavaScript errors.
+- QA-002: Waitlist modal opens.
+- QA-003: Members modal opens.
+- QA-004: Escape closes modals.
+- QA-005: Email validation works.
+- QA-006: Core is the main product focus.
+- QA-007: Command, Studio, Launch are coming-soon teasers.
+- QA-008: No pricing appears on landing page.
+- QA-009: No color accents except restrained Nexus sun.
+- QA-010: Reduced motion works.
+- QA-011: Mobile layout is usable.
+- QA-012: WebGL fallback works or at least fails gracefully.
+- QA-013: Build passes.
+- QA-014: No invented product names.
+- QA-015: No fake claims.
+- QA-016: Page renders without JavaScript errors.
+- QA-017: Waitlist modal opens.
+- QA-018: Members modal opens.
+- QA-019: Escape closes modals.
+- QA-020: Email validation works.
+- QA-021: Core is the main product focus.
+- QA-022: Command, Studio, Launch are coming-soon teasers.
+- QA-023: No pricing appears on landing page.
+- QA-024: No color accents except restrained Nexus sun.
+- QA-025: Reduced motion works.
+- QA-026: Mobile layout is usable.
+- QA-027: WebGL fallback works or at least fails gracefully.
+- QA-028: Build passes.
+- QA-029: No invented product names.
+- QA-030: No fake claims.
+- QA-031: Page renders without JavaScript errors.
+- QA-032: Waitlist modal opens.
+- QA-033: Members modal opens.
+- QA-034: Escape closes modals.
+- QA-035: Email validation works.
+- QA-036: Core is the main product focus.
+- QA-037: Command, Studio, Launch are coming-soon teasers.
+- QA-038: No pricing appears on landing page.
+- QA-039: No color accents except restrained Nexus sun.
+- QA-040: Reduced motion works.
+- QA-041: Mobile layout is usable.
+- QA-042: WebGL fallback works or at least fails gracefully.
+- QA-043: Build passes.
+- QA-044: No invented product names.
+- QA-045: No fake claims.
+- QA-046: Page renders without JavaScript errors.
+- QA-047: Waitlist modal opens.
+- QA-048: Members modal opens.
+- QA-049: Escape closes modals.
+- QA-050: Email validation works.
+- QA-051: Core is the main product focus.
+- QA-052: Command, Studio, Launch are coming-soon teasers.
+- QA-053: No pricing appears on landing page.
+- QA-054: No color accents except restrained Nexus sun.
+- QA-055: Reduced motion works.
+- QA-056: Mobile layout is usable.
+- QA-057: WebGL fallback works or at least fails gracefully.
+- QA-058: Build passes.
+- QA-059: No invented product names.
+- QA-060: No fake claims.
+- QA-061: Page renders without JavaScript errors.
+- QA-062: Waitlist modal opens.
+- QA-063: Members modal opens.
+- QA-064: Escape closes modals.
+- QA-065: Email validation works.
+- QA-066: Core is the main product focus.
+- QA-067: Command, Studio, Launch are coming-soon teasers.
+- QA-068: No pricing appears on landing page.
+- QA-069: No color accents except restrained Nexus sun.
+- QA-070: Reduced motion works.
+- QA-071: Mobile layout is usable.
+- QA-072: WebGL fallback works or at least fails gracefully.
+- QA-073: Build passes.
+- QA-074: No invented product names.
+- QA-075: No fake claims.
+- QA-076: Page renders without JavaScript errors.
+- QA-077: Waitlist modal opens.
+- QA-078: Members modal opens.
+- QA-079: Escape closes modals.
+- QA-080: Email validation works.
+- QA-081: Core is the main product focus.
+- QA-082: Command, Studio, Launch are coming-soon teasers.
+- QA-083: No pricing appears on landing page.
+- QA-084: No color accents except restrained Nexus sun.
+- QA-085: Reduced motion works.
+- QA-086: Mobile layout is usable.
+- QA-087: WebGL fallback works or at least fails gracefully.
+- QA-088: Build passes.
+- QA-089: No invented product names.
+- QA-090: No fake claims.
+- QA-091: Page renders without JavaScript errors.
+- QA-092: Waitlist modal opens.
+- QA-093: Members modal opens.
+- QA-094: Escape closes modals.
+- QA-095: Email validation works.
+- QA-096: Core is the main product focus.
+- QA-097: Command, Studio, Launch are coming-soon teasers.
+- QA-098: No pricing appears on landing page.
+- QA-099: No color accents except restrained Nexus sun.
+- QA-100: Reduced motion works.
+- QA-101: Mobile layout is usable.
+- QA-102: WebGL fallback works or at least fails gracefully.
+- QA-103: Build passes.
+- QA-104: No invented product names.
+- QA-105: No fake claims.
+- QA-106: Page renders without JavaScript errors.
+- QA-107: Waitlist modal opens.
+- QA-108: Members modal opens.
+- QA-109: Escape closes modals.
+- QA-110: Email validation works.
+- QA-111: Core is the main product focus.
+- QA-112: Command, Studio, Launch are coming-soon teasers.
+- QA-113: No pricing appears on landing page.
+- QA-114: No color accents except restrained Nexus sun.
+- QA-115: Reduced motion works.
+- QA-116: Mobile layout is usable.
+- QA-117: WebGL fallback works or at least fails gracefully.
+- QA-118: Build passes.
+- QA-119: No invented product names.
+- QA-120: No fake claims.
+- QA-121: Page renders without JavaScript errors.
+- QA-122: Waitlist modal opens.
+- QA-123: Members modal opens.
+- QA-124: Escape closes modals.
+- QA-125: Email validation works.
+- QA-126: Core is the main product focus.
+- QA-127: Command, Studio, Launch are coming-soon teasers.
+- QA-128: No pricing appears on landing page.
+- QA-129: No color accents except restrained Nexus sun.
+- QA-130: Reduced motion works.
+- QA-131: Mobile layout is usable.
+- QA-132: WebGL fallback works or at least fails gracefully.
+- QA-133: Build passes.
+- QA-134: No invented product names.
+- QA-135: No fake claims.
+- QA-136: Page renders without JavaScript errors.
+- QA-137: Waitlist modal opens.
+- QA-138: Members modal opens.
+- QA-139: Escape closes modals.
+- QA-140: Email validation works.
+- QA-141: Core is the main product focus.
+- QA-142: Command, Studio, Launch are coming-soon teasers.
+- QA-143: No pricing appears on landing page.
+- QA-144: No color accents except restrained Nexus sun.
+- QA-145: Reduced motion works.
+- QA-146: Mobile layout is usable.
+- QA-147: WebGL fallback works or at least fails gracefully.
+- QA-148: Build passes.
+- QA-149: No invented product names.
+- QA-150: No fake claims.
+- QA-151: Page renders without JavaScript errors.
+- QA-152: Waitlist modal opens.
+- QA-153: Members modal opens.
+- QA-154: Escape closes modals.
+- QA-155: Email validation works.
+- QA-156: Core is the main product focus.
+- QA-157: Command, Studio, Launch are coming-soon teasers.
+- QA-158: No pricing appears on landing page.
+- QA-159: No color accents except restrained Nexus sun.
+- QA-160: Reduced motion works.
+- QA-161: Mobile layout is usable.
+- QA-162: WebGL fallback works or at least fails gracefully.
+- QA-163: Build passes.
+- QA-164: No invented product names.
+- QA-165: No fake claims.
+- QA-166: Page renders without JavaScript errors.
+- QA-167: Waitlist modal opens.
+- QA-168: Members modal opens.
+- QA-169: Escape closes modals.
+- QA-170: Email validation works.
+- QA-171: Core is the main product focus.
+- QA-172: Command, Studio, Launch are coming-soon teasers.
+- QA-173: No pricing appears on landing page.
+- QA-174: No color accents except restrained Nexus sun.
+- QA-175: Reduced motion works.
+- QA-176: Mobile layout is usable.
+- QA-177: WebGL fallback works or at least fails gracefully.
+- QA-178: Build passes.
+- QA-179: No invented product names.
+- QA-180: No fake claims.
+- QA-181: Page renders without JavaScript errors.
+- QA-182: Waitlist modal opens.
+- QA-183: Members modal opens.
+- QA-184: Escape closes modals.
+- QA-185: Email validation works.
+- QA-186: Core is the main product focus.
+- QA-187: Command, Studio, Launch are coming-soon teasers.
+- QA-188: No pricing appears on landing page.
+- QA-189: No color accents except restrained Nexus sun.
+- QA-190: Reduced motion works.
+- QA-191: Mobile layout is usable.
+- QA-192: WebGL fallback works or at least fails gracefully.
+- QA-193: Build passes.
+- QA-194: No invented product names.
+- QA-195: No fake claims.
+- QA-196: Page renders without JavaScript errors.
+- QA-197: Waitlist modal opens.
+- QA-198: Members modal opens.
+- QA-199: Escape closes modals.
+- QA-200: Email validation works.
+- QA-201: Core is the main product focus.
+- QA-202: Command, Studio, Launch are coming-soon teasers.
+- QA-203: No pricing appears on landing page.
+- QA-204: No color accents except restrained Nexus sun.
+- QA-205: Reduced motion works.
+- QA-206: Mobile layout is usable.
+- QA-207: WebGL fallback works or at least fails gracefully.
+- QA-208: Build passes.
+- QA-209: No invented product names.
+- QA-210: No fake claims.
+- QA-211: Page renders without JavaScript errors.
+- QA-212: Waitlist modal opens.
+- QA-213: Members modal opens.
+- QA-214: Escape closes modals.
+- QA-215: Email validation works.
+- QA-216: Core is the main product focus.
+- QA-217: Command, Studio, Launch are coming-soon teasers.
+- QA-218: No pricing appears on landing page.
+- QA-219: No color accents except restrained Nexus sun.
+- QA-220: Reduced motion works.
+- QA-221: Mobile layout is usable.
+- QA-222: WebGL fallback works or at least fails gracefully.
+- QA-223: Build passes.
+- QA-224: No invented product names.
+- QA-225: No fake claims.
+- QA-226: Page renders without JavaScript errors.
+- QA-227: Waitlist modal opens.
+- QA-228: Members modal opens.
+- QA-229: Escape closes modals.
+- QA-230: Email validation works.
+- QA-231: Core is the main product focus.
+- QA-232: Command, Studio, Launch are coming-soon teasers.
+- QA-233: No pricing appears on landing page.
+- QA-234: No color accents except restrained Nexus sun.
+- QA-235: Reduced motion works.
+- QA-236: Mobile layout is usable.
+- QA-237: WebGL fallback works or at least fails gracefully.
+- QA-238: Build passes.
+- QA-239: No invented product names.
+- QA-240: No fake claims.
+- QA-241: Page renders without JavaScript errors.
+- QA-242: Waitlist modal opens.
+- QA-243: Members modal opens.
+- QA-244: Escape closes modals.
+- QA-245: Email validation works.
+- QA-246: Core is the main product focus.
+- QA-247: Command, Studio, Launch are coming-soon teasers.
+- QA-248: No pricing appears on landing page.
+- QA-249: No color accents except restrained Nexus sun.
+- QA-250: Reduced motion works.
+- QA-251: Mobile layout is usable.
+- QA-252: WebGL fallback works or at least fails gracefully.
+- QA-253: Build passes.
+- QA-254: No invented product names.
+- QA-255: No fake claims.
+- QA-256: Page renders without JavaScript errors.
+- QA-257: Waitlist modal opens.
+- QA-258: Members modal opens.
+- QA-259: Escape closes modals.
+- QA-260: Email validation works.
+- QA-261: Core is the main product focus.
+- QA-262: Command, Studio, Launch are coming-soon teasers.
+- QA-263: No pricing appears on landing page.
+- QA-264: No color accents except restrained Nexus sun.
+- QA-265: Reduced motion works.
+- QA-266: Mobile layout is usable.
+- QA-267: WebGL fallback works or at least fails gracefully.
+- QA-268: Build passes.
+- QA-269: No invented product names.
+- QA-270: No fake claims.
+- QA-271: Page renders without JavaScript errors.
+- QA-272: Waitlist modal opens.
+- QA-273: Members modal opens.
+- QA-274: Escape closes modals.
+- QA-275: Email validation works.
+- QA-276: Core is the main product focus.
+- QA-277: Command, Studio, Launch are coming-soon teasers.
+- QA-278: No pricing appears on landing page.
+- QA-279: No color accents except restrained Nexus sun.
+- QA-280: Reduced motion works.
+- QA-281: Mobile layout is usable.
+- QA-282: WebGL fallback works or at least fails gracefully.
+- QA-283: Build passes.
+- QA-284: No invented product names.
+- QA-285: No fake claims.
+- QA-286: Page renders without JavaScript errors.
+- QA-287: Waitlist modal opens.
+- QA-288: Members modal opens.
+- QA-289: Escape closes modals.
+- QA-290: Email validation works.
+- QA-291: Core is the main product focus.
+- QA-292: Command, Studio, Launch are coming-soon teasers.
+- QA-293: No pricing appears on landing page.
+- QA-294: No color accents except restrained Nexus sun.
+- QA-295: Reduced motion works.
+- QA-296: Mobile layout is usable.
+- QA-297: WebGL fallback works or at least fails gracefully.
+- QA-298: Build passes.
+- QA-299: No invented product names.
+- QA-300: No fake claims.
+- QA-301: Page renders without JavaScript errors.
+- QA-302: Waitlist modal opens.
+- QA-303: Members modal opens.
+- QA-304: Escape closes modals.
+- QA-305: Email validation works.
+- QA-306: Core is the main product focus.
+- QA-307: Command, Studio, Launch are coming-soon teasers.
+- QA-308: No pricing appears on landing page.
+- QA-309: No color accents except restrained Nexus sun.
+- QA-310: Reduced motion works.
+- QA-311: Mobile layout is usable.
+- QA-312: WebGL fallback works or at least fails gracefully.
+- QA-313: Build passes.
+- QA-314: No invented product names.
+- QA-315: No fake claims.
+- QA-316: Page renders without JavaScript errors.
+- QA-317: Waitlist modal opens.
+- QA-318: Members modal opens.
+- QA-319: Escape closes modals.
+- QA-320: Email validation works.
+- QA-321: Core is the main product focus.
+- QA-322: Command, Studio, Launch are coming-soon teasers.
+- QA-323: No pricing appears on landing page.
+- QA-324: No color accents except restrained Nexus sun.
+- QA-325: Reduced motion works.
+- QA-326: Mobile layout is usable.
+- QA-327: WebGL fallback works or at least fails gracefully.
+- QA-328: Build passes.
+- QA-329: No invented product names.
+- QA-330: No fake claims.
+- QA-331: Page renders without JavaScript errors.
+- QA-332: Waitlist modal opens.
+- QA-333: Members modal opens.
+- QA-334: Escape closes modals.
+- QA-335: Email validation works.
+- QA-336: Core is the main product focus.
+- QA-337: Command, Studio, Launch are coming-soon teasers.
+- QA-338: No pricing appears on landing page.
+- QA-339: No color accents except restrained Nexus sun.
+- QA-340: Reduced motion works.
+- QA-341: Mobile layout is usable.
+- QA-342: WebGL fallback works or at least fails gracefully.
+- QA-343: Build passes.
+- QA-344: No invented product names.
+- QA-345: No fake claims.
+- QA-346: Page renders without JavaScript errors.
+- QA-347: Waitlist modal opens.
+- QA-348: Members modal opens.
+- QA-349: Escape closes modals.
+- QA-350: Email validation works.
+- QA-351: Core is the main product focus.
+- QA-352: Command, Studio, Launch are coming-soon teasers.
+- QA-353: No pricing appears on landing page.
+- QA-354: No color accents except restrained Nexus sun.
+- QA-355: Reduced motion works.
+- QA-356: Mobile layout is usable.
+- QA-357: WebGL fallback works or at least fails gracefully.
+- QA-358: Build passes.
+- QA-359: No invented product names.
+- QA-360: No fake claims.
+- QA-361: Page renders without JavaScript errors.
+- QA-362: Waitlist modal opens.
+- QA-363: Members modal opens.
+- QA-364: Escape closes modals.
+- QA-365: Email validation works.
+- QA-366: Core is the main product focus.
+- QA-367: Command, Studio, Launch are coming-soon teasers.
+- QA-368: No pricing appears on landing page.
+- QA-369: No color accents except restrained Nexus sun.
+- QA-370: Reduced motion works.
+- QA-371: Mobile layout is usable.
+- QA-372: WebGL fallback works or at least fails gracefully.
+- QA-373: Build passes.
+- QA-374: No invented product names.
+- QA-375: No fake claims.
+
+# FINAL INSTRUCTION TO FABLE 5
+
+- Implement the landing page now.
+- Do not ask unnecessary questions.
+- If a detail is missing, make a premium, restrained, brand-consistent choice.
+- Do not add extra products.
+- Do not add pricing.
+- Do not add colors.
+- Do not turn this into a generic SaaS page.
+- After implementation, summarize files changed, features built, and any remaining TODOs.
+
+```
+
+## 2. Extra Notes for Oscar
+
+- The prompt intentionally tells Fable 5 to avoid pricing because this specific landing page is waitlist-first.
+- The prompt treats Core as active and the rest as coming soon.
+- The product planets are still present so the ecosystem feels larger than Core.
+- The 3D system is designed so you can later reuse the same galaxy for Command, Studio, and Launch pages.
+- The dark chrome-orange Nexus sun is the only permitted warm accent.
+- Everything else stays black, graphite, silver, chrome, and white.
+
+## 3. Appendix: Micro-Directives for Premium Polish
+
+- Appendix-0001 | Spacing: Prefer restraint over decoration.
+- Appendix-0002 | Typography: Use fewer elements with better spacing.
+- Appendix-0003 | Motion: Keep hierarchy obvious.
+- Appendix-0004 | Three.js: Make interactive states subtle.
+- Appendix-0005 | Core narrative: Do not introduce new colors.
+- Appendix-0006 | Capability cards: Keep the product story clear.
+- Appendix-0007 | Modals: Use consistent border radius.
+- Appendix-0008 | Footer: Use consistent icon weight.
+- Appendix-0009 | Responsive: Make all copy concise.
+- Appendix-0010 | Performance: Avoid filler sections.
+- Appendix-0011 | Accessibility: Prefer restraint over decoration.
+- Appendix-0012 | Brand consistency: Use fewer elements with better spacing.
+- Appendix-0013 | Spacing: Keep hierarchy obvious.
+- Appendix-0014 | Typography: Make interactive states subtle.
+- Appendix-0015 | Motion: Do not introduce new colors.
+- Appendix-0016 | Three.js: Keep the product story clear.
+- Appendix-0017 | Core narrative: Use consistent border radius.
+- Appendix-0018 | Capability cards: Use consistent icon weight.
+- Appendix-0019 | Modals: Make all copy concise.
+- Appendix-0020 | Footer: Avoid filler sections.
+- Appendix-0021 | Responsive: Prefer restraint over decoration.
+- Appendix-0022 | Performance: Use fewer elements with better spacing.
+- Appendix-0023 | Accessibility: Keep hierarchy obvious.
+- Appendix-0024 | Brand consistency: Make interactive states subtle.
+- Appendix-0025 | Spacing: Do not introduce new colors.
+- Appendix-0026 | Typography: Keep the product story clear.
+- Appendix-0027 | Motion: Use consistent border radius.
+- Appendix-0028 | Three.js: Use consistent icon weight.
+- Appendix-0029 | Core narrative: Make all copy concise.
+- Appendix-0030 | Capability cards: Avoid filler sections.
+- Appendix-0031 | Modals: Prefer restraint over decoration.
+- Appendix-0032 | Footer: Use fewer elements with better spacing.
+- Appendix-0033 | Responsive: Keep hierarchy obvious.
+- Appendix-0034 | Performance: Make interactive states subtle.
+- Appendix-0035 | Accessibility: Do not introduce new colors.
+- Appendix-0036 | Brand consistency: Keep the product story clear.
+- Appendix-0037 | Spacing: Use consistent border radius.
+- Appendix-0038 | Typography: Use consistent icon weight.
+- Appendix-0039 | Motion: Make all copy concise.
+- Appendix-0040 | Three.js: Avoid filler sections.
+- Appendix-0041 | Core narrative: Prefer restraint over decoration.
+- Appendix-0042 | Capability cards: Use fewer elements with better spacing.
+- Appendix-0043 | Modals: Keep hierarchy obvious.
+- Appendix-0044 | Footer: Make interactive states subtle.
+- Appendix-0045 | Responsive: Do not introduce new colors.
+- Appendix-0046 | Performance: Keep the product story clear.
+- Appendix-0047 | Accessibility: Use consistent border radius.
+- Appendix-0048 | Brand consistency: Use consistent icon weight.
+- Appendix-0049 | Spacing: Make all copy concise.
+- Appendix-0050 | Typography: Avoid filler sections.
+- Appendix-0051 | Motion: Prefer restraint over decoration.
+- Appendix-0052 | Three.js: Use fewer elements with better spacing.
+- Appendix-0053 | Core narrative: Keep hierarchy obvious.
+- Appendix-0054 | Capability cards: Make interactive states subtle.
+- Appendix-0055 | Modals: Do not introduce new colors.
+- Appendix-0056 | Footer: Keep the product story clear.
+- Appendix-0057 | Responsive: Use consistent border radius.
+- Appendix-0058 | Performance: Use consistent icon weight.
+- Appendix-0059 | Accessibility: Make all copy concise.
+- Appendix-0060 | Brand consistency: Avoid filler sections.
+- Appendix-0061 | Spacing: Prefer restraint over decoration.
+- Appendix-0062 | Typography: Use fewer elements with better spacing.
+- Appendix-0063 | Motion: Keep hierarchy obvious.
+- Appendix-0064 | Three.js: Make interactive states subtle.
+- Appendix-0065 | Core narrative: Do not introduce new colors.
+- Appendix-0066 | Capability cards: Keep the product story clear.
+- Appendix-0067 | Modals: Use consistent border radius.
+- Appendix-0068 | Footer: Use consistent icon weight.
+- Appendix-0069 | Responsive: Make all copy concise.
+- Appendix-0070 | Performance: Avoid filler sections.
+- Appendix-0071 | Accessibility: Prefer restraint over decoration.
+- Appendix-0072 | Brand consistency: Use fewer elements with better spacing.
+- Appendix-0073 | Spacing: Keep hierarchy obvious.
+- Appendix-0074 | Typography: Make interactive states subtle.
+- Appendix-0075 | Motion: Do not introduce new colors.
+- Appendix-0076 | Three.js: Keep the product story clear.
+- Appendix-0077 | Core narrative: Use consistent border radius.
+- Appendix-0078 | Capability cards: Use consistent icon weight.
+- Appendix-0079 | Modals: Make all copy concise.
+- Appendix-0080 | Footer: Avoid filler sections.
+- Appendix-0081 | Responsive: Prefer restraint over decoration.
+- Appendix-0082 | Performance: Use fewer elements with better spacing.
+- Appendix-0083 | Accessibility: Keep hierarchy obvious.
+- Appendix-0084 | Brand consistency: Make interactive states subtle.
+- Appendix-0085 | Spacing: Do not introduce new colors.
+- Appendix-0086 | Typography: Keep the product story clear.
+- Appendix-0087 | Motion: Use consistent border radius.
+- Appendix-0088 | Three.js: Use consistent icon weight.
+- Appendix-0089 | Core narrative: Make all copy concise.
+- Appendix-0090 | Capability cards: Avoid filler sections.
+- Appendix-0091 | Modals: Prefer restraint over decoration.
+- Appendix-0092 | Footer: Use fewer elements with better spacing.
+- Appendix-0093 | Responsive: Keep hierarchy obvious.
+- Appendix-0094 | Performance: Make interactive states subtle.
+- Appendix-0095 | Accessibility: Do not introduce new colors.
+- Appendix-0096 | Brand consistency: Keep the product story clear.
+- Appendix-0097 | Spacing: Use consistent border radius.
+- Appendix-0098 | Typography: Use consistent icon weight.
+- Appendix-0099 | Motion: Make all copy concise.
+- Appendix-0100 | Three.js: Avoid filler sections.
+- Appendix-0101 | Core narrative: Prefer restraint over decoration.
+- Appendix-0102 | Capability cards: Use fewer elements with better spacing.
+- Appendix-0103 | Modals: Keep hierarchy obvious.
+- Appendix-0104 | Footer: Make interactive states subtle.
+- Appendix-0105 | Responsive: Do not introduce new colors.
+- Appendix-0106 | Performance: Keep the product story clear.
+- Appendix-0107 | Accessibility: Use consistent border radius.
+- Appendix-0108 | Brand consistency: Use consistent icon weight.
+- Appendix-0109 | Spacing: Make all copy concise.
+- Appendix-0110 | Typography: Avoid filler sections.
+- Appendix-0111 | Motion: Prefer restraint over decoration.
+- Appendix-0112 | Three.js: Use fewer elements with better spacing.
+- Appendix-0113 | Core narrative: Keep hierarchy obvious.
+- Appendix-0114 | Capability cards: Make interactive states subtle.
+- Appendix-0115 | Modals: Do not introduce new colors.
+- Appendix-0116 | Footer: Keep the product story clear.
+- Appendix-0117 | Responsive: Use consistent border radius.
+- Appendix-0118 | Performance: Use consistent icon weight.
+- Appendix-0119 | Accessibility: Make all copy concise.
+- Appendix-0120 | Brand consistency: Avoid filler sections.
+- Appendix-0121 | Spacing: Prefer restraint over decoration.
+- Appendix-0122 | Typography: Use fewer elements with better spacing.
+- Appendix-0123 | Motion: Keep hierarchy obvious.
+- Appendix-0124 | Three.js: Make interactive states subtle.
+- Appendix-0125 | Core narrative: Do not introduce new colors.
+- Appendix-0126 | Capability cards: Keep the product story clear.
+- Appendix-0127 | Modals: Use consistent border radius.
+- Appendix-0128 | Footer: Use consistent icon weight.
+- Appendix-0129 | Responsive: Make all copy concise.
+- Appendix-0130 | Performance: Avoid filler sections.
+- Appendix-0131 | Accessibility: Prefer restraint over decoration.
+- Appendix-0132 | Brand consistency: Use fewer elements with better spacing.
+- Appendix-0133 | Spacing: Keep hierarchy obvious.
+- Appendix-0134 | Typography: Make interactive states subtle.
+- Appendix-0135 | Motion: Do not introduce new colors.
+- Appendix-0136 | Three.js: Keep the product story clear.
+- Appendix-0137 | Core narrative: Use consistent border radius.
+- Appendix-0138 | Capability cards: Use consistent icon weight.
+- Appendix-0139 | Modals: Make all copy concise.
+- Appendix-0140 | Footer: Avoid filler sections.
+- Appendix-0141 | Responsive: Prefer restraint over decoration.
+- Appendix-0142 | Performance: Use fewer elements with better spacing.
+- Appendix-0143 | Accessibility: Keep hierarchy obvious.
+- Appendix-0144 | Brand consistency: Make interactive states subtle.
+- Appendix-0145 | Spacing: Do not introduce new colors.
+- Appendix-0146 | Typography: Keep the product story clear.
+- Appendix-0147 | Motion: Use consistent border radius.
+- Appendix-0148 | Three.js: Use consistent icon weight.
+- Appendix-0149 | Core narrative: Make all copy concise.
+- Appendix-0150 | Capability cards: Avoid filler sections.
+- Appendix-0151 | Modals: Prefer restraint over decoration.
+- Appendix-0152 | Footer: Use fewer elements with better spacing.
+- Appendix-0153 | Responsive: Keep hierarchy obvious.
+- Appendix-0154 | Performance: Make interactive states subtle.
+- Appendix-0155 | Accessibility: Do not introduce new colors.
+- Appendix-0156 | Brand consistency: Keep the product story clear.
+- Appendix-0157 | Spacing: Use consistent border radius.
+- Appendix-0158 | Typography: Use consistent icon weight.
+- Appendix-0159 | Motion: Make all copy concise.
+- Appendix-0160 | Three.js: Avoid filler sections.
+- Appendix-0161 | Core narrative: Prefer restraint over decoration.
+- Appendix-0162 | Capability cards: Use fewer elements with better spacing.
+- Appendix-0163 | Modals: Keep hierarchy obvious.
+- Appendix-0164 | Footer: Make interactive states subtle.
+- Appendix-0165 | Responsive: Do not introduce new colors.
+- Appendix-0166 | Performance: Keep the product story clear.
+- Appendix-0167 | Accessibility: Use consistent border radius.
+- Appendix-0168 | Brand consistency: Use consistent icon weight.
+- Appendix-0169 | Spacing: Make all copy concise.
+- Appendix-0170 | Typography: Avoid filler sections.
+- Appendix-0171 | Motion: Prefer restraint over decoration.
+- Appendix-0172 | Three.js: Use fewer elements with better spacing.
+- Appendix-0173 | Core narrative: Keep hierarchy obvious.
+- Appendix-0174 | Capability cards: Make interactive states subtle.
+- Appendix-0175 | Modals: Do not introduce new colors.
+- Appendix-0176 | Footer: Keep the product story clear.
+- Appendix-0177 | Responsive: Use consistent border radius.
+- Appendix-0178 | Performance: Use consistent icon weight.
+- Appendix-0179 | Accessibility: Make all copy concise.
+- Appendix-0180 | Brand consistency: Avoid filler sections.
+- Appendix-0181 | Spacing: Prefer restraint over decoration.
+- Appendix-0182 | Typography: Use fewer elements with better spacing.
+- Appendix-0183 | Motion: Keep hierarchy obvious.
+- Appendix-0184 | Three.js: Make interactive states subtle.
+- Appendix-0185 | Core narrative: Do not introduce new colors.
+- Appendix-0186 | Capability cards: Keep the product story clear.
+- Appendix-0187 | Modals: Use consistent border radius.
+- Appendix-0188 | Footer: Use consistent icon weight.
+- Appendix-0189 | Responsive: Make all copy concise.
+- Appendix-0190 | Performance: Avoid filler sections.
+- Appendix-0191 | Accessibility: Prefer restraint over decoration.
+- Appendix-0192 | Brand consistency: Use fewer elements with better spacing.
+- Appendix-0193 | Spacing: Keep hierarchy obvious.
+- Appendix-0194 | Typography: Make interactive states subtle.
+- Appendix-0195 | Motion: Do not introduce new colors.
+- Appendix-0196 | Three.js: Keep the product story clear.
+- Appendix-0197 | Core narrative: Use consistent border radius.
+- Appendix-0198 | Capability cards: Use consistent icon weight.
+- Appendix-0199 | Modals: Make all copy concise.
+- Appendix-0200 | Footer: Avoid filler sections.
+- Appendix-0201 | Responsive: Prefer restraint over decoration.
+- Appendix-0202 | Performance: Use fewer elements with better spacing.
+- Appendix-0203 | Accessibility: Keep hierarchy obvious.
+- Appendix-0204 | Brand consistency: Make interactive states subtle.
+- Appendix-0205 | Spacing: Do not introduce new colors.
+- Appendix-0206 | Typography: Keep the product story clear.
+- Appendix-0207 | Motion: Use consistent border radius.
+- Appendix-0208 | Three.js: Use consistent icon weight.
+- Appendix-0209 | Core narrative: Make all copy concise.
+- Appendix-0210 | Capability cards: Avoid filler sections.
+- Appendix-0211 | Modals: Prefer restraint over decoration.
+- Appendix-0212 | Footer: Use fewer elements with better spacing.
+- Appendix-0213 | Responsive: Keep hierarchy obvious.
+- Appendix-0214 | Performance: Make interactive states subtle.
+- Appendix-0215 | Accessibility: Do not introduce new colors.
+- Appendix-0216 | Brand consistency: Keep the product story clear.
+- Appendix-0217 | Spacing: Use consistent border radius.
+- Appendix-0218 | Typography: Use consistent icon weight.
+- Appendix-0219 | Motion: Make all copy concise.
+- Appendix-0220 | Three.js: Avoid filler sections.
+- Appendix-0221 | Core narrative: Prefer restraint over decoration.
+- Appendix-0222 | Capability cards: Use fewer elements with better spacing.
+- Appendix-0223 | Modals: Keep hierarchy obvious.
+- Appendix-0224 | Footer: Make interactive states subtle.
+- Appendix-0225 | Responsive: Do not introduce new colors.
+- Appendix-0226 | Performance: Keep the product story clear.
+- Appendix-0227 | Accessibility: Use consistent border radius.
+- Appendix-0228 | Brand consistency: Use consistent icon weight.
+- Appendix-0229 | Spacing: Make all copy concise.
+- Appendix-0230 | Typography: Avoid filler sections.
+- Appendix-0231 | Motion: Prefer restraint over decoration.
+- Appendix-0232 | Three.js: Use fewer elements with better spacing.
+- Appendix-0233 | Core narrative: Keep hierarchy obvious.
+- Appendix-0234 | Capability cards: Make interactive states subtle.
+- Appendix-0235 | Modals: Do not introduce new colors.
+- Appendix-0236 | Footer: Keep the product story clear.
+- Appendix-0237 | Responsive: Use consistent border radius.
+- Appendix-0238 | Performance: Use consistent icon weight.
+- Appendix-0239 | Accessibility: Make all copy concise.
+- Appendix-0240 | Brand consistency: Avoid filler sections.
+
+
+---
+
+# UPDATE ADDENDUM — CORE PLANET, DEEP LINKS, SSR, SEO, AEO
+
+This addendum is mandatory. Treat it as an override and expansion to the original prompt. Do not remove the original concept. Extend it with the following requirements.
+
+## Core Planet as a Transparent AI Brain Globe
+
+- The Core planet must not look like a normal solid planet.
+- The Core planet should feel like a transparent, glass-like, obsidian intelligence sphere.
+- Inside the Core planet, render a premium abstract AI Brain.
+- The AI Brain should be centered inside the globe.
+- The globe should be transparent, smoky, glassy, and monochrome.
+- The globe may use chrome rings, neural arcs, faint constellation nodes, and thin orbital paths.
+- Avoid biological realism.
+- Avoid a wet realistic brain.
+- Avoid bright colors.
+- The brain should look like a luxury intelligence core, not a medical object.
+- The brain can be metallic, glassy, neural, faceted, or procedural.
+- The Core planet should communicate: this is the user's personal AI Brain.
+- Core is the first active product.
+- Core should be the most interactive product planet.
+- The other product planets can remain mostly teaser planets.
+- Core should have more visual complexity than Command, Studio, and Launch because it is the landing page focus.
+
+## Capability Asteroids Around Core
+
+- Core's Capabilities should be represented as orbiting asteroids, moons, or micro-planets around the Core Brain globe.
+- The first five capability objects are:
+  - Archive
+  - Gallery
+  - Signal
+  - Compass
+  - Ascend
+- Each capability object should orbit around the Core globe, not around the Nexus sun.
+- Capability objects should move slowly and elegantly.
+- Their orbits should be visible only as very subtle chrome or glass lines.
+- Capability objects must use the simple monochrome icon style previously selected:
+  - Archive: minimal folder icon
+  - Gallery: minimal image/frame icon
+  - Signal: minimal envelope / signal icon
+  - Compass: minimal compass icon
+  - Ascend: minimal upward arrow / ascent icon
+- Capability objects should be clickable.
+- Hovering a capability object should reveal a small floating info component.
+- Clicking a capability object should smoothly zoom toward it and open a richer detail panel.
+- The panel can show:
+  - capability name
+  - short tagline
+  - one-sentence description
+  - three use cases
+  - “Join waitlist” CTA
+  - “Back to Core” control
+- Capability asteroids should feel like premium product satellites.
+- Do not make them colorful.
+- Do not make them cartoon planets.
+- They should look like small chrome UI objects floating in space.
+- Use glass, black metal, chrome outlines, tiny icons, subtle shadows, and soft monochrome glow.
+
+## Capability Asteroids as Navigable Content Objects
+
+- Every capability asteroid must be addressable by URL slug.
+- Every product planet must be addressable by URL slug.
+- Every floating moon, asteroid, and fragment should support a slug if it contains meaningful content.
+- The app should support direct navigation to:
+  - `/` for the default galaxy overview
+  - `/?focus=core`
+  - `/?focus=command`
+  - `/?focus=studio`
+  - `/?focus=launch`
+  - `/?focus=core&capability=archive`
+  - `/?focus=core&capability=gallery`
+  - `/?focus=core&capability=signal`
+  - `/?focus=core&capability=compass`
+  - `/?focus=core&capability=ascend`
+- Also support clean route aliases if the framework allows:
+  - `/core`
+  - `/command`
+  - `/studio`
+  - `/launch`
+  - `/core/archive`
+  - `/core/gallery`
+  - `/core/signal`
+  - `/core/compass`
+  - `/core/ascend`
+- The routing system should be simple to extend.
+- A developer should be able to add a new product planet or capability asteroid by adding one object to a data file.
+- Include an easy `slug` prop in each data object.
+- Include optional navigation targets in data objects.
+- Include optional SEO metadata in every object.
+
+## Required Data Model Extension
+
+Update product and capability data models to include slugs and navigation metadata:
+
+```ts
+export type ProductStatus = 'active' | 'coming-soon';
+export type ProductKey = 'core' | 'command' | 'studio' | 'launch';
+
+export interface SeoMeta {
+  title: string;
+  description: string;
+  canonicalPath: string;
+  ogImage?: string;
+  noindex?: boolean;
+}
+
+export interface ProductPlanetData {
+  key: ProductKey;
+  slug: string;
+  name: string;
+  tagline: string;
+  description: string;
+  status: ProductStatus;
+  orbitRadius: number;
+  orbitSpeed: number;
+  initialAngle: number;
+  scale: number;
+  route: string;
+  focusQuery: string;
+  seo: SeoMeta;
+}
+
+export interface CapabilityAsteroidData {
+  key: string;
+  slug: string;
+  name: string;
+  tagline: string;
+  description: string;
+  useCases: string[];
+  icon: string;
+  parentProduct: 'core';
+  orbitRadius: number;
+  orbitSpeed: number;
+  initialAngle: number;
+  scale: number;
+  route: string;
+  focusQuery: string;
+  seo: SeoMeta;
+}
+```
+
+## Required Product Data Extension
+
+Use product data shaped like this:
+
+```ts
+export const products = [
+  {
+    key: 'core',
+    slug: 'core',
+    name: 'Core',
+    tagline: 'Your AI Brain',
+    description: 'A mobile consumer app where every user gets a personal AI Brain and expands it with Capabilities.',
+    status: 'active',
+    orbitRadius: 4,
+    orbitSpeed: 0.12,
+    initialAngle: 0,
+    scale: 1.2,
+    route: '/core',
+    focusQuery: '/?focus=core',
+    seo: {
+      title: 'Core — Your Personal AI Brain | Vorinthex AI',
+      description: 'Core is your personal AI Brain. Build it, expand it, and make it yours with powerful Capabilities.',
+      canonicalPath: '/core',
+    },
+  },
+  {
+    key: 'command',
+    slug: 'command',
+    name: 'Command',
+    tagline: 'AI Orchestrator Suite',
+    description: 'A command center with AI C-suite orchestrators for founders, builders, and operators.',
+    status: 'coming-soon',
+    orbitRadius: 7,
+    orbitSpeed: 0.07,
+    initialAngle: 1.4,
+    scale: 1,
+    route: '/command',
+    focusQuery: '/?focus=command',
+    seo: {
+      title: 'Command — AI Orchestrator Suite | Vorinthex AI',
+      description: 'Command gives builders and teams access to AI orchestrators for leadership, operations, strategy, finance, product, technology, and more.',
+      canonicalPath: '/command',
+      noindex: true,
+    },
+  },
+  {
+    key: 'studio',
+    slug: 'studio',
+    name: 'Studio',
+    tagline: 'One Interface. Every AI Model.',
+    description: 'A unified workspace to create with chat, images, video, music, voice, code, documents, research, and more.',
+    status: 'coming-soon',
+    orbitRadius: 10,
+    orbitSpeed: 0.05,
+    initialAngle: 2.8,
+    scale: 1,
+    route: '/studio',
+    focusQuery: '/?focus=studio',
+    seo: {
+      title: 'Studio — One Interface. Every AI Model. | Vorinthex AI',
+      description: 'Studio is a unified AI workspace for creating with the world’s leading AI models from one interface.',
+      canonicalPath: '/studio',
+      noindex: true,
+    },
+  },
+  {
+    key: 'launch',
+    slug: 'launch',
+    name: 'Launch',
+    tagline: 'Build and Deploy AI Agents',
+    description: 'A lightweight platform for building agents, automations, workflows, and deploying them everywhere.',
+    status: 'coming-soon',
+    orbitRadius: 13,
+    orbitSpeed: 0.035,
+    initialAngle: 4.2,
+    scale: 1,
+    route: '/launch',
+    focusQuery: '/?focus=launch',
+    seo: {
+      title: 'Launch — Build and Deploy AI Agents | Vorinthex AI',
+      description: 'Launch is a lightweight platform for creating, automating, and deploying AI agents.',
+      canonicalPath: '/launch',
+      noindex: true,
+    },
+  },
+] as const;
+```
+
+## Required Capability Data Extension
+
+Use capability data shaped like this:
+
+```ts
+export const coreCapabilities = [
+  {
+    key: 'archive',
+    slug: 'archive',
+    name: 'Archive',
+    tagline: 'Your second brain',
+    description: 'Capture notes, ideas, research, labels, folders, semantic search, and graph-based knowledge connections.',
+    useCases: [
+      'Capture notes, ideas, research, meeting notes, and daily thoughts.',
+      'Organize everything with folders, labels, and AI structure.',
+      'Search semantically and traverse knowledge relationships.',
+    ],
+    icon: 'folder',
+    parentProduct: 'core',
+    orbitRadius: 1.6,
+    orbitSpeed: 0.18,
+    initialAngle: 0,
+    scale: 0.32,
+    route: '/core/archive',
+    focusQuery: '/?focus=core&capability=archive',
+    seo: {
+      title: 'Archive — Your Second Brain | Core by Vorinthex AI',
+      description: 'Archive is a Core Capability for notes, ideas, research, folders, labels, semantic search, and graph-based knowledge connections.',
+      canonicalPath: '/core/archive',
+    },
+  },
+  {
+    key: 'gallery',
+    slug: 'gallery',
+    name: 'Gallery',
+    tagline: 'Your memories, organized',
+    description: 'A smart image and memory library with albums, clusters, sharing links, QR invites, and AI-powered discovery.',
+    useCases: [
+      'Organize images and memories into AI-generated albums and clusters.',
+      'Invite people to shared albums with QR codes or private links.',
+      'Find moments by people, places, dates, emotions, and events.',
+    ],
+    icon: 'image',
+    parentProduct: 'core',
+    orbitRadius: 1.85,
+    orbitSpeed: 0.14,
+    initialAngle: 1.25,
+    scale: 0.32,
+    route: '/core/gallery',
+    focusQuery: '/?focus=core&capability=gallery',
+    seo: {
+      title: 'Gallery — Your Memories, Organized | Core by Vorinthex AI',
+      description: 'Gallery is a Core Capability for organizing photos, memories, albums, clusters, sharing links, QR invites, and AI-powered discovery.',
+      canonicalPath: '/core/gallery',
+    },
+  },
+  {
+    key: 'signal',
+    slug: 'signal',
+    name: 'Signal',
+    tagline: 'Your inbox, optimized',
+    description: 'An AI inbox guard across email and messages that filters noise, prioritizes what matters, and can reply in your tone.',
+    useCases: [
+      'Connect multiple inboxes and message channels.',
+      'Filter noise, prioritize important messages, and notify only when it matters.',
+      'Draft or send replies in the user’s tone after approval.',
+    ],
+    icon: 'envelope',
+    parentProduct: 'core',
+    orbitRadius: 2.05,
+    orbitSpeed: 0.11,
+    initialAngle: 2.5,
+    scale: 0.32,
+    route: '/core/signal',
+    focusQuery: '/?focus=core&capability=signal',
+    seo: {
+      title: 'Signal — Your Inbox, Optimized | Core by Vorinthex AI',
+      description: 'Signal is a Core Capability that acts as an AI inbox guard across email and messages, filtering noise and prioritizing what matters.',
+      canonicalPath: '/core/signal',
+    },
+  },
+  {
+    key: 'compass',
+    slug: 'compass',
+    name: 'Compass',
+    tagline: 'Your world',
+    description: 'A 3D life map for memories, places visited, cities to visit, countries planned, and journeys rendered as a globe.',
+    useCases: [
+      'Add cities, countries, places visited, and future destinations.',
+      'Save memories, images, notes, and plans to an interactive 3D globe.',
+      'Click pins to relive past journeys or build future itineraries.',
+    ],
+    icon: 'compass',
+    parentProduct: 'core',
+    orbitRadius: 1.75,
+    orbitSpeed: 0.16,
+    initialAngle: 3.75,
+    scale: 0.32,
+    route: '/core/compass',
+    focusQuery: '/?focus=core&capability=compass',
+    seo: {
+      title: 'Compass — Your World | Core by Vorinthex AI',
+      description: 'Compass is a Core Capability for mapping memories, places visited, future destinations, travel plans, and life journeys on a 3D globe.',
+      canonicalPath: '/core/compass',
+    },
+  },
+  {
+    key: 'ascend',
+    slug: 'ascend',
+    name: 'Ascend',
+    tagline: 'Your growth',
+    description: 'A personal AI coach for mental goals, habits, health, routines, finance, and custom AI-generated audio books.',
+    useCases: [
+      'Define personal goals for fitness, mental growth, money, habits, and development.',
+      'Generate custom audio books, learning journeys, and coaching plans.',
+      'Track progress and receive coaching based on real context from the user’s Brain.',
+    ],
+    icon: 'ascend',
+    parentProduct: 'core',
+    orbitRadius: 2.2,
+    orbitSpeed: 0.09,
+    initialAngle: 5,
+    scale: 0.32,
+    route: '/core/ascend',
+    focusQuery: '/?focus=core&capability=ascend',
+    seo: {
+      title: 'Ascend — Your Growth | Core by Vorinthex AI',
+      description: 'Ascend is a Core Capability for goals, habits, health, routines, finance, coaching, and AI-generated audio books.',
+      canonicalPath: '/core/ascend',
+    },
+  },
+] as const;
+```
+
+## Slug-Based Camera Navigation
+
+- Implement a camera navigation system that can focus on any product planet or capability asteroid by slug.
+- The camera should read the current slug/query state and animate to the correct location.
+- On page load, if the URL contains `focus=core`, the camera starts near Core.
+- On page load, if the URL contains `focus=core&capability=archive`, the camera starts near Core and highlights Archive.
+- The slug navigation must work on refresh.
+- The slug navigation must work when shared as a link.
+- The slug navigation must not rely only on client state.
+- Use route parameters or query parameters as the source of truth.
+- Use graceful fallback if WebGL is unavailable.
+- If WebGL is unavailable and the user visits `/core/archive`, show a static Archive section with the correct content.
+- Use `history.pushState` or framework routing to update the URL when the user clicks planets and capability asteroids.
+- Do not reload the page for in-page focus changes.
+- But ensure route aliases can be rendered server-side.
+
+## SSR and Server-Side Requirements
+
+- Use SSR wherever possible.
+- Prefer Next.js App Router or an equivalent SSR-capable framework.
+- The main page should have server-rendered text content for:
+  - Vorinthex AI headline
+  - Core headline
+  - Core description
+  - product descriptions
+  - capability descriptions
+  - waitlist CTA copy
+  - members modal copy
+  - footer links
+- Do not make the entire landing page client-only.
+- Three.js/WebGL components may be client components.
+- Text content, metadata, structured data, and critical layout should be server-rendered.
+- Server-render the fallback sections so crawlers and LLM crawlers can understand the page even without WebGL.
+- Use progressive enhancement:
+  - SSR gives the complete content.
+  - Client-side Three.js enhances the visual experience.
+- Hydration should not cause layout shift.
+- Use dynamic import for heavy 3D components.
+- Use lazy loading for non-critical Three.js scenes.
+- Use `next/dynamic` or equivalent with SSR disabled only for the WebGL canvas component, not for the whole page.
+- Render semantic HTML for all content.
+- Every major product and capability should be represented in real HTML text outside the canvas.
+- The canvas must never be the only source of important content.
+
+## Suggested SSR Architecture
+
+Use an architecture like:
+
+```txt
+app/
+  layout.tsx
+  page.tsx
+  core/
+    page.tsx
+    [capability]/
+      page.tsx
+  command/
+    page.tsx
+  studio/
+    page.tsx
+  launch/
+    page.tsx
+  robots.ts
+  sitemap.ts
+  manifest.ts
+  opengraph-image.tsx
+  twitter-image.tsx
+  api/
+    waitlist/
+      route.ts
+    members/
+      route.ts
+components/
+  landing/
+    LandingPage.tsx              # Server component shell
+    HeroContent.tsx              # Server-rendered copy
+    ProductSummaryGrid.tsx       # Server-rendered product text
+    CapabilitySummaryGrid.tsx    # Server-rendered capability text
+    GalaxyScene.client.tsx       # Client-only Three.js scene
+    CoreBrainGlobe.client.tsx    # Client-only detailed brain globe
+    WaitlistModal.client.tsx
+    MembersModal.client.tsx
+lib/
+  seo.ts
+  structured-data.ts
+  routes.ts
+  products.ts
+  capabilities.ts
+public/
+  robots.txt                     # Or generated via app/robots.ts
+  llms.txt
+  sitemap.xml                    # Or generated via app/sitemap.ts
+```
+
+## SEO Requirements
+
+- Implement full SEO fundamentals.
+- Use unique metadata for the homepage, Core, and each capability route.
+- Generate a sitemap.
+- Generate or serve robots.txt.
+- Add canonical URLs.
+- Add Open Graph metadata.
+- Add Twitter/X card metadata.
+- Add favicons and app icons.
+- Add web app manifest.
+- Use semantic headings.
+- Only one H1 per page.
+- Ensure product/capability content is crawlable as text.
+- Do not hide all meaningful content inside a canvas.
+- Use descriptive alt text for static images and mockups.
+- Use JSON-LD structured data.
+- Ensure the landing page loads quickly.
+- Optimize Core Web Vitals.
+- Use image optimization.
+- Use font optimization.
+- Use metadata generation functions if using Next.js.
+
+## AEO / LLM Search Optimization Requirements
+
+AEO means Answer Engine Optimization. The site should be understandable by AI search systems and LLM crawlers.
+
+- Add an `llms.txt` file at the site root.
+- Add a concise “What is Vorinthex AI?” answer in server-rendered HTML.
+- Add a concise “What is Core?” answer in server-rendered HTML.
+- Add concise answers for each Core Capability.
+- Use FAQ structured data.
+- Include direct natural-language answer blocks.
+- Make the page easy for AI systems to summarize accurately.
+- Do not rely on vague marketing copy only.
+- Provide precise definitions:
+  - Vorinthex AI is the Nexus of Intelligence.
+  - Core is a mobile consumer app where every user gets a personal AI Brain.
+  - Users expand Core by adding Capabilities.
+  - Archive is the second brain capability for notes and knowledge.
+  - Gallery is the memory and image capability.
+  - Signal is the inbox guard capability.
+  - Compass is the 3D life map and travel memory capability.
+  - Ascend is the personal AI coach capability.
+- Include these explanations in visible or accessible sections.
+- Use clean semantic HTML that an answer engine can parse.
+- Use schema.org data where relevant.
+
+## Required `robots.txt`
+
+Create `robots.txt` or framework equivalent:
+
+```txt
+User-agent: *
+Allow: /
+
+Sitemap: https://vorinthex.com/sitemap.xml
+```
+
+If staging or preview builds exist, block indexing there:
+
+```txt
+User-agent: *
+Disallow: /
+```
+
+Only production should allow indexing.
+
+## Required `llms.txt`
+
+Create `llms.txt` at the root of the site.
+
+It should be concise, structured, and useful for LLM crawlers:
+
+```txt
+# Vorinthex AI
+
+Vorinthex AI is the Nexus of Intelligence: a premium ecosystem of AI products built around personal intelligence, AI orchestration, creation, and deployment.
+
+## Products
+
+- Core: A mobile consumer app where every user gets a personal AI Brain and expands it with Capabilities.
+- Command: An AI orchestrator suite for founders, operators, and builders, built around C-suite AI orchestrators.
+- Studio: One interface for creating with leading AI models across chat, images, video, music, voice, code, documents, and research.
+- Launch: A lightweight platform for creating agents, automations, workflows, and deploying them.
+
+## Core Capabilities
+
+- Archive: Notes, ideas, research, folders, labels, semantic search, and graph-based knowledge.
+- Gallery: Memories, images, albums, clusters, sharing links, QR invites, and AI discovery.
+- Signal: Email and message inbox guard that filters noise, prioritizes important messages, and can reply in the user’s tone.
+- Compass: 3D life map for places visited, future destinations, travel plans, memories, and journeys.
+- Ascend: Personal AI coach for goals, habits, health, routines, finance, and custom audio books.
+
+## Primary Page
+
+The primary landing page focuses on Core and invites users to join the waitlist.
+
+## Brand
+
+Visual style: obsidian black, chrome/silver, premium, precise, futuristic, minimal, and spacious.
+```
+
+## Structured Data Requirements
+
+Add JSON-LD for:
+
+- Organization
+- WebSite
+- SoftwareApplication for Core
+- FAQPage
+- BreadcrumbList for route pages
+
+Example:
+
+```ts
+export const organizationJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Vorinthex AI',
+  slogan: 'The Nexus of Intelligence',
+  url: 'https://vorinthex.com',
+};
+
+export const coreSoftwareJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Core',
+  applicationCategory: 'ProductivityApplication',
+  operatingSystem: 'iOS, Android, Web',
+  description: 'Core is a mobile consumer app where every user gets a personal AI Brain and expands it with Capabilities.',
+  offers: {
+    '@type': 'Offer',
+    availability: 'https://schema.org/PreOrder',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+};
+```
+
+## Metadata Requirements
+
+Homepage metadata:
+
+```ts
+export const metadata = {
+  title: 'Vorinthex AI — The Nexus of Intelligence',
+  description: 'Vorinthex AI is a premium AI ecosystem. Core is your personal AI Brain, built to grow with you through Capabilities.',
+  alternates: {
+    canonical: '/',
+  },
+  openGraph: {
+    title: 'Vorinthex AI — The Nexus of Intelligence',
+    description: 'Core is your personal AI Brain. Build it, expand it, and make it yours.',
+    url: 'https://vorinthex.com',
+    siteName: 'Vorinthex AI',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Vorinthex AI — The Nexus of Intelligence',
+    description: 'Core is your personal AI Brain. Build it, expand it, and make it yours.',
+  },
+};
+```
+
+Core route metadata:
+
+```ts
+export const metadata = {
+  title: 'Core — Your Personal AI Brain | Vorinthex AI',
+  description: 'Core is a mobile consumer app where every user gets a personal AI Brain and expands it with Capabilities.',
+  alternates: {
+    canonical: '/core',
+  },
+};
+```
+
+Capability route metadata should be generated from the capability data object.
+
+## Server-Side Content Blocks for AEO
+
+Add a section that may be visually minimal but must exist in SSR HTML:
+
+```html
+<section aria-labelledby="what-is-core">
+  <h2 id="what-is-core">What is Core?</h2>
+  <p>Core is a mobile consumer app from Vorinthex AI where every user gets a personal AI Brain. Users can expand their Brain by adding Capabilities such as Archive, Gallery, Signal, Compass, and Ascend.</p>
+</section>
+```
+
+Add capability definitions:
+
+```html
+<section aria-labelledby="core-capabilities">
+  <h2 id="core-capabilities">Core Capabilities</h2>
+  <article>
+    <h3>Archive</h3>
+    <p>Archive is the second brain capability for notes, ideas, research, folders, labels, semantic search, and graph-based knowledge connections.</p>
+  </article>
+  <article>
+    <h3>Gallery</h3>
+    <p>Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI-powered discovery.</p>
+  </article>
+  <article>
+    <h3>Signal</h3>
+    <p>Signal is an AI inbox guard that filters noise, prioritizes important email and messages, and can reply in the user’s tone.</p>
+  </article>
+  <article>
+    <h3>Compass</h3>
+    <p>Compass maps visited places, future destinations, travel memories, and plans on an interactive 3D globe.</p>
+  </article>
+  <article>
+    <h3>Ascend</h3>
+    <p>Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI-generated audio books.</p>
+  </article>
+</section>
+```
+
+## Performance and Crawlability Constraints
+
+- The 3D scene must not block initial HTML render.
+- First meaningful content should render without JavaScript.
+- Use a static server-rendered hero and upgrade with 3D after hydration.
+- Use fallback images or CSS-only placeholders for 3D objects.
+- Do not import all Three.js addons globally.
+- Lazy-load heavy 3D assets only when needed.
+- Use compressed models if any 3D models are used.
+- Prefer procedural geometry for the sun, planets, orbit rings, stars, and capability asteroids.
+- Avoid shipping huge GLB files unless absolutely necessary.
+- Provide a low-power mode.
+- Provide reduced-motion mode.
+- Provide no-WebGL fallback.
+
+## Exact UX for Deep Links
+
+- If user opens `/core/archive`:
+  - SSR renders Archive content immediately.
+  - After hydration, the galaxy animates directly to Core.
+  - Then the Archive asteroid is highlighted.
+  - Archive detail panel opens.
+- If user opens `/?focus=studio`:
+  - SSR renders Studio coming-soon content.
+  - After hydration, the camera glides toward Studio planet.
+  - Studio card shows “Coming Soon”.
+- If user opens `/`:
+  - Show the full galaxy overview.
+  - Core is visually emphasized as active.
+  - Command, Studio, Launch are present but secondary and “Coming Soon”.
+
+## Developer Ergonomics Requirement
+
+Adding a new capability should require editing only one data object.
+
+Example:
+
+```ts
+{
+  key: 'newCapability',
+  slug: 'new-capability',
+  name: 'New Capability',
+  tagline: 'Short capability tagline',
+  description: 'Clear one-sentence description.',
+  useCases: ['Use case one.', 'Use case two.', 'Use case three.'],
+  icon: 'custom-icon-key',
+  parentProduct: 'core',
+  orbitRadius: 2.4,
+  orbitSpeed: 0.08,
+  initialAngle: 0.5,
+  scale: 0.3,
+  route: '/core/new-capability',
+  focusQuery: '/?focus=core&capability=new-capability',
+  seo: {
+    title: 'New Capability | Core by Vorinthex AI',
+    description: 'SEO description here.',
+    canonicalPath: '/core/new-capability',
+  },
+}
+```
+
+No hardcoded capability names should exist inside the Three.js scene.
+
+## Final Addendum Instruction
+
+Build the experience as a premium SSR-first landing page with a client-enhanced Three.js galaxy. The Core planet must be a transparent AI Brain globe. Its Capabilities must orbit around it as clickable asteroids/moons. Every product planet and capability asteroid must be reachable by slug or query-state URL. The site must be optimized for SEO, AEO, LLM crawlers, robots.txt, llms.txt, sitemap, metadata, structured data, accessibility, and performance. Do not hide critical text inside the WebGL canvas. The result should feel like a million-SEK premium landing page for the future of personal AI.

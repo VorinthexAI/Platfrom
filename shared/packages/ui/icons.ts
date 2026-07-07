@@ -51,4 +51,10 @@ export * from './icons/log-out';
 export * from './icons/calendar';
 export * from './icons/globe';
 export * from './icons/chat-bubble';
+export * from './icons/archive';
+export * from './icons/gallery';
+export * from './icons/signal';
+export * from './icons/compass';
+export * from './icons/ascend';
+export * from './icons/brain';
 

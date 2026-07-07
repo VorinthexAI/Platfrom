@@ -80,7 +80,7 @@ export function renderMarketingEmail(input: MarketingEmailInput) {
     headline: input.headline,
     body_html: input.bodyHtml,
     footer_html: input.footerHtml,
-    unsubscribe_html: `No longer want these updates? <a href="${input.unsubscribeUrl}" style="color:var(--vtx-color-muted, #6b6358); text-decoration:underline; word-break:break-all;">Unsubscribe here</a>. This link expires in 15 minutes. If it expires, use the newest unsubscribe link from the latest email.`,
+    unsubscribe_html: `No longer want these updates? <a href="${input.unsubscribeUrl}" style="color:#aeb6bc; text-decoration:underline; word-break:break-all;">Unsubscribe here</a>. This link expires in 15 minutes. If it expires, use the newest unsubscribe link from the latest email.`,
   });
 }
 

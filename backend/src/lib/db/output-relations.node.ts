@@ -27,6 +27,7 @@ const helpers = createNodeHelpers(
 export const insertOutputRelation = helpers.insert;
 export const getOutputRelationById = helpers.getById;
 export const deleteOutputRelation = helpers.deleteById;
+export const upsertOutputRelationByKey = helpers.upsertByKey;
 export const getAllOutputRelationsChunked = helpers.getAllChunked;
 export const listOutputRelationsPage = helpers.listPage;
 

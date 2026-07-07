@@ -1,5 +1,5 @@
 ﻿import type { SVGProps } from "react";
-export type ShareIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type ShareIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type ShareIconSize = "sm" | "md" | "lg";
 export type ShareIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: ShareIconVariant;
@@ -8,12 +8,13 @@ export type ShareIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<ShareIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<ShareIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function ShareIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: ShareIconProps) {
+export function ShareIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: ShareIconProps) {
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>

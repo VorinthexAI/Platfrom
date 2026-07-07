@@ -6,7 +6,7 @@ export function Select({ style, ...props }: SelectProps) {
 }
 const styles = StyleSheet.create({
   root: {
-    borderColor: "#E3DCD0",
+    borderColor: "#262D36",
     borderRadius: 12,
   },
 });

@@ -26,6 +26,7 @@ export const insertAuthChallenge = helpers.insert;
 export const getAuthChallengeById = helpers.getById;
 export const updateAuthChallenge = helpers.updateById;
 export const deleteAuthChallenge = helpers.deleteById;
+export const upsertAuthChallengeByKey = helpers.upsertByKey;
 export const getAllAuthChallengesChunked = helpers.getAllChunked;
 export const listAuthChallengesPage = helpers.listPage;
 

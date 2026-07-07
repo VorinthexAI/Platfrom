@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-export type InboxIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type InboxIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type InboxIconSize = "sm" | "md" | "lg";
 export type InboxIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: InboxIconVariant;
@@ -10,6 +10,7 @@ export type InboxIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<InboxIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<InboxIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
@@ -17,7 +18,7 @@ const colors: Record<InboxIconVariant, string> = {
 };
 
 export function InboxIcon({
-  variant = "default",
+  variant = "inherit",
   size = "md",
   strokeWidth = 1.4,
   ...props

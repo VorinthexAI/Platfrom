@@ -55,7 +55,7 @@ export function Button({
 const styles = StyleSheet.create({
   root: {
     alignItems: "center",
-    borderRadius: 9,
+    borderRadius: 999,
     borderWidth: 1,
     flexDirection: "row",
     gap: 8,
@@ -65,12 +65,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   primary: {
-    backgroundColor: "#8B6F47",
-    borderColor: "#8B6F47",
+    backgroundColor: "#DDE2E5",
+    borderColor: "#DDE2E5",
   },
   secondary: {
     backgroundColor: "transparent",
-    borderColor: "#E3DCD0",
+    borderColor: "#262D36",
   },
   ghost: {
     backgroundColor: "transparent",
@@ -81,21 +81,21 @@ const styles = StyleSheet.create({
   },
   outline: {
     backgroundColor: "transparent",
-    borderColor: "#E3DCD0",
+    borderColor: "#262D36",
   },
   danger: {
-    backgroundColor: "#7F2E2E",
-    borderColor: "#7F2E2E",
+    backgroundColor: "#B04A4A",
+    borderColor: "#B04A4A",
   },
   icon: {
     backgroundColor: "transparent",
-    borderColor: "#E3DCD0",
+    borderColor: "#262D36",
     height: 42,
     paddingHorizontal: 0,
     width: 42,
   },
   disabled: {
-    backgroundColor: "#F0EBE2",
+    backgroundColor: "#0D1117",
     opacity: 0.7,
   },
   pressed: {
@@ -107,21 +107,21 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   primaryText: {
-    color: "#FAF7F2",
+    color: "#030507",
   },
   secondaryText: {
-    color: "#6B6358",
+    color: "#DDE2E5",
   },
   ghostText: {
-    color: "#8B6F47",
+    color: "#DDE2E5",
   },
   outlineText: {
-    color: "#6B6358",
+    color: "#DDE2E5",
   },
   dangerText: {
-    color: "#FAF7F2",
+    color: "#F5F7F8",
   },
   iconText: {
-    color: "#1C1A17",
+    color: "#F5F7F8",
   },
 });

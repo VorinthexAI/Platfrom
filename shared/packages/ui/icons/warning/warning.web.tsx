@@ -1,5 +1,5 @@
 ﻿import type { SVGProps } from "react";
-export type WarningIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type WarningIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type WarningIconSize = "sm" | "md" | "lg";
 export type WarningIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: WarningIconVariant;
@@ -8,12 +8,13 @@ export type WarningIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<WarningIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<WarningIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function WarningIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: WarningIconProps) {
+export function WarningIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: WarningIconProps) {
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>

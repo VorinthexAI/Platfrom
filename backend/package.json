@@ -22,6 +22,7 @@
     "db:migrate:ci": "bun run src/db/arango-migrate.ts",
     "seed.ts": "bun --env-file=../environments/backend/.env.dev src/lib/db/seed.ts",
     "db:seed": "bun --env-file=../environments/backend/.env.dev src/db/seed-all.ts",
+    "seed:secrets": "bun run scripts/seed-secrets.ts",
     "polar:sync": "bun run scripts/sync-polar-products.ts"
   },
   "dependencies": {

@@ -5,9 +5,12 @@ import {
   updateAuthChallenge,
 } from '@/lib/db/auth-challenges.node';
 import { updateUser, type User } from '@/lib/db/users.node';
+import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
+import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
 import { sendBrandedEmail } from './email';
+import { notifyCountersDirty } from './live-bus';
 import { defaultNameFromEmail, normalizeEmail, upsertUserByEmail } from './users';
 import { trackPlatformEvent } from '@/platform/events';
 
@@ -63,23 +66,21 @@ export async function deliverWaitlistVerifyEmail(input: { email: string; name?: 
   await sendBrandedEmail({
     from: process.env.ADMIN_EMAIL,
     to: input.email,
-    subject: 'Welcome to Vorinthex',
-    preheader: 'You are on the waitlist. Confirm your email to keep your place.',
+    subject: 'Verify your email to secure your spot',
+    preheader: 'One click left — confirm your email or your waitlist place isn’t locked in.',
     label: 'Waitlist',
-    eyebrow: 'Stealth mode',
-    headline: 'You are on the list',
+    eyebrow: 'Action required',
+    headline: 'Verify your email to secure your spot',
     bodyHtml: [
       `<p style="margin:0 0 16px;">Hi ${name},</p>`,
-      '<p style="margin:0 0 18px;">Vorinthex is being built in stealth mode, behind the scenes and in private.</p>',
-      '<p style="margin:0 0 22px;">The first doors open in 2027.</p>',
-      '<p style="margin:0 0 18px;">I am already building with Vorinthex AI in private.</p>',
-      '<p style="margin:0 0 22px;">At 20, I am using it behind the scenes to build and scale apps. The first proof: idea to live on the App Store and Play Store in 20 days.</p>',
-      '<p style="margin:0 0 18px;">Vorinthex is being shaped as your hidden AI team for turning app ideas into real products: built, launched, marketed, and grown without needing to become technical first.</p>',
-      '<p style="margin:0;">I believe this can help more people turn ideas into real businesses, create new income paths, and build toward greater financial independence.</p>',
+      '<p style="margin:0 0 18px;">Your place on the Vorinthex waitlist is reserved — but it is not secured until you verify this email.</p>',
+      '<p style="margin:0 0 18px;">Vorinthex is being built in stealth mode, behind the scenes and in private. The first doors open in 2027.</p>',
+      '<p style="margin:0 0 18px;">I am already building with Vorinthex AI behind the scenes — the first proof: idea to live on the App Store and Play Store in 20 days.</p>',
+      '<p style="margin:0;">One click below locks in your spot.</p>',
     ].join(''),
     actionUrl: input.verifyLink,
-    actionLabel: 'Verify email',
-    supportingHtml: `Confirm your email to keep your waitlist place. This link expires in 12 hours at ${input.expiresAt.toISOString()}.`,
+    actionLabel: 'Secure my spot',
+    supportingHtml: `Your spot is only locked in once you verify. This link expires in 12 hours at ${input.expiresAt.toISOString()}.`,
     footerHtml: 'You received this because this email address was used to join the Vorinthex waitlist.',
     extraPayload: {
       verification_link: input.verifyLink,
@@ -100,24 +101,36 @@ export async function sendWaitlistVerificationEmailForUser(user: Pick<User, 'key
   return { verifyLink, expiresAt: challenge.expiresAt };
 }
 
-export async function requestWaitlistVerification(email: string) {
+export async function requestWaitlistVerification(email: string, explorerId?: string, distinctId?: string, tempEmailHash?: string) {
   const normalized = normalizeWaitlistEmail(email);
   const entry = await upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
     is_subscribed_to_updates: true,
-  });
+  }, { distinctId: distinctId ?? null });
+  if (explorerId) {
+    await adoptExplorerFragments(explorerId, entry.key);
+  }
   trackPlatformEvent({
     slug: 'waitlist.signup_submitted',
     userId: entry.key,
     data: {
       user_id: entry.key,
       email_hash: entry.emailHash,
+      ...(tempEmailHash ? { temp_email_hash: tempEmailHash } : {}),
       is_verified: entry.isVerified,
     },
   });
+  notifyCountersDirty();
+
+  const alias = entry.alias ?? generateAlias(entry.key);
 
   if (entry.isVerified) {
-    return { email: entry.email, isVerified: true as const };
+    return {
+      email: entry.email,
+      isVerified: true as const,
+      alias,
+      waitlistNumber: entry.waitlistNumber,
+    };
   }
 
   const delivery = await sendWaitlistVerificationEmailForUser(entry);
@@ -125,6 +138,8 @@ export async function requestWaitlistVerification(email: string) {
   return {
     email: entry.email,
     isVerified: false as const,
+    alias,
+    waitlistNumber: entry.waitlistNumber,
     verificationEmailSent: true,
     expiresAt: delivery.expiresAt,
     devVerifyLink: process.env.NODE_ENV === 'production' ? undefined : delivery.verifyLink,
@@ -155,5 +170,15 @@ export async function verifyWaitlistEmail(tokenHash: string) {
       email_hash: entry.emailHash,
     },
   });
-  return { id: entry.key, email: entry.email, isVerified: entry.isVerified };
+  notifyCountersDirty();
+
+  const alias = entry.alias ?? generateAlias(entry.key);
+  return {
+    id: entry.key,
+    email: entry.email,
+    isVerified: entry.isVerified,
+    alias,
+    waitlistNumber: entry.waitlistNumber,
+    welcomeLine: pickWelcomeLine(entry.key, alias),
+  };
 }

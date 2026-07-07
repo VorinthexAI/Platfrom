@@ -31,6 +31,7 @@ export const insertPaymentCheckout = helpers.insert;
 export const getPaymentCheckoutById = helpers.getById;
 export const updatePaymentCheckout = helpers.updateById;
 export const deletePaymentCheckout = helpers.deleteById;
+export const upsertPaymentCheckoutByKey = helpers.upsertByKey;
 export const getAllPaymentCheckoutsChunked = helpers.getAllChunked;
 export const listPaymentCheckoutsPage = helpers.listPage;
 

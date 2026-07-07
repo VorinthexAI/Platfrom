@@ -5,9 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="x-apple-disable-message-reformatting">
     <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="color-scheme" content="dark">
+    <meta name="supported-color-schemes" content="dark">
     <title>{{subject}}</title>
-    <link rel="stylesheet" href="../layout.css">
     <style>
+      :root {
+        color-scheme: dark;
+        supported-color-schemes: dark;
+      }
+
       @media screen and (max-width: 620px) {
         .vtx-shell {
           width: 100% !important;
@@ -15,12 +21,12 @@
         }
 
         .vtx-panel {
-          padding: 32px 22px !important;
+          padding: 34px 22px !important;
         }
 
         .vtx-title {
-          font-size: 32px !important;
-          line-height: 1.08 !important;
+          font-size: 27px !important;
+          line-height: 1.16 !important;
         }
 
         .vtx-button {
@@ -31,23 +37,23 @@
       }
     </style>
   </head>
-  <body style="margin:0; padding:0; background:var(--vtx-color-page, #faf7f2); color:var(--vtx-color-text, #1c1a17); font-family:var(--vtx-font-serif, Georgia, Cambria, 'Times New Roman', serif);">
+  <body style="margin:0; padding:0; background:#030507; background-color:#030507; color:#dde2e5; font-family:'Helvetica Neue', Helvetica, Arial, 'Segoe UI', sans-serif;">
     <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent; line-height:1px;">
       {{preheader}}
     </div>
 
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:var(--vtx-color-page, #faf7f2); margin:0; padding:0; width:100%;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#030507; background-color:#030507; margin:0; padding:0; width:100%;">
       <tr>
-        <td align="center" style="padding:40px 16px;">
+        <td align="center" style="padding:48px 16px;">
           <table class="vtx-shell" role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px; max-width:600px; table-layout:fixed;">
             <tr>
-              <td style="padding:0 0 18px;">
+              <td style="padding:0 0 22px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                   <tr>
-                    <td align="left" style="font-size:19px; line-height:1.2; font-weight:500; color:var(--vtx-color-text, #1c1a17); letter-spacing:0;">
+                    <td align="left" style="font-size:16px; line-height:1.2; font-weight:600; color:#f5f7f8; letter-spacing:0.24em; text-transform:uppercase;">
                       Vorinthex
                     </td>
-                    <td align="right" style="font-size:12px; line-height:1.2; font-weight:500; color:var(--vtx-color-muted, #6b6358); letter-spacing:0.18em; text-transform:uppercase;">
+                    <td align="right" style="font-family:Consolas, Menlo, 'Courier New', monospace; font-size:11px; line-height:1.2; font-weight:500; color:#7b858c; letter-spacing:0.22em; text-transform:uppercase;">
                       {{label}}
                     </td>
                   </tr>
@@ -56,30 +62,30 @@
             </tr>
 
             <tr>
-              <td class="vtx-panel" style="background:var(--vtx-color-surface, #ffffff); border:1px solid var(--vtx-color-border, #e3dcd0); border-radius:var(--vtx-radius-lg, 12px); padding:44px;">
+              <td class="vtx-panel" style="background:#0d1117; background-color:#0d1117; background-image:linear-gradient(180deg, #141922 0%, #0a0e13 100%); border:1px solid rgba(221,226,229,0.14); border-radius:20px; padding:46px 44px;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
                   <tr>
-                    <td style="font-size:13px; line-height:1.2; font-weight:500; color:var(--vtx-color-accent, #8b6f47); letter-spacing:0.18em; text-transform:uppercase; padding:0 0 18px;">
+                    <td style="font-family:Consolas, Menlo, 'Courier New', monospace; font-size:11px; line-height:1.2; font-weight:600; color:#aeb6bc; letter-spacing:0.22em; text-transform:uppercase; padding:0 0 22px;">
                       {{eyebrow}}
                     </td>
                   </tr>
                   <tr>
-                    <td class="vtx-title" style="font-size:40px; line-height:1.06; font-weight:400; color:var(--vtx-color-text, #1c1a17); letter-spacing:0; padding:0 0 20px;">
+                    <td class="vtx-title" style="font-size:32px; line-height:1.12; font-weight:600; color:#f5f7f8; letter-spacing:0; padding:0 0 22px;">
                       {{headline}}
                     </td>
                   </tr>
                   <tr>
-                    <td style="font-size:17px; line-height:1.58; font-weight:400; color:var(--vtx-color-text, #1c1a17); padding:0 0 26px;">
+                    <td style="font-size:16px; line-height:1.65; font-weight:400; color:#dde2e5; padding:0 0 28px;">
                       {{body_html}}
                     </td>
                   </tr>
 
                   <tr>
-                    <td style="padding:0 0 30px;">
+                    <td style="padding:0 0 32px;">
                       <table class="vtx-button-wrap" role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%; table-layout:fixed;">
                         <tr>
                           <td align="left" style="padding:0;">
-                            <a class="vtx-button" href="{{action_url}}" style="background:var(--vtx-color-accent, #8b6f47); border:1px solid var(--vtx-color-accent, #8b6f47); border-radius:var(--vtx-radius-md, 9px); color:var(--vtx-color-page, #faf7f2); display:inline-block; font-size:15px; font-weight:500; line-height:1.2; max-width:100%; mso-padding-alt:0; padding:13px 26px; text-decoration:none; box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word;">
+                            <a class="vtx-button" href="{{action_url}}" style="background:#dde2e5; background-color:#dde2e5; background-image:linear-gradient(135deg, #ffffff 0%, #dde2e5 45%, #aeb6bc 100%); border:1px solid rgba(255,255,255,0.55); border-radius:999px; color:#030507; display:inline-block; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; line-height:1.2; max-width:100%; mso-padding-alt:0; padding:15px 32px; text-decoration:none; box-sizing:border-box; overflow-wrap:anywhere; word-break:break-word; box-shadow:0 0 34px rgba(221,226,229,0.22);">
                               {{action_label}}
                             </a>
                           </td>
@@ -89,7 +95,13 @@
                   </tr>
 
                   <tr>
-                    <td style="background:var(--vtx-color-secondary, #f0ebe2); border-radius:var(--vtx-radius-md, 9px); color:var(--vtx-color-muted, #6b6358); font-size:14px; line-height:1.5; padding:14px 16px;">
+                    <td style="padding:0 0 28px;">
+                      <div style="height:1px; line-height:1px; font-size:0; background:rgba(221,226,229,0.14); background-image:linear-gradient(90deg, rgba(221,226,229,0), rgba(221,226,229,0.32), rgba(221,226,229,0));">&nbsp;</div>
+                    </td>
+                  </tr>
+
+                  <tr>
+                    <td style="background:#141922; background-color:#141922; border:1px solid rgba(221,226,229,0.10); border-radius:12px; color:#aeb6bc; font-size:14px; line-height:1.55; padding:16px 18px;">
                       {{supporting_html}}
                     </td>
                   </tr>
@@ -98,15 +110,15 @@
             </tr>
 
             <tr>
-              <td style="padding:22px 0 0; color:var(--vtx-color-muted, #6b6358); font-size:13px; line-height:1.55;">
+              <td style="padding:24px 0 0; color:#7b858c; font-size:13px; line-height:1.55;">
                 {{footer_html}}
               </td>
             </tr>
 
             <tr>
-              <td style="padding:14px 0 0; color:var(--vtx-color-muted, #6b6358); font-size:12px; line-height:1.5;">
+              <td style="padding:14px 0 0; color:#7b858c; font-size:12px; line-height:1.5;">
                 If the button does not work, open this link:<br>
-                <a href="{{action_url}}" style="color:var(--vtx-color-accent, #8b6f47); text-decoration:underline; word-break:break-all;">{{action_url}}</a>
+                <a href="{{action_url}}" style="color:#aeb6bc; text-decoration:underline; word-break:break-all;">{{action_url}}</a>
               </td>
             </tr>
           </table>

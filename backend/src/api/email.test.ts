@@ -22,6 +22,13 @@ describe('email rendering', () => {
     expect(html).toContain('https://app.example.com/action');
     expect(html).toContain('vtx-button-wrap');
     expect(html).toContain('box-sizing:border-box');
+    expect(html).toContain('background-color:#030507');
+    expect(html).toContain('border:1px solid rgba(221,226,229,0.14)');
+    expect(html).toContain('border-radius:999px');
+    expect(html).toContain('color:#030507');
+    expect(html).not.toContain('#faf7f2');
+    expect(html).not.toContain('#8b6f47');
+    expect(html).not.toContain('layout.css');
     const buttonCss = html.match(/\.vtx-button\s*\{([^}]*)\}/)?.[1] ?? '';
     const buttonDeclarations = buttonCss.split(';').map((value) => value.trim());
     expect(buttonDeclarations).not.toContain('width: 100% !important');
@@ -45,7 +52,10 @@ describe('email rendering', () => {
     expect(html).toContain('A quiet signal');
     expect(html).toContain('Unsubscribe here');
     expect(html).toContain('https://app.example.com/public/updates/unsubscribe?token_hash=abc');
+    expect(html).toContain('background-color:#030507');
     expect(html).not.toContain('{{action_url}}');
     expect(html).not.toContain('vtx-button');
+    expect(html).not.toContain('#faf7f2');
+    expect(html).not.toContain('#6b6358');
   });
 });

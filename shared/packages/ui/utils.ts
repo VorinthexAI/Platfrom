@@ -19,9 +19,9 @@ export const iconColors = {
 } as const;
 
 export const nativeIconColors = {
-  default: "#1C1A17",
-  muted: "#6B6358",
-  accent: "#8B6F47",
-  danger: "#7F2E2E",
-  inverse: "#FAF7F2",
+  default: "#F5F7F8",
+  muted: "#7B858C",
+  accent: "#DDE2E5",
+  danger: "#B04A4A",
+  inverse: "#030507",
 } as const;

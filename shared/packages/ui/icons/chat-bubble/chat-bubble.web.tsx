@@ -1,5 +1,5 @@
 import type { SVGProps } from "react";
-export type ChatBubbleIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type ChatBubbleIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type ChatBubbleIconSize = "sm" | "md" | "lg";
 export type ChatBubbleIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: ChatBubbleIconVariant;
@@ -8,12 +8,13 @@ export type ChatBubbleIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<ChatBubbleIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<ChatBubbleIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function ChatBubbleIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: ChatBubbleIconProps) {
+export function ChatBubbleIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: ChatBubbleIconProps) {
   const pixelSize = sizes[size];
   const color = colors[variant];
   return (

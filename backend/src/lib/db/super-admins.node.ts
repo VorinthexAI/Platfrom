@@ -26,6 +26,7 @@ export const insertSuperAdmin = helpers.insert;
 export const getSuperAdminById = helpers.getById;
 export const updateSuperAdmin = helpers.updateById;
 export const deleteSuperAdmin = helpers.deleteById;
+export const upsertSuperAdminByKey = helpers.upsertByKey;
 export const getAllSuperAdminsChunked = helpers.getAllChunked;
 export const listSuperAdminsPage = helpers.listPage;
 

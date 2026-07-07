@@ -1,18 +1,42 @@
 :root {
-  --vui-color-page: #faf7f2;
-  --vui-color-secondary: #f0ebe2;
-  --vui-color-surface: #ffffff;
-  --vui-color-text: #1c1a17;
-  --vui-color-muted: #6b6358;
-  --vui-color-accent: #8b6f47;
-  --vui-color-accent-light: #c9a876;
-  --vui-color-border: #e3dcd0;
-  --vui-color-danger: #7f2e2e;
-  --vui-radius-sm: 6px;
-  --vui-radius-md: 9px;
-  --vui-radius-lg: 12px;
-  --vui-font-serif: var(--font-fraunces), Fraunces, Georgia, Cambria,
-    "Times New Roman", serif;
+  --vui-color-page: #030507;
+  --vui-color-secondary: #0d1117;
+  --vui-color-surface: #141922;
+  --vui-color-text: #f5f7f8;
+  --vui-color-muted: #7b858c;
+  --vui-color-accent: #dde2e5;
+  --vui-color-accent-light: #ffffff;
+  --vui-color-border: rgba(221, 226, 229, 0.14);
+  --vui-color-danger: #b04a4a;
+  --vui-radius-sm: 10px;
+  --vui-radius-md: 14px;
+  --vui-radius-lg: 24px;
+  --vui-radius-pill: 999px;
+  --vui-font-serif: var(--font-cinzel), Cinzel, "Cormorant Garamond", serif;
+  --vui-font-ui: var(--font-geist), Geist, Inter, system-ui, sans-serif;
+  --vui-font-mono: var(--font-jetbrains), "JetBrains Mono", "IBM Plex Mono",
+    monospace;
+  --vui-gradient-chrome: linear-gradient(
+    135deg,
+    #ffffff 0%,
+    #aeb6bc 18%,
+    #3c434a 38%,
+    #f5f7f8 55%,
+    #7b858c 76%,
+    #ffffff 100%
+  );
+  --vui-gradient-panel: linear-gradient(
+    180deg,
+    rgba(20, 25, 34, 0.88),
+    rgba(3, 5, 7, 0.96)
+  );
+  --vui-gradient-border: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.42),
+    rgba(123, 133, 140, 0.18),
+    rgba(255, 255, 255, 0.12)
+  );
+  --vui-ease-luxury: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @theme inline {
@@ -22,61 +46,178 @@
   --color-surface: var(--vui-color-surface);
   --color-border: var(--vui-color-border);
   --color-accent: var(--vui-color-accent);
-  --font-sans: var(--vui-font-serif);
+  --font-sans: var(--vui-font-ui);
   --font-serif: var(--vui-font-serif);
 }
 
 .vui-button {
   align-items: center;
-  border-radius: var(--vui-radius-md);
+  border-radius: var(--vui-radius-pill);
   border: 1px solid transparent;
   cursor: pointer;
   display: inline-flex;
-  font-family: var(--vui-font-serif);
-  font-size: 15px;
-  font-weight: 500;
+  font-family: var(--vui-font-ui);
+  font-size: 13px;
+  font-weight: 600;
   gap: 8px;
+  /* Own stacking context + clip so the loading fill can live BEHIND the
+     label (negative z-index) yet inside the pill. */
+  isolation: isolate;
   justify-content: center;
+  letter-spacing: 0.08em;
   line-height: 1.2;
   min-height: 42px;
+  overflow: hidden;
   padding: 12px 26px;
-  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+  position: relative;
+  text-transform: uppercase;
+  transition: background-position 800ms var(--vui-ease-luxury),
+    background-color 400ms var(--vui-ease-luxury),
+    border-color 400ms var(--vui-ease-luxury),
+    box-shadow 400ms var(--vui-ease-luxury),
+    color 400ms var(--vui-ease-luxury),
+    transform 400ms var(--vui-ease-luxury);
 }
 
-.vui-button:focus-visible,
-.vui-control:focus-visible {
+.vui-button:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--vui-color-accent);
+  box-shadow: 0 0 0 1px rgba(221, 226, 229, 0.6),
+    0 0 24px rgba(221, 226, 229, 0.22);
+}
+
+.vui-control:focus-visible {
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 0 3px rgba(221, 226, 229, 0.08),
+    0 0 24px rgba(221, 226, 229, 0.14);
+  outline: none;
 }
 
 .vui-button:disabled,
 .vui-button[aria-disabled="true"] {
-  background: var(--vui-color-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: none;
   color: var(--vui-color-muted);
   cursor: not-allowed;
   opacity: 0.7;
+  transform: none;
+}
+
+/* Loading: the button is disabled but very much alive — the rising
+   chrome melt carries the state, and the label darkens to stay legible
+   on top of it. */
+.vui-button[aria-busy="true"] {
+  color: #030507;
+  cursor: progress;
+  opacity: 1;
+}
+
+/* The melt itself: a chrome gradient floods up from the floor of the
+   pill, its surface churning, bubbles climbing through it until the
+   whole button has filled with liquid metal. */
+.vui-button-fill {
+  animation:
+    vui-fill-rise 1.4s var(--vui-ease-luxury) forwards,
+    vui-fill-churn 2.6s ease-in-out infinite;
+  background: var(--vui-gradient-chrome);
+  background-size: 220% 220%;
+  border-radius: inherit;
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transform-origin: bottom;
+  z-index: -1;
+}
+
+.vui-button-fill::before,
+.vui-button-fill::after {
+  animation: vui-fill-bubble 1.3s ease-in infinite;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.95),
+    rgba(255, 255, 255, 0) 70%
+  );
+  border-radius: 50%;
+  bottom: -6px;
+  content: "";
+  height: 10px;
+  opacity: 0;
+  position: absolute;
+  width: 10px;
+}
+
+.vui-button-fill::before {
+  animation-delay: 0.25s;
+  left: 27%;
+}
+
+.vui-button-fill::after {
+  animation-delay: 0.85s;
+  height: 7px;
+  left: 66%;
+  width: 7px;
+}
+
+@keyframes vui-fill-rise {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes vui-fill-churn {
+  0% {
+    background-position: 0% 100%;
+  }
+  50% {
+    background-position: 100% 0%;
+  }
+  100% {
+    background-position: 0% 100%;
+  }
+}
+
+@keyframes vui-fill-bubble {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  25% {
+    opacity: 0.85;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-34px) scale(1.2);
+  }
 }
 
 .vui-button-primary {
-  background: var(--vui-color-accent);
-  color: var(--vui-color-page);
+  background: var(--vui-gradient-chrome);
+  background-position: 0% 0%;
+  background-size: 200% 200%;
+  color: #030507;
+  box-shadow: 0 0 34px rgba(221, 226, 229, 0.18);
 }
 
 .vui-button-primary:hover:not(:disabled) {
-  background: var(--vui-color-accent-light);
+  background-position: 100% 100%;
+  box-shadow: 0 0 44px rgba(221, 226, 229, 0.3);
+  transform: translateY(-1px);
 }
 
 .vui-button-secondary,
 .vui-button-outline {
-  background: transparent;
-  border-color: var(--vui-color-border);
-  color: var(--vui-color-muted);
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(221, 226, 229, 0.18);
+  color: var(--vui-color-accent);
 }
 
 .vui-button-secondary:hover:not(:disabled),
 .vui-button-outline:hover:not(:disabled) {
-  border-color: var(--vui-color-accent);
-  color: var(--vui-color-accent);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(221, 226, 229, 0.4);
+  color: var(--vui-color-accent-light);
 }
 
 .vui-button-ghost {
@@ -84,14 +225,25 @@
   color: var(--vui-color-accent);
   min-height: auto;
   padding: 0;
+  text-underline-offset: 4px;
+}
+
+.vui-button-ghost:hover:not(:disabled) {
+  color: var(--vui-color-accent-light);
+  text-decoration: underline;
 }
 
 .vui-button-danger {
   background: var(--vui-color-danger);
-  color: var(--vui-color-page);
+  color: var(--vui-color-text);
+}
+
+.vui-button-danger:hover:not(:disabled) {
+  background: #c05555;
 }
 
 .vui-button-icon {
+  border-radius: var(--vui-radius-pill);
   height: 42px;
   min-height: 42px;
   padding: 0;
@@ -99,35 +251,41 @@
 }
 
 .vui-control {
-  background: var(--vui-color-page);
-  border: 1px solid var(--vui-color-border);
-  border-radius: var(--vui-radius-md);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--vui-radius-pill);
   color: var(--vui-color-text);
-  font-family: var(--vui-font-serif);
+  font-family: var(--vui-font-ui);
   font-size: 16px;
-  min-height: 42px;
-  padding: 10px 12px;
+  min-height: 44px;
+  padding: 12px 20px;
+  transition: border-color 400ms var(--vui-ease-luxury),
+    box-shadow 400ms var(--vui-ease-luxury);
   width: 100%;
 }
 
 .vui-control::placeholder {
-  color: var(--vui-color-muted);
+  color: #3c434a;
 }
 
 .vui-card,
 .vui-panel {
-  background: var(--vui-color-surface);
-  border: 1px solid var(--vui-color-border);
+  background: var(--vui-gradient-panel);
+  border: 1px solid rgba(221, 226, 229, 0.12);
   border-radius: var(--vui-radius-lg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 24px 80px rgba(0, 0, 0, 0.55);
   color: var(--vui-color-text);
   padding: clamp(24px, 3vw, 44px);
 }
 
 .vui-totp-setup {
   align-items: stretch;
-  background: var(--vui-color-surface);
-  border: 1px solid var(--vui-color-border);
+  background: var(--vui-gradient-panel);
+  border: 1px solid rgba(221, 226, 229, 0.12);
   border-radius: var(--vui-radius-lg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 24px 80px rgba(0, 0, 0, 0.55);
   color: var(--vui-color-text);
   display: grid;
   gap: 18px;
@@ -141,13 +299,16 @@
 }
 
 .vui-totp-setup-copy h2 {
+  font-family: var(--vui-font-serif);
   font-size: clamp(1.875rem, 4vw, 2.5rem);
   font-weight: 400;
+  letter-spacing: 0.04em;
   line-height: 1.05;
 }
 
 .vui-totp-setup-copy p:not(.vui-label) {
   color: var(--vui-color-muted);
+  font-family: var(--vui-font-ui);
   font-size: 15px;
   line-height: 1.6;
 }
@@ -156,8 +317,8 @@
   align-items: center;
   align-self: center;
   aspect-ratio: 1;
-  background: var(--vui-color-page);
-  border: 1px solid var(--vui-color-border);
+  background: #f5f7f8;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--vui-radius-md);
   display: flex;
   justify-content: center;
@@ -176,11 +337,17 @@
 
 .vui-totp-setup-deep-link {
   color: var(--vui-color-accent);
+  cursor: pointer;
+  font-family: var(--vui-font-ui);
   font-size: 15px;
   font-weight: 500;
   justify-self: center;
   text-decoration: underline;
   text-underline-offset: 4px;
+}
+
+.vui-totp-setup-deep-link:hover {
+  color: var(--vui-color-accent-light);
 }
 
 .vui-totp-setup-extra {
@@ -189,10 +356,10 @@
 
 .vui-label {
   color: var(--vui-color-muted);
-  font-family: var(--vui-font-serif);
-  font-size: 13px;
+  font-family: var(--vui-font-mono);
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.22em;
   line-height: 1.2;
   text-transform: uppercase;
 }
@@ -200,48 +367,57 @@
 .vui-badge,
 .vui-tag {
   align-items: center;
-  background: var(--vui-color-secondary);
-  border-radius: 999px;
-  color: var(--vui-color-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(221, 226, 229, 0.14);
+  border-radius: var(--vui-radius-pill);
+  color: var(--vui-color-accent);
   display: inline-flex;
-  font-family: var(--vui-font-serif);
-  font-size: 13px;
+  font-family: var(--vui-font-mono);
+  font-size: 12px;
   gap: 8px;
-  padding: 6px 10px;
+  letter-spacing: 0.08em;
+  padding: 6px 12px;
 }
 
 .vui-table {
   border-collapse: collapse;
   color: var(--vui-color-text);
-  font-family: var(--vui-font-serif);
+  font-family: var(--vui-font-ui);
   width: 100%;
 }
 
 .vui-table th {
   color: var(--vui-color-muted);
-  font-size: 12px;
+  font-family: var(--vui-font-mono);
+  font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.22em;
   padding: 0 0 12px;
   text-align: left;
   text-transform: uppercase;
 }
 
 .vui-table td {
-  border-top: 1px solid var(--vui-color-border);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   padding: 18px 0;
 }
 
 .vui-divider {
-  background: var(--vui-color-border);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(221, 226, 229, 0.32),
+    transparent
+  );
   border: 0;
   height: 1px;
   width: 100%;
 }
 
 .vui-alert {
-  border: 1px solid var(--vui-color-border);
+  border: 1px solid rgba(221, 226, 229, 0.14);
   border-radius: var(--vui-radius-md);
+  font-family: var(--vui-font-ui);
   font-size: 14px;
   line-height: 1.4;
   padding: 12px 16px;
@@ -249,27 +425,62 @@
 
 .vui-alert-info {
   background: var(--vui-color-secondary);
-  color: var(--vui-color-text);
+  color: var(--vui-color-accent);
 }
 
 .vui-alert-danger {
-  background: var(--vui-color-page);
-  border-color: var(--vui-color-danger);
-  color: var(--vui-color-danger);
+  background: rgba(176, 74, 74, 0.1);
+  border-color: rgba(176, 74, 74, 0.45);
+  color: #d98f8f;
 }
 
+/* Standalone Spinner component: three silver bubbles rising and settling
+   in sequence. (Buttons use the vui-button-fill melt instead.) */
 .vui-spinner {
-  animation: vui-spin 900ms linear infinite;
-  border: 1px solid var(--vui-color-border);
-  border-radius: 999px;
-  border-top-color: var(--vui-color-accent);
+  animation: vui-bubble 1.1s ease-in-out infinite;
+  animation-delay: 0.18s;
+  background: currentColor;
+  border-radius: var(--vui-radius-pill);
   display: inline-block;
-  height: 20px;
-  width: 20px;
+  height: 6px;
+  position: relative;
+  width: 6px;
 }
 
-@keyframes vui-spin {
-  to {
-    transform: rotate(360deg);
+.vui-spinner::before,
+.vui-spinner::after {
+  animation: vui-bubble 1.1s ease-in-out infinite;
+  background: currentColor;
+  border-radius: var(--vui-radius-pill);
+  content: "";
+  height: 6px;
+  position: absolute;
+  top: 0;
+  width: 6px;
+}
+
+.vui-spinner::before {
+  animation-delay: 0s;
+  left: -10px;
+}
+
+.vui-spinner::after {
+  animation-delay: 0.36s;
+  left: 10px;
+}
+
+@keyframes vui-bubble {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0) scale(0.72);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1.08);
+  }
+  70% {
+    opacity: 0.55;
+    transform: translateY(0.5px) scale(0.9);
   }
 }

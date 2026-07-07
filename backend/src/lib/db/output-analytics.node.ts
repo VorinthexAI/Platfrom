@@ -23,6 +23,7 @@ const helpers = createNodeHelpers(OUTPUT_ANALYTICS_COLLECTION, outputAnalyticsSc
 export const insertOutputAnalytics = helpers.insert;
 export const getOutputAnalyticsById = helpers.getById;
 export const deleteOutputAnalytics = helpers.deleteById;
+export const upsertOutputAnalyticsByKey = helpers.upsertByKey;
 export const getAllOutputAnalyticsChunked = helpers.getAllChunked;
 export const listOutputAnalyticsPage = helpers.listPage;
 

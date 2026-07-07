@@ -1,9 +1,12 @@
 .env
 *.env
 prod.env
+.github/.configs/secrets.json
 environments/**/.env.dev
 environments/**/.env.prod
-.github/.configs/secrets.json
+environments/**/db.seeds.secrets.json
+.temp
+backend/scripts/tmp-*.ts
 
 node_modules/
 .next/

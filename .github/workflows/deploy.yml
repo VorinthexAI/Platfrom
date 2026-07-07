@@ -82,6 +82,7 @@ jobs:
                 while IFS= read -r file; do
                   [ -n "$file" ] || continue
                   case "$file" in
+                    web/app/*) vorinthex=true; orbit=true ;;
                     web/landing-pages/vorinthex/*) vorinthex=true ;;
                     web/landing-pages/orbit/*) orbit=true ;;
                     backend/*) backend=true ;;
@@ -102,6 +103,7 @@ jobs:
             while IFS= read -r file; do
               [ -n "$file" ] || continue
               case "$file" in
+                web/app/*) vorinthex=true; orbit=true ;;
                 web/landing-pages/vorinthex/*) vorinthex=true ;;
                 web/landing-pages/orbit/*) orbit=true ;;
                 backend/*) backend=true ;;
@@ -134,6 +136,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - name: Unlock encrypted environments/**/.env.* files
+        env:
+          GIT_CRYPT_KEY_B64: ${{ secrets.GIT_CRYPT_KEY }}
+        run: |
+          test -n "$GIT_CRYPT_KEY_B64" || { echo "::error::GIT_CRYPT_KEY is not configured."; exit 1; }
+          sudo apt-get update && sudo apt-get install -y git-crypt
+          echo "$GIT_CRYPT_KEY_B64" | base64 -d > /tmp/git-crypt.key
+          git-crypt unlock /tmp/git-crypt.key
+          rm -f /tmp/git-crypt.key
       - name: Sync .github/.configs/vars.json to repo Variables
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
@@ -154,9 +165,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --linker=hoisted
       - name: Lint
-        run: bun run vorinthex:lint
+        run: bun run web:lint
       - name: Typecheck
-        run: bun run vorinthex:typecheck
+        run: bun run web:typecheck
 
   verify-orbit:
     name: Verify orbit web
@@ -171,9 +182,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile --linker=hoisted
       - name: Lint
-        run: bun run orbit:lint
+        run: bun run web:lint
       - name: Typecheck
-        run: bun run orbit:typecheck
+        run: bun run web:typecheck
 
   verify-backend:
     name: Verify backend
@@ -199,7 +210,7 @@ jobs:
     if: needs.changes.outputs.vorinthex == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     defaults:
       run:
-        working-directory: web/landing-pages/vorinthex
+        working-directory: web/app
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -208,8 +219,8 @@ jobs:
 
       - name: Strip non-app content from the build context
         run: |
-          rm -rf ../../../shared/brand ../../../shared/docs ../../../.claude
-          rm -f CLAUDE.md AGENTS.md admin.md ../../../CLAUDE.md ../../../AGENTS.md
+          rm -rf ../../shared/brand ../../shared/docs ../../.claude
+          rm -f CLAUDE.md AGENTS.md admin.md ../../CLAUDE.md ../../AGENTS.md
 
       - uses: oven-sh/setup-bun@v2
 
@@ -221,10 +232,10 @@ jobs:
 
       - name: Materialize web dependencies for Vercel tracing
         run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules"
-          mkdir -p "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules/"
-          test -f "${GITHUB_WORKSPACE}/web/landing-pages/vorinthex/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
+          test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
         env:
@@ -332,7 +343,7 @@ jobs:
     if: needs.changes.outputs.orbit == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     defaults:
       run:
-        working-directory: web/landing-pages/orbit
+        working-directory: web/app
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -341,8 +352,8 @@ jobs:
 
       - name: Strip non-app content from the build context
         run: |
-          rm -rf ../../../shared/brand ../../../shared/docs ../../../.claude
-          rm -f CLAUDE.md AGENTS.md admin.md ../../../CLAUDE.md ../../../AGENTS.md
+          rm -rf ../../shared/brand ../../shared/docs ../../.claude
+          rm -f CLAUDE.md AGENTS.md admin.md ../../CLAUDE.md ../../AGENTS.md
 
       - uses: oven-sh/setup-bun@v2
 
@@ -354,10 +365,10 @@ jobs:
 
       - name: Materialize web dependencies for Vercel tracing
         run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules"
-          mkdir -p "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules/"
-          test -f "${GITHUB_WORKSPACE}/web/landing-pages/orbit/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
+          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules"
+          mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
+          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
+          test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
 
       - name: Load production env file
         env:
@@ -691,6 +702,89 @@ jobs:
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
           bun run --cwd backend polar:sync
+
+  seed-db-secrets:
+    name: Upsert db.seeds.secrets.json to production
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'pull_request' || inputs.deploy
+    environment: production
+    env:
+      EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
+      EC2_USER: ${{ secrets.GRAPH_DB_EC2_USER }}
+      EC2_SSH_KEY: ${{ secrets.GRAPH_DB_EC2_SSH_KEY }}
+      EC2_SSH_KEY_B64: ${{ secrets.GRAPH_DB_EC2_SSH_KEY_B64 }}
+      GIT_CRYPT_KEY_B64: ${{ secrets.GIT_CRYPT_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - name: Unlock encrypted environments/**/.env.* and db.seeds.secrets.json
+        run: |
+          test -n "$GIT_CRYPT_KEY_B64" || { echo "::error::GIT_CRYPT_KEY is not configured."; exit 1; }
+          sudo apt-get update && sudo apt-get install -y git-crypt
+          echo "$GIT_CRYPT_KEY_B64" | base64 -d > /tmp/git-crypt.key
+          git-crypt unlock /tmp/git-crypt.key
+          rm -f /tmp/git-crypt.key
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --linker=hoisted
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Open SSH tunnel to ArangoDB
+        run: |
+          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
+          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("﻿").strip())')"
+          export EC2_HOST EC2_USER
+          mkdir -p ~/.ssh
+          if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
+            python3 - <<'PY' > ~/.ssh/deploy_key
+          import base64
+          import os
+          import sys
+
+          key_b64 = "".join(os.environ.get("EC2_SSH_KEY_B64", "").split())
+          print(f"Using EC2_SSH_KEY_B64 ({len(key_b64)} chars, mod4={len(key_b64) % 4})", file=sys.stderr)
+          try:
+              sys.stdout.buffer.write(base64.b64decode(key_b64, validate=True))
+          except Exception as exc:
+              sys.exit(f"Invalid EC2_SSH_KEY_B64: {exc}")
+          PY
+          else
+            python3 - <<'PY' > ~/.ssh/deploy_key
+          import os
+          import sys
+
+          key = os.environ.get("EC2_SSH_KEY", "").strip()
+          if not key:
+              sys.exit("EC2_SSH_KEY is empty")
+          key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
+          print(key)
+          PY
+          fi
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
+          ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for graph database host; SSH will use accept-new."
+          printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
+          ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
+      - name: Fetch ArangoDB credentials from SSM
+        run: |
+          creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
+          arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
+          arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
+          test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
+          echo "::add-mask::$arango_password"
+          echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
+          echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
+      - name: Upsert db.seeds.secrets.json
+        env:
+          ARANGO_URL: http://127.0.0.1:8529
+          ARANGO_USERNAME: root
+          SEEDS_FILE: ${{ github.workspace }}/environments/backend/db.seeds.secrets.json
+        run: bun run --cwd backend seed:secrets
 
   backend-app:
     name: Deploy backend app role

@@ -20,9 +20,12 @@ import { appendUserEvents, postUserEventsBodySchema } from './user-events';
 import { parseJson, parseQuery, strictObject } from './validation';
 import { createPaymentCheckout, handlePolarWebhook, listUserEntitlements, POLAR_WEBHOOK_PATH } from './payments';
 import { requestWaitlistVerification, verifyWaitlistEmail } from './waitlist';
+import { recordPlatformClientEvent } from './platform-events';
+import { collectFragment, getFragmentsSummary } from './fragments';
+import { streamLiveCounters } from './live';
+import { joinPresence, leavePresence, presenceBeat, streamPresence } from './presence';
 import { unsubscribeFromUpdates } from './updates';
 import { hashUserEmail } from './users';
-import { clientEventSlugSchema, trackPlatformEvent } from '@/platform/events';
 import { listNodes } from './nodes';
 import {
   attachCurrentMindCapability,
@@ -41,8 +44,8 @@ import {
   upsertCurrentMind,
 } from './system';
 
-const jsonObject = z.record(z.string(), z.unknown()).default({});
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
+const tempEmailHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
 const challengeTokenHashBodyBase = strictObject({
   challenge_token_hash: challengeHash,
@@ -144,42 +147,56 @@ export function registerRoutes(app: Hono) {
   });
 
   app.post('/waitlist', async (c) => {
-    const body = await parseJson(c, emailBody);
-    return c.json(await requestWaitlistVerification(body.email), 201);
+    const body = await parseJson(c, strictObject({
+      email: z.string().email(),
+      explorer_id: z.string().min(8).max(80).optional(),
+      distinct_id: z.string().min(8).max(80).optional(),
+      temp_email_hash: tempEmailHash.optional(),
+    }));
+    const result = await requestWaitlistVerification(body.email, body.explorer_id, body.distinct_id, body.temp_email_hash);
+    const { waitlistNumber, ...rest } = result;
+    return c.json({ ...rest, waitlist_number: waitlistNumber }, 201);
   });
 
-  app.post('/platform/events', async (c) => {
-    const body = await parseJson(c, strictObject({
-      distinctId: z.string().min(1).max(200),
-      slug: clientEventSlugSchema,
-      app_id: z.string().min(1).optional(),
-      source_id: z.string().min(1).optional(),
-      metadata: jsonObject.optional(),
-    }));
-    const userId = await getUserId(c);
-    trackPlatformEvent({
-      slug: body.slug,
-      appId: body.app_id,
-      sourceId: body.source_id,
-      userId,
-      data: { ...body.metadata, distinct_id: body.distinctId },
-    });
-    return c.json({ ok: true }, 202);
-  });
+  app.post('/platform/events', recordPlatformClientEvent);
 
   app.post('/waitlist/verify', async (c) => {
     const body = await parseJson(c, tokenHashBodyBase);
     const result = await verifyWaitlistEmail(body.token_hash);
     if (!result) return c.json({ error: 'invalid or expired verification link' }, 401);
-    return c.json({ ok: true, email: result.email, is_verified: result.isVerified });
+    return c.json({
+      ok: true,
+      email: result.email,
+      is_verified: result.isVerified,
+      alias: result.alias,
+      waitlist_number: result.waitlistNumber,
+      welcome_line: result.welcomeLine,
+    });
   });
 
   app.get('/waitlist/verify', async (c) => {
     const query = parseQuery(c, strictObject({ token_hash: challengeHash }));
     const result = await verifyWaitlistEmail(query.token_hash);
     if (!result) return c.json({ error: 'invalid or expired verification link' }, 401);
-    return c.json({ ok: true, email: result.email, is_verified: result.isVerified });
+    return c.json({
+      ok: true,
+      email: result.email,
+      is_verified: result.isVerified,
+      alias: result.alias,
+      waitlist_number: result.waitlistNumber,
+      welcome_line: result.welcomeLine,
+    });
   });
+
+  app.post('/fragments', collectFragment);
+  app.get('/fragments/summary', getFragmentsSummary);
+
+  app.get('/live/stream', streamLiveCounters);
+
+  app.post('/presence/join', joinPresence);
+  app.post('/presence/beat', presenceBeat);
+  app.post('/presence/leave', leavePresence);
+  app.get('/presence/stream', streamPresence);
 
   app.post('/newsletter', async (c) => {
     const body = await parseJson(c, emailBody);

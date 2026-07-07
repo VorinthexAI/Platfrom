@@ -3,21 +3,50 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "web/landing-pages/*",
+    "web/app",
     "backend",
-    "shared"
+    "shared",
+    "scripts/image",
+    "scripts/video",
+    "scripts/audio"
   ],
   "scripts": {
-    "vorinthex:lint": "bun run --cwd web/landing-pages/vorinthex lint",
-    "vorinthex:typecheck": "bun run --cwd web/landing-pages/vorinthex typecheck",
-    "orbit:lint": "bun run --cwd web/landing-pages/orbit lint",
-    "orbit:typecheck": "bun run --cwd web/landing-pages/orbit typecheck",
+    "design": "bun run --cwd scripts/image design",
+    "design:galaxy": "bun run --cwd scripts/image generate:galaxy",
+    "design:refresh-brand-capabilities": "bun run --cwd scripts/image refresh:brand-capabilities",
+    "design:gallery": "bun run --cwd scripts/image gallery",
+    "assets": "bun run --cwd scripts/image assets",
+    "design:validate": "bun run --cwd scripts/image validate",
+    "design:backup": "bun run --cwd scripts/image backup",
+    "design:backfill-svgs": "bun run --cwd scripts/image backfill:svgs",
+    "video": "bun run --cwd scripts/video video",
+    "video:list-targets": "bun run --cwd scripts/video list-targets",
+    "video:generate": "bun run --cwd scripts/video generate",
+    "video:capture-references": "bun run --cwd scripts/video capture-references",
+    "video:validate": "bun run --cwd scripts/video validate",
+    "audio": "bun run --cwd scripts/audio audio",
+    "audio:list-targets": "bun run --cwd scripts/audio list-targets",
+    "audio:generate": "bun run --cwd scripts/audio generate",
+    "audio:tts": "bun run --cwd scripts/audio tts",
+    "audio:merge": "bun run --cwd scripts/audio merge",
+    "audio:validate": "bun run --cwd scripts/audio validate",
+    "web:dev": "bun run --cwd web/app dev",
+    "web:build": "bun run --cwd web/app build",
+    "web:lint": "bun run --cwd web/app lint",
+    "web:typecheck": "bun run --cwd web/app typecheck",
     "backend:check": "bun run --cwd backend check",
-    "backend:test": "bun run --cwd backend test"
+    "backend:test": "bun run --cwd backend test",
+    "backend:manage": "bun run --cwd backend manage",
+    "backend:nodes": "bun run --cwd backend nodes",
+    "backend:reset": "bun run --cwd backend reset",
+    "backend:create-super-admin": "bun run --cwd backend create:super-admin"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
     "@types/react": "^19",
     "@types/react-dom": "^19"
-  }
+  },
+  "trustedDependencies": [
+    "ffmpeg-static"
+  ]
 }

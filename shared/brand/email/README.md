@@ -2,8 +2,11 @@
 
 `default-email-layout.html` is the shared base for transactional email.
 
-Shared brand CSS variables live in `../layout.css`. Do not define per-layout
-token variables inside email layouts.
+Email layouts use literal inline hex values from `../DESIGN_SYSTEM.md`
+(obsidian/chrome palette) instead of CSS variables: most email clients strip
+external stylesheets and support `var()` unreliably, so token indirection
+would silently break. Do not define per-layout token variables inside email
+layouts; keep values inline and in sync with the design system.
 
 ## Placeholders
 

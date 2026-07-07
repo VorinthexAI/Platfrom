@@ -6,7 +6,7 @@ export function Progress({ style, ...props }: ProgressProps) {
 }
 const styles = StyleSheet.create({
   root: {
-    borderColor: "#E3DCD0",
+    borderColor: "#262D36",
     borderRadius: 12,
   },
 });

@@ -1,9 +1,0 @@
-# Production deploys are prebuilt in GitHub Actions and only .vercel/output is
-# uploaded. If a deploy is ever made directly from a source tree, these internal
-# project files must never be uploaded.
-src/shared/brand
-src/shared/docs
-.claude
-CLAUDE.md
-AGENTS.md
-admin.md

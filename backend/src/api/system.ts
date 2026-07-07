@@ -13,7 +13,6 @@ import {
   listCapabilitiesPage,
   updateCapability,
 } from '@/lib/db/capabilities.node';
-import { getMemberByUserId } from '@/lib/db/members.node';
 import { getSuperAdminByUserId } from '@/lib/db/super-admins.node';
 import {
   deleteMindCapability,
@@ -118,14 +117,11 @@ async function requireSuperAdmin(c: Context) {
   const auth = await requireUserId(c);
   if ('error' in auth) return auth;
 
-  const [member, superAdmin] = await Promise.all([
-    getMemberByUserId(auth.userId),
-    getSuperAdminByUserId(auth.userId),
-  ]);
-  if (!member || !superAdmin) {
+  const superAdmin = await getSuperAdminByUserId(auth.userId);
+  if (!superAdmin) {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
-  return { userId: auth.userId, member };
+  return { userId: auth.userId, superAdmin };
 }
 
 function uniqueConflict(c: Context, err: unknown, message: string) {

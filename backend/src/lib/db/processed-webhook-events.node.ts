@@ -43,6 +43,7 @@ export async function getProcessedWebhookEvent(
 
 export const updateProcessedWebhookEvent = helpers.updateById;
 export const deleteProcessedWebhookEvent = helpers.deleteById;
+export const upsertProcessedWebhookEventByKey = helpers.upsertByKey;
 export const getAllProcessedWebhookEventsChunked = helpers.getAllChunked;
 export const listProcessedWebhookEventsPage = helpers.listPage;
 

@@ -33,6 +33,7 @@ export const insertSubscription = helpers.insert;
 export const getSubscriptionById = helpers.getById;
 export const updateSubscription = helpers.updateById;
 export const deleteSubscription = helpers.deleteById;
+export const upsertSubscriptionByKey = helpers.upsertByKey;
 export const getAllSubscriptionsChunked = helpers.getAllChunked;
 export const listSubscriptionsPage = helpers.listPage;
 

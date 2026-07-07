@@ -1,5 +1,5 @@
 ﻿import type { SVGProps } from "react";
-export type LocationPinIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type LocationPinIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type LocationPinIconSize = "sm" | "md" | "lg";
 export type LocationPinIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: LocationPinIconVariant;
@@ -8,12 +8,13 @@ export type LocationPinIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<LocationPinIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<LocationPinIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function LocationPinIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: LocationPinIconProps) {
+export function LocationPinIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: LocationPinIconProps) {
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>

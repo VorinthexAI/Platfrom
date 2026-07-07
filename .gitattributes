@@ -5,3 +5,7 @@
 *.jpeg binary
 *.webp binary
 *.ico binary
+
+environments/**/.env.dev filter=git-crypt diff=git-crypt
+environments/**/.env.prod filter=git-crypt diff=git-crypt
+environments/**/db.seeds.secrets.json filter=git-crypt diff=git-crypt

@@ -6,7 +6,7 @@ export function Toast({ style, ...props }: ToastProps) {
 }
 const styles = StyleSheet.create({
   root: {
-    borderColor: "#E3DCD0",
+    borderColor: "#262D36",
     borderRadius: 12,
   },
 });

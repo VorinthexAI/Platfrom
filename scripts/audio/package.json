@@ -1,0 +1,27 @@
+{
+  "name": "@vorinthex/audio-asset-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "audio": "bun src/index.ts",
+    "generate": "bun src/index.ts generate",
+    "tts": "bun src/index.ts tts",
+    "list-targets": "bun src/index.ts list-targets",
+    "merge": "bun src/index.ts merge",
+    "validate": "bun src/validate.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "dotenv": "^17.2.3",
+    "ffmpeg-static": "^5.2.0",
+    "nanoid": "^5.1.6",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3"
+  }
+}

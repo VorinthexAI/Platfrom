@@ -26,5 +26,6 @@ export const insertEvent = helpers.insert;
 export const getEventById = helpers.getById;
 export const updateEvent = helpers.updateById;
 export const deleteEvent = helpers.deleteById;
+export const upsertEventByKey = helpers.upsertByKey;
 export const getAllEventsChunked = helpers.getAllChunked;
 export const listEventsPage = helpers.listPage;

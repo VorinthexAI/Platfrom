@@ -12,6 +12,8 @@ export const userSchema = z.object({
   emailHash: z.string(),
   name: z.string().nullable().default(null),
   profileUrl: z.string().nullable().default(null),
+  alias: z.string().nullable().default(null),
+  waitlistNumber: z.number().int().nullable().default(null),
   isVerified: z.boolean().default(false),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
@@ -35,6 +37,7 @@ export const insertUser = helpers.insert;
 export const getUserById = helpers.getById;
 export const updateUser = helpers.updateById;
 export const deleteUser = helpers.deleteById;
+export const upsertUserByKey = helpers.upsertByKey;
 export const getAllUsersChunked = helpers.getAllChunked;
 export const listUsersPage = helpers.listPage;
 
@@ -69,6 +72,25 @@ export async function getUserByUpdatesUnsubscribeTokenHash(tokenHash: string): P
   `);
   const doc = await cursor.next();
   return doc ? userSchema.parse(withArangoKey(doc)) : null;
+}
+
+export async function countUsers(): Promise<number> {
+  const cursor = await db.query(aql`
+    RETURN LENGTH(${db.collection(USERS_COLLECTION)})
+  `);
+  const count = await cursor.next();
+  return typeof count === 'number' ? count : 0;
+}
+
+export async function countVerifiedUsers(): Promise<number> {
+  const cursor = await db.query(aql`
+    FOR u IN ${db.collection(USERS_COLLECTION)}
+      FILTER u.isVerified == true
+      COLLECT WITH COUNT INTO verified
+      RETURN verified
+  `);
+  const count = await cursor.next();
+  return typeof count === 'number' ? count : 0;
 }
 
 export async function listUnverifiedWaitlistUsers(): Promise<User[]> {

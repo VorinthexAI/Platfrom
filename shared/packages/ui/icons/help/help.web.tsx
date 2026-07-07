@@ -1,5 +1,5 @@
 ﻿import type { SVGProps } from "react";
-export type HelpIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type HelpIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type HelpIconSize = "sm" | "md" | "lg";
 export type HelpIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: HelpIconVariant;
@@ -8,12 +8,13 @@ export type HelpIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<HelpIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<HelpIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function HelpIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: HelpIconProps) {
+export function HelpIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: HelpIconProps) {
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>

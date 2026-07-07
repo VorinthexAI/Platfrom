@@ -8,11 +8,11 @@ export type ProfileIconProps = {
 };
 const sizes: Record<ProfileIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<ProfileIconVariant, string> = {
-  default: "#1C1A17",
-  muted: "#6B6358",
-  accent: "#8B6F47",
-  danger: "#7F2E2E",
-  inverse: "#FAF7F2",
+  default: "#F5F7F8",
+  muted: "#7B858C",
+  accent: "#DDE2E5",
+  danger: "#B04A4A",
+  inverse: "#030507",
 };
 export function ProfileIcon({ variant = "default", size = "md", strokeWidth = 1.4 }: ProfileIconProps) {
   const pixelSize = sizes[size];

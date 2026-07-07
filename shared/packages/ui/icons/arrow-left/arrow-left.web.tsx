@@ -1,5 +1,5 @@
 ﻿import type { SVGProps } from "react";
-export type ArrowLeftIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type ArrowLeftIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type ArrowLeftIconSize = "sm" | "md" | "lg";
 export type ArrowLeftIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: ArrowLeftIconVariant;
@@ -8,12 +8,13 @@ export type ArrowLeftIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<ArrowLeftIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<ArrowLeftIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function ArrowLeftIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: ArrowLeftIconProps) {
+export function ArrowLeftIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: ArrowLeftIconProps) {
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>

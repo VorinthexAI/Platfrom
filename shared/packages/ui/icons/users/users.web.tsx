@@ -1,5 +1,5 @@
 ﻿import type { SVGProps } from "react";
-export type UsersIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type UsersIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type UsersIconSize = "sm" | "md" | "lg";
 export type UsersIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: UsersIconVariant;
@@ -8,12 +8,13 @@ export type UsersIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<UsersIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<UsersIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function UsersIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: UsersIconProps) {
+export function UsersIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: UsersIconProps) {
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>

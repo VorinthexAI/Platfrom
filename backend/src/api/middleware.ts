@@ -69,6 +69,12 @@ function querySchemaForPath(path: string) {
   if (apiPath === '/waitlist/verify') {
     return strictObject({ token_hash: z.string().regex(/^[a-f0-9]{64}$/).optional() });
   }
+  if (apiPath === '/fragments/summary') {
+    return strictObject({
+      explorer_id: z.string().optional(),
+      format: z.string().optional(),
+    });
+  }
   return strictObject({});
 }
 

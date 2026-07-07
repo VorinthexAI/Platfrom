@@ -1,0 +1,33 @@
+{
+  "name": "@vorinthex/image-design-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "design": "bun src/index.ts",
+    "generate:galaxy": "bun src/galaxy-assets.ts",
+    "refresh:brand-capabilities": "bun src/refresh-brand-capabilities.ts",
+    "assets": "bun src/gallery-server.ts",
+    "gallery": "bun src/gallery-server.ts",
+    "validate": "bun src/validate.ts",
+    "backup": "bun src/backup.ts",
+    "backfill:svgs": "bun src/backfill-svgs.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "dotenv": "^17.2.3",
+    "nanoid": "^5.1.6",
+    "openai": "^6.9.1",
+    "ora": "^9.0.0",
+    "prompts": "^2.4.2",
+    "sharp": "^0.34.4",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0",
+    "@types/node": "^24.0.0",
+    "@types/prompts": "^2.4.9",
+    "typescript": "^5.9.3"
+  }
+}

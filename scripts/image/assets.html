@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vorinthex Assets</title>
+    <link rel="stylesheet" href="./assets.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div>
+          <p class="eyebrow">Vorinthex AI</p>
+          <h1>Assets</h1>
+        </div>
+        <div class="meta" id="meta">Loading assets...</div>
+      </header>
+
+      <section class="toolbar" aria-label="Asset filters">
+        <button class="filter active" data-kind="all">All Assets</button>
+        <button class="filter" data-kind="logo">Logos</button>
+        <button class="filter" data-kind="video">Videos</button>
+        <button class="filter" data-kind="audio">Audio</button>
+        <span class="divider"></span>
+        <button class="filter active" data-format="png">PNG</button>
+        <button class="filter" data-format="svg">SVG</button>
+        <span class="divider"></span>
+        <button class="filter active" data-background="transparent">Transparent</button>
+        <button class="filter" data-background="solid">Solid</button>
+        <span class="divider"></span>
+        <button class="filter active" data-category="all">All Targets</button>
+        <button class="filter" data-category="master-brand">Master</button>
+        <button class="filter" data-category="product">Products</button>
+        <button class="filter" data-category="capability">Capabilities</button>
+        <button class="filter" data-category="orchestrator">Orchestrators</button>
+      </section>
+
+      <section class="grid" id="grid" aria-live="polite"></section>
+    </main>
+
+    <script>
+      const grid = document.querySelector("#grid");
+      const meta = document.querySelector("#meta");
+      let assets = [];
+      let kindFilter = "all";
+      let categoryFilter = "all";
+      let logoFormat = "png";
+      let logoBackground = "transparent";
+
+      function latestVersion(asset) {
+        if (!asset.versions?.length) return null;
+        return asset.versions.find((version) => version.id === asset.currentVersionId) || asset.versions.at(-1);
+      }
+
+      function normalizeLogo(asset) {
+        const version = latestVersion(asset);
+        if (!version) return null;
+        return { kind: "logo", category: asset.category, slug: asset.slug, name: asset.name, version };
+      }
+
+      function normalizeVideo(asset) {
+        return (asset.versions || [])
+          .filter((version) => version.status === "completed")
+          .map((version) => ({
+            kind: "video",
+            category: asset.category,
+            slug: `${asset.slug}-${version.id}`,
+            baseSlug: asset.slug,
+            name: `${asset.name} ${version.id.toUpperCase()}`,
+            version
+          }));
+      }
+
+      function normalizeAudio(asset) {
+        return (asset.versions || [])
+          .filter((version) => version.status === "completed")
+          .map((version) => ({
+            kind: "audio",
+            category: asset.category,
+            slug: `${asset.slug}-${version.id}`,
+            baseSlug: asset.slug,
+            name: `${asset.name} ${version.id.toUpperCase()}`,
+            version
+          }));
+      }
+
+      function renderLogo(asset) {
+        const src = logoFilePath(asset.version);
+        const label = `${logoBackground} ${logoFormat}`.toUpperCase();
+        return `
+          <article class="card">
+            <div class="preview ${logoBackground === "solid" ? "solidPreview" : "transparentPreview"}">
+              <span class="previewLabel">${label}</span>
+              ${src ? `<img src="./${src}" alt="${asset.name} ${label} logo" loading="lazy" />` : `<span>No ${label}</span>`}
+            </div>
+            ${cardBody(asset, src)}
+          </article>
+        `;
+      }
+
+      function renderVideo(asset) {
+        const src = asset.version.videoPath ? `video-assets/${asset.version.videoPath}` : "";
+        return `
+          <article class="card videoCard">
+            <div class="videoPreview">
+              <span class="previewLabel">Video</span>
+              ${src ? `<video src="${src}" controls loop playsinline preload="metadata"></video>` : `<span>No video</span>`}
+            </div>
+            ${cardBody(asset, src)}
+          </article>
+        `;
+      }
+
+      function renderAudio(asset) {
+        const src = asset.version.audioPath ? `audio-assets/${asset.version.audioPath}` : "";
+        return `
+          <article class="card audioCard">
+            <div class="audioPreview">
+              <span class="previewLabel">${asset.version.mode || "Audio"}</span>
+              <div class="audioGlyph">AUDIO</div>
+              ${src ? `<audio src="${src}" controls preload="metadata"></audio>` : `<span>No audio</span>`}
+            </div>
+            ${cardBody(asset, src)}
+          </article>
+        `;
+      }
+
+      function logoFilePath(version) {
+        if (!version) return "";
+        if (logoFormat === "svg" && logoBackground === "transparent") return version.transparentSvgPath || version.transparentPath || "";
+        if (logoFormat === "svg" && logoBackground === "solid") return version.solidSvgPath || version.solidPath || "";
+        if (logoBackground === "solid") return version.solidPath || "";
+        return version.transparentPath || "";
+      }
+
+      function fileNameFromPath(filePath) {
+        return filePath.split("/").at(-1) || "asset";
+      }
+
+      function cardBody(asset, downloadPath) {
+        const audioMeta = asset.kind === "audio"
+          ? [asset.version.voice, asset.version.language].filter(Boolean).map((value) => `<span class="pill">${value}</span>`).join("")
+          : "";
+        return `
+          <div class="cardBody">
+            <div>
+              <h2>${asset.name}</h2>
+              <p>${asset.slug}</p>
+            </div>
+            <div class="cardActions">
+              <div class="pills">
+                <span class="pill">${asset.kind}</span>
+                <span class="pill">${asset.category}</span>
+                ${audioMeta}
+              </div>
+              ${downloadPath ? `<a class="downloadButton" href="./${downloadPath}" download="${fileNameFromPath(downloadPath)}" aria-label="Download ${asset.name}">↓</a>` : ""}
+            </div>
+          </div>
+        `;
+      }
+
+      function render() {
+        const visible = assets.filter((asset) => {
+          const kindMatch = kindFilter === "all" || asset.kind === kindFilter;
+          const categoryMatch = categoryFilter === "all" || asset.category === categoryFilter;
+          return kindMatch && categoryMatch;
+        });
+        meta.textContent = `${visible.length} shown / ${assets.length} assets`;
+        grid.innerHTML = visible.map((asset) => {
+          if (asset.kind === "video") return renderVideo(asset);
+          if (asset.kind === "audio") return renderAudio(asset);
+          return renderLogo(asset);
+        }).join("");
+      }
+
+      document.querySelectorAll("[data-kind]").forEach((button) => {
+        button.addEventListener("click", () => {
+          kindFilter = button.dataset.kind;
+          document.querySelectorAll("[data-kind]").forEach((item) => item.classList.toggle("active", item === button));
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-category]").forEach((button) => {
+        button.addEventListener("click", () => {
+          categoryFilter = button.dataset.category;
+          document.querySelectorAll("[data-category]").forEach((item) => item.classList.toggle("active", item === button));
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-format]").forEach((button) => {
+        button.addEventListener("click", () => {
+          logoFormat = button.dataset.format;
+          document.querySelectorAll("[data-format]").forEach((item) => item.classList.toggle("active", item === button));
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-background]").forEach((button) => {
+        button.addEventListener("click", () => {
+          logoBackground = button.dataset.background;
+          document.querySelectorAll("[data-background]").forEach((item) => item.classList.toggle("active", item === button));
+          render();
+        });
+      });
+
+      Promise.all([
+        fetch("./registry/assets.json").then((response) => response.json()).catch(() => ({ assets: [] })),
+        fetch("./video-registry/videos.json").then((response) => response.json()).catch(() => ({ videos: [] })),
+        fetch("./audio-registry/audio.json").then((response) => response.json()).catch(() => ({ audio: [] }))
+      ]).then(([imageRegistry, videoRegistry, audioRegistry]) => {
+        const logos = imageRegistry.assets
+          .filter((asset) => ["master-brand", "product", "capability", "orchestrator"].includes(asset.category))
+          .map(normalizeLogo)
+          .filter(Boolean);
+        const videos = videoRegistry.videos
+          .filter((asset) => ["master-brand", "product", "capability", "orchestrator"].includes(asset.category))
+          .flatMap(normalizeVideo);
+        const audio = audioRegistry.audio
+          .filter((asset) => ["master-brand", "product", "capability", "orchestrator"].includes(asset.category))
+          .flatMap(normalizeAudio);
+        assets = [...logos, ...videos, ...audio].sort((a, b) => `${a.category}-${a.slug}-${a.kind}`.localeCompare(`${b.category}-${b.slug}-${b.kind}`));
+        render();
+      }).catch((error) => {
+        meta.textContent = "Could not load asset registries";
+        grid.innerHTML = `<p class="error">${error.message}</p>`;
+      });
+    </script>
+  </body>
+</html>

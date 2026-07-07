@@ -1,5 +1,5 @@
 import type { SVGProps } from "react";
-export type GlobeIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type GlobeIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type GlobeIconSize = "sm" | "md" | "lg";
 export type GlobeIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: GlobeIconVariant;
@@ -8,12 +8,13 @@ export type GlobeIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<GlobeIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<GlobeIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function GlobeIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: GlobeIconProps) {
+export function GlobeIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: GlobeIconProps) {
   const pixelSize = sizes[size];
   const color = colors[variant];
   return (

@@ -50,7 +50,7 @@ export function Button({
       type={type}
       {...props}
     >
-      {loading ? <span aria-hidden="true" className="vui-spinner" /> : icon}
+      {loading ? <span aria-hidden="true" className="vui-button-fill" /> : icon}
       {variant === "icon" ? <span className="sr-only">{children}</span> : children}
     </button>
   );

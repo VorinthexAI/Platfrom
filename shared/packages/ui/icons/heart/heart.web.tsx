@@ -1,5 +1,5 @@
 ﻿import type { SVGProps } from "react";
-export type HeartIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
+export type HeartIconVariant = "default" | "inherit" | "muted" | "accent" | "danger" | "inverse";
 export type HeartIconSize = "sm" | "md" | "lg";
 export type HeartIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
   variant?: HeartIconVariant;
@@ -8,12 +8,13 @@ export type HeartIconProps = Omit<SVGProps<SVGSVGElement>, "color"> & {
 const sizes: Record<HeartIconSize, number> = { sm: 16, md: 20, lg: 24 };
 const colors: Record<HeartIconVariant, string> = {
   default: "var(--vui-color-text)",
+  inherit: "currentColor",
   muted: "var(--vui-color-muted)",
   accent: "var(--vui-color-accent)",
   danger: "var(--vui-color-danger)",
   inverse: "var(--vui-color-page)",
 };
-export function HeartIcon({ variant = "default", size = "md", strokeWidth = 1.4, ...props }: HeartIconProps) {
+export function HeartIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, ...props }: HeartIconProps) {
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>

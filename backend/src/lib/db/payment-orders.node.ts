@@ -34,6 +34,7 @@ export const insertPaymentOrder = helpers.insert;
 export const getPaymentOrderById = helpers.getById;
 export const updatePaymentOrder = helpers.updateById;
 export const deletePaymentOrder = helpers.deleteById;
+export const upsertPaymentOrderByKey = helpers.upsertByKey;
 export const getAllPaymentOrdersChunked = helpers.getAllChunked;
 export const listPaymentOrdersPage = helpers.listPage;
 
