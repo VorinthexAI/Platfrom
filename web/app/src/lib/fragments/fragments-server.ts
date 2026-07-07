@@ -94,7 +94,7 @@ export interface ProceduralLootInput {
 /** Value bounds the server will honor for procedural biome loot. */
 const LOOT_BOUNDS: Record<ProceduralLootInput["kind"], { min: number; max: number }> = {
   fragment: { min: 1, max: 3 },
-  crystal: { min: 100, max: 10000 },
+  crystal: { min: 10, max: 1_000_000 },
 };
 
 /** Rapid floor-scavenging is the point — a much shorter cooldown here. */

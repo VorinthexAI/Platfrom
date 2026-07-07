@@ -188,6 +188,10 @@ const collections: CollectionSpec[] = [
       { fields: ['explorerId'] },
       { fields: ['explorerId', 'collectibleId'], unique: true },
       { fields: ['collectibleId'] },
+      // Leaderboard lookups: recent collects and per-user totals straight
+      // from the fragments ledger — no separate leaderboard node.
+      { fields: ['createdAt'] },
+      { fields: ['userId', 'createdAt'] },
     ],
   },
 ];

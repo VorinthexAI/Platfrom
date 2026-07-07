@@ -111,6 +111,9 @@ export function ProductPlanet({
       <group
         onClick={(event) => {
           event.stopPropagation();
+          // A sideways camera drag that happens to end on a planet is not
+          // a click — only a still tap selects.
+          if (event.delta > 8) return;
           onSelect(data);
         }}
         onPointerOver={(event) => {

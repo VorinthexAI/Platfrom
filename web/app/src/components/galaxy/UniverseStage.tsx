@@ -34,6 +34,10 @@ interface UniverseStageProps {
 const STEP_COOLDOWN_MS = 900;
 const WHEEL_THRESHOLD = 90;
 const SWIPE_THRESHOLD = 60;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
 /**
  * Belt-mode pace compounds: the first scrolls add a gentle drift, but keep
  * scrolling and each push multiplies the last until the whole solar system
@@ -203,31 +207,129 @@ export function UniverseStage({
       }
     };
 
+    /**
+     * Sideways rotation shared by touch swipes and mouse drags: the
+     * camera yaws around the solar system (overview) or spins the belt
+     * ring, following the gesture 1:1 — flick fast and it flies.
+     */
+    const canRotate = () => {
+      const state = useGalaxyStore.getState();
+      return (
+        state.mode === "belt" ||
+        (state.mode === "system" && state.step === 0)
+      );
+    };
+    const applyRotation = (dxPixels: number, dtMs: number) => {
+      const state = useGalaxyStore.getState();
+      // Drag right → the world turns with your hand.
+      const angleDelta = -(dxPixels / window.innerWidth) * Math.PI * 1.15;
+      const velocity = dtMs > 0 ? angleDelta / (dtMs / 1000) : 0;
+      if (state.mode === "belt") {
+        galaxyMotion.beltAngle += angleDelta;
+        galaxyMotion.beltVelocity = clamp(
+          velocity,
+          -BELT_MAX_VELOCITY,
+          BELT_MAX_VELOCITY,
+        );
+      } else {
+        galaxyMotion.orbitAngle += angleDelta;
+        galaxyMotion.orbitVelocity = clamp(velocity, -3.2, 3.2);
+      }
+    };
+
+    let touchStartX: number | null = null;
+    let touchLastX = 0;
+    let touchLastAt = 0;
+    /** null until the gesture picks an axis; then locked for its lifetime. */
+    let touchAxis: "step" | "rotate" | null = null;
+
     const onTouchStart = (event: TouchEvent) => {
       if (insideScrollSafe(event.target)) return;
       touchStartY = event.touches[0]?.clientY ?? null;
+      touchStartX = event.touches[0]?.clientX ?? null;
+      touchLastX = touchStartX ?? 0;
+      touchLastAt = performance.now();
+      touchAxis = null;
       touchConsumed = false;
     };
 
     const onTouchMove = (event: TouchEvent) => {
-      if (touchStartY === null || touchConsumed) return;
+      if (touchStartY === null || touchStartX === null) return;
       if (insideScrollSafe(event.target)) return;
-      const deltaY = touchStartY - (event.touches[0]?.clientY ?? touchStartY);
-      if (Math.abs(deltaY) >= SWIPE_THRESHOLD) {
+      const x = event.touches[0]?.clientX ?? touchStartX;
+      const y = event.touches[0]?.clientY ?? touchStartY;
+      const totalX = x - touchStartX;
+      const totalY = touchStartY - y;
+
+      // First decisive movement locks the gesture's axis: sideways
+      // rotates the camera, vertical steps/feeds — never both, and a
+      // sideways swipe can never dive into a planet or asteroid.
+      if (touchAxis === null && (Math.abs(totalX) > 14 || Math.abs(totalY) > 14)) {
+        touchAxis =
+          Math.abs(totalX) > Math.abs(totalY) && canRotate() ? "rotate" : "step";
+        if (touchAxis === "rotate") galaxyMotion.dragging = true;
+      }
+
+      if (touchAxis === "rotate") {
+        const now = performance.now();
+        markExplored();
+        applyRotation(x - touchLastX, now - touchLastAt);
+        touchLastX = x;
+        touchLastAt = now;
+        return;
+      }
+
+      if (touchConsumed) return;
+      if (Math.abs(totalY) >= SWIPE_THRESHOLD) {
         touchConsumed = true;
         markExplored();
-        applyScrollEnergy(deltaY);
+        applyScrollEnergy(totalY);
         if (insideRock()) {
           throwToRandomRock();
         } else if (useGalaxyStore.getState().mode === "system") {
-          step(deltaY > 0 ? 1 : -1);
+          step(totalY > 0 ? 1 : -1);
         }
       }
     };
 
     const onTouchEnd = () => {
       touchStartY = null;
+      touchStartX = null;
+      touchAxis = null;
       touchConsumed = false;
+      galaxyMotion.dragging = false;
+    };
+
+    // Mouse: grab the cosmos and drag it around. The camera follows the
+    // pointer's own speed — a fast flick keeps spinning at flick speed.
+    let mouseDragging = false;
+    let mouseLastX = 0;
+    let mouseLastAt = 0;
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse" || event.button !== 0) return;
+      // Only bare canvas starts a drag — buttons and cards keep clicking.
+      if (!(event.target instanceof HTMLCanvasElement)) return;
+      if (!canRotate()) return;
+      mouseDragging = true;
+      mouseLastX = event.clientX;
+      mouseLastAt = performance.now();
+      galaxyMotion.dragging = true;
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (!mouseDragging) return;
+      const now = performance.now();
+      applyRotation(event.clientX - mouseLastX, now - mouseLastAt);
+      mouseLastX = event.clientX;
+      mouseLastAt = now;
+      markExplored();
+    };
+
+    const onPointerUp = () => {
+      if (!mouseDragging) return;
+      mouseDragging = false;
+      galaxyMotion.dragging = false;
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -275,13 +377,20 @@ export function UniverseStage({
     stage.addEventListener("touchstart", onTouchStart, { passive: true });
     stage.addEventListener("touchmove", onTouchMove, { passive: true });
     stage.addEventListener("touchend", onTouchEnd, { passive: true });
+    stage.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("keydown", onKeyDown);
     return () => {
       stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("touchstart", onTouchStart);
       stage.removeEventListener("touchmove", onTouchMove);
       stage.removeEventListener("touchend", onTouchEnd);
+      stage.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("keydown", onKeyDown);
+      galaxyMotion.dragging = false;
     };
   }, [setStep, stepBy, markExplored]);
 

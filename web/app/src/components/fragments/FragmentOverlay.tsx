@@ -6,7 +6,6 @@ import { Button } from "@vorinthex/shared/ui/components";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
 import { trackLandingEvent } from "@/lib/analytics";
 import { useGalaxyStore } from "@/lib/galaxy-store";
-import { useLiveStore } from "@/lib/live/live-store";
 import { CloseIcon } from "@/components/ui/icons";
 
 /**
@@ -24,41 +23,11 @@ export function FragmentOverlay() {
 
   return (
     <>
-      <FragmentBadge />
+      {/* The floating fragments-count badge is gone — the Galaxy
+          Leaderboard asteroid is the home of the numbers now. */}
       <CollectibleTooltip />
       <FragmentToast />
     </>
-  );
-}
-
-/**
- * The Intelligence Fragments count as a quiet badge below the nav — no
- * goal, no threshold, just the living number. It rides along everywhere
- * (solar system and belt); biome interiors, arrival, caves, and the hyper
- * jump fly without it.
- */
-function FragmentBadge() {
-  const localTotal = useFragmentsStore((s) => s.globalTotal);
-  const liveTotal = useLiveStore((s) => s.fragmentsTotal);
-  // The SSE stream is the durable ledger; the local ledger covers the
-  // current session before the first live frame arrives.
-  const globalTotal = Math.max(localTotal, liveTotal);
-  const mode = useGalaxyStore((s) => s.mode);
-  const visitPhase = useGalaxyStore((s) => s.visitPhase);
-
-  if (mode === "intro" || mode === "jump" || mode === "cave") return null;
-  if (mode === "system" && visitPhase !== "fly") return null;
-
-  return (
-    <div
-      role="status"
-      className="pointer-events-none absolute top-20 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-white/10 bg-black/40 px-4 py-2 backdrop-blur-md sm:top-24 sm:right-10 sm:left-auto sm:translate-x-0"
-    >
-      <span className="block h-1.5 w-1.5 rotate-45 bg-silver-100 shadow-[0_0_8px_rgba(221,226,229,0.8)]" />
-      <span className="font-mono text-[0.55rem] tracking-[0.24em] text-silver-300 uppercase">
-        {globalTotal.toLocaleString("en-US")} Intelligence Fragments
-      </span>
-    </div>
   );
 }
 

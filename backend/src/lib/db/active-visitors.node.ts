@@ -42,6 +42,18 @@ export const upsertActiveVisitorByKey = helpers.upsertByKey;
 export const getAllActiveVisitorsChunked = helpers.getAllChunked;
 export const listActiveVisitorsPage = helpers.listPage;
 
+/** How many presence sessions are currently open. */
+export async function countOpenActiveVisitors(): Promise<number> {
+  const cursor = await db.query(aql`
+    FOR a IN ${db.collection(ACTIVE_VISITORS_COLLECTION)}
+      FILTER a.disconnectedAt == null
+      COLLECT WITH COUNT INTO open
+      RETURN open
+  `);
+  const count = await cursor.next();
+  return typeof count === 'number' ? count : 0;
+}
+
 /** Open sessions (no disconnect stamp yet), oldest first, bounded. */
 export async function listOpenActiveVisitors(limit = 500): Promise<ActiveVisitor[]> {
   const cursor = await db.query(aql`

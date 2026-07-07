@@ -27,7 +27,7 @@ const claimSchema = z.strictObject({
       kind: z.enum(["fragment", "crystal"]),
       name: z.string().min(1).max(120),
       rarity: z.string().min(1).max(40),
-      fragments: z.number().int().min(1).max(10000),
+      fragments: z.number().int().min(1).max(1_000_000),
       mesh: meshSchema.optional(),
     })
     .optional(),

@@ -33,6 +33,12 @@ export const intelligenceFragmentSchema = z.object({
   fragments: z.number().int().min(1),
   /** Exact 3D mesh recipe captured at collection time (null for legacy entries). */
   mesh: fragmentMeshSchema.nullable().default(null),
+  /**
+   * Random seed rolled at collection time that decides where this piece
+   * mounts on the leaderboard-asteroid's walls. Null for legacy entries
+   * (renderers fall back to hashing the key).
+   */
+  placementSeed: z.number().int().nullable().default(null),
   createdAt: z.string(),
   embedding: z.array(z.number()).default([]),
 });
@@ -90,6 +96,74 @@ export async function sumFragmentsTotal(): Promise<number> {
   `);
   const total = await cursor.next();
   return typeof total === 'number' ? total : 0;
+}
+
+export interface LeaderboardRow {
+  userId: string;
+  alias: string | null;
+  total: number;
+}
+
+/**
+ * Top collectors, straight off the fragments ledger (userId index) joined
+ * to their user node for the alias — users and their fragments stay the
+ * single source of truth; there is deliberately no leaderboard node.
+ */
+export async function listTopCollectors(limit: number): Promise<LeaderboardRow[]> {
+  const cursor = await db.query(aql`
+    FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
+      FILTER f.userId != null
+      COLLECT userId = f.userId AGGREGATE total = SUM(f.fragments)
+      SORT total DESC
+      LIMIT ${limit}
+      LET user = DOCUMENT('users', userId)
+      RETURN { userId, alias: user != null ? user.alias : null, total }
+  `);
+  const rows = await cursor.all();
+  return rows.map((row) => ({
+    userId: String(row.userId),
+    alias: typeof row.alias === 'string' ? row.alias : null,
+    total: typeof row.total === 'number' ? row.total : 0,
+  }));
+}
+
+export interface RecentFragmentEntry {
+  key: string;
+  fragments: number;
+  rarity: string;
+  mesh: FragmentMesh | null;
+  placementSeed: number | null;
+  createdAt: string;
+  alias: string | null;
+}
+
+/** Latest collected pieces (createdAt index) with the collector's alias. */
+export async function listRecentFragmentEntries(limit: number): Promise<RecentFragmentEntry[]> {
+  const cursor = await db.query(aql`
+    FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
+      SORT f.createdAt DESC
+      LIMIT ${limit}
+      LET user = f.userId != null ? DOCUMENT('users', f.userId) : null
+      RETURN {
+        key: f._key,
+        fragments: f.fragments,
+        rarity: f.rarity,
+        mesh: f.mesh,
+        placementSeed: f.placementSeed,
+        createdAt: f.createdAt,
+        alias: user != null ? user.alias : null,
+      }
+  `);
+  const rows = await cursor.all();
+  return rows.map((row) => ({
+    key: String(row.key),
+    fragments: typeof row.fragments === 'number' ? row.fragments : 0,
+    rarity: typeof row.rarity === 'string' ? row.rarity : 'common',
+    mesh: row.mesh ? fragmentMeshSchema.parse(row.mesh) : null,
+    placementSeed: typeof row.placementSeed === 'number' ? row.placementSeed : null,
+    createdAt: typeof row.createdAt === 'string' ? row.createdAt : new Date(0).toISOString(),
+    alias: typeof row.alias === 'string' ? row.alias : null,
+  }));
 }
 
 /**

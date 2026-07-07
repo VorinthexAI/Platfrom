@@ -22,6 +22,7 @@ import { createPaymentCheckout, handlePolarWebhook, listUserEntitlements, POLAR_
 import { requestWaitlistVerification, verifyWaitlistEmail } from './waitlist';
 import { recordPlatformClientEvent } from './platform-events';
 import { collectFragment, getFragmentsSummary } from './fragments';
+import { streamLeaderboard } from './leaderboard';
 import { streamLiveCounters } from './live';
 import { joinPresence, leavePresence, presenceBeat, streamPresence } from './presence';
 import { unsubscribeFromUpdates } from './updates';
@@ -206,6 +207,7 @@ export function registerRoutes(app: Hono) {
   app.get('/fragments/summary', getFragmentsSummary);
 
   app.get('/live/stream', streamLiveCounters);
+  app.get('/leaderboard/stream', streamLeaderboard);
 
   app.post('/presence/join', joinPresence);
   app.post('/presence/beat', presenceBeat);

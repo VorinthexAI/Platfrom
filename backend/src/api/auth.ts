@@ -25,6 +25,7 @@ import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail 
 import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { trackPlatformEvent } from '@/platform/events';
+import { notifyCountersDirty } from './live-bus';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -281,13 +282,13 @@ async function deliverSignInEmail(input: { email: string; magicLink: string; exp
   await sendBrandedEmail({
     to: input.email,
     subject: 'Your Vorinthex sign in link',
-    preheader: 'Use this secure link to continue signing in to Vorinthex.',
+    preheader: 'Sign in to access your galaxy.',
     label: 'Sign in',
     eyebrow: 'Secure access',
-    headline: 'Continue to Vorinthex',
-    bodyHtml: 'Use this secure link to continue. You may be asked for your authenticator code next.',
+    headline: 'Your galaxy awaits',
+    bodyHtml: 'Sign in to access your galaxy.',
     actionUrl: input.magicLink,
-    actionLabel: 'Continue sign in',
+    actionLabel: 'Sign in',
     supportingHtml: 'If you did not request this, you can ignore this email.',
     footerHtml: 'You received this because someone requested Vorinthex access for this email.',
     extraPayload: {
@@ -334,10 +335,11 @@ export async function requestSignInEmail(email: string) {
     };
   }
 
-  // Verified waitlist users sign in with the same magic-link email; they get a
-  // direct session (no TOTP) that lands in their public galaxy.
+  // Waitlist users — verified or not — sign in with the same magic-link
+  // email; they get a direct session (no TOTP) that lands in their public
+  // galaxy, and signing in doubles as email verification.
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
-  if (!user?.isVerified) {
+  if (!user) {
     return { allowed: false as const };
   }
 
@@ -389,15 +391,29 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
 
   if (emailChallenge.identityType === 'user') {
     const user = await getUserById(emailChallenge.identityKey);
-    if (!user?.isVerified) return null;
+    if (!user) return null;
     const tokens = await issueUserTokens(user);
-    await updateUser(user.key, { lastLoginAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    // Signing in proves inbox ownership — it verifies the email too.
+    const wasUnverified = !user.isVerified;
+    await updateUser(user.key, {
+      isVerified: true,
+      lastLoginAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
     const alias = user.alias ?? generateAlias(user.key);
     trackPlatformEvent({
       slug: 'auth.magic_link_authenticated',
       userId: user.key,
       data: { user_id: user.key, email_hash: user.emailHash },
     });
+    if (wasUnverified) {
+      trackPlatformEvent({
+        slug: 'waitlist.email_verified',
+        userId: user.key,
+        data: { user_id: user.key, email_hash: user.emailHash, via: 'signin' },
+      });
+      notifyCountersDirty();
+    }
     return {
       status: 'authenticated',
       identity: { key: user.key, identityType: 'user' },

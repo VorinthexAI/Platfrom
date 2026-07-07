@@ -43,7 +43,9 @@ describe('postFragmentsBodySchema', () => {
 
   test('rejects out-of-range fragment counts', () => {
     expect(() => postFragmentsBodySchema.parse({ ...validBody, fragments: 0 })).toThrow();
-    expect(() => postFragmentsBodySchema.parse({ ...validBody, fragments: 100001 })).toThrow();
+    // Million-class asteroid crystals are the ceiling.
+    expect(() => postFragmentsBodySchema.parse({ ...validBody, fragments: 1_000_001 })).toThrow();
+    expect(postFragmentsBodySchema.parse({ ...validBody, fragments: 1_000_000 }).fragments).toBe(1_000_000);
     expect(() => postFragmentsBodySchema.parse({ ...validBody, fragments: 1.5 })).toThrow();
   });
 
