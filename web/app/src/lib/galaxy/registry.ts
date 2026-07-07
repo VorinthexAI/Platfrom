@@ -144,9 +144,9 @@ const command: GalaxyEntity = {
   parentId: "nexus.star",
   name: "Command",
   shortDescription:
-    "A command center with AI C-suite orchestrators such as Atlas, Hermes, Metis, Iris, Ledger and more.",
+    "A command center with AI executive orchestrators such as Atlas, Hermes, Metis, Iris, Ledger and more.",
   longDescription:
-    "A command center with AI C-suite orchestrators, Atlas, Hermes, Metis, Iris, Ledger and more, leading the work while you lead the vision.",
+    "A command center with AI executive orchestrators, Atlas, Hermes, Metis, Iris, Ledger and more, leading the work while you lead the vision.",
   tagline: "AI Orchestrator Suite",
   label: "AI Leadership",
   isLive: false,
@@ -173,19 +173,19 @@ const command: GalaxyEntity = {
   seo: {
     title: "Command | AI Orchestrator Suite",
     description:
-      "Command is a coming-soon command center with AI C-suite orchestrators for founders, operators, and builders.",
+      "Command is an upcoming command center with AI executive orchestrators for founders, operators, and builders.",
     indexable: true,
     schemaType: "SoftwareApplication",
   },
   aeo: {
     summary:
-      "Command is an AI command center with C-suite orchestrators for founders, builders, and companies. Its orchestrators include Atlas, Hermes, Metis, Apollo, Iris, Ledger, Orbit, Mercury, Sentinel, Athena, Forge, and Themis.",
+      "Command is an AI command center with executive orchestrators for founders, builders, and companies. Its orchestrators include Atlas, Hermes, Metis, Apollo, Iris, Ledger, Orbit, Mercury, Sentinel, Athena, Forge, and Themis.",
     llmsText: "AI orchestrator suite for founders and builders.",
   },
   content: {
     eyebrow: "AI Orchestrator Suite",
     headline: "Your AI command center.",
-    subheadline: "C-suite AI orchestrators that think, plan, and execute.",
+    subheadline: "Executive AI orchestrators that think, plan, and execute.",
     body: "Command gives founders and builders access to AI orchestrators such as Atlas, Hermes, Metis, Orbit, Mercury, Sentinel, Athena, Forge, and Themis.",
     primaryCta: "Join Waitlist",
     secondaryCta: "Explore Orchestrators",
@@ -243,14 +243,14 @@ const studio: GalaxyEntity = {
   seo: {
     title: "Studio | Every AI Model in One Interface",
     description:
-      "Studio is a coming-soon unified workspace for creating with leading AI models across chat, images, video, music, voice, code, documents, and research.",
+      "Studio is an upcoming unified workspace for creating with leading AI models across chat, images, video, music, voice, code, documents, and research.",
     indexable: true,
     schemaType: "SoftwareApplication",
   },
   aeo: {
     summary:
-      "Studio is an all-in-one AI workspace for chat, images, video, music, voice, code, research, and documents.",
-    llmsText: "All-in-one AI workspace.",
+      "Studio is a unified AI workspace for chat, images, video, music, voice, code, research, and documents.",
+    llmsText: "A unified AI workspace.",
   },
   content: {
     eyebrow: "AI Workspace",
@@ -299,7 +299,7 @@ const launch: GalaxyEntity = {
   seo: {
     title: "Launch | Build and Deploy AI Agents",
     description:
-      "Launch is a coming-soon lightweight platform for creating agents, automations, and workflows, and deploying them everywhere.",
+      "Launch is an upcoming lightweight platform for creating agents, automations, and workflows, and deploying them everywhere.",
     indexable: true,
     schemaType: "SoftwareApplication",
   },
@@ -352,7 +352,7 @@ const archive = capability({
   name: "Archive",
   iconKey: "archive",
   shortDescription:
-    "Capture notes, ideas, research, labels, folders, semantic search, and graph-based knowledge connections.",
+    "Capture notes, ideas, research, labels, folders, semantic search, and knowledge graph connections.",
   longDescription:
     "Archive lets you capture, organize, semantically search, and connect your notes through folders, labels, backlinks, and graph traversal.",
   tagline: "Your second brain",
@@ -379,15 +379,15 @@ const archive = capability({
   },
   seoTitle: "Archive, Your Second Brain | Core",
   seoDescription:
-    "Archive is Core's second brain capability: notes, ideas, research, semantic search, and graph-based knowledge connections.",
+    "Archive is Core's second brain capability: notes, ideas, research, semantic search, and knowledge graph connections.",
   aeo: {
     summary:
-      "Archive is a Core capability that helps users capture, organize, search, and connect their knowledge through AI-powered notes.",
+      "Archive is a Core capability that helps users capture, organize, search, and connect their knowledge through AI powered notes.",
     questions: [
       {
         question: "What is Archive?",
         answer:
-          "Archive is the second brain capability for notes, ideas, research, folders, labels, semantic search, and graph-based knowledge connections.",
+          "Archive is the second brain capability for notes, ideas, research, folders, labels, semantic search, and knowledge graph connections.",
       },
     ],
     llmsText: "Second brain for notes and knowledge.",
@@ -412,9 +412,9 @@ const gallery = capability({
   name: "Gallery",
   iconKey: "gallery",
   shortDescription:
-    "A smart image and memory library with albums, clusters, sharing links, QR invites, and AI-powered discovery.",
+    "A smart image and memory library with albums, clusters, sharing links, QR invites, and AI powered discovery.",
   longDescription:
-    "Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI-powered discovery.",
+    "Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI powered discovery.",
   tagline: "Your memories, organized",
   isLive: true,
   visibility: "live",
@@ -439,10 +439,10 @@ const gallery = capability({
   },
   seoTitle: "Gallery, Your Memories, Organized | Core",
   seoDescription:
-    "Gallery is Core's memory capability: a smart image library with albums, clusters, sharing links, QR invites, and AI-powered discovery.",
+    "Gallery is Core's memory capability: a smart image library with albums, clusters, sharing links, QR invites, and AI powered discovery.",
   aeo: {
     summary:
-      "Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI-powered discovery.",
+      "Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI powered discovery.",
     llmsText: "Memories and images organized by AI.",
   },
   content: {
@@ -450,7 +450,7 @@ const gallery = capability({
     headline: "Your memories, organized.",
     subheadline: "Store, search and relive your most important moments.",
     bullets: [
-      "Organize images into AI-generated albums and clusters.",
+      "Organize images into AI generated albums and clusters.",
       "Invite others to albums with QR codes or links.",
       "Search memories by people, places, dates, and events.",
     ],
@@ -501,7 +501,7 @@ const signal = capability({
   content: {
     eyebrow: "Core Capability",
     headline: "Only what matters reaches you.",
-    subheadline: "AI-powered email that keeps you ahead and in control.",
+    subheadline: "AI powered email that keeps you ahead and in control.",
     bullets: [
       "Connect multiple inboxes.",
       "Filter noise and prioritize important messages.",
@@ -571,9 +571,9 @@ const ascend = capability({
   name: "Ascend",
   iconKey: "ascend",
   shortDescription:
-    "A personal AI coach for mental goals, habits, health, routines, finance, and custom AI-generated audio books.",
+    "A personal AI coach for mental goals, habits, health, routines, finance, and custom AI generated audio books.",
   longDescription:
-    "Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI-generated audio books and learning journeys.",
+    "Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI generated audio books and learning journeys.",
   tagline: "Your growth",
   isLive: true,
   visibility: "live",
@@ -598,10 +598,10 @@ const ascend = capability({
   },
   seoTitle: "Ascend, Your Growth | Core",
   seoDescription:
-    "Ascend is Core's personal AI coach capability: goals, habits, health, routines, finance, and custom AI-generated audio books.",
+    "Ascend is Core's personal AI coach capability: goals, habits, health, routines, finance, and custom AI generated audio books.",
   aeo: {
     summary:
-      "Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI-generated audio books.",
+      "Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI generated audio books.",
     llmsText: "AI coach for growth, habits, and goals.",
   },
   content: {
@@ -713,13 +713,13 @@ const orchestrators: GalaxyEntity[] = [
     role: "CEO",
     fullTitle: "Chief Executive Orchestrator",
     reportsTo: null,
-    scope: "Vision, leadership, direction, executive strategy, and company-level decisions.",
+    scope: "Vision, leadership, direction, executive strategy, and company wide decisions.",
     bullets: [
       "Vision and direction",
       "Executive strategy",
       "Decision support",
       "Leadership alignment",
-      "Company-level prioritization",
+      "Company wide prioritization",
     ],
     coins: { beginner: 1_000_000, advanced: 3_000_000, pro: 10_000_000 },
     orbitRadius: 1.6,
@@ -764,7 +764,7 @@ const orchestrators: GalaxyEntity[] = [
     role: "CSO",
     fullTitle: "Chief Strategy Orchestrator",
     reportsTo: "orchestrator.metis",
-    scope: "Strategy, foresight, growth, market direction, and long-term planning.",
+    scope: "Strategy, foresight, growth, market direction, and long range planning.",
     bullets: ["Strategy", "Foresight", "Growth", "Market direction", "Planning"],
     coins: { beginner: 500_000, advanced: 1_500_000, pro: 5_000_000 },
     orbitRadius: 2.8,
@@ -905,9 +905,9 @@ const commandPlans: CommandPlan[] = [
   { id: "command.plan.professional", name: "Professional", priceUsd: 499.99, monthlyCoins: 7_500_000, description: "Use advanced orchestrator workspaces across strategy, operations, and finance." },
   { id: "command.plan.business", name: "Business", priceUsd: 999.99, monthlyCoins: 20_000_000, description: "Run multiple orchestrator workspaces across your company." },
   { id: "command.plan.growth", name: "Growth", priceUsd: 1999.99, monthlyCoins: 50_000_000, description: "Scale AI leadership across departments and workflows." },
-  { id: "command.plan.scale", name: "Scale", priceUsd: 3999.99, monthlyCoins: 125_000_000, description: "Large-scale orchestrator usage for serious operators." },
+  { id: "command.plan.scale", name: "Scale", priceUsd: 3999.99, monthlyCoins: 125_000_000, description: "Large scale orchestrator usage for serious operators." },
   { id: "command.plan.enterprise", name: "Enterprise", priceUsd: 7999.99, monthlyCoins: 300_000_000, description: "Enterprise AI orchestration for teams, systems, and strategy." },
-  { id: "command.plan.enterprise-plus", name: "Enterprise Plus", priceUsd: 14999.99, monthlyCoins: 750_000_000, description: "High-capacity orchestration across many workspaces." },
+  { id: "command.plan.enterprise-plus", name: "Enterprise Plus", priceUsd: 14999.99, monthlyCoins: 750_000_000, description: "High capacity orchestration across many workspaces." },
   { id: "command.plan.sovereign", name: "Sovereign", priceUsd: 29999.99, monthlyCoins: 2_000_000_000, description: "Sovereign AI command capacity for elite organizations." },
   { id: "command.plan.custom", name: "Custom", priceUsd: null, monthlyCoins: null, description: "Custom, dedicated, and enterprise terms. Contact sales." },
 ];

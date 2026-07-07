@@ -343,26 +343,16 @@ function InteriorTreasures({
     );
     if (pool.length === 0) return [];
     const random = mulberry32(seed ^ 0x77ea);
-    // Every biome holds treasure: at least one, sometimes two.
-    const count = Math.min(1 + (random() < 0.4 ? 1 : 0), pool.length);
-    const picks: Array<{ collectible: CollectibleDef; position: THREE.Vector3 }> = [];
-    const used = new Set<number>();
-    for (let i = 0; i < count && used.size < pool.length; i++) {
-      let index = Math.floor(random() * pool.length);
-      while (used.has(index)) index = (index + 1) % pool.length;
-      used.add(index);
-      const angle = random() * Math.PI * 2;
-      const radius = 1.2 + random() * (CHAMBER_RADIUS * 0.45);
-      picks.push({
+    // Every biome holds one treasure, and it sits dead center on the
+    // chamber floor — right under the capability emblem, exactly where
+    // the eye already rests — so collecting it never turns into a hunt.
+    const index = Math.floor(random() * pool.length);
+    return [
+      {
         collectible: pool[index],
-        position: new THREE.Vector3(
-          Math.cos(angle) * radius,
-          -CHAMBER_RADIUS * 0.52 + 0.25,
-          Math.sin(angle) * radius,
-        ),
-      });
-    }
-    return picks;
+        position: new THREE.Vector3(0, -CHAMBER_RADIUS * 0.52 + 0.25, 0),
+      },
+    ];
   }, [owner, seed]);
 
   return (

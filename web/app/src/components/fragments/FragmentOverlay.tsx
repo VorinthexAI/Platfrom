@@ -52,7 +52,7 @@ function CollectibleTooltip() {
           transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
           className="chrome-border card-depth absolute bottom-24 left-1/2 z-40 w-[calc(100vw-2.5rem)] max-w-xs -translate-x-1/2 rounded-2xl p-5 lg:bottom-32"
           style={{ background: "var(--gradient-panel)" }}
-          aria-label={`${selected.name} — collect Intelligence Fragments`}
+          aria-label={`${selected.name}, collect Intelligence Fragments`}
         >
           <div className="flex items-center justify-between gap-3">
             <p className="micro-label">{selected.rarity} discovery</p>
