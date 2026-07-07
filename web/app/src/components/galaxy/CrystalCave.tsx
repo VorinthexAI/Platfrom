@@ -19,7 +19,7 @@ import { CHAMBER_RADIUS } from "./BiomeChamber";
 
 /**
  * The leaderboard asteroid's crystal cave: every piece the galaxy has
- * claimed (streamed live over SSE) mounts to the chamber's walls, floor,
+ * collected (streamed live over SSE) mounts to the chamber's walls, floor,
  * and roof, pointing in toward the camera — together they line the whole
  * room with treasure. Each piece renders its EXACT persisted mesh recipe
  * at the spot its collection-time placement seed dictates, and its age

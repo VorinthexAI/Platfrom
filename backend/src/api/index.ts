@@ -6,6 +6,7 @@ import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, 
 import { handlePolarWebhook, POLAR_WEBHOOK_PATH } from './payments';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { registerRoutes } from './routes';
+import { ensureLeaderboardDigestSweeper } from '@/platform/leaderboard-digest';
 
 if (process.env.NODE_ENV === 'production' && process.env.POLAR_ACCESS_TOKEN && !process.env.POLAR_WEBHOOK_SECRET) {
   throw new Error('POLAR_WEBHOOK_SECRET is required in production when POLAR_ACCESS_TOKEN is configured');
@@ -66,6 +67,10 @@ if (import.meta.main) {
     fetch: app.fetch,
   });
   console.log(`vorinthex app listening on ${port}`);
+
+  // Daily waitlist-leaderboard digest: hourly ticks race for a Redis
+  // day-lock, so exactly one instance sends per UTC day.
+  ensureLeaderboardDigestSweeper();
 
   const shutdown = async () => {
     server.stop();

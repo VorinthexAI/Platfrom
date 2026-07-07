@@ -30,14 +30,14 @@ export async function GET() {
   if (backendConfigured() && explorerId) {
     const result = await backendFetch<{
       global_total: number;
-      explorer: { balance: number; claimed: string[] } | null;
+      explorer: { balance: number; collected: string[] } | null;
       three?: ThreePayload;
     }>(`/fragments/summary?explorer_id=${encodeURIComponent(explorerId)}&format=three`);
     if (result.ok && result.data) {
       return NextResponse.json({
         ok: true,
         balance: result.data.explorer?.balance ?? 0,
-        claimed: result.data.explorer?.claimed ?? [],
+        collected: result.data.explorer?.collected ?? [],
         globalTotal: result.data.global_total,
         three: result.data.three ?? { points: [], colors: [], meta: [] },
       });
@@ -48,7 +48,7 @@ export async function GET() {
   // mirroring the backend formatter's hash→sphere placement.
   const progress = getProgress(explorerId);
   const three: ThreePayload = { points: [], colors: [], meta: [] };
-  for (const id of progress.claimed) {
+  for (const id of progress.collected) {
     const random = mulberry32(hashString(id));
     const y = random() * 2 - 1;
     const theta = random() * Math.PI * 2;
@@ -65,7 +65,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     balance: progress.balance,
-    claimed: progress.claimed,
+    collected: progress.collected,
     globalTotal: progress.total,
     three,
   });

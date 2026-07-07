@@ -18,6 +18,7 @@ export {
   ArrowRightIcon,
   AscendIcon,
   BrainIcon,
+  ChevronRightIcon,
   CloseIcon,
   CompassIcon,
   GalleryIcon,

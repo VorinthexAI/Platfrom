@@ -32,7 +32,7 @@ import { BiomeLootField } from "./BiomeLoot";
  * The inside of the focused world. Stepping onto a product, orchestrator,
  * or capability dives beneath its surface into a seeded biome chamber —
  * with the world's own transparent emblem pulsing and wobbling at its
- * heart, and (if fortune rolls right) hidden treasure to claim.
+ * heart, and (if fortune rolls right) hidden treasure to collect.
  */
 
 /** Curated interiors for the product worlds; children hash their biome. */
@@ -226,8 +226,8 @@ function TreasureCrystal({
   const [gone, setGone] = useState(false);
   const [hovered, setHovered] = useState(false);
   const select = useFragmentsStore((s) => s.select);
-  const claimed = useFragmentsStore((s) =>
-    s.claimedIds.includes(collectible.id),
+  const collected = useFragmentsStore((s) =>
+    s.collectedIds.includes(collectible.id),
   );
   const isSelected = useFragmentsStore(
     (s) => s.selected?.id === collectible.id,
@@ -248,23 +248,23 @@ function TreasureCrystal({
   useFrame((_, delta) => {
     if (paused || !groupRef.current) return;
     timeRef.current += delta;
-    // Claimed treasure dissolves into light.
+    // Collected treasure dissolves into light.
     const target =
-      claimed || timeRef.current < entryDelay ? 0.001 : 1;
+      collected || timeRef.current < entryDelay ? 0.001 : 1;
     const scale = THREE.MathUtils.lerp(
       groupRef.current.scale.x,
       target,
       delta * 3,
     );
     groupRef.current.scale.setScalar(scale);
-    if (claimed && scale < 0.01) setGone(true);
+    if (collected && scale < 0.01) setGone(true);
   });
 
   if (gone) return null;
 
   const handleSelect = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
-    if (!claimed) select(collectible);
+    if (!collected) select(collectible);
   };
 
   return (
@@ -331,15 +331,15 @@ function InteriorTreasures({
     entity.type === "product" ? entity : getOwningProduct(entity);
   const spots = useMemo(() => {
     if (!owner) return [];
-    // Snapshot of claims at entry: only unclaimed treasure spawns, and a
-    // claim mid-visit dissolves in place instead of reshuffling the room.
-    const claimedIds = useFragmentsStore.getState().claimedIds;
+    // Snapshot of collects at entry: only uncollected treasure spawns, and a
+    // collect mid-visit dissolves in place instead of reshuffling the room.
+    const collectedIds = useFragmentsStore.getState().collectedIds;
     const pool = VORINTHEX_GALAXY_REGISTRY.collectibles.filter(
       (c) =>
         !c.isDiscoverable &&
-        c.isClaimable &&
+        c.isCollectible &&
         c.parentEntityId === owner.id &&
-        !claimedIds.includes(c.id),
+        !collectedIds.includes(c.id),
     );
     if (pool.length === 0) return [];
     const random = mulberry32(seed ^ 0x77ea);

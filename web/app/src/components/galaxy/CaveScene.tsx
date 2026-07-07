@@ -14,7 +14,7 @@ import { CrystalCave } from "./CrystalCave";
  * is keyed to the asteroid's stable identity, so collected pieces never
  * respawn — while the cavern itself still re-rolls its look per entry.
  * The leaderboard asteroid is the exception: no loot of its own — its
- * walls carry every piece the whole galaxy has claimed, live.
+ * walls carry every piece the whole galaxy has collected, live.
  */
 
 export function CaveScene() {

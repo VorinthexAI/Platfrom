@@ -3,8 +3,8 @@ import { platformEventsBodySchema } from './platform-events';
 import { landingEventSlugSchema, landingEventSlugs } from '@/platform/events';
 
 describe('platform event schemas', () => {
-  test('catalog contains the 30 landing events', () => {
-    expect(landingEventSlugs).toHaveLength(30);
+  test('catalog contains the 31 landing events', () => {
+    expect(landingEventSlugs).toHaveLength(31);
     expect(landingEventSlugSchema.parse('landing.product_entered')).toBe('landing.product_entered');
     expect(landingEventSlugSchema.parse('fragments.collected')).toBe('fragments.collected');
     expect(landingEventSlugSchema.parse('landing.crystal_collected')).toBe('landing.crystal_collected');
@@ -26,7 +26,7 @@ describe('platform event schemas', () => {
     const body = platformEventsBodySchema.parse({
       distinctId: 'b'.repeat(64),
       temp_email_hash: 'b'.repeat(64),
-      slug: 'landing.fragment_claim_clicked',
+      slug: 'landing.fragment_collect_clicked',
       metadata: { collectible_id: 'collectible.frag-belt-1' },
     });
 

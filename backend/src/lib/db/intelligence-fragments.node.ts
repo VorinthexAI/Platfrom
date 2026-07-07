@@ -127,6 +127,61 @@ export async function listTopCollectors(limit: number): Promise<LeaderboardRow[]
   }));
 }
 
+/**
+ * Every collector ranked by total fragments, best first. Bounded by the
+ * user count; the (userId) index carries the aggregation.
+ */
+export async function listRankedCollectors(): Promise<Array<{ userId: string; total: number }>> {
+  const cursor = await db.query(aql`
+    FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
+      FILTER f.userId != null
+      COLLECT userId = f.userId AGGREGATE total = SUM(f.fragments)
+      SORT total DESC
+      RETURN { userId, total }
+  `);
+  const rows = await cursor.all();
+  return rows.map((row) => ({
+    userId: String(row.userId),
+    total: typeof row.total === 'number' ? row.total : 0,
+  }));
+}
+
+/**
+ * A single user's fragment total and 1-based leaderboard place (everyone
+ * with a strictly higher total, plus one). Null when they have no entries.
+ */
+export async function getUserFragmentPlace(
+  userId: string,
+): Promise<{ total: number; place: number } | null> {
+  const cursor = await db.query(aql`
+    LET mine = SUM(
+      FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
+        FILTER f.userId == ${userId}
+        RETURN f.fragments
+    )
+    LET entries = LENGTH(
+      FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
+        FILTER f.userId == ${userId}
+        LIMIT 1
+        RETURN 1
+    )
+    LET ahead = LENGTH(
+      FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
+        FILTER f.userId != null
+        COLLECT other = f.userId AGGREGATE total = SUM(f.fragments)
+        FILTER total > mine
+        RETURN 1
+    )
+    RETURN { mine, entries, ahead }
+  `);
+  const row = await cursor.next();
+  if (!row || row.entries === 0) return null;
+  return {
+    total: typeof row.mine === 'number' ? row.mine : 0,
+    place: (typeof row.ahead === 'number' ? row.ahead : 0) + 1,
+  };
+}
+
 export interface RecentFragmentEntry {
   key: string;
   fragments: number;
@@ -167,7 +222,7 @@ export async function listRecentFragmentEntries(limit: number): Promise<RecentFr
 }
 
 /**
- * Claims every not-yet-adopted entry collected under an anonymous explorer id
+ * Collects every not-yet-adopted entry collected under an anonymous explorer id
  * for a real user. Returns how many entries were adopted.
  */
 export async function adoptExplorerFragments(explorerId: string, userId: string): Promise<number> {

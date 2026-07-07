@@ -171,7 +171,7 @@ export interface CollectibleDef {
   rarity: CollectibleRarity;
   fragments: number;
   isLive: boolean;
-  isClaimable: boolean;
+  isCollectible: boolean;
   isDiscoverable: boolean;
   /** World-space position in the galaxy scene. */
   position: [number, number, number];

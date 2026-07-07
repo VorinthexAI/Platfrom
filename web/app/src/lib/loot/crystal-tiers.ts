@@ -47,7 +47,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "Small finds still stack on the leaderboard.",
     "Take it; the next rock might be the one.",
     "A start is a start, explorer.",
-    "Claim it and keep your streak alive.",
+    "Collect it and keep your streak alive.",
   ]),
   T(1, "Faint Shard", 25, 59, 15, [
     "A soft glow under the dust — something small survived here.",
@@ -61,7 +61,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "It's small, but it's yours if you want it.",
     "A gentle find — the belt is warming up to you.",
   ], [
-    "Claim it and keep hopping rocks.",
+    "Collect it and keep hopping rocks.",
     "Stack it — climbers take every step.",
     "Take the shard; bigger veins are out there.",
     "Add it to your haul and push on.",
@@ -79,7 +79,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "Steady light from a steady rock.",
     "The belt rewards the persistent.",
   ], [
-    "Claim it before the dust settles back.",
+    "Collect it before the dust settles back.",
     "Take it and let the ledger sing.",
     "That's leaderboard fuel — grab it.",
     "Yours for the tapping, explorer.",
@@ -97,7 +97,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "The belt tipped its hand this time.",
     "Scanners don't usually get this excited.",
   ], [
-    "Claim it — finds like this move rankings.",
+    "Collect it — finds like this move rankings.",
     "Tap it and watch your balance jump.",
     "That's a proper step up the leaderboard.",
     "Take it; the galaxy is watching.",
@@ -115,7 +115,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "The belt just paid you a compliment.",
     "Your scanners are not exaggerating.",
   ], [
-    "Claim it — this one changes your standing.",
+    "Collect it — this one changes your standing.",
     "Take it before the rock reconsiders.",
     "That's hundreds of fragments in one tap.",
     "Bank it and enjoy the climb.",
@@ -133,7 +133,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "Some dives just pay off. This is one.",
     "The belt is being generous today.",
   ], [
-    "Claim it and climb — hard.",
+    "Collect it and climb — hard.",
     "Tap it; that's a leaderboard leap.",
     "Take your strike and ride the streak.",
     "Secure it before you wake up.",
@@ -151,7 +151,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "Somewhere, a rival explorer just shivered.",
     "The belt's poker face finally cracked.",
   ], [
-    "Claim it — that's a ranking rewritten.",
+    "Collect it — that's a ranking rewritten.",
     "Take it and let the toast say the rest.",
     "Thousands upon thousands. One tap.",
     "Bank it; legends need receipts.",
@@ -169,7 +169,7 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "Your name is about to travel the galaxy.",
     "The belt kept its best behind this wall.",
   ], [
-    "Claim it and watch the galaxy react.",
+    "Collect it and watch the galaxy react.",
     "One tap and the leaderboard shakes.",
     "Take it — history favors the bold.",
     "Secure the heart. Then breathe again.",
@@ -187,14 +187,14 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "Finds like this rewrite the top ten.",
     "You may want to sit down for the number.",
   ], [
-    "Claim it — the toast will cause panic.",
+    "Collect it — the toast will cause panic.",
     "Take it and ascend the board.",
     "One tap: six figures, forever yours.",
     "Secure the jewel. Then go brag.",
     "The leaderboard is about to bend.",
   ]),
   T(9, "Million Vault", 250_000, 1_000_000, 3, [
-    "THE MILLION VAULT. It's real. It's here. It's yours to claim.",
+    "THE MILLION VAULT. It's real. It's here. It's yours to collect.",
     "The crystal fills the entire chamber — you're standing inside the prize.",
     "This is the find the whole galaxy whispers about.",
     "Numbers this size have their own weather.",
@@ -205,11 +205,11 @@ export const CRYSTAL_TIERS: CrystalTier[] = [
     "Scanners across the galaxy just spiked.",
     "There are legends, and then there is this.",
   ], [
-    "CLAIM IT. Then never stop telling the story.",
+    "COLLECT IT. Then never stop telling the story.",
     "One tap and the top of the board is yours.",
     "Take it — the galaxy deserves the shockwave.",
     "Secure the vault and take your throne.",
-    "Tap. Claim. Reign.",
+    "Tap. Collect. Reign.",
   ]),
 ];
 

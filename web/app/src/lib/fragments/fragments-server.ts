@@ -4,7 +4,7 @@ import type { CollectibleDef } from "@/lib/galaxy/registry-types";
 
 /**
  * Server-side fragment ledger. Collectibles are defined in the registry —
- * the client is never trusted: every claim is validated here.
+ * the client is never trusted: every collect is validated here.
  *
  * TODO: replace the in-memory store with the platform backend (Redis/DB)
  * before launch — balances and the global counter currently reset on
@@ -16,25 +16,25 @@ const collectiblesById = new Map(
 );
 
 interface Ledger {
-  /** explorerId -> claimed collectible ids */
-  claims: Map<string, Set<string>>;
+  /** explorerId -> collected collectible ids */
+  collects: Map<string, Set<string>>;
   /** explorerId -> fragment balance */
   balances: Map<string, number>;
-  /** explorerId -> last claim timestamp (rate limiting) */
-  lastClaimAt: Map<string, number>;
+  /** explorerId -> last collect timestamp (rate limiting) */
+  lastCollectAt: Map<string, number>;
   globalTotal: number;
 }
 
 const ledger: Ledger = {
-  claims: new Map(),
+  collects: new Map(),
   balances: new Map(),
-  lastClaimAt: new Map(),
+  lastCollectAt: new Map(),
   globalTotal: 0,
 };
 
-const CLAIM_COOLDOWN_MS = 1500;
+const COLLECT_COOLDOWN_MS = 1500;
 
-export type ClaimResult =
+export type CollectResult =
   | {
       ok: true;
       collectible: CollectibleDef;
@@ -44,31 +44,31 @@ export type ClaimResult =
     }
   | { ok: false; status: number; error: string };
 
-export function claimCollectible(
+export function collectCollectible(
   explorerId: string,
   collectibleId: string,
-): ClaimResult {
+): CollectResult {
   const collectible = collectiblesById.get(collectibleId);
   if (!collectible) {
     return { ok: false, status: 404, error: "Unknown collectible." };
   }
-  if (!collectible.isLive || !collectible.isClaimable) {
-    return { ok: false, status: 409, error: "This fragment cannot be claimed yet." };
+  if (!collectible.isLive || !collectible.isCollectible) {
+    return { ok: false, status: 409, error: "This fragment cannot be collected yet." };
   }
 
-  const last = ledger.lastClaimAt.get(explorerId) ?? 0;
-  if (Date.now() - last < CLAIM_COOLDOWN_MS) {
+  const last = ledger.lastCollectAt.get(explorerId) ?? 0;
+  if (Date.now() - last < COLLECT_COOLDOWN_MS) {
     return { ok: false, status: 429, error: "Slow down, explorer." };
   }
 
-  const claimed = ledger.claims.get(explorerId) ?? new Set<string>();
-  if (claimed.has(collectibleId)) {
-    return { ok: false, status: 409, error: "Already claimed." };
+  const collected = ledger.collects.get(explorerId) ?? new Set<string>();
+  if (collected.has(collectibleId)) {
+    return { ok: false, status: 409, error: "Already collected." };
   }
 
-  claimed.add(collectibleId);
-  ledger.claims.set(explorerId, claimed);
-  ledger.lastClaimAt.set(explorerId, Date.now());
+  collected.add(collectibleId);
+  ledger.collects.set(explorerId, collected);
+  ledger.lastCollectAt.set(explorerId, Date.now());
   const balance =
     (ledger.balances.get(explorerId) ?? 0) + collectible.fragments;
   ledger.balances.set(explorerId, balance);
@@ -100,38 +100,38 @@ const LOOT_BOUNDS: Record<ProceduralLootInput["kind"], { min: number; max: numbe
 /** Rapid floor-scavenging is the point — a much shorter cooldown here. */
 const LOOT_COOLDOWN_MS = 200;
 
-export type ProceduralClaimResult =
+export type ProceduralCollectResult =
   | { ok: true; fragmentsAwarded: number; balance: number; globalTotal: number }
   | { ok: false; status: number; error: string };
 
 /**
- * Claims procedurally generated biome loot (floor fragments and center
+ * Collects procedurally generated biome loot (floor fragments and center
  * crystals). These have no registry entry — the id encodes the biome and
  * slot — so validation is bounds-based: the client is trusted only within
  * the marketing-collectible value ranges.
  */
-export function claimProceduralLoot(
+export function collectProceduralLoot(
   explorerId: string,
   input: ProceduralLootInput,
-): ProceduralClaimResult {
+): ProceduralCollectResult {
   const bounds = LOOT_BOUNDS[input.kind];
   if (input.fragments < bounds.min || input.fragments > bounds.max) {
     return { ok: false, status: 400, error: "Loot value out of range." };
   }
 
-  const last = ledger.lastClaimAt.get(explorerId) ?? 0;
+  const last = ledger.lastCollectAt.get(explorerId) ?? 0;
   if (Date.now() - last < LOOT_COOLDOWN_MS) {
     return { ok: false, status: 429, error: "Slow down, explorer." };
   }
 
-  const claimed = ledger.claims.get(explorerId) ?? new Set<string>();
-  if (claimed.has(input.lootId)) {
-    return { ok: false, status: 409, error: "Already claimed." };
+  const collected = ledger.collects.get(explorerId) ?? new Set<string>();
+  if (collected.has(input.lootId)) {
+    return { ok: false, status: 409, error: "Already collected." };
   }
 
-  claimed.add(input.lootId);
-  ledger.claims.set(explorerId, claimed);
-  ledger.lastClaimAt.set(explorerId, Date.now());
+  collected.add(input.lootId);
+  ledger.collects.set(explorerId, collected);
+  ledger.lastCollectAt.set(explorerId, Date.now());
   const balance = (ledger.balances.get(explorerId) ?? 0) + input.fragments;
   ledger.balances.set(explorerId, balance);
   ledger.globalTotal += input.fragments;
@@ -150,8 +150,8 @@ export function getProgress(explorerId?: string) {
     goal: VORINTHEX_GALAXY_REGISTRY.fragmentGoal,
     label: VORINTHEX_GALAXY_REGISTRY.fragmentCounterLabel,
     balance: explorerId ? (ledger.balances.get(explorerId) ?? 0) : 0,
-    claimed: explorerId
-      ? Array.from(ledger.claims.get(explorerId) ?? [])
+    collected: explorerId
+      ? Array.from(ledger.collects.get(explorerId) ?? [])
       : [],
   };
 }

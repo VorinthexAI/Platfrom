@@ -3,11 +3,13 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
+import { AscendIcon } from "@/components/ui/icons";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { products } from "@/data/products";
 import { trackCtaClick } from "@/lib/analytics";
 import { useAudioStore } from "@/lib/audio/audio-store";
 import {
+  galaxyMotion,
   stepIndexForFocus,
   syncEntityUrl,
   useGalaxyStore,
@@ -30,7 +32,23 @@ export function SiteNav() {
         aria-label="Primary"
         className="mx-auto grid h-20 w-full max-w-7xl grid-cols-[1fr_auto] items-center px-5 sm:px-10 lg:grid-cols-[1fr_auto_1fr]"
       >
-        <Link href="/" className="flex items-center gap-3 justify-self-start">
+        <Link
+          href="/"
+          onClick={(event) => {
+            // The brand mark restarts the whole arrival: reset the galaxy
+            // and replay the same deep-space flight as a fresh page load.
+            event.preventDefault();
+            trackCtaClick("brand_home", { placement: "nav" });
+            const state = useGalaxyStore.getState();
+            state.resetToSystem();
+            galaxyMotion.momentum = 0;
+            galaxyMotion.orbitAngle = 0;
+            galaxyMotion.orbitVelocity = 0;
+            state.startIntro();
+            syncEntityUrl("/");
+          }}
+          className="flex items-center gap-3 justify-self-start"
+        >
           {/* unoptimized: a 1.3 KB mark gains nothing from /_next/image,
               and the optimizer route can hang (it kept the tab's load
               event, and its spinner, alive forever on the dev server). */}
@@ -100,16 +118,18 @@ export function SiteNav() {
           })}
         </div>
 
-        <div className="flex items-center gap-3 justify-self-end sm:gap-6">
+        {/* Short, single-word labels so nothing ever wraps; on phones the
+            mission and leaderboard collapse to icon-only buttons. */}
+        <div className="flex items-center gap-2 justify-self-end sm:gap-4">
           <Button
             variant="primary"
             onClick={() => {
               trackCtaClick("waitlist_open", { placement: "nav" });
               enterCave("join");
             }}
-            className="min-h-0 px-5 py-2.5 text-[0.65rem]"
+            className="min-h-0 px-5 py-2.5 text-[0.65rem] whitespace-nowrap"
           >
-            Join Waitlist
+            Join
           </Button>
           <Button
             variant="secondary"
@@ -118,13 +138,11 @@ export function SiteNav() {
               toggleMission();
             }}
             icon={<SpeakerIcon animated={missionPlaying} />}
-            className="min-h-0 px-4 py-2.5 text-[0.65rem] uppercase"
+            aria-label={missionPlaying ? "Stop the mission" : "Hear the mission"}
+            className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
           >
             <span className="hidden sm:inline">
-              {missionPlaying ? "Stop the Mission" : "Hear the Mission"}
-            </span>
-            <span className="sr-only sm:hidden">
-              {missionPlaying ? "Stop the Mission" : "Hear the Mission"}
+              {missionPlaying ? "Stop" : "Hear"}
             </span>
           </Button>
           <Button
@@ -133,10 +151,11 @@ export function SiteNav() {
               trackCtaClick("leaderboard_open", { placement: "nav" });
               enterCave("leaderboard");
             }}
-            className="min-h-0 px-4 py-2.5 text-[0.65rem] uppercase"
+            icon={<AscendIcon size="sm" />}
+            aria-label="View leaderboard"
+            className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
           >
-            <span className="hidden sm:inline">View Leaderboard</span>
-            <span className="sr-only sm:hidden">View Leaderboard</span>
+            <span className="hidden sm:inline">Leaderboard</span>
           </Button>
         </div>
       </nav>

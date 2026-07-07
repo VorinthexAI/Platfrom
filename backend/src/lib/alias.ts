@@ -2,16 +2,18 @@
  * Deterministic waitlist alias + welcome line generation.
  *
  * Aliases are "<Prefix> <Role>" pairs ("Orbit Surfer", "Nova Cartographer")
- * picked from two fixed 250-entry lists themed around the product universe:
+ * picked from two fixed 1000-entry lists themed around the product universe:
  * the Nexus/Core/Command/Studio/Launch surfaces, the orchestrators
  * (Atlas, Hermes, Metis, Apollo, Iris, Ledger, Orbit, Athena, Forge,
  * Mercury, Sentinel, Themis), and capabilities (Archive, Gallery, Signal,
- * Compass, Ascend) — mythic and spacefaring. The pick is a pure function of
- * the seed string (usually the user key), so the same user always gets the
- * same alias.
+ * Compass, Ascend) — mythic and spacefaring. Each list is 250 hand-picked
+ * words plus 750 deterministic compounds (head × tail, deduplicated), for
+ * 1000 × 1000 = one million distinct aliases. The pick is a pure function
+ * of the seed string (usually the user key), so the same user always gets
+ * the same alias.
  */
 
-export const ALIAS_PREFIXES: readonly string[] = [
+const BASE_ALIAS_PREFIXES: readonly string[] = [
   'Orbit', 'Nexus', 'Nova', 'Ion', 'Zenith', 'Quantum', 'Astral', 'Ember', 'Chrome', 'Obsidian',
   'Void', 'Stellar', 'Lunar', 'Solar', 'Comet', 'Nebula', 'Photon', 'Gravity', 'Halo', 'Drift',
   'Pulse', 'Vector', 'Cipher', 'Atlas', 'Aurora', 'Apex', 'Aether', 'Axiom', 'Beacon', 'Binary',
@@ -39,7 +41,7 @@ export const ALIAS_PREFIXES: readonly string[] = [
   'Archive', 'Gallery', 'Compass', 'Command', 'Core', 'Studio', 'Launch', 'Lyric', 'Marble', 'Mistral',
 ];
 
-export const ALIAS_ROLES: readonly string[] = [
+const BASE_ALIAS_ROLES: readonly string[] = [
   'Surfer', 'Explorer', 'Voyager', 'Pathfinder', 'Cartographer', 'Navigator', 'Sentinel', 'Architect', 'Pioneer', 'Wanderer',
   'Harbinger', 'Custodian', 'Archivist', 'Signalist', 'Pilot', 'Captain', 'Commander', 'Scout', 'Ranger', 'Warden',
   'Keeper', 'Seeker', 'Sage', 'Oracle', 'Herald', 'Envoy', 'Emissary', 'Courier', 'Engineer', 'Artificer',
@@ -65,6 +67,74 @@ export const ALIAS_ROLES: readonly string[] = [
   'Charter', 'Plotter', 'Grapher', 'Recorder', 'Register', 'Ledgerkeeper', 'Accountant', 'Auditor', 'Appraiser', 'Valuer',
   'Collector', 'Assembler', 'Compiler', 'Aggregator', 'Synthesizer', 'Distiller', 'Refiner', 'Polisher', 'Finisher', 'Perfecter',
   'Optimizer', 'Calibrator', 'Tuner', 'Balancer', 'Harmonizer', 'Resonator', 'Echoist', 'Soundsmith', 'Wavecrafter', 'Tidewatcher',
+];
+
+/**
+ * Deterministic compound builder: crosses heads × tails, skips anything
+ * already in the base list (or a self-echo like Stormstorm), and returns
+ * exactly `needed` unique words. Throws at module load if the pools ever
+ * shrink below the target — the 1000-entry guarantee is enforced, not
+ * hoped for.
+ */
+function buildCompounds(
+  base: readonly string[],
+  heads: readonly string[],
+  tails: readonly string[],
+  needed: number,
+): string[] {
+  const seen = new Set(base.map((word) => word.toLowerCase()));
+  const out: string[] = [];
+  for (const head of heads) {
+    for (const tail of tails) {
+      if (out.length >= needed) return out;
+      if (head.toLowerCase() === tail.toLowerCase()) continue;
+      const word = `${head}${tail}`;
+      const key = word.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(word);
+    }
+  }
+  if (out.length < needed) {
+    throw new Error(`alias compound pool exhausted: ${out.length}/${needed}`);
+  }
+  return out;
+}
+
+const PREFIX_HEADS: readonly string[] = [
+  'Star', 'Sky', 'Sun', 'Moon', 'Void', 'Iron', 'Storm', 'Frost', 'Ash', 'Night',
+  'Dawn', 'Dusk', 'Ever', 'Deep', 'Far', 'High', 'True', 'Wild', 'Silver', 'Golden',
+  'Astro', 'Cosmo', 'Hyper', 'Ultra', 'Nova', 'Nebula', 'Comet', 'Orbit', 'Aero', 'Chrono',
+  'Cryo', 'Umbra',
+];
+
+const PREFIX_TAILS: readonly string[] = [
+  'fall', 'fire', 'gate', 'glow', 'wind', 'wake', 'veil', 'forge', 'light', 'spire',
+  'drift', 'born', 'bound', 'crest', 'shade', 'song', 'spark', 'field', 'flare', 'helm',
+  'mark', 'path', 'rise', 'reach', 'tide',
+];
+
+const ROLE_HEADS: readonly string[] = [
+  'Star', 'Void', 'Sky', 'Rift', 'Belt', 'Core', 'Dust', 'Flux', 'Nova', 'Orbit',
+  'Comet', 'Nebula', 'Photon', 'Aurora', 'Ion', 'Warp', 'Beacon', 'Cipher', 'Signal', 'Vault',
+  'Relic', 'Ember', 'Frost', 'Storm', 'Dawn', 'Night', 'Halo', 'Prism', 'Quasar', 'Pulse',
+  'Crystal', 'Fragment',
+];
+
+const ROLE_TAILS: readonly string[] = [
+  'smith', 'wright', 'warden', 'keeper', 'seeker', 'walker', 'rider', 'singer', 'caller', 'bringer',
+  'weaver', 'watcher', 'chaser', 'breaker', 'shaper', 'bearer', 'finder', 'reader', 'guard', 'scribe',
+  'herald', 'knight', 'marshal', 'pilot', 'scout',
+];
+
+export const ALIAS_PREFIXES: readonly string[] = [
+  ...BASE_ALIAS_PREFIXES,
+  ...buildCompounds(BASE_ALIAS_PREFIXES, PREFIX_HEADS, PREFIX_TAILS, 750),
+];
+
+export const ALIAS_ROLES: readonly string[] = [
+  ...BASE_ALIAS_ROLES,
+  ...buildCompounds(BASE_ALIAS_ROLES, ROLE_HEADS, ROLE_TAILS, 750),
 ];
 
 /**

@@ -33,7 +33,7 @@ export async function GET() {
           waitlist_count: 0,
           waitlist_verified_count: 0,
           fragments_total: progress.total,
-          fragments_entries: progress.claimed.length,
+          fragments_entries: progress.collected.length,
         });
         controller.enqueue(
           encoder.encode(`event: counters\ndata: ${payload}\n\n`),

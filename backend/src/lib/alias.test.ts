@@ -2,14 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { ALIAS_PREFIXES, ALIAS_ROLES, WELCOME_LINES, generateAlias, pickWelcomeLine } from './alias';
 
 describe('alias word lists', () => {
-  test('has exactly 250 unique prefixes', () => {
-    expect(ALIAS_PREFIXES.length).toBe(250);
-    expect(new Set(ALIAS_PREFIXES).size).toBe(250);
+  test('has exactly 1000 unique prefixes', () => {
+    expect(ALIAS_PREFIXES.length).toBe(1000);
+    expect(new Set(ALIAS_PREFIXES.map((word) => word.toLowerCase())).size).toBe(1000);
   });
 
-  test('has exactly 250 unique roles', () => {
-    expect(ALIAS_ROLES.length).toBe(250);
-    expect(new Set(ALIAS_ROLES).size).toBe(250);
+  test('has exactly 1000 unique roles', () => {
+    expect(ALIAS_ROLES.length).toBe(1000);
+    expect(new Set(ALIAS_ROLES.map((word) => word.toLowerCase())).size).toBe(1000);
   });
 });
 

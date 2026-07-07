@@ -152,7 +152,7 @@
       "category": "master-brand",
       "entityId": "brand.vorinthex-ai",
       "description": "Vorinthex AI master brand: The Nexus of Intelligence.",
-      "currentVersionId": "v5",
+      "currentVersionId": "v7",
       "versions": [
         {
           "id": "v1",
@@ -215,6 +215,8 @@
           "createdAt": "2026-07-07T01:33:42.751Z"
         },
         {
+          "id": "v5",
+          "version": 5,
           "prompt": "Create a premium 75 second Vorinthex AI soundtrack bed for launch videos: obsidian spatial depth, slow orbital whoosh, restrained chrome shimmer, deep controlled sub pulse, elegant rise and fall, clean enough to loop under product videos. No speech, no vocals, no lyrics, no cheap EDM, no abrupt trailer hits.",
           "fullPrompt": "Create an audio asset for Vorinthex AI.\n\nTarget:\n- Type: master-brand\n- Slug: vorinthex-ai\n- Description: Vorinthex AI master brand: The Nexus of Intelligence.\n\n\n\nAudio system:\nPremium cinematic ambient sound design for Vorinthex AI: restrained, dark, spatial, precise, with low sub-bass pressure, soft metallic shimmer, orbital movement, clean pulses, and a controlled enterprise-software feel. No vocals, no speech, no melody-heavy pop music, no trailer hits.\n\nTiming:\n- Exact intended duration: 75 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nCreate a premium 75 second Vorinthex AI soundtrack bed for launch videos: obsidian spatial depth, slow orbital whoosh, restrained chrome shimmer, deep controlled sub pulse, elegant rise and fall, clean enough to loop under product videos. No speech, no vocals, no lyrics, no cheap EDM, no abrupt trailer hits.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
           "mode": "soundtrack",
@@ -224,13 +226,41 @@
           "status": "completed",
           "audioPath": "outputs/audio/master-brand/vorinthex-ai/v5/vorinthex-ai-v5.mp3",
           "metadataPath": "outputs/audio/master-brand/vorinthex-ai/v5/metadata.json",
-          "id": "v5",
-          "version": 5,
           "createdAt": "2026-07-07T02:09:22.995Z"
+        },
+        {
+          "id": "v6",
+          "version": 6,
+          "prompt": "Explorer, welcome to Vorinthex. Your mission: collect Intelligence Fragments scattered across the galaxy. Dive into asteroids to uncover giant crystals worth thousands of fragments, and climb the galaxy leaderboard. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create an audio asset for Vorinthex AI.\n\nTarget:\n- Type: master-brand\n- Slug: vorinthex-ai\n- Description: Vorinthex AI master brand: The Nexus of Intelligence.\n\n\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 25 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nExplorer, welcome to Vorinthex. Your mission: collect Intelligence Fragments scattered across the galaxy. Dive into asteroids to uncover giant crystals worth thousands of fragments, and climb the galaxy leaderboard. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "duration": 25,
+          "format": "wav",
+          "status": "failed",
+          "metadataPath": "outputs/audio/master-brand/vorinthex-ai/v6/metadata.json",
+          "error": "400 {\"success\":false,\"error\":{\"name\":\"ZodError\",\"message\":\"[\\n  {\\n    \\\"code\\\": \\\"invalid_value\\\",\\n    \\\"values\\\": [\\n      \\\"mp3\\\",\\n      \\\"pcm\\\"\\n    ],\\n    \\\"path\\\": [\\n      \\\"response_format\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid option: expected one of \\\\\\\"mp3\\\\\\\"|\\\\\\\"pcm\\\\\\\"\\\"\\n  }\\n]\"}}",
+          "createdAt": "2026-07-07T13:53:45.860Z"
+        },
+        {
+          "prompt": "Explorer, welcome to Vorinthex. Your mission: collect Intelligence Fragments scattered across the galaxy. Dive into asteroids to uncover giant crystals worth thousands of fragments, and climb the galaxy leaderboard. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create an audio asset for Vorinthex AI.\n\nTarget:\n- Type: master-brand\n- Slug: vorinthex-ai\n- Description: Vorinthex AI master brand: The Nexus of Intelligence.\n\n\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 25 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nExplorer, welcome to Vorinthex. Your mission: collect Intelligence Fragments scattered across the galaxy. Dive into asteroids to uncover giant crystals worth thousands of fragments, and climb the galaxy leaderboard. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 25,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/master-brand/vorinthex-ai/v7/vorinthex-ai-v7.pcm",
+          "metadataPath": "outputs/audio/master-brand/vorinthex-ai/v7/metadata.json",
+          "id": "v7",
+          "version": 7,
+          "createdAt": "2026-07-07T13:54:38.800Z"
         }
       ],
       "createdAt": "2026-07-07T00:14:49.782Z",
-      "updatedAt": "2026-07-07T02:09:22.998Z"
+      "updatedAt": "2026-07-07T13:54:38.802Z"
     },
     {
       "id": "orchestrator-orchestrator-apollo",

@@ -106,14 +106,14 @@ describe('fragment summaries', () => {
     expect(dedupeFragmentEntries(entries).map((entry) => entry.key)).toEqual(['frag_a', 'frag_b']);
   });
 
-  test('summarizeFragmentEntries sums the balance and lists claimed collectibles once', () => {
+  test('summarizeFragmentEntries sums the balance and lists collected collectibles once', () => {
     expect(summarizeFragmentEntries(entries)).toEqual({
       balance: 125,
-      claimed: ['nexus-shard', 'founder-core'],
+      collected: ['nexus-shard', 'founder-core'],
     });
   });
 
   test('summarizes empty collections to a zero balance', () => {
-    expect(summarizeFragmentEntries([])).toEqual({ balance: 0, claimed: [] });
+    expect(summarizeFragmentEntries([])).toEqual({ balance: 0, collected: [] });
   });
 });

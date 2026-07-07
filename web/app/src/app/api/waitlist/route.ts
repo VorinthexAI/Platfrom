@@ -3,11 +3,11 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
 import { emailSchema } from "@/lib/email";
-import { claimCollectible } from "@/lib/fragments/fragments-server";
+import { collectCollectible } from "@/lib/fragments/fragments-server";
 
 const waitlistSchema = z.strictObject({
   email: emailSchema,
-  /** Treasure the visitor is claiming by joining ("Join Waitlist to claim"). */
+  /** Treasure the visitor is collecting by joining ("Join Waitlist to collect"). */
   collectibleId: z.string().min(1).max(120).optional(),
 });
 
@@ -25,7 +25,7 @@ interface BackendWaitlistResponse {
   devVerifyLink?: string;
 }
 
-interface ClaimPayload {
+interface CollectPayload {
   ok: boolean;
   fragmentsAwarded?: number;
   balance?: number;
@@ -63,15 +63,15 @@ export async function POST(request: Request) {
   const distinctId = cookieStore.get("vx_did")?.value;
   const tempEmailHash = cookieStore.get(TEMP_EMAIL_HASH_COOKIE)?.value;
 
-  // Claim the carried treasure for this explorer right away — the node is
+  // Collect the carried treasure for this explorer right away — the node is
   // stored before the email is ever verified. Different explorers may
-  // claim the same treasure; the same explorer never claims twice (the
+  // collect the same treasure; the same explorer never collects twice (the
   // ledger and the backend's unique index both enforce it).
-  let claim: ClaimPayload | null = null;
+  let collect: CollectPayload | null = null;
   if (parsed.data.collectibleId) {
-    const result = claimCollectible(explorerId, parsed.data.collectibleId);
+    const result = collectCollectible(explorerId, parsed.data.collectibleId);
     if (result.ok) {
-      claim = {
+      collect = {
         ok: true,
         fragmentsAwarded: result.fragmentsAwarded,
         balance: result.balance,
@@ -93,11 +93,11 @@ export async function POST(request: Request) {
           },
         );
         if (upstream.ok && upstream.data?.total_fragments !== undefined) {
-          claim.globalTotal = upstream.data.total_fragments;
+          collect.globalTotal = upstream.data.total_fragments;
         }
       }
     } else {
-      claim = { ok: false, error: result.error };
+      collect = { ok: false, error: result.error };
     }
   }
 
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
       isVerified: result.data.isVerified,
       alias: result.data.alias ?? null,
       waitlistNumber: result.data.waitlist_number ?? null,
-      claim,
+      collect,
     };
   } else {
     if (isProduction) {
@@ -138,7 +138,7 @@ export async function POST(request: Request) {
       isVerified: false,
       alias: null,
       waitlistNumber: null,
-      claim,
+      collect,
     };
   }
 

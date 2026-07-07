@@ -31,7 +31,7 @@ import { CHAMBER_RADIUS } from "./BiomeChamber";
  * - CenterCrystal: 3-in-5 asteroid biomes grow a rare crystal in the
  *   middle — worth 100 up to 10,000 fragments, sized with its value (the
  *   largest fill the whole chamber). It assembles from shards erupting
- *   out of the floor, then rotates on a full-3D loop until claimed.
+ *   out of the floor, then rotates on a full-3D loop until collected.
  *
  * Collection uses pointer-DOWN on an always-full-size invisible hit
  * sphere: taps register the instant a finger lands, even while the
@@ -154,7 +154,7 @@ export function BiomeLootField({
   lootSeed: number;
 }) {
   const collectBiomeLoot = useFragmentsStore((s) => s.collectBiomeLoot);
-  const lootClaimedIds = useFragmentsStore((s) => s.lootClaimedIds);
+  const lootCollectedIds = useFragmentsStore((s) => s.lootCollectedIds);
 
   const fragments = useMemo(() => {
     const random = mulberry32(lootSeed ^ 0x10c5e);
@@ -180,7 +180,7 @@ export function BiomeLootField({
   return (
     <group>
       {fragments
-        .filter((fragment) => !lootClaimedIds.includes(fragment.id))
+        .filter((fragment) => !lootCollectedIds.includes(fragment.id))
         .map((fragment) => (
           <FloorFragment
             key={fragment.id}
@@ -263,12 +263,12 @@ export function CenterCrystal({
   autoExitOnCollect?: boolean;
 }) {
   const collectBiomeLoot = useFragmentsStore((s) => s.collectBiomeLoot);
-  const lootClaimedIds = useFragmentsStore((s) => s.lootClaimedIds);
+  const lootCollectedIds = useFragmentsStore((s) => s.lootCollectedIds);
   const exitCave = useGalaxyStore((s) => s.exitCave);
 
   const roll = useMemo(() => rollCenterCrystal(lootSeed), [lootSeed]);
   const lootId = `loot-${biomeKey}-crystal`;
-  const claimed = lootClaimedIds.includes(lootId);
+  const collected = lootCollectedIds.includes(lootId);
 
   const groupRef = useRef<THREE.Group>(null);
   const spinRef = useRef<THREE.Group>(null);
@@ -300,7 +300,7 @@ export function CenterCrystal({
   );
 
   useEffect(() => {
-    if (roll.present && !claimed && roll.value >= 5000) {
+    if (roll.present && !collected && roll.value >= 5000) {
       trackLandingEvent({
         slug: "landing.crystal_room_filled",
         metadata: { loot_id: lootId, fragments: roll.value },
@@ -352,7 +352,7 @@ export function CenterCrystal({
       }
     }
 
-    // Claimed: dissolve into light. Alive: breathe.
+    // Collected: dissolve into light. Alive: breathe.
     const pulse = taken ? 1 : 1 + Math.sin(t * 1.7) * 0.045;
     const target = taken ? 0.001 : roll.scale * pulse;
     const scale = THREE.MathUtils.lerp(group.scale.x, target, delta * 3.2);
@@ -360,7 +360,7 @@ export function CenterCrystal({
     if (taken && scale < 0.02) setGone(true);
   });
 
-  if (!roll.present || claimed || gone) return null;
+  if (!roll.present || collected || gone) return null;
 
   const handleCollect = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
