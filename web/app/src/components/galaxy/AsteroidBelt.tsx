@@ -66,6 +66,7 @@ function RockLayer({
   lookSeed,
 }: RockLayerProps) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const hitRef = useRef<THREE.InstancedMesh>(null);
   const mode = useGalaxyStore((s) => s.mode);
 
   const half = (outer - inner) / 2;
@@ -105,7 +106,10 @@ function RockLayer({
     const rotation = new THREE.Euler();
     const quaternion = new THREE.Quaternion();
     const scale = new THREE.Vector3();
+    const identityQuaternion = new THREE.Quaternion();
+    const hitScale = new THREE.Vector3();
     const matrices: THREE.Matrix4[] = [];
+    const hitMatrices: THREE.Matrix4[] = [];
     const colors: THREE.Color[] = [];
 
     for (let i = 0; i < count; i++) {
@@ -135,6 +139,12 @@ function RockLayer({
         s * (0.8 + random() * 0.4),
       );
       matrices.push(matrix.compose(position, quaternion, scale).clone());
+      // The planets' trick, instanced: every rock gets a generous invisible
+      // hit sphere (never smaller than a comfortable tap target).
+      hitScale.setScalar(Math.max(s * 1.45, 0.5));
+      hitMatrices.push(
+        matrix.compose(position, identityQuaternion, hitScale).clone(),
+      );
       // Per-instance tint jitter: brightness and a whisper of hue drift.
       const brightness = 0.72 + random() * 0.55;
       const warm = random() * 0.08;
@@ -146,7 +156,7 @@ function RockLayer({
         ),
       );
     }
-    return { matrices, colors };
+    return { matrices, hitMatrices, colors };
   }, [seed, count, innerBias, minScale, maxScale, half, center, thickness]);
 
   useEffect(() => {
@@ -156,6 +166,17 @@ function RockLayer({
     instances.colors.forEach((color, i) => mesh.setColorAt(i, color));
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    // CRITICAL: InstancedMesh caches its boundingSphere on the FIRST
+    // raycast. A pointer event during the heavy first frame — before these
+    // matrices land — caches a zero-radius sphere at the origin and every
+    // rock click/hover misses forever. Recompute now that matrices exist.
+    mesh.computeBoundingSphere();
+    const hit = hitRef.current;
+    if (hit) {
+      instances.hitMatrices.forEach((matrix, i) => hit.setMatrixAt(i, matrix));
+      hit.instanceMatrix.needsUpdate = true;
+      hit.computeBoundingSphere();
+    }
   }, [instances]);
 
   useEffect(() => {
@@ -191,28 +212,39 @@ function RockLayer({
     : undefined;
 
   return (
-    <instancedMesh
-      ref={meshRef}
-      args={[geometry, material, count]}
-      // Instances span the whole ring; per-geometry bounds would cull wrongly.
-      frustumCulled={false}
-      onClick={handleClick}
-      onPointerOver={
-        clickable && (mode === "system" || mode === "belt")
-          ? (event) => {
-              event.stopPropagation();
-              document.body.style.cursor = "pointer";
-            }
-          : undefined
-      }
-      onPointerOut={
-        clickable
-          ? () => {
-              document.body.style.cursor = "auto";
-            }
-          : undefined
-      }
-    />
+    <group>
+      <instancedMesh
+        ref={meshRef}
+        args={[geometry, material, count]}
+        // Instances span the whole ring; per-geometry bounds would cull wrongly.
+        frustumCulled={false}
+      />
+      {/* Same enter/click logic as the planets: pointer events live on
+          generous INVISIBLE hit spheres, not the jagged rock triangles. */}
+      {clickable ? (
+        <instancedMesh
+          ref={hitRef}
+          args={[undefined, undefined, count]}
+          frustumCulled={false}
+          visible={false}
+          onClick={handleClick}
+          onPointerOver={
+            mode === "system" || mode === "belt"
+              ? (event) => {
+                  event.stopPropagation();
+                  document.body.style.cursor = "pointer";
+                }
+              : undefined
+          }
+          onPointerOut={() => {
+            document.body.style.cursor = "auto";
+          }}
+        >
+          <sphereGeometry args={[1, 8, 8]} />
+          <meshBasicMaterial />
+        </instancedMesh>
+      ) : null}
+    </group>
   );
 }
 
@@ -255,6 +287,16 @@ function GrowthLayer({ paused, dense }: { paused: boolean; dense: boolean }) {
       material.dispose();
     };
   }, [geometry, material]);
+
+  // This pool's matrices are written per-frame, so the lazily-cached
+  // raycast boundingSphere would freeze at whatever the first pointer
+  // event saw (all-zero matrices → radius 0 → unclickable forever). Pin a
+  // static sphere generously covering the whole growth band instead.
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 150);
+  }, []);
 
   useFrame((_, delta) => {
     const mesh = meshRef.current;
