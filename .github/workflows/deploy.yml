@@ -814,7 +814,7 @@ jobs:
           if [ ! -f "$SEEDS_FILE" ]; then
             if [ -n "$DB_SEEDS_SECRETS_JSON_B64" ]; then
               mkdir -p "$(dirname "$SEEDS_FILE")"
-              printf '%s' "$DB_SEEDS_SECRETS_JSON_B64" | base64 -d > "$SEEDS_FILE"
+              printf '%s' "$DB_SEEDS_SECRETS_JSON_B64" | tr -d '\r\n\t ' | base64 -d > "$SEEDS_FILE"
             elif [ -n "$DB_SEEDS_SECRETS_JSON" ]; then
               mkdir -p "$(dirname "$SEEDS_FILE")"
               printf '%s' "$DB_SEEDS_SECRETS_JSON" > "$SEEDS_FILE"
