@@ -15,6 +15,7 @@ export type LinkLandingAction = "signin" | "waitlist-verify" | "member";
 export interface LinkLanding {
   action: LinkLandingAction;
   alias: string | null;
+  aliasSlug?: string | null;
   waitlistNumber: number | null;
 }
 

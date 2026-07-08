@@ -9,6 +9,7 @@ import { consumeGlobePreload } from "@/lib/fragments/globe-preload";
 interface StoredProfile {
   email: string;
   alias: string | null;
+  aliasSlug?: string | null;
   waitlistNumber: number | null;
   welcomeLine: string | null;
 }

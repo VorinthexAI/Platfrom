@@ -15,6 +15,7 @@ interface HandoffClaimPayload {
   access_token?: string;
   refresh_token?: string;
   alias?: string;
+  alias_slug?: string | null;
   waitlist_number?: number | null;
   welcome_line?: string;
 }
@@ -37,6 +38,7 @@ export async function POST() {
       ok: true,
       status: "authenticated",
       alias: "Local Explorer",
+      alias_slug: "devx-local-explorer",
       waitlist_number: 1,
       welcome_line: "Welcome back, Local Explorer.",
     });

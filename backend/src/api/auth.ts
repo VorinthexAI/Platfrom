@@ -71,6 +71,7 @@ export type MagicLinkValidationResult =
     accessToken: string;
     refreshToken: string;
     alias: string;
+    aliasSlug: string | null;
     waitlistNumber: number | null;
     welcomeLine: string;
   };
@@ -446,6 +447,7 @@ export async function validateMagicLink(token: string, explorerId?: string): Pro
       identity: { key: user.key, identityType: 'user' },
       ...tokens,
       alias,
+      aliasSlug: user.alias_slug,
       waitlistNumber: user.waitlistNumber,
       welcomeLine: pickWelcomeLine(user.key, alias),
     };

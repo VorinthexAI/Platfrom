@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 export interface AuthProfile {
   email?: string | null;
   alias?: string | null;
+  aliasSlug?: string | null;
   waitlistNumber?: number | null;
   welcomeLine?: string | null;
 }

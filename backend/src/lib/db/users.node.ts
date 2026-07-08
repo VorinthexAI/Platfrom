@@ -13,6 +13,7 @@ export const userSchema = z.object({
   name: z.string().nullable().default(null),
   profileUrl: z.string().nullable().default(null),
   alias: z.string().nullable().default(null),
+  alias_slug: z.string().regex(/^[a-z]{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable().default(null),
   waitlistNumber: z.number().int().nullable().default(null),
   isVerified: z.boolean().default(false),
   is_subscribed_to_updates: z.boolean().default(true),
@@ -56,6 +57,17 @@ export async function getUserByEmailHash(emailHash: string): Promise<User | null
   const cursor = await db.query(aql`
     FOR u IN ${db.collection(USERS_COLLECTION)}
       FILTER u.emailHash == ${emailHash}
+      LIMIT 1
+      RETURN u
+  `);
+  const doc = await cursor.next();
+  return doc ? userSchema.parse(withArangoKey(doc)) : null;
+}
+
+export async function getUserByAliasSlug(aliasSlug: string): Promise<User | null> {
+  const cursor = await db.query(aql`
+    FOR u IN ${db.collection(USERS_COLLECTION)}
+      FILTER u.alias_slug == ${aliasSlug}
       LIMIT 1
       RETURN u
   `);

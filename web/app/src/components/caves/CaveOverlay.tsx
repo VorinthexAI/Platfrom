@@ -1074,6 +1074,7 @@ function MembersFlow() {
 interface VerifiedProfile {
   email: string;
   alias: string | null;
+  aliasSlug: string | null;
   waitlistNumber: number | null;
   welcomeLine: string | null;
 }
@@ -1111,6 +1112,7 @@ function WaitlistVerifyFlow() {
         const profile: VerifiedProfile = {
           email: data.email,
           alias: data.alias,
+          aliasSlug: data.aliasSlug ?? null,
           waitlistNumber: data.waitlistNumber,
           welcomeLine: data.welcomeLine,
         };
@@ -1301,6 +1303,7 @@ function MagicFlow() {
             setLinkLanding({
               action: "signin",
               alias: data.alias ?? null,
+              aliasSlug: data.alias_slug ?? null,
               waitlistNumber: data.waitlist_number ?? null,
             });
             useGalaxyStore.getState().enterCave("sealed");
@@ -1310,6 +1313,7 @@ function MagicFlow() {
             "vx_profile",
             JSON.stringify({
               alias: data.alias ?? null,
+              aliasSlug: data.alias_slug ?? null,
               waitlistNumber: data.waitlist_number ?? null,
               welcomeLine: data.welcome_line ?? null,
             }),

@@ -14,6 +14,7 @@ interface BackendVerifyResponse {
   email: string;
   is_verified: boolean;
   alias?: string | null;
+  alias_slug?: string | null;
   waitlist_number?: number | null;
   welcome_line?: string | null;
 }
@@ -50,6 +51,7 @@ export async function GET(request: Request) {
       email: result.data.email,
       isVerified: result.data.is_verified,
       alias: result.data.alias ?? null,
+      aliasSlug: result.data.alias_slug ?? null,
       waitlistNumber: result.data.waitlist_number ?? null,
       welcomeLine: result.data.welcome_line ?? null,
     });
@@ -61,6 +63,7 @@ export async function GET(request: Request) {
     email: "explorer@vorinthex.dev",
     isVerified: true,
     alias: "Orbit Surfer",
+    aliasSlug: "devx-orbit-surfer",
     waitlistNumber: 188,
     welcomeLine:
       "Welcome, Orbit Surfer. You have joined a very exclusive club of people.",

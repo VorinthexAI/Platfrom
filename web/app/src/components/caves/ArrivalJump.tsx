@@ -58,6 +58,7 @@ async function verifyWaitlistToken(token: string): Promise<ArrivalResult> {
     JSON.stringify({
       email: data.email,
       alias: data.alias,
+      aliasSlug: data.aliasSlug ?? null,
       waitlistNumber: data.waitlistNumber,
       welcomeLine: data.welcomeLine,
     }),
@@ -87,6 +88,7 @@ async function validateMagicToken(token: string): Promise<ArrivalResult> {
       setLinkLanding({
         action: "signin",
         alias: data.alias ?? null,
+        aliasSlug: data.alias_slug ?? null,
         waitlistNumber: data.waitlist_number ?? null,
       });
       return { outcome: "sealed" };

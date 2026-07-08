@@ -101,6 +101,7 @@ export function registerRoutes(app: Hono) {
       access_token: result.accessToken,
       refresh_token: result.refreshToken,
       alias: result.alias,
+      alias_slug: result.aliasSlug,
       waitlist_number: result.waitlistNumber,
       welcome_line: result.welcomeLine,
     });
@@ -129,6 +130,7 @@ export function registerRoutes(app: Hono) {
         access_token: result.accessToken,
         refresh_token: result.refreshToken,
         alias: result.alias,
+        alias_slug: result.aliasSlug,
         waitlist_number: result.waitlistNumber,
         welcome_line: result.welcomeLine,
       });
@@ -202,8 +204,8 @@ export function registerRoutes(app: Hono) {
       temp_email_hash: tempEmailHash.optional(),
     }));
     const result = await requestWaitlistVerification(body.email, body.explorer_id, body.distinct_id, body.temp_email_hash);
-    const { waitlistNumber, ...rest } = result;
-    return c.json({ ...rest, waitlist_number: waitlistNumber }, 201);
+    const { waitlistNumber, aliasSlug, ...rest } = result;
+    return c.json({ ...rest, alias_slug: aliasSlug, waitlist_number: waitlistNumber }, 201);
   });
 
   app.post('/platform/events', recordPlatformClientEvent);
@@ -217,6 +219,7 @@ export function registerRoutes(app: Hono) {
       email: result.email,
       is_verified: result.isVerified,
       alias: result.alias,
+      alias_slug: result.aliasSlug,
       waitlist_number: result.waitlistNumber,
       welcome_line: result.welcomeLine,
     });
@@ -231,6 +234,7 @@ export function registerRoutes(app: Hono) {
       email: result.email,
       is_verified: result.isVerified,
       alias: result.alias,
+      alias_slug: result.aliasSlug,
       waitlist_number: result.waitlistNumber,
       welcome_line: result.welcomeLine,
     });

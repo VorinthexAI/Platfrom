@@ -2,15 +2,16 @@
  * Deterministic waitlist alias + welcome line generation.
  *
  * Aliases are "<Prefix> <Role>" pairs ("Orbit Surfer", "Nova Cartographer")
- * picked from two fixed 1000-entry lists themed around the product universe:
+ * picked from two fixed 10000-entry lists themed around the product universe:
  * the Nexus/Core/Command/Studio/Launch surfaces, the orchestrators
  * (Atlas, Hermes, Metis, Apollo, Iris, Ledger, Orbit, Athena, Forge,
  * Mercury, Sentinel, Themis), and capabilities (Archive, Gallery, Signal,
  * Compass, Ascend) — mythic and spacefaring. Each list is 250 hand-picked
- * words plus 750 deterministic compounds (head × tail, deduplicated), for
- * 1000 × 1000 = one million distinct aliases. The pick is a pure function
+ * words plus 9750 deterministic compounds (head × tail, deduplicated), for
+ * 10000 × 10000 = one hundred million distinct aliases. The pick is a pure function
  * of the seed string (usually the user key), so the same user always gets
  * the same alias.
+ * Current enforced guarantee: 10000 prefixes x 10000 roles = 100000000 aliases.
  */
 
 const BASE_ALIAS_PREFIXES: readonly string[] = [
@@ -73,7 +74,7 @@ const BASE_ALIAS_ROLES: readonly string[] = [
  * Deterministic compound builder: crosses heads × tails, skips anything
  * already in the base list (or a self-echo like Stormstorm), and returns
  * exactly `needed` unique words. Throws at module load if the pools ever
- * shrink below the target — the 1000-entry guarantee is enforced, not
+ * shrink below the target — the 10000-entry guarantee is enforced, not
  * hoped for.
  */
 function buildCompounds(
@@ -105,36 +106,71 @@ const PREFIX_HEADS: readonly string[] = [
   'Star', 'Sky', 'Sun', 'Moon', 'Void', 'Iron', 'Storm', 'Frost', 'Ash', 'Night',
   'Dawn', 'Dusk', 'Ever', 'Deep', 'Far', 'High', 'True', 'Wild', 'Silver', 'Golden',
   'Astro', 'Cosmo', 'Hyper', 'Ultra', 'Nova', 'Nebula', 'Comet', 'Orbit', 'Aero', 'Chrono',
-  'Cryo', 'Umbra',
+  'Cryo', 'Umbra', 'Nexus', 'Core', 'Command', 'Studio', 'Launch', 'Atlas', 'Hermes', 'Metis',
+  'Apollo', 'Iris', 'Ledger', 'Mercury', 'Sentinel', 'Athena', 'Forge', 'Themis', 'Archive', 'Gallery',
+  'Signal', 'Compass', 'Ascend', 'Aether', 'Axiom', 'Beacon', 'Binary', 'Catalyst', 'Celestial', 'Circuit',
+  'Cobalt', 'Cosmic', 'Crimson', 'Crystal', 'Delta', 'Dynamo', 'Echo', 'Eclipse', 'Electric', 'Elysian',
+  'Enigma', 'Epoch', 'Equinox', 'Falcon', 'Flare', 'Flux', 'Fractal', 'Fusion', 'Galactic', 'Gamma',
+  'Glacier', 'Granite', 'Graviton', 'Helio', 'Helix', 'Horizon', 'Igneous', 'Indigo', 'Inertia', 'Iridium',
+  'Jade', 'Kepler', 'Kinetic', 'Krypton', 'Lattice', 'Lithium', 'Lucent', 'Lumen', 'Magnetar', 'Magnetic',
+  'Meridian', 'Meteor', 'Midnight', 'Mirage', 'Momentum', 'Monolith', 'Mosaic', 'Mythic', 'Nadir', 'Neon',
+  'Neutron', 'Nimbus', 'Nocturne', 'Nomad', 'Nucleus', 'Oblivion', 'Odyssey', 'Omega', 'Onyx', 'Opal',
+  'Oracle', 'Orion', 'Osmium', 'Paradox', 'Parallax', 'Particle', 'Pearl', 'Penumbra', 'Perigee', 'Phantom',
+  'Phoenix', 'Pinnacle', 'Plasma', 'Platinum', 'Polaris', 'Prime', 'Prism', 'Proton', 'Pulsar', 'Quasar',
+  'Quartz', 'Radiant', 'Radial', 'Reactor', 'Relay', 'Rift', 'Rocket', 'Rune', 'Sapphire', 'Satellite',
 ];
 
 const PREFIX_TAILS: readonly string[] = [
   'fall', 'fire', 'gate', 'glow', 'wind', 'wake', 'veil', 'forge', 'light', 'spire',
   'drift', 'born', 'bound', 'crest', 'shade', 'song', 'spark', 'field', 'flare', 'helm',
-  'mark', 'path', 'rise', 'reach', 'tide',
+  'mark', 'path', 'rise', 'reach', 'tide', 'beam', 'bloom', 'bridge', 'burst', 'call',
+  'channel', 'chord', 'cipher', 'crown', 'current', 'deck', 'dome', 'drive', 'echo', 'edge',
+  'engine', 'flow', 'frame', 'front', 'garden', 'grid', 'grove', 'harbor', 'hatch', 'haven',
+  'horizon', 'key', 'lance', 'lantern', 'line', 'link', 'matrix', 'mirror', 'node', 'pathway',
+  'phase', 'pillar', 'portal', 'pulse', 'rail', 'relay', 'rift', 'ring', 'root', 'sail',
+  'seal', 'sector', 'signal', 'sphere', 'stack', 'stream', 'summit', 'trail', 'vault', 'vector',
+  'vertex', 'vessel', 'vista', 'wave', 'weave', 'wing', 'yard', 'anchor', 'array', 'axis',
+  'beacon', 'belt', 'bridgeway', 'camp', 'chart', 'cradle', 'dock', 'gatehouse', 'harvest', 'keel',
+  'loom', 'map', 'needle', 'orbit', 'prism', 'quartz', 'yardarm',
 ];
 
 const ROLE_HEADS: readonly string[] = [
   'Star', 'Void', 'Sky', 'Rift', 'Belt', 'Core', 'Dust', 'Flux', 'Nova', 'Orbit',
   'Comet', 'Nebula', 'Photon', 'Aurora', 'Ion', 'Warp', 'Beacon', 'Cipher', 'Signal', 'Vault',
   'Relic', 'Ember', 'Frost', 'Storm', 'Dawn', 'Night', 'Halo', 'Prism', 'Quasar', 'Pulse',
-  'Crystal', 'Fragment',
+  'Crystal', 'Fragment', 'Nexus', 'Command', 'Studio', 'Launch', 'Atlas', 'Hermes', 'Metis', 'Apollo',
+  'Iris', 'Ledger', 'Mercury', 'Sentinel', 'Athena', 'Forge', 'Themis', 'Archive', 'Gallery', 'Compass',
+  'Ascend', 'Aether', 'Axiom', 'Binary', 'Circuit', 'Cosmic', 'Delta', 'Echo', 'Eclipse', 'Equinox',
+  'Falcon', 'Flare', 'Fractal', 'Fusion', 'Gamma', 'Glacier', 'Graviton', 'Helix', 'Horizon', 'Kepler',
+  'Kinetic', 'Lattice', 'Lumen', 'Magnetar', 'Meridian', 'Meteor', 'Midnight', 'Mirage', 'Monolith', 'Mosaic',
+  'Neutron', 'Nimbus', 'Nomad', 'Nucleus', 'Odyssey', 'Omega', 'Onyx', 'Oracle', 'Orion', 'Parallax',
+  'Particle', 'Phoenix', 'Plasma', 'Polaris', 'Proton', 'Pulsar', 'Quartz', 'Radiant', 'Reactor', 'Relay',
+  'Rocket', 'Rune', 'Satellite', 'Shadow', 'Shard', 'Silver', 'Solstice', 'Spectral', 'Spiral', 'Static',
+  'Steel', 'Summit', 'Surge', 'Tachyon', 'Talon', 'Tempest', 'Thunder', 'Titan', 'Uplink',
 ];
 
 const ROLE_TAILS: readonly string[] = [
   'smith', 'wright', 'warden', 'keeper', 'seeker', 'walker', 'rider', 'singer', 'caller', 'bringer',
   'weaver', 'watcher', 'chaser', 'breaker', 'shaper', 'bearer', 'finder', 'reader', 'guard', 'scribe',
-  'herald', 'knight', 'marshal', 'pilot', 'scout',
+  'herald', 'knight', 'marshal', 'pilot', 'scout', 'architect', 'archivist', 'artisan', 'assembler', 'auditor',
+  'builder', 'calibrator', 'captain', 'cartographer', 'chronicler', 'commander', 'composer', 'conductor', 'connector', 'courier',
+  'curator', 'decoder', 'defender', 'delver', 'designer', 'discoverer', 'dispatcher', 'distiller', 'engineer', 'envoy',
+  'explorer', 'forger', 'founder', 'gatherer', 'guardian', 'harvester', 'igniter', 'interpreter', 'launcher', 'librarian',
+  'locator', 'maker', 'mapper', 'navigator', 'operator', 'optimizer', 'pathfinder', 'pioneer', 'planner', 'plotter',
+  'prospector', 'protector', 'ranger', 'recorder', 'refiner', 'runner', 'sage', 'sentinel', 'strategist', 'surveyor',
+  'synthesizer', 'tactician', 'technician', 'tracker', 'translator', 'tuner', 'voyager', 'wanderer', 'wayfarer', 'analyst',
+  'appraiser', 'balancer', 'beaconer', 'bridger', 'controller', 'diplomat', 'harbinger', 'mediator', 'oracle', 'polisher',
+  'resonator', 'stargazer', 'steward', 'trailblazer', 'transmitter', 'vanguardist', 'virtuoso', 'wavecrafter', 'windrider',
 ];
 
 export const ALIAS_PREFIXES: readonly string[] = [
   ...BASE_ALIAS_PREFIXES,
-  ...buildCompounds(BASE_ALIAS_PREFIXES, PREFIX_HEADS, PREFIX_TAILS, 750),
+  ...buildCompounds(BASE_ALIAS_PREFIXES, PREFIX_HEADS, PREFIX_TAILS, 9750),
 ];
 
 export const ALIAS_ROLES: readonly string[] = [
   ...BASE_ALIAS_ROLES,
-  ...buildCompounds(BASE_ALIAS_ROLES, ROLE_HEADS, ROLE_TAILS, 750),
+  ...buildCompounds(BASE_ALIAS_ROLES, ROLE_HEADS, ROLE_TAILS, 9750),
 ];
 
 /**
@@ -209,6 +245,32 @@ export function generateAlias(seedString: string): string {
   const prefix = ALIAS_PREFIXES[hashSeed(`prefix:${seedString}`) % ALIAS_PREFIXES.length];
   const role = ALIAS_ROLES[hashSeed(`role:${seedString}`) % ALIAS_ROLES.length];
   return `${prefix} ${role}`;
+}
+
+function slugPart(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'explorer';
+}
+
+export const ALIAS_SLUG_PREFIX_SPACE = 26 ** 4;
+
+function fourLettersFromNumber(value: number): string {
+  let hash = value;
+  let out = '';
+  for (let index = 0; index < 4; index += 1) {
+    out += String.fromCharCode(97 + (hash % 26));
+    hash = Math.floor(hash / 26);
+  }
+  return out;
+}
+
+/** Builds "abcd-orbit-surfer" style public user slugs. Pass a larger attempt on collision. */
+export function generateAliasSlug(alias: string, seedString: string, attempt = 0): string {
+  const offset = hashSeed(`alias_slug:${seedString}`) % ALIAS_SLUG_PREFIX_SPACE;
+  const prefixIndex = (offset + (attempt * 17)) % ALIAS_SLUG_PREFIX_SPACE;
+  return `${fourLettersFromNumber(prefixIndex)}-${slugPart(alias)}`;
 }
 
 /** Deterministically picks a welcome line for a seed and interpolates `{alias}`. */

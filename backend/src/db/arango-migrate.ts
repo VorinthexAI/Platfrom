@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
 import { embed } from '../core/actions/embed';
-import { generateAlias } from '../lib/alias';
+import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
@@ -12,6 +12,7 @@ const password = process.env.ARANGO_ROOT_PASSWORD ?? '';
 interface CollectionSpec {
   name: string;
   indexes?: Array<{ fields: string[]; unique?: boolean; sparse?: boolean }>;
+  embedKeys?: string[];
 }
 
 const legacyIndexesToDrop: Record<string, string[][]> = {
@@ -23,12 +24,15 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   visitors: [['emailHash'], ['userId']],
 };
 
-function buildEventEmbedText(key: string, belongsTo: string, slug: string): string {
-  return ['_events', key, belongsTo, slug].join(':');
-}
-
-function buildOutputEmbedText(key: string, type: string): string {
-  return ['_outputs', key, type].join(':');
+function buildNodeEmbedText(collectionName: string, key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
+  if (embedKeys.length === 0) return null;
+  const parts = [`_${collectionName}`, key];
+  for (const field of embedKeys) {
+    const value = doc[field];
+    if (value === null || value === undefined || value === '') continue;
+    parts.push(String(value));
+  }
+  return parts.join(':');
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -83,18 +87,56 @@ async function resolveEventUserId(input: {
   return emailHash ? getUserIdByEmailHash(input.targetDb, emailHash) : null;
 }
 
+async function backfillCollectionEmbeddings(targetDb: Database, spec: CollectionSpec): Promise<void> {
+  const embedKeys = spec.embedKeys ?? [];
+  if (embedKeys.length === 0) {
+    await targetDb.query(
+      `
+      FOR doc IN @@collection
+        FILTER !HAS(doc, "embedding") || doc.embedding == null || !IS_ARRAY(doc.embedding)
+        UPDATE doc WITH { embedding: [] } IN @@collection
+    `,
+      { '@collection': spec.name },
+    );
+    return;
+  }
+
+  const cursor = await targetDb.query<Record<string, unknown>>(
+    `
+      FOR doc IN @@collection
+        RETURN doc
+    `,
+    { '@collection': spec.name },
+  );
+  const collection = targetDb.collection(spec.name);
+  const docs = await cursor.all();
+  for (const doc of docs) {
+    const key = nonEmptyString(doc._key);
+    if (!key) continue;
+    const text = buildNodeEmbedText(spec.name, key, embedKeys, doc);
+    const embedding = text ? await embed({ text }) : [];
+    await collection.update(key, { embedding });
+  }
+  if (docs.length > 0) {
+    console.log(`Normalized embeddings for ${docs.length} ${spec.name} documents`);
+  }
+}
+
 const collections: CollectionSpec[] = [
   {
     name: 'users',
+    embedKeys: ['email', 'name'],
     indexes: [
       { fields: ['platformId'] },
       { fields: ['email'], unique: true },
       { fields: ['emailHash'], unique: true },
+      { fields: ['alias_slug'], unique: true, sparse: true },
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
   {
     name: 'members',
+    embedKeys: ['email', 'name'],
     indexes: [
       { fields: ['platformId'] },
       { fields: ['platformId', 'role'] },
@@ -105,6 +147,7 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'superAdmins',
+    embedKeys: ['email'],
     indexes: [
       { fields: ['platformId'] },
       { fields: ['email'], unique: true },
@@ -112,16 +155,17 @@ const collections: CollectionSpec[] = [
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
-  { name: 'minds', indexes: [{ fields: ['userId'], unique: true }] },
-  { name: 'orchestrators', indexes: [{ fields: ['name'] }] },
+  { name: 'minds', embedKeys: ['name'], indexes: [{ fields: ['userId'], unique: true }] },
+  { name: 'orchestrators', embedKeys: ['name', 'model'], indexes: [{ fields: ['name'] }] },
   {
     name: 'agents',
+    embedKeys: ['name', 'role', 'model'],
     indexes: [
       { fields: ['orchestratorId'] },
       { fields: ['orchestratorId', 'name'], unique: true },
     ],
   },
-  { name: 'capabilities', indexes: [{ fields: ['name'] }] },
+  { name: 'capabilities', embedKeys: ['name'], indexes: [{ fields: ['name'] }] },
   {
     name: 'mindCapabilities',
     indexes: [
@@ -132,6 +176,7 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'products',
+    embedKeys: ['productId', 'name', 'type', 'billingPeriod'],
     indexes: [
       { fields: ['productId'], unique: true },
       { fields: ['polarProductId'], unique: true, sparse: true },
@@ -160,10 +205,11 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'events',
+    embedKeys: ['belongsTo', 'slug'],
     indexes: [{ fields: ['slug', 'createdAt'] }, { fields: ['belongsTo', 'sourceId', 'createdAt'] }, { fields: ['userId', 'createdAt'] }],
   },
-  { name: 'outputs', indexes: [{ fields: ['type', 'createdAt'] }] },
-  { name: 'outputRelations', indexes: [{ fields: ['parentOutputId'] }, { fields: ['childOutputId'] }] },
+  { name: 'outputs', embedKeys: ['type'], indexes: [{ fields: ['type', 'createdAt'] }] },
+  { name: 'outputRelations', embedKeys: ['relationType'], indexes: [{ fields: ['parentOutputId'] }, { fields: ['childOutputId'] }] },
   { name: 'outputAnalytics', indexes: [{ fields: ['outputId', 'snapshotAt'] }] },
   { name: 'platforms', indexes: [{ fields: ['name'], unique: true }] },
   {
@@ -194,6 +240,7 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'intelligenceFragments',
+    embedKeys: ['collectibleId', 'rarity'],
     indexes: [
       { fields: ['userId'] },
       { fields: ['explorerId'] },
@@ -272,14 +319,7 @@ async function main() {
         sparse: index.sparse ?? false,
       });
     }
-    await targetDb.query(
-      `
-      FOR doc IN @@collection
-        FILTER !HAS(doc, "embedding") || doc.embedding == null
-        UPDATE doc WITH { embedding: [] } IN @@collection
-    `,
-      { '@collection': spec.name },
-    );
+    await backfillCollectionEmbeddings(targetDb, spec);
   }
 
   const platformsCollection = targetDb.collection('platforms');
@@ -385,6 +425,7 @@ async function main() {
     for (const render of renders) {
       const key = newId();
       const type = 'post.render';
+      const outputEmbedText = buildNodeEmbedText('outputs', key, ['type'], { type });
       await outputs.save(
         {
           _key: key,
@@ -396,7 +437,7 @@ async function main() {
           },
           storagePath: null,
           usageCount: 0,
-          embedding: await embed({ text: buildOutputEmbedText(key, type) }),
+          embedding: outputEmbedText ? await embed({ text: outputEmbedText }) : [],
           createdAt: render.createdAt ?? render.updatedAt ?? new Date().toISOString(),
         },
         { overwriteMode: 'replace' },
@@ -426,6 +467,7 @@ async function main() {
         : typeof event.created_at === 'string'
           ? event.created_at
           : new Date().toISOString();
+      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'platform', slug });
       await eventsCollection.save({
         _key: key,
         sourceId: defaultPlatformId,
@@ -437,7 +479,7 @@ async function main() {
           payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
         },
         createdAt,
-        embedding: await embed({ text: buildEventEmbedText(key, 'user', slug) }),
+        embedding: eventEmbedText ? await embed({ text: eventEmbedText }) : [],
       });
     }
   }
@@ -469,6 +511,7 @@ async function main() {
 
       const slug = typeof event.slug === 'string' && event.slug.length > 0 ? event.slug : 'unknown';
       const key = `user_event_${event._key}`;
+      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'platform', slug });
       await eventsCollection.save(
         {
           _key: key,
@@ -478,7 +521,7 @@ async function main() {
           slug,
           data: event.data && typeof event.data === 'object' ? event.data : {},
           createdAt: typeof event.createdAt === 'string' ? event.createdAt : new Date().toISOString(),
-          embedding: await embed({ text: buildEventEmbedText(key, 'user', slug) }),
+          embedding: eventEmbedText ? await embed({ text: eventEmbedText }) : [],
         },
         { overwriteMode: 'ignore' },
       );
@@ -546,9 +589,10 @@ async function main() {
       ?? nonEmptyString(event.sourceId)
       ?? legacyPlatformSourceId
       ?? defaultPlatformId;
-    const embedding = typeof event.slug === 'string' && event.slug.length > 0
-      ? await embed({ text: buildEventEmbedText(event._key, belongsTo, event.slug) })
-      : [];
+    const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
+      ? buildNodeEmbedText('events', event._key, ['belongsTo', 'slug'], { belongsTo, slug: event.slug })
+      : null;
+    const embedding = eventEmbedText ? await embed({ text: eventEmbedText }) : [];
     await eventsCollection.update(event._key, {
       sourceId,
       belongsTo,
@@ -590,21 +634,49 @@ async function main() {
   `);
   let nextWaitlistNumber = (await maxWaitlistNumberCursor.next()) ?? 0;
   const usersCollection = targetDb.collection('users');
+  const existingAliasSlugsCursor = await targetDb.query<{ _key: string; alias_slug?: string | null }>(`
+    FOR u IN users
+      FILTER HAS(u, "alias_slug") && u.alias_slug != null && u.alias_slug != ""
+      RETURN { _key: u._key, alias_slug: u.alias_slug }
+  `);
+  const takenAliasSlugs = new Map<string, string>();
+  for (const row of await existingAliasSlugsCursor.all()) {
+    if (typeof row.alias_slug === 'string' && row.alias_slug.length > 0) {
+      takenAliasSlugs.set(row.alias_slug, row._key);
+    }
+  }
+  function allocateAliasSlug(alias: string, userKey: string): string {
+    for (let attempt = 0; attempt < ALIAS_SLUG_PREFIX_SPACE; attempt += 1) {
+      const candidate = generateAliasSlug(alias, userKey, attempt);
+      const owner = takenAliasSlugs.get(candidate);
+      if (!owner || owner === userKey) {
+        takenAliasSlugs.set(candidate, userKey);
+        return candidate;
+      }
+    }
+    throw new Error(`Could not allocate alias_slug for user ${userKey}`);
+  }
   const usersMissingAliasCursor = await targetDb.query<{
     _key: string;
     alias?: string | null;
+    alias_slug?: string | null;
     waitlistNumber?: number | null;
   }>(`
     FOR u IN users
       FILTER !HAS(u, "alias") || u.alias == null
+        || !HAS(u, "alias_slug") || u.alias_slug == null || u.alias_slug == ""
         || !HAS(u, "waitlistNumber") || u.waitlistNumber == null
       SORT u.createdAt ASC
-      RETURN { _key: u._key, alias: u.alias, waitlistNumber: u.waitlistNumber }
+      RETURN { _key: u._key, alias: u.alias, alias_slug: u.alias_slug, waitlistNumber: u.waitlistNumber }
   `);
   const usersMissingAlias = await usersMissingAliasCursor.all();
   for (const user of usersMissingAlias) {
     const patch: Record<string, unknown> = {};
-    if (user.alias == null) patch.alias = generateAlias(user._key);
+    const alias = user.alias ?? generateAlias(user._key);
+    if (user.alias == null) patch.alias = alias;
+    if (user.alias_slug == null || user.alias_slug === '') {
+      patch.alias_slug = allocateAliasSlug(alias, user._key);
+    }
     if (user.waitlistNumber == null) {
       nextWaitlistNumber += 1;
       patch.waitlistNumber = nextWaitlistNumber;

@@ -144,6 +144,7 @@ export async function requestWaitlistVerification(email: string, explorerId?: st
       email: entry.email,
       isVerified: true as const,
       alias,
+      aliasSlug: entry.alias_slug,
       waitlistNumber: entry.waitlistNumber,
     };
   }
@@ -154,6 +155,7 @@ export async function requestWaitlistVerification(email: string, explorerId?: st
     email: entry.email,
     isVerified: false as const,
     alias,
+    aliasSlug: entry.alias_slug,
     waitlistNumber: entry.waitlistNumber,
     verificationEmailSent: true,
     expiresAt: delivery.expiresAt,
@@ -206,6 +208,7 @@ export async function verifyWaitlistEmail(tokenHash: string, explorerId?: string
     email: entry.email,
     isVerified: entry.isVerified,
     alias,
+    aliasSlug: entry.alias_slug,
     waitlistNumber: entry.waitlistNumber,
     welcomeLine: pickWelcomeLine(entry.key, alias),
   };

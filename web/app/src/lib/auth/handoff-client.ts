@@ -18,6 +18,7 @@ const HANDOFF_MARKER_COOKIE = "vx_handoff_pending";
 
 export interface HandoffProfile {
   alias: string | null;
+  aliasSlug: string | null;
   waitlistNumber: number | null;
   welcomeLine: string | null;
 }
@@ -40,6 +41,7 @@ export async function claimHandoffSession(): Promise<HandoffProfile | null> {
     const data = (await response.json().catch(() => null)) as
       | ({ ok: boolean; status?: string } & {
           alias?: string | null;
+          alias_slug?: string | null;
           waitlist_number?: number | null;
           welcome_line?: string | null;
         })
@@ -47,6 +49,7 @@ export async function claimHandoffSession(): Promise<HandoffProfile | null> {
     if (!response.ok || !data?.ok) return null;
     const profile: HandoffProfile = {
       alias: data.alias ?? null,
+      aliasSlug: data.alias_slug ?? null,
       waitlistNumber: data.waitlist_number ?? null,
       welcomeLine: data.welcome_line ?? null,
     };

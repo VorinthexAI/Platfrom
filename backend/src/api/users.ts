@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { countUsers, getUserByEmailHash, insertUser, updateUser, type User } from '@/lib/db/users.node';
+import { countUsers, getUserByAliasSlug, getUserByEmailHash, insertUser, updateUser, type User } from '@/lib/db/users.node';
 import { getVisitorByDistinctId, type Visitor } from '@/lib/db/visitors.node';
-import { generateAlias } from '@/lib/alias';
+import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '@/lib/alias';
 import { sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
 import { getDefaultPlatformId } from '@/platform/events';
@@ -31,6 +31,15 @@ async function findVisitorForConversion(distinctId: string | null): Promise<Visi
   return distinctId ? getVisitorByDistinctId(distinctId) : null;
 }
 
+async function createUniqueAliasSlug(alias: string, userKey: string): Promise<string> {
+  for (let attempt = 0; attempt < ALIAS_SLUG_PREFIX_SPACE; attempt += 1) {
+    const candidate = generateAliasSlug(alias, userKey, attempt);
+    const existing = await getUserByAliasSlug(candidate);
+    if (!existing || existing.key === userKey) return candidate;
+  }
+  throw new Error(`Could not allocate alias_slug for user ${userKey}`);
+}
+
 export async function upsertUserByEmail(
   email: string,
   values: Partial<Omit<User, 'key' | 'email' | 'emailHash'>> = {},
@@ -51,6 +60,13 @@ export async function upsertUserByEmail(
     if (patch.alias === undefined && existing.alias == null && visitor?.alias) {
       patch.alias = visitor.alias;
     }
+    const alias = patch.alias ?? existing.alias ?? generateAlias(existing.key);
+    if (existing.alias == null && patch.alias === undefined) {
+      patch.alias = alias;
+    }
+    if (patch.alias_slug === undefined && existing.alias_slug == null) {
+      patch.alias_slug = await createUniqueAliasSlug(alias, existing.key);
+    }
     return updateUser(existing.key, patch);
   }
 
@@ -58,6 +74,7 @@ export async function upsertUserByEmail(
   // right before the insert is close enough for a marketing counter.
   const key = newId();
   const waitlistNumber = values.waitlistNumber ?? (await countUsers()) + 1;
+  const alias = values.alias ?? visitor?.alias ?? generateAlias(key);
   const created = await insertUser({
     key,
     ...values,
@@ -65,7 +82,8 @@ export async function upsertUserByEmail(
     email: normalized,
     emailHash,
     name: values.name ?? defaultNameFromEmail(normalized),
-    alias: values.alias ?? visitor?.alias ?? generateAlias(key),
+    alias,
+    alias_slug: values.alias_slug ?? await createUniqueAliasSlug(alias, key),
     waitlistNumber,
     createdAt: now,
     updatedAt: now,

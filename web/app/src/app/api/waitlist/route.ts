@@ -23,6 +23,7 @@ interface BackendWaitlistResponse {
   email: string;
   isVerified: boolean;
   alias?: string | null;
+  alias_slug?: string | null;
   waitlist_number?: number | null;
   verificationEmailSent?: boolean;
   expiresAt?: string;
@@ -129,6 +130,7 @@ export async function POST(request: Request) {
       ok: true,
       isVerified: result.data.isVerified,
       alias: result.data.alias ?? null,
+      aliasSlug: result.data.alias_slug ?? null,
       waitlistNumber: result.data.waitlist_number ?? null,
       collect,
     };
@@ -152,6 +154,7 @@ export async function POST(request: Request) {
       ok: true,
       isVerified: false,
       alias: null,
+      aliasSlug: null,
       waitlistNumber: null,
       collect,
     };

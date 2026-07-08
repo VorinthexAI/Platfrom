@@ -130,6 +130,7 @@ export async function claimHandoff(handoffPublicHash: string) {
     status: 'authenticated' as const,
     ...tokens,
     alias,
+    aliasSlug: user.alias_slug,
     waitlistNumber: user.waitlistNumber,
     welcomeLine: pickWelcomeLine(user.key, alias),
   };
