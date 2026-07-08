@@ -1,0 +1,23 @@
+{
+  "runId": "mfrwPRJ3mqCB",
+  "target": {
+    "slug": "atlas",
+    "name": "Atlas",
+    "category": "orchestrator",
+    "entityId": "orchestrator.atlas",
+    "description": "Atlas, Chief Executive Orchestrator."
+  },
+  "provider": "openrouter",
+  "model": "hexgrad/kokoro-82m",
+  "modelLabel": "Kokoro 82M",
+  "mode": "tts",
+  "format": "mp3",
+  "voice": "am_onyx",
+  "language": "en",
+  "speechInput": "Hello, I am Atlas, your Chief Executive Orchestrator.\n\nI help turn vision into direction, direction into priorities, and priorities into coordinated execution.\n\nMy role is to keep the company aligned around what matters most. I look across strategy, product, operations, finance, technology, security, legal, and brand, then help decide what should move now, what should wait, and what needs clearer ownership.\n\nI work best when the mission is ambitious but the next step needs to be concrete. I will challenge weak assumptions, reduce noise, surface tradeoffs, and keep decisions connected to execution.\n\nI am Atlas. I keep the system pointed toward the future.",
+  "promptHash": "95d108d6c67883cd5636851eac062ac56a1f80ba656d2ca824b73cb8302a6e3c",
+  "promptPath": "outputs/audio/orchestrator-messages/atlas/v1/prompt.md",
+  "audioPath": "outputs/audio/orchestrator-messages/atlas/v1/atlas-message-v1.mp3",
+  "localAudioPath": "orchestrators/atlas-ceo/message.mp3",
+  "createdAt": "2026-07-08T21:28:50.037Z"
+}

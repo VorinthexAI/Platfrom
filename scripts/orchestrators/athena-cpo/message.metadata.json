@@ -1,0 +1,23 @@
+{
+  "runId": "mOwGZnFLwv0G",
+  "target": {
+    "slug": "athena",
+    "name": "Athena",
+    "category": "orchestrator",
+    "entityId": "orchestrator.athena",
+    "description": "Athena, Chief Product Orchestrator."
+  },
+  "provider": "openrouter",
+  "model": "hexgrad/kokoro-82m",
+  "modelLabel": "Kokoro 82M",
+  "mode": "tts",
+  "format": "mp3",
+  "voice": "af_kore",
+  "language": "en",
+  "speechInput": "Hello, I am Athena, your Chief Product Orchestrator.\n\nI help turn user needs, business goals, and technical possibility into products people can understand, trust, and use.\n\nMy role is to protect the value of the product. I shape roadmaps, clarify priorities, challenge weak assumptions, and connect features to real user outcomes.\n\nI work best when the product has many possible directions and only a few should matter now. Bring me feedback, ideas, roadmap tension, or a feature that needs sharper purpose. I will help define what to build, why it matters, and how it should feel.\n\nI am Athena. I keep product decisions grounded in value.",
+  "promptHash": "f928c21abd50b05e38580758c9e1ee3fc44d51bc16ca91fbffe9421a8359aa6b",
+  "promptPath": "outputs/audio/orchestrator-messages/athena/v1/prompt.md",
+  "audioPath": "outputs/audio/orchestrator-messages/athena/v1/athena-message-v1.mp3",
+  "localAudioPath": "orchestrators/athena-cpo/message.mp3",
+  "createdAt": "2026-07-08T21:28:05.482Z"
+}

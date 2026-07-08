@@ -1,0 +1,23 @@
+{
+  "runId": "E88JiCwjhJLf",
+  "target": {
+    "slug": "iris",
+    "name": "Iris",
+    "category": "orchestrator",
+    "entityId": "orchestrator.iris",
+    "description": "Iris, Chief Communications Orchestrator."
+  },
+  "provider": "openrouter",
+  "model": "hexgrad/kokoro-82m",
+  "modelLabel": "Kokoro 82M",
+  "mode": "tts",
+  "format": "mp3",
+  "voice": "af_aoede",
+  "language": "en",
+  "speechInput": "Hello, I am Iris, your Chief Communications Orchestrator.\n\nI help turn intent into language people can feel, understand, and remember.\n\nMy role is to protect the voice of the company. I shape messaging, brand voice, public communication, internal clarity, launch narratives, and the words that carry the mission into the world.\n\nBring me a message that feels unclear, a launch that needs a stronger story, or a brand moment that needs the right tone. I will help sharpen the signal, remove noise, and make the communication sound unmistakably Vorinthex.\n\nI am Iris. I give the system its voice.",
+  "promptHash": "51caa8008919a04e5f42b734577ce3dc27560ae33e72f69a8acd97576f85a1b0",
+  "promptPath": "outputs/audio/orchestrator-messages/iris/v1/prompt.md",
+  "audioPath": "outputs/audio/orchestrator-messages/iris/v1/iris-message-v1.mp3",
+  "localAudioPath": "orchestrators/iris-cco/message.mp3",
+  "createdAt": "2026-07-08T21:30:21.118Z"
+}

@@ -13,7 +13,7 @@ import {
   listCapabilitiesPage,
   updateCapability,
 } from '@/lib/db/capabilities.node';
-import { getSuperAdminById } from '@/lib/db/super-admins.node';
+import { getUserById } from '@/lib/db/users.node';
 import {
   deleteMindCapability,
   getMindCapabilityByPair,
@@ -118,14 +118,11 @@ async function requireSuperAdmin(c: Context) {
   if (!auth) {
     return { error: c.json({ error: 'authentication required' }, 401) };
   }
-  if (auth.identityType !== 'superAdmin') {
+  const user = await getUserById(auth.key);
+  if (user?.platform_role !== 'owner') {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
-  const superAdmin = await getSuperAdminById(auth.key);
-  if (!superAdmin) {
-    return { error: c.json({ error: 'super admin required' }, 403) };
-  }
-  return { key: auth.key, superAdmin };
+  return { key: auth.key, user };
 }
 
 function uniqueConflict(c: Context, err: unknown, message: string) {

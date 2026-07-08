@@ -5,6 +5,8 @@ import { createNodeHelpers, withArangoKey } from './base';
 
 export const VISITOR_SESSIONS_COLLECTION = 'visitorSessions';
 
+export const presenceSourceSchema = z.enum(['web', 'mobile', 'desktop', 'tv']);
+
 /**
  * One node per anonymous presence session — a sub-node of a `visitors`
  * node, owned by the platform ("this"). Created when an anonymous visitor
@@ -19,6 +21,7 @@ export const visitorSessionSchema = z.object({
   /** Parent visitor node. */
   visitorId: z.string(),
   alias: z.string(),
+  source: presenceSourceSchema.default('web'),
   /** Redis presence session this node mirrors. */
   sessionKey: z.string(),
   connectedAt: z.string(),

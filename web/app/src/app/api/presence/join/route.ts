@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   if (backendConfigured()) {
     const result = await backendFetch<BackendJoinResponse>("/presence/join", {
       method: "POST",
-      body: JSON.stringify({ distinct_id: distinctId }),
+      body: JSON.stringify({ distinct_id: distinctId, source: "web" }),
       headers: {
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
         ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),

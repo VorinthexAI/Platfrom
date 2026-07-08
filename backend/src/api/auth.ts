@@ -1,18 +1,4 @@
 import { getAuthChallengeByTokenHash, insertAuthChallenge, updateAuthChallenge, type authIdentityTypeSchema } from '@/lib/db/auth-challenges.node';
-import {
-  getMemberByEmail,
-  getMemberById,
-  getMemberByRefreshTokenHash,
-  updateMember,
-  type Member,
-} from '@/lib/db/members.node';
-import {
-  getSuperAdminByEmail,
-  getSuperAdminById,
-  getSuperAdminByRefreshTokenHash,
-  updateSuperAdmin,
-  type SuperAdmin,
-} from '@/lib/db/super-admins.node';
 import { decryptSecret, encryptSecret, randomToken, sha256, timingSafeEqual } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
 import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
@@ -97,69 +83,84 @@ async function signAccessTokenPayload(payload: string) {
   return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
 }
 
-function memberIdentity(member: Member): LoginIdentity {
+function platformIdentity(user: User): LoginIdentity | null {
+  if (user.platform_role === 'owner') {
+    return {
+      type: 'superAdmin',
+      key: user.key,
+      email: user.email,
+      emailHash: user.emailHash,
+      isMfaEnabled: user.isMfaEnabled,
+      has_request_mfa_reset_link: user.has_request_mfa_reset_link,
+      requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
+      totpSecret: user.totpSecret,
+      lastTotpTimeStep: user.lastTotpTimeStep,
+    };
+  }
+  if (user.platform_role === 'admin' || user.platform_role === 'viewer') {
+    return {
+      type: 'member',
+      key: user.key,
+      email: user.email,
+      emailHash: user.emailHash,
+      isMfaEnabled: user.isMfaEnabled,
+      has_request_mfa_reset_link: user.has_request_mfa_reset_link,
+      requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
+      totpSecret: user.totpSecret,
+      lastTotpTimeStep: user.lastTotpTimeStep,
+    };
+  }
+  return null;
+}
+
+function memberIdentity(user: User): LoginIdentity {
   return {
     type: 'member',
-    key: member.key,
-    email: member.email,
-    emailHash: member.emailHash,
-    isMfaEnabled: member.isMfaEnabled,
-    has_request_mfa_reset_link: member.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: member.requested_mfa_reset_link_at,
-    totpSecret: member.totpSecret,
-    lastTotpTimeStep: member.lastTotpTimeStep,
+    key: user.key,
+    email: user.email,
+    emailHash: user.emailHash,
+    isMfaEnabled: user.isMfaEnabled,
+    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
+    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
+    totpSecret: user.totpSecret,
+    lastTotpTimeStep: user.lastTotpTimeStep,
   };
 }
 
-function superAdminIdentity(superAdmin: SuperAdmin): LoginIdentity {
+function superAdminIdentity(user: User): LoginIdentity {
   return {
     type: 'superAdmin',
-    key: superAdmin.key,
-    email: superAdmin.email,
-    emailHash: superAdmin.emailHash,
-    isMfaEnabled: superAdmin.isMfaEnabled,
-    has_request_mfa_reset_link: superAdmin.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: superAdmin.requested_mfa_reset_link_at,
-    totpSecret: superAdmin.totpSecret,
-    lastTotpTimeStep: superAdmin.lastTotpTimeStep,
+    key: user.key,
+    email: user.email,
+    emailHash: user.emailHash,
+    isMfaEnabled: user.isMfaEnabled,
+    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
+    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
+    totpSecret: user.totpSecret,
+    lastTotpTimeStep: user.lastTotpTimeStep,
   };
 }
 
 export async function findLoginIdentityByEmail(email: string): Promise<LoginIdentity | null> {
   const normalized = normalizeEmail(email);
-  const [member, superAdmin] = await Promise.all([
-    getMemberByEmail(normalized),
-    getSuperAdminByEmail(normalized),
-  ]);
-  if (member && superAdmin) throw new Error('email exists as both a member and a super admin');
-  if (member) return memberIdentity(member);
-  if (superAdmin) return superAdminIdentity(superAdmin);
-  return null;
+  const user = await getUserByEmailHash(await hashUserEmail(normalized));
+  return user ? platformIdentity(user) : null;
 }
 
 async function getLoginIdentity(type: LoginIdentityType, key: string): Promise<LoginIdentity | null> {
-  if (type === 'member') {
-    const member = await getMemberById(key);
-    return member ? memberIdentity(member) : null;
-  }
-  const superAdmin = await getSuperAdminById(key);
-  return superAdmin ? superAdminIdentity(superAdmin) : null;
+  const user = await getUserById(key);
+  if (!user) return null;
+  if (type === 'superAdmin') return user.platform_role === 'owner' ? superAdminIdentity(user) : null;
+  return user.platform_role === 'admin' || user.platform_role === 'viewer' ? memberIdentity(user) : null;
 }
 
 async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: Record<string, unknown>) {
-  if (type === 'member') return updateMember(key, patch as Partial<Member>);
-  return updateSuperAdmin(key, patch as Partial<SuperAdmin>);
+  return updateUser(key, patch as Partial<User>);
 }
 
 async function getLoginIdentityByRefreshTokenHash(refreshTokenHash: string): Promise<LoginIdentity | null> {
-  const [member, superAdmin] = await Promise.all([
-    getMemberByRefreshTokenHash(refreshTokenHash),
-    getSuperAdminByRefreshTokenHash(refreshTokenHash),
-  ]);
-  if (member && superAdmin) throw new Error('refresh token exists for multiple identities');
-  if (member) return memberIdentity(member);
-  if (superAdmin) return superAdminIdentity(superAdmin);
-  return null;
+  const user = await getUserByRefreshTokenHash(refreshTokenHash);
+  return user ? platformIdentity(user) : null;
 }
 
 export async function createAccessToken(identity: AuthIdentity | string) {

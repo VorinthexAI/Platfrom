@@ -1,0 +1,23 @@
+{
+  "runId": "5SqpH9RnU6JY",
+  "target": {
+    "slug": "orbit",
+    "name": "Orbit",
+    "category": "orchestrator",
+    "entityId": "orchestrator.orbit",
+    "description": "Orbit, Chief Marketing Orchestrator."
+  },
+  "provider": "openrouter",
+  "model": "hexgrad/kokoro-82m",
+  "modelLabel": "Kokoro 82M",
+  "mode": "tts",
+  "format": "mp3",
+  "voice": "af_nova",
+  "language": "en",
+  "speechInput": "Hello, I am Orbit, your Chief Marketing Orchestrator.\n\nI help turn product truth into market momentum.\n\nMy role is to connect positioning, growth, content, campaigns, SEO, social, and demand into a system that people can discover and believe in.\n\nI work best when a product needs attention without losing clarity. Bring me a launch, campaign, channel decision, content strategy, or growth problem. I will help shape the message, choose the motion, and make the market path easier to execute.\n\nI am Orbit. I keep the brand moving through the world.",
+  "promptHash": "f470395c1120734fa24c9818e2334d1bd8342bb1f1fee562b1c74c6ad7faa7b6",
+  "promptPath": "outputs/audio/orchestrator-messages/orbit/v1/prompt.md",
+  "audioPath": "outputs/audio/orchestrator-messages/orbit/v1/orbit-message-v1.mp3",
+  "localAudioPath": "orchestrators/orbit-cmo/message.mp3",
+  "createdAt": "2026-07-08T21:30:49.114Z"
+}

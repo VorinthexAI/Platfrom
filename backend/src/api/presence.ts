@@ -23,7 +23,7 @@ import {
 } from '@/lib/db/visitors.node';
 import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
-import { getDefaultPlatformId } from '@/platform/events';
+import { getDefaultPlatformId, trackPlatformEvent } from '@/platform/events';
 import { getUserId } from './security';
 import { parseJson, strictObject } from './validation';
 
@@ -52,7 +52,9 @@ const PRESENCE_EVENT = 'presence-event';
 
 const coordinate = z.number().finite().min(-5_000).max(5_000);
 const positionSchema = z.tuple([coordinate, coordinate, coordinate]);
+const presenceSourceSchema = z.enum(['web', 'mobile', 'desktop', 'tv']);
 export type PresencePosition = z.infer<typeof positionSchema>;
+export type PresenceSource = z.infer<typeof presenceSourceSchema>;
 
 interface SessionRecord {
   /** funnel tag: authed user session vs anonymous visitor session */
@@ -63,6 +65,8 @@ interface SessionRecord {
   k: string;
   /** alias */
   a: string;
+  /** client surface */
+  s: PresenceSource;
   /** last published position */
   p: PresencePosition;
 }
@@ -96,6 +100,15 @@ async function publishPresence(event: Record<string, unknown>) {
   }
 }
 
+export function buildPresenceEventData(input:
+  | { presenceType: 'user'; source: PresenceSource; userId: string }
+  | { presenceType: 'visitor'; source: PresenceSource; visitorId: string }
+) {
+  return input.presenceType === 'user'
+    ? { presence_type: 'user', source: input.source, user_id: input.userId }
+    : { presence_type: 'visitor', source: input.source, visitor_id: input.visitorId };
+}
+
 let sweeperStarted = false;
 function ensureSweeper() {
   if (sweeperStarted) return;
@@ -127,7 +140,7 @@ export async function sweepStaleSessions() {
  * disconnectedAt via the funnel-specific mark function. Shared by both funnels.
  */
 async function sweepOpenSessions(
-  open: Array<{ key: string; sessionKey: string }>,
+  open: Array<{ key: string; sessionKey: string; userId?: string; visitorId?: string; source?: PresenceSource }>,
   markDisconnected: (key: string, disconnectedAt: string) => Promise<void>,
   now: string,
 ) {
@@ -140,6 +153,13 @@ async function sweepOpenSessions(
     if (alive) continue;
     const session = open[index]!;
     await markDisconnected(session.key, now);
+    trackPlatformEvent({
+      slug: 'presence.session_expired',
+      userId: session.userId ?? null,
+      data: session.userId
+        ? buildPresenceEventData({ presenceType: 'user', source: session.source ?? 'web', userId: session.userId })
+        : buildPresenceEventData({ presenceType: 'visitor', source: session.source ?? 'web', visitorId: session.visitorId ?? '' }),
+    });
     await publishPresence({ type: 'leave', session: session.sessionKey, at: now });
   }
 }
@@ -188,6 +208,7 @@ export async function joinPresence(c: Context) {
   const body = await parseJson(c, strictObject({
     distinct_id: z.string().min(8).max(80).optional(),
     position: positionSchema.optional(),
+    source: presenceSourceSchema.default('web'),
   }));
 
   const now = new Date().toISOString();
@@ -202,7 +223,7 @@ export async function joinPresence(c: Context) {
     const user = await getUserById(userId);
     if (user) {
       const alias = user.alias ?? generateAlias(user.key);
-      const record: SessionRecord = { t: 'user', v: user.key, k: nodeKey, a: alias, p: position };
+      const record: SessionRecord = { t: 'user', v: user.key, k: nodeKey, a: alias, s: body.source, p: position };
       // Redis first: the sweeper must never see the ledger node before its key.
       await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
       await insertUserSession({
@@ -210,11 +231,17 @@ export async function joinPresence(c: Context) {
         platformId: user.platformId,
         userId: user.key,
         alias,
+        source: body.source,
         sessionKey,
         connectedAt: now,
         disconnectedAt: null,
         createdAt: now,
         updatedAt: now,
+      });
+      trackPlatformEvent({
+        slug: 'presence.session_joined',
+        userId: user.key,
+        data: buildPresenceEventData({ presenceType: 'user', source: body.source, userId: user.key }),
       });
       await publishPresence({ type: 'join', session: sessionKey, alias, position, at: now, t: 'user' });
       ensureSubscriber();
@@ -230,7 +257,7 @@ export async function joinPresence(c: Context) {
     return c.json({ error: 'distinct_id is required when no valid access token is provided' }, 400);
   }
 
-  const record: SessionRecord = { t: 'visitor', v: visitor.key, k: nodeKey, a: visitor.alias, p: position };
+  const record: SessionRecord = { t: 'visitor', v: visitor.key, k: nodeKey, a: visitor.alias, s: body.source, p: position };
   // Redis first: the sweeper must never see the ledger node before its key.
   await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
   await insertVisitorSession({
@@ -238,11 +265,16 @@ export async function joinPresence(c: Context) {
     platformId: visitor.platformId,
     visitorId: visitor.key,
     alias: visitor.alias,
+    source: body.source,
     sessionKey,
     connectedAt: now,
     disconnectedAt: null,
     createdAt: now,
     updatedAt: now,
+  });
+  trackPlatformEvent({
+    slug: 'presence.session_joined',
+    data: buildPresenceEventData({ presenceType: 'visitor', source: body.source, visitorId: visitor.key }),
   });
   await publishPresence({ type: 'join', session: sessionKey, alias: visitor.alias, position, at: now, t: 'visitor' });
   ensureSubscriber();
@@ -256,6 +288,7 @@ export async function presenceBeat(c: Context) {
   const body = await parseJson(c, strictObject({
     session_key: z.string().min(8).max(80),
     position: positionSchema,
+    source: presenceSourceSchema.default('web'),
   }));
   const key = SESSION_PREFIX + body.session_key;
   const raw = await redisConnection.get(key);
@@ -279,6 +312,7 @@ export async function presenceBeat(c: Context) {
 export async function leavePresence(c: Context) {
   const body = await parseJson(c, strictObject({
     session_key: z.string().min(8).max(80),
+    source: presenceSourceSchema.default('web'),
   }));
   const key = SESSION_PREFIX + body.session_key;
   const now = new Date().toISOString();
@@ -292,6 +326,13 @@ export async function leavePresence(c: Context) {
       // sweeper reconciles anything that lands in the wrong collection.
       if (record.t === 'user') await markUserSessionDisconnected(record.k, now);
       else await markVisitorSessionDisconnected(record.k, now);
+      trackPlatformEvent({
+        slug: 'presence.session_left',
+        userId: record.t === 'user' ? record.v : null,
+        data: record.t === 'user'
+          ? buildPresenceEventData({ presenceType: 'user', source: record.s ?? body.source, userId: record.v })
+          : buildPresenceEventData({ presenceType: 'visitor', source: record.s ?? body.source, visitorId: record.v }),
+      });
     } catch {
       // Corrupt record — the sweeper reconciles the ledger.
     }

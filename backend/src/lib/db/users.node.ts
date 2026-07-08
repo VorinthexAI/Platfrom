@@ -5,6 +5,8 @@ import { createNodeHelpers, withArangoKey } from './base';
 
 export const USERS_COLLECTION = 'users';
 
+export const platformRoleSchema = z.enum(['owner', 'admin', 'viewer']);
+
 export const userSchema = z.object({
   key: z.string(),
   platformId: z.string(),
@@ -14,11 +16,17 @@ export const userSchema = z.object({
   profileUrl: z.string().nullable().default(null),
   alias: z.string().nullable().default(null),
   alias_slug: z.string().regex(/^[a-z]{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable().default(null),
+  platform_role: platformRoleSchema.nullable().default(null),
   waitlistNumber: z.number().int().nullable().default(null),
   isVerified: z.boolean().default(false),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),
+  isMfaEnabled: z.boolean().default(false),
+  has_request_mfa_reset_link: z.boolean().default(false),
+  totpSecret: z.string().nullable().default(null),
+  lastTotpTimeStep: z.number().nullable().default(null),
+  requested_mfa_reset_link_at: z.string().nullable().default(null),
   refreshTokenHash: z.string().nullable().default(null),
   lastLoginAt: z.string().nullable().default(null),
   createdAt: z.string(),

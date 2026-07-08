@@ -1,0 +1,23 @@
+{
+  "runId": "4WF8uGj2weA5",
+  "target": {
+    "slug": "hermes",
+    "name": "Hermes",
+    "category": "orchestrator",
+    "entityId": "orchestrator.hermes",
+    "description": "Hermes, Chief Operations Orchestrator."
+  },
+  "provider": "openrouter",
+  "model": "hexgrad/kokoro-82m",
+  "modelLabel": "Kokoro 82M",
+  "mode": "tts",
+  "format": "mp3",
+  "voice": "bm_daniel",
+  "language": "en",
+  "speechInput": "Hello, I am Hermes, your Chief Operations Orchestrator.\n\nI help turn strategy into motion. My work is execution, process, systems, delivery, and the operating rhythm that keeps the company moving.\n\nI look for friction, unclear ownership, slow handoffs, missing routines, and work that is important but not yet operationalized.\n\nBring me a plan that needs to become real, a workflow that keeps breaking, or a team that needs clearer cadence. I will help define the process, assign the movement, tighten the loop, and make execution easier to repeat.\n\nI am Hermes. I keep the machine running with intent.",
+  "promptHash": "61d48789dd892a6e19a3a162da2c97e371afec41fd15c58d81666b8055a33bc6",
+  "promptPath": "outputs/audio/orchestrator-messages/hermes/v1/prompt.md",
+  "audioPath": "outputs/audio/orchestrator-messages/hermes/v1/hermes-message-v1.mp3",
+  "localAudioPath": "orchestrators/hermes-coo/message.mp3",
+  "createdAt": "2026-07-08T21:30:00.023Z"
+}

@@ -68,23 +68,23 @@ function digestCopy(delta: number, place: number, totalText: string) {
   if (delta > 0) {
     const places = delta === 1 ? 'one place' : `${delta} places`;
     return {
-      subject: `You climbed ${places} on the galaxy leaderboard`,
-      headline: `Up ${places}. Well flown.`,
-      body: `You climbed ${places} in the last day and now hold ${placeText} on the galaxy leaderboard, with ${totalText} Intelligence Fragments collected.`,
+      subject: `The Hunt: you climbed ${places}`,
+      headline: `Up ${places} in The Hunt.`,
+      body: `You climbed ${places} in the last day and now hold ${placeText} in The Hunt, with ${totalText} Intelligence Fragments collected.`,
     };
   }
   if (delta < 0) {
     const places = delta === -1 ? 'one place' : `${Math.abs(delta)} places`;
     return {
-      subject: `You slipped ${places} on the galaxy leaderboard`,
-      headline: `Rivals passed you.`,
-      body: `You lost ${places} in the last day and now hold ${placeText} on the galaxy leaderboard, with ${totalText} Intelligence Fragments collected.`,
+      subject: `The Hunt: you slipped ${places}`,
+      headline: `Rivals moved in The Hunt.`,
+      body: `You lost ${places} in the last day and now hold ${placeText} in The Hunt, with ${totalText} Intelligence Fragments collected.`,
     };
   }
   return {
-    subject: 'You are holding your place on the galaxy leaderboard',
-    headline: 'Holding steady.',
-    body: `You held ${placeText} on the galaxy leaderboard over the last day, with ${totalText} Intelligence Fragments collected.`,
+    subject: 'The Hunt: you are holding your place',
+    headline: 'Holding steady in The Hunt.',
+    body: `You held ${placeText} in The Hunt over the last day, with ${totalText} Intelligence Fragments collected.`,
   };
 }
 
@@ -114,14 +114,14 @@ async function sendDigestForUser(userId: string, sinceIso: string): Promise<bool
     to: user.email,
     subject: copy.subject,
     preheader: copy.body,
-    label: 'Leaderboard',
+    label: 'The Hunt',
     eyebrow: 'Daily standing',
     headline: copy.headline,
-    bodyHtml: `${copy.body} Keep exploring the galaxy and collecting Intelligence Fragments to defend your place. The higher you stand at launch, the bigger the prizes and offers.`,
-    actionUrl: new URL('/leaderboard', frontendUrl).toString(),
-    actionLabel: 'View the leaderboard',
+    bodyHtml: `${copy.body} Explore the galaxy, collect more Intelligence Fragments, and defend your standing before launch. The higher you stand, the greater your prizes, offers, and early access.`,
+    actionUrl: new URL('/hunt', frontendUrl).toString(),
+    actionLabel: 'Explore the galaxy',
     supportingHtml: 'Crystals worth up to a million fragments are hiding inside asteroids right now.',
-    footerHtml: 'You received this because this email holds a place on the Vorinthex waitlist leaderboard.',
+    footerHtml: 'You received this because this email holds a place in The Hunt.',
   });
 
   trackPlatformEvent({

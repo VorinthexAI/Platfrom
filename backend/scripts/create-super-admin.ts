@@ -40,8 +40,7 @@ async function main() {
 
   try {
     const { hashUserEmail } = await import('@/api/users');
-    const { getSuperAdminByEmail, updateSuperAdmin } = await import('@/lib/db/super-admins.node');
-    const { upsertSuperAdminByKeyGuarded } = await import('@/lib/db/identity-guard');
+    const { getUserByEmailHash, insertUser, updateUser } = await import('@/lib/db/users.node');
     const { encryptSecret } = await import('@/lib/crypto');
     const { newId } = await import('@/lib/ids');
     const { getDefaultPlatformId } = await import('@/platform/events');
@@ -50,25 +49,39 @@ async function main() {
     const email = await askEmail();
 
     console.log(`\nCreating/updating super admin identity for ${email} in ${environment}...`);
-    const existingSuperAdmin = await getSuperAdminByEmail(email);
+    const emailHash = await hashUserEmail(email);
+    const existingSuperAdmin = await getUserByEmailHash(emailHash);
     const now = new Date().toISOString();
-    const superAdmin = existingSuperAdmin ?? await upsertSuperAdminByKeyGuarded({
+    const superAdmin = existingSuperAdmin ?? await insertUser({
       key: newId(),
       platformId: await getDefaultPlatformId(),
       email,
-      emailHash: await hashUserEmail(email),
+      emailHash,
+      name: null,
+      profileUrl: null,
+      alias: null,
+      alias_slug: null,
+      platform_role: 'owner',
+      waitlistNumber: null,
+      isVerified: true,
+      is_subscribed_to_updates: true,
+      is_subscribed_to_updates_unsubscribe_token_hash: null,
+      is_subscribed_to_updates_unsubscribe_requested_at: null,
       isMfaEnabled: false,
       has_request_mfa_reset_link: false,
-      refreshTokenHash: null,
       totpSecret: null,
       lastTotpTimeStep: null,
       requested_mfa_reset_link_at: null,
+      refreshTokenHash: null,
       lastLoginAt: null,
       createdAt: now,
       updatedAt: now,
-      embedding: [],
     });
-    console.log(`Super admin identity ${superAdmin.key} ready.`);
+    if (existingSuperAdmin && existingSuperAdmin.platform_role !== 'owner') {
+      await updateUser(existingSuperAdmin.key, { platform_role: 'owner', updatedAt: now });
+    }
+    const superAdminKey = superAdmin.key;
+    console.log(`Super admin identity ${superAdminKey} ready.`);
 
     const secret = generateSecret();
     const otpauthUrl = generateURI({ issuer: ISSUER, label: email, secret });
@@ -81,7 +94,7 @@ async function main() {
 
     const lastTotpTimeStep = await verifyTwoCodes(secret, verifySuccessiveTotpCodes);
 
-    await updateSuperAdmin(superAdmin.key, {
+    await updateUser(superAdminKey, {
       totpSecret: await encryptSecret(secret),
       isMfaEnabled: true,
       lastTotpTimeStep,

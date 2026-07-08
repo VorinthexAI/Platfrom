@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
   await backendFetch("/presence/leave", {
     method: "POST",
-    body: JSON.stringify({ session_key: parsed.data.sessionKey }),
+    body: JSON.stringify({ session_key: parsed.data.sessionKey, source: "web" }),
   });
   return NextResponse.json({ ok: true });
 }

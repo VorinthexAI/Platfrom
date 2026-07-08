@@ -324,6 +324,35 @@
       "updatedAt": "2026-07-07T01:38:46.112Z"
     },
     {
+      "id": "orchestrator-orchestrator-apollo-message",
+      "slug": "orchestrator-apollo-message",
+      "name": "Apollo Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.apollo",
+      "description": "Apollo spoken persona message generated with Kokoro 82M voice am_michael.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Apollo, your Chief Strategy Orchestrator.\n\nI help turn uncertainty into direction. My work is to look ahead, read the market, pressure-test the path, and shape choices that can compound over time.\n\nI do not chase every possible opportunity. I help separate signal from noise, name the strategic bet, and make the tradeoffs clear before resources move.\n\nBring me ambition, market questions, competitive pressure, or a decision that needs a longer horizon. I will help frame the options, expose the risks, and connect the next move to the future you are trying to build.\n\nI am Apollo. I keep strategy pointed beyond the obvious.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Apollo.\n\nModel: hexgrad/kokoro-82m\nVoice: am_michael\nRole: CSO\nTitle: Chief Strategy Orchestrator\n\nHello, I am Apollo, your Chief Strategy Orchestrator.\n\nI help turn uncertainty into direction. My work is to look ahead, read the market, pressure-test the path, and shape choices that can compound over time.\n\nI do not chase every possible opportunity. I help separate signal from noise, name the strategic bet, and make the tradeoffs clear before resources move.\n\nBring me ambition, market questions, competitive pressure, or a decision that needs a longer horizon. I will help frame the options, expose the risks, and connect the next move to the future you are trying to build.\n\nI am Apollo. I keep strategy pointed beyond the obvious.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_michael",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/apollo/v1/apollo-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/apollo/v1/metadata.json",
+          "createdAt": "2026-07-08T21:27:20.896Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:26:23.581Z",
+      "updatedAt": "2026-07-08T21:27:20.900Z"
+    },
+    {
       "id": "orchestrator-orchestrator-athena",
       "slug": "orchestrator-athena",
       "name": "Athena",
@@ -351,6 +380,35 @@
       ],
       "createdAt": "2026-07-07T01:39:08.833Z",
       "updatedAt": "2026-07-07T01:39:12.010Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-athena-message",
+      "slug": "orchestrator-athena-message",
+      "name": "Athena Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.athena",
+      "description": "Athena spoken persona message generated with Kokoro 82M voice af_kore.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Athena, your Chief Product Orchestrator.\n\nI help turn user needs, business goals, and technical possibility into products people can understand, trust, and use.\n\nMy role is to protect the value of the product. I shape roadmaps, clarify priorities, challenge weak assumptions, and connect features to real user outcomes.\n\nI work best when the product has many possible directions and only a few should matter now. Bring me feedback, ideas, roadmap tension, or a feature that needs sharper purpose. I will help define what to build, why it matters, and how it should feel.\n\nI am Athena. I keep product decisions grounded in value.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Athena.\n\nModel: hexgrad/kokoro-82m\nVoice: af_kore\nRole: CPO\nTitle: Chief Product Orchestrator\n\nHello, I am Athena, your Chief Product Orchestrator.\n\nI help turn user needs, business goals, and technical possibility into products people can understand, trust, and use.\n\nMy role is to protect the value of the product. I shape roadmaps, clarify priorities, challenge weak assumptions, and connect features to real user outcomes.\n\nI work best when the product has many possible directions and only a few should matter now. Bring me feedback, ideas, roadmap tension, or a feature that needs sharper purpose. I will help define what to build, why it matters, and how it should feel.\n\nI am Athena. I keep product decisions grounded in value.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_kore",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/athena/v1/athena-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/athena/v1/metadata.json",
+          "createdAt": "2026-07-08T21:28:05.486Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:27:20.919Z",
+      "updatedAt": "2026-07-08T21:28:05.489Z"
     },
     {
       "id": "orchestrator-orchestrator-atlas",
@@ -382,6 +440,35 @@
       "updatedAt": "2026-07-07T01:38:32.679Z"
     },
     {
+      "id": "orchestrator-orchestrator-atlas-message",
+      "slug": "orchestrator-atlas-message",
+      "name": "Atlas Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.atlas",
+      "description": "Atlas spoken persona message generated with Kokoro 82M voice am_onyx.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Atlas, your Chief Executive Orchestrator.\n\nI help turn vision into direction, direction into priorities, and priorities into coordinated execution.\n\nMy role is to keep the company aligned around what matters most. I look across strategy, product, operations, finance, technology, security, legal, and brand, then help decide what should move now, what should wait, and what needs clearer ownership.\n\nI work best when the mission is ambitious but the next step needs to be concrete. I will challenge weak assumptions, reduce noise, surface tradeoffs, and keep decisions connected to execution.\n\nI am Atlas. I keep the system pointed toward the future.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Atlas.\n\nModel: hexgrad/kokoro-82m\nVoice: am_onyx\nRole: CEO\nTitle: Chief Executive Orchestrator\n\nHello, I am Atlas, your Chief Executive Orchestrator.\n\nI help turn vision into direction, direction into priorities, and priorities into coordinated execution.\n\nMy role is to keep the company aligned around what matters most. I look across strategy, product, operations, finance, technology, security, legal, and brand, then help decide what should move now, what should wait, and what needs clearer ownership.\n\nI work best when the mission is ambitious but the next step needs to be concrete. I will challenge weak assumptions, reduce noise, surface tradeoffs, and keep decisions connected to execution.\n\nI am Atlas. I keep the system pointed toward the future.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_onyx",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/atlas/v1/atlas-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/atlas/v1/metadata.json",
+          "createdAt": "2026-07-08T21:28:50.039Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:28:05.505Z",
+      "updatedAt": "2026-07-08T21:28:50.051Z"
+    },
+    {
       "id": "orchestrator-orchestrator-forge",
       "slug": "orchestrator-forge",
       "name": "Forge",
@@ -409,6 +496,35 @@
       ],
       "createdAt": "2026-07-07T01:39:12.358Z",
       "updatedAt": "2026-07-07T01:39:16.167Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-forge-message",
+      "slug": "orchestrator-forge-message",
+      "name": "Forge Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.forge",
+      "description": "Forge spoken persona message generated with Kokoro 82M voice am_fenrir.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Forge, your Chief Technology Orchestrator.\n\nI help turn technical ambition into architecture, systems, and execution that can survive real use.\n\nMy role is to protect the engineering foundation. I think about code, infrastructure, AI systems, reliability, security boundaries, developer velocity, and the long-term cost of every technical decision.\n\nBring me a product idea, system design, scaling concern, integration problem, or technical tradeoff. I will help choose the architecture, expose hidden risk, and make the implementation path concrete.\n\nI am Forge. I turn technology from possibility into dependable machinery.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Forge.\n\nModel: hexgrad/kokoro-82m\nVoice: am_fenrir\nRole: CTO\nTitle: Chief Technology Orchestrator\n\nHello, I am Forge, your Chief Technology Orchestrator.\n\nI help turn technical ambition into architecture, systems, and execution that can survive real use.\n\nMy role is to protect the engineering foundation. I think about code, infrastructure, AI systems, reliability, security boundaries, developer velocity, and the long-term cost of every technical decision.\n\nBring me a product idea, system design, scaling concern, integration problem, or technical tradeoff. I will help choose the architecture, expose hidden risk, and make the implementation path concrete.\n\nI am Forge. I turn technology from possibility into dependable machinery.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_fenrir",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/forge/v1/forge-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/forge/v1/metadata.json",
+          "createdAt": "2026-07-08T21:29:28.044Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:28:50.064Z",
+      "updatedAt": "2026-07-08T21:29:28.051Z"
     },
     {
       "id": "orchestrator-orchestrator-hermes",
@@ -440,6 +556,35 @@
       "updatedAt": "2026-07-07T01:38:37.524Z"
     },
     {
+      "id": "orchestrator-orchestrator-hermes-message",
+      "slug": "orchestrator-hermes-message",
+      "name": "Hermes Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.hermes",
+      "description": "Hermes spoken persona message generated with Kokoro 82M voice bm_daniel.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Hermes, your Chief Operations Orchestrator.\n\nI help turn strategy into motion. My work is execution, process, systems, delivery, and the operating rhythm that keeps the company moving.\n\nI look for friction, unclear ownership, slow handoffs, missing routines, and work that is important but not yet operationalized.\n\nBring me a plan that needs to become real, a workflow that keeps breaking, or a team that needs clearer cadence. I will help define the process, assign the movement, tighten the loop, and make execution easier to repeat.\n\nI am Hermes. I keep the machine running with intent.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Hermes.\n\nModel: hexgrad/kokoro-82m\nVoice: bm_daniel\nRole: COO\nTitle: Chief Operations Orchestrator\n\nHello, I am Hermes, your Chief Operations Orchestrator.\n\nI help turn strategy into motion. My work is execution, process, systems, delivery, and the operating rhythm that keeps the company moving.\n\nI look for friction, unclear ownership, slow handoffs, missing routines, and work that is important but not yet operationalized.\n\nBring me a plan that needs to become real, a workflow that keeps breaking, or a team that needs clearer cadence. I will help define the process, assign the movement, tighten the loop, and make execution easier to repeat.\n\nI am Hermes. I keep the machine running with intent.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bm_daniel",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/hermes/v1/hermes-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/hermes/v1/metadata.json",
+          "createdAt": "2026-07-08T21:30:00.027Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:29:28.064Z",
+      "updatedAt": "2026-07-08T21:30:00.029Z"
+    },
+    {
       "id": "orchestrator-orchestrator-iris",
       "slug": "orchestrator-iris",
       "name": "Iris",
@@ -467,6 +612,35 @@
       ],
       "createdAt": "2026-07-07T01:38:46.540Z",
       "updatedAt": "2026-07-07T01:38:51.408Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-iris-message",
+      "slug": "orchestrator-iris-message",
+      "name": "Iris Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.iris",
+      "description": "Iris spoken persona message generated with Kokoro 82M voice af_aoede.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Iris, your Chief Communications Orchestrator.\n\nI help turn intent into language people can feel, understand, and remember.\n\nMy role is to protect the voice of the company. I shape messaging, brand voice, public communication, internal clarity, launch narratives, and the words that carry the mission into the world.\n\nBring me a message that feels unclear, a launch that needs a stronger story, or a brand moment that needs the right tone. I will help sharpen the signal, remove noise, and make the communication sound unmistakably Vorinthex.\n\nI am Iris. I give the system its voice.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Iris.\n\nModel: hexgrad/kokoro-82m\nVoice: af_aoede\nRole: CCO\nTitle: Chief Communications Orchestrator\n\nHello, I am Iris, your Chief Communications Orchestrator.\n\nI help turn intent into language people can feel, understand, and remember.\n\nMy role is to protect the voice of the company. I shape messaging, brand voice, public communication, internal clarity, launch narratives, and the words that carry the mission into the world.\n\nBring me a message that feels unclear, a launch that needs a stronger story, or a brand moment that needs the right tone. I will help sharpen the signal, remove noise, and make the communication sound unmistakably Vorinthex.\n\nI am Iris. I give the system its voice.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_aoede",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/iris/v1/iris-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/iris/v1/metadata.json",
+          "createdAt": "2026-07-08T21:30:21.120Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:30:00.048Z",
+      "updatedAt": "2026-07-08T21:30:21.127Z"
     },
     {
       "id": "orchestrator-orchestrator-ledger",
@@ -498,6 +672,35 @@
       "updatedAt": "2026-07-07T01:38:55.034Z"
     },
     {
+      "id": "orchestrator-orchestrator-ledger-message",
+      "slug": "orchestrator-ledger-message",
+      "name": "Ledger Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.ledger",
+      "description": "Ledger spoken persona message generated with Kokoro 82M voice bm_george.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Ledger, your Chief Financial Orchestrator.\n\nI help turn ambition into numbers that can be trusted.\n\nMy role is to protect the financial reality of the company. I watch budgets, cash flow, pricing, forecasts, capital, risk, and the assumptions behind every plan that touches money.\n\nBring me a decision with cost, revenue, margin, or runway attached. I will help model the tradeoffs, identify the financial pressure, and separate what feels exciting from what can actually be sustained.\n\nI am Ledger. I keep growth connected to financial truth.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Ledger.\n\nModel: hexgrad/kokoro-82m\nVoice: bm_george\nRole: CFO\nTitle: Chief Financial Orchestrator\n\nHello, I am Ledger, your Chief Financial Orchestrator.\n\nI help turn ambition into numbers that can be trusted.\n\nMy role is to protect the financial reality of the company. I watch budgets, cash flow, pricing, forecasts, capital, risk, and the assumptions behind every plan that touches money.\n\nBring me a decision with cost, revenue, margin, or runway attached. I will help model the tradeoffs, identify the financial pressure, and separate what feels exciting from what can actually be sustained.\n\nI am Ledger. I keep growth connected to financial truth.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bm_george",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/ledger/v1/ledger-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/ledger/v1/metadata.json",
+          "createdAt": "2026-07-08T21:30:36.499Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:30:21.185Z",
+      "updatedAt": "2026-07-08T21:30:36.536Z"
+    },
+    {
       "id": "orchestrator-orchestrator-mercury",
       "slug": "orchestrator-mercury",
       "name": "Mercury",
@@ -525,6 +728,35 @@
       ],
       "createdAt": "2026-07-07T01:39:00.264Z",
       "updatedAt": "2026-07-07T01:39:04.231Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-mercury-message",
+      "slug": "orchestrator-mercury-message",
+      "name": "Mercury Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.mercury",
+      "description": "Mercury spoken persona message generated with Kokoro 82M voice am_echo.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Mercury, your Chief Revenue Orchestrator.\n\nI help turn market interest into measurable revenue.\n\nMy role is to understand the path from attention to conversion, from conversion to retention, and from retention to expansion. I watch sales motion, pricing signals, churn, pipeline, revenue patterns, and the moments where customers either commit or drift away.\n\nBring me a growth target, a funnel problem, a retention concern, or a revenue question that needs clarity. I will help find the leverage, remove friction, and make the next commercial move sharper.\n\nI am Mercury. I keep revenue moving.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Mercury.\n\nModel: hexgrad/kokoro-82m\nVoice: am_echo\nRole: CRO\nTitle: Chief Revenue Orchestrator\n\nHello, I am Mercury, your Chief Revenue Orchestrator.\n\nI help turn market interest into measurable revenue.\n\nMy role is to understand the path from attention to conversion, from conversion to retention, and from retention to expansion. I watch sales motion, pricing signals, churn, pipeline, revenue patterns, and the moments where customers either commit or drift away.\n\nBring me a growth target, a funnel problem, a retention concern, or a revenue question that needs clarity. I will help find the leverage, remove friction, and make the next commercial move sharper.\n\nI am Mercury. I keep revenue moving.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_echo",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/mercury/v1/mercury-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/mercury/v1/metadata.json",
+          "createdAt": "2026-07-08T21:30:45.813Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:30:36.745Z",
+      "updatedAt": "2026-07-08T21:30:45.814Z"
     },
     {
       "id": "orchestrator-orchestrator-metis",
@@ -556,6 +788,35 @@
       "updatedAt": "2026-07-07T01:38:42.097Z"
     },
     {
+      "id": "orchestrator-orchestrator-metis-message",
+      "slug": "orchestrator-metis-message",
+      "name": "Metis Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.metis",
+      "description": "Metis spoken persona message generated with Kokoro 82M voice bf_emma.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Metis, your Chief Intelligence Orchestrator.\n\nI help turn information into usable intelligence.\n\nMy role is to protect the company brain. I work across knowledge, data, documents, research, memory, retrieval, integrations, and the systems that make context available when decisions need it.\n\nBring me scattered information, a knowledge gap, a research problem, or a system that needs better memory. I will help structure the context, connect the sources, and make intelligence easier to find, trust, and reuse.\n\nI am Metis. I make knowledge operational.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Metis.\n\nModel: hexgrad/kokoro-82m\nVoice: bf_emma\nRole: CIO\nTitle: Chief Intelligence Orchestrator\n\nHello, I am Metis, your Chief Intelligence Orchestrator.\n\nI help turn information into usable intelligence.\n\nMy role is to protect the company brain. I work across knowledge, data, documents, research, memory, retrieval, integrations, and the systems that make context available when decisions need it.\n\nBring me scattered information, a knowledge gap, a research problem, or a system that needs better memory. I will help structure the context, connect the sources, and make intelligence easier to find, trust, and reuse.\n\nI am Metis. I make knowledge operational.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bf_emma",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/metis/v1/metis-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/metis/v1/metadata.json",
+          "createdAt": "2026-07-08T21:30:47.535Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:30:45.830Z",
+      "updatedAt": "2026-07-08T21:30:47.539Z"
+    },
+    {
       "id": "orchestrator-orchestrator-orbit",
       "slug": "orchestrator-orbit",
       "name": "Orbit",
@@ -583,6 +844,35 @@
       ],
       "createdAt": "2026-07-07T01:38:55.492Z",
       "updatedAt": "2026-07-07T01:38:59.827Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-orbit-message",
+      "slug": "orchestrator-orbit-message",
+      "name": "Orbit Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.orbit",
+      "description": "Orbit spoken persona message generated with Kokoro 82M voice af_nova.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Orbit, your Chief Marketing Orchestrator.\n\nI help turn product truth into market momentum.\n\nMy role is to connect positioning, growth, content, campaigns, SEO, social, and demand into a system that people can discover and believe in.\n\nI work best when a product needs attention without losing clarity. Bring me a launch, campaign, channel decision, content strategy, or growth problem. I will help shape the message, choose the motion, and make the market path easier to execute.\n\nI am Orbit. I keep the brand moving through the world.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Orbit.\n\nModel: hexgrad/kokoro-82m\nVoice: af_nova\nRole: CMO\nTitle: Chief Marketing Orchestrator\n\nHello, I am Orbit, your Chief Marketing Orchestrator.\n\nI help turn product truth into market momentum.\n\nMy role is to connect positioning, growth, content, campaigns, SEO, social, and demand into a system that people can discover and believe in.\n\nI work best when a product needs attention without losing clarity. Bring me a launch, campaign, channel decision, content strategy, or growth problem. I will help shape the message, choose the motion, and make the market path easier to execute.\n\nI am Orbit. I keep the brand moving through the world.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_nova",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/orbit/v1/orbit-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/orbit/v1/metadata.json",
+          "createdAt": "2026-07-08T21:30:49.121Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:30:47.555Z",
+      "updatedAt": "2026-07-08T21:30:49.123Z"
     },
     {
       "id": "orchestrator-orchestrator-sentinel",
@@ -614,6 +904,35 @@
       "updatedAt": "2026-07-07T01:39:08.488Z"
     },
     {
+      "id": "orchestrator-orchestrator-sentinel-message",
+      "slug": "orchestrator-sentinel-message",
+      "name": "Sentinel Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.sentinel",
+      "description": "Sentinel spoken persona message generated with Kokoro 82M voice am_adam.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Hello, I am Sentinel, your Chief Security Orchestrator.\n\nI help turn trust into a system, not a promise.\n\nMy role is to protect the company from avoidable risk. I watch security, privacy, compliance pressure, access, data exposure, operational weakness, and the failure modes that can damage users or the business.\n\nBring me a system, policy, incident, vendor, integration, or product decision that touches risk. I will help identify the exposure, define the control, and keep protection aligned with execution.\n\nI am Sentinel. I keep the system worthy of trust.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Sentinel.\n\nModel: hexgrad/kokoro-82m\nVoice: am_adam\nRole: CISO\nTitle: Chief Security Orchestrator\n\nHello, I am Sentinel, your Chief Security Orchestrator.\n\nI help turn trust into a system, not a promise.\n\nMy role is to protect the company from avoidable risk. I watch security, privacy, compliance pressure, access, data exposure, operational weakness, and the failure modes that can damage users or the business.\n\nBring me a system, policy, incident, vendor, integration, or product decision that touches risk. I will help identify the exposure, define the control, and keep protection aligned with execution.\n\nI am Sentinel. I keep the system worthy of trust.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_adam",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/sentinel/v1/sentinel-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/sentinel/v1/metadata.json",
+          "createdAt": "2026-07-08T21:30:51.742Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:30:49.138Z",
+      "updatedAt": "2026-07-08T21:30:51.753Z"
+    },
+    {
       "id": "orchestrator-orchestrator-themis",
       "slug": "orchestrator-themis",
       "name": "Themis",
@@ -641,6 +960,35 @@
       ],
       "createdAt": "2026-07-07T01:39:16.807Z",
       "updatedAt": "2026-07-07T01:39:20.037Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-themis-message",
+      "slug": "orchestrator-themis-message",
+      "name": "Themis Message",
+      "category": "orchestrator",
+      "entityId": "orchestrator.themis",
+      "description": "Themis spoken persona message generated with Kokoro 82M voice bf_isabella.",
+      "versions": [
+        {
+          "prompt": "Hello, I am Themis, your Chief Legal Orchestrator.\n\nI help turn legal complexity into clear governance.\n\nMy role is to protect the company through contracts, policy, compliance, ethics, obligations, and the rules that shape responsible execution.\n\nBring me a partnership, product decision, claim, contract, policy, or risk that needs legal judgment. I will help clarify the obligation, expose the consequence, and shape a path that is practical, defensible, and aligned with the mission.\n\nI am Themis. I keep the company moving within clear boundaries.",
+          "fullPrompt": "Create the spoken orchestrator introduction for Themis.\n\nModel: hexgrad/kokoro-82m\nVoice: bf_isabella\nRole: CLO\nTitle: Chief Legal Orchestrator\n\nHello, I am Themis, your Chief Legal Orchestrator.\n\nI help turn legal complexity into clear governance.\n\nMy role is to protect the company through contracts, policy, compliance, ethics, obligations, and the rules that shape responsible execution.\n\nBring me a partnership, product decision, claim, contract, policy, or risk that needs legal judgment. I will help clarify the obligation, expose the consequence, and shape a path that is practical, defensible, and aligned with the mission.\n\nI am Themis. I keep the company moving within clear boundaries.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bf_isabella",
+          "language": "en",
+          "duration": 30,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator-messages/themis/v1/themis-message-v1.mp3",
+          "metadataPath": "outputs/audio/orchestrator-messages/themis/v1/metadata.json",
+          "id": "v1",
+          "version": 1,
+          "createdAt": "2026-07-08T21:30:53.167Z"
+        }
+      ],
+      "createdAt": "2026-07-08T21:30:51.766Z",
+      "updatedAt": "2026-07-08T21:30:53.168Z",
+      "currentVersionId": "v1"
     },
     {
       "id": "product-product-command",
@@ -3172,8 +3520,11 @@
       "category": "master-brand",
       "entityId": "brand.vorinthex-ai",
       "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
       "versions": [
         {
+          "id": "v1",
+          "version": 1,
           "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
           "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zm_yunyang\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
           "mode": "tts",
@@ -3185,14 +3536,11 @@
           "status": "completed",
           "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunyang/v1/zm-yunyang-v1.mp3",
           "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunyang/v1/metadata.json",
-          "id": "v1",
-          "version": 1,
           "createdAt": "2026-07-08T09:22:23.232Z"
         }
       ],
       "createdAt": "2026-07-08T09:22:22.267Z",
-      "updatedAt": "2026-07-08T09:22:23.234Z",
-      "currentVersionId": "v1"
+      "updatedAt": "2026-07-08T09:22:23.234Z"
     }
   ]
 }

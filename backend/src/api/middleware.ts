@@ -29,7 +29,7 @@ function getBearerToken(c: Parameters<MiddlewareHandler>[0]) {
 
 function setAuthIdentity(c: Parameters<MiddlewareHandler>[0], identity: AuthIdentity) {
   c.set('authIdentity', identity);
-  if (identity.identityType === 'user') c.set('userId', identity.key);
+  c.set('userId', identity.key);
 }
 
 function cookieOptions(maxAge: number) {
