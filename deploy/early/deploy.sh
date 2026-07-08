@@ -120,13 +120,14 @@ log "new color healthy"
 # --- flip Caddy to the new color (start it on first deploy, else hot-reload) -
 sed "s/__COLOR__/${NEW}/g" "${ROOT}/Caddyfile.tmpl" > "${ROOT}/Caddyfile"
 if docker ps --format '{{.Names}}' | grep -qx caddy; then
-	docker cp "${ROOT}/Caddyfile" caddy:/etc/caddy/Caddyfile
+	# ${ROOT}/Caddyfile is bind-mounted into the container, so writing it above
+	# already updated the container's view — just hot-reload (no docker cp).
 	docker exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null ||
 		docker restart caddy
 else
-	log "starting caddy (:80)"
+	log "starting caddy (:80 + :443)"
 	docker run -d --name caddy --network "$NET" --restart unless-stopped \
-		-p 80:80 \
+		-p 80:80 -p 443:443 \
 		-v "${ROOT}/Caddyfile:/etc/caddy/Caddyfile:ro" \
 		-v "${ROOT}/caddy-data:/data" \
 		caddy:2-alpine

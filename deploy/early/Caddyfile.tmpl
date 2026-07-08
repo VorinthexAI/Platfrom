@@ -1,21 +1,19 @@
 # Caddy reverse proxy for the single-box early-infra app host.
 # Rendered by deploy.sh with __COLOR__ replaced by the active color (blue|green).
 #
-# CloudFront is the only client and forwards the real Host header, which we route
-# on: api.vorinthex.com -> the Bun backend (:3001); everything else -> the Next.js
-# web app (:3000), which fans every other subdomain out via proxy.ts.
+# Cloudflare is the client (proxied) and forwards the real Host header, which we
+# route on: api.vorinthex.com -> Bun backend (:3001); everything else -> Next.js
+# web (:3000, fans other subdomains out via proxy.ts).
 #
-# HTTP-only on :80 — CloudFront connects to this origin over HTTP. (Hardening
-# follow-up: switch CloudFront->origin to HTTPS with a Let's Encrypt cert for
-# origin.vorinthex.com.) The app box SG only accepts :80 from CloudFront's
-# origin-facing prefix list, so it is not open to the public internet.
+# Serves both :80 (Cloudflare "Flexible") and :443 with a Caddy self-signed cert
+# (Cloudflare "Full"). Self-signed is fine for Cloudflare Full (non-strict); the
+# viewer-facing TLS is Cloudflare's edge cert.
 
 {
 	admin off
-	auto_https off
 }
 
-:80 {
+(routes) {
 	@api header Host api.vorinthex.com
 	handle @api {
 		reverse_proxy api-__COLOR__:3001 {
@@ -27,4 +25,13 @@
 			flush_interval -1
 		}
 	}
+}
+
+:80 {
+	import routes
+}
+
+:443 {
+	tls internal
+	import routes
 }
