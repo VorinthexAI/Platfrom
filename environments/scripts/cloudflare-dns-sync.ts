@@ -35,7 +35,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
-const DEFAULT_TARGET = "d15bpr5kewe7p5.cloudfront.net";
+// Early-infra origin: the single app box (public DNS of its EIP). Override with
+// CLOUDFLARE_DNS_TARGET. (Was a CloudFront domain; that distribution is retired.)
+const DEFAULT_TARGET = "ec2-13-49-39-46.eu-north-1.compute.amazonaws.com";
 const DEFAULT_APEX = "vorinthex.com";
 const DEFAULT_DOMAINS_FILE = "environments/domains.json";
 const MAX_RETRIES = 5;

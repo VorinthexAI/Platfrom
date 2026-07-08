@@ -207,7 +207,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-          CLOUDFLARE_DNS_TARGET: ${{ vars.CLOUDFLARE_DNS_TARGET || 'd15bpr5kewe7p5.cloudfront.net' }}
+          CLOUDFLARE_DNS_TARGET: ${{ vars.CLOUDFLARE_DNS_TARGET || 'ec2-13-49-39-46.eu-north-1.compute.amazonaws.com' }}
           DNS_APEX: ${{ vars.DNS_APEX || 'vorinthex.com' }}
           DRY_RUN: ${{ inputs.dns_dry_run && '1' || '0' }}
         run: bun environments/scripts/cloudflare-dns-sync.ts
