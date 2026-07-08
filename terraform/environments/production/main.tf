@@ -140,6 +140,7 @@ locals {
     for key in local.ssm_keys :
     "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${local.normalized_ssm_prefix}/${key}"
   ]
+  ssm_prefix_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${local.normalized_ssm_prefix}/*"
 }
 
 data "aws_caller_identity" "current" {}
@@ -187,7 +188,7 @@ module "render_service" {
   task_memory          = var.task_memory
   desired_count        = var.render_desired_count
   ssm_parameter_prefix = local.normalized_ssm_prefix
-  ssm_parameter_arns   = local.ssm_arns
+  ssm_parameter_arns   = distinct(concat(local.ssm_arns, [local.ssm_prefix_arn]))
   kms_key_arns         = var.kms_key_arns
   s3_bucket_arn        = module.storage.s3_bucket_arn
   tags                 = local.tags
@@ -240,7 +241,7 @@ module "app_platform" {
   alb_https_enabled   = var.alb_https_enabled
 
   ssm_parameter_prefix = local.normalized_ssm_prefix
-  ssm_parameter_arns   = local.ssm_arns
+  ssm_parameter_arns   = distinct(concat(local.ssm_arns, [local.ssm_prefix_arn]))
   kms_key_arns         = var.kms_key_arns
   s3_bucket_arn        = module.storage.s3_bucket_arn
   site_url             = var.site_url
