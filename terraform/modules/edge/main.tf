@@ -46,12 +46,141 @@ resource "aws_acm_certificate" "cloudfront" {
   }
 }
 
+# ----------------------------------------------------------------------------
+# AWS WAFv2 web ACL (CLOUDFRONT scope, so it MUST live in us-east-1). Additive:
+# it is created alongside the distribution and attached via the distribution's
+# web_acl_id attribute (an in-place update — CloudFront is never replaced).
+#
+# Rules, in priority order:
+#   1. AWSManagedRulesCommonRuleSet        (OWASP-style core protections)
+#   2. AWSManagedRulesKnownBadInputsRuleSet (known exploit / bad-input patterns)
+#   3. AWSManagedRulesAmazonIpReputationList (AWS threat-intel IP reputation)
+#  10. Rate-based per-IP limit (default 2000 requests / 5 min → block)
+#
+# Managed groups use override_action { none {} } so each group's own block/count
+# actions apply. Everything not matched falls through to the default allow.
+# ----------------------------------------------------------------------------
+resource "aws_wafv2_web_acl" "this" {
+  provider    = aws.us_east_1
+  count       = var.waf_enabled ? 1 : 0
+  name        = "${var.name_prefix}-cloudfront-waf"
+  description = "${var.name_prefix} CloudFront WAF: AWS managed rule groups + per-IP rate limit."
+  scope       = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "AWSManagedRulesCommonRuleSet"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-waf-common"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AWSManagedRulesKnownBadInputsRuleSet"
+    priority = 2
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-waf-bad-inputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "AWSManagedRulesAmazonIpReputationList"
+    priority = 3
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-waf-ip-reputation"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # Per-IP rate limit. aggregate over a 5-minute (300s) window and block IPs
+  # exceeding var.waf_rate_limit requests within it.
+  rule {
+    name     = "RateLimitPerIP"
+    priority = 10
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit                 = var.waf_rate_limit
+        evaluation_window_sec = 300
+        aggregate_key_type    = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-waf-rate-limit"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.name_prefix}-cloudfront-waf"
+    sampled_requests_enabled   = true
+  }
+
+  tags = merge(var.tags, { Name = "${var.name_prefix}-cloudfront-waf" })
+}
+
 resource "aws_cloudfront_distribution" "this" {
   enabled         = true
   is_ipv6_enabled = true
   comment         = "${var.name_prefix} web edge"
   price_class     = var.price_class
   aliases         = local.aliases
+
+  # Attach the WAFv2 web ACL (ARN) when enabled. This is an in-place update on
+  # the existing distribution and does NOT trigger a replacement.
+  web_acl_id = var.waf_enabled ? aws_wafv2_web_acl.this[0].arn : null
 
   origin {
     domain_name = var.alb_domain_name

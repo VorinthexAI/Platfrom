@@ -45,6 +45,23 @@ variable "price_class" {
   default     = "PriceClass_100"
 }
 
+variable "waf_enabled" {
+  type        = bool
+  description = "Create the CLOUDFRONT-scope WAFv2 web ACL and attach it to the distribution. Additive in-place update; CloudFront is never replaced."
+  default     = true
+}
+
+variable "waf_rate_limit" {
+  type        = number
+  description = "Per-IP request limit over a 5-minute window before the rate-based rule blocks the source IP."
+  default     = 2000
+
+  validation {
+    condition     = var.waf_rate_limit >= 100
+    error_message = "waf_rate_limit must be at least 100 (WAFv2 rate-based statement minimum)."
+  }
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to created resources."

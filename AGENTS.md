@@ -8,10 +8,13 @@ Vorinthex platform monorepo. Top-level workspaces:
 
 - `web/app`: the single Next.js app (the "universe" landing experience).
   `web/` itself is not a workspace — it's just the parent folder. The app
-  is deployed to ALL THREE Vercel projects (vorinthex, orbit, and hunt) by
-  the Unified Deploy workflow; entity subdomains (orbit.vorinthex.com, …)
-  and cave subdomains (hunt.vorinthex.com → /hunt) are routed inside the
-  app via `web/app/src/proxy.ts`.
+  builds to ONE container image (`vorinthex-web` in ECR) and runs as the
+  `vorinthex-prod-web` ECS service on the shared `vorinthex-production`
+  cluster behind the ALB. That single image serves every subdomain —
+  entity subdomains (orbit.vorinthex.com, …) and cave subdomains
+  (hunt.vorinthex.com → /hunt) are routed inside the app via
+  `web/app/src/proxy.ts`. (Vercel has been fully removed — see
+  `VERCEL-REMOVAL.md`.)
 - `backend`: Bun backend service.
 - `shared`: shared UI, brand, and library code used by the web app and
   backend.
@@ -117,4 +120,4 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - Run the relevant checks before considering a task complete.
 - Ask before introducing a new major dependency or framework.
 - This repo is its own monorepo; do not add git submodules for `web/app`, `backend`, or `shared`.
-- Vercel deployments happen ONLY through the Unified Deploy GitHub workflow (prebuilt `vercel deploy`); the Vercel projects are intentionally not git-connected, so do not reconnect them — git-triggered builds cannot build this monorepo and will fail.
+- Deployments are AWS-ECS-only and happen ONLY through the Unified Deploy GitHub workflow (`.github/workflows/deploy.yml`): merge to `main` builds the `vorinthex-web` and `vorinthex-backend` images, pushes them to ECR, and rolls the `vorinthex-prod-web` and `vorinthex-prod-api` ECS services via `aws ecs update-service --force-new-deployment`. Vercel is GONE — there are no Vercel projects, no `vercel` CLI, and no git-connected hosting; do not reintroduce any of them (see `VERCEL-REMOVAL.md`). Infrastructure itself (Terraform plan/approval/apply) is provisioned by `infra.yml`, not `deploy.yml`.

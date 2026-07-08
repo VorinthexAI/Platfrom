@@ -95,6 +95,11 @@ output "cloudfront_acm_validation_records" {
   value       = one(module.edge[*].cloudfront_acm_validation_records)
 }
 
+output "cloudfront_waf_web_acl_arn" {
+  description = "ARN of the CloudFront WAFv2 web ACL (null unless the platform + WAF are enabled)."
+  value       = one(module.edge[*].waf_web_acl_arn)
+}
+
 output "app_platform_web_service_name" {
   value = one(module.app_platform[*].web_service_name)
 }

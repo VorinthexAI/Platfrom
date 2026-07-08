@@ -277,5 +277,8 @@ module "edge" {
   viewer_acm_certificate_arn = var.cloudfront_viewer_acm_certificate_arn
   origin_custom_header_value = var.cloudfront_origin_verify_value
 
+  waf_enabled    = var.cloudfront_waf_enabled
+  waf_rate_limit = var.cloudfront_waf_rate_limit
+
   tags = local.tags
 }

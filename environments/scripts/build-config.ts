@@ -1,25 +1,23 @@
 #!/usr/bin/env bun
 // Builds the JSON payload for .github/.configs/secrets.json (gitignored,
 // local-only — see .github/.configs/secrets.json.example for the schema)
-// from environments/{vorinthex,orbit,backend}/.env.prod plus the handful of
-// deployment values that don't live in those files (Vercel token/team,
-// per-project Vercel project id, and each app's production URL).
+// from environments/{vorinthex,orbit,backend}/.env.prod plus each app's
+// production URL. Vercel has been fully removed: the web app and backend now
+// deploy to AWS ECS (container images in ECR), so no Vercel token, team id, or
+// per-project Vercel project id is emitted anymore.
 //
 // Usage:
 //   bun environments/scripts/build-config.ts \
-//     --vercel-token=... \
-//     --vorinthex-project-id=prj_... \
-//     --orbit-project-id=prj_... \
+//     --vorinthex-url=https://www.vorinthex.com \
+//     --orbit-url=https://orbit.vorinthex.com \
 //     > .github/.configs/secrets.json
 //   bash environments/scripts/sync-configs.sh secrets
 //
 // deploy.yml reads the resulting CONFIG secret via fromJSON(secrets.CONFIG),
 // e.g. fromJSON(secrets.CONFIG).vorinthex.url, .vorinthex.env, or
-// .vercel.team_id. Re-run this whenever any .env.prod file changes.
+// .env (the backend SSM env). Re-run this whenever any .env.prod file changes.
 
 import { readFileSync } from "node:fs";
-
-const DEFAULT_VERCEL_TEAM_ID = "team_TuCe5vyzHhXf3aId8h8CpFyP";
 
 function parseArgs() {
   const args: Record<string, string> = {};
@@ -66,18 +64,12 @@ function withServerBackendEnv(env: Record<string, string>) {
 }
 
 const config = {
-  vercel: {
-    token: args["vercel-token"] ?? "",
-    team_id: args["vercel-team-id"] ?? DEFAULT_VERCEL_TEAM_ID,
-  },
   vorinthex: {
     url: args["vorinthex-url"] ?? vorinthexEnv.NEXT_PUBLIC_SITE_URL ?? "",
-    vercel_project_id: args["vorinthex-project-id"] ?? "",
     env: withServerBackendEnv(vorinthexEnv),
   },
   orbit: {
     url: args["orbit-url"] ?? orbitEnv.NEXT_PUBLIC_SITE_URL ?? "",
-    vercel_project_id: args["orbit-project-id"] ?? "",
     env: withServerBackendEnv(orbitEnv),
   },
   env: backendEnv,

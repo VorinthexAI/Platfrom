@@ -1,5 +1,17 @@
 name: Unified Deploy
 
+# Production deploy pipeline. Vercel has been fully removed — the Next.js web app
+# and the Bun backend both ship as container images to Amazon ECR and roll out on
+# the shared ECS cluster (vorinthex-production) behind the ALB.
+#
+# Flow (per infra.md "CI/CD"):
+#   merge to main  ->  Build  ->  Test  ->  Docker Buildx  ->  Push ECR (web + backend)
+#                  ->  [Terraform Plan / Approval / Apply is owned by infra.yml]
+#                  ->  ECS Rolling Deploy (force-new-deployment + wait services-stable + health smoke)
+#
+# The GitHub `production` environment provides the manual approval gate.
+# Infrastructure provisioning (Terraform plan/apply) lives in infra.yml, not here.
+
 on:
   pull_request:
     types: [closed]
@@ -9,7 +21,7 @@ on:
       target:
         description: 'Deployment target'
         type: choice
-        options: [all, vorinthex, orbit, hunt, backend, selective]
+        options: [all, web, backend, selective]
         default: all
       deploy:
         description: 'Deploy after verification'
@@ -26,7 +38,13 @@ concurrency:
 
 env:
   AWS_REGION: eu-north-1
-  ECR_REPOSITORY: vorinthex-backend
+  ECS_CLUSTER: vorinthex-production
+  ECS_WEB_SERVICE: vorinthex-prod-web
+  ECS_API_SERVICE: vorinthex-prod-api
+  ECR_WEB_REPOSITORY: vorinthex-web
+  ECR_BACKEND_REPOSITORY: vorinthex-backend
+  # ECS task defs (web + api) run on ARM (t4g) capacity, so images are built for arm64.
+  IMAGE_PLATFORM: linux/arm64
   COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
   SSM_PATH: /vorinthex/prod/
 
@@ -36,9 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     outputs:
-      vorinthex: ${{ steps.decide.outputs.vorinthex }}
-      orbit: ${{ steps.decide.outputs.orbit }}
-      hunt: ${{ steps.decide.outputs.hunt }}
+      web: ${{ steps.decide.outputs.web }}
       backend: ${{ steps.decide.outputs.backend }}
       changed_files: ${{ steps.decide.outputs.changed_files }}
     steps:
@@ -52,87 +68,54 @@ jobs:
         run: |
           set -euo pipefail
 
+          map_file() {
+            case "$1" in
+              web/app/*) web=true ;;
+              backend/*) backend=true ;;
+              shared/*) shared=true ;;
+              .github/workflows/deploy.yml) web=true; backend=true ;;
+            esac
+          }
+
+          web=false
+          backend=false
+          shared=false
+          files=""
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             case "${{ inputs.target }}" in
               all)
-                vorinthex=true
-                orbit=true
-                hunt=true
+                web=true
                 backend=true
                 ;;
-              vorinthex)
-                vorinthex=true
-                orbit=false
-                hunt=false
-                backend=false
-                ;;
-              orbit)
-                vorinthex=false
-                orbit=true
-                hunt=false
-                backend=false
-                ;;
-              hunt)
-                vorinthex=false
-                orbit=false
-                hunt=true
-                backend=false
+              web)
+                web=true
                 ;;
               backend)
-                vorinthex=false
-                orbit=false
-                hunt=false
                 backend=true
                 ;;
               selective)
                 files="$(git diff --name-only HEAD~1 HEAD || true)"
-                vorinthex=false
-                orbit=false
-                hunt=false
-                backend=false
-                shared=false
                 while IFS= read -r file; do
                   [ -n "$file" ] || continue
-                  case "$file" in
-                    web/app/*) vorinthex=true; orbit=true; hunt=true ;;
-                    web/landing-pages/vorinthex/*) vorinthex=true ;;
-                    web/landing-pages/orbit/*) orbit=true ;;
-                    backend/*) backend=true ;;
-                    shared/*) shared=true ;;
-                    .github/workflows/deploy.yml) vorinthex=true; orbit=true; hunt=true; backend=true ;;
-                  esac
+                  map_file "$file"
                 done <<< "$files"
-                if [ "$shared" = true ]; then vorinthex=true; orbit=true; hunt=true; fi
                 ;;
             esac
           else
             base='${{ github.event.pull_request.base.sha }}'
             files="$(git diff --name-only "$base" "${{ env.COMMIT_SHA }}")"
-            vorinthex=false
-            orbit=false
-            hunt=false
-            backend=false
-            shared=false
             while IFS= read -r file; do
               [ -n "$file" ] || continue
-              case "$file" in
-                web/app/*) vorinthex=true; orbit=true; hunt=true ;;
-                web/landing-pages/vorinthex/*) vorinthex=true ;;
-                web/landing-pages/orbit/*) orbit=true ;;
-                backend/*) backend=true ;;
-                shared/*) shared=true ;;
-                .github/workflows/deploy.yml) vorinthex=true; orbit=true; hunt=true; backend=true ;;
-              esac
+              map_file "$file"
             done <<< "$files"
-
-            # shared/ is consumed by every landing-page app.
-            if [ "$shared" = true ]; then vorinthex=true; orbit=true; hunt=true; fi
           fi
 
+          # shared/ is consumed by BOTH the web app and the backend.
+          if [ "$shared" = true ]; then web=true; backend=true; fi
+
           {
-            echo "vorinthex=$vorinthex"
-            echo "orbit=$orbit"
-            echo "hunt=$hunt"
+            echo "web=$web"
             echo "backend=$backend"
             echo "changed_files<<EOF"
             printf '%s\n' "${files:-manual:${{ inputs.target || 'all' }}}"
@@ -144,7 +127,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: >-
-      (needs.changes.outputs.vorinthex == 'true' || needs.changes.outputs.orbit == 'true' || needs.changes.outputs.hunt == 'true' || needs.changes.outputs.backend == 'true')
+      (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event_name == 'pull_request' || inputs.deploy)
     steps:
       - uses: actions/checkout@v4
@@ -155,7 +138,7 @@ jobs:
           GIT_CRYPT_KEY_B64: ${{ secrets.GIT_CRYPT_KEY }}
         run: |
           if [ -z "$GIT_CRYPT_KEY_B64" ]; then
-            echo "::warning::GIT_CRYPT_KEY is not configured; continuing because production env files are provided by GitHub/Vercel/AWS secrets."
+            echo "::warning::GIT_CRYPT_KEY is not configured; continuing because production env values are provided by GitHub/AWS SSM secrets."
             exit 0
           fi
           sudo apt-get update && sudo apt-get install -y git-crypt
@@ -169,45 +152,11 @@ jobs:
           test -n "$GH_TOKEN" || { echo "::error::GH_PAT is not configured (needed to manage repo Variables/Secrets — the default GITHUB_TOKEN can't)."; exit 1; }
           bash environments/scripts/sync-configs.sh vars
 
-  verify-vorinthex:
-    name: Verify vorinthex web
+  verify-web:
+    name: Verify web
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.vorinthex == 'true'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.COMMIT_SHA }}
-      - uses: oven-sh/setup-bun@v2
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --linker=hoisted
-      - name: Lint
-        run: bun run web:lint
-      - name: Typecheck
-        run: bun run web:typecheck
-
-  verify-orbit:
-    name: Verify orbit web
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.orbit == 'true'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.COMMIT_SHA }}
-      - uses: oven-sh/setup-bun@v2
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --linker=hoisted
-      - name: Lint
-        run: bun run web:lint
-      - name: Typecheck
-        run: bun run web:typecheck
-
-  verify-hunt:
-    name: Verify hunt web
-    runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.hunt == 'true'
+    if: needs.changes.outputs.web == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -237,432 +186,95 @@ jobs:
       - name: Test
         run: bun run backend:test
 
-  deploy-vorinthex:
-    name: Build and deploy vorinthex web
+  # ---------------------------------------------------------------------------
+  # WEB: build the Next standalone image, push to ECR (vorinthex-web), and roll
+  # the vorinthex-prod-web ECS service. ONE image serves every subdomain
+  # (orbit/hunt/...) — routing happens inside the app via web/app/src/proxy.ts.
+  # Replaces the three former Vercel jobs (deploy-vorinthex / -orbit / -hunt).
+  # ---------------------------------------------------------------------------
+  deploy-web:
+    name: Build image and roll web ECS service
     runs-on: ubuntu-latest
-    needs: [changes, sync-configs, verify-vorinthex]
-    if: needs.changes.outputs.vorinthex == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
-    defaults:
-      run:
-        working-directory: web/app
+    needs: [changes, sync-configs, verify-web]
+    if: needs.changes.outputs.web == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     environment: production
+    env:
+      SITE_URL: ${{ fromJSON(secrets.CONFIG).vorinthex.url }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
 
-      - name: Strip non-app content from the build context
-        run: |
-          rm -rf ../../shared/brand ../../shared/docs ../../.claude
-          rm -f CLAUDE.md AGENTS.md admin.md ../../CLAUDE.md ../../AGENTS.md
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: |
-          cd "${GITHUB_WORKSPACE}"
-          bun install --frozen-lockfile --linker=hoisted
-          test -f "${GITHUB_WORKSPACE}/node_modules/next/package.json"
-
-      - name: Materialize web dependencies for Vercel tracing
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules" "${GITHUB_WORKSPACE}/web/app/web"
-          mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
-          mkdir -p "${GITHUB_WORKSPACE}/web/app/web/app/node_modules"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/"
-          test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
-          test -f "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
-
-      - name: Load production env file
-        env:
-          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).vorinthex.env) }}
-        run: |
-          set -euo pipefail
-          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.vorinthex.env is not configured."; exit 1; }
-          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
-          chmod 600 prod.env
-
-      - name: Validate deployment secrets
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).vorinthex.vercel_project_id }}
-        run: |
-          missing=0
-          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
-            if [ -z "${!name}" ]; then
-              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / vorinthex.vercel_project_id)."
-              missing=1
-            fi
-          done
-          test -s prod.env || { echo "::error::config.env produced no vorinthex values."; missing=1; }
-          [ "$missing" -eq 0 ]
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Sync prod.env to Vercel
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).vorinthex.vercel_project_id }}
-          VERCEL_TEAM_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-        run: |
-          set -euo pipefail
-          while IFS= read -r line || [ -n "$line" ]; do
-            case "$line" in ''|\#*) continue ;; esac
-            [[ "$line" == *=* ]] || { echo "::error::Malformed prod.env line."; exit 1; }
-            key="${line%%=*}"
-            value="${line#*=}"
-            test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
-            [ -n "$value" ] || continue
-            payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
-            curl -sf -X POST \
-              "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
-              -H "Authorization: Bearer $VERCEL_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$payload" > /dev/null
-          done < prod.env
-
-      - name: Pull Vercel project settings
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).vorinthex.vercel_project_id }}
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-
-      - name: Build
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-        run: vercel build --prod --token="$VERCEL_TOKEN"
-
-      - name: Materialize Vercel trace paths
-        run: |
-          mkdir -p web/app/.next
-          cp -al .next/. web/app/.next/
-          test -d web/app/.next/server/chunks
-
-      - name: Verify excluded content is not in the deploy artifact
-        run: |
-          forbidden=$(find .vercel/output \
-            \( -ipath '*shared/brand*' \
-            -o -ipath '*shared/docs*' \
-            -o -iname 'CLAUDE.md' \
-            -o -iname 'AGENTS.md' \
-            -o -iname 'admin.md' \
-            -o -iname '.claude' \) -print)
-          if [ -n "$forbidden" ]; then
-            echo "::error::Excluded content found in the build output:"
-            echo "$forbidden"
-            exit 1
-          fi
-
-      - name: Deploy to Vercel
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-        run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
-
-      - name: Verify production is live
-        env:
-          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).vorinthex.url }}
-        run: |
-          URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
-          for i in $(seq 1 24); do
-            CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
-            if [ "$CODE" = "200" ]; then
-              echo "Production is live (HTTP 200) at $URL on attempt $i/24"
-              exit 0
-            fi
-            echo "attempt $i/24: HTTP $CODE; retrying in 10s"
-            sleep 10
-          done
-          echo "::error::Production health check failed after 4 minutes ($URL)"
-          exit 1
-
-  deploy-orbit:
-    name: Build and deploy orbit web
-    runs-on: ubuntu-latest
-    needs: [changes, sync-configs, verify-orbit]
-    if: needs.changes.outputs.orbit == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
-    defaults:
-      run:
-        working-directory: web/app
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          ref: ${{ env.COMMIT_SHA }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Strip non-app content from the build context
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR repository exists
         run: |
-          rm -rf ../../shared/brand ../../shared/docs ../../.claude
-          rm -f CLAUDE.md AGENTS.md admin.md ../../CLAUDE.md ../../AGENTS.md
+          aws ecr describe-repositories --repository-names "$ECR_WEB_REPOSITORY" >/dev/null 2>&1 || \
+            aws ecr create-repository --repository-name "$ECR_WEB_REPOSITORY" --image-scanning-configuration scanOnPush=true --image-tag-mutability MUTABLE
 
-      - uses: oven-sh/setup-bun@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Install dependencies
-        run: |
-          cd "${GITHUB_WORKSPACE}"
-          bun install --frozen-lockfile --linker=hoisted
-          test -f "${GITHUB_WORKSPACE}/node_modules/next/package.json"
+      - name: Compute image reference
+        id: meta
+        run: echo "image=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:${{ env.COMMIT_SHA }}" >> "$GITHUB_OUTPUT"
 
-      - name: Materialize web dependencies for Vercel tracing
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules" "${GITHUB_WORKSPACE}/web/app/web"
-          mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
-          mkdir -p "${GITHUB_WORKSPACE}/web/app/web/app/node_modules"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/"
-          test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
-          test -f "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
-
-      - name: Load production env file
-        env:
-          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).orbit.env) }}
-        run: |
-          set -euo pipefail
-          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.orbit.env is not configured."; exit 1; }
-          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
-          chmod 600 prod.env
-
-      - name: Validate deployment secrets
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).orbit.vercel_project_id }}
-        run: |
-          missing=0
-          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
-            if [ -z "${!name}" ]; then
-              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / orbit.vercel_project_id)."
-              missing=1
-            fi
-          done
-          test -s prod.env || { echo "::error::config.env produced no orbit values."; missing=1; }
-          [ "$missing" -eq 0 ]
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Sync prod.env to Vercel
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).orbit.vercel_project_id }}
-          VERCEL_TEAM_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-        run: |
-          set -euo pipefail
-          while IFS= read -r line || [ -n "$line" ]; do
-            case "$line" in ''|\#*) continue ;; esac
-            [[ "$line" == *=* ]] || { echo "::error::Malformed prod.env line."; exit 1; }
-            key="${line%%=*}"
-            value="${line#*=}"
-            test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
-            [ -n "$value" ] || continue
-            payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
-            curl -sf -X POST \
-              "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
-              -H "Authorization: Bearer $VERCEL_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$payload" > /dev/null
-          done < prod.env
-
-      - name: Pull Vercel project settings
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).orbit.vercel_project_id }}
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-
-      - name: Build
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-        run: vercel build --prod --token="$VERCEL_TOKEN"
-
-      - name: Materialize Vercel trace paths
-        run: |
-          mkdir -p web/app/.next
-          cp -al .next/. web/app/.next/
-          test -d web/app/.next/server/chunks
-
-      - name: Verify excluded content is not in the deploy artifact
-        run: |
-          forbidden=$(find .vercel/output \
-            \( -ipath '*shared/brand*' \
-            -o -ipath '*shared/docs*' \
-            -o -iname 'CLAUDE.md' \
-            -o -iname 'AGENTS.md' \
-            -o -iname 'admin.md' \
-            -o -iname '.claude' \) -print)
-          if [ -n "$forbidden" ]; then
-            echo "::error::Excluded content found in the build output:"
-            echo "$forbidden"
-            exit 1
-          fi
-
-      - name: Deploy to Vercel
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-        run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
-
-      - name: Verify production is live
-        env:
-          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).orbit.url }}
-        run: |
-          URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
-          for i in $(seq 1 24); do
-            CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
-            if [ "$CODE" = "200" ]; then
-              echo "Production is live (HTTP 200) at $URL on attempt $i/24"
-              exit 0
-            fi
-            echo "attempt $i/24: HTTP $CODE; retrying in 10s"
-            sleep 10
-          done
-          echo "::error::Production health check failed after 4 minutes ($URL)"
-          exit 1
-
-  deploy-hunt:
-    name: Build and deploy hunt web
-    runs-on: ubuntu-latest
-    needs: [changes, sync-configs, verify-hunt]
-    if: needs.changes.outputs.hunt == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
-    defaults:
-      run:
-        working-directory: web/app
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
         with:
-          ref: ${{ env.COMMIT_SHA }}
+          context: .
+          file: web/app/Dockerfile
+          platforms: ${{ env.IMAGE_PLATFORM }}
+          push: true
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=${{ env.SITE_URL }}
+          tags: |
+            ${{ steps.meta.outputs.image }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+          provenance: false
 
-      - name: Strip non-app content from the build context
+      - name: Roll web ECS service
         run: |
-          rm -rf ../../shared/brand ../../shared/docs ../../.claude
-          rm -f CLAUDE.md AGENTS.md admin.md ../../CLAUDE.md ../../AGENTS.md
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_WEB_SERVICE" \
+            --force-new-deployment \
+            --query 'service.serviceName' --output text
+          echo "Waiting for $ECS_WEB_SERVICE to reach a steady state..."
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE"
 
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: |
-          cd "${GITHUB_WORKSPACE}"
-          bun install --frozen-lockfile --linker=hoisted
-          test -f "${GITHUB_WORKSPACE}/node_modules/next/package.json"
-
-      - name: Materialize web dependencies for Vercel tracing
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}/web/app/node_modules" "${GITHUB_WORKSPACE}/web/app/web"
-          mkdir -p "${GITHUB_WORKSPACE}/web/app/node_modules"
-          mkdir -p "${GITHUB_WORKSPACE}/web/app/web/app/node_modules"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/node_modules/"
-          cp -al "${GITHUB_WORKSPACE}/node_modules/." "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/"
-          test -f "${GITHUB_WORKSPACE}/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
-          test -f "${GITHUB_WORKSPACE}/web/app/web/app/node_modules/next/dist/compiled/next-server/server.runtime.prod.js"
-
-      - name: Load production env file
+      - name: Web health smoke check
         env:
-          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).hunt.env) }}
+          PRODUCTION_URL: ${{ env.SITE_URL }}
         run: |
-          set -euo pipefail
-          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.hunt.env is not configured."; exit 1; }
-          echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
-          chmod 600 prod.env
-
-      - name: Validate deployment secrets
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).hunt.vercel_project_id }}
-        run: |
-          missing=0
-          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
-            if [ -z "${!name}" ]; then
-              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / hunt.vercel_project_id)."
-              missing=1
-            fi
-          done
-          test -s prod.env || { echo "::error::config.env produced no hunt values."; missing=1; }
-          [ "$missing" -eq 0 ]
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
-      - name: Sync prod.env to Vercel
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).hunt.vercel_project_id }}
-          VERCEL_TEAM_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-        run: |
-          set -euo pipefail
-          while IFS= read -r line || [ -n "$line" ]; do
-            case "$line" in ''|\#*) continue ;; esac
-            [[ "$line" == *=* ]] || { echo "::error::Malformed prod.env line."; exit 1; }
-            key="${line%%=*}"
-            value="${line#*=}"
-            test -n "$key" || { echo "::error::Malformed prod.env line. Key cannot be empty."; exit 1; }
-            [ -n "$value" ] || continue
-            payload=$(KEY="$key" VALUE="$value" python3 -c 'import json, os; print(json.dumps({"key": os.environ["KEY"], "value": os.environ["VALUE"], "target": ["production"], "type": "encrypted"}))')
-            curl -sf -X POST \
-              "https://api.vercel.com/v10/projects/${VERCEL_PROJECT_ID}/env?teamId=${VERCEL_TEAM_ID}&upsert=true" \
-              -H "Authorization: Bearer $VERCEL_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "$payload" > /dev/null
-          done < prod.env
-
-      - name: Pull Vercel project settings
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).hunt.vercel_project_id }}
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
-
-      - name: Build
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-        run: vercel build --prod --token="$VERCEL_TOKEN"
-
-      - name: Materialize Vercel trace paths
-        run: |
-          mkdir -p web/app/.next
-          cp -al .next/. web/app/.next/
-          test -d web/app/.next/server/chunks
-
-      - name: Verify excluded content is not in the deploy artifact
-        run: |
-          forbidden=$(find .vercel/output \
-            \( -ipath '*shared/brand*' \
-            -o -ipath '*shared/docs*' \
-            -o -iname 'CLAUDE.md' \
-            -o -iname 'AGENTS.md' \
-            -o -iname 'admin.md' \
-            -o -iname '.claude' \) -print)
-          if [ -n "$forbidden" ]; then
-            echo "::error::Excluded content found in the build output:"
-            echo "$forbidden"
-            exit 1
-          fi
-
-      - name: Deploy to Vercel
-        env:
-          VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-        run: vercel deploy --prebuilt --archive=tgz --prod --token="$VERCEL_TOKEN" > deployment-url.txt
-
-      - name: Verify production is live
-        env:
-          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).hunt.url }}
-        run: |
-          URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
+          URL="${PRODUCTION_URL:-https://www.vorinthex.com}"
           for i in $(seq 1 24); do
             CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
             if [ "$CODE" = "200" ]; then
-              echo "Production is live (HTTP 200) at $URL on attempt $i/24"
+              echo "Web is live (HTTP 200) at $URL on attempt $i/24"
               exit 0
             fi
             echo "attempt $i/24: HTTP $CODE; retrying in 10s"
             sleep 10
           done
-          echo "::error::Production health check failed after 4 minutes ($URL)"
+          echo "::error::Web health check failed after 4 minutes ($URL)"
           exit 1
 
+  # ---------------------------------------------------------------------------
+  # BACKEND
+  # ---------------------------------------------------------------------------
   backend-secrets:
     name: Sync backend secrets
     runs-on: ubuntu-latest
@@ -719,27 +331,38 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
       - name: Ensure ECR repository exists
         run: |
-          aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 || \
-            aws ecr create-repository --repository-name "$ECR_REPOSITORY" --image-scanning-configuration scanOnPush=true --image-tag-mutability MUTABLE
+          aws ecr describe-repositories --repository-names "$ECR_BACKEND_REPOSITORY" >/dev/null 2>&1 || \
+            aws ecr create-repository --repository-name "$ECR_BACKEND_REPOSITORY" --image-scanning-configuration scanOnPush=true --image-tag-mutability MUTABLE
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Compute image reference
         id: meta
-        run: echo "image=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ env.COMMIT_SHA }}" >> "$GITHUB_OUTPUT"
+        run: echo "image=${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ env.COMMIT_SHA }}" >> "$GITHUB_OUTPUT"
       - name: Build and push runtime image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: backend/deploy/Dockerfile
           target: runtime
+          platforms: ${{ env.IMAGE_PLATFORM }}
           push: true
           tags: |
             ${{ steps.meta.outputs.image }}
-            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max,ignore-error=true
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend,ignore-error=true
           provenance: false
 
+  # NOTE (migrate/seed): ArangoDB lives on its own PRIVATE EC2 and is reached
+  # through an SSH tunnel. This path is intentionally kept (it is NOT a Vercel
+  # dependency). It could not be safely moved to `aws ecs run-task` because the
+  # runtime image only ships backend/src (not backend/scripts), so polar:sync and
+  # seed:secrets are unavailable inside the api image, and seed:secrets also needs
+  # the git-crypt-encrypted environments/backend/db.seeds.secrets.json which is not
+  # baked into any image. Schema migrate + node seed + Polar sync therefore keep
+  # running from a full checkout over the tunnel.
   backend-db:
     name: Deploy graph database
     runs-on: ubuntu-latest
@@ -762,8 +385,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Set up SSH
         run: |
-          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
-          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
+          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
+          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("﻿").strip())')"
           export EC2_HOST EC2_USER
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
@@ -838,8 +461,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH tunnel to ArangoDB
         run: |
-          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
-          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
+          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
+          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("﻿").strip())')"
           export EC2_HOST EC2_USER
           mkdir -p ~/.ssh
           if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
@@ -999,19 +622,17 @@ jobs:
           python3 -m json.tool "$SEEDS_FILE" > /dev/null
           bun run --cwd backend seed:secrets
 
-  backend-app:
-    name: Deploy backend app role
+  # Rolling deploy of the backend api service. Replaces the former blue-green
+  # SSH/scp/deploy-app.sh path on the standalone app EC2. The api task def
+  # references <ecr>:latest, so force-new-deployment repulls the freshly pushed
+  # image and ECS performs a rolling replacement (deploymentController ECS,
+  # minimumHealthyPercent 100, per Terraform).
+  backend-deploy:
+    name: Roll api ECS service
     runs-on: ubuntu-latest
     needs: [changes, backend-image, backend-migrate]
     if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     environment: production
-    env:
-      IMAGE: ${{ needs.backend-image.outputs.image }}
-      REGISTRY: ${{ needs.backend-image.outputs.registry }}
-      EC2_HOST: ${{ secrets.APP_EC2_HOST }}
-      EC2_USER: ${{ secrets.APP_EC2_USER }}
-      EC2_SSH_KEY: ${{ secrets.APP_EC2_SSH_KEY || secrets.EC2_SSH_KEY }}
-      EC2_SSH_KEY_B64: ${{ secrets.APP_EC2_SSH_KEY_B64 || secrets.EC2_SSH_KEY_B64 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1021,120 +642,31 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Set up SSH
+      - name: Roll api ECS service
         run: |
-          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
-          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
-          export EC2_HOST EC2_USER
-          mkdir -p ~/.ssh
-          if [ -n "${EC2_SSH_KEY_B64:-}" ]; then
-            python3 - <<'PY' > ~/.ssh/deploy_key
-          import base64
-          import os
-          import sys
-
-          key_b64 = "".join(os.environ.get("EC2_SSH_KEY_B64", "").split())
-          print(f"Using EC2_SSH_KEY_B64 ({len(key_b64)} chars, mod4={len(key_b64) % 4})", file=sys.stderr)
-          try:
-              sys.stdout.buffer.write(base64.b64decode(key_b64, validate=True))
-          except Exception as exc:
-              sys.exit(f"Invalid EC2_SSH_KEY_B64: {exc}")
-          PY
-          else
-            python3 - <<'PY' > ~/.ssh/deploy_key
-          import os
-          import sys
-
-          key = os.environ.get("EC2_SSH_KEY", "").strip()
-          if not key:
-              sys.exit("EC2_SSH_KEY is empty")
-          key = key.replace("\\n", "\n").replace("\r\n", "\n").replace("\r", "\n")
-          print(key)
-          PY
-          fi
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key >/dev/null || { echo "::error::EC2 SSH key is not a valid private key. Re-save the GitHub secret with the full PEM/OpenSSH private key or set the *_SSH_KEY_B64 secret."; exit 1; }
-          ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for app host; SSH will use accept-new."
-          printf 'Host appbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
-      - name: Ensure app host trusts deploy key
-        run: |
-          set -euo pipefail
-          EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("\ufeff").strip())')"
-          EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("\ufeff").strip())')"
-          PUBLIC_KEY="$(ssh-keygen -y -f ~/.ssh/deploy_key)"
-          INSTANCE_ID="$(aws ec2 describe-instances \
-            --region "$AWS_REGION" \
-            --filters "Name=ip-address,Values=$EC2_HOST" "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' \
-            --output text)"
-          test -n "$INSTANCE_ID" && test "$INSTANCE_ID" != "None" || { echo "::error::Could not find running app EC2 instance for $EC2_HOST"; exit 1; }
-          PUBLIC_KEY="$PUBLIC_KEY" EC2_USER="$EC2_USER" python3 - <<'PY' > /tmp/ssm-authorized-key.json
-          import json
-          import os
-          import shlex
-
-          key = os.environ["PUBLIC_KEY"]
-          user = os.environ["EC2_USER"]
-          home = f"/home/{user}"
-          key_q = shlex.quote(key)
-          user_q = shlex.quote(user)
-          home_q = shlex.quote(home)
-          commands = [
-              "set -euo pipefail",
-              f"install -d -m 700 -o {user_q} -g {user_q} {home_q}/.ssh",
-              f"touch {home_q}/.ssh/authorized_keys",
-              f"chown {user_q}:{user_q} {home_q}/.ssh/authorized_keys",
-              f"chmod 600 {home_q}/.ssh/authorized_keys",
-              f"grep -qxF {key_q} {home_q}/.ssh/authorized_keys || printf '%s\\n' {key_q} >> {home_q}/.ssh/authorized_keys",
-          ]
-          print(json.dumps({"commands": commands}))
-          PY
-          COMMAND_ID="$(aws ssm send-command \
-            --region "$AWS_REGION" \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --parameters file:///tmp/ssm-authorized-key.json \
-            --query 'Command.CommandId' \
-            --output text)"
-          for i in $(seq 1 30); do
-            STATUS="$(aws ssm get-command-invocation --region "$AWS_REGION" --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || true)"
-            case "$STATUS" in
-              Success) exit 0 ;;
-              Failed|Cancelled|TimedOut) echo "::error::SSM authorized_keys repair failed with status $STATUS"; exit 1 ;;
-            esac
-            sleep 2
-          done
-          echo "::error::Timed out waiting for SSM authorized_keys repair."
-          exit 1
-      - name: Copy app compose and deploy script
-        run: |
-          ssh appbox "mkdir -p ~/vorinthex"
-          scp backend/deploy/docker-compose.app.yml appbox:~/vorinthex/docker-compose.yml
-          scp backend/deploy/deploy-app.sh appbox:~/vorinthex/deploy-app.sh
-      - name: Render .env from SSM
-        run: |
-          aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json \
-          | jq -r '.[] | (.n | sub("^.*/";"")) + "=" + .v' > /tmp/prod.env
-          test -s /tmp/prod.env || { echo "::error::No parameters found under $SSM_PATH"; exit 1; }
-          scp /tmp/prod.env appbox:~/vorinthex/.env
-          rm -f /tmp/prod.env
-      - name: Login app host to ECR
-        run: aws ecr get-login-password --region "$AWS_REGION" | ssh appbox "docker login --username AWS --password-stdin $REGISTRY"
-      - name: Blue-green deploy app
-        run: ssh appbox "cd ~/vorinthex && chmod +x deploy-app.sh && IMAGE='$IMAGE' COMMIT_SHA='${IMAGE##*:}' bash deploy-app.sh"
-      - name: External app health check
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_API_SERVICE" \
+            --force-new-deployment \
+            --query 'service.serviceName' --output text
+          echo "Waiting for $ECS_API_SERVICE to reach a steady state..."
+          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_API_SERVICE"
+      - name: External api health check
         if: vars.APP_HEALTH_URL != ''
         run: bash backend/deploy/health-check.sh "${{ vars.APP_HEALTH_URL }}"
 
+  # Optional render worker (desired count is 0 by default). Registers a new task
+  # definition revision with the freshly built image and rolls the service only
+  # when the RENDER_TASK_FAMILY variable is configured.
   backend-render:
     name: Deploy backend render role
     runs-on: ubuntu-latest
-    needs: [changes, backend-image, backend-migrate, backend-app]
+    needs: [changes, backend-image, backend-migrate, backend-deploy]
     if: >-
       always() && needs.changes.outputs.backend == 'true'
       && (github.event_name == 'pull_request' || inputs.deploy)
       && needs.backend-migrate.result == 'success'
-      && needs.backend-app.result != 'failure' && needs.backend-app.result != 'cancelled'
+      && needs.backend-deploy.result != 'failure' && needs.backend-deploy.result != 'cancelled'
       && vars.RENDER_TASK_FAMILY != ''
     environment: production
     env:
@@ -1154,9 +686,9 @@ jobs:
       - name: Register revision and optionally roll service
         run: |
           set -e
-          FAMILY="$(python3 -c 'import os; print(os.environ["FAMILY"].lstrip("\ufeff").strip())')"
-          RENDER_ECS_CLUSTER="$(python3 -c 'import os; print(os.environ["RENDER_ECS_CLUSTER"].lstrip("\ufeff").strip())')"
-          RENDER_ECS_SERVICE="$(python3 -c 'import os; print(os.environ["RENDER_ECS_SERVICE"].lstrip("\ufeff").strip())')"
+          FAMILY="$(python3 -c 'import os; print(os.environ["FAMILY"].lstrip("﻿").strip())')"
+          RENDER_ECS_CLUSTER="$(python3 -c 'import os; print(os.environ["RENDER_ECS_CLUSTER"].lstrip("﻿").strip())')"
+          RENDER_ECS_SERVICE="$(python3 -c 'import os; print(os.environ["RENDER_ECS_SERVICE"].lstrip("﻿").strip())')"
           export FAMILY RENDER_ECS_CLUSTER RENDER_ECS_SERVICE
           aws ecs describe-task-definition --task-definition "$FAMILY" --query 'taskDefinition' --output json > taskdef.json
           jq --arg IMAGE "$IMAGE" --arg AWS_REGION "$AWS_REGION" '
@@ -1181,7 +713,7 @@ jobs:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-vorinthex, deploy-orbit, deploy-hunt, backend-app, backend-render]
+    needs: [changes, deploy-web, backend-deploy, backend-render]
     steps:
       - name: Write deploy audit
         run: |
@@ -1190,11 +722,9 @@ jobs:
             echo ""
             echo "| Service | Selected | Result |"
             echo "|---|---:|---|"
-            echo "| vorinthex | ${{ needs.changes.outputs.vorinthex }} | ${{ needs.deploy-vorinthex.result }} |"
-            echo "| orbit | ${{ needs.changes.outputs.orbit }} | ${{ needs.deploy-orbit.result }} |"
-            echo "| hunt | ${{ needs.changes.outputs.hunt }} | ${{ needs.deploy-hunt.result }} |"
-            echo "| backend-app | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-app.result }} |"
-            echo "| backend-render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
+            echo "| web (ECS vorinthex-prod-web) | ${{ needs.changes.outputs.web }} | ${{ needs.deploy-web.result }} |"
+            echo "| api (ECS vorinthex-prod-api) | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-deploy.result }} |"
+            echo "| render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo ""
             echo "### Changed files"
             echo '```'

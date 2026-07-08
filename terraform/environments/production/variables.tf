@@ -277,3 +277,17 @@ variable "site_url" {
   description = "NEXT_PUBLIC_SITE_URL for the web container."
   default     = "https://vorinthex.com"
 }
+
+# ---- CloudFront WAF (part of the edge module; only exists when the platform is
+# enabled because module.edge itself is gated by enable_app_platform) ----------
+variable "cloudfront_waf_enabled" {
+  type        = bool
+  description = "Attach a CLOUDFRONT-scope WAFv2 web ACL (AWS managed rule groups + per-IP rate limit) to the distribution."
+  default     = true
+}
+
+variable "cloudfront_waf_rate_limit" {
+  type        = number
+  description = "Per-IP request limit over a 5-minute window before the WAF rate-based rule blocks the source IP."
+  default     = 2000
+}

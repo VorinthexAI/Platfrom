@@ -49,6 +49,16 @@ on:
         required: false
         type: boolean
         default: false
+      run_dns_sync:
+        description: 'Also run the Cloudflare DNS sync (domains.json -> proxied CNAMEs at the CloudFront target)'
+        required: false
+        type: boolean
+        default: false
+      dns_dry_run:
+        description: 'DNS sync dry-run: log planned Cloudflare changes without applying them'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -150,3 +160,44 @@ jobs:
             echo "terraform -chdir=terraform/environments/production output -raw app_ec2_ssh_private_key"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  cloudflare-dns:
+    name: Cloudflare DNS sync
+    if: ${{ inputs.run_dns_sync }}
+    # Deliberately independent of the terraform job so DNS sync never blocks or
+    # is blocked by plan/apply. It only reads the committed environments/domains.json.
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Cloudflare credentials
+        id: check
+        # secrets/vars are not available in job-level `if`, so gate here and
+        # skip gracefully (without failing the workflow) when unset.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ZONE_ID" ]; then
+            echo "::warning::Skipping Cloudflare DNS sync: set the CLOUDFLARE_API_TOKEN secret and CLOUDFLARE_ZONE_ID variable to enable it."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Bun
+        if: steps.check.outputs.skip != 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Sync Cloudflare DNS
+        if: steps.check.outputs.skip != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_DNS_TARGET: ${{ vars.CLOUDFLARE_DNS_TARGET || 'd1zyw7lyzk1blr.cloudfront.net' }}
+          DNS_APEX: ${{ vars.DNS_APEX || 'vorinthex.com' }}
+          DRY_RUN: ${{ inputs.dns_dry_run && '1' || '0' }}
+        run: bun environments/scripts/cloudflare-dns-sync.ts

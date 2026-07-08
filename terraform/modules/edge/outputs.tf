@@ -7,6 +7,11 @@ output "distribution_domain_name" {
   value       = aws_cloudfront_distribution.this.domain_name
 }
 
+output "waf_web_acl_arn" {
+  description = "ARN of the CloudFront-scope WAFv2 web ACL (null when waf_enabled = false)."
+  value       = var.waf_enabled ? aws_wafv2_web_acl.this[0].arn : null
+}
+
 output "cloudfront_acm_certificate_arn" {
   value = local.create_acm ? aws_acm_certificate.cloudfront[0].arn : var.viewer_acm_certificate_arn
 }
