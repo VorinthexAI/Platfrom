@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { intelligenceFragmentSchema } from '@/lib/db/intelligence-fragments.node';
 import {
   dedupeFragmentEntries,
+  fragmentsStandingQuerySchema,
   fragmentsSummaryQuerySchema,
   postFragmentsBodySchema,
   summarizeFragmentEntries,
@@ -63,6 +64,19 @@ describe('fragmentsSummaryQuerySchema', () => {
   test('rejects unknown formats and extra params', () => {
     expect(() => fragmentsSummaryQuerySchema.parse({ format: 'json' })).toThrow();
     expect(() => fragmentsSummaryQuerySchema.parse({ extra: '1' })).toThrow();
+  });
+});
+
+describe('fragmentsStandingQuerySchema', () => {
+  test('accepts an optional explorer_id', () => {
+    expect(fragmentsStandingQuerySchema.parse({ explorer_id: 'vx_explorer_1234' }).explorer_id)
+      .toBe('vx_explorer_1234');
+    expect(fragmentsStandingQuerySchema.parse({}).explorer_id).toBeUndefined();
+  });
+
+  test('rejects the three-format flag and unknown params (standing is caller-scoped)', () => {
+    expect(() => fragmentsStandingQuerySchema.parse({ format: 'three' })).toThrow();
+    expect(() => fragmentsStandingQuerySchema.parse({ extra: '1' })).toThrow();
   });
 });
 

@@ -3,8 +3,11 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
-import { AscendIcon } from "@/components/ui/icons";
+import { LogOutIcon } from "@vorinthex/shared/ui/icons";
+import { FragmentIcon } from "@/components/ui/icons";
 import { trackCtaClick } from "@/lib/analytics";
+import { useAuthProfile } from "@/lib/auth/use-auth-profile";
+import { signOut } from "@/lib/auth/sign-out";
 import {
   galaxyMotion,
   syncEntityUrl,
@@ -19,8 +22,10 @@ import {
  */
 export function SiteNav() {
   const enterCave = useGalaxyStore((s) => s.enterCave);
+  const startJump = useGalaxyStore((s) => s.startJump);
   const mode = useGalaxyStore((s) => s.mode);
   const caveKind = useGalaxyStore((s) => s.caveKind);
+  const { signedIn } = useAuthProfile();
 
   // The sealed chamber (tapped email links) offers no way out — not even
   // the brand mark or the cave shortcuts up here.
@@ -76,40 +81,82 @@ export function SiteNav() {
         <div className="hidden lg:block" />
 
         {/* Short, single-word labels so nothing ever wraps; on phones
-            Sign in and Hunt collapse to icon-only buttons. */}
+            the icon buttons collapse to icon-only. Signed-in explorers get
+            a straight galaxy jump and a sign-out in place of Join/Sign in. */}
         <div className="flex items-center gap-2 justify-self-end sm:gap-4">
-          <Button
-            variant="primary"
-            onClick={() => {
-              trackCtaClick("waitlist_open", { placement: "nav" });
-              enterCave("join");
-            }}
-            className="min-h-0 px-5 py-2.5 text-[0.65rem] whitespace-nowrap"
-          >
-            Join
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              trackCtaClick("signin_gate_open", { placement: "nav" });
-              enterCave("signin");
-            }}
-            className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
-          >
-            Sign in
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              trackCtaClick("hunt_open", { placement: "nav" });
-              enterCave("hunt");
-            }}
-            icon={<AscendIcon size="sm" />}
-            aria-label="View the hunt"
-            className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
-          >
-            <span className="hidden sm:inline">Hunt</span>
-          </Button>
+          {signedIn ? (
+            <>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  trackCtaClick("public_jump", { placement: "nav" });
+                  startJump("public");
+                }}
+                className="min-h-0 px-5 py-2.5 text-[0.65rem] whitespace-nowrap"
+              >
+                Jump Galaxy
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  trackCtaClick("hunt_open", { placement: "nav" });
+                  enterCave("hunt");
+                }}
+                icon={<FragmentIcon size="sm" />}
+                aria-label="View the hunt"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+              >
+                <span className="hidden sm:inline">Hunt</span>
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  trackCtaClick("signout", { placement: "nav" });
+                  void signOut();
+                }}
+                icon={<LogOutIcon size="sm" />}
+                aria-label="Sign out"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+              >
+                <span className="hidden sm:inline">Sign out</span>
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  trackCtaClick("waitlist_open", { placement: "nav" });
+                  enterCave("join");
+                }}
+                className="min-h-0 px-5 py-2.5 text-[0.65rem] whitespace-nowrap"
+              >
+                Join
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  trackCtaClick("signin_gate_open", { placement: "nav" });
+                  enterCave("signin");
+                }}
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+              >
+                Sign in
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  trackCtaClick("hunt_open", { placement: "nav" });
+                  enterCave("hunt");
+                }}
+                icon={<FragmentIcon size="sm" />}
+                aria-label="View the hunt"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+              >
+                <span className="hidden sm:inline">Hunt</span>
+              </Button>
+            </>
+          )}
         </div>
       </nav>
     </header>

@@ -10,6 +10,9 @@ locals {
   ssh_public_key  = var.ssh_public_key != "" ? var.ssh_public_key : tls_private_key.generated.public_key_openssh
   app_ec2_user    = "ec2-user"
   ssm_policy_arns = length(var.ssm_parameter_arns) > 0 ? var.ssm_parameter_arns : ["*"]
+  # Pin to var.ami_id when provided; otherwise the AL2023 SSM latest. Either
+  # way the instance ignores ami changes, so this never triggers a replace.
+  app_ami_id = var.ami_id != "" ? var.ami_id : data.aws_ssm_parameter.al2023.value
 }
 
 resource "aws_key_pair" "deploy" {
@@ -93,7 +96,7 @@ resource "aws_iam_instance_profile" "this" {
 }
 
 resource "aws_instance" "this" {
-  ami                         = data.aws_ssm_parameter.al2023.value
+  ami                         = local.app_ami_id
   instance_type               = var.instance_type
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [var.security_group_id]
@@ -131,7 +134,8 @@ resource "aws_instance" "this" {
   })
 
   lifecycle {
-    ignore_changes = [user_data]
+    # SAFETY: never re-image or force-replace the running app host on apply.
+    ignore_changes = [user_data, ami]
   }
 }
 

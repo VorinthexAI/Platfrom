@@ -32,6 +32,23 @@ on:
         description: 'Optional Redis node type override'
         required: false
         type: string
+      ssh_ingress_cidr_blocks:
+        description: 'Optional SSH ingress CIDRs as a JSON list, e.g. ["1.2.3.4/32"]. Empty = no SSH (SSM only).'
+        required: false
+        type: string
+      app_ami_id:
+        description: 'Optional pinned AMI id for the app host (blank = AL2023 latest, protected by ignore_changes)'
+        required: false
+        type: string
+      graph_db_ami_id:
+        description: 'Optional pinned AMI id for the graph-db host (blank = AL2023 latest, protected by ignore_changes)'
+        required: false
+        type: string
+      enable_app_platform:
+        description: 'Create the additive ALB + ECS EC2 web/api + CloudFront target-state platform'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -53,6 +70,13 @@ env:
   TF_VAR_redis_node_type: ${{ inputs.redis_node_type || vars.PROD_REDIS_NODE_TYPE || 'cache.t4g.micro' }}
   TF_VAR_s3_bucket_name: ${{ vars.PROD_S3_BUCKET_NAME }}
   TF_VAR_ssm_parameter_prefix: ${{ vars.SSM_PARAMETER_PREFIX || 'vorinthex/prod' }}
+  # Additive: SSH ingress is a JSON list; default '[]' matches the new safe
+  # (no world-open SSH) Terraform default. Set the input or PROD_SSH_INGRESS_CIDR_BLOCKS
+  # to a JSON list to allow SSH again before an apply that still deploys via SSH.
+  TF_VAR_ssh_ingress_cidr_blocks: ${{ inputs.ssh_ingress_cidr_blocks || vars.PROD_SSH_INGRESS_CIDR_BLOCKS || '[]' }}
+  TF_VAR_app_ami_id: ${{ inputs.app_ami_id || vars.PROD_APP_AMI_ID || '' }}
+  TF_VAR_graph_db_ami_id: ${{ inputs.graph_db_ami_id || vars.PROD_GRAPH_DB_AMI_ID || '' }}
+  TF_VAR_enable_app_platform: ${{ inputs.enable_app_platform || vars.PROD_ENABLE_APP_PLATFORM || 'false' }}
 
 jobs:
   terraform:

@@ -2,6 +2,8 @@ import type { Context } from 'hono';
 import { z } from 'zod';
 import {
   countFragmentEntries,
+  getExplorerStanding,
+  getUserStanding,
   insertIntelligenceFragment,
   listFragmentsByExplorer,
   listFragmentsByUser,
@@ -45,6 +47,10 @@ export const postFragmentsBodySchema = strictObject({
 export const fragmentsSummaryQuerySchema = strictObject({
   explorer_id: z.string().min(8).max(80).optional(),
   format: z.literal('three').optional(),
+});
+
+export const fragmentsStandingQuerySchema = strictObject({
+  explorer_id: z.string().min(8).max(80).optional(),
 });
 
 /** Dedupes merged explorer + user entries by key (an adopted entry matches both lookups). */
@@ -124,6 +130,47 @@ export async function collectFragment(c: Context) {
     entry_key: entry.key,
     total_fragments: await sumFragmentsTotal(),
   }, 201);
+}
+
+/**
+ * The single authoritative "standing" for a caller: total fragments and
+ * 1-based leaderboard rank. For a signed-in user, total + rank come from the
+ * SAME COLLECT/SUM query family as `listTopCollectors` (the board), so the
+ * in-list "You" row and the standing card can never structurally disagree.
+ * An anonymous explorer gets their local (unadopted) haul with `rank: null` —
+ * the board is signed-in-only, they join/sign in to rank.
+ */
+export async function getFragmentsStanding(c: Context) {
+  const query = parseQuery(c, fragmentsStandingQuerySchema);
+  const userId = await getUserId(c);
+
+  if (userId) {
+    const standing = await getUserStanding(userId);
+    if (standing) {
+      return c.json({
+        user_id: userId,
+        total: standing.total,
+        rank: standing.rank,
+        entries: standing.entries,
+        adopted: true,
+      });
+    }
+    // Signed in but nothing adopted yet — fall through to the device haul so
+    // a just-joined explorer still sees the fragments they collected.
+  }
+
+  if (query.explorer_id) {
+    const standing = await getExplorerStanding(query.explorer_id);
+    return c.json({
+      user_id: userId,
+      total: standing.total,
+      rank: null,
+      entries: standing.entries,
+      adopted: false,
+    });
+  }
+
+  return c.json({ user_id: userId, total: 0, rank: null, entries: 0, adopted: false });
 }
 
 export async function getFragmentsSummary(c: Context) {

@@ -57,4 +57,5 @@ export * from './icons/signal';
 export * from './icons/compass';
 export * from './icons/ascend';
 export * from './icons/brain';
+export * from './icons/fragment';
 

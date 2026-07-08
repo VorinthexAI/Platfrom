@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
-import { countOpenActiveVisitors } from '@/lib/db/active-visitors.node';
+import { countOpenVisitorSessions } from '@/lib/db/visitor-sessions.node';
+import { countOpenUserSessions } from '@/lib/db/user-sessions.node';
 import {
   countFragmentEntries,
   listRecentFragmentEntries,
@@ -33,13 +34,15 @@ export interface LeaderboardPayload {
 }
 
 export async function readLeaderboard(): Promise<LeaderboardPayload> {
-  const [top, fragmentsTotal, fragmentsEntries, activeExplorers, recent] = await Promise.all([
+  const [top, fragmentsTotal, fragmentsEntries, openVisitorSessions, openUserSessions, recent] = await Promise.all([
     listTopCollectors(TOP_LIMIT),
     sumFragmentsTotal(),
     countFragmentEntries(),
-    countOpenActiveVisitors(),
+    countOpenVisitorSessions(),
+    countOpenUserSessions(),
     listRecentFragmentEntries(RECENT_LIMIT),
   ]);
+  const activeExplorers = openVisitorSessions + openUserSessions;
   return {
     top: top.map((row) => ({ user_id: row.userId, alias: row.alias, total: row.total })),
     fragments_total: fragmentsTotal,

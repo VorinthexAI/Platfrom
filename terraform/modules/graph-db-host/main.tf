@@ -6,6 +6,9 @@ locals {
   ec2_user      = "ec2-user"
   device_name   = "/dev/sdf"
   kernel_device = "/dev/xvdf"
+  # Pin to var.ami_id when provided; otherwise the AL2023 SSM latest. Either
+  # way the instance ignores ami changes, so this never triggers a replace.
+  graph_db_ami_id = var.ami_id != "" ? var.ami_id : data.aws_ssm_parameter.al2023.value
 }
 
 resource "aws_key_pair" "deploy" {
@@ -27,7 +30,7 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
 }
 
 resource "aws_instance" "this" {
-  ami                         = data.aws_ssm_parameter.al2023.value
+  ami                         = local.graph_db_ami_id
   instance_type               = var.instance_type
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [var.security_group_id]
@@ -77,7 +80,9 @@ resource "aws_instance" "this" {
   })
 
   lifecycle {
-    ignore_changes = [user_data]
+    # SAFETY: never re-image or force-replace the running database host; that
+    # would tear down the instance the EBS data volume is attached to.
+    ignore_changes = [user_data, ami]
   }
 }
 

@@ -1,0 +1,43 @@
+# Build context is the REPO ROOT (see web/app/Dockerfile), so these paths are
+# relative to the monorepo root. Keep the content-strip section in sync with
+# .github/workflows/deploy.yml.
+#
+# NOTE: the root package.json declares bun workspaces (web/app, backend, shared,
+# scripts/image, scripts/video, scripts/audio). Those workspace directories are
+# intentionally NOT excluded here — `bun install --frozen-lockfile` validates the
+# whole workspace graph against bun.lock, so their package.json files must be
+# present. Only node_modules / build output / secrets / brand assets are stripped.
+
+# Dependencies and build artifacts (reinstalled/rebuilt inside the image)
+**/node_modules
+web/app/.next
+web/app/out
+**/dist
+**/.turbo
+
+# VCS / CI / editor / local
+.git
+.github
+.gitignore
+**/.DS_Store
+**/.vscode
+**/.idea
+**/*.log
+**/coverage
+
+# Secrets and local env (only .env.example is committed)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Content-strip (mirror of deploy.yml): brand/docs assets + agent instructions
+shared/brand
+shared/docs
+.claude
+CLAUDE.md
+AGENTS.md
+admin.md
+plan.md
+
+# Not needed to build the web image (terraform is not a bun workspace)
+terraform

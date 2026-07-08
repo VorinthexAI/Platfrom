@@ -59,7 +59,7 @@ const nexus: GalaxyEntity = {
     eyebrow: "The Nexus of Intelligence",
     headline: "The Nexus of Intelligence",
     subheadline: "Your personal AI for everything, with infinite memory.",
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Already on waitlist? Sign in",
   },
   children: ["product.core", "product.command", "product.studio", "product.launch"],
@@ -127,7 +127,7 @@ const core: GalaxyEntity = {
     body: "Core is your central intelligence. It learns, remembers and evolves with you. Expand it with powerful Capabilities that orbit your Brain.",
     drawerLine:
       "Your central intelligence. It learns, remembers, and evolves with you.",
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Explore Core",
   },
   children: [
@@ -203,7 +203,7 @@ const command: GalaxyEntity = {
     body: "Command gives founders and builders access to AI orchestrators such as Atlas, Hermes, Metis, Orbit, Mercury, Sentinel, Athena, Forge, and Themis.",
     drawerLine:
       "Executive AI orchestrators that think, plan, and execute while you lead.",
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Explore Orchestrators",
     statusNote:
       "Command joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
@@ -281,7 +281,7 @@ const studio: GalaxyEntity = {
     subheadline: "One interface. Every AI model.",
     body: "Every leading AI model in one interface, chat, image, video, music, voice, code, documents, and research in a single creative workspace.",
     drawerLine: "Every leading AI model in one creative workspace.",
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     statusNote:
       "Studio joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
   },
@@ -346,7 +346,7 @@ const launch: GalaxyEntity = {
     body: "A lightweight platform to create agents, automations, and workflows, then deploy them everywhere your work happens.",
     drawerLine:
       "Create agents, automations, and workflows, then deploy them everywhere.",
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     statusNote:
       "Launch joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
   },
@@ -435,7 +435,7 @@ const archive = capability({
       "Organize notes into folders and labels.",
       "Search semantically and traverse knowledge relationships.",
     ],
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Explore Core",
   },
 });
@@ -496,7 +496,7 @@ const gallery = capability({
       "Invite others to albums with QR codes or links.",
       "Search memories by people, places, dates, and events.",
     ],
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Explore Core",
   },
 });
@@ -557,7 +557,7 @@ const signal = capability({
       "Filter noise and prioritize important messages.",
       "Reply in your tone when approved.",
     ],
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Explore Core",
   },
 });
@@ -618,7 +618,7 @@ const compass = capability({
       "Save memories and plans to an interactive 3D globe.",
       "Click pins to relive trips or build future itineraries.",
     ],
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Explore Core",
   },
 });
@@ -679,7 +679,7 @@ const ascend = capability({
       "Generate custom audio books and learning journeys.",
       "Track progress and receive coaching based on real context.",
     ],
-    primaryCta: "Join Waitlist",
+    primaryCta: "Join Hunt",
     secondaryCta: "Explore Core",
   },
 });
@@ -764,7 +764,7 @@ function orchestrator(input: OrchestratorInput): GalaxyEntity {
       headline: `${input.name}. ${input.role} intelligence for your company.`,
       subheadline: input.scope,
       bullets: input.bullets,
-      primaryCta: "Join Waitlist",
+      primaryCta: "Join Hunt",
       secondaryCta: "Explore Command",
       statusNote:
         "Available in private Command access. Waitlist members get first invitations.",

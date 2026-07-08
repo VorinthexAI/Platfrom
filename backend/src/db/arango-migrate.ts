@@ -18,6 +18,9 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   members: [['userId']],
   superAdmins: [['userId'], ['memberId']],
   authChallenges: [['userId', 'kind']],
+  // Visitors are anonymous now: the emailHash/userId identity indexes go
+  // with the fields (scrubbed below); only distinctId + platformId remain.
+  visitors: [['emailHash'], ['userId']],
 };
 
 function buildEventEmbedText(key: string, belongsTo: string, slug: string): string {
@@ -167,18 +170,26 @@ const collections: CollectionSpec[] = [
     name: 'visitors',
     indexes: [
       { fields: ['platformId'] },
-      { fields: ['emailHash'], unique: true, sparse: true },
       { fields: ['distinctId'], unique: true, sparse: true },
-      { fields: ['userId'], sparse: true },
     ],
   },
   {
-    name: 'activeVisitors',
+    name: 'visitorSessions',
     indexes: [
       { fields: ['visitorId'] },
       { fields: ['sessionKey'], unique: true },
       { fields: ['disconnectedAt'] },
       { fields: ['platformId', 'connectedAt'] },
+    ],
+  },
+  {
+    name: 'userSessions',
+    indexes: [
+      { fields: ['userId'] },
+      { fields: ['sessionKey'], unique: true },
+      { fields: ['disconnectedAt'] },
+      { fields: ['platformId', 'connectedAt'] },
+      { fields: ['userId', 'connectedAt'] },
     ],
   },
   {
@@ -600,6 +611,88 @@ async function main() {
     }
     await usersCollection.update(user._key, patch);
   }
+
+  // Presence funnel split: partition the old single `activeVisitors` ledger
+  // into two clean funnels. Each session resolves to an identity — its parent
+  // visitor's userId, else its own emailHash against `users` — and lands in
+  // `userSessions` (authed) or `visitorSessions` (anonymous). Migrated docs
+  // keep their `_key`s so any in-flight Redis session closes cleanly through
+  // the new sweeper/leave code. Runs BEFORE the visitors scrub so the userId
+  // link is still readable, and the source is dropped only after the copy
+  // completes — `overwriteMode: 'ignore'` makes reruns no-ops.
+  const activeVisitorsCollection = targetDb.collection('activeVisitors');
+  if (await activeVisitorsCollection.exists()) {
+    const visitorSessionsCollection = targetDb.collection('visitorSessions');
+    const userSessionsCollection = targetDb.collection('userSessions');
+    const cursor = await targetDb.query<{
+      _key: string;
+      platformId?: string;
+      visitorId?: string;
+      emailHash?: string | null;
+      alias?: string;
+      sessionKey?: string;
+      connectedAt?: string;
+      disconnectedAt?: string | null;
+      createdAt?: string;
+      updatedAt?: string;
+    }>(`
+      FOR a IN activeVisitors
+        RETURN a
+    `);
+    const legacyActiveVisitors = await cursor.all();
+    let migratedUserSessions = 0;
+    let migratedVisitorSessions = 0;
+    for (const active of legacyActiveVisitors) {
+      let userId: string | null = null;
+      if (typeof active.visitorId === 'string' && active.visitorId.length > 0) {
+        const parentCursor = await targetDb.query<{ userId?: string | null }>(
+          `
+            FOR v IN visitors
+              FILTER v._key == @visitorId
+              LIMIT 1
+              RETURN { userId: v.userId }
+          `,
+          { visitorId: active.visitorId },
+        );
+        const parent = await parentCursor.next();
+        userId = nonEmptyString(parent?.userId ?? null);
+      }
+      if (!userId && typeof active.emailHash === 'string' && active.emailHash.length > 0) {
+        userId = await getUserIdByEmailHash(targetDb, active.emailHash);
+      }
+
+      const base = {
+        _key: active._key,
+        platformId: active.platformId,
+        alias: active.alias,
+        sessionKey: active.sessionKey,
+        connectedAt: active.connectedAt,
+        disconnectedAt: active.disconnectedAt ?? null,
+        createdAt: active.createdAt,
+        updatedAt: active.updatedAt,
+        embedding: [],
+      };
+      if (userId) {
+        await userSessionsCollection.save({ ...base, userId }, { overwriteMode: 'ignore' });
+        migratedUserSessions += 1;
+      } else {
+        await visitorSessionsCollection.save({ ...base, visitorId: active.visitorId }, { overwriteMode: 'ignore' });
+        migratedVisitorSessions += 1;
+      }
+    }
+    await activeVisitorsCollection.drop();
+    console.log(
+      `Migrated activeVisitors -> ${migratedUserSessions} userSessions + ${migratedVisitorSessions} visitorSessions and dropped collection activeVisitors`,
+    );
+  }
+
+  // Visitors are anonymous by definition now — drop the leftover identity
+  // fields so nothing lingers behind the removed indexes.
+  await targetDb.query(`
+    FOR v IN visitors
+      FILTER HAS(v, "userId") || HAS(v, "emailHash")
+      UPDATE v WITH { userId: null, emailHash: null } IN visitors OPTIONS { keepNull: false }
+  `);
 
   console.log('ArangoDB schema is up to date.');
   systemDb.close();

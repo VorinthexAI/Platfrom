@@ -29,6 +29,7 @@
     "audio:list-targets": "bun run --cwd scripts/audio list-targets",
     "audio:generate": "bun run --cwd scripts/audio generate",
     "audio:tts": "bun run --cwd scripts/audio tts",
+    "audio:voice-samples": "bun run --cwd scripts/audio voice-samples",
     "audio:merge": "bun run --cwd scripts/audio merge",
     "audio:validate": "bun run --cwd scripts/audio validate",
     "web:dev": "bun run --cwd web/app dev",

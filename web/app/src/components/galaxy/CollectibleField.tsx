@@ -6,6 +6,7 @@ import * as THREE from "three";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { CollectibleDef } from "@/lib/galaxy/registry-types";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
+import { trackLandingEvent } from "@/lib/analytics";
 import {
   createCrystalGeometry,
   crystalTintForRarity,
@@ -35,6 +36,7 @@ function CrystalShard({
   const [gone, setGone] = useState(false);
   const [hovered, setHovered] = useState(false);
   const select = useFragmentsStore((s) => s.select);
+  const collect = useFragmentsStore((s) => s.collect);
   const collected = useFragmentsStore((s) =>
     s.collectedIds.includes(collectible.id),
   );
@@ -93,7 +95,26 @@ function CrystalShard({
 
   const handleSelect = (event: ThreeEvent<MouseEvent>) => {
     event.stopPropagation();
-    if (!collected) select(collectible);
+    if (collected) return;
+    // Joined/authed explorers collect on the click itself — no tooltip
+    // detour. collect() POSTs and fires the reward toast; the dissolve
+    // still keys off collectedIds. Non-joined explorers open the tooltip.
+    if (useFragmentsStore.getState().hasJoined) {
+      trackLandingEvent({
+        slug: "landing.fragment_discovered",
+        metadata: {
+          collectible_id: collectible.id,
+          collectible_slug: collectible.slug,
+          collectible_name: collectible.name,
+          rarity: collectible.rarity,
+          fragments: collectible.fragments,
+          parent_entity_id: collectible.parentEntityId,
+        },
+      });
+      void collect(collectible);
+      return;
+    }
+    select(collectible);
   };
 
   return (

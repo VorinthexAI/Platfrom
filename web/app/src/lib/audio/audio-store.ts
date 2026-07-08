@@ -76,18 +76,12 @@ function voiceElement(): HTMLAudioElement {
   return voice;
 }
 
-/** The page's single automatic mission play (retried after autoplay block). */
-let missionAutoPlayed = false;
-let missionAutoPending = false;
-
 interface AudioState {
   missionPlaying: boolean;
   ambientStarted: boolean;
   pendingVoiceSrc: string | null;
   /** Tap once → hear once; tap mid-voice → cancel. */
   toggleMission: () => void;
-  /** Play the mission once on page load (falls back to first gesture). */
-  autoPlayMission: () => void;
   startAmbient: () => void;
   playVoice: (src: string) => void;
   stopVoice: () => void;
@@ -181,17 +175,6 @@ export const useAudioStore = create<AudioState>((set, get) => {
     startMission();
   },
 
-  autoPlayMission: () => {
-    // Once per page load: either it plays now, or the first user gesture
-    // (via resumePending) retries it. A manual tap counts as played.
-    if (missionAutoPlayed || (mission && !mission.paused)) return;
-    missionAutoPlayed = true;
-    startMission(() => {
-      missionAutoPending = true;
-      missionAutoPlayed = false;
-    });
-  },
-
   startAmbient: () => {
     if (get().ambientStarted) return;
     const audio = ambientElement();
@@ -247,12 +230,8 @@ export const useAudioStore = create<AudioState>((set, get) => {
   },
 
   resumePending: () => {
-    // The gesture that unlocks audio also fires the deferred auto-play.
-    if (missionAutoPending) {
-      missionAutoPending = false;
-      get().autoPlayMission();
-      return;
-    }
+    // The first gesture that unlocks audio releases any voice line the
+    // browser held back (the ambient bed starts alongside it).
     const pending = get().pendingVoiceSrc;
     if (pending) get().playVoice(pending);
   },

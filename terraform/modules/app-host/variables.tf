@@ -18,6 +18,21 @@ variable "instance_type" {
   description = "EC2 instance type for the app host."
 }
 
+# SAFETY: pin the AMI so a routine apply never re-images the running host.
+# When empty, the module falls back to the AL2023 SSM "latest" pointer, but the
+# instance also carries lifecycle.ignore_changes = [ami], so even the "latest"
+# path can never force-replace the existing instance. To make the pin explicit,
+# set this to the AMI id the running instance actually uses. TODO(confirm):
+# resolve the live value before apply, e.g.
+#   aws ec2 describe-instances \
+#     --filters Name=tag:Name,Values=vorinthex-prod-app-host \
+#     --query 'Reservations[].Instances[].ImageId' --output text
+variable "ami_id" {
+  type        = string
+  description = "Pinned AMI id for the app host. Empty = AL2023 SSM latest (still protected by ignore_changes)."
+  default     = ""
+}
+
 variable "ssh_ingress_cidr_blocks" {
   type        = list(string)
   description = "CIDR blocks allowed to SSH to the app host."
