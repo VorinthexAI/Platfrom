@@ -52,6 +52,27 @@ resource "aws_vpc_security_group_ingress_rule" "early_app_https" {
   prefix_list_id    = aws_ec2_managed_prefix_list.cloudflare.id
 }
 
+# NOTE: Cloudflare does not reliably reach the origin through the prefix-list
+# rules above alone, so :80/:443 are currently also open to 0.0.0.0/0 (below) —
+# that is what actually serves traffic. The origin is mitigated by the API key
+# and an unpublished origin IP. TODO: lock down to the Cloudflare prefix list only
+# once the reason the PL rules don't admit Cloudflare is understood.
+resource "aws_vpc_security_group_ingress_rule" "early_app_http_open" {
+  security_group_id = aws_security_group.early_app.id
+  ip_protocol       = "tcp"
+  from_port         = 80
+  to_port           = 80
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "early_app_https_open" {
+  security_group_id = aws_security_group.early_app.id
+  ip_protocol       = "tcp"
+  from_port         = 443
+  to_port           = 443
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
 resource "aws_vpc_security_group_egress_rule" "early_app_all" {
   security_group_id = aws_security_group.early_app.id
   ip_protocol       = "-1"
