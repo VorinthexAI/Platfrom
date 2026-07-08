@@ -22,7 +22,7 @@ import { parseJson, parseQuery, strictObject } from './validation';
 import { createPaymentCheckout, handlePolarWebhook, listUserEntitlements, POLAR_WEBHOOK_PATH } from './payments';
 import { requestWaitlistVerification, verifyWaitlistEmail } from './waitlist';
 import { recordPlatformClientEvent } from './platform-events';
-import { collectFragment, getFragmentsSummary } from './fragments';
+import { collectFragment, getFragmentsStanding, getFragmentsSummary } from './fragments';
 import { streamLeaderboard } from './leaderboard';
 import { streamLiveCounters } from './live';
 import { joinPresence, leavePresence, presenceBeat, streamPresence } from './presence';
@@ -238,6 +238,7 @@ export function registerRoutes(app: Hono) {
 
   app.post('/fragments', collectFragment);
   app.get('/fragments/summary', getFragmentsSummary);
+  app.get('/fragments/standing', getFragmentsStanding);
 
   app.get('/live/stream', streamLiveCounters);
   app.get('/leaderboard/stream', streamLeaderboard);

@@ -5,14 +5,18 @@ import { z } from 'zod';
 import { generateAlias } from '@/lib/alias';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import {
-  insertActiveVisitor,
-  listOpenActiveVisitors,
-  markActiveVisitorDisconnected,
-} from '@/lib/db/active-visitors.node';
+  insertVisitorSession,
+  listOpenVisitorSessions,
+  markVisitorSessionDisconnected,
+} from '@/lib/db/visitor-sessions.node';
+import {
+  insertUserSession,
+  listOpenUserSessions,
+  markUserSessionDisconnected,
+} from '@/lib/db/user-sessions.node';
 import { getUserById } from '@/lib/db/users.node';
 import {
   getVisitorByDistinctId,
-  getVisitorByEmailHash,
   insertVisitor,
   updateVisitor,
   type Visitor,
@@ -29,11 +33,13 @@ import { parseJson, strictObject } from './validation';
  * Redis is the live truth — one volatile key per session (TTL-refreshed
  * by heartbeats) plus a pub/sub channel every backend instance subscribes
  * to once and fans out to its SSE clients. ArangoDB is the durable
- * ledger the live state syncs into: a `visitors` node per distinct
- * explorer and an `activeVisitors` sub-node per session with
- * connectedAt/disconnectedAt stamps. A sweeper closes ledger sessions
- * whose Redis key has expired (crashed tabs, dropped networks), so the
- * two stores converge without any per-heartbeat DB writes.
+ * ledger the live state syncs into, split across two parallel funnels:
+ * anonymous explorers get a `visitors` node plus a `visitorSessions`
+ * sub-node per session, while signed-in users get a `userSessions` node
+ * per session — both with connectedAt/disconnectedAt stamps. A sweeper
+ * closes ledger sessions whose Redis key has expired (crashed tabs,
+ * dropped networks) in both funnels, so the stores converge without any
+ * per-heartbeat DB writes.
  */
 
 const PRESENCE_CHANNEL = 'presence:events';
@@ -49,9 +55,11 @@ const positionSchema = z.tuple([coordinate, coordinate, coordinate]);
 export type PresencePosition = z.infer<typeof positionSchema>;
 
 interface SessionRecord {
-  /** visitor key */
+  /** funnel tag: authed user session vs anonymous visitor session */
+  t: 'user' | 'visitor';
+  /** identity key: the visitor key (anon) or user key (authed) */
   v: string;
-  /** activeVisitors node key */
+  /** session ledger node key (visitorSessions or userSessions) */
   k: string;
   /** alias */
   a: string;
@@ -100,60 +108,64 @@ function ensureSweeper() {
 }
 
 /**
- * Ledger ↔ live sync: close every open activeVisitors node whose Redis
- * session key has expired. Idempotent — safe to run on many instances.
+ * Ledger ↔ live sync: close every open session node — in BOTH the visitor
+ * and user funnels — whose Redis session key has expired. Idempotent —
+ * safe to run on many instances.
  */
 export async function sweepStaleSessions() {
-  const open = await listOpenActiveVisitors(500);
+  const now = new Date().toISOString();
+  const [visitorSessions, userSessions] = await Promise.all([
+    listOpenVisitorSessions(500),
+    listOpenUserSessions(500),
+  ]);
+  await sweepOpenSessions(visitorSessions, markVisitorSessionDisconnected, now);
+  await sweepOpenSessions(userSessions, markUserSessionDisconnected, now);
+}
+
+/**
+ * Close the given open session nodes whose Redis key has expired, stamping
+ * disconnectedAt via the funnel-specific mark function. Shared by both funnels.
+ */
+async function sweepOpenSessions(
+  open: Array<{ key: string; sessionKey: string }>,
+  markDisconnected: (key: string, disconnectedAt: string) => Promise<void>,
+  now: string,
+) {
   if (open.length === 0) return;
   const pipeline = redisConnection.pipeline();
-  for (const active of open) pipeline.exists(SESSION_PREFIX + active.sessionKey);
+  for (const session of open) pipeline.exists(SESSION_PREFIX + session.sessionKey);
   const results = await pipeline.exec();
-  const now = new Date().toISOString();
   for (let index = 0; index < open.length; index += 1) {
     const alive = results?.[index]?.[1] === 1;
     if (alive) continue;
-    const active = open[index]!;
-    await markActiveVisitorDisconnected(active.key, now);
-    await publishPresence({ type: 'leave', session: active.sessionKey, at: now });
+    const session = open[index]!;
+    await markDisconnected(session.key, now);
+    await publishPresence({ type: 'leave', session: session.sessionKey, at: now });
   }
 }
 
 /**
- * Resolve the visitor node behind this request: the access token's user
- * (emailHash + their alias) wins; the distinct-id cookie is the
- * anonymous fallback. Creates the visitor on first sight, enriches it
- * with anything newly learned after.
+ * Resolve the anonymous visitor node behind this request from the
+ * distinct-id cookie alone — visitors are anonymous by definition now, so
+ * there is no user/emailHash enrichment (authed joins skip this entirely
+ * and land in the userSessions funnel). Creates the visitor on first sight,
+ * bumps lastSeenAt after.
  */
-async function resolvePresenceVisitor(c: Context, distinctId: string | null): Promise<Visitor | null> {
+async function resolvePresenceVisitor(distinctId: string | null): Promise<Visitor | null> {
+  if (!distinctId) return null;
   const now = new Date().toISOString();
-  const userId = await getUserId(c);
-  let emailHash: string | null = null;
-  let userAlias: string | null = null;
-  if (userId) {
-    const user = await getUserById(userId);
-    if (user) {
-      emailHash = user.emailHash;
-      userAlias = user.alias;
-    }
-  }
-  if (!emailHash && !distinctId) return null;
 
-  let visitor = emailHash ? await getVisitorByEmailHash(emailHash) : null;
-  if (!visitor && distinctId) visitor = await getVisitorByDistinctId(distinctId);
-
+  const visitor = await getVisitorByDistinctId(distinctId);
   if (!visitor) {
-    // Alias seeds off the most durable identity so the same explorer
-    // rolls the same "<Prefix> <Role>" pair (same 250×250 lists as
-    // signup) across sessions.
-    const alias = userAlias ?? generateAlias(emailHash ?? distinctId!);
+    // Alias rolls off the distinct id so the same anonymous explorer keeps
+    // the same "<Prefix> <Role>" pair (same 250×250 lists as signup) across
+    // sessions.
+    const alias = generateAlias(distinctId);
     try {
       return await insertVisitor({
         key: newId(),
         platformId: await getDefaultPlatformId(),
         distinctId,
-        emailHash,
-        userId: userId ?? null,
         alias,
         lastSeenAt: now,
         createdAt: now,
@@ -161,28 +173,14 @@ async function resolvePresenceVisitor(c: Context, distinctId: string | null): Pr
       });
     } catch (error) {
       if (!isArangoUniqueConstraintError(error)) throw error;
-      // Raced a concurrent join for the same identity — adopt the winner.
-      const winner = (emailHash ? await getVisitorByEmailHash(emailHash) : null)
-        ?? (distinctId ? await getVisitorByDistinctId(distinctId) : null);
+      // Raced a concurrent join for the same distinct id — adopt the winner.
+      const winner = await getVisitorByDistinctId(distinctId);
       if (!winner) throw error;
       return winner;
     }
   }
 
-  const patch: Partial<Omit<Visitor, 'key' | 'embedding'>> = { lastSeenAt: now, updatedAt: now };
-  if (emailHash && visitor.emailHash == null) patch.emailHash = emailHash;
-  if (distinctId && visitor.distinctId == null) patch.distinctId = distinctId;
-  if (userId && visitor.userId == null) patch.userId = userId;
-  // Once authed, the user's alias is authoritative for their star.
-  if (userAlias && visitor.alias !== userAlias) patch.alias = userAlias;
-  try {
-    return await updateVisitor(visitor.key, patch);
-  } catch (error) {
-    if (!isArangoUniqueConstraintError(error)) throw error;
-    // Another visitor already owns this emailHash/distinctId — use it.
-    const winner = (emailHash ? await getVisitorByEmailHash(emailHash) : null) ?? visitor;
-    return winner;
-  }
+  return updateVisitor(visitor.key, { lastSeenAt: now, updatedAt: now });
 }
 
 /** POST /presence/join — register a session, return its key + alias. */
@@ -192,24 +190,53 @@ export async function joinPresence(c: Context) {
     position: positionSchema.optional(),
   }));
 
-  const visitor = await resolvePresenceVisitor(c, body.distinct_id ?? null);
+  const now = new Date().toISOString();
+  const sessionKey = newId();
+  const nodeKey = newId();
+  const position: PresencePosition = body.position ?? [0, 6.5, 15.5];
+
+  // Authenticated funnel: an access token skips visitor resolution entirely
+  // and lands a fresh userSessions node, aliased off the user doc.
+  const userId = await getUserId(c);
+  if (userId) {
+    const user = await getUserById(userId);
+    if (user) {
+      const alias = user.alias ?? generateAlias(user.key);
+      const record: SessionRecord = { t: 'user', v: user.key, k: nodeKey, a: alias, p: position };
+      // Redis first: the sweeper must never see the ledger node before its key.
+      await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
+      await insertUserSession({
+        key: nodeKey,
+        platformId: user.platformId,
+        userId: user.key,
+        alias,
+        sessionKey,
+        connectedAt: now,
+        disconnectedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await publishPresence({ type: 'join', session: sessionKey, alias, position, at: now, t: 'user' });
+      ensureSubscriber();
+      ensureSweeper();
+      return c.json({ ok: true, session_key: sessionKey, visitor_key: user.key, alias }, 201);
+    }
+    // Token resolved to a user that no longer exists — fall through to anon.
+  }
+
+  // Anonymous funnel: distinct-id visitor + a fresh visitorSessions node.
+  const visitor = await resolvePresenceVisitor(body.distinct_id ?? null);
   if (!visitor) {
     return c.json({ error: 'distinct_id is required when no valid access token is provided' }, 400);
   }
 
-  const now = new Date().toISOString();
-  const sessionKey = newId();
-  const activeKey = newId();
-  const position: PresencePosition = body.position ?? [0, 6.5, 15.5];
-  const record: SessionRecord = { v: visitor.key, k: activeKey, a: visitor.alias, p: position };
-
+  const record: SessionRecord = { t: 'visitor', v: visitor.key, k: nodeKey, a: visitor.alias, p: position };
   // Redis first: the sweeper must never see the ledger node before its key.
   await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
-  await insertActiveVisitor({
-    key: activeKey,
+  await insertVisitorSession({
+    key: nodeKey,
     platformId: visitor.platformId,
     visitorId: visitor.key,
-    emailHash: visitor.emailHash,
     alias: visitor.alias,
     sessionKey,
     connectedAt: now,
@@ -217,7 +244,7 @@ export async function joinPresence(c: Context) {
     createdAt: now,
     updatedAt: now,
   });
-  await publishPresence({ type: 'join', session: sessionKey, alias: visitor.alias, position, at: now });
+  await publishPresence({ type: 'join', session: sessionKey, alias: visitor.alias, position, at: now, t: 'visitor' });
   ensureSubscriber();
   ensureSweeper();
 
@@ -260,7 +287,11 @@ export async function leavePresence(c: Context) {
     await redisConnection.del(key);
     try {
       const record = JSON.parse(raw) as SessionRecord;
-      await markActiveVisitorDisconnected(record.k, now);
+      // Route the disconnect stamp to the funnel this session belongs to;
+      // legacy records without a tag default to the visitor funnel and the
+      // sweeper reconciles anything that lands in the wrong collection.
+      if (record.t === 'user') await markUserSessionDisconnected(record.k, now);
+      else await markVisitorSessionDisconnected(record.k, now);
     } catch {
       // Corrupt record — the sweeper reconciles the ledger.
     }

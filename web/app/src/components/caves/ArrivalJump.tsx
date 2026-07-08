@@ -62,6 +62,7 @@ async function verifyWaitlistToken(token: string): Promise<ArrivalResult> {
       welcomeLine: data.welcomeLine,
     }),
   );
+  window.dispatchEvent(new Event("vx-profile-changed"));
   // Same surface that requested the link: consume the parked handoff so
   // its cookies clear instead of lingering until expiry.
   void fetch("/api/auth/handoff/claim", { method: "POST" }).catch(() => {});
@@ -98,6 +99,7 @@ async function validateMagicToken(token: string): Promise<ArrivalResult> {
         welcomeLine: data.welcome_line ?? null,
       }),
     );
+    window.dispatchEvent(new Event("vx-profile-changed"));
     // Same surface that requested the link: consume the parked handoff
     // so its cookies clear instead of lingering until expiry.
     void fetch("/api/auth/handoff/claim", { method: "POST" }).catch(() => {});

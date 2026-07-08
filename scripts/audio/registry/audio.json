@@ -275,6 +275,8 @@
           "createdAt": "2026-07-07T21:22:26.090Z"
         },
         {
+          "id": "v9",
+          "version": 9,
           "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
           "fullPrompt": "Create an audio asset for Vorinthex AI.\n\nTarget:\n- Type: master-brand\n- Slug: vorinthex-ai\n- Description: Vorinthex AI master brand: The Nexus of Intelligence.\n\n\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 12 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
           "mode": "tts",
@@ -286,8 +288,6 @@
           "status": "completed",
           "audioPath": "outputs/audio/master-brand/vorinthex-ai/v9/vorinthex-ai-v9.pcm",
           "metadataPath": "outputs/audio/master-brand/vorinthex-ai/v9/metadata.json",
-          "id": "v9",
-          "version": 9,
           "createdAt": "2026-07-07T23:58:39.088Z"
         }
       ],
@@ -757,6 +757,2442 @@
       ],
       "createdAt": "2026-07-07T01:38:21.288Z",
       "updatedAt": "2026-07-07T01:38:24.463Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-achernar",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-achernar",
+      "name": "Google Gemini 3.1 Flash TTS - Achernar",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Achernar\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Achernar",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/achernar/v1/achernar-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/achernar/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:57.657Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:50.537Z",
+      "updatedAt": "2026-07-08T09:19:57.658Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-achird",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-achird",
+      "name": "Google Gemini 3.1 Flash TTS - Achird",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Achird\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Achird",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/achird/v1/achird-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/achird/v1/metadata.json",
+          "createdAt": "2026-07-08T09:20:36.595Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:20:28.729Z",
+      "updatedAt": "2026-07-08T09:20:36.597Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-algenib",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-algenib",
+      "name": "Google Gemini 3.1 Flash TTS - Algenib",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Algenib\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Algenib",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/algenib/v1/algenib-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/algenib/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:36.363Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:29.146Z",
+      "updatedAt": "2026-07-08T09:19:36.366Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-algieba",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-algieba",
+      "name": "Google Gemini 3.1 Flash TTS - Algieba",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Algieba\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Algieba",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/algieba/v1/algieba-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/algieba/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:14.643Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:07.461Z",
+      "updatedAt": "2026-07-08T09:19:14.645Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-alnilam",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-alnilam",
+      "name": "Google Gemini 3.1 Flash TTS - Alnilam",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Alnilam\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Alnilam",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/alnilam/v1/alnilam-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/alnilam/v1/metadata.json",
+          "createdAt": "2026-07-08T09:20:06.390Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:57.672Z",
+      "updatedAt": "2026-07-08T09:20:06.392Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-aoede",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-aoede",
+      "name": "Google Gemini 3.1 Flash TTS - Aoede",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Aoede\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Aoede",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/aoede/v1/aoede-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/aoede/v1/metadata.json",
+          "createdAt": "2026-07-08T09:18:30.065Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:23.365Z",
+      "updatedAt": "2026-07-08T09:18:30.071Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-autonoe",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-autonoe",
+      "name": "Google Gemini 3.1 Flash TTS - Autonoe",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Autonoe\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Autonoe",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/autonoe/v1/autonoe-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/autonoe/v1/metadata.json",
+          "createdAt": "2026-07-08T09:18:45.087Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:37.229Z",
+      "updatedAt": "2026-07-08T09:18:45.088Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-callirrhoe",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-callirrhoe",
+      "name": "Google Gemini 3.1 Flash TTS - Callirrhoe",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Callirrhoe\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Callirrhoe",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/callirrhoe/v1/callirrhoe-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/callirrhoe/v1/metadata.json",
+          "createdAt": "2026-07-08T09:18:37.211Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:30.087Z",
+      "updatedAt": "2026-07-08T09:18:37.213Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-charon",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-charon",
+      "name": "Google Gemini 3.1 Flash TTS - Charon",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Charon\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/charon/v1/charon-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/charon/v1/metadata.json",
+          "createdAt": "2026-07-08T09:17:52.659Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:17:45.259Z",
+      "updatedAt": "2026-07-08T09:17:52.662Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-despina",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-despina",
+      "name": "Google Gemini 3.1 Flash TTS - Despina",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Despina\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Despina",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/despina/v1/despina-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/despina/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:21.783Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:14.655Z",
+      "updatedAt": "2026-07-08T09:19:21.785Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-enceladus",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-enceladus",
+      "name": "Google Gemini 3.1 Flash TTS - Enceladus",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Enceladus\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Enceladus",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/enceladus/v1/enceladus-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/enceladus/v1/metadata.json",
+          "createdAt": "2026-07-08T09:18:52.386Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:45.101Z",
+      "updatedAt": "2026-07-08T09:18:52.387Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-erinome",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-erinome",
+      "name": "Google Gemini 3.1 Flash TTS - Erinome",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Erinome\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Erinome",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/erinome/v1/erinome-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/erinome/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:29.128Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:21.799Z",
+      "updatedAt": "2026-07-08T09:19:29.134Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-fenrir",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-fenrir",
+      "name": "Google Gemini 3.1 Flash TTS - Fenrir",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Fenrir\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Fenrir",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/fenrir/v1/fenrir-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/fenrir/v1/metadata.json",
+          "createdAt": "2026-07-08T09:18:08.124Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:00.032Z",
+      "updatedAt": "2026-07-08T09:18:08.125Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-gacrux",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-gacrux",
+      "name": "Google Gemini 3.1 Flash TTS - Gacrux",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Gacrux\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Gacrux",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/gacrux/v1/gacrux-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/gacrux/v1/metadata.json",
+          "createdAt": "2026-07-08T09:20:21.168Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:20:13.890Z",
+      "updatedAt": "2026-07-08T09:20:21.169Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-iapetus",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-iapetus",
+      "name": "Google Gemini 3.1 Flash TTS - Iapetus",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Iapetus\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Iapetus",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/iapetus/v1/iapetus-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/iapetus/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:00.939Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:52.397Z",
+      "updatedAt": "2026-07-08T09:19:00.940Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-kore",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-kore",
+      "name": "Google Gemini 3.1 Flash TTS - Kore",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Kore\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Kore",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/kore/v1/kore-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/kore/v1/metadata.json",
+          "createdAt": "2026-07-08T09:17:59.999Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:17:52.674Z",
+      "updatedAt": "2026-07-08T09:18:00.003Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-laomedeia",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-laomedeia",
+      "name": "Google Gemini 3.1 Flash TTS - Laomedeia",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Laomedeia\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Laomedeia",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/laomedeia/v1/laomedeia-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/laomedeia/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:50.519Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:43.250Z",
+      "updatedAt": "2026-07-08T09:19:50.521Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-leda",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-leda",
+      "name": "Google Gemini 3.1 Flash TTS - Leda",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Leda\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Leda",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/leda/v1/leda-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/leda/v1/metadata.json",
+          "createdAt": "2026-07-08T09:18:15.607Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:08.135Z",
+      "updatedAt": "2026-07-08T09:18:15.608Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-orus",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-orus",
+      "name": "Google Gemini 3.1 Flash TTS - Orus",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Orus\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Orus",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/orus/v1/orus-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/orus/v1/metadata.json",
+          "createdAt": "2026-07-08T09:18:23.350Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:18:15.620Z",
+      "updatedAt": "2026-07-08T09:18:23.352Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-puck",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-puck",
+      "name": "Google Gemini 3.1 Flash TTS - Puck",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Puck\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Puck",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/puck/v1/puck-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/puck/v1/metadata.json",
+          "createdAt": "2026-07-08T09:17:45.245Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:17:37.787Z",
+      "updatedAt": "2026-07-08T09:17:45.247Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-pulcherrima",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-pulcherrima",
+      "name": "Google Gemini 3.1 Flash TTS - Pulcherrima",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Pulcherrima\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Pulcherrima",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/pulcherrima/v1/pulcherrima-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/pulcherrima/v1/metadata.json",
+          "createdAt": "2026-07-08T09:20:28.713Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:20:21.178Z",
+      "updatedAt": "2026-07-08T09:20:28.717Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-rasalgethi",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-rasalgethi",
+      "name": "Google Gemini 3.1 Flash TTS - Rasalgethi",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Rasalgethi\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Rasalgethi",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/rasalgethi/v1/rasalgethi-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/rasalgethi/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:43.238Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:36.380Z",
+      "updatedAt": "2026-07-08T09:19:43.239Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-sadachbia",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-sadachbia",
+      "name": "Google Gemini 3.1 Flash TTS - Sadachbia",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Sadachbia\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Sadachbia",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/sadachbia/v1/sadachbia-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/sadachbia/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:01.758Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:20:53.399Z",
+      "updatedAt": "2026-07-08T09:21:01.760Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-sadaltager",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-sadaltager",
+      "name": "Google Gemini 3.1 Flash TTS - Sadaltager",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Sadaltager\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Sadaltager",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/sadaltager/v1/sadaltager-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/sadaltager/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:08.677Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:01.775Z",
+      "updatedAt": "2026-07-08T09:21:08.678Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-schedar",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-schedar",
+      "name": "Google Gemini 3.1 Flash TTS - Schedar",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Schedar\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Schedar",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/schedar/v1/schedar-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/schedar/v1/metadata.json",
+          "createdAt": "2026-07-08T09:20:13.877Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:20:06.403Z",
+      "updatedAt": "2026-07-08T09:20:13.878Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-sulafat",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-sulafat",
+      "name": "Google Gemini 3.1 Flash TTS - Sulafat",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Sulafat\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Sulafat",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/sulafat/v1/sulafat-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/sulafat/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:17.099Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:08.688Z",
+      "updatedAt": "2026-07-08T09:21:17.101Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-umbriel",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-umbriel",
+      "name": "Google Gemini 3.1 Flash TTS - Umbriel",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Umbriel\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Umbriel",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/umbriel/v1/umbriel-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/umbriel/v1/metadata.json",
+          "createdAt": "2026-07-08T09:19:07.450Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:19:00.951Z",
+      "updatedAt": "2026-07-08T09:19:07.452Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-vindemiatrix",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-vindemiatrix",
+      "name": "Google Gemini 3.1 Flash TTS - Vindemiatrix",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Vindemiatrix\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Vindemiatrix",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/vindemiatrix/v1/vindemiatrix-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/vindemiatrix/v1/metadata.json",
+          "createdAt": "2026-07-08T09:20:53.386Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:20:46.222Z",
+      "updatedAt": "2026-07-08T09:20:53.387Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-zephyr",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-zephyr",
+      "name": "Google Gemini 3.1 Flash TTS - Zephyr",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Zephyr\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Zephyr",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/zephyr/v1/zephyr-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/zephyr/v1/metadata.json",
+          "createdAt": "2026-07-08T09:17:37.775Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:17:29.341Z",
+      "updatedAt": "2026-07-08T09:17:37.777Z"
+    },
+    {
+      "id": "master-brand-voice-google-gemini-3-1-flash-tts-preview-zubenelgenubi",
+      "slug": "voice-google-gemini-3-1-flash-tts-preview-zubenelgenubi",
+      "name": "Google Gemini 3.1 Flash TTS - Zubenelgenubi",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Google Gemini 3.1 Flash TTS. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Google Gemini 3.1 Flash TTS.\n\nModel: google/gemini-3.1-flash-tts-preview\nVoice: Zubenelgenubi\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Zubenelgenubi",
+          "language": "en",
+          "duration": 12,
+          "format": "wav",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/zubenelgenubi/v1/zubenelgenubi-v1.wav",
+          "metadataPath": "outputs/audio/voices/google-gemini-3-1-flash-tts-preview/zubenelgenubi/v1/metadata.json",
+          "createdAt": "2026-07-08T09:20:46.209Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:20:36.609Z",
+      "updatedAt": "2026-07-08T09:20:46.211Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-alloy",
+      "slug": "voice-hexgrad-kokoro-82m-af-alloy",
+      "name": "Kokoro 82M - af_alloy",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_alloy\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_alloy",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-alloy/v1/af-alloy-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-alloy/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:19.261Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:18.281Z",
+      "updatedAt": "2026-07-08T09:21:19.265Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-aoede",
+      "slug": "voice-hexgrad-kokoro-82m-af-aoede",
+      "name": "Kokoro 82M - af_aoede",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_aoede\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_aoede",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-aoede/v1/af-aoede-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-aoede/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:20.553Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:19.279Z",
+      "updatedAt": "2026-07-08T09:21:20.554Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-bella",
+      "slug": "voice-hexgrad-kokoro-82m-af-bella",
+      "name": "Kokoro 82M - af_bella",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_bella\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_bella",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-bella/v1/af-bella-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-bella/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:21.588Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:20.565Z",
+      "updatedAt": "2026-07-08T09:21:21.590Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-heart",
+      "slug": "voice-hexgrad-kokoro-82m-af-heart",
+      "name": "Kokoro 82M - af_heart",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_heart\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_heart",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-heart/v1/af-heart-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-heart/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:18.257Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:17.112Z",
+      "updatedAt": "2026-07-08T09:21:18.260Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-jessica",
+      "slug": "voice-hexgrad-kokoro-82m-af-jessica",
+      "name": "Kokoro 82M - af_jessica",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_jessica\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_jessica",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-jessica/v1/af-jessica-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-jessica/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:22.944Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:21.601Z",
+      "updatedAt": "2026-07-08T09:21:22.946Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-kore",
+      "slug": "voice-hexgrad-kokoro-82m-af-kore",
+      "name": "Kokoro 82M - af_kore",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_kore\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_kore",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-kore/v1/af-kore-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-kore/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:24.021Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:22.957Z",
+      "updatedAt": "2026-07-08T09:21:24.022Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-nicole",
+      "slug": "voice-hexgrad-kokoro-82m-af-nicole",
+      "name": "Kokoro 82M - af_nicole",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_nicole\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_nicole",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-nicole/v1/af-nicole-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-nicole/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:25.159Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:24.034Z",
+      "updatedAt": "2026-07-08T09:21:25.160Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-nova",
+      "slug": "voice-hexgrad-kokoro-82m-af-nova",
+      "name": "Kokoro 82M - af_nova",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_nova\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_nova",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-nova/v1/af-nova-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-nova/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:26.172Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:25.173Z",
+      "updatedAt": "2026-07-08T09:21:26.173Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-river",
+      "slug": "voice-hexgrad-kokoro-82m-af-river",
+      "name": "Kokoro 82M - af_river",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_river\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_river",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-river/v1/af-river-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-river/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:27.515Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:26.183Z",
+      "updatedAt": "2026-07-08T09:21:27.517Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-sarah",
+      "slug": "voice-hexgrad-kokoro-82m-af-sarah",
+      "name": "Kokoro 82M - af_sarah",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_sarah\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_sarah",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-sarah/v1/af-sarah-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-sarah/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:28.492Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:27.527Z",
+      "updatedAt": "2026-07-08T09:21:28.493Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-af-sky",
+      "slug": "voice-hexgrad-kokoro-82m-af-sky",
+      "name": "Kokoro 82M - af_sky",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: af_sky\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "af_sky",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-sky/v1/af-sky-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/af-sky/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:29.589Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:28.503Z",
+      "updatedAt": "2026-07-08T09:21:29.590Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-adam",
+      "slug": "voice-hexgrad-kokoro-82m-am-adam",
+      "name": "Kokoro 82M - am_adam",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_adam\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_adam",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-adam/v1/am-adam-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-adam/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:30.542Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:29.600Z",
+      "updatedAt": "2026-07-08T09:21:30.544Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-echo",
+      "slug": "voice-hexgrad-kokoro-82m-am-echo",
+      "name": "Kokoro 82M - am_echo",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_echo\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_echo",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-echo/v1/am-echo-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-echo/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:31.539Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:30.556Z",
+      "updatedAt": "2026-07-08T09:21:31.541Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-eric",
+      "slug": "voice-hexgrad-kokoro-82m-am-eric",
+      "name": "Kokoro 82M - am_eric",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_eric\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_eric",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-eric/v1/am-eric-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-eric/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:32.540Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:31.558Z",
+      "updatedAt": "2026-07-08T09:21:32.542Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-fenrir",
+      "slug": "voice-hexgrad-kokoro-82m-am-fenrir",
+      "name": "Kokoro 82M - am_fenrir",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_fenrir\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_fenrir",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-fenrir/v1/am-fenrir-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-fenrir/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:33.566Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:32.559Z",
+      "updatedAt": "2026-07-08T09:21:33.568Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-liam",
+      "slug": "voice-hexgrad-kokoro-82m-am-liam",
+      "name": "Kokoro 82M - am_liam",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_liam\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_liam",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-liam/v1/am-liam-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-liam/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:38.177Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:33.578Z",
+      "updatedAt": "2026-07-08T09:21:38.180Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-michael",
+      "slug": "voice-hexgrad-kokoro-82m-am-michael",
+      "name": "Kokoro 82M - am_michael",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_michael\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_michael",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-michael/v1/am-michael-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-michael/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:40.815Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:38.199Z",
+      "updatedAt": "2026-07-08T09:21:40.819Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-onyx",
+      "slug": "voice-hexgrad-kokoro-82m-am-onyx",
+      "name": "Kokoro 82M - am_onyx",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_onyx\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_onyx",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-onyx/v1/am-onyx-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-onyx/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:41.823Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:40.840Z",
+      "updatedAt": "2026-07-08T09:21:41.824Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-puck",
+      "slug": "voice-hexgrad-kokoro-82m-am-puck",
+      "name": "Kokoro 82M - am_puck",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_puck\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_puck",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-puck/v1/am-puck-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-puck/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:43.555Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:41.839Z",
+      "updatedAt": "2026-07-08T09:21:43.556Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-am-santa",
+      "slug": "voice-hexgrad-kokoro-82m-am-santa",
+      "name": "Kokoro 82M - am_santa",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: am_santa\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "am_santa",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-santa/v1/am-santa-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/am-santa/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:44.562Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:43.568Z",
+      "updatedAt": "2026-07-08T09:21:44.564Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bf-alice",
+      "slug": "voice-hexgrad-kokoro-82m-bf-alice",
+      "name": "Kokoro 82M - bf_alice",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bf_alice\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bf_alice",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-alice/v1/bf-alice-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-alice/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:45.598Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:44.575Z",
+      "updatedAt": "2026-07-08T09:21:45.600Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bf-emma",
+      "slug": "voice-hexgrad-kokoro-82m-bf-emma",
+      "name": "Kokoro 82M - bf_emma",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bf_emma\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bf_emma",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-emma/v1/bf-emma-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-emma/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:46.583Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:45.610Z",
+      "updatedAt": "2026-07-08T09:21:46.584Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bf-isabella",
+      "slug": "voice-hexgrad-kokoro-82m-bf-isabella",
+      "name": "Kokoro 82M - bf_isabella",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bf_isabella\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bf_isabella",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-isabella/v1/bf-isabella-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-isabella/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:47.682Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:46.596Z",
+      "updatedAt": "2026-07-08T09:21:47.683Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bf-lily",
+      "slug": "voice-hexgrad-kokoro-82m-bf-lily",
+      "name": "Kokoro 82M - bf_lily",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bf_lily\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bf_lily",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-lily/v1/bf-lily-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bf-lily/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:48.727Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:47.697Z",
+      "updatedAt": "2026-07-08T09:21:48.730Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bm-daniel",
+      "slug": "voice-hexgrad-kokoro-82m-bm-daniel",
+      "name": "Kokoro 82M - bm_daniel",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bm_daniel\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bm_daniel",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-daniel/v1/bm-daniel-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-daniel/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:49.716Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:48.740Z",
+      "updatedAt": "2026-07-08T09:21:49.718Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bm-fable",
+      "slug": "voice-hexgrad-kokoro-82m-bm-fable",
+      "name": "Kokoro 82M - bm_fable",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bm_fable\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bm_fable",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-fable/v1/bm-fable-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-fable/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:50.755Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:49.728Z",
+      "updatedAt": "2026-07-08T09:21:50.757Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bm-george",
+      "slug": "voice-hexgrad-kokoro-82m-bm-george",
+      "name": "Kokoro 82M - bm_george",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bm_george\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bm_george",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-george/v1/bm-george-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-george/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:53.987Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:50.770Z",
+      "updatedAt": "2026-07-08T09:21:53.989Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-bm-lewis",
+      "slug": "voice-hexgrad-kokoro-82m-bm-lewis",
+      "name": "Kokoro 82M - bm_lewis",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: bm_lewis\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "bm_lewis",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-lewis/v1/bm-lewis-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/bm-lewis/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:55.486Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:54.001Z",
+      "updatedAt": "2026-07-08T09:21:55.487Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-ef-dora",
+      "slug": "voice-hexgrad-kokoro-82m-ef-dora",
+      "name": "Kokoro 82M - ef_dora",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: ef_dora\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "ef_dora",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/ef-dora/v1/ef-dora-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/ef-dora/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:57.137Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:55.498Z",
+      "updatedAt": "2026-07-08T09:21:57.138Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-em-alex",
+      "slug": "voice-hexgrad-kokoro-82m-em-alex",
+      "name": "Kokoro 82M - em_alex",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: em_alex\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "em_alex",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/em-alex/v1/em-alex-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/em-alex/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:58.082Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:57.150Z",
+      "updatedAt": "2026-07-08T09:21:58.085Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-em-santa",
+      "slug": "voice-hexgrad-kokoro-82m-em-santa",
+      "name": "Kokoro 82M - em_santa",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: em_santa\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "em_santa",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/em-santa/v1/em-santa-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/em-santa/v1/metadata.json",
+          "createdAt": "2026-07-08T09:21:59.216Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:58.095Z",
+      "updatedAt": "2026-07-08T09:21:59.217Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-ff-siwis",
+      "slug": "voice-hexgrad-kokoro-82m-ff-siwis",
+      "name": "Kokoro 82M - ff_siwis",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: ff_siwis\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "ff_siwis",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/ff-siwis/v1/ff-siwis-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/ff-siwis/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:00.184Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:21:59.229Z",
+      "updatedAt": "2026-07-08T09:22:00.185Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-hf-alpha",
+      "slug": "voice-hexgrad-kokoro-82m-hf-alpha",
+      "name": "Kokoro 82M - hf_alpha",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: hf_alpha\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "hf_alpha",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/hf-alpha/v1/hf-alpha-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/hf-alpha/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:01.241Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:00.196Z",
+      "updatedAt": "2026-07-08T09:22:01.245Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-hf-beta",
+      "slug": "voice-hexgrad-kokoro-82m-hf-beta",
+      "name": "Kokoro 82M - hf_beta",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: hf_beta\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "hf_beta",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/hf-beta/v1/hf-beta-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/hf-beta/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:02.513Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:01.258Z",
+      "updatedAt": "2026-07-08T09:22:02.515Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-hm-omega",
+      "slug": "voice-hexgrad-kokoro-82m-hm-omega",
+      "name": "Kokoro 82M - hm_omega",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: hm_omega\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "hm_omega",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/hm-omega/v1/hm-omega-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/hm-omega/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:03.514Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:02.526Z",
+      "updatedAt": "2026-07-08T09:22:03.516Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-hm-psi",
+      "slug": "voice-hexgrad-kokoro-82m-hm-psi",
+      "name": "Kokoro 82M - hm_psi",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: hm_psi\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "hm_psi",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/hm-psi/v1/hm-psi-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/hm-psi/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:04.981Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:03.530Z",
+      "updatedAt": "2026-07-08T09:22:04.983Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-if-sara",
+      "slug": "voice-hexgrad-kokoro-82m-if-sara",
+      "name": "Kokoro 82M - if_sara",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: if_sara\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "if_sara",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/if-sara/v1/if-sara-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/if-sara/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:05.976Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:04.993Z",
+      "updatedAt": "2026-07-08T09:22:05.978Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-im-nicola",
+      "slug": "voice-hexgrad-kokoro-82m-im-nicola",
+      "name": "Kokoro 82M - im_nicola",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: im_nicola\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "im_nicola",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/im-nicola/v1/im-nicola-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/im-nicola/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:06.943Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:05.988Z",
+      "updatedAt": "2026-07-08T09:22:06.947Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-jf-alpha",
+      "slug": "voice-hexgrad-kokoro-82m-jf-alpha",
+      "name": "Kokoro 82M - jf_alpha",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: jf_alpha\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "jf_alpha",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-alpha/v1/jf-alpha-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-alpha/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:07.910Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:06.957Z",
+      "updatedAt": "2026-07-08T09:22:07.914Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-jf-gongitsune",
+      "slug": "voice-hexgrad-kokoro-82m-jf-gongitsune",
+      "name": "Kokoro 82M - jf_gongitsune",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: jf_gongitsune\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "jf_gongitsune",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-gongitsune/v1/jf-gongitsune-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-gongitsune/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:08.933Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:07.924Z",
+      "updatedAt": "2026-07-08T09:22:08.935Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-jf-nezumi",
+      "slug": "voice-hexgrad-kokoro-82m-jf-nezumi",
+      "name": "Kokoro 82M - jf_nezumi",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: jf_nezumi\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "jf_nezumi",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-nezumi/v1/jf-nezumi-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-nezumi/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:10.072Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:08.951Z",
+      "updatedAt": "2026-07-08T09:22:10.073Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-jf-tebukuro",
+      "slug": "voice-hexgrad-kokoro-82m-jf-tebukuro",
+      "name": "Kokoro 82M - jf_tebukuro",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: jf_tebukuro\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "jf_tebukuro",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-tebukuro/v1/jf-tebukuro-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/jf-tebukuro/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:11.130Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:10.085Z",
+      "updatedAt": "2026-07-08T09:22:11.132Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-jm-kumo",
+      "slug": "voice-hexgrad-kokoro-82m-jm-kumo",
+      "name": "Kokoro 82M - jm_kumo",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: jm_kumo\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "jm_kumo",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/jm-kumo/v1/jm-kumo-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/jm-kumo/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:12.180Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:11.142Z",
+      "updatedAt": "2026-07-08T09:22:12.181Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-pf-dora",
+      "slug": "voice-hexgrad-kokoro-82m-pf-dora",
+      "name": "Kokoro 82M - pf_dora",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: pf_dora\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "pf_dora",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/pf-dora/v1/pf-dora-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/pf-dora/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:13.119Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:12.192Z",
+      "updatedAt": "2026-07-08T09:22:13.121Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-pm-alex",
+      "slug": "voice-hexgrad-kokoro-82m-pm-alex",
+      "name": "Kokoro 82M - pm_alex",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: pm_alex\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "pm_alex",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/pm-alex/v1/pm-alex-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/pm-alex/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:14.104Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:13.132Z",
+      "updatedAt": "2026-07-08T09:22:14.106Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-pm-santa",
+      "slug": "voice-hexgrad-kokoro-82m-pm-santa",
+      "name": "Kokoro 82M - pm_santa",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: pm_santa\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "pm_santa",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/pm-santa/v1/pm-santa-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/pm-santa/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:15.057Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:14.119Z",
+      "updatedAt": "2026-07-08T09:22:15.059Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zf-xiaobei",
+      "slug": "voice-hexgrad-kokoro-82m-zf-xiaobei",
+      "name": "Kokoro 82M - zf_xiaobei",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zf_xiaobei\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zf_xiaobei",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaobei/v1/zf-xiaobei-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaobei/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:16.063Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:15.070Z",
+      "updatedAt": "2026-07-08T09:22:16.064Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zf-xiaoni",
+      "slug": "voice-hexgrad-kokoro-82m-zf-xiaoni",
+      "name": "Kokoro 82M - zf_xiaoni",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zf_xiaoni\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zf_xiaoni",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaoni/v1/zf-xiaoni-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaoni/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:17.086Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:16.075Z",
+      "updatedAt": "2026-07-08T09:22:17.087Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zf-xiaoxiao",
+      "slug": "voice-hexgrad-kokoro-82m-zf-xiaoxiao",
+      "name": "Kokoro 82M - zf_xiaoxiao",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zf_xiaoxiao\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zf_xiaoxiao",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaoxiao/v1/zf-xiaoxiao-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaoxiao/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:18.036Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:17.098Z",
+      "updatedAt": "2026-07-08T09:22:18.038Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zf-xiaoyi",
+      "slug": "voice-hexgrad-kokoro-82m-zf-xiaoyi",
+      "name": "Kokoro 82M - zf_xiaoyi",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: female.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zf_xiaoyi\nGender: female\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zf_xiaoyi",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaoyi/v1/zf-xiaoyi-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zf-xiaoyi/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:19.304Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:18.053Z",
+      "updatedAt": "2026-07-08T09:22:19.305Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zm-yunjian",
+      "slug": "voice-hexgrad-kokoro-82m-zm-yunjian",
+      "name": "Kokoro 82M - zm_yunjian",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zm_yunjian\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zm_yunjian",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunjian/v1/zm-yunjian-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunjian/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:20.255Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:19.317Z",
+      "updatedAt": "2026-07-08T09:22:20.258Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zm-yunxi",
+      "slug": "voice-hexgrad-kokoro-82m-zm-yunxi",
+      "name": "Kokoro 82M - zm_yunxi",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zm_yunxi\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zm_yunxi",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunxi/v1/zm-yunxi-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunxi/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:21.283Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:20.278Z",
+      "updatedAt": "2026-07-08T09:22:21.285Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zm-yunxia",
+      "slug": "voice-hexgrad-kokoro-82m-zm-yunxia",
+      "name": "Kokoro 82M - zm_yunxia",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zm_yunxia\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zm_yunxia",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunxia/v1/zm-yunxia-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunxia/v1/metadata.json",
+          "createdAt": "2026-07-08T09:22:22.250Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:21.297Z",
+      "updatedAt": "2026-07-08T09:22:22.252Z"
+    },
+    {
+      "id": "master-brand-voice-hexgrad-kokoro-82m-zm-yunyang",
+      "slug": "voice-hexgrad-kokoro-82m-zm-yunyang",
+      "name": "Kokoro 82M - zm_yunyang",
+      "category": "master-brand",
+      "entityId": "brand.vorinthex-ai",
+      "description": "Voice sample for Kokoro 82M. Gender: male.",
+      "versions": [
+        {
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create a voice sample for Kokoro 82M.\n\nModel: hexgrad/kokoro-82m\nVoice: zm_yunyang\nGender: male\n\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "mode": "tts",
+          "model": "hexgrad/kokoro-82m",
+          "voice": "zm_yunyang",
+          "language": "en",
+          "duration": 12,
+          "format": "mp3",
+          "status": "completed",
+          "audioPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunyang/v1/zm-yunyang-v1.mp3",
+          "metadataPath": "outputs/audio/voices/hexgrad-kokoro-82m/zm-yunyang/v1/metadata.json",
+          "id": "v1",
+          "version": 1,
+          "createdAt": "2026-07-08T09:22:23.232Z"
+        }
+      ],
+      "createdAt": "2026-07-08T09:22:22.267Z",
+      "updatedAt": "2026-07-08T09:22:23.234Z",
+      "currentVersionId": "v1"
     }
   ]
 }

@@ -82,6 +82,11 @@ function querySchemaForPath(path: string) {
       format: z.string().optional(),
     });
   }
+  if (apiPath === '/fragments/standing') {
+    return strictObject({
+      explorer_id: z.string().optional(),
+    });
+  }
   return strictObject({});
 }
 

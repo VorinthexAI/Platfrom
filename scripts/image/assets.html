@@ -17,6 +17,9 @@
       </header>
 
       <section class="toolbar" aria-label="Asset filters">
+        <button class="filter active" data-view="assets">Assets</button>
+        <button class="filter" data-view="voices">Voices</button>
+        <span class="divider"></span>
         <button class="filter active" data-kind="all">All Assets</button>
         <button class="filter" data-kind="logo">Logos</button>
         <button class="filter" data-kind="slideshow">Slideshows</button>
@@ -38,17 +41,31 @@
         <button class="filter" data-category="announcement">Announcements</button>
       </section>
 
+      <section class="toolbar voiceToolbar" id="voiceToolbar" aria-label="Voice filters" hidden>
+        <button class="filter active" data-voice-model="all">All Models</button>
+        <button class="filter" data-voice-model="google/gemini-3.1-flash-tts-preview">Google Gemini</button>
+        <button class="filter" data-voice-model="hexgrad/kokoro-82m">Kokoro 82M</button>
+        <span class="divider"></span>
+        <button class="filter active" data-voice-gender="all">All Voices</button>
+        <button class="filter" data-voice-gender="male">Man</button>
+        <button class="filter" data-voice-gender="female">Woman</button>
+      </section>
+
       <section class="grid" id="grid" aria-live="polite"></section>
     </main>
 
     <script>
       const grid = document.querySelector("#grid");
       const meta = document.querySelector("#meta");
+      const voiceToolbar = document.querySelector("#voiceToolbar");
       let assets = [];
+      let viewMode = "assets";
       let kindFilter = "all";
       let categoryFilter = "all";
       let logoFormat = "png";
       let logoBackground = "transparent";
+      let voiceModelFilter = "all";
+      let voiceGenderFilter = "all";
       const slideshowIndexes = new Map();
 
       function latestVersion(asset) {
@@ -98,6 +115,7 @@
             slug: `${asset.slug}-${version.id}`,
             baseSlug: asset.slug,
             name: `${asset.name} ${version.id.toUpperCase()}`,
+            isVoiceSample: asset.slug.startsWith("voice-"),
             version
           }));
       }
@@ -154,11 +172,12 @@
 
       function renderAudio(asset) {
         const src = asset.version.audioPath ? `audio-assets/${asset.version.audioPath}` : "";
+        const voiceMeta = asset.isVoiceSample ? `${modelLabel(asset.version.model)} / ${voiceGender(asset)}` : asset.version.mode || "Audio";
         return `
           <article class="card audioCard">
             <div class="audioPreview">
-              <span class="previewLabel">${asset.version.mode || "Audio"}</span>
-              <div class="audioGlyph">AUDIO</div>
+              <span class="previewLabel">${voiceMeta}</span>
+              <div class="audioGlyph">${asset.isVoiceSample ? asset.version.voice : "AUDIO"}</div>
               ${src ? `<audio src="${src}" controls preload="metadata"></audio>` : `<span>No audio</span>`}
             </div>
             ${cardBody(asset, src)}
@@ -180,7 +199,7 @@
 
       function cardBody(asset, downloadPath) {
         const audioMeta = asset.kind === "audio"
-          ? [asset.version.voice, asset.version.language].filter(Boolean).map((value) => `<span class="pill">${value}</span>`).join("")
+          ? [asset.version.voice, asset.version.language, asset.isVoiceSample ? modelLabel(asset.version.model) : "", asset.isVoiceSample ? voiceGender(asset) : ""].filter(Boolean).map((value) => `<span class="pill">${value}</span>`).join("")
           : "";
         const slideshowMeta = asset.kind === "slideshow"
           ? [`${asset.version.slidePaths?.length || 0} slides`, asset.version.referenceImagePaths?.length ? `${asset.version.referenceImagePaths.length} refs` : "no refs"].map((value) => `<span class="pill">${value}</span>`).join("")
@@ -205,11 +224,20 @@
       }
 
       function render() {
-        const visible = assets.filter((asset) => {
-          const kindMatch = kindFilter === "all" || asset.kind === kindFilter;
-          const categoryMatch = categoryFilter === "all" || asset.category === categoryFilter;
-          return kindMatch && categoryMatch;
-        });
+        voiceToolbar.hidden = viewMode !== "voices";
+        const visible = viewMode === "voices"
+          ? assets.filter((asset) => {
+              if (!asset.isVoiceSample) return false;
+              const modelMatch = voiceModelFilter === "all" || asset.version.model === voiceModelFilter;
+              const genderMatch = voiceGenderFilter === "all" || voiceGender(asset) === voiceGenderFilter;
+              return modelMatch && genderMatch;
+            }).sort((a, b) => `${modelLabel(a.version.model)}-${voiceGender(a)}-${a.version.voice}`.localeCompare(`${modelLabel(b.version.model)}-${voiceGender(b)}-${b.version.voice}`))
+          : assets.filter((asset) => {
+              if (asset.isVoiceSample) return false;
+              const kindMatch = kindFilter === "all" || asset.kind === kindFilter;
+              const categoryMatch = categoryFilter === "all" || asset.category === categoryFilter;
+              return kindMatch && categoryMatch;
+            });
         meta.textContent = `${visible.length} shown / ${assets.length} assets`;
         grid.innerHTML = visible.map((asset) => {
           if (asset.kind === "video") return renderVideo(asset);
@@ -218,6 +246,27 @@
           return renderLogo(asset);
         }).join("");
       }
+
+      function modelLabel(model) {
+        if (model === "google/gemini-3.1-flash-tts-preview") return "Google Gemini";
+        if (model === "hexgrad/kokoro-82m") return "Kokoro 82M";
+        return model || "Audio";
+      }
+
+      function voiceGender(asset) {
+        const voice = asset.version.voice || "";
+        if (asset.version.model === "hexgrad/kokoro-82m") return voice[1] === "m" ? "male" : "female";
+        const female = new Set(["Zephyr", "Kore", "Leda", "Aoede", "Callirrhoe", "Autonoe", "Despina", "Erinome", "Laomedeia", "Achernar", "Gacrux", "Pulcherrima", "Vindemiatrix", "Sulafat"]);
+        return female.has(voice) ? "female" : "male";
+      }
+
+      document.querySelectorAll("[data-view]").forEach((button) => {
+        button.addEventListener("click", () => {
+          viewMode = button.dataset.view;
+          document.querySelectorAll("[data-view]").forEach((item) => item.classList.toggle("active", item === button));
+          render();
+        });
+      });
 
       document.querySelectorAll("[data-kind]").forEach((button) => {
         button.addEventListener("click", () => {
@@ -247,6 +296,22 @@
         button.addEventListener("click", () => {
           logoBackground = button.dataset.background;
           document.querySelectorAll("[data-background]").forEach((item) => item.classList.toggle("active", item === button));
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-voice-model]").forEach((button) => {
+        button.addEventListener("click", () => {
+          voiceModelFilter = button.dataset.voiceModel;
+          document.querySelectorAll("[data-voice-model]").forEach((item) => item.classList.toggle("active", item === button));
+          render();
+        });
+      });
+
+      document.querySelectorAll("[data-voice-gender]").forEach((button) => {
+        button.addEventListener("click", () => {
+          voiceGenderFilter = button.dataset.voiceGender;
+          document.querySelectorAll("[data-voice-gender]").forEach((item) => item.classList.toggle("active", item === button));
           render();
         });
       });

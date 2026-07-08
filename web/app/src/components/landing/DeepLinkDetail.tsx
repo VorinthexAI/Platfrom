@@ -56,7 +56,7 @@ export function CapabilityDetail({
             variant="primary"
             className="min-h-0 px-7 py-3 text-xs"
           >
-            Join Waitlist
+            Join Hunt
           </OpenModalButton>
         </div>
       </div>
@@ -108,7 +108,7 @@ export function OrchestratorDetail({ entity }: { entity: GalaxyEntity }) {
             variant="primary"
             className="min-h-0 px-7 py-3 text-xs"
           >
-            {entity.content?.primaryCta ?? "Join Waitlist"}
+            {entity.content?.primaryCta ?? "Join Hunt"}
           </OpenModalButton>
         </div>
       </div>
@@ -153,7 +153,7 @@ export function ProductDetail({ product }: { product: ProductPlanetData }) {
             variant="primary"
             className="min-h-0 px-7 py-3 text-xs"
           >
-            Join Waitlist
+            Join Hunt
           </OpenModalButton>
         </div>
       </div>

@@ -53,6 +53,10 @@ output "ecr_repository_url" {
   value = module.storage.ecr_repository_url
 }
 
+output "ecr_web_repository_url" {
+  value = module.storage.ecr_web_repository_url
+}
+
 output "s3_bucket_name" {
   value = module.storage.s3_bucket_name
 }
@@ -67,4 +71,34 @@ output "redis_url" {
 
 output "ssm_parameter_prefix" {
   value = local.normalized_ssm_prefix
+}
+
+# ---- Target-state platform (null unless enable_app_platform = true) ---------
+
+output "app_platform_alb_dns_name" {
+  description = "ALB DNS name for the new web/api tiers."
+  value       = one(module.app_platform[*].alb_dns_name)
+}
+
+output "app_platform_alb_acm_validation_records" {
+  description = "DNS CNAME records to add to validate the ALB ACM certificate."
+  value       = one(module.app_platform[*].alb_acm_validation_records)
+}
+
+output "cloudfront_domain_name" {
+  description = "CloudFront distribution domain; point Cloudflare/DNS at this."
+  value       = one(module.edge[*].distribution_domain_name)
+}
+
+output "cloudfront_acm_validation_records" {
+  description = "DNS CNAME records to add to validate the CloudFront (us-east-1) ACM certificate."
+  value       = one(module.edge[*].cloudfront_acm_validation_records)
+}
+
+output "app_platform_web_service_name" {
+  value = one(module.app_platform[*].web_service_name)
+}
+
+output "app_platform_api_service_name" {
+  value = one(module.app_platform[*].api_service_name)
 }

@@ -21,6 +21,7 @@ export {
   ChevronRightIcon,
   CloseIcon,
   CompassIcon,
+  FragmentIcon,
   GalleryIcon,
   LockIcon,
   SignalIcon,

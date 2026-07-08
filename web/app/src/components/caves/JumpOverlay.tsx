@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { useGalaxyStore } from "@/lib/galaxy-store";
+import { preloadGlobe } from "@/lib/fragments/globe-preload";
 
 const JUMP_DURATION_MS = 1600;
 
@@ -19,8 +20,14 @@ export function JumpOverlay() {
 
   useEffect(() => {
     if (mode !== "jump" || !jumpTarget) return;
+    const targetPath = jumpTarget === "private" ? "/galaxy/private" : "/galaxy/public";
+    // Warm the destination + preload the fragment jar during the white-out so
+    // /galaxy/public paints a full jar on first frame (no empty-then-fill).
+    if (jumpTarget === "public") {
+      preloadGlobe();
+      router.prefetch("/galaxy/public");
+    }
     const timer = setTimeout(() => {
-      const targetPath = jumpTarget === "private" ? "/galaxy/private" : "/galaxy/public";
       useGalaxyStore.getState().resetToSystem();
       router.replace(targetPath);
     }, JUMP_DURATION_MS);

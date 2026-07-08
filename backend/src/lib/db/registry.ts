@@ -1,5 +1,6 @@
 import type { Page } from './base';
-import { getAllActiveVisitorsChunked, listActiveVisitorsPage, upsertActiveVisitorByKey } from './active-visitors.node';
+import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSessionByKey } from './visitor-sessions.node';
+import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
 import { getAllAgentsChunked, listAgentsPage, upsertAgentByKey } from './agents.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChallengeByKey } from './auth-challenges.node';
 import { getAllCapabilitiesChunked, listCapabilitiesPage, upsertCapabilityByKey } from './capabilities.node';
@@ -46,7 +47,6 @@ export interface NodeAccessors {
  * once and it shows up in both automatically.
  */
 export const NODE_REGISTRY: Record<string, NodeAccessors> = {
-  activeVisitors: { listPage: listActiveVisitorsPage, getAllChunked: getAllActiveVisitorsChunked, upsertByKey: upsertActiveVisitorByKey },
   agents: { listPage: listAgentsPage, getAllChunked: getAllAgentsChunked, upsertByKey: upsertAgentByKey },
   authChallenges: { listPage: listAuthChallengesPage, getAllChunked: getAllAuthChallengesChunked, upsertByKey: upsertAuthChallengeByKey },
   capabilities: { listPage: listCapabilitiesPage, getAllChunked: getAllCapabilitiesChunked, upsertByKey: upsertCapabilityByKey },
@@ -67,7 +67,9 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   subscriptions: { listPage: listSubscriptionsPage, getAllChunked: getAllSubscriptionsChunked, upsertByKey: upsertSubscriptionByKey },
   superAdmins: { listPage: listSuperAdminsPage, getAllChunked: getAllSuperAdminsChunked, upsertByKey: upsertSuperAdminByKeyGuarded as never },
   userEntitlements: { listPage: listUserEntitlementsPage, getAllChunked: getAllUserEntitlementsChunked, upsertByKey: upsertUserEntitlementByKey },
+  userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },
+  visitorSessions: { listPage: listVisitorSessionsPage, getAllChunked: getAllVisitorSessionsChunked, upsertByKey: upsertVisitorSessionByKey },
   visitors: { listPage: listVisitorsPage, getAllChunked: getAllVisitorsChunked, upsertByKey: upsertVisitorByKey },
 };
 

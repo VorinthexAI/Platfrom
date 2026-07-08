@@ -6,7 +6,7 @@ import { Button } from "@vorinthex/shared/ui/components";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
 import { trackCtaClick, trackLandingEvent } from "@/lib/analytics";
 import { useGalaxyStore } from "@/lib/galaxy-store";
-import { ChevronRightIcon, CloseIcon } from "@/components/ui/icons";
+import { CloseIcon } from "@/components/ui/icons";
 
 /**
  * Screen-space layer for the Intelligence Fragments system: the community
@@ -85,6 +85,10 @@ function CollectibleTooltip() {
               </Button>
             ) : (
               <>
+                <p className="text-[0.72rem] leading-relaxed text-silver-500">
+                  New explorer? Join to send your fragments into the hunt.
+                  Already collecting? Sign in to sync your haul.
+                </p>
                 <Button
                   variant="primary"
                   onClick={() => {
@@ -104,12 +108,12 @@ function CollectibleTooltip() {
                     select(null);
                     enterCave("join");
                   }}
-                  className="w-full min-h-0 px-5 py-2.5 text-[0.6rem]"
+                  className="mt-4 w-full min-h-0 px-5 py-3.5 text-xs uppercase"
                 >
-                  Join to collect
+                  Join
                 </Button>
-                <button
-                  type="button"
+                <Button
+                  variant="secondary"
                   onClick={() => {
                     // Same treasure, other door: sign-in also stores the
                     // collect immediately, so the fragment is never lost.
@@ -120,11 +124,10 @@ function CollectibleTooltip() {
                     select(null);
                     enterCave("signin");
                   }}
-                  className="mt-2.5 flex w-full items-center justify-center gap-1 text-center font-mono text-[0.55rem] tracking-[0.2em] text-silver-500 uppercase transition-colors hover:text-silver-100"
+                  className="mt-2 w-full min-h-0 px-5 py-3 text-[0.62rem] uppercase"
                 >
-                  Already on waitlist? Tap here to sign in
-                  <ChevronRightIcon size="sm" />
-                </button>
+                  Sign in
+                </Button>
               </>
             )}
           </div>

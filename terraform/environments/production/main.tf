@@ -66,7 +66,19 @@ module "graph_db_host" {
   data_volume_size        = var.graph_db_volume_size
   ssh_ingress_cidr_blocks = var.ssh_ingress_cidr_blocks
   ssh_public_key          = local.effective_ssh_public_key
+  ami_id                  = var.graph_db_ami_id
   tags                    = local.tags
+}
+
+# Wave 0 safety: automated DLM snapshots of the ArangoDB data volume. Selects
+# the existing volume by its Name tag, so it never mutates the volume itself.
+module "graph_db_backup" {
+  source = "../../modules/backup"
+
+  name_prefix           = var.name_prefix
+  target_volume_tags    = { Name = "${var.name_prefix}-graph-db-data" }
+  snapshot_retain_count = var.graph_db_snapshot_retain_count
+  tags                  = local.tags
 }
 
 module "cache" {
@@ -170,6 +182,7 @@ module "app_host" {
   ssm_parameter_arns      = local.ssm_arns
   kms_key_arns            = var.kms_key_arns
   allow_instance_ssm_read = var.allow_app_instance_ssm_read
+  ami_id                  = var.app_ami_id
   tags                    = local.tags
 }
 
@@ -190,4 +203,79 @@ module "render_service" {
   tags                 = local.tags
 
   depends_on = [aws_ssm_parameter.prod]
+}
+
+# ---------------------------------------------------------------------------
+# Target-state additive platform (ALB + ECS EC2 web/api + CloudFront). Gated by
+# var.enable_app_platform (default false) so the default plan shows ZERO changes
+# from these modules. When enabled they stand up ALONGSIDE the existing app/DB
+# hosts and Redis, which stay running as the instant rollback until DNS cutover.
+# ---------------------------------------------------------------------------
+locals {
+  effective_web_image = var.web_image != "" ? var.web_image : "${module.storage.ecr_web_repository_url}:latest"
+  effective_api_image = var.api_image != "" ? var.api_image : "${module.storage.ecr_repository_url}:latest"
+}
+
+module "app_platform" {
+  source = "../../modules/app-platform"
+  count  = var.enable_app_platform ? 1 : 0
+
+  name_prefix = var.name_prefix
+  vpc_id      = module.network.vpc_id
+
+  alb_subnet_ids = module.network.public_subnet_ids
+  app_subnet_ids = module.network.private_subnet_ids
+
+  # Attach to the EXISTING cluster created by the render-service module.
+  cluster_name = module.render_service.cluster_name
+
+  db_security_group_id    = module.network.graph_db_security_group_id
+  cache_security_group_id = module.network.cache_security_group_id
+
+  web_image = local.effective_web_image
+  api_image = local.effective_api_image
+
+  instance_type        = var.app_platform_instance_type
+  asg_min_size         = var.app_platform_asg_min_size
+  asg_max_size         = var.app_platform_asg_max_size
+  asg_desired_capacity = var.app_platform_asg_min_size
+
+  web_desired_count = var.web_desired_count
+  api_desired_count = var.api_desired_count
+
+  web_domain_names = var.web_domain_names
+  api_domain_names = var.api_domain_names
+
+  acm_certificate_arn = var.alb_acm_certificate_arn
+  alb_https_enabled   = var.alb_https_enabled
+
+  ssm_parameter_prefix = local.normalized_ssm_prefix
+  ssm_parameter_arns   = local.ssm_arns
+  kms_key_arns         = var.kms_key_arns
+  s3_bucket_arn        = module.storage.s3_bucket_arn
+  site_url             = var.site_url
+
+  tags = local.tags
+
+  depends_on = [aws_ssm_parameter.prod]
+}
+
+module "edge" {
+  source = "../../modules/edge"
+  count  = var.enable_app_platform ? 1 : 0
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  name_prefix     = var.name_prefix
+  alb_domain_name = module.app_platform[0].alb_dns_name
+
+  web_domain_names = var.web_domain_names
+  api_domain_names = var.api_domain_names
+
+  viewer_acm_certificate_arn = var.cloudfront_viewer_acm_certificate_arn
+  origin_custom_header_value = var.cloudfront_origin_verify_value
+
+  tags = local.tags
 }

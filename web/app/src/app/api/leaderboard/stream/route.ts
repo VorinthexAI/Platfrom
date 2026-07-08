@@ -1,4 +1,4 @@
-import { backendStream } from "@/lib/backend";
+import { backendConfigured, backendStream } from "@/lib/backend";
 import { getProgress } from "@/lib/fragments/fragments-server";
 
 export const dynamic = "force-dynamic";
@@ -22,26 +22,38 @@ export async function GET() {
     });
   }
 
-  // Local fallback stream: a believable little galaxy.
+  // Fallback stream. In a configured environment (prod/staging) the backend
+  // is the ONLY source of truth: if it's momentarily unreachable we emit an
+  // honest empty board rather than fabricated demo rows that could masquerade
+  // as real standings. The believable demo galaxy is dev-only.
+  const demo = !backendConfigured();
   const encoder = new TextEncoder();
   let interval: ReturnType<typeof setInterval> | null = null;
   const stream = new ReadableStream({
     start(controller) {
       const emit = () => {
         const progress = getProgress();
-        const payload = JSON.stringify({
-          top: [
-            { user_id: "demo-1", alias: "Wind Surfer", total: 132000 },
-            { user_id: "demo-2", alias: "Road Yokl", total: 41800 },
-            { user_id: "demo-3", alias: "Galaxy Glory", total: 10230 },
-            { user_id: "demo-4", alias: "Night Ranger", total: 4420 },
-            { user_id: "demo-5", alias: "Dust Pilot", total: 443 },
-          ],
-          fragments_total: Math.max(progress.total, 189430),
-          fragments_entries: Math.max(progress.collected.length, 42),
-          active_explorers: 52,
-          recent: [],
-        });
+        const payload = demo
+          ? JSON.stringify({
+              top: [
+                { user_id: "demo-1", alias: "Wind Surfer", total: 132000 },
+                { user_id: "demo-2", alias: "Road Yokl", total: 41800 },
+                { user_id: "demo-3", alias: "Galaxy Glory", total: 10230 },
+                { user_id: "demo-4", alias: "Night Ranger", total: 4420 },
+                { user_id: "demo-5", alias: "Dust Pilot", total: 443 },
+              ],
+              fragments_total: Math.max(progress.total, 189430),
+              fragments_entries: Math.max(progress.collected.length, 42),
+              active_explorers: 52,
+              recent: [],
+            })
+          : JSON.stringify({
+              top: [],
+              fragments_total: 0,
+              fragments_entries: 0,
+              active_explorers: 0,
+              recent: [],
+            });
         controller.enqueue(
           encoder.encode(`event: leaderboard\ndata: ${payload}\n\n`),
         );

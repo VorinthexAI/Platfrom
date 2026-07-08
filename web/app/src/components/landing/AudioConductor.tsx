@@ -7,9 +7,8 @@ import { ORBIT_STEPS, useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
  * Conducts the galaxy's soundtrack (no UI of its own):
- * - the mission voice speaks once on page load (deferred to the first
- *   gesture when the browser blocks autoplay); the header CTA replays or
- *   cancels it, and it never loops;
+ * - the mission voice never auto-plays; only the hunt biome's Briefing
+ *   button starts it (via the store's toggleMission), and it never loops;
  * - the master-brand ambient bed starts on the very first interaction
  *   (scroll, tap, click, or key) and loops subtly forever;
  * - every voiced world (product, orchestrator, capability) speaks its
@@ -37,15 +36,6 @@ export function AudioConductor() {
   const resumePending = useAudioStore((s) => s.resumePending);
   const startAmbient = useAudioStore((s) => s.startAmbient);
   const ambientStarted = useAudioStore((s) => s.ambientStarted);
-  const autoPlayMission = useAudioStore((s) => s.autoPlayMission);
-
-  // The mission speaks once per page load. If the browser blocks the
-  // autoplay, the first gesture below retries it; if the page loaded
-  // straight into a planet biome, that biome's voice pauses while the
-  // mission has the floor and resumes right after.
-  useEffect(() => {
-    autoPlayMission();
-  }, [autoPlayMission]);
 
   // The first gesture starts the ambient bed and releases whatever
   // autoplay held back. Listeners stay attached until a gesture the

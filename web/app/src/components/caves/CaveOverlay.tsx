@@ -334,9 +334,10 @@ function LeaderboardFlow() {
   const fragmentsTotal = useLeaderboardStore((s) => s.fragmentsTotal);
   const activeExplorers = useLeaderboardStore((s) => s.activeExplorers);
   const myRank = useLeaderboardStore((s) => s.myRank);
+  const myTotal = useLeaderboardStore((s) => s.myTotal);
+  const myUserId = useLeaderboardStore((s) => s.myUserId);
   const standingTier = useLeaderboardStore((s) => s.standingTier);
   const updateNonce = useLeaderboardStore((s) => s.updateNonce);
-  const balance = useFragmentsStore((s) => s.balance);
   const [profile, setProfile] = useState<HunterProfile | null | "loading">(
     "loading",
   );
@@ -359,7 +360,6 @@ function LeaderboardFlow() {
   }, []);
 
   const isAuthed = profile !== "loading" && profile !== null;
-  const alias = isAuthed ? (profile as HunterProfile).alias ?? null : null;
 
   // The board renders only real seats, plus the visitor's own standing
   // card under them. If the visitor is in the top rows they also render
@@ -424,7 +424,7 @@ function LeaderboardFlow() {
         <div data-scroll-safe className="scrollbar-hide max-h-[46dvh] overflow-y-auto pr-1">
         <div className="space-y-1">
           {topRows.map((row, index) => {
-            const isMe = Boolean(alias) && row.alias === alias;
+            const isMe = Boolean(myUserId) && row.userId === myUserId;
             return (
               <p
                 key={row.userId}
@@ -467,38 +467,36 @@ function LeaderboardFlow() {
                 You
               </span>
               <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-                {formatFragments(balance)}
+                {formatFragments(myTotal)}
               </span>
             </p>
           </div>
         ) : profile !== "loading" ? (
-          <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-3">
+          <div className="mt-3 flex flex-col gap-2">
             <p className="text-[0.78rem] leading-relaxed text-silver-500">
               New explorer? Join to send your fragments into the hunt.
               Already collecting? Sign in to sync your haul.
             </p>
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <Button
-                variant="primary"
-                onClick={() => {
-                  trackCtaClick("waitlist_open", { placement: "hunt_standing" });
-                  enterCave("join");
-                }}
-                className="min-h-0 flex-1 px-5 py-2.5 text-[0.6rem] uppercase"
-              >
-                Join
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  trackCtaClick("signin_gate_open", { placement: "hunt_standing" });
-                  enterCave("signin");
-                }}
-                className="min-h-0 flex-1 px-5 py-2.5 text-[0.6rem] uppercase"
-              >
-                Sign in
-              </Button>
-            </div>
+            <Button
+              variant="primary"
+              onClick={() => {
+                trackCtaClick("waitlist_open", { placement: "hunt_standing" });
+                enterCave("join");
+              }}
+              className="w-full px-5 py-3.5 text-xs uppercase"
+            >
+              Join
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                trackCtaClick("signin_gate_open", { placement: "hunt_standing" });
+                enterCave("signin");
+              }}
+              className="w-full px-5 py-3 text-[0.62rem] uppercase"
+            >
+              Sign in
+            </Button>
           </div>
         ) : null}
         </div>
@@ -1117,6 +1115,7 @@ function WaitlistVerifyFlow() {
           welcomeLine: data.welcomeLine,
         };
         window.localStorage.setItem("vx_profile", JSON.stringify(profile));
+        window.dispatchEvent(new Event("vx-profile-changed"));
         setState({ phase: "verified", profile });
         window.setTimeout(() => startJump("public"), 450);
       } catch {
@@ -1315,6 +1314,7 @@ function MagicFlow() {
               welcomeLine: data.welcome_line ?? null,
             }),
           );
+          window.dispatchEvent(new Event("vx-profile-changed"));
           startJump("public");
           return;
         }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FragmentGlobe, type GlobeData } from "@/components/fragments/FragmentGlobe";
 import { useGalaxyStore } from "@/lib/galaxy-store";
+import { consumeGlobePreload } from "@/lib/fragments/globe-preload";
 
 interface StoredProfile {
   email: string;
@@ -48,11 +49,17 @@ export function PublicGalaxy() {
       }
       setProfile(stored);
       try {
-        const response = await fetch("/api/fragments/globe");
-        if (!response.ok) return;
-        const data = await response.json();
+        // Consume the jar preloaded during the hyperjump white-out so the
+        // globe paints full on first frame; fall back to a fresh fetch.
+        const preloaded = consumeGlobePreload();
+        const data = preloaded
+          ? await preloaded
+          : await fetch("/api/fragments/globe").then((r) =>
+              r.ok ? r.json() : null,
+            );
+        if (!data) return;
         setBalance(data.balance ?? 0);
-        setGlobe(data.three ?? { points: [], colors: [] });
+        setGlobe(data.three ?? { points: [], colors: [], meta: [] });
       } catch {
         // The globe is decorative — stay quiet on failure.
       }

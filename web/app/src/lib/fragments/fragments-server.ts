@@ -15,6 +15,11 @@ const collectiblesById = new Map(
   VORINTHEX_GALAXY_REGISTRY.collectibles.map((c) => [c.id, c]),
 );
 
+/** The registry collectible for an id (name/rarity/value), or undefined. */
+export function getCollectible(collectibleId: string): CollectibleDef | undefined {
+  return collectiblesById.get(collectibleId);
+}
+
 interface Ledger {
   /** explorerId -> collected collectible ids */
   collects: Map<string, Set<string>>;

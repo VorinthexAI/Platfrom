@@ -51,6 +51,7 @@ export async function claimHandoffSession(): Promise<HandoffProfile | null> {
       welcomeLine: data.welcome_line ?? null,
     };
     window.localStorage.setItem("vx_profile", JSON.stringify(profile));
+    window.dispatchEvent(new Event("vx-profile-changed"));
     return profile;
   } catch {
     return null;
