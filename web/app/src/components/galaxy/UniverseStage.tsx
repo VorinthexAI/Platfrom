@@ -78,8 +78,13 @@ export function UniverseStage({
       ? getEntityById(initialEntityId)
       : undefined;
     if (initialEntity) {
+      // Every subdomain deep-link anchors straight into its own biome on load
+      // — products (core/command/studio/launch), capabilities and orchestrators
+      // all have a WorldInterior biome chamber, exactly like hunt dives into
+      // its cave. Only the home nexus (no subdomain) would ever "fly".
       setStep(stepForEntity(initialEntity), {
         visitPhase:
+          initialEntity.type === "product" ||
           initialEntity.type === "orchestrator" ||
           initialEntity.type === "capability"
             ? "inside"
