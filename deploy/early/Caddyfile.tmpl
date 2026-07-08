@@ -5,12 +5,13 @@
 # route on: api.vorinthex.com -> Bun backend (:3001); everything else -> Next.js
 # web (:3000, fans other subdomains out via proxy.ts).
 #
-# Serves both :80 (Cloudflare "Flexible") and :443 with a Caddy self-signed cert
-# (Cloudflare "Full"). Self-signed is fine for Cloudflare Full (non-strict); the
-# viewer-facing TLS is Cloudflare's edge cert.
+# Serves :80 (Cloudflare "Flexible") AND :443 with a self-signed internal cert for
+# vorinthex.com + *.vorinthex.com (Cloudflare "Full", non-strict). local_certs
+# forces Caddy's internal CA so it never reaches out to Let's Encrypt.
 
 {
 	admin off
+	local_certs
 }
 
 (routes) {
@@ -31,7 +32,7 @@
 	import routes
 }
 
-:443 {
+https://vorinthex.com, https://*.vorinthex.com {
 	tls internal
 	import routes
 }
