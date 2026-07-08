@@ -78,11 +78,11 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "gem",
     approachLabel: "Opening the Accord Vault",
   },
-  leaderboard: {
+  hunt: {
     ...rolledAnchor(),
     interior: [720, -240, 0],
     theme: "gem",
-    approachLabel: "Approaching the Galaxy Leaderboard",
+    approachLabel: "Approaching the Hunt",
   },
   // Where every tapped email link lands: a chamber with no way out. It
   // only confirms the action worked and points back to where the link
@@ -131,7 +131,7 @@ export function randomRockAnchor(): RockAnchor {
 }
 
 /** Story caves an ordinary-looking asteroid can secretly host. */
-const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "members", "join", "leaderboard"];
+const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "members", "join", "hunt"];
 
 /**
  * Does this belt bearing sit on one of the hidden story vaults? Diving

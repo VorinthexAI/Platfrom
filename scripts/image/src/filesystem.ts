@@ -16,6 +16,7 @@ export const runtimeDirs = [
   "outputs/solid",
   "outputs/packages",
   "outputs/review-sheets",
+  "slideshow",
   "runs",
   "backups"
 ] as const;

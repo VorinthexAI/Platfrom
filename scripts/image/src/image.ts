@@ -161,6 +161,23 @@ export async function resizeWebp(inputPath: string, outputPath: string, size: nu
   await sharp(inputPath).resize(size, size, { fit: "contain" }).webp({ quality: 92 }).toFile(outputPath);
 }
 
+export async function normalizeVerticalSlide(inputPath: string, outputPath: string, width = 1080, height = 1920): Promise<void> {
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  const finalOutputPath = path.resolve(outputPath);
+  const sharpOutputPath = path.resolve(inputPath) === finalOutputPath
+    ? `${finalOutputPath}.${process.pid}.${Date.now()}.normalized.png`
+    : finalOutputPath;
+  await sharp(inputPath)
+    .resize(width, height, {
+      fit: "cover",
+      position: "center",
+      background: "#030405"
+    })
+    .png()
+    .toFile(sharpOutputPath);
+  if (sharpOutputPath !== finalOutputPath) await rename(sharpOutputPath, finalOutputPath);
+}
+
 export async function copyLatest(sourcePath: string, targetPath: string): Promise<void> {
   await mkdir(path.dirname(targetPath), { recursive: true });
   await copyFile(sourcePath, targetPath);

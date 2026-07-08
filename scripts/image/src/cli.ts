@@ -42,6 +42,7 @@ const menuChoices = [
   "Regenerate transparent version",
   "Regenerate solid-background version",
   "Upscale / enhance",
+  "Generate TikTok slideshow",
   "Create full asset package",
   "Validate locked assets",
   "Backup registry",
@@ -500,6 +501,11 @@ async function fullPackage(context: EngineContext): Promise<void> {
   console.log(chalk.green(`Full asset package: ${rel(context.config.rootDir, dir)}`));
 }
 
+async function generateTikTokSlideshow(context: EngineContext): Promise<void> {
+  if (!await requireClient(context)) return;
+  await import("./slideshow").then((module) => module.generateSlideshow());
+}
+
 async function rejectLatest(context: EngineContext, asset: AssetRecord): Promise<void> {
   const version = latestVersion(asset);
   if (!version) return;
@@ -551,6 +557,7 @@ export async function runCli(): Promise<void> {
       case "Regenerate transparent version": await regenerateTransparent(context); break;
       case "Regenerate solid-background version": await regenerateSolid(context); break;
       case "Upscale / enhance": await upscaleEnhance(context); break;
+      case "Generate TikTok slideshow": await generateTikTokSlideshow(context); break;
       case "Create full asset package": await fullPackage(context); break;
       case "Validate locked assets": {
         const result = await validateLockedAssets(config.rootDir);

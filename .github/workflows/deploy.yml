@@ -9,7 +9,7 @@ on:
       target:
         description: 'Deployment target'
         type: choice
-        options: [all, vorinthex, orbit, waitlist-leaderboard, backend, selective]
+        options: [all, vorinthex, orbit, hunt, backend, selective]
         default: all
       deploy:
         description: 'Deploy after verification'
@@ -38,7 +38,7 @@ jobs:
     outputs:
       vorinthex: ${{ steps.decide.outputs.vorinthex }}
       orbit: ${{ steps.decide.outputs.orbit }}
-      waitlist_leaderboard: ${{ steps.decide.outputs.waitlist_leaderboard }}
+      hunt: ${{ steps.decide.outputs.hunt }}
       backend: ${{ steps.decide.outputs.backend }}
       changed_files: ${{ steps.decide.outputs.changed_files }}
     steps:
@@ -57,52 +57,52 @@ jobs:
               all)
                 vorinthex=true
                 orbit=true
-                waitlist_leaderboard=true
+                hunt=true
                 backend=true
                 ;;
               vorinthex)
                 vorinthex=true
                 orbit=false
-                waitlist_leaderboard=false
+                hunt=false
                 backend=false
                 ;;
               orbit)
                 vorinthex=false
                 orbit=true
-                waitlist_leaderboard=false
+                hunt=false
                 backend=false
                 ;;
-              waitlist-leaderboard)
+              hunt)
                 vorinthex=false
                 orbit=false
-                waitlist_leaderboard=true
+                hunt=true
                 backend=false
                 ;;
               backend)
                 vorinthex=false
                 orbit=false
-                waitlist_leaderboard=false
+                hunt=false
                 backend=true
                 ;;
               selective)
                 files="$(git diff --name-only HEAD~1 HEAD || true)"
                 vorinthex=false
                 orbit=false
-                waitlist_leaderboard=false
+                hunt=false
                 backend=false
                 shared=false
                 while IFS= read -r file; do
                   [ -n "$file" ] || continue
                   case "$file" in
-                    web/app/*) vorinthex=true; orbit=true; waitlist_leaderboard=true ;;
+                    web/app/*) vorinthex=true; orbit=true; hunt=true ;;
                     web/landing-pages/vorinthex/*) vorinthex=true ;;
                     web/landing-pages/orbit/*) orbit=true ;;
                     backend/*) backend=true ;;
                     shared/*) shared=true ;;
-                    .github/workflows/deploy.yml) vorinthex=true; orbit=true; waitlist_leaderboard=true; backend=true ;;
+                    .github/workflows/deploy.yml) vorinthex=true; orbit=true; hunt=true; backend=true ;;
                   esac
                 done <<< "$files"
-                if [ "$shared" = true ]; then vorinthex=true; orbit=true; waitlist_leaderboard=true; fi
+                if [ "$shared" = true ]; then vorinthex=true; orbit=true; hunt=true; fi
                 ;;
             esac
           else
@@ -110,29 +110,29 @@ jobs:
             files="$(git diff --name-only "$base" "${{ env.COMMIT_SHA }}")"
             vorinthex=false
             orbit=false
-            waitlist_leaderboard=false
+            hunt=false
             backend=false
             shared=false
             while IFS= read -r file; do
               [ -n "$file" ] || continue
               case "$file" in
-                web/app/*) vorinthex=true; orbit=true; waitlist_leaderboard=true ;;
+                web/app/*) vorinthex=true; orbit=true; hunt=true ;;
                 web/landing-pages/vorinthex/*) vorinthex=true ;;
                 web/landing-pages/orbit/*) orbit=true ;;
                 backend/*) backend=true ;;
                 shared/*) shared=true ;;
-                .github/workflows/deploy.yml) vorinthex=true; orbit=true; waitlist_leaderboard=true; backend=true ;;
+                .github/workflows/deploy.yml) vorinthex=true; orbit=true; hunt=true; backend=true ;;
               esac
             done <<< "$files"
 
             # shared/ is consumed by every landing-page app.
-            if [ "$shared" = true ]; then vorinthex=true; orbit=true; waitlist_leaderboard=true; fi
+            if [ "$shared" = true ]; then vorinthex=true; orbit=true; hunt=true; fi
           fi
 
           {
             echo "vorinthex=$vorinthex"
             echo "orbit=$orbit"
-            echo "waitlist_leaderboard=$waitlist_leaderboard"
+            echo "hunt=$hunt"
             echo "backend=$backend"
             echo "changed_files<<EOF"
             printf '%s\n' "${files:-manual:${{ inputs.target || 'all' }}}"
@@ -144,7 +144,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: >-
-      (needs.changes.outputs.vorinthex == 'true' || needs.changes.outputs.orbit == 'true' || needs.changes.outputs.waitlist_leaderboard == 'true' || needs.changes.outputs.backend == 'true')
+      (needs.changes.outputs.vorinthex == 'true' || needs.changes.outputs.orbit == 'true' || needs.changes.outputs.hunt == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event_name == 'pull_request' || inputs.deploy)
     steps:
       - uses: actions/checkout@v4
@@ -203,11 +203,11 @@ jobs:
       - name: Typecheck
         run: bun run web:typecheck
 
-  verify-waitlist-leaderboard:
-    name: Verify waitlist-leaderboard web
+  verify-hunt:
+    name: Verify hunt web
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.waitlist_leaderboard == 'true'
+    if: needs.changes.outputs.hunt == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -521,11 +521,11 @@ jobs:
           echo "::error::Production health check failed after 4 minutes ($URL)"
           exit 1
 
-  deploy-waitlist-leaderboard:
-    name: Build and deploy waitlist-leaderboard web
+  deploy-hunt:
+    name: Build and deploy hunt web
     runs-on: ubuntu-latest
-    needs: [changes, sync-configs, verify-waitlist-leaderboard]
-    if: needs.changes.outputs.waitlist_leaderboard == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    needs: [changes, sync-configs, verify-hunt]
+    if: needs.changes.outputs.hunt == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     defaults:
       run:
         working-directory: web/app
@@ -560,10 +560,10 @@ jobs:
 
       - name: Load production env file
         env:
-          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).waitlist_leaderboard.env) }}
+          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).hunt.env) }}
         run: |
           set -euo pipefail
-          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.waitlist_leaderboard.env is not configured."; exit 1; }
+          test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.hunt.env is not configured."; exit 1; }
           echo "$CONFIG_ENV" | jq -r 'to_entries[] | "\(.key)=\(.value // "")"' > prod.env
           chmod 600 prod.env
 
@@ -571,16 +571,16 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
           VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.vercel_project_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).hunt.vercel_project_id }}
         run: |
           missing=0
           for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
             if [ -z "${!name}" ]; then
-              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / waitlist_leaderboard.vercel_project_id)."
+              echo "::error::config value for $name is not configured (vercel.token / vercel.team_id / hunt.vercel_project_id)."
               missing=1
             fi
           done
-          test -s prod.env || { echo "::error::config.env produced no waitlist_leaderboard values."; missing=1; }
+          test -s prod.env || { echo "::error::config.env produced no hunt values."; missing=1; }
           [ "$missing" -eq 0 ]
 
       - name: Install Vercel CLI
@@ -589,7 +589,7 @@ jobs:
       - name: Sync prod.env to Vercel
         env:
           VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.vercel_project_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).hunt.vercel_project_id }}
           VERCEL_TEAM_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
         run: |
           set -euo pipefail
@@ -612,7 +612,7 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ fromJSON(secrets.CONFIG).vercel.token }}
           VERCEL_ORG_ID: ${{ fromJSON(secrets.CONFIG).vercel.team_id }}
-          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.vercel_project_id }}
+          VERCEL_PROJECT_ID: ${{ fromJSON(secrets.CONFIG).hunt.vercel_project_id }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
       - name: Build
@@ -648,7 +648,7 @@ jobs:
 
       - name: Verify production is live
         env:
-          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).waitlist_leaderboard.url }}
+          PRODUCTION_URL: ${{ fromJSON(secrets.CONFIG).hunt.url }}
         run: |
           URL="${PRODUCTION_URL:-$(tail -n 1 deployment-url.txt)}"
           for i in $(seq 1 24); do
@@ -1181,7 +1181,7 @@ jobs:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-vorinthex, deploy-orbit, deploy-waitlist-leaderboard, backend-app, backend-render]
+    needs: [changes, deploy-vorinthex, deploy-orbit, deploy-hunt, backend-app, backend-render]
     steps:
       - name: Write deploy audit
         run: |
@@ -1192,7 +1192,7 @@ jobs:
             echo "|---|---:|---|"
             echo "| vorinthex | ${{ needs.changes.outputs.vorinthex }} | ${{ needs.deploy-vorinthex.result }} |"
             echo "| orbit | ${{ needs.changes.outputs.orbit }} | ${{ needs.deploy-orbit.result }} |"
-            echo "| waitlist-leaderboard | ${{ needs.changes.outputs.waitlist_leaderboard }} | ${{ needs.deploy-waitlist-leaderboard.result }} |"
+            echo "| hunt | ${{ needs.changes.outputs.hunt }} | ${{ needs.deploy-hunt.result }} |"
             echo "| backend-app | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-app.result }} |"
             echo "| backend-render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo ""

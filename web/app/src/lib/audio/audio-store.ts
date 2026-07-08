@@ -7,13 +7,14 @@ import { trackLandingEvent } from "@/lib/analytics";
  * The galaxy's sound has three channels:
  * AMBIENT is the master-brand bed — very subtle, starts on the first user
  *   gesture (scroll/tap/click) and loops forever underneath everything.
- * MISSION is the mission voice started by the header CTA. It plays exactly
- *   once per tap (no loop); tapping again mid-play cancels it. While it
- *   speaks, any biome voice is paused and resumes where it left off.
+ * MISSION is the hunt briefing voice started by the Briefing CTA inside
+ *   the hunt biome. It plays exactly once per tap (no loop); tapping
+ *   again mid-play cancels it. While it speaks, any biome voice is
+ *   paused and resumes where it left off.
  * VOICE is the current world's voiceover.
  */
 
-export const MISSION_AUDIO_SRC = "/audio/brand/mission.mp3";
+export const MISSION_AUDIO_SRC = "/audio/brand/hunt-briefing.mp3";
 export const AMBIENT_AUDIO_SRC = "/audio/brand/master-brand-vorinthex-ai-v1.mp3";
 
 export function entityAudioUrl(type: string, slug: string): string {

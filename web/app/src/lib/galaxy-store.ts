@@ -36,7 +36,7 @@ export type CaveKind =
   | "magic" // arrived via /public/auth/token?token_hash=… (TOTP setup/verify)
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault
-  | "leaderboard" // the galaxy leaderboard hall — live ranks + crystal cave
+  | "hunt" // the galaxy hunt hall — live ranks + crystal cave
   | "sealed" // tapped-email-link landing: success state, no way out
   | "rock"; // any ordinary belt asteroid — hollow, near-empty, a few fragments
 

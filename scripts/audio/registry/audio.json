@@ -152,7 +152,7 @@
       "category": "master-brand",
       "entityId": "brand.vorinthex-ai",
       "description": "Vorinthex AI master brand: The Nexus of Intelligence.",
-      "currentVersionId": "v8",
+      "currentVersionId": "v9",
       "versions": [
         {
           "id": "v1",
@@ -259,6 +259,8 @@
           "createdAt": "2026-07-07T13:54:38.800Z"
         },
         {
+          "id": "v8",
+          "version": 8,
           "prompt": "Welcome to the Vorinthex galaxy. Your mission: collect Intelligence Fragments scattered across the galaxy. Dive into asteroids to uncover giant crystals worth thousands of fragments, and climb the galaxy leaderboard. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
           "fullPrompt": "Create an audio asset for Vorinthex AI.\n\nTarget:\n- Type: master-brand\n- Slug: vorinthex-ai\n- Description: Vorinthex AI master brand: The Nexus of Intelligence.\n\n\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 12 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nWelcome to the Vorinthex galaxy. Your mission: collect Intelligence Fragments scattered across the galaxy. Dive into asteroids to uncover giant crystals worth thousands of fragments, and climb the galaxy leaderboard. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
           "mode": "tts",
@@ -270,13 +272,27 @@
           "status": "completed",
           "audioPath": "outputs/audio/master-brand/vorinthex-ai/v8/vorinthex-ai-v8.pcm",
           "metadataPath": "outputs/audio/master-brand/vorinthex-ai/v8/metadata.json",
-          "id": "v8",
-          "version": 8,
           "createdAt": "2026-07-07T21:22:26.090Z"
+        },
+        {
+          "prompt": "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.",
+          "fullPrompt": "Create an audio asset for Vorinthex AI.\n\nTarget:\n- Type: master-brand\n- Slug: vorinthex-ai\n- Description: Vorinthex AI master brand: The Nexus of Intelligence.\n\n\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 12 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nWelcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 12,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/master-brand/vorinthex-ai/v9/vorinthex-ai-v9.pcm",
+          "metadataPath": "outputs/audio/master-brand/vorinthex-ai/v9/metadata.json",
+          "id": "v9",
+          "version": 9,
+          "createdAt": "2026-07-07T23:58:39.088Z"
         }
       ],
       "createdAt": "2026-07-07T00:14:49.782Z",
-      "updatedAt": "2026-07-07T21:22:26.093Z"
+      "updatedAt": "2026-07-07T23:58:39.090Z"
     },
     {
       "id": "orchestrator-orchestrator-apollo",

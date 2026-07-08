@@ -19,6 +19,7 @@
       <section class="toolbar" aria-label="Asset filters">
         <button class="filter active" data-kind="all">All Assets</button>
         <button class="filter" data-kind="logo">Logos</button>
+        <button class="filter" data-kind="slideshow">Slideshows</button>
         <button class="filter" data-kind="video">Videos</button>
         <button class="filter" data-kind="audio">Audio</button>
         <span class="divider"></span>
@@ -33,6 +34,8 @@
         <button class="filter" data-category="product">Products</button>
         <button class="filter" data-category="capability">Capabilities</button>
         <button class="filter" data-category="orchestrator">Orchestrators</button>
+        <button class="filter" data-category="experiment">Experiments</button>
+        <button class="filter" data-category="announcement">Announcements</button>
       </section>
 
       <section class="grid" id="grid" aria-live="polite"></section>
@@ -46,6 +49,7 @@
       let categoryFilter = "all";
       let logoFormat = "png";
       let logoBackground = "transparent";
+      const slideshowIndexes = new Map();
 
       function latestVersion(asset) {
         if (!asset.versions?.length) return null;
@@ -55,7 +59,21 @@
       function normalizeLogo(asset) {
         const version = latestVersion(asset);
         if (!version) return null;
+        if (version.slideshowPath || version.slidePaths?.length) return null;
         return { kind: "logo", category: asset.category, slug: asset.slug, name: asset.name, version };
+      }
+
+      function normalizeSlideshow(asset) {
+        return (asset.versions || [])
+          .filter((version) => version.slideshowPath || version.slidePaths?.length)
+          .map((version) => ({
+            kind: "slideshow",
+            category: asset.category,
+            slug: `${asset.slug}-${version.id}`,
+            baseSlug: asset.slug,
+            name: `${asset.name} ${version.id.toUpperCase()}`,
+            version
+          }));
       }
 
       function normalizeVideo(asset) {
@@ -111,6 +129,29 @@
         `;
       }
 
+      function renderSlideshow(asset) {
+        const manifest = asset.version.slideshowPath || "";
+        const slides = asset.version.slidePaths || [];
+        const count = slides.length;
+        const currentIndex = Math.min(slideshowIndexes.get(asset.slug) || 0, Math.max(0, count - 1));
+        const preview = slides[currentIndex] || asset.version.previewPath || "";
+        slideshowIndexes.set(asset.slug, currentIndex);
+        return `
+          <article class="card slideshowCard">
+            <div class="slideshowPreview">
+              <span class="previewLabel">Slide ${count ? currentIndex + 1 : 0} / ${count}</span>
+              ${preview ? `<img src="./${preview}" alt="${asset.name} slideshow preview" loading="lazy" />` : `<span>No preview</span>`}
+              <div class="slideControls" aria-label="Slideshow controls">
+                <button class="slideButton" data-slide-action="prev" data-slide-id="${asset.slug}" ${count <= 1 ? "disabled" : ""} aria-label="Previous slide">&lt;</button>
+                <a class="slideDownload" href="./${preview || manifest}" download="${fileNameFromPath(preview || manifest || "slide.png")}" aria-label="Download current slide">Download</a>
+                <button class="slideButton" data-slide-action="next" data-slide-id="${asset.slug}" ${count <= 1 ? "disabled" : ""} aria-label="Next slide">&gt;</button>
+              </div>
+            </div>
+            ${cardBody(asset, manifest || preview)}
+          </article>
+        `;
+      }
+
       function renderAudio(asset) {
         const src = asset.version.audioPath ? `audio-assets/${asset.version.audioPath}` : "";
         return `
@@ -141,6 +182,9 @@
         const audioMeta = asset.kind === "audio"
           ? [asset.version.voice, asset.version.language].filter(Boolean).map((value) => `<span class="pill">${value}</span>`).join("")
           : "";
+        const slideshowMeta = asset.kind === "slideshow"
+          ? [`${asset.version.slidePaths?.length || 0} slides`, asset.version.referenceImagePaths?.length ? `${asset.version.referenceImagePaths.length} refs` : "no refs"].map((value) => `<span class="pill">${value}</span>`).join("")
+          : "";
         return `
           <div class="cardBody">
             <div>
@@ -152,6 +196,7 @@
                 <span class="pill">${asset.kind}</span>
                 <span class="pill">${asset.category}</span>
                 ${audioMeta}
+                ${slideshowMeta}
               </div>
               ${downloadPath ? `<a class="downloadButton" href="./${downloadPath}" download="${fileNameFromPath(downloadPath)}" aria-label="Download ${asset.name}">↓</a>` : ""}
             </div>
@@ -169,6 +214,7 @@
         grid.innerHTML = visible.map((asset) => {
           if (asset.kind === "video") return renderVideo(asset);
           if (asset.kind === "audio") return renderAudio(asset);
+          if (asset.kind === "slideshow") return renderSlideshow(asset);
           return renderLogo(asset);
         }).join("");
       }
@@ -205,6 +251,22 @@
         });
       });
 
+      grid.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-slide-action]");
+        if (!button) return;
+        const id = button.dataset.slideId;
+        const action = button.dataset.slideAction;
+        const asset = assets.find((item) => item.kind === "slideshow" && item.slug === id);
+        const count = asset?.version.slidePaths?.length || 0;
+        if (!asset || count <= 1) return;
+        const current = slideshowIndexes.get(id) || 0;
+        const next = action === "next"
+          ? (current + 1) % count
+          : (current - 1 + count) % count;
+        slideshowIndexes.set(id, next);
+        render();
+      });
+
       Promise.all([
         fetch("./registry/assets.json").then((response) => response.json()).catch(() => ({ assets: [] })),
         fetch("./video-registry/videos.json").then((response) => response.json()).catch(() => ({ videos: [] })),
@@ -214,13 +276,16 @@
           .filter((asset) => ["master-brand", "product", "capability", "orchestrator"].includes(asset.category))
           .map(normalizeLogo)
           .filter(Boolean);
+        const slideshows = imageRegistry.assets
+          .filter((asset) => ["master-brand", "product", "capability", "orchestrator", "experiment", "announcement"].includes(asset.category))
+          .flatMap(normalizeSlideshow);
         const videos = videoRegistry.videos
           .filter((asset) => ["master-brand", "product", "capability", "orchestrator"].includes(asset.category))
           .flatMap(normalizeVideo);
         const audio = audioRegistry.audio
           .filter((asset) => ["master-brand", "product", "capability", "orchestrator"].includes(asset.category))
           .flatMap(normalizeAudio);
-        assets = [...logos, ...videos, ...audio].sort((a, b) => `${a.category}-${a.slug}-${a.kind}`.localeCompare(`${b.category}-${b.slug}-${b.kind}`));
+        assets = [...logos, ...slideshows, ...videos, ...audio].sort((a, b) => `${a.category}-${a.slug}-${a.kind}`.localeCompare(`${b.category}-${b.slug}-${b.kind}`));
         render();
       }).catch((error) => {
         meta.textContent = "Could not load asset registries";

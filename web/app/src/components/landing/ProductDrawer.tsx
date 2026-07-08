@@ -20,9 +20,6 @@ import {
   useGalaxyStore,
 } from "@/lib/galaxy-store";
 
-/** The drawer waits below the fold this long before sliding into place. */
-const DRAWER_HOLD_SECONDS = 3;
-
 export function ProductDrawer() {
   const step = useGalaxyStore((s) => s.step);
   const mode = useGalaxyStore((s) => s.mode);
@@ -50,23 +47,12 @@ export function ProductDrawer() {
           key={entity.id}
           role="dialog"
           aria-label={`${entity.name} details`}
-          // Held below the fold for a beat, then one smooth slide up into
-          // place; leaving slides it back down immediately.
+          // Slides up into place immediately; leaving slides it back down.
           initial={reducedMotion ? { opacity: 0 } : { y: "115%" }}
           animate={
             reducedMotion
-              ? {
-                  opacity: 1,
-                  transition: { delay: DRAWER_HOLD_SECONDS, duration: 0.5 },
-                }
-              : {
-                  y: 0,
-                  transition: {
-                    delay: DRAWER_HOLD_SECONDS,
-                    duration: 0.85,
-                    ease: [0.16, 1, 0.3, 1],
-                  },
-                }
+              ? { opacity: 1, transition: { duration: 0.5 } }
+              : { y: 0, transition: { duration: 0.65, ease: [0.16, 1, 0.3, 1] } }
           }
           exit={
             reducedMotion

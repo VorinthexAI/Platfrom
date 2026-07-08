@@ -10,16 +10,17 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Button, TextInput } from "@vorinthex/shared/ui/components";
 import { rollCenterCrystal } from "@/components/galaxy/BiomeLoot";
-import { EruptAssembly } from "@/components/ui/EruptAssembly";
 import { CloseIcon } from "@/components/ui/icons";
+import { SlideUpCard } from "@/components/ui/SlideUpCard";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { trackCtaClick, trackLandingEvent } from "@/lib/analytics";
 import { useAudioStore } from "@/lib/audio/audio-store";
 import {
   claimHandoffSession,
+  hasPendingHandoff,
   watchHandoff,
 } from "@/lib/auth/handoff-client";
-import { peekLinkLanding } from "@/lib/auth/link-landing";
+import { peekLinkLanding, setLinkLanding } from "@/lib/auth/link-landing";
 import { takeMagicHandoff } from "@/lib/auth/magic-handoff";
 import { CAVE_CONFIGS } from "@/lib/cave-config";
 import { normalizeEmailInput, parseApiError } from "@/lib/email";
@@ -93,26 +94,18 @@ export function CaveOverlay() {
           // Uncharted rocks get a slim bottom drawer (same hold-then-slide
           // beat as the planet drawer) so the crystal stays center stage.
           <RockDrawer key={`rock-${visitSeed}`} />
-        ) : caveKind === "leaderboard" ? (
-          // The leaderboard breaks out of the single card: three floating
-          // islands — the call, the board, the galaxy pulse.
+        ) : caveKind === "hunt" ? (
+          // The hunt breaks out of the single card: several floating
+          // islands, each sliding up in its own cascaded beat.
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
-            <EruptAssembly
-              key={`leaderboard-${visitSeed}`}
-              seed={visitSeed}
-              className="pointer-events-auto w-full max-w-md"
-            >
+            <div key={`leaderboard-${visitSeed}`} className="pointer-events-auto w-full max-w-md">
               <LeaderboardFlow />
-            </EruptAssembly>
+            </div>
           </div>
         ) : (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
-            {/* the WHOLE card arrives like the emblem: shattered into grid
-                shards, blasted out of the floor, fused in place — fresh on
-                every entry */}
-            <EruptAssembly
+            <SlideUpCard
               key={`${caveKind}-${visitSeed}`}
-              seed={visitSeed}
               className="pointer-events-auto w-full max-w-md"
             >
               <div
@@ -146,7 +139,7 @@ export function CaveOverlay() {
                 {caveKind === "privacy" ? <LegalFlow copy={PRIVACY_COPY} /> : null}
                 {caveKind === "terms" ? <LegalFlow copy={TERMS_COPY} /> : null}
               </div>
-            </EruptAssembly>
+            </SlideUpCard>
           </div>
         )
       ) : null}
@@ -189,6 +182,15 @@ function SealedFlow() {
             </p>
           )}
         </>
+      ) : action === "member" ? (
+        <>
+          <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.08em] text-silver-50">
+            Your cipher is forged.
+          </h2>
+          <p className="mt-3 text-sm leading-relaxed text-silver-300">
+            The vault opened. Your authenticator is verified.
+          </p>
+        </>
       ) : (
         <>
           <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.08em] text-silver-50">
@@ -220,15 +222,11 @@ function SealedFlow() {
 /* the uncharted rock — a slim drawer under the crystal               */
 /* ---------------------------------------------------------------- */
 
-/** The drawer waits below the fold this long before sliding into place. */
-const ROCK_DRAWER_HOLD_SECONDS = 3;
-
 /**
- * Slim bottom drawer for asteroid dives: held down for three seconds
- * (the eruption finishes, the crystal assembles), then one smooth slide
- * up — mirroring the planet drawer — with a tier-toned opener (one of
- * 500: 10 tiers × 50 unique lines), the vault's exact value, and the
- * standing order: collect it and keep exploring to climb the leaderboard.
+ * Slim bottom drawer for asteroid dives: slides up immediately with a
+ * tier-toned opener (one of 500: 10 tiers × 50 unique lines), the vault's
+ * exact value, and the standing order: collect it and keep exploring to
+ * climb the hunt.
  */
 function RockDrawer() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
@@ -251,14 +249,10 @@ function RockDrawer() {
       initial={reducedMotion ? { opacity: 0 } : { y: "130%" }}
       animate={
         reducedMotion
-          ? { opacity: 1, transition: { delay: ROCK_DRAWER_HOLD_SECONDS, duration: 0.5 } }
+          ? { opacity: 1, transition: { duration: 0.5 } }
           : {
               y: 0,
-              transition: {
-                delay: ROCK_DRAWER_HOLD_SECONDS,
-                duration: 0.85,
-                ease: [0.16, 1, 0.3, 1],
-              },
+              transition: { duration: 0.65, ease: [0.16, 1, 0.3, 1] },
             }
       }
       exit={
@@ -281,14 +275,14 @@ function RockDrawer() {
             <p className="mt-1.5 text-[0.82rem] leading-relaxed text-silver-300">
               {collected ? (
                 <>Vault collected. Dive into more asteroids to climb the
-                leaderboard.</>
+                hunt.</>
               ) : (
                 <>
                   {opener}{" "}
                   <span className="text-silver-50">
                     Tap the crystal to collect {amount} fragments
                   </span>{" "}
-                  and climb the leaderboard.
+                  and climb the hunt.
                 </>
               )}
             </p>
@@ -325,8 +319,13 @@ const STANDING_TITLES = {
  *     with the only close control.
  *  3. The pulse — galaxy totals and the active-explorer heartbeat.
  */
+interface HunterProfile {
+  alias?: string | null;
+}
+
 function LeaderboardFlow() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
+  const enterCave = useGalaxyStore((s) => s.enterCave);
   const toggleMission = useAudioStore((s) => s.toggleMission);
   const missionPlaying = useAudioStore((s) => s.missionPlaying);
   const connect = useLeaderboardStore((s) => s.connect);
@@ -338,7 +337,9 @@ function LeaderboardFlow() {
   const standingTier = useLeaderboardStore((s) => s.standingTier);
   const updateNonce = useLeaderboardStore((s) => s.updateNonce);
   const balance = useFragmentsStore((s) => s.balance);
-  const [alias, setAlias] = useState<string | null>(null);
+  const [profile, setProfile] = useState<HunterProfile | null | "loading">(
+    "loading",
+  );
 
   useEffect(() => {
     connect();
@@ -350,42 +351,59 @@ function LeaderboardFlow() {
       await Promise.resolve();
       try {
         const raw = window.localStorage.getItem("vx_profile");
-        const profile = raw ? (JSON.parse(raw) as { alias?: string | null }) : null;
-        setAlias(profile?.alias ?? null);
+        setProfile(raw ? (JSON.parse(raw) as HunterProfile) : null);
       } catch {
-        setAlias(null);
+        setProfile(null);
       }
     })();
   }, []);
 
-  // The board always shows eleven cards: ten fixed seats (filled by the
-  // top collectors, open seats waiting below them) plus the visitor's own
-  // standing card under the board. If the visitor is in the top ten they
-  // also render among the rows, unmistakably marked.
+  const isAuthed = profile !== "loading" && profile !== null;
+  const alias = isAuthed ? (profile as HunterProfile).alias ?? null : null;
+
+  // The board renders only real seats, plus the visitor's own standing
+  // card under them. If the visitor is in the top rows they also render
+  // among them, unmistakably marked.
   const topRows = rows.slice(0, 10);
   const myPlace = myRank ?? Math.max(rows.length, topRows.length) + 1;
 
   return (
     <div className="flex max-h-[88dvh] flex-col gap-4 sm:gap-6">
-      {/* the mission voice — the first thing an arriving explorer sees */}
-      <Button
-        variant="primary"
-        onClick={() => {
-          trackCtaClick("mission_audio", { placement: "leaderboard" });
-          toggleMission();
-        }}
-        icon={<SpeakerIcon animated={missionPlaying} />}
-        className="w-full px-5 py-3.5 text-xs uppercase"
-      >
-        {missionPlaying ? "Stop the Mission" : "Hear the Mission"}
-      </Button>
+      {/* the briefing — the first thing an arriving explorer sees */}
+      <SlideUpCard index={0} className="flex flex-col gap-2">
+        <Button
+          variant="primary"
+          onClick={() => {
+            trackCtaClick("mission_audio", { placement: "hunt" });
+            toggleMission();
+          }}
+          icon={<SpeakerIcon animated={missionPlaying} />}
+          className="w-full px-5 py-3.5 text-xs uppercase"
+        >
+          <span className="animate-[fade-in_0.4s_ease-out]">
+            {missionPlaying ? "Stop" : "Briefing"}
+          </span>
+        </Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            trackCtaClick("hunt_return", { placement: "hunt" });
+            exitCave();
+            syncEntityUrl("/");
+          }}
+          className="w-full px-5 py-3 text-[0.62rem] uppercase"
+        >
+          Return to Solar System
+        </Button>
+      </SlideUpCard>
 
       {/* island 1 — the call */}
-      <div
+      <SlideUpCard
+        index={1}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
-        <p className="micro-label">The Intelligence Hunt</p>
+        <p className="micro-label">Hunt</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
           The great collectors
         </h2>
@@ -394,49 +412,18 @@ function LeaderboardFlow() {
           The higher you stand at launch, the greater your prizes, offers,
           and early access.
         </p>
-      </div>
+      </SlideUpCard>
 
-      {/* island 2 — the board: pure rows, and the only close control */}
-      <div
+      {/* island 2 — the board: pure rows, no close control (Return to
+          Solar System above is the only way out of the hunt) */}
+      <SlideUpCard
+        index={2}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
-        data-scroll-safe
       >
-        <button
-          type="button"
-          onClick={() => {
-            trackCtaClick("cave_close", { cave_kind: "leaderboard" });
-            exitCave();
-            syncEntityUrl("/");
-          }}
-          aria-label="Leave the leaderboard"
-          className="absolute top-4 right-4 z-10 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
-        >
-          <CloseIcon width={12} height={12} />
-        </button>
-
-        <div className="scrollbar-hide max-h-[46dvh] overflow-y-auto pr-1">
+        <div data-scroll-safe className="scrollbar-hide max-h-[46dvh] overflow-y-auto pr-1">
         <div className="space-y-1">
-          {Array.from({ length: 10 }, (_, index) => {
-            const row = topRows[index];
-            if (!row) {
-              return (
-                <p
-                  key={`seat-${index}`}
-                  className="flex items-baseline gap-3 rounded-xl border border-white/5 bg-white/[0.01] px-3.5 py-1.5 text-sm"
-                >
-                  <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-600">
-                    {index + 1}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-600">
-                    Open seat
-                  </span>
-                  <span className="shrink-0 font-mono text-[0.72rem] text-silver-600 tabular-nums">
-                    ···
-                  </span>
-                </p>
-              );
-            }
+          {topRows.map((row, index) => {
             const isMe = Boolean(alias) && row.alias === alias;
             return (
               <p
@@ -465,28 +452,61 @@ function LeaderboardFlow() {
           })}
         </div>
 
-        {/* the visitor's standing: one pure row under the board */}
-        <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
-          <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
-            {STANDING_TITLES[standingTier]}
-          </p>
-          <p className="mt-1 flex items-baseline gap-3 text-sm">
-            <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
-              {myPlace}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
-              You
-            </span>
-            <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-              {formatFragments(balance)}
-            </span>
-          </p>
+        {/* the visitor's standing: signed in gets the pure row, everyone
+            else gets the join/sign-in call instead */}
+        {isAuthed ? (
+          <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
+            <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
+              {STANDING_TITLES[standingTier]}
+            </p>
+            <p className="mt-1 flex items-baseline gap-3 text-sm">
+              <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
+                {myPlace}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+                You
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                {formatFragments(balance)}
+              </span>
+            </p>
+          </div>
+        ) : profile !== "loading" ? (
+          <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-3.5 py-3">
+            <p className="text-[0.78rem] leading-relaxed text-silver-500">
+              New explorer? Join to send your fragments into the hunt.
+              Already collecting? Sign in to sync your haul.
+            </p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  trackCtaClick("waitlist_open", { placement: "hunt_standing" });
+                  enterCave("join");
+                }}
+                className="min-h-0 flex-1 px-5 py-2.5 text-[0.6rem] uppercase"
+              >
+                Join
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  trackCtaClick("signin_gate_open", { placement: "hunt_standing" });
+                  enterCave("signin");
+                }}
+                className="min-h-0 flex-1 px-5 py-2.5 text-[0.6rem] uppercase"
+              >
+                Sign in
+              </Button>
+            </div>
+          </div>
+        ) : null}
         </div>
-        </div>
-      </div>
+      </SlideUpCard>
 
       {/* island 3 — the galaxy pulse */}
-      <div
+      <SlideUpCard
+        index={3}
         className="chrome-border card-depth relative w-full rounded-3xl px-6 py-4 sm:px-7"
         style={{ background: "var(--gradient-panel)" }}
       >
@@ -496,7 +516,7 @@ function LeaderboardFlow() {
         <p className="mt-1.5 text-center text-[0.7rem] leading-relaxed text-silver-500">
           {galaxyPulseLine(activeExplorers, updateNonce * 48271 + 7)}
         </p>
-      </div>
+      </SlideUpCard>
     </div>
   );
 }
@@ -925,7 +945,7 @@ function ExplorerSigninFlow() {
       </label>
       <Button
         type="submit"
-        variant="secondary"
+        variant="primary"
         loading={status === "submitting"}
         className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
       >
@@ -1036,7 +1056,7 @@ function MembersFlow() {
       </label>
       <Button
         type="submit"
-        variant="secondary"
+        variant="primary"
         loading={status === "submitting"}
         className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
       >
@@ -1271,7 +1291,22 @@ function MagicFlow() {
           return;
         }
         if (data.status === "authenticated") {
-          // An explorer session: same hyper jump as email verification.
+          trackLandingEvent({
+            slug: "auth.magic_link_authenticated",
+            metadata: { flow: "user", placement: "cipher_chamber" },
+          });
+          // An explorer session, reached from a ?flow=member link — same
+          // foreign-surface check ArrivalJump applies for the ?flow=user
+          // path: only the browser that requested the light jumps in.
+          if (!hasPendingHandoff()) {
+            setLinkLanding({
+              action: "signin",
+              alias: data.alias ?? null,
+              waitlistNumber: data.waitlist_number ?? null,
+            });
+            useGalaxyStore.getState().enterCave("sealed");
+            return;
+          }
           window.localStorage.setItem(
             "vx_profile",
             JSON.stringify({
@@ -1280,10 +1315,6 @@ function MagicFlow() {
               welcomeLine: data.welcome_line ?? null,
             }),
           );
-          trackLandingEvent({
-            slug: "auth.magic_link_authenticated",
-            metadata: { flow: "user", placement: "cipher_chamber" },
-          });
           startJump("public");
           return;
         }
@@ -1349,15 +1380,27 @@ function MagicFlow() {
     );
   }
 
+  // TOTP itself is the real proof for members — it must be completed on
+  // whatever device the visitor is holding. Only AFTER it succeeds do we
+  // check whether this is the browser that requested the light: if not,
+  // the session stays here (it's genuinely valid) but the visitor is
+  // pointed back to where they started instead of landing in a vault
+  // they don't intend to keep using.
+  const onTotpSuccess = () => {
+    if (!hasPendingHandoff()) {
+      setLinkLanding({ action: "member", alias: null, waitlistNumber: null });
+      useGalaxyStore.getState().enterCave("sealed");
+      return;
+    }
+    startJump("private");
+  };
+
   if (state.phase === "setup") {
-    return <TotpSetupPanel data={state.data} onSuccess={() => startJump("private")} />;
+    return <TotpSetupPanel data={state.data} onSuccess={onTotpSuccess} />;
   }
 
   return (
-    <TotpVerifyPanel
-      challenge={state.challenge}
-      onSuccess={() => startJump("private")}
-    />
+    <TotpVerifyPanel challenge={state.challenge} onSuccess={onTotpSuccess} />
   );
 }
 
