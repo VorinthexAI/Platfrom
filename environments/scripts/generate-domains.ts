@@ -32,6 +32,14 @@ import { VORINTHEX_GALAXY_REGISTRY } from "../../web/app/src/lib/galaxy/registry
  */
 const CAVE_SUBDOMAINS: string[] = ["hunt.vorinthex.com"];
 
+/**
+ * Infrastructure subdomains: not app routes and not galaxy entities, but they
+ * still resolve to the same edge (CloudFront) and the ALB host-routes them to
+ * the right target group. `api.vorinthex.com` fronts the backend ECS service.
+ * Included so the Cloudflare DNS sync points them at CloudFront too.
+ */
+const INFRA_SUBDOMAINS: string[] = ["api.vorinthex.com"];
+
 /** The apex domain used as the JSON key when an entity declares no subdomain. */
 const DEFAULT_APEX = "vorinthex.com";
 
@@ -73,6 +81,7 @@ function buildDomains(): Record<string, string[]> {
     for (const host of entity.routes.subdomains ?? []) add(host);
   }
   for (const host of CAVE_SUBDOMAINS) add(host);
+  for (const host of INFRA_SUBDOMAINS) add(host);
 
   // Ensure the apex key exists even if nothing declared it explicitly.
   if (!byApex.has(DEFAULT_APEX)) byApex.set(DEFAULT_APEX, new Set());

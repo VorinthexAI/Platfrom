@@ -285,25 +285,44 @@ async function main() {
     const matches = byKey.get(key) ?? [];
 
     if (matches.length === 0) {
-      // Also warn if a non-CNAME record shadows this name; we do not touch it,
-      // but the operator should know Cloudflare will reject a conflicting CNAME.
-      const shadow = existing.filter(
-        (r) => r.name.toLowerCase() === want.name.toLowerCase() && r.type.toUpperCase() !== "CNAME",
+      // A CNAME cannot coexist with an A/AAAA record at the same name. Any
+      // address record here is a legacy origin (e.g. api.vorinthex.com pointing
+      // at the old EC2 EIP) that this desired CNAME is meant to REPLACE — remove
+      // it, then create the CNAME. Scoped to A/AAAA only so TXT/MX/etc. are never
+      // touched. (Non-address shadow types are surfaced, not deleted.)
+      const addressShadow = existing.filter(
+        (r) =>
+          r.name.toLowerCase() === want.name.toLowerCase() &&
+          (r.type.toUpperCase() === "A" || r.type.toUpperCase() === "AAAA"),
       );
-      if (shadow.length > 0) {
+      const otherShadow = existing.filter(
+        (r) =>
+          r.name.toLowerCase() === want.name.toLowerCase() &&
+          !["A", "AAAA", "CNAME"].includes(r.type.toUpperCase()),
+      );
+      if (otherShadow.length > 0) {
         console.warn(
-          `[cloudflare-dns-sync] WARN: ${want.name} already has ${shadow
+          `[cloudflare-dns-sync] WARN: ${want.name} has ${otherShadow
             .map((s) => s.type)
-            .join("/")} record(s); creating a CNAME may conflict`,
+            .join("/")} record(s); a CNAME may still conflict (not deleting these)`,
         );
       }
 
       if (dryRun) {
+        for (const s of addressShadow) {
+          console.log(`[plan] DELETE ${s.type} ${s.name} -> ${s.content} (replaced by CNAME)`);
+        }
         console.log(`[plan] CREATE CNAME ${want.name} -> ${want.content} (proxied)`);
         created += 1;
         continue;
       }
       try {
+        for (const s of addressShadow) {
+          await cfFetch<unknown>(`/zones/${zoneId}/dns_records/${s.id}`, {
+            method: "DELETE",
+          });
+          console.log(`[delete] ${s.type} ${s.name} -> ${s.content} (replaced by CNAME)`);
+        }
         await cfFetch<DnsRecord>(`/zones/${zoneId}/dns_records`, {
           method: "POST",
           body: JSON.stringify(want),
