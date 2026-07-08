@@ -234,16 +234,31 @@ variable "kms_key_arns" {
 
 variable "api_secret_keys" {
   type        = list(string)
-  description = "SSM keys injected into the api task as container secrets."
+  description = "SSM keys (/vorinthex/prod/*) injected into the api task as container secrets — the backend's full runtime env. AWS creds/AI keys are intentionally absent (task role / stubs)."
   default = [
-    "ARANGO_URL",
-    "ARANGO_DATABASE",
-    "ARANGO_USERNAME",
-    "ARANGO_ROOT_PASSWORD",
-    "REDIS_URL",
-    "S3_BUCKET",
-    "API_KEY",
     "ACCESS_TOKEN_SECRET",
+    "ADMIN_EMAIL",
+    "API_KEY",
+    "ARANGO_DATABASE",
+    "ARANGO_ROOT_PASSWORD",
+    "ARANGO_URL",
+    "ARANGO_USERNAME",
+    "CORS_ORIGINS",
+    "FRONTEND_URL",
+    "NO_REPLY_EMAIL",
+    "POLAR_ACCESS_TOKEN",
+    "POLAR_SERVER",
+    "POLAR_SKIP_WEBHOOK_VERIFICATION",
+    "POLAR_WEBHOOK_SECRET",
+    "RATE_LIMIT_ENABLED",
+    "RATE_LIMIT_REQ_PER_MIN",
+    "REDIS_URL",
+    "RESEND_WEBHOOK_SECRET",
+    "S3_BUCKET",
+    "SMTP_HOST",
+    "SMTP_PASS",
+    "SMTP_PORT",
+    "SMTP_USER",
     "TOTP_SECRET_ENCRYPTION_KEY"
   ]
 }
