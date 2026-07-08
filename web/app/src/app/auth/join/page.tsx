@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { LandingPage } from "@/components/landing/LandingPage";
 
 export const metadata: Metadata = {
-  title: "Join the hunt",
+  title: "Join the Hunt",
   description:
-    "Join the Vorinthex waitlist and start collecting Intelligence Fragments.",
+    "Enter your email to start your explorer profile and track your fragments as the Hunt unfolds.",
   robots: { index: false, follow: false },
 };
 

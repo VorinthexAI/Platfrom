@@ -162,11 +162,6 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
       </div>
 
       <div className="flex flex-col justify-center gap-3">
-        {!active && entity.content?.statusNote ? (
-          <p className="text-[0.7rem] leading-relaxed text-silver-700">
-            {entity.content.statusNote}
-          </p>
-        ) : null}
         <Button
           variant="secondary"
           onClick={() => {

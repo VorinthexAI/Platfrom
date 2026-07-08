@@ -40,7 +40,7 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     ...rolledAnchor(),
     interior: [0, -240, 0],
     theme: "gem",
-    approachLabel: "Approaching the Reservation Vault",
+    approachLabel: "Opening Join",
   },
   "waitlist-verify": {
     ...rolledAnchor(),

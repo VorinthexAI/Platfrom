@@ -4,7 +4,7 @@ import { LandingPage } from "@/components/landing/LandingPage";
 export const metadata: Metadata = {
   title: "Sign in",
   description:
-    "Sign in to restore your Vorinthex explorer profile and Intelligence Fragments.",
+    "Sign in to restore your Hunt explorer profile, alias, and fragments.",
   robots: { index: false, follow: false },
 };
 

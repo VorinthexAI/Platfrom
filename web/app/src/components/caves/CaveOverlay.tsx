@@ -556,7 +556,7 @@ function LegalFlow({
 }
 
 /* ---------------------------------------------------------------- */
-/* 1+2 — join the waitlist inside the Reservation Vault              */
+/* 1+2 — join inside the cave                                        */
 /* ---------------------------------------------------------------- */
 
 /**
@@ -668,13 +668,13 @@ function JoinFlow() {
   if (status === "sent") {
     return (
       <div>
-        <p className="micro-label">Reservation Vault</p>
+        <p className="micro-label">Join</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
           Check your inbox.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          Your spot is reserved, but not secured. Verify your email within
-          12 hours to lock it in, or your place drifts back into the belt.
+          We sent a confirmation link. Open it within 12 hours to finish
+          joining.
         </p>
         <p className="mt-2 text-sm leading-relaxed text-silver-500">
           Verify on any device. Keep this screen open and your galaxy
@@ -689,13 +689,13 @@ function JoinFlow() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <p className="micro-label">Reservation Vault</p>
+      <p className="micro-label">Join</p>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        Collect your place in the galaxy.
+        Join the Hunt.
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-silver-500">
-        This vault holds every reserved seat for Core. Leave your email and
-        the Nexus will carve yours into the rock.
+        Enter your email to start your explorer profile and track your
+        fragments as the Hunt unfolds.
       </p>
       {pendingCollect ? (
         <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 font-mono text-[0.55rem] tracking-[0.2em] text-silver-300 uppercase">
@@ -721,7 +721,7 @@ function JoinFlow() {
         loading={status === "submitting"}
         className="mt-4 w-full px-5 py-3.5 text-xs"
       >
-        Join Waitlist
+        Join
       </Button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
         {status === "error" ? error : ""}
@@ -779,7 +779,6 @@ function ExplorerSigninFlow() {
   if (profile !== "loading" && profile !== null) {
     return (
       <div>
-        <p className="micro-label">The Grove</p>
         <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.06em] text-silver-50">
           {profile.welcomeLine ??
             `Welcome back${profile.alias ? `, ${profile.alias}` : ""}.`}
@@ -825,16 +824,6 @@ function ExplorerSigninFlow() {
         >
           Keep exploring
         </Button>
-        <button
-          type="button"
-          onClick={() => {
-            trackCtaClick("member_gate_open", { placement: "explorer_profile" });
-            useGalaxyStore.getState().enterCave("members");
-          }}
-          className="mt-3 w-full text-center font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase transition-colors hover:text-silver-100"
-        >
-          Member with vault access? Enter the Members Gate
-        </button>
       </div>
     );
   }
@@ -907,7 +896,6 @@ function ExplorerSigninFlow() {
   if (status === "sent") {
     return (
       <div>
-        <p className="micro-label">The Grove</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
           Check your inbox.
         </h2>
@@ -924,13 +912,12 @@ function ExplorerSigninFlow() {
 
   return (
     <form onSubmit={handleSubmit}>
-      <p className="micro-label">The Grove</p>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        Welcome back, explorer.
+        Return to the Hunt.
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-silver-500">
-        Enter the email you joined with and the Grove will send a light to
-        restore your spot, your alias, and your fragments on this device.
+        Enter the email you joined with to restore your explorer profile,
+        alias, and fragments.
       </p>
       {pendingCollect ? (
         <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 font-mono text-[0.55rem] tracking-[0.2em] text-silver-300 uppercase">
@@ -961,16 +948,6 @@ function ExplorerSigninFlow() {
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
         {status === "error" ? error : ""}
       </p>
-      <button
-        type="button"
-        onClick={() => {
-          trackCtaClick("member_gate_open", { placement: "signin_form" });
-          useGalaxyStore.getState().enterCave("members");
-        }}
-        className="mt-2 w-full text-center font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase transition-colors hover:text-silver-100"
-      >
-        Member with vault access? Enter the Members Gate
-      </button>
     </form>
   );
 }
