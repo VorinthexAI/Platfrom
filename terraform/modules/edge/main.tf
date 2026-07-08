@@ -30,10 +30,37 @@ locals {
   response_sec_headers_id = "67f7725c-6f97-4210-82d7-5512b31e9d03" # SecurityHeadersPolicy
 }
 
-# (Removed the custom per-Host HTML cache policy: the default behavior no longer
-# caches HTML at CloudFront — Next.js App Router RSC vs document responses share a
-# URL and must not be cache-collided. proxy.ts still gets the right Host via the
-# AllViewer origin-request policy on the uncached default behavior.)
+# Retained but UNUSED: the default behavior now uses managed CachingDisabled
+# (Next.js App Router RSC vs document responses share a URL and must not be
+# cache-collided). This policy is kept only to avoid a CachePolicyInUse deletion
+# error during the same apply that detaches it; it can be removed in a later,
+# separate apply. proxy.ts gets the right Host via the AllViewer origin policy.
+resource "aws_cloudfront_cache_policy" "html" {
+  name    = "${var.name_prefix}-html-per-host"
+  comment = "Unused (default behavior is CachingDisabled); kept to avoid in-use delete"
+
+  min_ttl     = 0
+  default_ttl = 60
+  max_ttl     = 86400
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "whitelist"
+      headers {
+        items = ["Host"]
+      }
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
 
 # us-east-1 ACM cert for the CloudFront viewer certificate (DNS validation via
 # Cloudflare; outputs only). Created PENDING_VALIDATION, does not block apply.
