@@ -15,6 +15,7 @@ import {
 } from '@/lib/db/super-admins.node';
 import { decryptSecret, encryptSecret, randomToken, sha256, timingSafeEqual } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
+import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
 import { verify as verifyTotpToken } from '@otplib/totp';
 import { base32 } from '@otplib/plugin-base32-scure';
 import { crypto as otpCrypto } from '@otplib/plugin-crypto-noble';
@@ -400,7 +401,7 @@ export async function requestMfaResetEmail(email: string) {
   };
 }
 
-export async function validateMagicLink(token: string): Promise<MagicLinkValidationResult | null> {
+export async function validateMagicLink(token: string, explorerId?: string): Promise<MagicLinkValidationResult | null> {
   const emailChallenge = await consumeChallenge(token, 'email');
   if (!emailChallenge) return null;
 
@@ -418,6 +419,14 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
       lastLoginAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    // Fragments collected anonymously (as this browser's explorerId) since
+    // the last adoption — at join, or never, for a returning explorer who
+    // kept exploring signed out — merge into the account on every sign in,
+    // not just the first one.
+    if (explorerId) {
+      const adopted = await adoptExplorerFragments(explorerId, user.key);
+      if (adopted > 0) notifyCountersDirty();
+    }
     const alias = user.alias ?? generateAlias(user.key);
     trackPlatformEvent({
       slug: 'auth.magic_link_authenticated',

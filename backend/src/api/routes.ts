@@ -48,6 +48,7 @@ import {
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tempEmailHash = z.string().regex(/^[a-f0-9]{64}$/);
+const explorerIdSchema = z.string().min(8).max(80).optional();
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
 const challengeTokenHashBodyBase = strictObject({
   challenge_token_hash: challengeHash,
@@ -116,8 +117,8 @@ export function registerRoutes(app: Hono) {
   });
 
   app.post('/auth/magic/validate', async (c) => {
-    const body = await parseJson(c, tokenHashBodyBase);
-    const result = await validateMagicLink(body.token_hash);
+    const body = await parseJson(c, tokenHashBodyBase.extend({ explorer_id: explorerIdSchema }));
+    const result = await validateMagicLink(body.token_hash, body.explorer_id);
     if (!result) return c.json({ error: 'invalid or expired sign-in link' }, 401);
     if (result.status === 'authenticated') {
       setSessionTokenHeaders(c, result);
@@ -208,8 +209,8 @@ export function registerRoutes(app: Hono) {
   app.post('/platform/events', recordPlatformClientEvent);
 
   app.post('/waitlist/verify', async (c) => {
-    const body = await parseJson(c, tokenHashBodyBase);
-    const result = await verifyWaitlistEmail(body.token_hash);
+    const body = await parseJson(c, tokenHashBodyBase.extend({ explorer_id: explorerIdSchema }));
+    const result = await verifyWaitlistEmail(body.token_hash, body.explorer_id);
     if (!result) return c.json({ error: 'invalid or expired verification link' }, 401);
     return c.json({
       ok: true,
@@ -222,8 +223,8 @@ export function registerRoutes(app: Hono) {
   });
 
   app.get('/waitlist/verify', async (c) => {
-    const query = parseQuery(c, strictObject({ token_hash: challengeHash }));
-    const result = await verifyWaitlistEmail(query.token_hash);
+    const query = parseQuery(c, strictObject({ token_hash: challengeHash, explorer_id: explorerIdSchema }));
+    const result = await verifyWaitlistEmail(query.token_hash, query.explorer_id);
     if (!result) return c.json({ error: 'invalid or expired verification link' }, 401);
     return c.json({
       ok: true,

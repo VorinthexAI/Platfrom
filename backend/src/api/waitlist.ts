@@ -163,7 +163,7 @@ export async function requestWaitlistVerification(email: string, explorerId?: st
   };
 }
 
-export async function verifyWaitlistEmail(tokenHash: string) {
+export async function verifyWaitlistEmail(tokenHash: string, explorerId?: string) {
   const storedTokenHash = await sha256(tokenHash);
   const now = new Date();
 
@@ -184,6 +184,12 @@ export async function verifyWaitlistEmail(tokenHash: string) {
   await approveHandoff({ key: challenge.key, handoffTokenHash: challenge.handoffTokenHash });
 
   const entry = await updateUser(challenge.identityKey, { isVerified: true, updatedAt: now.toISOString() });
+  // Fragments collected anonymously since joining merge into the account
+  // the moment email ownership is proven, not just at the initial join.
+  if (explorerId) {
+    const adopted = await adoptExplorerFragments(explorerId, entry.key);
+    if (adopted > 0) notifyCountersDirty();
+  }
   trackPlatformEvent({
     slug: 'waitlist.email_verified',
     userId: entry.key,
