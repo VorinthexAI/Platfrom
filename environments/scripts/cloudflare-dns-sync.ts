@@ -35,7 +35,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const API_BASE = "https://api.cloudflare.com/client/v4";
-const DEFAULT_TARGET = "d1zyw7lyzk1blr.cloudfront.net";
+const DEFAULT_TARGET = "d15bpr5kewe7p5.cloudfront.net";
 const DEFAULT_APEX = "vorinthex.com";
 const DEFAULT_DOMAINS_FILE = "environments/domains.json";
 const MAX_RETRIES = 5;
