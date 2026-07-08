@@ -176,7 +176,7 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
           icon={<SpeakerIcon animated />}
           className="min-h-0 w-full px-5 py-3 text-[0.62rem] uppercase sm:w-auto sm:px-6"
         >
-          Hear the Story
+          Play Briefing
         </Button>
       </div>
     </div>
