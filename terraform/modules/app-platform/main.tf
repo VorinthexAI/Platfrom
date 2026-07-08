@@ -257,21 +257,12 @@ resource "aws_lb_listener_rule" "http_api_host" {
   }
 }
 
-resource "aws_lb_listener_rule" "http_api_path" {
-  listener_arn = aws_lb_listener.http.arn
-  priority     = 20
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api.arn
-  }
-
-  condition {
-    path_pattern {
-      values = ["/api/*"]
-    }
-  }
-}
+# NOTE: deliberately NO "/api/*" path rule to the api target group. The web
+# app (Next.js) OWNS the /api/* path space — /api/members, /api/fragments/*,
+# /api/auth/* are its own route handlers that proxy to the backend server-side
+# (adding the API key). Routing /api/* to the api target group would hijack
+# those and return "api key required". The backend is reached only via its own
+# host (api_domain_names → http_api_host rule), never by path on the web domains.
 
 # Optional HTTPS listener; only when a validated cert is available.
 resource "aws_lb_listener" "https" {
@@ -305,22 +296,8 @@ resource "aws_lb_listener_rule" "https_api_host" {
   }
 }
 
-resource "aws_lb_listener_rule" "https_api_path" {
-  count        = var.alb_https_enabled ? 1 : 0
-  listener_arn = aws_lb_listener.https[0].arn
-  priority     = 20
-
-  action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api.arn
-  }
-
-  condition {
-    path_pattern {
-      values = ["/api/*"]
-    }
-  }
-}
+# NOTE: no "/api/*" path rule on HTTPS either — see the HTTP listener note
+# above. The web app owns /api/*; the backend is host-routed only.
 
 # ----------------------------------------------------------------------------
 # ECS EC2 capacity: instance role, launch template, ASG, capacity provider.
@@ -618,6 +595,13 @@ resource "aws_ecs_task_definition" "web" {
         { name = "PORT", value = tostring(var.web_container_port) },
         { name = "HOSTNAME", value = "0.0.0.0" },
         { name = "NEXT_PUBLIC_SITE_URL", value = var.site_url }
+        # NOTE: the RUNNING web task def also carries API_BASE_URL +
+        # BACKEND_API_KEY (the server-side backend bridge read by web/app
+        # src/lib/backend.ts). Without them the web app cannot authenticate to
+        # the backend and every sign-in / dynamic call returns "api key
+        # required". They are injected into the live task def out-of-band and
+        # preserved by ignore_changes below (the service also ignores
+        # task_definition). TODO: move to SSM SecureString + a secrets block.
       ]
       logConfiguration = {
         logDriver = "awslogs"
