@@ -46,14 +46,21 @@ Caddy, retires the old colour. Runtime secrets are pulled from SSM
 - `deploy.sh` — blue-green deploy, run on the box via SSM.
 - `bootstrap-app.sh` / `bootstrap-db.sh` — EC2 user-data (Docker + layout).
 
+## In Terraform
+
+The app box, its security group + rules, EIP, the Cloudflare-IP prefix list, and
+the arango-SG ingress rule are now managed in
+`terraform/environments/production/early_app.tf` (imported; `user_data`/`ami` are
+ignored so a plan never replaces the running box — verified 0-destroy, clean plan).
+
 ## Known gaps / follow-ups
 
-- **Not yet in Terraform.** The app box, its security group, EIP, the arango-SG
-  ingress rule, and the Cloudflare-IP prefix list were created via the AWS CLI
-  during the cost pivot. Terraform (`terraform/environments/production`) now
-  defines only VPC (no NAT) + graph-db + storage + SSM. Importing the app box into
-  IaC is a deliberate follow-up (skipped live to avoid disrupting the running box).
-- CloudFront→origin is currently Cloudflare Full with a self-signed origin cert.
-  Optional hardening: a real origin cert (Cloudflare Origin CA) for Full (strict).
+- **Origin is open on 0.0.0.0/0.** The Cloudflare-only prefix-list rules do not (on
+  their own) admit Cloudflare to the origin, so :80/:443 are also open to the world
+  (`early_app_http_open`/`early_app_https_open`). Mitigated by the API key + an
+  unpublished origin IP. TODO: figure out why the prefix-list rules don't work and
+  lock down to Cloudflare-only.
+- Cloudflare→origin is Full with a self-signed origin cert. Optional hardening: a
+  real origin cert (Cloudflare Origin CA) for Full (strict).
 - DB stays on t3.small (a t4g.small downsize was skipped — ~$5/mo, not worth the
   cross-instance data move).
