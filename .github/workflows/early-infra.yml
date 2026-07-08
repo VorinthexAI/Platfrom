@@ -1,0 +1,128 @@
+name: Early-infra deploy
+
+# Build + blue-green deploy of the stripped single-box early-infra stack
+# (web + api + redis + caddy on one t4g.medium). Builds the arm64 images, pushes
+# to ECR, then runs deploy/early/deploy.sh ON the app box via SSM — no SSH keys,
+# zero-downtime color swap. The DB box (ArangoDB) is provisioned separately and
+# is not touched by this workflow.
+#
+# Requires the deploy role (vars.AWS_DEPLOY_ROLE_ARN) to allow ecr:* on the two
+# repos and ssm:SendCommand/GetCommandInvocation on the app instance.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: this commit SHA)"
+        required: false
+        default: ""
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "web/app/**"
+      - "shared/**"
+      - "deploy/early/**"
+      - ".github/workflows/early-infra.yml"
+
+concurrency:
+  group: early-infra-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REGISTRY: 938565868704.dkr.ecr.eu-north-1.amazonaws.com
+  IMAGE_PLATFORM: linux/arm64
+  APP_INSTANCE_TAG: vorinthex-early-app
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: tag
+        run: echo "tag=${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Build + push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/app/Dockerfile
+          platforms: ${{ env.IMAGE_PLATFORM }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/vorinthex-web:${{ steps.tag.outputs.tag }}
+            ${{ env.ECR_REGISTRY }}/vorinthex-web:latest
+      - name: Build + push api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/deploy/Dockerfile
+          platforms: ${{ env.IMAGE_PLATFORM }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/vorinthex-backend:${{ steps.tag.outputs.tag }}
+            ${{ env.ECR_REGISTRY }}/vorinthex-backend:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Blue-green deploy via SSM
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          IID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${APP_INSTANCE_TAG}" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          if [ "$IID" = "None" ] || [ -z "$IID" ]; then echo "app box not found"; exit 1; fi
+          echo "app box: $IID  tag: $TAG"
+
+          DEPLOY_B64=$(base64 -w0 deploy/early/deploy.sh)
+          CADDY_B64=$(base64 -w0 deploy/early/Caddyfile.tmpl)
+
+          CMD=$(aws ssm send-command \
+            --instance-ids "$IID" \
+            --document-name AWS-RunShellScript \
+            --comment "early-infra blue-green $TAG" \
+            --timeout-seconds 900 \
+            --parameters commands="[
+              \"set -e\",
+              \"mkdir -p /opt/vorinthex\",
+              \"echo $DEPLOY_B64 | base64 -d > /opt/vorinthex/deploy.sh\",
+              \"echo $CADDY_B64 | base64 -d > /opt/vorinthex/Caddyfile.tmpl\",
+              \"chmod +x /opt/vorinthex/deploy.sh\",
+              \"/opt/vorinthex/deploy.sh $TAG\"
+            ]" \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $CMD"
+
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'Status' --output text 2>/dev/null || echo Pending)
+            echo "status: $STATUS"
+            case "$STATUS" in
+              Success) break;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardErrorContent' --output text || true
+                exit 1;;
+            esac
+            sleep 10
+          done
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardOutputContent' --output text | tail -30
