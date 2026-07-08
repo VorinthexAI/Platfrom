@@ -30,6 +30,41 @@ locals {
   response_sec_headers_id = "67f7725c-6f97-4210-82d7-5512b31e9d03" # SecurityHeadersPolicy
 }
 
+# Custom cache policy for the default (HTML) behavior. The web app serves every
+# domain from one origin via proxy.ts hostname routing, so the SAME path (e.g.
+# "/") returns different HTML per Host. Managed CachingOptimized omits Host from
+# the cache key, which would let one domain's page be served to another. This
+# policy puts Host in the cache key so each domain caches its own HTML, while
+# still caching at the edge (fast globally, Vercel-like). Query strings are
+# ignored (the galaxy app reads them client-side) for a high cache-hit rate;
+# min_ttl=0 lets dynamic/SSR routes opt out via their Cache-Control: no-cache.
+resource "aws_cloudfront_cache_policy" "html" {
+  name    = "${var.name_prefix}-html-per-host"
+  comment = "Default/HTML behavior: Host in the cache key for proxy.ts multi-domain routing"
+
+  min_ttl     = 0
+  default_ttl = 60
+  max_ttl     = 86400
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "whitelist"
+      headers {
+        items = ["Host"]
+      }
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
 # us-east-1 ACM cert for the CloudFront viewer certificate (DNS validation via
 # Cloudflare; outputs only). Created PENDING_VALIDATION, does not block apply.
 resource "aws_acm_certificate" "cloudfront" {
@@ -210,7 +245,7 @@ resource "aws_cloudfront_distribution" "this" {
     allowed_methods          = ["GET", "HEAD", "OPTIONS"]
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
-    cache_policy_id          = local.cache_optimized_id
+    cache_policy_id          = aws_cloudfront_cache_policy.html.id
     origin_request_policy_id = local.origin_all_viewer_id
   }
 
