@@ -15,6 +15,8 @@
     "design:galaxy": "bun run --cwd scripts/image generate:galaxy",
     "design:slideshow": "bun run --cwd scripts/image slideshow",
     "design:refresh-brand-capabilities": "bun run --cwd scripts/image refresh:brand-capabilities",
+    "og:cards": "bun run --cwd scripts/image og:cards",
+    "og:publish": "bun run --cwd scripts/image og:publish",
     "design:gallery": "bun run --cwd scripts/image gallery",
     "assets": "bun run --cwd scripts/image assets",
     "design:validate": "bun run --cwd scripts/image validate",

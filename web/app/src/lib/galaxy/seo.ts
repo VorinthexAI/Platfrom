@@ -8,6 +8,7 @@ export function buildMetadataFromEntity(entity: GalaxyEntity): Metadata {
   const canonicalUrl = canonical.startsWith("http")
     ? canonical
     : absoluteUrl(canonical);
+  const socialCardBase = `/social-cards/${entity.slug}`;
 
   return {
     title: entity.seo.title,
@@ -19,14 +20,13 @@ export function buildMetadataFromEntity(entity: GalaxyEntity): Metadata {
       title: entity.seo.title,
       description: entity.seo.description,
       url: canonicalUrl,
-      ...(entity.seo.openGraphImage
-        ? { images: [entity.seo.openGraphImage] }
-        : {}),
+      images: [entity.seo.openGraphImage ?? `${socialCardBase}/opengraph.png`],
     },
     twitter: {
       card: "summary_large_image",
       title: entity.seo.title,
       description: entity.seo.description,
+      images: [`${socialCardBase}/twitter.png`],
     },
   };
 }

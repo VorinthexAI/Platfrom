@@ -8,6 +8,8 @@
     "generate:galaxy": "bun src/galaxy-assets.ts",
     "slideshow": "bun src/slideshow.ts",
     "refresh:brand-capabilities": "bun src/refresh-brand-capabilities.ts",
+    "og:cards": "bun src/og-cards.ts",
+    "og:publish": "bun src/publish-og-cards.ts",
     "assets": "bun src/gallery-server.ts",
     "gallery": "bun src/gallery-server.ts",
     "validate": "bun src/validate.ts",

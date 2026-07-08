@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Button } from "@vorinthex/shared/ui/components";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
@@ -40,11 +40,36 @@ function CollectibleTooltip() {
   const setPendingCollect = useFragmentsStore((s) => s.setPendingCollect);
   const enterCave = useGalaxyStore((s) => s.enterCave);
   const reducedMotion = useReducedMotion();
+  const tooltipRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!selected) return;
+
+    const dismiss = () => select(null);
+    const dismissOnOutsidePointer = (event: PointerEvent) => {
+      const tooltip = tooltipRef.current;
+      if (tooltip?.contains(event.target as Node)) return;
+      dismiss();
+    };
+
+    document.addEventListener("pointerdown", dismissOnOutsidePointer, true);
+    window.addEventListener("wheel", dismiss, { passive: true });
+    window.addEventListener("scroll", dismiss, { passive: true });
+    window.addEventListener("touchmove", dismiss, { passive: true });
+
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnOutsidePointer, true);
+      window.removeEventListener("wheel", dismiss);
+      window.removeEventListener("scroll", dismiss);
+      window.removeEventListener("touchmove", dismiss);
+    };
+  }, [selected, select]);
 
   return (
     <AnimatePresence>
       {selected ? (
         <motion.aside
+          ref={tooltipRef}
           key={selected.id}
           initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -108,7 +133,7 @@ function CollectibleTooltip() {
                     select(null);
                     enterCave("join");
                   }}
-                  className="mt-4 w-full min-h-0 px-5 py-3.5 text-xs uppercase"
+                  className="mt-4 w-full min-h-0 px-5 py-3 text-[0.62rem] uppercase"
                 >
                   Join
                 </Button>

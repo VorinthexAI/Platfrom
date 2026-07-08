@@ -18,8 +18,9 @@ export function LogOutIcon({ variant = "inherit", size = "md", strokeWidth = 1.4
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>
-      <path d="M5 12h14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <path d="M12 5v14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M10 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H10" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 8l4 4-4 4" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M18 12H9" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
     </svg>
   );
 }

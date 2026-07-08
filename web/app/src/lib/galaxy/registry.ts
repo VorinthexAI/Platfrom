@@ -59,7 +59,7 @@ const nexus: GalaxyEntity = {
     eyebrow: "The Nexus of Intelligence",
     headline: "The Nexus of Intelligence",
     subheadline: "Your personal AI for everything, with infinite memory.",
-    primaryCta: "Join Hunt",
+    primaryCta: "Join",
     secondaryCta: "Already on waitlist? Sign in",
   },
   children: ["product.core", "product.command", "product.studio", "product.launch"],

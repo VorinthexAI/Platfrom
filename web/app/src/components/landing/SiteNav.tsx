@@ -97,28 +97,28 @@ export function SiteNav() {
                 Jump Galaxy
               </Button>
               <Button
-                variant="secondary"
+                variant="icon"
                 onClick={() => {
                   trackCtaClick("hunt_open", { placement: "nav" });
                   enterCave("hunt");
                 }}
                 icon={<FragmentIcon size="sm" />}
                 aria-label="View the hunt"
-                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+                className="h-9 w-9 min-h-0 p-0"
               >
-                <span className="hidden sm:inline">Hunt</span>
+                Hunt
               </Button>
               <Button
-                variant="secondary"
+                variant="icon"
                 onClick={() => {
                   trackCtaClick("signout", { placement: "nav" });
                   void signOut();
                 }}
                 icon={<LogOutIcon size="sm" />}
                 aria-label="Sign out"
-                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+                className="h-9 w-9 min-h-0 p-0"
               >
-                <span className="hidden sm:inline">Sign out</span>
+                Sign out
               </Button>
             </>
           ) : (
@@ -144,16 +144,16 @@ export function SiteNav() {
                 Sign in
               </Button>
               <Button
-                variant="secondary"
+                variant="icon"
                 onClick={() => {
                   trackCtaClick("hunt_open", { placement: "nav" });
                   enterCave("hunt");
                 }}
                 icon={<FragmentIcon size="sm" />}
                 aria-label="View the hunt"
-                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+                className="h-9 w-9 min-h-0 p-0"
               >
-                <span className="hidden sm:inline">Hunt</span>
+                Hunt
               </Button>
             </>
           )}

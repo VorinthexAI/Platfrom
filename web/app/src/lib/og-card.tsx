@@ -86,7 +86,7 @@ export function entityOgAlt(entity: GalaxyEntity): string {
 }
 
 interface CardInput {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   subtitle: string;
   accent: string;
@@ -109,7 +109,7 @@ function Card({ eyebrow, title, subtitle, accent, logo, badge }: CardInput) {
         color: "#e8ecef",
         fontFamily: "Georgia, serif",
         textAlign: "center",
-        padding: "0 96px",
+        padding: "44px 96px 34px",
       }}
     >
       {logo ? (
@@ -119,27 +119,29 @@ function Card({ eyebrow, title, subtitle, accent, logo, badge }: CardInput) {
         <img
           src={logo}
           alt=""
-          width={168}
-          height={168}
-          style={{ marginBottom: 44, objectFit: "contain" }}
+          width={132}
+          height={132}
+          style={{ marginBottom: 32, objectFit: "contain" }}
         />
+      ) : null}
+      {eyebrow ? (
+        <div
+          style={{
+            display: "flex",
+            fontSize: 26,
+            letterSpacing: 12,
+            color: accent,
+            textTransform: "uppercase",
+          }}
+        >
+          {eyebrow}
+        </div>
       ) : null}
       <div
         style={{
           display: "flex",
-          fontSize: 26,
-          letterSpacing: 12,
-          color: accent,
-          textTransform: "uppercase",
-        }}
-      >
-        {eyebrow}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          marginTop: 26,
-          fontSize: 82,
+          marginTop: eyebrow ? 22 : 0,
+          fontSize: 74,
           letterSpacing: 4,
           color: "#f4f6f8",
           textTransform: "uppercase",
@@ -150,8 +152,8 @@ function Card({ eyebrow, title, subtitle, accent, logo, badge }: CardInput) {
       <div
         style={{
           display: "flex",
-          marginTop: 30,
-          fontSize: 32,
+          marginTop: 24,
+          fontSize: 30,
           letterSpacing: 1,
           color: "#aeb7be",
           maxWidth: 940,
@@ -164,14 +166,14 @@ function Card({ eyebrow, title, subtitle, accent, logo, badge }: CardInput) {
         <div
           style={{
             display: "flex",
-            marginTop: 38,
+            marginTop: 28,
             padding: "10px 26px",
             border: `1px solid ${accent}`,
             borderRadius: 999,
             fontSize: 20,
-            letterSpacing: 5,
+            letterSpacing: 2,
             color: accent,
-            textTransform: "uppercase",
+            textTransform: "none",
           }}
         >
           {badge}
@@ -180,7 +182,7 @@ function Card({ eyebrow, title, subtitle, accent, logo, badge }: CardInput) {
       <div
         style={{
           display: "flex",
-          marginTop: badge ? 40 : 56,
+          marginTop: badge ? 30 : 42,
           width: 240,
           height: 2,
           background: `linear-gradient(90deg, rgba(232,236,239,0) 0%, ${accent}88 50%, rgba(232,236,239,0) 100%)`,
@@ -189,7 +191,7 @@ function Card({ eyebrow, title, subtitle, accent, logo, badge }: CardInput) {
       <div
         style={{
           display: "flex",
-          marginTop: 26,
+          marginTop: 22,
           fontSize: 22,
           letterSpacing: 8,
           color: "#6d767d",
@@ -217,7 +219,7 @@ export function renderEntityOg(entity: GalaxyEntity): ImageResponse {
         subtitle={entitySubtitle(entity)}
         accent={accentColor(entity.visual.accent)}
         logo={logo}
-        badge={entity.isLive ? null : (entity.statusLabel ?? "Coming soon")}
+        badge="Powered By Vorinthex AI"
       />
     ),
     OG_SIZE,
@@ -225,7 +227,7 @@ export function renderEntityOg(entity: GalaxyEntity): ImageResponse {
 }
 
 interface BrandedOgInput {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   subtitle: string;
   accent?: string;
@@ -248,7 +250,7 @@ export function renderBrandedOg({
         subtitle={subtitle}
         accent={accentColor(accent)}
         logo={readImageDataUri("logos/vorinthex-mark.png")}
-        badge={badge ?? null}
+        badge={badge === undefined ? "Powered By Vorinthex AI" : badge}
       />
     ),
     OG_SIZE,

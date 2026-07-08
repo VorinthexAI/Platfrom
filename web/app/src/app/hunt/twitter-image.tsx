@@ -7,10 +7,10 @@ export const contentType = OG_CONTENT_TYPE;
 
 export default function Image() {
   return renderBrandedOg({
-    eyebrow: "The Hunt",
     title: "The Hunt",
     subtitle:
       "The great collectors of the Vorinthex galaxy, ranked live by Intelligence Fragments.",
-    accent: "dark-orange-chrome",
+    accent: "chrome",
+    badge: null,
   });
 }

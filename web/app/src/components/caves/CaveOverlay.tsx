@@ -369,37 +369,9 @@ function LeaderboardFlow() {
 
   return (
     <div className="flex max-h-[88dvh] flex-col gap-4 sm:gap-6">
-      {/* the briefing — the first thing an arriving explorer sees */}
-      <SlideUpCard index={0} className="flex flex-col gap-2">
-        <Button
-          variant="primary"
-          onClick={() => {
-            trackCtaClick("mission_audio", { placement: "hunt" });
-            toggleMission();
-          }}
-          icon={<SpeakerIcon animated={missionPlaying} />}
-          className="w-full px-5 py-3.5 text-xs uppercase"
-        >
-          <span className="animate-[fade-in_0.4s_ease-out]">
-            {missionPlaying ? "Stop" : "Briefing"}
-          </span>
-        </Button>
-        <Button
-          variant="secondary"
-          onClick={() => {
-            trackCtaClick("hunt_return", { placement: "hunt" });
-            exitCave();
-            syncEntityUrl("/");
-          }}
-          className="w-full px-5 py-3 text-[0.62rem] uppercase"
-        >
-          Return to Solar System
-        </Button>
-      </SlideUpCard>
-
       {/* island 1 — the call */}
       <SlideUpCard
-        index={1}
+        index={0}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
@@ -414,8 +386,43 @@ function LeaderboardFlow() {
         </p>
       </SlideUpCard>
 
-      {/* island 2 — the board: pure rows, no close control (Return to
-          Solar System above is the only way out of the hunt) */}
+      {/* island 2 — hunt actions, attached to the hunt card instead of
+          floating above it as a separate lead-in. */}
+      <SlideUpCard
+        index={1}
+        className="chrome-border card-depth relative w-full rounded-3xl p-4"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="primary"
+            onClick={() => {
+              trackCtaClick("mission_audio", { placement: "hunt" });
+              toggleMission();
+            }}
+            icon={<SpeakerIcon animated={missionPlaying} />}
+            className="w-full px-5 py-3.5 text-xs uppercase"
+          >
+            <span className="animate-[fade-in_0.4s_ease-out]">
+              {missionPlaying ? "Stop" : "Briefing"}
+            </span>
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              trackCtaClick("hunt_return", { placement: "hunt" });
+              exitCave();
+              syncEntityUrl("/");
+            }}
+            className="w-full px-5 py-3 text-[0.62rem] uppercase"
+          >
+            Start collecting
+          </Button>
+        </div>
+      </SlideUpCard>
+
+      {/* island 3 — the board: pure rows, no close control (Start
+          collecting above is the way back to fragment hunting) */}
       <SlideUpCard
         index={2}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
@@ -472,37 +479,39 @@ function LeaderboardFlow() {
             </p>
           </div>
         ) : profile !== "loading" ? (
-          <div className="mt-3 flex flex-col gap-2">
+          <div className="mt-3 flex flex-col gap-4">
             <p className="text-[0.78rem] leading-relaxed text-silver-500">
               New explorer? Join to send your fragments into the hunt.
               Already collecting? Sign in to sync your haul.
             </p>
-            <Button
-              variant="primary"
-              onClick={() => {
-                trackCtaClick("waitlist_open", { placement: "hunt_standing" });
-                enterCave("join");
-              }}
-              className="w-full px-5 py-3.5 text-xs uppercase"
-            >
-              Join
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                trackCtaClick("signin_gate_open", { placement: "hunt_standing" });
-                enterCave("signin");
-              }}
-              className="w-full px-5 py-3 text-[0.62rem] uppercase"
-            >
-              Sign in
-            </Button>
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="primary"
+                onClick={() => {
+                  trackCtaClick("waitlist_open", { placement: "hunt_standing" });
+                  enterCave("join");
+                }}
+                className="w-full px-5 py-3.5 text-xs uppercase"
+              >
+                Join
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  trackCtaClick("signin_gate_open", { placement: "hunt_standing" });
+                  enterCave("signin");
+                }}
+                className="w-full px-5 py-3 text-[0.62rem] uppercase"
+              >
+                Sign in
+              </Button>
+            </div>
           </div>
         ) : null}
         </div>
       </SlideUpCard>
 
-      {/* island 3 — the galaxy pulse */}
+      {/* island 4 — the galaxy pulse */}
       <SlideUpCard
         index={3}
         className="chrome-border card-depth relative w-full rounded-3xl px-6 py-4 sm:px-7"

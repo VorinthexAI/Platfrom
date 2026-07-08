@@ -236,80 +236,6 @@
       "updatedAt": "2026-07-06T23:11:03.268Z"
     },
     {
-      "id": "announcement-hunt-launch",
-      "slug": "hunt-launch",
-      "name": "Hunt is Now Open",
-      "category": "announcement",
-      "status": "reviewed",
-      "locked": false,
-      "description": "A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.",
-      "designIntent": "TikTok slideshow campaign. Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.",
-      "currentVersionId": "v1",
-      "versions": [
-        {
-          "id": "v1",
-          "version": 1,
-          "prompt": "A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.",
-          "fullPrompt": "# Hunt is Now Open\n\n## Style Bible\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\n## Slide 1\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nIf text is requested, keep it short, large, clean, and safely inside the frame.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 1 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Hunt is now open.\n\nSlide subject idea, lower priority than references: A mysterious Intelligence Fragment floating above an obsidian landscape. Premium chrome edges, subtle internal glow, cinematic fog and dramatic lighting. The beginning of the Hunt.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 2\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nIf text is requested, keep it short, large, clean, and safely inside the frame.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 2 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Explore the Vorinthex Galaxy.\n\nSlide subject idea, lower priority than references: A lone Explorer overlooking vast futuristic worlds connected across the Vorinthex Galaxy. Hidden Intelligence Fragments glow in the distance, inviting exploration.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 3\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nIf text is requested, keep it short, large, clean, and safely inside the frame.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 3 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Collect Intelligence Fragments.\n\nSlide subject idea, lower priority than references: A premium collection of Intelligence Fragments ranging from common to legendary. Every fragment has a unique crystalline geometry, subtle energy core and luxurious chrome detailing floating in deep space.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 4\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nIf text is requested, keep it short, large, clean, and safely inside the frame.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 4 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Climb the global leaderboard.\n\nSlide subject idea, lower priority than references: A premium holographic leaderboard rising from polished dark glass. Anonymous Explorers climb the rankings while collected Intelligence Fragments orbit around the highest-ranked players.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 5\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nIf text is requested, keep it short, large, clean, and safely inside the frame.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 5 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Earn exclusive launch rewards.\n\nSlide subject idea, lower priority than references: Exclusive Founder rewards displayed on premium obsidian pedestals. Rare collectibles, early access, exclusive badges and mystery rewards are hinted at without revealing everything.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 6\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nIf text is requested, keep it short, large, clean, and safely inside the frame.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, generous negative space for overlay text, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 6 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: The expedition has begun.\n\nSlide subject idea, lower priority than references: A breathtaking cinematic view across the Vorinthex Galaxy. Countless planets, stars and distant Intelligence Fragments await discovery, creating a powerful feeling that the journey has only just begun.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n",
-          "slideshowPath": "slideshow/intelligence-hunt-launch-1/outputs/v1/slideshow.json",
-          "previewPath": "slideshow/intelligence-hunt-launch-1/outputs/v1/slide-01.png",
-          "slidePaths": [
-            "slideshow/intelligence-hunt-launch-1/outputs/v1/slide-01.png",
-            "slideshow/intelligence-hunt-launch-1/outputs/v1/slide-02.png",
-            "slideshow/intelligence-hunt-launch-1/outputs/v1/slide-03.png",
-            "slideshow/intelligence-hunt-launch-1/outputs/v1/slide-04.png",
-            "slideshow/intelligence-hunt-launch-1/outputs/v1/slide-05.png",
-            "slideshow/intelligence-hunt-launch-1/outputs/v1/slide-06.png"
-          ],
-          "referenceImagePaths": [],
-          "metadataPath": "assets/announcement/hunt-launch/v1/metadata.json",
-          "accepted": false,
-          "rejected": false,
-          "notes": "TikTok slideshow: 6 slides, 0 reference image(s).",
-          "createdAt": "2026-07-07T23:44:05.371Z"
-        }
-      ],
-      "createdAt": "2026-07-07T23:35:42.344Z",
-      "updatedAt": "2026-07-07T23:44:05.380Z"
-    },
-    {
-      "id": "announcement-hunt-launch-2",
-      "slug": "hunt-launch-2",
-      "name": "Hunt is Now Open",
-      "category": "announcement",
-      "status": "reviewed",
-      "locked": false,
-      "description": "A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.",
-      "designIntent": "TikTok slideshow campaign. Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.",
-      "versions": [
-        {
-          "prompt": "A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.",
-          "fullPrompt": "# Hunt is Now Open\n\n## Style Bible\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\n## Slide 1\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nReserve generous clean space for external overlay text and keep important subjects away from the top, bottom, left, and right edges.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nNever render text inside the image unless the slide brief explicitly overrides this.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 1 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Hunt is now open.\n\nSlide subject idea, lower priority than references: A quiet cinematic opening scene in the Vorinthex universe. One abstract focal form in the center distance, surrounded by dark space, fog, chrome reflections and ample empty room for overlay text.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 2\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nReserve generous clean space for external overlay text and keep important subjects away from the top, bottom, left, and right edges.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nNever render text inside the image unless the slide brief explicitly overrides this.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 2 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Explore the Vorinthex Galaxy.\n\nSlide subject idea, lower priority than references: A wide atmospheric discovery scene suggesting a vast galaxy and hidden paths. Keep the composition simple, spacious and cinematic, with no crowded elements near the edges.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 3\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nReserve generous clean space for external overlay text and keep important subjects away from the top, bottom, left, and right edges.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nNever render text inside the image unless the slide brief explicitly overrides this.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 3 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Collect Intelligence Fragments.\n\nSlide subject idea, lower priority than references: A minimal premium scene implying rare discoveries and collected intelligence through a few abstract luminous forms. Avoid showing many separate items; keep the image calm and spacious.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 4\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nReserve generous clean space for external overlay text and keep important subjects away from the top, bottom, left, and right edges.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nNever render text inside the image unless the slide brief explicitly overrides this.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 4 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Climb the global leaderboard.\n\nSlide subject idea, lower priority than references: An abstract upward progression scene using dark glass, chrome light, depth and vertical motion cues. Avoid literal UI, readable rankings or detailed interface elements.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 5\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nReserve generous clean space for external overlay text and keep important subjects away from the top, bottom, left, and right edges.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nNever render text inside the image unless the slide brief explicitly overrides this.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 5 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: Earn exclusive launch rewards.\n\nSlide subject idea, lower priority than references: A restrained premium reward reveal with soft light, mystery and negative space. Suggest exclusivity without showing specific reward objects or clutter.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n\n## Slide 6\n\nCreate one production-quality vertical TikTok slideshow slide.\nUse a consistent campaign art direction across every slide in the set.\nThe output must be a premium 9:16 image with strong mobile readability.\nKeep the same visual language, materials, color palette, lighting, camera distance, and composition rules across slides.\nReserve generous clean space for external overlay text and keep important subjects away from the top, bottom, left, and right edges.\nDo not add watermarks, platform UI, fake app chrome, unreadable microtext, or random typography.\nNever render text inside the image unless the slide brief explicitly overrides this.\n\nCampaign consistency contract:\n- Campaign: Hunt is Now Open\n- Description: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.\n- Shared style: Premium Vorinthex AI: obsidian black, polished chrome, dark glass, subtle volumetric lighting, cinematic sci-fi realism, premium enterprise aesthetic, minimalist composition, mobile-first 9:16, consistent visual language across every slide, broad atmospheric imagery rather than specific literal objects, generous empty space for overlay text, keep important subjects away from all edges, preserve at least 18 percent clean margin at top and bottom and 12 percent clean margin on left and right, never render text inside images, no logos, no UI, no watermarks.\n- References supplied: 0.\n- No reference images supplied. The shared style text is the highest-priority visual source.\n- Use one coherent palette, material system, camera language, lighting setup, depth treatment, and typography style across all slides.\n- Compose for TikTok 9:16 with safe margins at top and bottom.\n- Preserve continuity while changing the subject/action per slide.\n\nSlide 6 of 6:\nSlide message for campaign planning, do not render as image text unless explicitly allowed: The expedition has begun.\n\nSlide subject idea, lower priority than references: A broad cinematic closing vista with distant depth, subtle light and a sense of beginning. Keep the frame uncluttered, with the main energy centered and far from the edges.\n\n\nOutput requirements:\n- Native vertical image.\n- Final image should work as one slide in a consistent TikTok carousel.\n- Keep the reference-driven visual system intact across this slide.\n- If adding text, keep it short, premium, readable, and placed safely.\n\nNegative prompt:\nNo watermark, no TikTok interface, no usernames, no QR codes, no clutter, no tiny unreadable text, no messy collage, no cartoon style, no neon cyberpunk overload, no cheap poster layout, no duplicated faces, no distorted hands, no malformed logos.\n",
-          "slideshowPath": "slideshow/intelligence-hunt-launch-2/outputs/v1/slideshow.json",
-          "previewPath": "slideshow/intelligence-hunt-launch-2/outputs/v1/slide-01.png",
-          "slidePaths": [
-            "slideshow/intelligence-hunt-launch-2/outputs/v1/slide-01.png",
-            "slideshow/intelligence-hunt-launch-2/outputs/v1/slide-02.png",
-            "slideshow/intelligence-hunt-launch-2/outputs/v1/slide-03.png",
-            "slideshow/intelligence-hunt-launch-2/outputs/v1/slide-04.png",
-            "slideshow/intelligence-hunt-launch-2/outputs/v1/slide-05.png",
-            "slideshow/intelligence-hunt-launch-2/outputs/v1/slide-06.png"
-          ],
-          "referenceImagePaths": [],
-          "metadataPath": "assets/announcement/hunt-launch-2/v1/metadata.json",
-          "accepted": false,
-          "rejected": false,
-          "notes": "TikTok slideshow: 6 slides, 0 reference image(s).",
-          "id": "v1",
-          "version": 1,
-          "createdAt": "2026-07-08T00:09:11.849Z"
-        }
-      ],
-      "createdAt": "2026-07-08T00:04:47.290Z",
-      "updatedAt": "2026-07-08T00:09:11.852Z",
-      "currentVersionId": "v1"
-    },
-    {
       "id": "orchestrator-orchestrator-apollo",
       "slug": "orchestrator-apollo",
       "name": "Apollo",
@@ -804,6 +730,1167 @@
       ],
       "createdAt": "2026-07-06T21:59:58.411Z",
       "updatedAt": "2026-07-06T23:11:03.699Z"
+    },
+    {
+      "id": "announcement-social-card-apollo",
+      "slug": "social-card-apollo",
+      "name": "Apollo Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for apollo.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for apollo.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Apollo\nSubdomain: apollo.vorinthex.com\nCanonical route: /command/apollo\nOpen Graph route: /command/apollo/opengraph-image\nTwitter route: /command/apollo/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-apollo/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-apollo/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-apollo/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-apollo/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-apollo/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for apollo.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:53.142Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for apollo.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Apollo\nSubdomain: apollo.vorinthex.com\nCanonical route: /command/apollo\nOpen Graph route: /command/apollo/opengraph-image\nTwitter route: /command/apollo/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-apollo/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-apollo/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-apollo/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-apollo/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-apollo/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for apollo.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:29.486Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:51.473Z",
+      "updatedAt": "2026-07-08T17:43:29.489Z"
+    },
+    {
+      "id": "announcement-social-card-archive",
+      "slug": "social-card-archive",
+      "name": "Archive Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for archive.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for archive.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Archive\nSubdomain: archive.vorinthex.com\nCanonical route: /core/archive\nOpen Graph route: /core/archive/opengraph-image\nTwitter route: /core/archive/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-archive/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-archive/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-archive/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-archive/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-archive/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for archive.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:54.552Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for archive.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Archive\nSubdomain: archive.vorinthex.com\nCanonical route: /core/archive\nOpen Graph route: /core/archive/opengraph-image\nTwitter route: /core/archive/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-archive/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-archive/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-archive/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-archive/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-archive/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for archive.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:29.885Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:53.163Z",
+      "updatedAt": "2026-07-08T17:43:29.889Z"
+    },
+    {
+      "id": "announcement-social-card-ascend",
+      "slug": "social-card-ascend",
+      "name": "Ascend Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for ascend.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for ascend.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Ascend\nSubdomain: ascend.vorinthex.com\nCanonical route: /core/ascend\nOpen Graph route: /core/ascend/opengraph-image\nTwitter route: /core/ascend/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-ascend/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-ascend/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-ascend/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-ascend/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-ascend/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for ascend.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:54.744Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for ascend.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Ascend\nSubdomain: ascend.vorinthex.com\nCanonical route: /core/ascend\nOpen Graph route: /core/ascend/opengraph-image\nTwitter route: /core/ascend/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-ascend/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-ascend/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-ascend/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-ascend/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-ascend/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for ascend.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:30.082Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:54.569Z",
+      "updatedAt": "2026-07-08T17:43:30.088Z"
+    },
+    {
+      "id": "announcement-social-card-athena",
+      "slug": "social-card-athena",
+      "name": "Athena Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for athena.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for athena.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Athena\nSubdomain: athena.vorinthex.com\nCanonical route: /command/athena\nOpen Graph route: /command/athena/opengraph-image\nTwitter route: /command/athena/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-athena/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-athena/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-athena/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-athena/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-athena/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for athena.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:54.956Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for athena.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Athena\nSubdomain: athena.vorinthex.com\nCanonical route: /command/athena\nOpen Graph route: /command/athena/opengraph-image\nTwitter route: /command/athena/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-athena/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-athena/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-athena/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-athena/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-athena/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for athena.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:30.281Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:54.770Z",
+      "updatedAt": "2026-07-08T17:43:30.288Z"
+    },
+    {
+      "id": "announcement-social-card-atlas",
+      "slug": "social-card-atlas",
+      "name": "Atlas Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for atlas.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for atlas.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Atlas\nSubdomain: atlas.vorinthex.com\nCanonical route: /command/atlas\nOpen Graph route: /command/atlas/opengraph-image\nTwitter route: /command/atlas/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-atlas/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-atlas/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-atlas/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-atlas/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-atlas/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for atlas.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:55.186Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for atlas.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Atlas\nSubdomain: atlas.vorinthex.com\nCanonical route: /command/atlas\nOpen Graph route: /command/atlas/opengraph-image\nTwitter route: /command/atlas/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-atlas/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-atlas/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-atlas/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-atlas/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-atlas/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for atlas.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:30.493Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:54.986Z",
+      "updatedAt": "2026-07-08T17:43:30.497Z"
+    },
+    {
+      "id": "announcement-social-card-command",
+      "slug": "social-card-command",
+      "name": "Command Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for command.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for command.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Command\nSubdomain: command.vorinthex.com\nCanonical route: /command\nOpen Graph route: /command/opengraph-image\nTwitter route: /command/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-command/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-command/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-command/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-command/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-command/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for command.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:55.476Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for command.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Command\nSubdomain: command.vorinthex.com\nCanonical route: /command\nOpen Graph route: /command/opengraph-image\nTwitter route: /command/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-command/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-command/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-command/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-command/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-command/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for command.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:30.879Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:55.204Z",
+      "updatedAt": "2026-07-08T17:43:30.882Z"
+    },
+    {
+      "id": "announcement-social-card-compass",
+      "slug": "social-card-compass",
+      "name": "Compass Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for compass.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for compass.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Compass\nSubdomain: compass.vorinthex.com\nCanonical route: /core/compass\nOpen Graph route: /core/compass/opengraph-image\nTwitter route: /core/compass/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-compass/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-compass/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-compass/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-compass/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-compass/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for compass.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:55.662Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for compass.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Compass\nSubdomain: compass.vorinthex.com\nCanonical route: /core/compass\nOpen Graph route: /core/compass/opengraph-image\nTwitter route: /core/compass/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-compass/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-compass/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-compass/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-compass/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-compass/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for compass.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:31.069Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:55.493Z",
+      "updatedAt": "2026-07-08T17:43:31.074Z"
+    },
+    {
+      "id": "announcement-social-card-core",
+      "slug": "social-card-core",
+      "name": "Core Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for core.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for core.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Core\nSubdomain: core.vorinthex.com\nCanonical route: /core\nOpen Graph route: /core/opengraph-image\nTwitter route: /core/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-core/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-core/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-core/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-core/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-core/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for core.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:55.952Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for core.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Core\nSubdomain: core.vorinthex.com\nCanonical route: /core\nOpen Graph route: /core/opengraph-image\nTwitter route: /core/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-core/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-core/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-core/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-core/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-core/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for core.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:31.423Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:55.685Z",
+      "updatedAt": "2026-07-08T17:43:31.425Z"
+    },
+    {
+      "id": "announcement-social-card-forge",
+      "slug": "social-card-forge",
+      "name": "Forge Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for forge.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for forge.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Forge\nSubdomain: forge.vorinthex.com\nCanonical route: /command/forge\nOpen Graph route: /command/forge/opengraph-image\nTwitter route: /command/forge/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-forge/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-forge/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-forge/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-forge/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-forge/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for forge.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:56.145Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for forge.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Forge\nSubdomain: forge.vorinthex.com\nCanonical route: /command/forge\nOpen Graph route: /command/forge/opengraph-image\nTwitter route: /command/forge/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-forge/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-forge/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-forge/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-forge/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-forge/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for forge.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:31.686Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:55.974Z",
+      "updatedAt": "2026-07-08T17:43:31.690Z"
+    },
+    {
+      "id": "announcement-social-card-gallery",
+      "slug": "social-card-gallery",
+      "name": "Gallery Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for gallery.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for gallery.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Gallery\nSubdomain: gallery.vorinthex.com\nCanonical route: /core/gallery\nOpen Graph route: /core/gallery/opengraph-image\nTwitter route: /core/gallery/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-gallery/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-gallery/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-gallery/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-gallery/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-gallery/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for gallery.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:56.339Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for gallery.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Gallery\nSubdomain: gallery.vorinthex.com\nCanonical route: /core/gallery\nOpen Graph route: /core/gallery/opengraph-image\nTwitter route: /core/gallery/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-gallery/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-gallery/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-gallery/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-gallery/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-gallery/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for gallery.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:31.895Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:56.164Z",
+      "updatedAt": "2026-07-08T17:43:31.901Z"
+    },
+    {
+      "id": "announcement-social-card-hermes",
+      "slug": "social-card-hermes",
+      "name": "Hermes Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for hermes.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for hermes.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Hermes\nSubdomain: hermes.vorinthex.com\nCanonical route: /command/hermes\nOpen Graph route: /command/hermes/opengraph-image\nTwitter route: /command/hermes/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-hermes/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-hermes/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-hermes/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-hermes/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-hermes/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for hermes.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:56.550Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for hermes.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Hermes\nSubdomain: hermes.vorinthex.com\nCanonical route: /command/hermes\nOpen Graph route: /command/hermes/opengraph-image\nTwitter route: /command/hermes/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-hermes/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-hermes/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-hermes/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-hermes/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-hermes/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for hermes.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:32.078Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:56.359Z",
+      "updatedAt": "2026-07-08T17:43:32.082Z"
+    },
+    {
+      "id": "announcement-social-card-hunt",
+      "slug": "social-card-hunt",
+      "name": "The Hunt Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for hunt.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v3",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for hunt.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: The Hunt\nSubdomain: hunt.vorinthex.com\nCanonical route: /hunt\nOpen Graph route: /hunt/opengraph-image\nTwitter route: /hunt/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-hunt/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-hunt/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-hunt/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-hunt/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-hunt/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for hunt.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:56.840Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for hunt.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: The Hunt\nSubdomain: hunt.vorinthex.com\nCanonical route: /hunt\nOpen Graph route: /hunt/opengraph-image\nTwitter route: /hunt/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-hunt/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-hunt/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-hunt/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-hunt/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-hunt/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for hunt.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:32.453Z"
+        },
+        {
+          "prompt": "Materialize social preview cards for hunt.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: The Hunt\nSubdomain: hunt.vorinthex.com\nCanonical route: /hunt\nOpen Graph route: /hunt/opengraph-image\nTwitter route: /hunt/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-hunt/v3/metadata.json",
+          "previewPath": "assets/announcement/social-card-hunt/v3/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-hunt/v3/opengraph-1200x630.png",
+            "assets/announcement/social-card-hunt/v3/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-hunt/v3/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for hunt.vorinthex.com.",
+          "id": "v3",
+          "version": 3,
+          "createdAt": "2026-07-08T18:12:37.359Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:56.569Z",
+      "updatedAt": "2026-07-08T18:12:37.367Z"
+    },
+    {
+      "id": "announcement-social-card-iris",
+      "slug": "social-card-iris",
+      "name": "Iris Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for iris.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for iris.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Iris\nSubdomain: iris.vorinthex.com\nCanonical route: /command/iris\nOpen Graph route: /command/iris/opengraph-image\nTwitter route: /command/iris/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-iris/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-iris/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-iris/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-iris/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-iris/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for iris.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:57.046Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for iris.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Iris\nSubdomain: iris.vorinthex.com\nCanonical route: /command/iris\nOpen Graph route: /command/iris/opengraph-image\nTwitter route: /command/iris/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-iris/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-iris/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-iris/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-iris/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-iris/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for iris.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:32.622Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:56.867Z",
+      "updatedAt": "2026-07-08T17:43:32.630Z"
+    },
+    {
+      "id": "announcement-social-card-launch",
+      "slug": "social-card-launch",
+      "name": "Launch Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for launch.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for launch.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Launch\nSubdomain: launch.vorinthex.com\nCanonical route: /launch\nOpen Graph route: /launch/opengraph-image\nTwitter route: /launch/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-launch/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-launch/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-launch/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-launch/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-launch/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for launch.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:57.312Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for launch.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Launch\nSubdomain: launch.vorinthex.com\nCanonical route: /launch\nOpen Graph route: /launch/opengraph-image\nTwitter route: /launch/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-launch/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-launch/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-launch/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-launch/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-launch/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for launch.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:32.982Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:57.075Z",
+      "updatedAt": "2026-07-08T17:43:32.987Z"
+    },
+    {
+      "id": "announcement-social-card-ledger",
+      "slug": "social-card-ledger",
+      "name": "Ledger Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for ledger.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for ledger.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Ledger\nSubdomain: ledger.vorinthex.com\nCanonical route: /command/ledger\nOpen Graph route: /command/ledger/opengraph-image\nTwitter route: /command/ledger/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-ledger/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-ledger/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-ledger/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-ledger/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-ledger/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for ledger.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:57.510Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for ledger.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Ledger\nSubdomain: ledger.vorinthex.com\nCanonical route: /command/ledger\nOpen Graph route: /command/ledger/opengraph-image\nTwitter route: /command/ledger/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-ledger/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-ledger/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-ledger/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-ledger/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-ledger/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for ledger.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:33.175Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:57.334Z",
+      "updatedAt": "2026-07-08T17:43:33.177Z"
+    },
+    {
+      "id": "announcement-social-card-mercury",
+      "slug": "social-card-mercury",
+      "name": "Mercury Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for mercury.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for mercury.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Mercury\nSubdomain: mercury.vorinthex.com\nCanonical route: /command/mercury\nOpen Graph route: /command/mercury/opengraph-image\nTwitter route: /command/mercury/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-mercury/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-mercury/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-mercury/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-mercury/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-mercury/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for mercury.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:57.700Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for mercury.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Mercury\nSubdomain: mercury.vorinthex.com\nCanonical route: /command/mercury\nOpen Graph route: /command/mercury/opengraph-image\nTwitter route: /command/mercury/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-mercury/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-mercury/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-mercury/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-mercury/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-mercury/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for mercury.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:33.345Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:57.530Z",
+      "updatedAt": "2026-07-08T17:43:33.347Z"
+    },
+    {
+      "id": "announcement-social-card-metis",
+      "slug": "social-card-metis",
+      "name": "Metis Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for metis.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for metis.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Metis\nSubdomain: metis.vorinthex.com\nCanonical route: /command/metis\nOpen Graph route: /command/metis/opengraph-image\nTwitter route: /command/metis/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-metis/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-metis/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-metis/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-metis/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-metis/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for metis.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:57.906Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for metis.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Metis\nSubdomain: metis.vorinthex.com\nCanonical route: /command/metis\nOpen Graph route: /command/metis/opengraph-image\nTwitter route: /command/metis/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-metis/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-metis/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-metis/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-metis/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-metis/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for metis.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:33.514Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:57.718Z",
+      "updatedAt": "2026-07-08T17:43:33.518Z"
+    },
+    {
+      "id": "announcement-social-card-orbit",
+      "slug": "social-card-orbit",
+      "name": "Orbit Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for orbit.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for orbit.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Orbit\nSubdomain: orbit.vorinthex.com\nCanonical route: /command/orbit\nOpen Graph route: /command/orbit/opengraph-image\nTwitter route: /command/orbit/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-orbit/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-orbit/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-orbit/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-orbit/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-orbit/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for orbit.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:58.089Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for orbit.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Orbit\nSubdomain: orbit.vorinthex.com\nCanonical route: /command/orbit\nOpen Graph route: /command/orbit/opengraph-image\nTwitter route: /command/orbit/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-orbit/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-orbit/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-orbit/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-orbit/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-orbit/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for orbit.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:33.691Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:57.923Z",
+      "updatedAt": "2026-07-08T17:43:33.693Z"
+    },
+    {
+      "id": "announcement-social-card-sentinel",
+      "slug": "social-card-sentinel",
+      "name": "Sentinel Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for sentinel.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for sentinel.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Sentinel\nSubdomain: sentinel.vorinthex.com\nCanonical route: /command/sentinel\nOpen Graph route: /command/sentinel/opengraph-image\nTwitter route: /command/sentinel/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-sentinel/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-sentinel/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-sentinel/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-sentinel/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-sentinel/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for sentinel.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:58.288Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for sentinel.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Sentinel\nSubdomain: sentinel.vorinthex.com\nCanonical route: /command/sentinel\nOpen Graph route: /command/sentinel/opengraph-image\nTwitter route: /command/sentinel/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-sentinel/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-sentinel/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-sentinel/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-sentinel/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-sentinel/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for sentinel.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:33.859Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:58.106Z",
+      "updatedAt": "2026-07-08T17:43:33.861Z"
+    },
+    {
+      "id": "announcement-social-card-signal",
+      "slug": "social-card-signal",
+      "name": "Signal Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for signal.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for signal.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Signal\nSubdomain: signal.vorinthex.com\nCanonical route: /core/signal\nOpen Graph route: /core/signal/opengraph-image\nTwitter route: /core/signal/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-signal/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-signal/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-signal/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-signal/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-signal/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for signal.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:58.488Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for signal.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Signal\nSubdomain: signal.vorinthex.com\nCanonical route: /core/signal\nOpen Graph route: /core/signal/opengraph-image\nTwitter route: /core/signal/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-signal/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-signal/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-signal/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-signal/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-signal/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for signal.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:34.043Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:58.308Z",
+      "updatedAt": "2026-07-08T17:43:34.056Z"
+    },
+    {
+      "id": "announcement-social-card-studio",
+      "slug": "social-card-studio",
+      "name": "Studio Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for studio.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for studio.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Studio\nSubdomain: studio.vorinthex.com\nCanonical route: /studio\nOpen Graph route: /studio/opengraph-image\nTwitter route: /studio/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-studio/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-studio/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-studio/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-studio/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-studio/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for studio.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:58.770Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for studio.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Studio\nSubdomain: studio.vorinthex.com\nCanonical route: /studio\nOpen Graph route: /studio/opengraph-image\nTwitter route: /studio/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-studio/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-studio/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-studio/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-studio/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-studio/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for studio.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:34.527Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:58.507Z",
+      "updatedAt": "2026-07-08T17:43:34.535Z"
+    },
+    {
+      "id": "announcement-social-card-themis",
+      "slug": "social-card-themis",
+      "name": "Themis Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for themis.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v2",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for themis.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Themis\nSubdomain: themis.vorinthex.com\nCanonical route: /command/themis\nOpen Graph route: /command/themis/opengraph-image\nTwitter route: /command/themis/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-themis/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-themis/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-themis/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-themis/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-themis/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for themis.vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:59.006Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for themis.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Themis\nSubdomain: themis.vorinthex.com\nCanonical route: /command/themis\nOpen Graph route: /command/themis/opengraph-image\nTwitter route: /command/themis/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-themis/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-themis/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-themis/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-themis/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-themis/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for themis.vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:34.725Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:42:58.797Z",
+      "updatedAt": "2026-07-08T17:43:34.728Z"
+    },
+    {
+      "id": "announcement-social-card-vorinthex",
+      "slug": "social-card-vorinthex",
+      "name": "Vorinthex AI Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v3",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Vorinthex AI\nSubdomain: vorinthex.com\nCanonical route: /\nOpen Graph route: /opengraph-image\nTwitter route: /twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-vorinthex/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-vorinthex/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-vorinthex/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-vorinthex/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-vorinthex/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for vorinthex.com.",
+          "createdAt": "2026-07-08T17:38:57.328Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Materialize social preview cards for vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Nexus\nSubdomain: vorinthex.com\nCanonical route: /\nOpen Graph route: /opengraph-image\nTwitter route: /twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-vorinthex/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-vorinthex/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-vorinthex/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-vorinthex/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-vorinthex/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for vorinthex.com.",
+          "createdAt": "2026-07-08T17:42:51.447Z"
+        },
+        {
+          "id": "v3",
+          "version": 3,
+          "prompt": "Materialize social preview cards for vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Nexus\nSubdomain: vorinthex.com\nCanonical route: /\nOpen Graph route: /opengraph-image\nTwitter route: /twitter-image\nBase URL: http://127.0.0.1:3000",
+          "slideshowPath": "assets/announcement/social-card-vorinthex/v3/metadata.json",
+          "previewPath": "assets/announcement/social-card-vorinthex/v3/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-vorinthex/v3/opengraph-1200x630.png",
+            "assets/announcement/social-card-vorinthex/v3/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-vorinthex/v3/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for vorinthex.com.",
+          "createdAt": "2026-07-08T17:43:29.107Z"
+        }
+      ],
+      "createdAt": "2026-07-08T17:38:56.267Z",
+      "updatedAt": "2026-07-08T17:43:29.111Z"
     },
     {
       "id": "master-brand-vorinthex-ai",

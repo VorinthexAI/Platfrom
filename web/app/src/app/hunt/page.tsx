@@ -16,11 +16,13 @@ export const metadata: Metadata = {
     url: absoluteUrl("/hunt"),
     siteName: SITE_NAME,
     type: "website",
+    images: ["/social-cards/hunt/opengraph.png"],
   },
   twitter: {
     card: "summary_large_image",
     title: `${HUNT_TITLE} | ${SITE_NAME}`,
     description: HUNT_DESCRIPTION,
+    images: ["/social-cards/hunt/twitter.png"],
   },
 };
 

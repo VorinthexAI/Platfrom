@@ -109,7 +109,7 @@ export function HeroContent() {
                   variant="primary"
                   className="px-8 py-4 text-xs"
                 >
-                  {nexusContent?.primaryCta ?? "Join Hunt"}
+                  {nexusContent?.primaryCta ?? "Join"}
                 </OpenModalButton>
                 <OpenModalButton
                   modal="signin"

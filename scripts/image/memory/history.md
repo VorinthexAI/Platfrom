@@ -338,3 +338,471 @@ Paths:
 - slideshow/intelligence-hunt-launch-2/outputs/v1/slide-04.png
 - slideshow/intelligence-hunt-launch-2/outputs/v1/slide-05.png
 - slideshow/intelligence-hunt-launch-2/outputs/v1/slide-06.png
+## 2026-07-08 17:27
+Asset: Nexus Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for vorinthex.com.
+## 2026-07-08 17:27
+Asset: Nexus Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for vorinthex.com.
+## 2026-07-08 17:27
+Asset: Apollo Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for apollo.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Apollo Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for apollo.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Archive Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for archive.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Archive Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for archive.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Ascend Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for ascend.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Ascend Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for ascend.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Athena Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for athena.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Athena Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for athena.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Atlas Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for atlas.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Atlas Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for atlas.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Command Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for command.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Command Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for command.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Compass Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for compass.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Compass Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for compass.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Core Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for core.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Core Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for core.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Forge Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for forge.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Forge Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for forge.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Gallery Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for gallery.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Gallery Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for gallery.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Hermes Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for hermes.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Hermes Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for hermes.vorinthex.com.
+## 2026-07-08 17:27
+Asset: The Hunt Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for hunt.vorinthex.com.
+## 2026-07-08 17:27
+Asset: The Hunt Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Iris Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for iris.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Iris Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for iris.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Launch Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for launch.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Launch Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for launch.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Ledger Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for ledger.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Ledger Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for ledger.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Mercury Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for mercury.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Mercury Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for mercury.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Metis Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for metis.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Metis Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for metis.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Orbit Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for orbit.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Orbit Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for orbit.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Sentinel Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for sentinel.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Sentinel Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for sentinel.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Signal Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for signal.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Signal Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for signal.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Studio Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for studio.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Studio Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for studio.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Themis Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for themis.vorinthex.com.
+## 2026-07-08 17:27
+Asset: Themis Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for themis.vorinthex.com.
+## 2026-07-08 17:38
+Asset: Vorinthex AI Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for vorinthex.com.
+## 2026-07-08 17:38
+Asset: Vorinthex AI Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for vorinthex.com.
+## 2026-07-08 17:42
+Asset: Vorinthex AI Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for vorinthex.com.
+## 2026-07-08 17:42
+Asset: Apollo Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for apollo.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Apollo Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for apollo.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Archive Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for archive.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Archive Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for archive.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Ascend Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for ascend.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Ascend Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for ascend.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Athena Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for athena.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Athena Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for athena.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Atlas Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for atlas.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Atlas Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for atlas.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Command Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for command.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Command Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for command.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Compass Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for compass.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Compass Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for compass.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Core Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for core.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Core Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for core.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Forge Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for forge.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Forge Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for forge.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Gallery Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for gallery.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Gallery Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for gallery.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Hermes Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for hermes.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Hermes Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for hermes.vorinthex.com.
+## 2026-07-08 17:42
+Asset: The Hunt Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for hunt.vorinthex.com.
+## 2026-07-08 17:42
+Asset: The Hunt Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Iris Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for iris.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Iris Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for iris.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Launch Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for launch.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Launch Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for launch.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Ledger Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for ledger.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Ledger Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for ledger.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Mercury Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for mercury.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Mercury Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for mercury.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Metis Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for metis.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Metis Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for metis.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Orbit Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for orbit.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Orbit Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for orbit.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Sentinel Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for sentinel.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Sentinel Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for sentinel.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Signal Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for signal.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Signal Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for signal.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Studio Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for studio.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Studio Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for studio.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Themis Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for themis.vorinthex.com.
+## 2026-07-08 17:42
+Asset: Themis Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for themis.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Vorinthex AI Social Cards
+Action: Generated v3
+Notes: Generated Open Graph and Twitter cards for vorinthex.com.
+## 2026-07-08 17:43
+Asset: Apollo Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for apollo.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Archive Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for archive.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Ascend Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for ascend.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Athena Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for athena.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Atlas Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for atlas.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Command Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for command.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Compass Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for compass.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Core Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for core.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Forge Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for forge.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Gallery Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for gallery.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Hermes Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for hermes.vorinthex.com.
+## 2026-07-08 17:43
+Asset: The Hunt Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Iris Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for iris.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Launch Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for launch.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Ledger Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for ledger.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Mercury Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for mercury.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Metis Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for metis.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Orbit Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for orbit.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Sentinel Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for sentinel.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Signal Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for signal.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Studio Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for studio.vorinthex.com.
+## 2026-07-08 17:43
+Asset: Themis Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for themis.vorinthex.com.
+## 2026-07-08 18:12
+Asset: The Hunt Social Cards
+Action: Generated v3
+Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
