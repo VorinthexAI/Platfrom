@@ -1,0 +1,86 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ECRAuth",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECRRepoAccess",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "ecr:PutImage",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:DescribeRepositories",
+        "ecr:CreateRepository",
+        "ecr:PutImageScanningConfiguration",
+        "ecr:PutImageTagMutability",
+        "ecr:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:ecr:eu-north-1:938565868704:repository/vorinthex-backend",
+        "arn:aws:ecr:eu-north-1:938565868704:repository/vorinthex-web"
+      ]
+    },
+    {
+      "Sid": "SSMReadDeployParams",
+      "Effect": "Allow",
+      "Action": "ssm:GetParametersByPath",
+      "Resource": "arn:aws:ssm:eu-north-1:938565868704:parameter/vorinthex/prod/*"
+    },
+    {
+      "Sid": "SSMWriteDeployParams",
+      "Effect": "Allow",
+      "Action": "ssm:PutParameter",
+      "Resource": "arn:aws:ssm:eu-north-1:938565868704:parameter/vorinthex/prod/*"
+    },
+    {
+      "Sid": "ECSTaskDefinitions",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTaskDefinition",
+        "ecs:RegisterTaskDefinition"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ECSUpdateServices",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateService",
+        "ecs:DescribeServices"
+      ],
+      "Resource": [
+        "arn:aws:ecs:eu-north-1:938565868704:service/vorinthex-production/vorinthex-render",
+        "arn:aws:ecs:eu-north-1:938565868704:service/vorinthex-production/vorinthex-prod-web",
+        "arn:aws:ecs:eu-north-1:938565868704:service/vorinthex-production/vorinthex-prod-api"
+      ]
+    },
+    {
+      "Sid": "PassEcsRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::938565868704:role/vorinthex-prod-render-execution-role",
+        "arn:aws:iam::938565868704:role/vorinthex-prod-render-task-role"
+      ]
+    },
+    {
+      "Sid": "RepairAppHostSsh",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeInstances",
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
