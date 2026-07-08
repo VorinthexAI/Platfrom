@@ -4,11 +4,11 @@ import { getEntityBySubdomain } from "@/lib/galaxy/registry-helpers";
 /**
  * Anchored experiences that are caves, not registry entities: hostnames
  * here rewrite straight to their page route, exactly like planets do —
- * `waitlist-leaderboard.vorinthex.com` dives into the leaderboard
- * asteroid the way `orbit.vorinthex.com` enters the Orbit world.
+ * `hunt.vorinthex.com` dives into the hunt asteroid the way
+ * `orbit.vorinthex.com` enters the Orbit world.
  */
 const CAVE_SUBDOMAIN_PATHS: Record<string, string> = {
-  "waitlist-leaderboard": "/leaderboard",
+  hunt: "/hunt",
 };
 
 function caveSubdomainPath(hostname: string): string | null {

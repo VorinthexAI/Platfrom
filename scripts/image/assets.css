@@ -103,7 +103,8 @@ h1 {
 
 .preview,
 .videoPreview,
-.audioPreview {
+.audioPreview,
+.slideshowPreview {
   position: relative;
   display: grid;
   place-items: center;
@@ -126,6 +127,12 @@ h1 {
 
 .videoPreview {
   aspect-ratio: 16 / 9;
+}
+
+.slideshowPreview {
+  aspect-ratio: 9 / 16;
+  min-height: 440px;
+  background: #030405;
 }
 
 .audioPreview {
@@ -152,6 +159,55 @@ h1 {
   width: 94%;
   height: 94%;
   object-fit: contain;
+}
+
+.slideshowPreview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.slideControls {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  left: 10px;
+  display: grid;
+  grid-template-columns: 38px 1fr 38px;
+  gap: 8px;
+  align-items: center;
+}
+
+.slideButton,
+.slideDownload {
+  display: grid;
+  height: 38px;
+  place-items: center;
+  border: 1px solid rgba(216, 221, 224, 0.28);
+  border-radius: 8px;
+  background: rgba(3, 4, 5, 0.78);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13px;
+  line-height: 1;
+  backdrop-filter: blur(10px);
+}
+
+.slideButton {
+  padding: 0;
+  cursor: pointer;
+}
+
+.slideButton:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.slideButton:not(:disabled):hover,
+.slideDownload:hover {
+  border-color: rgba(216, 221, 224, 0.55);
+  background: rgba(216, 221, 224, 0.16);
 }
 
 video {

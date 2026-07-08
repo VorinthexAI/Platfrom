@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import type { EngineConfig, GenerateImageInput, ImageResult, ReviewImageInput, ReviewResult } from "./types";
 import { retry } from "./utils";
 import { reviewPrompt } from "../prompts/review";
@@ -26,6 +26,13 @@ function extractText(response: unknown): string {
   return output?.flatMap((entry) => entry.content ?? []).map((entry) => entry.text).filter(Boolean).join("\n") || "";
 }
 
+function imageMimeType(filePath: string): "image/png" | "image/jpeg" | "image/webp" {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+  if (extension === ".webp") return "image/webp";
+  return "image/png";
+}
+
 export class OpenAIClient {
   private readonly client: OpenAI;
 
@@ -37,11 +44,12 @@ export class OpenAIClient {
   }
 
   async generateImage(input: GenerateImageInput): Promise<ImageResult> {
+    const size = input.size ?? this.config.defaultSize;
     const result = await retry(async () => {
       const response = await this.client.images.generate({
         model: this.config.imageModel,
         prompt: input.prompt,
-        size: this.config.defaultSize,
+        size,
         background: input.background ?? "auto",
         output_format: this.config.defaultOutputFormat
       } as never);
@@ -49,18 +57,24 @@ export class OpenAIClient {
     }, 1);
     await mkdir(path.dirname(input.outputPath), { recursive: true });
     await writeFile(input.outputPath, result);
-    return { path: input.outputPath, model: this.config.imageModel, size: this.config.defaultSize };
+    return { path: input.outputPath, model: this.config.imageModel, size };
   }
 
   async editImage(input: GenerateImageInput): Promise<ImageResult> {
-    if (!input.sourceImagePath) return this.generateImage(input);
-    const sourceImagePath = input.sourceImagePath;
+    const sourceImagePaths = input.sourceImagePaths?.length ? input.sourceImagePaths : input.sourceImagePath ? [input.sourceImagePath] : [];
+    if (sourceImagePaths.length === 0) return this.generateImage(input);
+    const size = input.size ?? this.config.defaultSize;
+    const sourceImages = await Promise.all(sourceImagePaths.map((sourceImagePath) => toFile(
+      createReadStream(sourceImagePath),
+      path.basename(sourceImagePath),
+      { type: imageMimeType(sourceImagePath) }
+    )));
     const result = await retry(async () => {
       const response = await this.client.images.edit({
         model: this.config.imageModel,
-        image: createReadStream(sourceImagePath),
+        image: sourceImages,
         prompt: input.prompt,
-        size: this.config.defaultSize,
+        size,
         background: input.background ?? "auto",
         output_format: this.config.defaultOutputFormat
       } as never);
@@ -68,7 +82,7 @@ export class OpenAIClient {
     }, 1);
     await mkdir(path.dirname(input.outputPath), { recursive: true });
     await writeFile(input.outputPath, result);
-    return { path: input.outputPath, model: this.config.imageModel, size: this.config.defaultSize };
+    return { path: input.outputPath, model: this.config.imageModel, size };
   }
 
   async reviewImage(input: ReviewImageInput): Promise<ReviewResult> {

@@ -9,7 +9,6 @@ import {
 } from "@/lib/galaxy/registry-helpers";
 import {
   galaxyMotion,
-  ORBIT_STEPS,
   stepForEntity,
   syncEntityUrl,
   useGalaxyStore,
@@ -116,9 +115,13 @@ export function UniverseStage({
     let touchStartY: number | null = null;
     let touchConsumed = false;
 
+    // Scroll/swipe stepping moves the camera without rewriting the
+    // address bar — only landing back on the overview (step 0) does.
+    // Product/capability/orchestrator routes stay real for direct links
+    // and crawlers; they just don't chase interactive exploration.
     const syncStepPath = () => {
       const { step } = useGalaxyStore.getState();
-      syncEntityUrl(ORBIT_STEPS[step]?.path ?? "/");
+      if (step === 0) syncEntityUrl("/");
     };
 
     const step = (direction: 1 | -1) => {
@@ -315,6 +318,7 @@ export function UniverseStage({
       mouseLastX = event.clientX;
       mouseLastAt = performance.now();
       galaxyMotion.dragging = true;
+      document.body.style.cursor = "grabbing";
     };
 
     const onPointerMove = (event: PointerEvent) => {
@@ -330,6 +334,19 @@ export function UniverseStage({
       if (!mouseDragging) return;
       mouseDragging = false;
       galaxyMotion.dragging = false;
+      document.body.style.cursor = canRotate() ? "grab" : "";
+    };
+
+    // Hover feedback: an open hand over the rotatable canvas, ready to
+    // grab — separate from the window-level drag tracker above, which
+    // only cares about movement while a drag is already underway.
+    const onHoverMove = (event: PointerEvent) => {
+      if (mouseDragging || event.pointerType !== "mouse") return;
+      const overCanvas = event.target instanceof HTMLCanvasElement;
+      document.body.style.cursor = overCanvas && canRotate() ? "grab" : "";
+    };
+    const onHoverLeave = () => {
+      if (!mouseDragging) document.body.style.cursor = "";
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
@@ -381,6 +398,8 @@ export function UniverseStage({
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("keydown", onKeyDown);
+    stage.addEventListener("pointermove", onHoverMove);
+    stage.addEventListener("pointerleave", onHoverLeave);
     return () => {
       stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("touchstart", onTouchStart);
@@ -390,7 +409,10 @@ export function UniverseStage({
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("keydown", onKeyDown);
+      stage.removeEventListener("pointermove", onHoverMove);
+      stage.removeEventListener("pointerleave", onHoverLeave);
       galaxyMotion.dragging = false;
+      document.body.style.cursor = "";
     };
   }, [setStep, stepBy, markExplored]);
 

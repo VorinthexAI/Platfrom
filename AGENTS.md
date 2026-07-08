@@ -8,11 +8,10 @@ Vorinthex platform monorepo. Top-level workspaces:
 
 - `web/app`: the single Next.js app (the "universe" landing experience).
   `web/` itself is not a workspace — it's just the parent folder. The app
-  is deployed to ALL THREE Vercel projects (vorinthex, orbit, and
-  waitlist-leaderboard) by the Unified Deploy workflow; entity subdomains
-  (orbit.vorinthex.com, …) and cave subdomains
-  (waitlist-leaderboard.vorinthex.com → /leaderboard) are routed inside
-  the app via `web/app/src/proxy.ts`.
+  is deployed to ALL THREE Vercel projects (vorinthex, orbit, and hunt) by
+  the Unified Deploy workflow; entity subdomains (orbit.vorinthex.com, …)
+  and cave subdomains (hunt.vorinthex.com → /hunt) are routed inside the
+  app via `web/app/src/proxy.ts`.
 - `backend`: Bun backend service.
 - `shared`: shared UI, brand, and library code used by the web app and
   backend.
@@ -31,7 +30,7 @@ shared/prefixed keys:
 
 - `environments/vorinthex/.env.example` / `.env.dev` / `.env.prod`
 - `environments/orbit/.env.example` / `.env.dev` / `.env.prod`
-- `environments/waitlist-leaderboard/.env.example` / `.env.dev` / `.env.prod`
+- `environments/hunt/.env.example` / `.env.dev` / `.env.prod`
 - `environments/backend/.env.example` / `.env.dev` / `.env.prod`
 
 Only `.env.example` files should be committed. `.env.dev` and `.env.prod` are local secret-bearing files and must stay ignored.

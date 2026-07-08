@@ -6,6 +6,7 @@
   "scripts": {
     "design": "bun src/index.ts",
     "generate:galaxy": "bun src/galaxy-assets.ts",
+    "slideshow": "bun src/slideshow.ts",
     "refresh:brand-capabilities": "bun src/refresh-brand-capabilities.ts",
     "assets": "bun src/gallery-server.ts",
     "gallery": "bun src/gallery-server.ts",

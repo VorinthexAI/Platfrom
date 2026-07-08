@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const assetStatusSchema = z.enum(["draft", "reviewed", "locked", "rejected", "archived", "needs_fix"]);
-export const assetCategorySchema = z.enum(["master-brand", "product", "orchestrator", "capability", "experiment"]);
+export const assetCategorySchema = z.enum(["master-brand", "product", "orchestrator", "capability", "experiment", "announcement"]);
 export const lockLevelSchema = z.enum(["soft", "medium", "strict", "frozen"]);
 
 export type AssetStatus = z.infer<typeof assetStatusSchema>;
@@ -15,6 +15,10 @@ export const assetVersionSchema = z.object({
   fullPrompt: z.string(),
   solidPath: z.string().optional(),
   transparentPath: z.string().optional(),
+  slideshowPath: z.string().optional(),
+  previewPath: z.string().optional(),
+  slidePaths: z.array(z.string()).optional(),
+  referenceImagePaths: z.array(z.string()).optional(),
   solidSvgPath: z.string().optional(),
   transparentSvgPath: z.string().optional(),
   sourceImagePath: z.string().optional(),
@@ -97,6 +101,8 @@ export type GenerateImageInput = {
   outputPath: string;
   background?: "transparent" | "opaque" | "auto";
   sourceImagePath?: string;
+  sourceImagePaths?: string[];
+  size?: `${number}x${number}`;
 };
 
 export type ImageResult = {

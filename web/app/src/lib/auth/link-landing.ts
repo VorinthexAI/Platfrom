@@ -10,7 +10,7 @@
  * chamber mounts in the same page life as the arrival validation.
  */
 
-export type LinkLandingAction = "signin" | "waitlist-verify";
+export type LinkLandingAction = "signin" | "waitlist-verify" | "member";
 
 export interface LinkLanding {
   action: LinkLandingAction;

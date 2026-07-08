@@ -1,0 +1,25 @@
+{
+  "slug": "orbit-launch",
+  "title": "Orbit Launch TikTok Slideshow",
+  "description": "A vertical carousel introducing Orbit as an AI command center.",
+  "category": "experiment",
+  "style": "Premium Vorinthex AI: obsidian black, polished chrome, dark glass, restrained reflections, cinematic enterprise AI, clean mobile-first layout.",
+  "references": [
+    "references"
+  ],
+  "chainPreviousSlide": false,
+  "slides": [
+    {
+      "title": "Your AI command center",
+      "visual": "Subject only: a dark glass control surface with chrome orbital geometry and a clear central focal point."
+    },
+    {
+      "title": "Every agent in one place",
+      "visual": "Subject only: a precise grid of connected AI nodes. Keep the reference image style dominant."
+    },
+    {
+      "title": "Launch faster",
+      "visual": "Subject only: a refined product reveal with forward motion. Keep the reference image style dominant."
+    }
+  ]
+}

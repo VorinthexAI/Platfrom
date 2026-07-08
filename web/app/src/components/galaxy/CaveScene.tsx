@@ -13,8 +13,8 @@ import { CrystalCave } from "./CrystalCave";
  * biome grows a center crystal worth 10 up to 1,000,000 fragments. Loot
  * is keyed to the asteroid's stable identity, so collected pieces never
  * respawn — while the cavern itself still re-rolls its look per entry.
- * The leaderboard asteroid is the exception: no loot of its own — its
- * walls carry every piece the whole galaxy has collected, live.
+ * The hunt asteroid is the exception: no loot of its own — its walls
+ * carry every piece the whole galaxy has collected, live.
  */
 
 export function CaveScene() {
@@ -31,7 +31,7 @@ export function CaveScene() {
   // the story kind for vault caves. Loot keys off it, so nothing
   // collected here ever respawns on re-entry.
   const isRock = caveKind === "rock";
-  const isLeaderboard = caveKind === "leaderboard";
+  const isHunt = caveKind === "hunt";
   const { biomeKey, lootSeed } = caveLootIdentity(caveKind, rockBiomeSeed, visitSeed);
   // Uncharted rocks roll their chamber theme from their identity and get
   // far noisier cavern walls than the curated planet biomes.
@@ -48,7 +48,7 @@ export function CaveScene() {
       position={config.interior}
       distortion={distortion}
     >
-      {isLeaderboard ? (
+      {isHunt ? (
         <CrystalCave />
       ) : (
         <BiomeLootField biomeKey={biomeKey} lootSeed={lootSeed} />

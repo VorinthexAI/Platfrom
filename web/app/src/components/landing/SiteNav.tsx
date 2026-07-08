@@ -4,9 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
 import { AscendIcon } from "@/components/ui/icons";
-import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { trackCtaClick } from "@/lib/analytics";
-import { useAudioStore } from "@/lib/audio/audio-store";
 import {
   galaxyMotion,
   syncEntityUrl,
@@ -15,14 +13,14 @@ import {
 
 /**
  * Fixed top bar: brand mark on the left, waitlist actions on the right.
- * The worlds themselves are the product navigation.
+ * The worlds themselves are the product navigation. The mission briefing
+ * lives inside the hunt biome itself, not up here — it isn't tied to the
+ * whole landing experience, only to the hunt.
  */
 export function SiteNav() {
   const enterCave = useGalaxyStore((s) => s.enterCave);
   const mode = useGalaxyStore((s) => s.mode);
   const caveKind = useGalaxyStore((s) => s.caveKind);
-  const toggleMission = useAudioStore((s) => s.toggleMission);
-  const missionPlaying = useAudioStore((s) => s.missionPlaying);
 
   // The sealed chamber (tapped email links) offers no way out — not even
   // the brand mark or the cave shortcuts up here.
@@ -77,8 +75,8 @@ export function SiteNav() {
             the galaxy is the navigation. The center column stays empty. */}
         <div className="hidden lg:block" />
 
-        {/* Short, single-word labels so nothing ever wraps; on phones the
-            mission and leaderboard collapse to icon-only buttons. */}
+        {/* Short, single-word labels so nothing ever wraps; on phones
+            Sign in and Hunt collapse to icon-only buttons. */}
         <div className="flex items-center gap-2 justify-self-end sm:gap-4">
           <Button
             variant="primary"
@@ -93,28 +91,24 @@ export function SiteNav() {
           <Button
             variant="secondary"
             onClick={() => {
-              trackCtaClick("mission_audio", { placement: "nav" });
-              toggleMission();
+              trackCtaClick("signin_gate_open", { placement: "nav" });
+              enterCave("signin");
             }}
-            icon={<SpeakerIcon animated={missionPlaying} />}
-            aria-label={missionPlaying ? "Stop the mission" : "Hear the mission"}
             className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
           >
-            <span className="hidden sm:inline">
-              {missionPlaying ? "Stop" : "Hear"}
-            </span>
+            Sign in
           </Button>
           <Button
             variant="secondary"
             onClick={() => {
-              trackCtaClick("leaderboard_open", { placement: "nav" });
-              enterCave("leaderboard");
+              trackCtaClick("hunt_open", { placement: "nav" });
+              enterCave("hunt");
             }}
             icon={<AscendIcon size="sm" />}
-            aria-label="View leaderboard"
+            aria-label="View the hunt"
             className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
           >
-            <span className="hidden sm:inline">Leaderboard</span>
+            <span className="hidden sm:inline">Hunt</span>
           </Button>
         </div>
       </nav>

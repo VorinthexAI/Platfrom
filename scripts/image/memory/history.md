@@ -298,3 +298,23 @@ Notes: Removed glossy globe interior; cleaner V/orbit mark.
 Paths:
 - solid: assets/master-brand/vorinthex-ai-globe-v/v2/solid-1024.png
 - transparent: assets/master-brand/vorinthex-ai-globe-v/v2/transparent-1024.png
+## 2026-07-07 23:35
+Asset: Hunt is Now Open
+Action: Created asset
+Notes: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.
+## 2026-07-07 23:44
+Asset: Hunt is Now Open
+Action: Generated v1
+Notes: TikTok slideshow: 6 slides, 0 reference image(s).
+## 2026-07-07 23:44
+Asset: Hunt is Now Open
+Action: Generated slideshow v1
+Notes: TikTok slideshow: 6 slides, 0 reference image(s).
+Paths:
+- slideshow/intelligence-hunt-launch-1/outputs/v1/slideshow.json
+- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-01.png
+- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-02.png
+- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-03.png
+- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-04.png
+- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-05.png
+- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-06.png

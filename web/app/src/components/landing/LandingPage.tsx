@@ -49,10 +49,11 @@ export function LandingPage({
   arrival,
   detail,
 }: LandingPageProps) {
-  // The arrival flight plays on a fresh landing and on verify-and-jump
-  // deep links (the "travel to the solar system" beat before the hyper
-  // jump); entity/cave deep links go straight to their target.
-  const intro = !initialEntityId && !initialCave;
+  // The deep-space arrival flight is its own space-travel beat — playing
+  // it before a verify-and-jump deep link's real hyperjump reads as two
+  // jumps back to back. Those land straight in the solar system instead,
+  // so ArrivalJump's single hyperjump is the only jump this visit gets.
+  const intro = !initialEntityId && !initialCave && !arrival;
   return (
     <main className="h-dvh overflow-hidden">
       <UniverseStage initialEntityId={initialEntityId} intro={intro}>

@@ -19,7 +19,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   // Indexable pages that live outside the registry.
   const staticEntries = [
-    { path: "/leaderboard", priority: 0.6 },
+    { path: "/hunt", priority: 0.6 },
     { path: "/terms", priority: 0.3 },
     { path: "/privacy", priority: 0.3 },
   ].map(({ path, priority }) => ({
