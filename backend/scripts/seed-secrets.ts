@@ -5,13 +5,12 @@ import { newId } from '@/lib/ids';
 import { getDefaultPlatformId } from '@/platform/events';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
-import { getMemberByEmailHash } from '@/lib/db/members.node';
-import { getSuperAdminByEmailHash } from '@/lib/db/super-admins.node';
+import { getUserByEmailHash } from '@/lib/db/users.node';
 
 const SEEDS_FILE = process.env.SEEDS_FILE ?? '../environments/backend/db.seeds.secrets.json';
 
 // These are the only node schemas with a required (non-nullable) platformId.
-const NODES_WITH_PLATFORM_ID = new Set(['users', 'members', 'superAdmins']);
+const NODES_WITH_PLATFORM_ID = new Set(['users']);
 
 /** Same derivation the app uses at signup (see hashUserEmail in api/users.ts) — kept local so seed docs only need a plaintext "email". */
 function generateEmailHash(email: string): Promise<string> {
@@ -24,8 +23,7 @@ function generateCuidKey(): string {
 
 async function existingIdentityKey(nodeName: string, emailHash: unknown): Promise<string | null> {
   if (typeof emailHash !== 'string' || emailHash.length === 0) return null;
-  if (nodeName === 'members') return (await getMemberByEmailHash(emailHash))?.key ?? null;
-  if (nodeName === 'superAdmins') return (await getSuperAdminByEmailHash(emailHash))?.key ?? null;
+  if (nodeName === 'users') return (await getUserByEmailHash(emailHash))?.key ?? null;
   return null;
 }
 

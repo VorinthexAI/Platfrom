@@ -1,0 +1,23 @@
+{
+  "runId": "LreS56cvva9I",
+  "target": {
+    "slug": "ledger",
+    "name": "Ledger",
+    "category": "orchestrator",
+    "entityId": "orchestrator.ledger",
+    "description": "Ledger, Chief Financial Orchestrator."
+  },
+  "provider": "openrouter",
+  "model": "hexgrad/kokoro-82m",
+  "modelLabel": "Kokoro 82M",
+  "mode": "tts",
+  "format": "mp3",
+  "voice": "bm_george",
+  "language": "en",
+  "speechInput": "Hello, I am Ledger, your Chief Financial Orchestrator.\n\nI help turn ambition into numbers that can be trusted.\n\nMy role is to protect the financial reality of the company. I watch budgets, cash flow, pricing, forecasts, capital, risk, and the assumptions behind every plan that touches money.\n\nBring me a decision with cost, revenue, margin, or runway attached. I will help model the tradeoffs, identify the financial pressure, and separate what feels exciting from what can actually be sustained.\n\nI am Ledger. I keep growth connected to financial truth.",
+  "promptHash": "4d3112100e36d316207c25b67980627cfb3ebead55b8f1d50408ad15b080dcee",
+  "promptPath": "outputs/audio/orchestrator-messages/ledger/v1/prompt.md",
+  "audioPath": "outputs/audio/orchestrator-messages/ledger/v1/ledger-message-v1.mp3",
+  "localAudioPath": "orchestrators/ledger-cfo/message.mp3",
+  "createdAt": "2026-07-08T21:30:36.497Z"
+}

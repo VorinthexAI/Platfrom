@@ -22,5 +22,5 @@ export async function getAuthIdentity(c: Context): Promise<AuthIdentity | null> 
 
 export async function getUserId(c: Context) {
   const identity = await getAuthIdentity(c);
-  return identity?.identityType === 'user' ? identity.key : null;
+  return identity?.key ?? null;
 }

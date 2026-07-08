@@ -3,8 +3,6 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
-import { LogOutIcon } from "@vorinthex/shared/ui/icons";
-import { FragmentIcon } from "@/components/ui/icons";
 import { trackCtaClick } from "@/lib/analytics";
 import { useAuthProfile } from "@/lib/auth/use-auth-profile";
 import { signOut } from "@/lib/auth/sign-out";
@@ -97,26 +95,22 @@ export function SiteNav() {
                 Jump Galaxy
               </Button>
               <Button
-                variant="icon"
+                variant="secondary"
                 onClick={() => {
                   trackCtaClick("hunt_open", { placement: "nav" });
                   enterCave("hunt");
                 }}
-                icon={<FragmentIcon size="sm" />}
-                aria-label="View the hunt"
-                className="h-9 w-9 min-h-0 p-0"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
               >
                 Hunt
               </Button>
               <Button
-                variant="icon"
+                variant="secondary"
                 onClick={() => {
                   trackCtaClick("signout", { placement: "nav" });
                   void signOut();
                 }}
-                icon={<LogOutIcon size="sm" />}
-                aria-label="Sign out"
-                className="h-9 w-9 min-h-0 p-0"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
               >
                 Sign out
               </Button>
@@ -144,14 +138,12 @@ export function SiteNav() {
                 Sign in
               </Button>
               <Button
-                variant="icon"
+                variant="secondary"
                 onClick={() => {
                   trackCtaClick("hunt_open", { placement: "nav" });
                   enterCave("hunt");
                 }}
-                icon={<FragmentIcon size="sm" />}
-                aria-label="View the hunt"
-                className="h-9 w-9 min-h-0 p-0"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
               >
                 Hunt
               </Button>

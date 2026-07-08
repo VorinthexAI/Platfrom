@@ -32,6 +32,7 @@ export async function POST(request: Request) {
     body: JSON.stringify({
       session_key: parsed.data.sessionKey,
       position: parsed.data.position,
+      source: "web",
     }),
     headers: forwardedFor ? { "x-forwarded-for": forwardedFor } : undefined,
   });

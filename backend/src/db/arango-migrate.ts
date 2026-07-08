@@ -131,28 +131,37 @@ const collections: CollectionSpec[] = [
       { fields: ['email'], unique: true },
       { fields: ['emailHash'], unique: true },
       { fields: ['alias_slug'], unique: true, sparse: true },
+      { fields: ['platform_role'] },
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
   {
-    name: 'members',
-    embedKeys: ['email', 'name'],
+    name: 'teams',
+    embedKeys: ['name', 'slug', 'description'],
     indexes: [
-      { fields: ['platformId'] },
-      { fields: ['platformId', 'role'] },
-      { fields: ['email'], unique: true },
-      { fields: ['emailHash'], unique: true },
-      { fields: ['refreshTokenHash'], unique: true, sparse: true },
+      { fields: ['ownerId'] },
+      { fields: ['slug'], unique: true },
+      { fields: ['isActive'] },
     ],
   },
   {
-    name: 'superAdmins',
-    embedKeys: ['email'],
+    name: 'teamMembers',
     indexes: [
-      { fields: ['platformId'] },
-      { fields: ['email'], unique: true },
-      { fields: ['emailHash'], unique: true },
-      { fields: ['refreshTokenHash'], unique: true, sparse: true },
+      { fields: ['teamId'] },
+      { fields: ['userId'] },
+      { fields: ['teamId', 'userId'], unique: true },
+      { fields: ['teamId', 'role'] },
+    ],
+  },
+  {
+    name: 'teamMemberInvites',
+    embedKeys: ['email', 'role', 'status'],
+    indexes: [
+      { fields: ['teamId'] },
+      { fields: ['emailHash'] },
+      { fields: ['tokenHash'], unique: true },
+      { fields: ['teamId', 'emailHash'] },
+      { fields: ['status', 'expiresAt'] },
     ],
   },
   { name: 'minds', embedKeys: ['name'], indexes: [{ fields: ['userId'], unique: true }] },
@@ -223,6 +232,7 @@ const collections: CollectionSpec[] = [
     name: 'visitorSessions',
     indexes: [
       { fields: ['visitorId'] },
+      { fields: ['source'] },
       { fields: ['sessionKey'], unique: true },
       { fields: ['disconnectedAt'] },
       { fields: ['platformId', 'connectedAt'] },
@@ -232,6 +242,7 @@ const collections: CollectionSpec[] = [
     name: 'userSessions',
     indexes: [
       { fields: ['userId'] },
+      { fields: ['source'] },
       { fields: ['sessionKey'], unique: true },
       { fields: ['disconnectedAt'] },
       { fields: ['platformId', 'connectedAt'] },
@@ -350,8 +361,10 @@ async function main() {
     `
     FOR u IN users
       FILTER !HAS(u, "platformId") || u.platformId == null || u.platformId == ""
+        || !HAS(u, "platform_role")
       UPDATE u WITH {
-        platformId: @defaultPlatformId
+        platformId: (!HAS(u, "platformId") || u.platformId == null || u.platformId == "") ? @defaultPlatformId : u.platformId,
+        platform_role: HAS(u, "platform_role") ? u.platform_role : null
       } IN users
     `,
     { defaultPlatformId },
@@ -370,42 +383,154 @@ async function main() {
       } IN authChallenges OPTIONS { keepNull: false }
   `);
 
-  await targetDb.query(
-    `
-    FOR m IN members
-      FILTER !HAS(m, "platformId")
-        || m.platformId == null
-        || m.platformId == ""
-        || !HAS(m, "role")
-        || m.role == null
-        || m.role == ""
-        || HAS(m, "isSuperAdmin")
-      UPDATE m WITH {
-        platformId: (!HAS(m, "platformId") || m.platformId == null || m.platformId == "") ? @defaultPlatformId : m.platformId,
-        role: (!HAS(m, "role") || m.role == null || m.role == "") ? (m.isSuperAdmin == true ? "owner" : "viewer") : m.role,
-        isSuperAdmin: null
-      } IN members OPTIONS { keepNull: false }
-    `,
-    { defaultPlatformId },
-  );
-
   await targetDb.query(`
     FOR u IN users
-      FILTER HAS(u, "isMfaEnabled")
-        || HAS(u, "has_request_mfa_reset_link")
+      FILTER !HAS(u, "isMfaEnabled")
+        || !HAS(u, "has_request_mfa_reset_link")
         || HAS(u, "isSuperAdmin")
-        || HAS(u, "totpSecret")
-        || HAS(u, "lastTotpTimeStep")
-        || HAS(u, "requested_mfa_reset_link_at")
+        || !HAS(u, "totpSecret")
+        || !HAS(u, "lastTotpTimeStep")
+        || !HAS(u, "requested_mfa_reset_link_at")
       UPDATE u WITH {
-        isMfaEnabled: null,
-        has_request_mfa_reset_link: null,
+        isMfaEnabled: HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false,
+        has_request_mfa_reset_link: HAS(u, "has_request_mfa_reset_link") ? u.has_request_mfa_reset_link : false,
         isSuperAdmin: null,
-        totpSecret: null,
-        lastTotpTimeStep: null,
-        requested_mfa_reset_link_at: null
+        totpSecret: HAS(u, "totpSecret") ? u.totpSecret : null,
+        lastTotpTimeStep: HAS(u, "lastTotpTimeStep") ? u.lastTotpTimeStep : null,
+        requested_mfa_reset_link_at: HAS(u, "requested_mfa_reset_link_at") ? u.requested_mfa_reset_link_at : null
       } IN users OPTIONS { keepNull: false }
   `);
+
+  let migratedLegacyIdentities = false;
+  const membersCollection = targetDb.collection('members');
+  if (await membersCollection.exists()) {
+    migratedLegacyIdentities = true;
+    await targetDb.query(
+      `
+      FOR m IN members
+        FILTER !HAS(m, "platformId")
+          || m.platformId == null
+          || m.platformId == ""
+          || !HAS(m, "role")
+          || m.role == null
+          || m.role == ""
+          || HAS(m, "isSuperAdmin")
+        UPDATE m WITH {
+          platformId: (!HAS(m, "platformId") || m.platformId == null || m.platformId == "") ? @defaultPlatformId : m.platformId,
+          role: (!HAS(m, "role") || m.role == null || m.role == "") ? (m.isSuperAdmin == true ? "owner" : "viewer") : m.role,
+          isSuperAdmin: null
+        } IN members OPTIONS { keepNull: false }
+      `,
+      { defaultPlatformId },
+    );
+
+    await targetDb.query(`
+      FOR m IN members
+        LET existing = FIRST(FOR u IN users FILTER u.emailHash == m.emailHash LIMIT 1 RETURN u)
+        FILTER existing == null
+        INSERT {
+          _key: m._key,
+          platformId: HAS(m, "platformId") && m.platformId != null && m.platformId != "" ? m.platformId : @defaultPlatformId,
+          email: m.email,
+          emailHash: m.emailHash,
+          name: HAS(m, "name") ? m.name : null,
+          profileUrl: HAS(m, "profileUrl") ? m.profileUrl : null,
+          alias: null,
+          alias_slug: null,
+          platform_role: "viewer",
+          waitlistNumber: null,
+          isVerified: true,
+          is_subscribed_to_updates: true,
+          is_subscribed_to_updates_unsubscribe_token_hash: null,
+          is_subscribed_to_updates_unsubscribe_requested_at: null,
+          isMfaEnabled: HAS(m, "isMfaEnabled") ? m.isMfaEnabled : false,
+          has_request_mfa_reset_link: HAS(m, "has_request_mfa_reset_link") ? m.has_request_mfa_reset_link : false,
+          totpSecret: HAS(m, "totpSecret") ? m.totpSecret : null,
+          lastTotpTimeStep: HAS(m, "lastTotpTimeStep") ? m.lastTotpTimeStep : null,
+          requested_mfa_reset_link_at: HAS(m, "requested_mfa_reset_link_at") ? m.requested_mfa_reset_link_at : null,
+          refreshTokenHash: HAS(m, "refreshTokenHash") ? m.refreshTokenHash : null,
+          lastLoginAt: HAS(m, "lastLoginAt") ? m.lastLoginAt : null,
+          createdAt: HAS(m, "createdAt") ? m.createdAt : DATE_ISO8601(DATE_NOW()),
+          updatedAt: DATE_ISO8601(DATE_NOW()),
+          embedding: []
+        } IN users OPTIONS { overwriteMode: "ignore" }
+    `, { defaultPlatformId });
+
+    await targetDb.query(`
+      FOR m IN members
+        FOR u IN users
+          FILTER u.emailHash == m.emailHash
+          UPDATE u WITH {
+            platform_role: u.platform_role == "owner" || u.platform_role == "admin" ? u.platform_role : "viewer",
+            name: HAS(u, "name") && u.name != null ? u.name : (HAS(m, "name") ? m.name : null),
+            profileUrl: HAS(u, "profileUrl") && u.profileUrl != null ? u.profileUrl : (HAS(m, "profileUrl") ? m.profileUrl : null),
+            isMfaEnabled: HAS(m, "isMfaEnabled") ? m.isMfaEnabled : (HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false),
+            has_request_mfa_reset_link: HAS(m, "has_request_mfa_reset_link") ? m.has_request_mfa_reset_link : (HAS(u, "has_request_mfa_reset_link") ? u.has_request_mfa_reset_link : false),
+            totpSecret: HAS(m, "totpSecret") ? m.totpSecret : (HAS(u, "totpSecret") ? u.totpSecret : null),
+            lastTotpTimeStep: HAS(m, "lastTotpTimeStep") ? m.lastTotpTimeStep : (HAS(u, "lastTotpTimeStep") ? u.lastTotpTimeStep : null),
+            requested_mfa_reset_link_at: HAS(m, "requested_mfa_reset_link_at") ? m.requested_mfa_reset_link_at : (HAS(u, "requested_mfa_reset_link_at") ? u.requested_mfa_reset_link_at : null),
+            refreshTokenHash: HAS(m, "refreshTokenHash") && m.refreshTokenHash != null ? m.refreshTokenHash : (HAS(u, "refreshTokenHash") ? u.refreshTokenHash : null),
+            lastLoginAt: HAS(m, "lastLoginAt") && m.lastLoginAt != null ? m.lastLoginAt : (HAS(u, "lastLoginAt") ? u.lastLoginAt : null),
+            updatedAt: DATE_ISO8601(DATE_NOW())
+          } IN users
+    `);
+  }
+
+  const superAdminsCollection = targetDb.collection('superAdmins');
+  if (await superAdminsCollection.exists()) {
+    migratedLegacyIdentities = true;
+    await targetDb.query(`
+      FOR admin IN superAdmins
+        LET existing = FIRST(FOR u IN users FILTER u.emailHash == admin.emailHash LIMIT 1 RETURN u)
+        FILTER existing == null
+        INSERT {
+          _key: admin._key,
+          platformId: HAS(admin, "platformId") && admin.platformId != null && admin.platformId != "" ? admin.platformId : @defaultPlatformId,
+          email: admin.email,
+          emailHash: admin.emailHash,
+          name: null,
+          profileUrl: null,
+          alias: null,
+          alias_slug: null,
+          platform_role: "owner",
+          waitlistNumber: null,
+          isVerified: true,
+          is_subscribed_to_updates: true,
+          is_subscribed_to_updates_unsubscribe_token_hash: null,
+          is_subscribed_to_updates_unsubscribe_requested_at: null,
+          isMfaEnabled: HAS(admin, "isMfaEnabled") ? admin.isMfaEnabled : false,
+          has_request_mfa_reset_link: HAS(admin, "has_request_mfa_reset_link") ? admin.has_request_mfa_reset_link : false,
+          totpSecret: HAS(admin, "totpSecret") ? admin.totpSecret : null,
+          lastTotpTimeStep: HAS(admin, "lastTotpTimeStep") ? admin.lastTotpTimeStep : null,
+          requested_mfa_reset_link_at: HAS(admin, "requested_mfa_reset_link_at") ? admin.requested_mfa_reset_link_at : null,
+          refreshTokenHash: HAS(admin, "refreshTokenHash") ? admin.refreshTokenHash : null,
+          lastLoginAt: HAS(admin, "lastLoginAt") ? admin.lastLoginAt : null,
+          createdAt: HAS(admin, "createdAt") ? admin.createdAt : DATE_ISO8601(DATE_NOW()),
+          updatedAt: DATE_ISO8601(DATE_NOW()),
+          embedding: []
+        } IN users OPTIONS { overwriteMode: "ignore" }
+    `, { defaultPlatformId });
+
+    await targetDb.query(`
+      FOR admin IN superAdmins
+        FOR u IN users
+          FILTER u.emailHash == admin.emailHash
+          UPDATE u WITH {
+            platform_role: "owner",
+            isMfaEnabled: HAS(admin, "isMfaEnabled") ? admin.isMfaEnabled : (HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false),
+            has_request_mfa_reset_link: HAS(admin, "has_request_mfa_reset_link") ? admin.has_request_mfa_reset_link : (HAS(u, "has_request_mfa_reset_link") ? u.has_request_mfa_reset_link : false),
+            totpSecret: HAS(admin, "totpSecret") ? admin.totpSecret : (HAS(u, "totpSecret") ? u.totpSecret : null),
+            lastTotpTimeStep: HAS(admin, "lastTotpTimeStep") ? admin.lastTotpTimeStep : (HAS(u, "lastTotpTimeStep") ? u.lastTotpTimeStep : null),
+            requested_mfa_reset_link_at: HAS(admin, "requested_mfa_reset_link_at") ? admin.requested_mfa_reset_link_at : (HAS(u, "requested_mfa_reset_link_at") ? u.requested_mfa_reset_link_at : null),
+            refreshTokenHash: HAS(admin, "refreshTokenHash") && admin.refreshTokenHash != null ? admin.refreshTokenHash : (HAS(u, "refreshTokenHash") ? u.refreshTokenHash : null),
+            lastLoginAt: HAS(admin, "lastLoginAt") && admin.lastLoginAt != null ? admin.lastLoginAt : (HAS(u, "lastLoginAt") ? u.lastLoginAt : null),
+            updatedAt: DATE_ISO8601(DATE_NOW())
+          } IN users
+    `);
+  }
+  if (migratedLegacyIdentities) {
+    await backfillCollectionEmbeddings(targetDb, collections.find((spec) => spec.name === 'users')!);
+  }
 
   const oldPostRenders = targetDb.collection('postRenders');
   if (await oldPostRenders.exists()) {
@@ -765,6 +890,26 @@ async function main() {
       FILTER HAS(v, "userId") || HAS(v, "emailHash")
       UPDATE v WITH { userId: null, emailHash: null } IN visitors OPTIONS { keepNull: false }
   `);
+
+  await targetDb.query(`
+    FOR session IN visitorSessions
+      FILTER !HAS(session, "source") || session.source == null || session.source == ""
+      UPDATE session WITH { source: "web" } IN visitorSessions
+  `);
+
+  await targetDb.query(`
+    FOR session IN userSessions
+      FILTER !HAS(session, "source") || session.source == null || session.source == ""
+      UPDATE session WITH { source: "web" } IN userSessions
+  `);
+
+  for (const legacyIdentityCollectionName of ['members', 'superAdmins']) {
+    const collection = targetDb.collection(legacyIdentityCollectionName);
+    if (await collection.exists()) {
+      await collection.drop();
+      console.log(`Dropped legacy identity collection ${legacyIdentityCollectionName}`);
+    }
+  }
 
   console.log('ArangoDB schema is up to date.');
   systemDb.close();

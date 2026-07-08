@@ -24,6 +24,7 @@ describe('visitorSession node schema (anonymous funnel)', () => {
 
     expect(session.disconnectedAt).toBeNull();
     expect(session.visitorId).toBe('vis_test');
+    expect(session.source).toBe('web');
     expect('emailHash' in session).toBe(false);
   });
 
@@ -63,6 +64,7 @@ describe('userSession node schema (authenticated funnel)', () => {
 
     expect(session.disconnectedAt).toBeNull();
     expect(session.userId).toBe('usr_test');
+    expect(session.source).toBe('web');
     expect('visitorId' in session).toBe(false);
     expect('emailHash' in session).toBe(false);
   });
@@ -89,8 +91,10 @@ describe('userSession node schema (authenticated funnel)', () => {
     const visitorShape = Object.keys(visitorSessionSchema.shape);
 
     expect(userShape).toContain('userId');
+    expect(userShape).toContain('source');
     expect(userShape).not.toContain('visitorId');
     expect(visitorShape).toContain('visitorId');
+    expect(visitorShape).toContain('source');
     expect(visitorShape).not.toContain('userId');
     expect(userShape).not.toContain('emailHash');
     expect(visitorShape).not.toContain('emailHash');

@@ -1,0 +1,23 @@
+{
+  "runId": "puG6XD0YN7_s",
+  "target": {
+    "slug": "metis",
+    "name": "Metis",
+    "category": "orchestrator",
+    "entityId": "orchestrator.metis",
+    "description": "Metis, Chief Intelligence Orchestrator."
+  },
+  "provider": "openrouter",
+  "model": "hexgrad/kokoro-82m",
+  "modelLabel": "Kokoro 82M",
+  "mode": "tts",
+  "format": "mp3",
+  "voice": "bf_emma",
+  "language": "en",
+  "speechInput": "Hello, I am Metis, your Chief Intelligence Orchestrator.\n\nI help turn information into usable intelligence.\n\nMy role is to protect the company brain. I work across knowledge, data, documents, research, memory, retrieval, integrations, and the systems that make context available when decisions need it.\n\nBring me scattered information, a knowledge gap, a research problem, or a system that needs better memory. I will help structure the context, connect the sources, and make intelligence easier to find, trust, and reuse.\n\nI am Metis. I make knowledge operational.",
+  "promptHash": "a3b443903855d7961a4ed4ab075c293646d79e8dfb9a992cac65bdf42a299815",
+  "promptPath": "outputs/audio/orchestrator-messages/metis/v1/prompt.md",
+  "audioPath": "outputs/audio/orchestrator-messages/metis/v1/metis-message-v1.mp3",
+  "localAudioPath": "orchestrators/metis-cio/message.mp3",
+  "createdAt": "2026-07-08T21:30:47.529Z"
+}

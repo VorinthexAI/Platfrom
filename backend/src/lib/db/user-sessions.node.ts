@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
 import { createNodeHelpers, withArangoKey } from './base';
+import { presenceSourceSchema } from './visitor-sessions.node';
 
 export const USER_SESSIONS_COLLECTION = 'userSessions';
 
@@ -19,6 +20,7 @@ export const userSessionSchema = z.object({
   /** The signed-in user this session belongs to. */
   userId: z.string(),
   alias: z.string(),
+  source: presenceSourceSchema.default('web'),
   /** Redis presence session this node mirrors. */
   sessionKey: z.string(),
   connectedAt: z.string(),

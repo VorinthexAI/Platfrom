@@ -6,7 +6,6 @@ import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChalleng
 import { getAllCapabilitiesChunked, listCapabilitiesPage, upsertCapabilityByKey } from './capabilities.node';
 import { getAllEventsChunked, listEventsPage, upsertEventByKey } from './events.node';
 import { getAllIntelligenceFragmentsChunked, listIntelligenceFragmentsPage, upsertIntelligenceFragmentByKey } from './intelligence-fragments.node';
-import { getAllMembersChunked, listMembersPage } from './members.node';
 import { getAllMindCapabilitiesChunked, listMindCapabilitiesPage, upsertMindCapabilityByKey } from './mind-capabilities.node';
 import { getAllMindsChunked, listMindsPage, upsertMindByKey } from './minds.node';
 import { getAllOutputAnalyticsChunked, listOutputAnalyticsPage, upsertOutputAnalyticsByKey } from './output-analytics.node';
@@ -19,11 +18,12 @@ import { getAllPlatformsChunked, listPlatformsPage, upsertPlatform } from './pla
 import { getAllProcessedWebhookEventsChunked, listProcessedWebhookEventsPage, upsertProcessedWebhookEventByKey } from './processed-webhook-events.node';
 import { getAllProductsChunked, listProductsPage, upsertProduct } from './products.node';
 import { getAllSubscriptionsChunked, listSubscriptionsPage, upsertSubscriptionByKey } from './subscriptions.node';
-import { getAllSuperAdminsChunked, listSuperAdminsPage } from './super-admins.node';
+import { getAllTeamMemberInvitesChunked, listTeamMemberInvitesPage, upsertTeamMemberInviteByKey } from './team-member-invites.node';
+import { getAllTeamMembersChunked, listTeamMembersPage, upsertTeamMemberByKey } from './team-members.node';
+import { getAllTeamsChunked, listTeamsPage, upsertTeamByKey } from './teams.node';
 import { getAllUserEntitlementsChunked, listUserEntitlementsPage, upsertUserEntitlementByKey } from './user-entitlements.node';
 import { getAllUsersChunked, listUsersPage, upsertUserByKey } from './users.node';
 import { getAllVisitorsChunked, listVisitorsPage, upsertVisitorByKey } from './visitors.node';
-import { upsertMemberByKeyGuarded, upsertSuperAdminByKeyGuarded } from './identity-guard';
 
 export interface NodeAccessors {
   /** One resumable page — for stateless HTTP pagination (GET /api/v1/nodes). */
@@ -52,7 +52,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   capabilities: { listPage: listCapabilitiesPage, getAllChunked: getAllCapabilitiesChunked, upsertByKey: upsertCapabilityByKey },
   events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked, upsertByKey: upsertEventByKey },
   intelligenceFragments: { listPage: listIntelligenceFragmentsPage, getAllChunked: getAllIntelligenceFragmentsChunked, upsertByKey: upsertIntelligenceFragmentByKey },
-  members: { listPage: listMembersPage, getAllChunked: getAllMembersChunked, upsertByKey: upsertMemberByKeyGuarded as never },
   mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },
   minds: { listPage: listMindsPage, getAllChunked: getAllMindsChunked, upsertByKey: upsertMindByKey },
   outputAnalytics: { listPage: listOutputAnalyticsPage, getAllChunked: getAllOutputAnalyticsChunked, upsertByKey: upsertOutputAnalyticsByKey },
@@ -65,7 +64,9 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked, upsertByKey: upsertProcessedWebhookEventByKey },
   products: { listPage: listProductsPage, getAllChunked: getAllProductsChunked, upsertByKey: upsertProduct },
   subscriptions: { listPage: listSubscriptionsPage, getAllChunked: getAllSubscriptionsChunked, upsertByKey: upsertSubscriptionByKey },
-  superAdmins: { listPage: listSuperAdminsPage, getAllChunked: getAllSuperAdminsChunked, upsertByKey: upsertSuperAdminByKeyGuarded as never },
+  teamMemberInvites: { listPage: listTeamMemberInvitesPage, getAllChunked: getAllTeamMemberInvitesChunked, upsertByKey: upsertTeamMemberInviteByKey },
+  teamMembers: { listPage: listTeamMembersPage, getAllChunked: getAllTeamMembersChunked, upsertByKey: upsertTeamMemberByKey },
+  teams: { listPage: listTeamsPage, getAllChunked: getAllTeamsChunked, upsertByKey: upsertTeamByKey },
   userEntitlements: { listPage: listUserEntitlementsPage, getAllChunked: getAllUserEntitlementsChunked, upsertByKey: upsertUserEntitlementByKey },
   userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },
