@@ -30,40 +30,10 @@ locals {
   response_sec_headers_id = "67f7725c-6f97-4210-82d7-5512b31e9d03" # SecurityHeadersPolicy
 }
 
-# Custom cache policy for the default (HTML) behavior. The web app serves every
-# domain from one origin via proxy.ts hostname routing, so the SAME path (e.g.
-# "/") returns different HTML per Host. Managed CachingOptimized omits Host from
-# the cache key, which would let one domain's page be served to another. This
-# policy puts Host in the cache key so each domain caches its own HTML, while
-# still caching at the edge (fast globally, Vercel-like). Query strings are
-# ignored (the galaxy app reads them client-side) for a high cache-hit rate;
-# min_ttl=0 lets dynamic/SSR routes opt out via their Cache-Control: no-cache.
-resource "aws_cloudfront_cache_policy" "html" {
-  name    = "${var.name_prefix}-html-per-host"
-  comment = "Default/HTML behavior: Host in the cache key for proxy.ts multi-domain routing"
-
-  min_ttl     = 0
-  default_ttl = 60
-  max_ttl     = 86400
-
-  parameters_in_cache_key_and_forwarded_to_origin {
-    enable_accept_encoding_brotli = true
-    enable_accept_encoding_gzip   = true
-
-    cookies_config {
-      cookie_behavior = "none"
-    }
-    headers_config {
-      header_behavior = "whitelist"
-      headers {
-        items = ["Host"]
-      }
-    }
-    query_strings_config {
-      query_string_behavior = "none"
-    }
-  }
-}
+# (Removed the custom per-Host HTML cache policy: the default behavior no longer
+# caches HTML at CloudFront — Next.js App Router RSC vs document responses share a
+# URL and must not be cache-collided. proxy.ts still gets the right Host via the
+# AllViewer origin-request policy on the uncached default behavior.)
 
 # us-east-1 ACM cert for the CloudFront viewer certificate (DNS validation via
 # Cloudflare; outputs only). Created PENDING_VALIDATION, does not block apply.
@@ -239,13 +209,20 @@ resource "aws_cloudfront_distribution" "this" {
 
   # Default behavior -> web origin. Host is forwarded (AllViewer) so proxy.ts
   # subdomain routing works.
+  # Default (HTML) behavior: NOT cached at CloudFront. Next.js App Router serves
+  # the same URL as either an HTML document or an RSC flight payload depending on
+  # request headers (RSC / Next-Router-State-Tree / Next-Url). Caching HTML here
+  # collides the two — a cached RSC response served for a document load renders as
+  # raw ":HL[...]" text on a black screen. Disabling cache lets the origin decide
+  # per-request (correct); _next/static stays edge-cached below, and Cloudflare
+  # still fronts the whole thing. AllViewer forwards Host (proxy.ts) + RSC headers.
   default_cache_behavior {
     target_origin_id         = local.origin_id
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["GET", "HEAD", "OPTIONS"]
     cached_methods           = ["GET", "HEAD"]
     compress                 = true
-    cache_policy_id          = aws_cloudfront_cache_policy.html.id
+    cache_policy_id          = local.cache_disabled_id
     origin_request_policy_id = local.origin_all_viewer_id
   }
 
