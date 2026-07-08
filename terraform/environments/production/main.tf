@@ -30,7 +30,10 @@ module "network" {
   public_subnet_ids  = var.public_subnet_ids
   private_subnet_ids = var.private_subnet_ids
   vpc_cidr           = var.vpc_cidr
-  tags               = local.tags
+  # Early-infra: nothing runs in private subnets anymore (ECS/render retired),
+  # so drop the ~$40/mo NAT gateway. The app + DB boxes live in public subnets.
+  enable_nat = false
+  tags       = local.tags
 }
 
 module "storage" {
@@ -81,17 +84,7 @@ module "graph_db_backup" {
   tags                  = local.tags
 }
 
-module "cache" {
-  source = "../../modules/cache"
-
-  name_prefix                = var.name_prefix
-  subnet_ids                 = module.network.private_subnet_ids
-  security_group_id          = module.network.cache_security_group_id
-  redis_node_type            = var.redis_node_type
-  num_cache_clusters         = var.redis_num_cache_clusters
-  automatic_failover_enabled = var.redis_automatic_failover_enabled
-  tags                       = local.tags
-}
+# (Removed module "cache" — retired in the early-infra cost teardown.)
 
 resource "random_password" "api_key" {
   length  = 48
@@ -115,7 +108,7 @@ locals {
     ARANGO_DATABASE            = var.graph_db_name
     ARANGO_USERNAME            = "root"
     ARANGO_ROOT_PASSWORD       = random_password.graph_db_password.result
-    REDIS_URL                  = module.cache.redis_url
+    REDIS_URL                  = "redis://localhost:6379"
     S3_BUCKET                  = module.storage.s3_bucket_name
     API_KEY                    = random_password.api_key.result
     ACCESS_TOKEN_SECRET        = random_password.access_token_secret.result
@@ -177,24 +170,7 @@ resource "aws_ssm_parameter" "prod" {
 # ArangoDB graph-db host, Redis, and the shared SSH key remain. var.instance_type
 # and the network app SG are now unused but harmless.)
 
-module "render_service" {
-  source = "../../modules/render-service"
-
-  name_prefix          = var.name_prefix
-  subnet_ids           = module.network.private_subnet_ids
-  security_group_id    = module.network.render_security_group_id
-  container_image      = "${module.storage.ecr_repository_url}:latest"
-  task_cpu             = var.task_cpu
-  task_memory          = var.task_memory
-  desired_count        = var.render_desired_count
-  ssm_parameter_prefix = local.normalized_ssm_prefix
-  ssm_parameter_arns   = distinct(concat(local.ssm_arns, [local.ssm_prefix_arn]))
-  kms_key_arns         = var.kms_key_arns
-  s3_bucket_arn        = module.storage.s3_bucket_arn
-  tags                 = local.tags
-
-  depends_on = [aws_ssm_parameter.prod]
-}
+# (Removed module "render_service" — retired in the early-infra cost teardown.)
 
 # ---------------------------------------------------------------------------
 # Target-state additive platform (ALB + ECS EC2 web/api + CloudFront). Gated by
@@ -202,74 +178,7 @@ module "render_service" {
 # from these modules. When enabled they stand up ALONGSIDE the existing app/DB
 # hosts and Redis, which stay running as the instant rollback until DNS cutover.
 # ---------------------------------------------------------------------------
-locals {
-  effective_web_image = var.web_image != "" ? var.web_image : "${module.storage.ecr_web_repository_url}:latest"
-  effective_api_image = var.api_image != "" ? var.api_image : "${module.storage.ecr_repository_url}:latest"
-}
 
-module "app_platform" {
-  source = "../../modules/app-platform"
-  count  = var.enable_app_platform ? 1 : 0
+# (Removed module "app_platform" — retired in the early-infra cost teardown.)
 
-  name_prefix = var.name_prefix
-  vpc_id      = module.network.vpc_id
-
-  alb_subnet_ids = module.network.public_subnet_ids
-  app_subnet_ids = module.network.private_subnet_ids
-
-  # Attach to the EXISTING cluster created by the render-service module.
-  cluster_name = module.render_service.cluster_name
-
-  db_security_group_id    = module.network.graph_db_security_group_id
-  cache_security_group_id = module.network.cache_security_group_id
-
-  web_image = local.effective_web_image
-  api_image = local.effective_api_image
-
-  instance_type        = var.app_platform_instance_type
-  asg_min_size         = var.app_platform_asg_min_size
-  asg_max_size         = var.app_platform_asg_max_size
-  asg_desired_capacity = var.app_platform_asg_min_size
-
-  web_desired_count = var.web_desired_count
-  api_desired_count = var.api_desired_count
-
-  web_domain_names = var.web_domain_names
-  api_domain_names = var.api_domain_names
-
-  acm_certificate_arn = var.alb_acm_certificate_arn
-  alb_https_enabled   = var.alb_https_enabled
-
-  ssm_parameter_prefix = local.normalized_ssm_prefix
-  ssm_parameter_arns   = distinct(concat(local.ssm_arns, [local.ssm_prefix_arn]))
-  kms_key_arns         = var.kms_key_arns
-  s3_bucket_arn        = module.storage.s3_bucket_arn
-  site_url             = var.site_url
-
-  tags = local.tags
-
-  depends_on = [aws_ssm_parameter.prod]
-}
-
-module "edge" {
-  source = "../../modules/edge"
-  count  = var.enable_app_platform ? 1 : 0
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-
-  name_prefix     = var.name_prefix
-  alb_domain_name = module.app_platform[0].alb_dns_name
-
-  web_domain_names = var.web_domain_names
-  api_domain_names = var.api_domain_names
-
-  viewer_acm_certificate_arn = var.cloudfront_viewer_acm_certificate_arn
-  origin_custom_header_value = var.cloudfront_origin_verify_value
-
-  waf_enabled    = var.cloudfront_waf_enabled
-  waf_rate_limit = var.cloudfront_waf_rate_limit
-
-  tags = local.tags
-}
+# (Removed module "edge" — retired in the early-infra cost teardown.)

@@ -33,6 +33,12 @@ variable "availability_zones" {
   default     = []
 }
 
+variable "enable_nat" {
+  type        = bool
+  description = "Create the NAT gateway (+ EIP + private route). Set false to drop egress for private subnets — e.g. the early-infra teardown where nothing runs in private subnets."
+  default     = true
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags to apply to created resources."
