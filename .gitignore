@@ -23,3 +23,6 @@ terraform/**/tfplan
 
 .DS_Store
 Thumbs.db
+
+# Transient asset/gallery dev-server logs (lock git checkout on Windows)
+scripts/image/assets-server.*.log

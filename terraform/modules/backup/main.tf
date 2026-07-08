@@ -29,7 +29,7 @@ resource "aws_iam_role_policy_attachment" "dlm" {
 }
 
 resource "aws_dlm_lifecycle_policy" "ebs" {
-  description        = "${var.name_prefix} EBS snapshots (graph-db data volume)"
+  description        = "${var.name_prefix} EBS snapshots graph-db data volume"
   execution_role_arn = aws_iam_role.dlm.arn
   state              = "ENABLED"
 
