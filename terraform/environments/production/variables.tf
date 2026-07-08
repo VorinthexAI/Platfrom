@@ -219,8 +219,8 @@ variable "app_platform_asg_min_size" {
 
 variable "app_platform_asg_max_size" {
   type        = number
-  description = "Maximum ECS EC2 capacity instances."
-  default     = 4
+  description = "Maximum ECS EC2 capacity instances. Capped at 2: web+api (2 small tasks) fit on one t4g.medium; the 2nd node is only for rolling-deploy headroom / HA. Raise deliberately when real traffic needs it — a deploy spike once ran this to 4 and got stuck via managed termination protection."
+  default     = 2
 }
 
 variable "web_desired_count" {
