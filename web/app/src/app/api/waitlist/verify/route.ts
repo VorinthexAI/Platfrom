@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
 
 const querySchema = z.strictObject({
   token_hash: z.string().regex(/^[a-f0-9]{64}$/),
 });
+
+const EXPLORER_COOKIE = "vx_explorer";
 
 interface BackendVerifyResponse {
   ok: boolean;
@@ -28,8 +31,13 @@ export async function GET(request: Request) {
   }
 
   if (backendConfigured()) {
+    // Fragments collected anonymously in this browser (as its explorerId)
+    // merge into the account the moment email ownership is proven.
+    const explorerId = (await cookies()).get(EXPLORER_COOKIE)?.value;
+    const query = new URLSearchParams({ token_hash: parsed.data.token_hash });
+    if (explorerId) query.set("explorer_id", explorerId);
     const result = await backendFetch<BackendVerifyResponse>(
-      `/waitlist/verify?token_hash=${parsed.data.token_hash}`,
+      `/waitlist/verify?${query.toString()}`,
     );
     if (!result.ok || !result.data) {
       return NextResponse.json(

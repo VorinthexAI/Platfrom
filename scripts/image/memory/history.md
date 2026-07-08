@@ -318,3 +318,23 @@ Paths:
 - slideshow/intelligence-hunt-launch-1/outputs/v1/slide-04.png
 - slideshow/intelligence-hunt-launch-1/outputs/v1/slide-05.png
 - slideshow/intelligence-hunt-launch-1/outputs/v1/slide-06.png
+## 2026-07-08 00:04
+Asset: Hunt is Now Open
+Action: Created asset
+Notes: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.
+## 2026-07-08 00:09
+Asset: Hunt is Now Open
+Action: Generated v1
+Notes: TikTok slideshow: 6 slides, 0 reference image(s).
+## 2026-07-08 00:09
+Asset: Hunt is Now Open
+Action: Generated slideshow v1
+Notes: TikTok slideshow: 6 slides, 0 reference image(s).
+Paths:
+- slideshow/intelligence-hunt-launch-2/outputs/v1/slideshow.json
+- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-01.png
+- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-02.png
+- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-03.png
+- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-04.png
+- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-05.png
+- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-06.png

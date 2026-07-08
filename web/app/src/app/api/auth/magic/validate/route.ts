@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
 
@@ -9,6 +10,7 @@ const bodySchema = z.strictObject({
 
 const ACCESS_COOKIE = "vorinthex_access";
 const REFRESH_COOKIE = "vorinthex_refresh";
+const EXPLORER_COOKIE = "vx_explorer";
 
 interface MagicValidatePayload {
   status: string;
@@ -39,9 +41,15 @@ export async function POST(request: Request) {
   }
 
   if (backendConfigured()) {
+    // Fragments collected anonymously in this browser (as its explorerId)
+    // merge into the account on every sign in — not just the first join.
+    const explorerId = (await cookies()).get(EXPLORER_COOKIE)?.value;
     const result = await backendFetch<MagicValidatePayload>("/auth/magic/validate", {
       method: "POST",
-      body: JSON.stringify({ token_hash: parsed.data.token_hash }),
+      body: JSON.stringify({
+        token_hash: parsed.data.token_hash,
+        ...(explorerId ? { explorer_id: explorerId } : {}),
+      }),
     });
     if (!result.ok || !result.data) {
       return NextResponse.json(
