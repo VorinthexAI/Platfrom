@@ -146,18 +146,16 @@ jobs:
             echo "| GitHub name | Terraform output |"
             echo "|---|---|"
             echo "| APP_HEALTH_URL | $(terraform output -raw app_health_url) |"
-            echo "| APP_EC2_HOST | $(terraform output -raw app_ec2_host) |"
-            echo "| APP_EC2_USER | $(terraform output -raw app_ec2_user) |"
             echo "| GRAPH_DB_EC2_HOST | $(terraform output -raw graph_db_ec2_host) |"
             echo "| GRAPH_DB_EC2_USER | $(terraform output -raw graph_db_ec2_user) |"
             echo "| RENDER_TASK_FAMILY | $(terraform output -raw render_task_family) |"
             echo "| RENDER_ECS_CLUSTER | $(terraform output -raw render_ecs_cluster) |"
             echo "| RENDER_ECS_SERVICE | $(terraform output -raw render_ecs_service) |"
             echo ""
-            echo "APP_EC2_SSH_KEY is sensitive. Retrieve it from Terraform state only in a secure shell:"
+            echo "GRAPH_DB_EC2_SSH_KEY is sensitive. Retrieve it from Terraform state only in a secure shell:"
             echo ""
             echo '```bash'
-            echo "terraform -chdir=terraform/environments/production output -raw app_ec2_ssh_private_key"
+            echo "terraform -chdir=terraform/environments/production output -raw graph_db_ec2_ssh_private_key"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

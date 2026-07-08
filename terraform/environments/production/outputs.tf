@@ -3,18 +3,12 @@ output "app_health_url" {
   value       = "https://api.vorinthex.com/api/v1/health"
 }
 
-output "app_ec2_host" {
-  description = "Set GitHub secret APP_EC2_HOST to this value."
-  value       = module.app_host.public_ip
-}
+# (Removed app_ec2_host / app_ec2_user / app_ec2_ssh_private_key outputs — the
+# app_host module is gone. The shared deploy SSH key output moves under the
+# graph-db host, which still uses it.)
 
-output "app_ec2_user" {
-  description = "Set GitHub secret APP_EC2_USER to this value."
-  value       = module.app_host.ssh_user
-}
-
-output "app_ec2_ssh_private_key" {
-  description = "Set GitHub secret APP_EC2_SSH_KEY to this value if Terraform generated the key. This same key is authorized on both the app host and the graph-db host."
+output "graph_db_ec2_ssh_private_key" {
+  description = "Shared deploy SSH key (authorized on the graph-db host), when Terraform generated it."
   value       = var.ssh_public_key == "" ? tls_private_key.deploy.private_key_openssh : ""
   sensitive   = true
 }

@@ -170,21 +170,11 @@ resource "aws_ssm_parameter" "prod" {
   }
 }
 
-module "app_host" {
-  source = "../../modules/app-host"
-
-  name_prefix             = var.name_prefix
-  subnet_id               = module.network.public_subnet_ids[0]
-  security_group_id       = module.network.app_security_group_id
-  instance_type           = var.instance_type
-  ssh_ingress_cidr_blocks = var.ssh_ingress_cidr_blocks
-  ssh_public_key          = local.effective_ssh_public_key
-  ssm_parameter_arns      = local.ssm_arns
-  kms_key_arns            = var.kms_key_arns
-  allow_instance_ssm_read = var.allow_app_instance_ssm_read
-  ami_id                  = var.app_ami_id
-  tags                    = local.tags
-}
+# (Removed the app_host module: the backend was cut over to the autoscaling ECS
+# api service — api.vorinthex.com → CloudFront → ALB → ECS. The old blue-green
+# EC2 backend host is retired; this destroys its instance + EIP + IAM. The
+# ArangoDB graph-db host, Redis, and the shared SSH key remain. var.instance_type
+# and the network app SG are now unused but harmless.)
 
 module "render_service" {
   source = "../../modules/render-service"
