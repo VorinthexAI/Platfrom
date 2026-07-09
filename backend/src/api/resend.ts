@@ -20,6 +20,12 @@ const resendEventSchema = z.object({
   data: z.object({
     to: z.array(z.string().email()).min(1),
     created_at: z.string().optional(),
+    // SES-style classification Resend attaches to email.bounced events.
+    bounce: z.object({
+      type: z.string().optional(),
+      subType: z.string().optional(),
+      message: z.string().optional(),
+    }).passthrough().optional(),
   }).passthrough(),
 }).passthrough();
 
@@ -85,6 +91,7 @@ export async function recordResendEmailEvent(
     return { processed: true, matched: false, inserted: false, deleted: false };
   }
 
+  const bounce = event.type === 'email.bounced' ? event.data.bounce : undefined;
   await deps.insertEvent({
     key: deps.newId(),
     sourceId: await deps.getDefaultPlatformId(),
@@ -98,11 +105,18 @@ export async function recordResendEmailEvent(
       resend_event_id: eventId,
       message_id: typeof event.data.email_id === 'string' ? event.data.email_id : null,
       occurred_at: eventTimestamp(event),
+      ...(event.type === 'email.bounced'
+        ? { bounce_type: bounce?.type ?? null, bounce_sub_type: bounce?.subType ?? null }
+        : {}),
     },
     createdAt: new Date().toISOString(),
   });
 
-  if (event.type === 'email.bounced') {
+  // Auto-filter rubbish addresses: a Permanent bounce means the mailbox does
+  // not exist, so the account is junk and gets purged. Transient/Undetermined
+  // bounces are real mailboxes failing temporarily (full inbox, greylisting) —
+  // deleting those would erase legitimate users, so they only get the event.
+  if (event.type === 'email.bounced' && bounce?.type?.toLowerCase() === 'permanent') {
     await deps.deleteUser(user.key);
     return { processed: true, matched: true, inserted: true, deleted: true };
   }
