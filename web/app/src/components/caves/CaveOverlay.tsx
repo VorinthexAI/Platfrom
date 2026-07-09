@@ -1273,20 +1273,12 @@ function MagicFlow() {
   }
 
   // TOTP itself is the real proof for members — it must be completed on
-  // whatever device the visitor is holding. Only AFTER it succeeds do we
-  // check whether this is the browser that requested the light: if not,
-  // the session stays here (it's genuinely valid) but the visitor is
-  // pointed back to where they started instead of landing in a vault
-  // they don't intend to keep using.
+  // whatever device the visitor is holding, so THIS browser earned the
+  // session. No sealed detour: straight into the star.
   const onTotpSuccess = (name: string | null, title: string | null) => {
     // The sun greets the member by their real name and platform title.
     if (name) window.localStorage.setItem("vx_member_name", name);
     if (title) window.localStorage.setItem("vx_member_title", title);
-    if (!hasPendingHandoff()) {
-      setLinkLanding({ action: "member", alias: null, waitlistNumber: null });
-      useGalaxyStore.getState().enterCave("sealed");
-      return;
-    }
     startJump("sun");
   };
 
