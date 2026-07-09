@@ -6,12 +6,14 @@ import {
   updateAuthChallenge,
   type AuthChallenge,
 } from '@/lib/db/auth-challenges.node';
+import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
 import { getUserById } from '@/lib/db/users.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { redisConnection } from '@/lib/redis';
 import { trackPlatformEvent } from '@/platform/events';
 import { issueUserTokens } from './auth';
+import { notifyCountersDirty } from './live-bus';
 
 /**
  * Cross-device sign-in handoff.
@@ -106,20 +108,49 @@ export async function getHandoffStatus(handoffPublicHash: string): Promise<Hando
   return 'pending';
 }
 
+export interface ClaimHandoffDeps {
+  getAuthChallengeByHandoffTokenHash: typeof getAuthChallengeByHandoffTokenHash;
+  updateAuthChallenge: typeof updateAuthChallenge;
+  getUserById: typeof getUserById;
+  adoptExplorerFragments: typeof adoptExplorerFragments;
+  notifyCountersDirty: typeof notifyCountersDirty;
+  issueUserTokens: typeof issueUserTokens;
+}
+
+const defaultClaimDeps: ClaimHandoffDeps = {
+  getAuthChallengeByHandoffTokenHash,
+  updateAuthChallenge,
+  getUserById,
+  adoptExplorerFragments,
+  notifyCountersDirty,
+  issueUserTokens,
+};
+
 /**
  * One-shot claim: trade an approved handoff for a real explorer session.
  * Single use — the first claim wins, every later attempt is refused.
  */
-export async function claimHandoff(handoffPublicHash: string) {
+export async function claimHandoff(
+  handoffPublicHash: string,
+  explorerId?: string,
+  deps: ClaimHandoffDeps = defaultClaimDeps,
+) {
   const stored = await sha256(handoffPublicHash);
-  const challenge = await getAuthChallengeByHandoffTokenHash(stored);
+  const challenge = await deps.getAuthChallengeByHandoffTokenHash(stored);
   if (!challenge || !isHandoffClaimable(challenge)) return null;
 
-  await updateAuthChallenge(challenge.key, { handoffClaimedAt: new Date().toISOString() });
+  await deps.updateAuthChallenge(challenge.key, { handoffClaimedAt: new Date().toISOString() });
 
-  const user = await getUserById(challenge.identityKey);
+  const user = await deps.getUserById(challenge.identityKey);
   if (!user) return null;
-  const tokens = await issueUserTokens(user);
+  // The claiming browser is usually the one that collected anonymously
+  // while waiting — its bag merges onto the account here, exactly like the
+  // link-opening browser's bag merges in validateMagicLink.
+  if (explorerId) {
+    const adopted = await deps.adoptExplorerFragments(explorerId, user.key);
+    if (adopted > 0) deps.notifyCountersDirty();
+  }
+  const tokens = await deps.issueUserTokens(user);
   const alias = user.alias ?? generateAlias(user.key);
   trackPlatformEvent({
     slug: 'auth.magic_link_authenticated',

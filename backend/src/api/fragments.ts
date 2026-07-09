@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import {
+  adoptExplorerFragments,
   countFragmentEntries,
   getExplorerStanding,
   getUserStanding,
@@ -83,6 +84,13 @@ export async function collectFragment(c: Context) {
     userId = user?.key ?? null;
   }
 
+  // A signed-in collect sweeps the browser's older anonymous entries onto
+  // the account too, so the whole device bag ranks — not just this piece.
+  if (userId) {
+    const adopted = await adoptExplorerFragments(body.explorer_id, userId);
+    if (adopted > 0) notifyCountersDirty();
+  }
+
   let entry;
   try {
     entry = await insertIntelligenceFragment({
@@ -145,6 +153,13 @@ export async function getFragmentsStanding(c: Context) {
   const userId = await getUserId(c);
 
   if (userId) {
+    // Self-heal: a signed-in caller whose device bag is still anonymous
+    // (collected before this session, or signed in via handoff before the
+    // claim path adopted) gets it merged the moment their standing is read.
+    if (query.explorer_id) {
+      const adopted = await adoptExplorerFragments(query.explorer_id, userId);
+      if (adopted > 0) notifyCountersDirty();
+    }
     const standing = await getUserStanding(userId);
     if (standing) {
       return c.json({
