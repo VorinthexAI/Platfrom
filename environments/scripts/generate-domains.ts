@@ -38,7 +38,7 @@ const CAVE_SUBDOMAINS: string[] = ["hunt.vorinthex.com"];
  * the right target group. `api.vorinthex.com` fronts the backend ECS service.
  * Included so the Cloudflare DNS sync points them at CloudFront too.
  */
-const INFRA_SUBDOMAINS: string[] = ["api.vorinthex.com"];
+const INFRA_SUBDOMAINS: string[] = ["api.vorinthex.com", "www.vorinthex.com"];
 
 /** The apex domain used as the JSON key when an entity declares no subdomain. */
 const DEFAULT_APEX = "vorinthex.com";
