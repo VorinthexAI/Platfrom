@@ -55,7 +55,10 @@ async function main() {
   for (const [nodeName, docs] of Object.entries(seeds as Record<string, unknown>)) {
     const accessor = NODE_REGISTRY[nodeName];
     if (!accessor) {
-      throw new Error(`Unknown node "${nodeName}" in ${SEEDS_FILE}. Valid nodes: ${NODE_NAMES.join(', ')}`);
+      // Seeds files can outlive schema migrations (e.g. the retired
+      // superAdmins node) — skip loudly instead of failing the deploy.
+      console.warn(`Skipping unknown node "${nodeName}" in ${SEEDS_FILE}. Valid nodes: ${NODE_NAMES.join(', ')}`);
+      continue;
     }
     if (!Array.isArray(docs)) {
       throw new Error(`Node "${nodeName}" in ${SEEDS_FILE} must map to an array of documents.`);

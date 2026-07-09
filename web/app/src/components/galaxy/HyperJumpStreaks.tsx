@@ -8,8 +8,8 @@ import { mulberry32 } from "@/lib/three/procedural";
 
 /**
  * The star-wars hyper-jump: a camera-locked tunnel of light streaks that
- * race past and stretch as the jump accelerates. Members jump on cold
- * blue-steel light into /galaxy/private; explorers ride warm ember-silver
+ * race past and stretch as the jump accelerates. Platform members surf
+ * solar-gold light into /galaxy/sun; explorers ride warm ember-silver
  * into /galaxy/public. The same tunnel fires as a short silver burst when
  * warping between world interiors.
  */
@@ -105,7 +105,7 @@ export function HyperJumpStreaks() {
     if (mode === "jump") {
       materialRef.current.opacity = Math.min(t * 2.2, 0.9);
       materialRef.current.color.set(
-        jumpTarget === "private" ? "#9fb4c7" : "#ffb25c",
+        jumpTarget === "sun" ? "#ffd9a0" : "#ffb25c",
       );
     } else {
       // Interior warp: a fast silver burst that fades as the veil closes.

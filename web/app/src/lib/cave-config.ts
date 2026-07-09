@@ -60,6 +60,12 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "violet",
     approachLabel: "Unsealing the Cipher Chamber",
   },
+  mfa: {
+    ...rolledAnchor(),
+    interior: [540, -240, 0],
+    theme: "ember",
+    approachLabel: "Approaching the Solar Gate",
+  },
   privacy: {
     ...rolledAnchor(),
     interior: [360, -240, 0],
