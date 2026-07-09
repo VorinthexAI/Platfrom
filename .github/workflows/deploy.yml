@@ -74,6 +74,7 @@ jobs:
               backend/*) backend=true ;;
               shared/*) shared=true ;;
               environments/scripts/cloudflare-cache-policy.ts) web=true ;;
+              environments/backend/db.seeds.secrets.json) backend=true ;;
               .github/workflows/deploy.yml) web=true ;;
             esac
           }
@@ -750,7 +751,10 @@ jobs:
           DB_SEEDS_SECRETS_JSON_B64: ${{ secrets.DB_SEEDS_SECRETS_JSON_B64 }}
           DB_SEEDS_SECRETS_JSON: ${{ secrets.DB_SEEDS_SECRETS_JSON }}
         run: |
-          if [ ! -f "$SEEDS_FILE" ]; then
+          # The checked-out file is git-crypt encrypted unless GIT_CRYPT_KEY
+          # unlocked it above — treat a non-JSON file the same as a missing
+          # one and fall back to the secret.
+          if [ ! -f "$SEEDS_FILE" ] || ! python3 -m json.tool "$SEEDS_FILE" > /dev/null 2>&1; then
             if [ -n "$DB_SEEDS_SECRETS_JSON_B64" ]; then
               mkdir -p "$(dirname "$SEEDS_FILE")"
               printf '%s' "$DB_SEEDS_SECRETS_JSON_B64" | tr -d '\r\n\t ' | base64 -d > "$SEEDS_FILE"
@@ -758,7 +762,7 @@ jobs:
               mkdir -p "$(dirname "$SEEDS_FILE")"
               printf '%s' "$DB_SEEDS_SECRETS_JSON" > "$SEEDS_FILE"
             else
-              echo "::notice::$SEEDS_FILE is absent and DB_SEEDS_SECRETS_JSON_B64 is not configured; skipping secret seed upsert."
+              echo "::notice::$SEEDS_FILE is absent/locked and DB_SEEDS_SECRETS_JSON_B64 is not configured; skipping secret seed upsert."
               exit 0
             fi
           fi
