@@ -877,7 +877,16 @@ jobs:
           REV=$(aws ecs register-task-definition --cli-input-json file://new-taskdef.json --query 'taskDefinition.revision' --output text)
           echo "::notice::Registered $FAMILY:$REV with image $IMAGE"
           if [ -n "$RENDER_ECS_CLUSTER" ] && [ -n "$RENDER_ECS_SERVICE" ]; then
-            aws ecs update-service --cluster "$RENDER_ECS_CLUSTER" --service "$RENDER_ECS_SERVICE" --task-definition "$FAMILY:$REV" --query 'service.serviceName' --output text
+            # The render service is provisioned by infra.yml and may not exist
+            # yet — registering the revision is the deploy's real job here.
+            if ! out=$(aws ecs update-service --cluster "$RENDER_ECS_CLUSTER" --service "$RENDER_ECS_SERVICE" --task-definition "$FAMILY:$REV" --query 'service.serviceName' --output text 2>&1); then
+              if echo "$out" | grep -q "ServiceNotFoundException"; then
+                echo "::warning::Render service $RENDER_ECS_SERVICE does not exist yet; revision $FAMILY:$REV registered, service roll skipped."
+              else
+                echo "::error::Failed to roll render service: $out"
+                exit 1
+              fi
+            fi
           fi
 
   deploy-summary:

@@ -16,8 +16,10 @@ import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './
 import { notifyCountersDirty } from './live-bus';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
+/** Platform-role links (MFA sign-in, setup, recovery) burn out in 5 minutes. */
+const MEMBER_LINK_TTL_MS = 5 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
-const MFA_RESET_LINK_TTL_MS = 15 * 60 * 1000;
+const MFA_RESET_LINK_TTL_MS = MEMBER_LINK_TTL_MS;
 const TOTP_PERIOD_SECONDS = 30;
 const ISSUER = 'Vorinthex';
 
@@ -39,6 +41,7 @@ interface LoginIdentity {
   key: string;
   email: string;
   emailHash: string;
+  name: string | null;
   isMfaEnabled: boolean;
   has_request_mfa_reset_link: boolean;
   requested_mfa_reset_link_at: string | null;
@@ -90,6 +93,7 @@ function platformIdentity(user: User): LoginIdentity | null {
       key: user.key,
       email: user.email,
       emailHash: user.emailHash,
+      name: user.name,
       isMfaEnabled: user.isMfaEnabled,
       has_request_mfa_reset_link: user.has_request_mfa_reset_link,
       requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -103,6 +107,7 @@ function platformIdentity(user: User): LoginIdentity | null {
       key: user.key,
       email: user.email,
       emailHash: user.emailHash,
+      name: user.name,
       isMfaEnabled: user.isMfaEnabled,
       has_request_mfa_reset_link: user.has_request_mfa_reset_link,
       requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -119,6 +124,7 @@ function memberIdentity(user: User): LoginIdentity {
     key: user.key,
     email: user.email,
     emailHash: user.emailHash,
+    name: user.name,
     isMfaEnabled: user.isMfaEnabled,
     has_request_mfa_reset_link: user.has_request_mfa_reset_link,
     requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -133,6 +139,7 @@ function superAdminIdentity(user: User): LoginIdentity {
     key: user.key,
     email: user.email,
     emailHash: user.emailHash,
+    name: user.name,
     isMfaEnabled: user.isMfaEnabled,
     has_request_mfa_reset_link: user.has_request_mfa_reset_link,
     requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -292,6 +299,14 @@ export function buildMagicLink(tokenHash: string, flow: 'member' | 'user' = 'mem
   return url.toString();
 }
 
+/** Platform-role links land in the MFA biome — setup wizard or code entry. */
+export function buildMfaLink(tokenHash: string) {
+  const frontendUrl = process.env.FRONTEND_URL ?? process.env.FRONTEND_AUTH_URL ?? 'http://localhost:3000';
+  const url = new URL('/auth/mfa', frontendUrl);
+  url.searchParams.set('token_hash', tokenHash);
+  return url.toString();
+}
+
 async function deliverSignInEmail(input: { email: string; magicLink: string; expiresAt: Date }) {
   await sendBrandedEmail({
     to: input.email,
@@ -312,19 +327,69 @@ async function deliverSignInEmail(input: { email: string; magicLink: string; exp
   });
 }
 
-async function deliverMfaResetEmail(input: { email: string; magicLink: string; expiresAt: Date }) {
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function memberGreetingName(identity: Pick<LoginIdentity, 'name' | 'email'>) {
+  return escapeHtml(identity.name?.trim() || defaultNameFromEmail(identity.email) || 'there');
+}
+
+/**
+ * The platform sign-in email: professional, addressed by the member's real
+ * name, and explicit about the MFA step waiting behind the link.
+ */
+async function deliverMemberSignInEmail(input: {
+  email: string;
+  name: string;
+  magicLink: string;
+  mfaEnabled: boolean;
+  expiresAt: Date;
+}) {
+  const mfaBody = input.mfaEnabled
+    ? '<p style="margin:0;">Follow the link below to sign in with your MFA code. For your security, the link expires in 5 minutes.</p>'
+    : '<p style="margin:0;">Follow the link below to set up multi-factor authentication and secure your platform access. For your security, the link expires in 5 minutes.</p>';
   await sendBrandedEmail({
     to: input.email,
-    subject: 'Reset your Vorinthex authenticator',
-    preheader: 'Use this secure link to set up a new authenticator for Vorinthex.',
-    label: 'Security',
-    eyebrow: 'MFA reset',
-    headline: 'Reset your authenticator',
-    bodyHtml: 'Use this secure link to set up a new authenticator. Access stays locked until setup is complete.',
+    subject: input.mfaEnabled
+      ? 'Your Vorinthex platform sign-in'
+      : 'Set up MFA for your Vorinthex platform access',
+    preheader: input.mfaEnabled
+      ? 'Sign in to the Vorinthex platform with your MFA code.'
+      : 'Set up multi-factor authentication to open your Vorinthex platform access.',
+    label: 'Platform',
+    eyebrow: 'Secure access',
+    headline: input.mfaEnabled ? 'Sign in to the platform' : 'Set up your MFA',
+    bodyHtml: `<p style="margin:0 0 16px;">Hi ${input.name},</p>${mfaBody}`,
     actionUrl: input.magicLink,
-    actionLabel: 'Reset authenticator',
+    actionLabel: input.mfaEnabled ? 'Sign in with MFA' : 'Set up MFA',
     supportingHtml: 'If you did not request this, you can ignore this email.',
-    footerHtml: 'You received this because someone requested an MFA reset for this Vorinthex account.',
+    footerHtml: 'You received this because a sign-in was requested for your Vorinthex platform account.',
+    extraPayload: {
+      magic_link: input.magicLink,
+      expires_at: input.expiresAt.toISOString(),
+    },
+  });
+}
+
+async function deliverMfaResetEmail(input: { email: string; name: string; magicLink: string; expiresAt: Date }) {
+  await sendBrandedEmail({
+    to: input.email,
+    subject: 'Recover your Vorinthex MFA',
+    preheader: 'Use this secure link to set up a new authenticator for Vorinthex.',
+    label: 'Platform',
+    eyebrow: 'MFA recovery',
+    headline: 'Recover your MFA',
+    bodyHtml: `<p style="margin:0 0 16px;">Hi ${input.name},</p><p style="margin:0;">Follow the link below to set up a new authenticator. Access stays locked until setup is complete, and the link expires in 5 minutes.</p>`,
+    actionUrl: input.magicLink,
+    actionLabel: 'Set up a new authenticator',
+    supportingHtml: 'If you did not request this, you can ignore this email.',
+    footerHtml: 'You received this because someone requested MFA recovery for this Vorinthex platform account.',
     extraPayload: {
       magic_link: input.magicLink,
       expires_at: input.expiresAt.toISOString(),
@@ -336,12 +401,26 @@ export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
   if (identity) {
-    const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type);
-    const magicLink = buildMagicLink(challenge.tokenHash, 'member');
-    await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
+    // A truthy platform_role gets the professional platform email: real
+    // name, MFA-aware copy, a 5-minute link, and the /auth/mfa biome.
+    const challenge = await createChallenge(identity.key, 'email', MEMBER_LINK_TTL_MS, identity.type);
+    const magicLink = buildMfaLink(challenge.tokenHash);
+    await deliverMemberSignInEmail({
+      email: normalized,
+      name: memberGreetingName(identity),
+      magicLink,
+      mfaEnabled: identity.isMfaEnabled,
+      expiresAt: challenge.expiresAt,
+    });
     trackPlatformEvent({
-      slug: 'auth.signin_email_sent',
-      data: { identity_type: identity.type, email_hash: identity.emailHash },
+      slug: 'platform.sign_in_link_requested',
+      userId: identity.key,
+      data: {
+        user_id: identity.key,
+        identity_type: identity.type,
+        email_hash: identity.emailHash,
+        mfa_enabled: identity.isMfaEnabled,
+      },
     });
     return {
       allowed: true as const,
@@ -394,8 +473,18 @@ export async function requestMfaResetEmail(email: string) {
   });
 
   const challenge = await createChallenge(identity.key, 'email', MFA_RESET_LINK_TTL_MS, identity.type);
-  const magicLink = buildMagicLink(challenge.tokenHash);
-  await deliverMfaResetEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
+  const magicLink = buildMfaLink(challenge.tokenHash);
+  await deliverMfaResetEmail({
+    email: normalized,
+    name: memberGreetingName(identity),
+    magicLink,
+    expiresAt: challenge.expiresAt,
+  });
+  trackPlatformEvent({
+    slug: 'platform.mfa_recovery_requested',
+    userId: identity.key,
+    data: { user_id: identity.key, email_hash: identity.emailHash },
+  });
   return {
     ok: true as const,
     emailSent: true,
@@ -489,6 +578,11 @@ export async function startTotpSetup(challengeToken: string) {
   });
 
   const otpauthUrl = generateURI({ issuer: ISSUER, label: identity.email, secret });
+  trackPlatformEvent({
+    slug: 'platform.mfa_setup_started',
+    userId: identity.key,
+    data: { user_id: identity.key, email_hash: identity.emailHash },
+  });
   return {
     setupChallengeToken: (await createChallenge(identity.key, 'totp', TOTP_CHALLENGE_TTL_MS, identity.type)).tokenHash,
     secret,
@@ -546,8 +640,18 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
     lastTotpTimeStep: lastTimeStep,
     updatedAt: new Date().toISOString(),
   });
+  trackPlatformEvent({
+    slug: 'platform.mfa_enabled',
+    userId: auth.key,
+    data: { user_id: auth.key, email_hash: auth.emailHash },
+  });
 
-  return { ok: true as const, identity: { key: auth.key, identityType: auth.type }, ...(await issueTokens(auth)) };
+  return {
+    ok: true as const,
+    identity: { key: auth.key, identityType: auth.type },
+    name: auth.name,
+    ...(await issueTokens(auth)),
+  };
 }
 
 export async function verifyTotpAndIssueSession(challengeToken: string, code: string) {
@@ -572,6 +676,15 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
     lastTotpTimeStep: result.timeStep,
     updatedAt: new Date().toISOString(),
   });
+  trackPlatformEvent({
+    slug: 'platform.mfa_verified',
+    userId: auth.key,
+    data: { user_id: auth.key, email_hash: auth.emailHash },
+  });
 
-  return { identity: { key: auth.key, identityType: auth.type }, ...(await issueTokens(auth)) };
+  return {
+    identity: { key: auth.key, identityType: auth.type },
+    name: auth.name,
+    ...(await issueTokens(auth)),
+  };
 }

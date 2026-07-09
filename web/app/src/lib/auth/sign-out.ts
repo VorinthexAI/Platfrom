@@ -22,6 +22,7 @@ export async function signOut(): Promise<void> {
   try {
     window.localStorage.removeItem("vx_profile");
     window.localStorage.removeItem("vx_member_email");
+    window.localStorage.removeItem("vx_member_name");
     window.localStorage.removeItem("vx_joined");
   } catch {
     // Storage may be blocked — nothing more to clear.

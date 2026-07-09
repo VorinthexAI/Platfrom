@@ -41,10 +41,9 @@ import { crystalOpener, tierForValue } from "@/lib/loot/crystal-tiers";
  *  2. join → sent     — "check your inbox, verify to secure your spot"
  *  3. waitlist-verify — auto-verifies ?token_hash, reveals alias + number
  *  4. signin          — explorer profile: welcome line + fragments haul
- *  5. members         — members email form (generic success, no probing)
- *  6. magic           — validates ?token_hash → TOTP setup (QR + 2 codes)
- *  7. magic           — returning member: single TOTP code
- *  8. success         — hyper jump into /galaxy/private or /galaxy/public
+ *  5. magic / mfa     — validates ?token_hash → TOTP setup (QR + 2 codes)
+ *  6. magic / mfa     — returning member: single TOTP code
+ *  7. success         — hyper jump into /galaxy/sun or /galaxy/public
  */
 export function CaveOverlay() {
   const mode = useGalaxyStore((s) => s.mode);
@@ -140,6 +139,7 @@ export function CaveOverlay() {
                 {caveKind === "signin" ? <ExplorerSigninFlow /> : null}
                 {caveKind === "waitlist-verify" ? <WaitlistVerifyFlow /> : null}
                 {caveKind === "magic" ? <MagicFlow /> : null}
+                {caveKind === "mfa" ? <MagicFlow /> : null}
                 {caveKind === "privacy" ? <LegalFlow copy={PRIVACY_COPY} /> : null}
                 {caveKind === "terms" ? <LegalFlow copy={TERMS_COPY} /> : null}
               </div>
@@ -888,7 +888,7 @@ function ExplorerSigninFlow() {
           });
         }
         // Members get a TOTP step after their link; remember who asked so
-        // /galaxy/private can greet them and MFA reset knows the email.
+        // the sun can greet them and MFA recovery knows the email.
         window.localStorage.setItem("vx_member_email", normalizedEmail);
         setEmail(normalizedEmail);
         setStatus("sent");
@@ -1278,13 +1278,15 @@ function MagicFlow() {
   // the session stays here (it's genuinely valid) but the visitor is
   // pointed back to where they started instead of landing in a vault
   // they don't intend to keep using.
-  const onTotpSuccess = () => {
+  const onTotpSuccess = (name: string | null) => {
+    // The sun greets the member by their real name.
+    if (name) window.localStorage.setItem("vx_member_name", name);
     if (!hasPendingHandoff()) {
       setLinkLanding({ action: "member", alias: null, waitlistNumber: null });
       useGalaxyStore.getState().enterCave("sealed");
       return;
     }
-    startJump("private");
+    startJump("sun");
   };
 
   if (state.phase === "setup") {
@@ -1301,7 +1303,7 @@ function TotpSetupPanel({
   onSuccess,
 }: {
   data: TotpSetupData;
-  onSuccess: () => void;
+  onSuccess: (name: string | null) => void;
 }) {
   const [codeA, setCodeA] = useState("");
   const [codeB, setCodeB] = useState("");
@@ -1327,7 +1329,7 @@ function TotpSetupPanel({
         setStatus("error");
         return;
       }
-      onSuccess();
+      onSuccess(typeof result.name === "string" ? result.name : null);
     } catch {
       setError("The chamber did not answer, try again.");
       setStatus("error");
@@ -1336,7 +1338,7 @@ function TotpSetupPanel({
 
   return (
     <form onSubmit={handleSubmit}>
-      <p className="micro-label">Cipher Chamber</p>
+      <p className="micro-label">Solar Gate</p>
       <h2 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
         Forge your cipher.
       </h2>
@@ -1408,14 +1410,67 @@ function TotpSetupPanel({
         variant="primary"
         loading={status === "submitting"}
         disabled={codeA.length !== 6 || codeB.length !== 6}
-        className="mt-5 w-full px-5 py-3.5 text-xs"
+        className="mt-5 w-full px-5 py-3.5 text-xs uppercase"
       >
-        Complete the cipher
+        Verify
       </Button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
         {status === "error" ? error : ""}
       </p>
+      <MfaRecoveryBlock />
     </form>
+  );
+}
+
+/**
+ * "Lost access to your MFA?" — sends a fresh 5-minute recovery link that
+ * lets the member set up a new authenticator. Shared by both wizards.
+ */
+function MfaRecoveryBlock() {
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
+    "idle",
+  );
+
+  async function requestRecovery() {
+    const email = window.localStorage.getItem("vx_member_email");
+    if (!email) {
+      useGalaxyStore.getState().enterCave("signin");
+      return;
+    }
+    if (status === "sending") return;
+    setStatus("sending");
+    try {
+      await fetch("/api/auth/totp/reset/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      setStatus("sent");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="mt-8 border-t border-white/8 pt-6 text-center">
+      <p className="text-[0.68rem] text-silver-500">Lost access to your MFA?</p>
+      <Button
+        type="button"
+        variant="secondary"
+        loading={status === "sending"}
+        onClick={requestRecovery}
+        className="mt-4 w-full px-5 py-3 text-[0.62rem] uppercase"
+      >
+        Request recovery
+      </Button>
+      <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
+        {status === "sent"
+          ? "Check your inbox — a recovery link is on its way. It expires in 5 minutes."
+          : status === "error"
+            ? "Could not send the recovery link. Try again."
+            : ""}
+      </p>
+    </div>
   );
 }
 
@@ -1424,10 +1479,10 @@ function TotpVerifyPanel({
   onSuccess,
 }: {
   challenge: string;
-  onSuccess: () => void;
+  onSuccess: (name: string | null) => void;
 }) {
   const [code, setCode] = useState("");
-  const [status, setStatus] = useState<"idle" | "submitting" | "error" | "reset-sent">("idle");
+  const [status, setStatus] = useState<"idle" | "submitting" | "error">("idle");
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -1444,26 +1499,7 @@ function TotpVerifyPanel({
         setStatus("error");
         return;
       }
-      onSuccess();
-    } catch {
-      setStatus("error");
-    }
-  }
-
-  async function requestReset() {
-    const email = window.localStorage.getItem("vx_member_email");
-    if (!email) {
-      useGalaxyStore.getState().enterCave("signin");
-      return;
-    }
-    setStatus("submitting");
-    try {
-      await fetch("/api/auth/totp/reset/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      setStatus("reset-sent");
+      onSuccess(typeof result.name === "string" ? result.name : null);
     } catch {
       setStatus("error");
     }
@@ -1471,7 +1507,7 @@ function TotpVerifyPanel({
 
   return (
     <form onSubmit={handleSubmit}>
-      <p className="micro-label">Cipher Chamber</p>
+      <p className="micro-label">Solar Gate</p>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
         Speak the cipher.
       </h2>
@@ -1497,24 +1533,14 @@ function TotpVerifyPanel({
         variant="primary"
         loading={status === "submitting"}
         disabled={code.length !== 6}
-        className="mt-4 w-full px-5 py-3.5 text-xs"
+        className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
       >
-        Enter
+        Verify
       </Button>
-      <button
-        type="button"
-        onClick={requestReset}
-        className="mt-3 w-full text-center text-[0.68rem] text-silver-500 underline-offset-4 hover:text-silver-300 hover:underline"
-      >
-        Reset MFA
-      </button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "reset-sent"
-          ? "Check your inbox for a new secure link to reset your authenticator."
-          : status === "error"
-            ? "Invalid code, try the next one."
-            : ""}
+        {status === "error" ? "Invalid code, try the next one." : ""}
       </p>
+      <MfaRecoveryBlock />
     </form>
   );
 }

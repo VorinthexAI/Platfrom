@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { generate, generateSecret } from 'otplib';
 import {
   buildMagicLink,
+  buildMfaLink,
   createAccessToken,
   createChallengeTokenHash,
   hasUsableMfaResetRequest,
@@ -30,6 +31,17 @@ describe('auth helpers', () => {
     const link = buildMagicLink(tokenHash, 'user');
 
     expect(link).toBe(`https://app.example.com/public/auth/token?token_hash=${tokenHash}&flow=user`);
+  });
+
+  test('builds platform MFA links that land in the /auth/mfa biome', async () => {
+    process.env.FRONTEND_URL = 'https://app.example.com';
+
+    const rawToken = 'vrtx_email_member';
+    const tokenHash = await createChallengeTokenHash(rawToken);
+    const link = buildMfaLink(tokenHash);
+
+    expect(link).toBe(`https://app.example.com/auth/mfa?token_hash=${tokenHash}`);
+    expect(link).not.toContain(rawToken);
   });
 
   test('encrypts and decrypts TOTP secrets', async () => {
@@ -63,18 +75,18 @@ describe('auth helpers', () => {
     expect(await verifySuccessiveTotpCodes(secret, [first, first], submittedAtEpoch)).toBeNull();
   });
 
-  test('accepts MFA reset requests only inside the 15 minute window', () => {
+  test('accepts MFA reset requests only inside the 5 minute window', () => {
     const requestedAt = '2026-07-03T10:00:00.000Z';
 
     expect(hasUsableMfaResetRequest({
       has_request_mfa_reset_link: true,
       requested_mfa_reset_link_at: requestedAt,
-    }, Date.parse('2026-07-03T10:14:59.000Z'))).toBe(true);
+    }, Date.parse('2026-07-03T10:04:59.000Z'))).toBe(true);
 
     expect(hasUsableMfaResetRequest({
       has_request_mfa_reset_link: true,
       requested_mfa_reset_link_at: requestedAt,
-    }, Date.parse('2026-07-03T10:15:00.000Z'))).toBe(false);
+    }, Date.parse('2026-07-03T10:05:00.000Z'))).toBe(false);
 
     expect(hasUsableMfaResetRequest({
       has_request_mfa_reset_link: false,

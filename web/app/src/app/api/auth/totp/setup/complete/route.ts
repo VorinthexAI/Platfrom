@@ -31,6 +31,7 @@ export async function POST(request: Request) {
       ok: boolean;
       authenticated: boolean;
       userId: string;
+      name?: string | null;
     }>("/auth/totp/setup/complete", {
       method: "POST",
       body: JSON.stringify(parsed.data),
@@ -46,8 +47,12 @@ export async function POST(request: Request) {
         { status: result.status >= 500 ? 502 : 400 },
       );
     }
-    return NextResponse.json({ ok: true, authenticated: true });
+    return NextResponse.json({
+      ok: true,
+      authenticated: true,
+      name: result.data.name ?? null,
+    });
   }
 
-  return NextResponse.json({ ok: true, authenticated: true });
+  return NextResponse.json({ ok: true, authenticated: true, name: null });
 }

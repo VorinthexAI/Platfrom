@@ -180,6 +180,7 @@ export function registerRoutes(app: Hono) {
       ok: true,
       authenticated: true,
       identity: result.identity,
+      name: result.name,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
     });

@@ -16,9 +16,9 @@ interface AuthTokenPageProps {
  *
  * Explorer links (flow=user) travel into the solar system, validate in the
  * background, and hyper-jump straight to the public galaxy — the same
- * arrival as email verification. Member links (flow=member) dive into the
- * Cipher Chamber for TOTP setup/verification, then hyper-jump to
- * /galaxy/private.
+ * arrival as email verification. Legacy member links (flow=member) dive
+ * into the Cipher Chamber for TOTP setup/verification, then surf into
+ * /galaxy/sun — new platform links land on /auth/mfa instead.
  */
 export default async function AuthTokenPage({ searchParams }: AuthTokenPageProps) {
   const params = await searchParams;

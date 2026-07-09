@@ -33,6 +33,7 @@ export type CaveKind =
   | "waitlist-verify" // arrived via /public/waitlist/verify?token_hash=…
   | "signin" // explorer sign-in: waitlist profile + fragments collected
   | "magic" // arrived via /public/auth/token?token_hash=… (TOTP setup/verify)
+  | "mfa" // arrived via /auth/mfa?token_hash=… (platform MFA setup/sign-in)
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault
   | "hunt" // the galaxy hunt hall — live ranks + crystal cave
@@ -45,7 +46,7 @@ export interface RockAnchor {
   radius: number;
 }
 
-export type JumpTarget = "public" | "private";
+export type JumpTarget = "public" | "sun";
 
 /**
  * Interior approach phases (shared by asteroid caves and world visits):

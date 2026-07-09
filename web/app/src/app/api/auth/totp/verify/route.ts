@@ -24,7 +24,7 @@ export async function POST(request: Request) {
   }
 
   if (backendConfigured()) {
-    const result = await backendFetch<{ userId?: string }>("/auth/totp/verify", {
+    const result = await backendFetch<{ userId?: string; name?: string | null }>("/auth/totp/verify", {
       method: "POST",
       body: JSON.stringify(parsed.data),
     });
@@ -34,8 +34,12 @@ export async function POST(request: Request) {
         { status: result.status === 401 ? 401 : 502 },
       );
     }
-    return NextResponse.json({ ok: true, authenticated: true });
+    return NextResponse.json({
+      ok: true,
+      authenticated: true,
+      name: result.data.name ?? null,
+    });
   }
 
-  return NextResponse.json({ ok: true, authenticated: true });
+  return NextResponse.json({ ok: true, authenticated: true, name: null });
 }
