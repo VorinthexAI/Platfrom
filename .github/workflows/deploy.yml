@@ -74,7 +74,7 @@ jobs:
               backend/*) backend=true ;;
               shared/*) shared=true ;;
               environments/scripts/cloudflare-cache-policy.ts) web=true ;;
-              .github/workflows/deploy.yml) web=true; backend=true ;;
+              .github/workflows/deploy.yml) web=true ;;
             esac
           }
 
@@ -248,6 +248,25 @@ jobs:
 
       - name: Roll web ECS service
         run: |
+          CLUSTER_STATUS=$(aws ecs describe-clusters \
+            --clusters "$ECS_CLUSTER" \
+            --query 'clusters[0].status' \
+            --output text 2>/dev/null || echo INACTIVE)
+          if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
+            echo "::notice::Skipping ECS web rollout because cluster $ECS_CLUSTER is $CLUSTER_STATUS. Current production traffic is served by early-infra/Caddy."
+            exit 0
+          fi
+
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_WEB_SERVICE" \
+            --query 'services[0].status' \
+            --output text 2>/dev/null || echo INACTIVE)
+          if [ "$SERVICE_STATUS" != "ACTIVE" ]; then
+            echo "::notice::Skipping ECS web rollout because service $ECS_WEB_SERVICE is $SERVICE_STATUS. Current production traffic is served by early-infra/Caddy."
+            exit 0
+          fi
+
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_WEB_SERVICE" \
@@ -664,6 +683,25 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Roll api ECS service
         run: |
+          CLUSTER_STATUS=$(aws ecs describe-clusters \
+            --clusters "$ECS_CLUSTER" \
+            --query 'clusters[0].status' \
+            --output text 2>/dev/null || echo INACTIVE)
+          if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
+            echo "::notice::Skipping ECS api rollout because cluster $ECS_CLUSTER is $CLUSTER_STATUS. Current production traffic is served by early-infra/Caddy."
+            exit 0
+          fi
+
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_API_SERVICE" \
+            --query 'services[0].status' \
+            --output text 2>/dev/null || echo INACTIVE)
+          if [ "$SERVICE_STATUS" != "ACTIVE" ]; then
+            echo "::notice::Skipping ECS api rollout because service $ECS_API_SERVICE is $SERVICE_STATUS. Current production traffic is served by early-infra/Caddy."
+            exit 0
+          fi
+
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_API_SERVICE" \

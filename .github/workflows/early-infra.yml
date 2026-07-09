@@ -16,15 +16,6 @@ on:
         description: "Image tag to deploy (default: this commit SHA)"
         required: false
         default: ""
-  push:
-    branches: [main]
-    paths:
-      - "backend/**"
-      - "web/app/**"
-      - "shared/**"
-      - "environments/scripts/cloudflare-cache-policy.ts"
-      - "deploy/early/**"
-      - ".github/workflows/early-infra.yml"
 
 concurrency:
   group: early-infra-deploy
