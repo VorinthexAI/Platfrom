@@ -243,7 +243,7 @@ jobs:
             ${{ steps.meta.outputs.image }}
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:latest
           cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
+          cache-to: type=gha,mode=max,scope=web,ignore-error=true
           provenance: false
 
       - name: Roll web ECS service
