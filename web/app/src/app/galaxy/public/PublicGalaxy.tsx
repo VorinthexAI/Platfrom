@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FragmentGlobe, type GlobeData } from "@/components/fragments/FragmentGlobe";
+import { formatFragments } from "@/lib/format";
 import { useGalaxyStore } from "@/lib/galaxy-store";
 import { consumeGlobePreload } from "@/lib/fragments/globe-preload";
 
@@ -101,10 +102,18 @@ export function PublicGalaxy() {
         </p>
       )}
 
+      <button
+        type="button"
+        onClick={returnToGalaxy}
+        className="vui-button vui-button-primary mt-8 min-h-0 px-8 py-3.5 text-xs uppercase"
+      >
+        Explore and collect
+      </button>
+
       <div className="mt-10 flex flex-col items-center">
         <FragmentGlobe data={globe} />
         <p className="chrome-text mt-2 text-5xl font-extralight tabular-nums">
-          {balance.toLocaleString("en-US")}
+          {formatFragments(balance)}
         </p>
         <p className="mt-2 font-mono text-[0.55rem] tracking-[0.28em] text-silver-500 uppercase">
           Intelligence Fragments collected
@@ -116,14 +125,6 @@ export function PublicGalaxy() {
         Collectors earn better offers and early-access pricing when
         Vorinthex launches, keep exploring.
       </p>
-
-      <button
-        type="button"
-        onClick={returnToGalaxy}
-        className="vui-button vui-button-secondary mt-10 min-h-0 px-7 py-3 text-xs uppercase"
-      >
-        Return to the galaxy
-      </button>
     </main>
   );
 }
