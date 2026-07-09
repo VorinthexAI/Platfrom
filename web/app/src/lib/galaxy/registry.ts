@@ -60,7 +60,7 @@ const nexus: GalaxyEntity = {
     headline: "The Nexus of Intelligence",
     subheadline: "Your personal AI for everything, with infinite memory.",
     primaryCta: "Join",
-    secondaryCta: "Already on waitlist? Sign in",
+    secondaryCta: "Already hunting? Sign in",
   },
   children: ["product.core", "product.command", "product.studio", "product.launch"],
 };
