@@ -4,7 +4,7 @@ name: Unified Deploy
 # and the Bun backend both ship as container images to Amazon ECR and roll out on
 # the shared ECS cluster (vorinthex-production) behind the ALB.
 #
-# Flow (per infra.md "CI/CD"):
+# Flow:
 #   merge to main  ->  Build  ->  Test  ->  Docker Buildx  ->  Push ECR (web + backend)
 #                  ->  [Terraform Plan / Approval / Apply is owned by infra.yml]
 #                  ->  ECS Rolling Deploy (force-new-deployment + wait services-stable + health smoke)
