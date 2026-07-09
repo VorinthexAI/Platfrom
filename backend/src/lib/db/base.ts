@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
-import { embed } from '@/core/actions/embed';
+import { embed } from '@/lib/embed';
 
 const DEFAULT_CHUNK_SIZE = 500;
 const DEFAULT_PAGE_SIZE = 50;
