@@ -12,7 +12,11 @@ import {
 import { CloseIcon, LockIcon } from "@/components/ui/icons";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { trackCtaClick } from "@/lib/analytics";
-import { entityAudioUrl, useAudioStore } from "@/lib/audio/audio-store";
+import {
+  entityAudioUrl,
+  orchestratorMessageUrl,
+  useAudioStore,
+} from "@/lib/audio/audio-store";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import {
   ORBIT_STEPS,
@@ -161,9 +165,9 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
         </p>
       </div>
 
-      <div className="flex flex-col items-start justify-center gap-3">
+      <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:justify-start">
         <Button
-          variant="secondary"
+          variant="primary"
           onClick={() => {
             trackCtaClick("entity_audio", {
               placement: "entity_drawer",
@@ -174,10 +178,28 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
             playVoice(entityAudioUrl(entity.type, entity.slug));
           }}
           icon={<SpeakerIcon animated />}
-          className="min-h-0 max-w-full self-start px-5 py-3 text-[0.62rem] uppercase sm:px-6"
+          className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] uppercase sm:px-6"
         >
           Play Briefing
         </Button>
+        {entity.type === "orchestrator" ? (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              trackCtaClick("orchestrator_message", {
+                placement: "entity_drawer",
+                entity_id: entity.id,
+                entity_type: entity.type,
+                entity_slug: entity.slug,
+              });
+              playVoice(orchestratorMessageUrl(entity.slug));
+            }}
+            icon={<SpeakerIcon animated />}
+            className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] uppercase sm:px-6"
+          >
+            Meet {entity.name}
+          </Button>
+        ) : null}
       </div>
     </div>
   );
