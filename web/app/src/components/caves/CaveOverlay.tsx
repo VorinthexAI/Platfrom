@@ -96,9 +96,14 @@ export function CaveOverlay() {
           <RockDrawer key={`rock-${visitSeed}`} />
         ) : caveKind === "hunt" ? (
           // The hunt breaks out of the single card: several floating
-          // islands, each sliding up in its own cascaded beat.
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4">
-            <div key={`leaderboard-${visitSeed}`} className="pointer-events-auto w-full max-w-md">
+          // islands, each sliding up in its own cascaded beat. This is a
+          // card stack, not a drawer: it owns vertical scroll on mobile.
+          <div className="pointer-events-none absolute inset-0 px-4">
+            <div
+              key={`leaderboard-${visitSeed}`}
+              data-scroll-safe
+              className="scrollbar-hide pointer-events-auto mx-auto h-full w-full max-w-md overflow-y-auto overscroll-contain pt-[calc(env(safe-area-inset-top)+7rem)] pb-[calc(env(safe-area-inset-bottom)+3.5rem)] [touch-action:pan-y] sm:pt-32 sm:pb-12 lg:pt-28"
+            >
               <LeaderboardFlow />
             </div>
           </div>
@@ -368,7 +373,7 @@ function LeaderboardFlow() {
   const myPlace = myRank ?? Math.max(rows.length, topRows.length) + 1;
 
   return (
-    <div className="flex max-h-[88dvh] flex-col gap-4 sm:gap-6">
+    <div className="flex flex-col gap-4 sm:gap-6">
       {/* island 1 — the call */}
       <SlideUpCard
         index={0}
@@ -428,7 +433,7 @@ function LeaderboardFlow() {
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
-        <div data-scroll-safe className="scrollbar-hide max-h-[46dvh] overflow-y-auto pr-1">
+        <div className="pr-1">
         <div className="space-y-1">
           {topRows.map((row, index) => {
             const isMe = Boolean(myUserId) && row.userId === myUserId;

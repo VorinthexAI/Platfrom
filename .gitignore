@@ -5,6 +5,10 @@ prod.env
 environments/**/.env.dev
 environments/**/.env.prod
 environments/**/db.seeds.secrets.json
+
+# These secret-bearing files are allowed in git only because .gitattributes
+# stores them through git-crypt.
+!launch/.env
 .temp
 backend/scripts/tmp-*.ts
 
@@ -15,6 +19,9 @@ dist/
 coverage/
 *.tsbuildinfo
 graphify-out/
+
+launch/**/outputs/*
+!launch/**/outputs/.gitkeep
 
 terraform/**/.terraform/
 terraform/**/*.tfstate
