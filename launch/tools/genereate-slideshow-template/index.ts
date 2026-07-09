@@ -1,7 +1,7 @@
 /**
  * Agent Tool: generateSlideshowTemplate (Azure Foundry version)
  * -------------------------------------------------------------
- * Generates a slideshow template via the Azure OpenAI Responses API using
+ * Generates a slideshow template via the Azure OpenAI Images API using
  * gpt-image-2, deployed in Microsoft Foundry.
  *
  * No agent SDK dependency. This defines a small custom AgentTool shape
@@ -28,9 +28,9 @@ import { z } from "zod";
 import { estimateImageTurnCostUsd, loadEnvFile } from "../utilities";
 
 const TOOL_SLUG = "generate-slideshow-template";
-const TOOL_DIR = path.resolve("launch/tools/genereate-slideshow-template");
-const DEFAULT_OUTPUT_ROOT = path.join(TOOL_DIR, "outputs");
-const ENV_PATH = path.resolve("launch/.env");
+const TOOL_DIR = import.meta.dir;
+const DEFAULT_OUTPUT_ROOT = path.resolve(TOOL_DIR, "../../agents/slideshow-director/outputs");
+const ENV_PATH = path.resolve(TOOL_DIR, "../../.env");
 
 loadEnvFile(ENV_PATH);
 
@@ -56,7 +56,7 @@ const SlideshowTemplateInputSchema = z.object({
     .string()
     .min(1)
     .optional()
-    .describe("Optional human-readable label stored in metadata. Output folders always use a random UUID."),
+    .describe("Optional human-readable label stored in metadata. Agent output folders always use a random UUID."),
   saveImages: z
     .boolean()
     .optional()
@@ -119,56 +119,51 @@ async function runSlideshowTemplatePipeline(
 
   const slides: GeneratedSlide[] = [];
   let totalEstimatedCostUsd = 0;
-  let previousResponseId: string | undefined;
 
   for (let index = 0; index < scenes.length; index += 1) {
-    const promptText = index === 0 ? `${baseStyle}${scenes[index]}` : scenes[index];
+    const promptText = [
+      baseStyle,
+      "",
+      `Slide ${index + 1} of ${scenes.length}.`,
+      "Keep the same protagonist, material language, lighting, palette, camera grammar, and premium Vorinthex Hunt campaign style as the full sequence.",
+      scenes[index],
+    ].join("\n");
 
-    const response = await openai.responses.create({
+    const response = await openai.images.generate({
       model: MODEL_ID,
-      previous_response_id: previousResponseId,
-      input: [
-        {
-          role: "user",
-          content: [{ type: "input_text", text: promptText }],
-        },
-      ],
-      tools: [
-        {
-          type: "image_generation",
-          quality: IMAGE_QUALITY,
-          size: IMAGE_SIZE,
-        },
-      ],
-    });
+      prompt: promptText,
+      quality: IMAGE_QUALITY,
+      size: IMAGE_SIZE,
+      output_format: "png",
+      n: 1,
+    } as never);
 
-    const imageCall = response.output.find((item) => item.type === "image_generation_call");
+    const imageBase64 = await extractImageBase64(response);
 
-    if (!imageCall || !("result" in imageCall) || !imageCall.result) {
+    if (!imageBase64) {
       throw new Error(`No image was returned for slide ${index + 1}.`);
     }
 
-    const cost = estimateImageTurnCostUsd(response.usage, {
+    const cost = estimateImageTurnCostUsd((response as { usage?: unknown }).usage, {
       textInputPerMillion: PRICE_PER_M_TEXT_INPUT,
       imageInputPerMillion: PRICE_PER_M_IMAGE_INPUT,
       imageOutputPerMillion: PRICE_PER_M_IMAGE_OUTPUT,
     });
     const slide: GeneratedSlide = {
       index,
-      imageBase64: imageCall.result,
-      responseId: response.id,
+      imageBase64,
+      responseId: `image-${index + 1}`,
       estimatedCostUsd: cost,
     };
 
     if (outputDir) {
       const imagePath = path.join(outputDir, `slide-${String(index + 1).padStart(2, "0")}.png`);
-      await writeFile(imagePath, Buffer.from(imageCall.result, "base64"));
+      await writeFile(imagePath, Buffer.from(imageBase64, "base64"));
       slide.imagePath = imagePath;
     }
 
     slides.push(slide);
     totalEstimatedCostUsd += cost;
-    previousResponseId = response.id;
   }
 
   if (outputDir) {
@@ -209,7 +204,7 @@ export const generateSlideshowTemplateTool: AgentTool<
   name: "generate_slideshow_template",
   description:
     "Generates a vertical slideshow template with consistent visual style through Azure Foundry's " +
-    "Responses API and gpt-image-2. Saves PNG slides under this tool's outputs folder by default.",
+    "Images API and gpt-image-2. Saves PNG slides under the agent outputs folder by default.",
   parameters: SlideshowTemplateInputSchema,
   execute: runSlideshowTemplatePipeline,
 };
@@ -238,4 +233,16 @@ if (path.resolve(process.argv[1] ?? "") === path.join(TOOL_DIR, "index.ts")) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
   });
+}
+
+async function extractImageBase64(response: unknown): Promise<string | undefined> {
+  const image = (response as { data?: Array<{ b64_json?: string; url?: string }> }).data?.[0];
+  if (image?.b64_json) return image.b64_json;
+  if (!image?.url) return undefined;
+
+  const downloaded = await fetch(image.url);
+  if (!downloaded.ok) {
+    throw new Error(`Failed to download generated image: ${downloaded.status} ${downloaded.statusText}`);
+  }
+  return Buffer.from(await downloaded.arrayBuffer()).toString("base64");
 }

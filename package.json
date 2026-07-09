@@ -44,7 +44,8 @@
     "backend:manage": "bun run --cwd backend manage",
     "backend:nodes": "bun run --cwd backend nodes",
     "backend:reset": "bun run --cwd backend reset",
-    "backend:create-super-admin": "bun run --cwd backend create:super-admin"
+    "backend:create-super-admin": "bun run --cwd backend create:super-admin",
+    "agent": "bun run --cwd launch agent"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
