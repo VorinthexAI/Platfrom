@@ -21,6 +21,11 @@ export function entityAudioUrl(type: string, slug: string): string {
   return `/audio/entities/${type}-${slug}.mp3`;
 }
 
+/** The orchestrator's personal message — played by "Meet <name>" in its biome. */
+export function orchestratorMessageUrl(slug: string): string {
+  return `/audio/entities/orchestrator-${slug}-message.mp3`;
+}
+
 const AMBIENT_VOLUME = 0.066;
 const AMBIENT_DUCKED = 0.024;
 const MISSION_VOLUME = 0.55;
