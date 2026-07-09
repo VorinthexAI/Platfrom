@@ -80,6 +80,7 @@ ${orchestrators
 
 ## Optional
 
+- [About](${absoluteUrl("/about")}): Vorinthex is an AI-native software company building the operating system for AI-powered work.
 - [The Hunt](${absoluteUrl("/hunt")}): the live leaderboard of collectors ranked by Intelligence Fragments.
 - [llms-full.txt](${absoluteUrl("/llms-full.txt")}): the complete entity reference with per-page URLs and statuses.
 - [Sitemap](${absoluteUrl("/sitemap.xml")}): every indexable page.
