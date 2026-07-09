@@ -92,11 +92,14 @@ describe('Resend webhook payload processing', () => {
     }));
   });
 
-  test('records bounces and deletes the matched user', async () => {
+  test('records permanent bounces and deletes the matched user', async () => {
     const bounced = mockDeps();
     await expect(processResendWebhookPayload({
       type: 'email.bounced',
-      data: { to: ['person@example.com'] },
+      data: {
+        to: ['person@example.com'],
+        bounce: { type: 'Permanent', subType: 'General', message: 'mailbox does not exist' },
+      },
     }, 'svix_msg_bounce', bounced.deps as any)).resolves.toEqual({
       processed: true,
       matched: true,
@@ -109,7 +112,51 @@ describe('Resend webhook payload processing', () => {
       userId: 'usr_test',
       slug: 'email.bounced',
     }));
+    expect(bounced.events[0].data).toEqual(expect.objectContaining({
+      bounce_type: 'Permanent',
+      bounce_sub_type: 'General',
+    }));
     expect(bounced.deletedUsers).toEqual(['usr_test']);
+  });
+
+  test('records transient bounces WITHOUT deleting the user', async () => {
+    const bounced = mockDeps();
+    await expect(processResendWebhookPayload({
+      type: 'email.bounced',
+      data: {
+        to: ['person@example.com'],
+        bounce: { type: 'Transient', subType: 'MailboxFull' },
+      },
+    }, 'svix_msg_soft_bounce', bounced.deps as any)).resolves.toEqual({
+      processed: true,
+      matched: true,
+      inserted: true,
+      deleted: false,
+    });
+    expect(bounced.events[0]).toEqual(expect.objectContaining({ slug: 'email.bounced' }));
+    expect(bounced.events[0].data).toEqual(expect.objectContaining({
+      bounce_type: 'Transient',
+      bounce_sub_type: 'MailboxFull',
+    }));
+    expect(bounced.deletedUsers).toEqual([]);
+  });
+
+  test('keeps the user when a bounce carries no classification', async () => {
+    const bounced = mockDeps();
+    await expect(processResendWebhookPayload({
+      type: 'email.bounced',
+      data: { to: ['person@example.com'] },
+    }, 'svix_msg_unclassified_bounce', bounced.deps as any)).resolves.toEqual({
+      processed: true,
+      matched: true,
+      inserted: true,
+      deleted: false,
+    });
+    expect(bounced.events[0].data).toEqual(expect.objectContaining({
+      bounce_type: null,
+      bounce_sub_type: null,
+    }));
+    expect(bounced.deletedUsers).toEqual([]);
   });
 
   test('records complaints without updating or deleting the user', async () => {

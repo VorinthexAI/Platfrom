@@ -10,6 +10,7 @@ import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
 import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
+import { requestSignInEmail } from './auth';
 import { sendBrandedEmail } from './email';
 import { notifyCountersDirty } from './live-bus';
 import { defaultNameFromEmail, normalizeEmail, upsertUserByEmail } from './users';
@@ -116,16 +117,40 @@ export async function sendWaitlistVerificationEmailForUser(user: Pick<User, 'key
   };
 }
 
-export async function requestWaitlistVerification(email: string, explorerId?: string, distinctId?: string, tempEmailHash?: string) {
+export interface WaitlistVerificationDeps {
+  upsertUserByEmail: typeof upsertUserByEmail;
+  adoptExplorerFragments: typeof adoptExplorerFragments;
+  trackPlatformEvent: typeof trackPlatformEvent;
+  notifyCountersDirty: typeof notifyCountersDirty;
+  requestSignInEmail: typeof requestSignInEmail;
+  sendWaitlistVerificationEmailForUser: typeof sendWaitlistVerificationEmailForUser;
+}
+
+const defaultWaitlistDeps: WaitlistVerificationDeps = {
+  upsertUserByEmail,
+  adoptExplorerFragments,
+  trackPlatformEvent,
+  notifyCountersDirty,
+  requestSignInEmail,
+  sendWaitlistVerificationEmailForUser,
+};
+
+export async function requestWaitlistVerification(
+  email: string,
+  explorerId?: string,
+  distinctId?: string,
+  tempEmailHash?: string,
+  deps: WaitlistVerificationDeps = defaultWaitlistDeps,
+) {
   const normalized = normalizeWaitlistEmail(email);
-  const entry = await upsertUserByEmail(normalized, {
+  const entry = await deps.upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
     is_subscribed_to_updates: true,
   }, { distinctId: distinctId ?? null });
   if (explorerId) {
-    await adoptExplorerFragments(explorerId, entry.key);
+    await deps.adoptExplorerFragments(explorerId, entry.key);
   }
-  trackPlatformEvent({
+  deps.trackPlatformEvent({
     slug: 'waitlist.signup_submitted',
     userId: entry.key,
     data: {
@@ -135,21 +160,31 @@ export async function requestWaitlistVerification(email: string, explorerId?: st
       is_verified: entry.isVerified,
     },
   });
-  notifyCountersDirty();
+  deps.notifyCountersDirty();
 
   const alias = entry.alias ?? generateAlias(entry.key);
 
   if (entry.isVerified) {
+    // Re-joining with an already-verified email is a sign-in attempt in
+    // disguise — the UI says "check your inbox", so an email MUST go out.
+    const signIn = await deps.requestSignInEmail(entry.email);
     return {
       email: entry.email,
       isVerified: true as const,
       alias,
       aliasSlug: entry.alias_slug,
       waitlistNumber: entry.waitlistNumber,
+      signInEmailSent: signIn.allowed,
+      ...(signIn.allowed && 'handoffTokenHash' in signIn && signIn.handoffTokenHash
+        ? {
+          handoffTokenHash: signIn.handoffTokenHash,
+          handoffExpiresAt: signIn.handoffExpiresAt,
+        }
+        : {}),
     };
   }
 
-  const delivery = await sendWaitlistVerificationEmailForUser(entry);
+  const delivery = await deps.sendWaitlistVerificationEmailForUser(entry);
 
   return {
     email: entry.email,

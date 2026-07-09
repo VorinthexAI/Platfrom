@@ -595,6 +595,7 @@ function JoinFlow() {
     "idle",
   );
   const [error, setError] = useState("");
+  const [alreadyVerified, setAlreadyVerified] = useState(false);
   const formStarted = useRef(false);
   const pendingCollect = useFragmentsStore((s) => s.pendingCollect);
   const markJoined = useFragmentsStore((s) => s.markJoined);
@@ -653,6 +654,7 @@ function JoinFlow() {
         return;
       }
       setEmail(normalizedEmail);
+      setAlreadyVerified(Boolean(data?.isVerified));
       markJoined();
       // The treasure is collected for this explorer the moment they join —
       // the backend stores the node right away, before email verification.
@@ -673,17 +675,19 @@ function JoinFlow() {
   if (status === "sent") {
     return (
       <div>
-        <p className="micro-label">Join</p>
+        <p className="micro-label">{alreadyVerified ? "Welcome back" : "Join"}</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
           Check your inbox.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          We sent a confirmation link. Open it within 12 hours to finish
-          joining.
+          {alreadyVerified
+            ? "You are already in The Hunt — we sent you a sign-in link instead. Open it within 15 minutes."
+            : "We sent a confirmation link. Open it within 12 hours to finish joining."}
         </p>
         <p className="mt-2 text-sm leading-relaxed text-silver-500">
-          Verify on any device. Keep this screen open and your galaxy
-          opens right here.
+          {alreadyVerified
+            ? "Tap it on any device. Keep this screen open and it signs itself in the moment the link is used."
+            : "Verify on any device. Keep this screen open and your galaxy opens right here."}
         </p>
         <p className="mt-4 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
           Sent to {email}

@@ -26,6 +26,7 @@ interface BackendWaitlistResponse {
   alias_slug?: string | null;
   waitlist_number?: number | null;
   verificationEmailSent?: boolean;
+  signInEmailSent?: boolean;
   expiresAt?: string;
   handoffTokenHash?: string;
   handoffExpiresAt?: string;
@@ -129,6 +130,7 @@ export async function POST(request: Request) {
     payload = {
       ok: true,
       isVerified: result.data.isVerified,
+      signInEmailSent: result.data.signInEmailSent ?? false,
       alias: result.data.alias ?? null,
       aliasSlug: result.data.alias_slug ?? null,
       waitlistNumber: result.data.waitlist_number ?? null,
