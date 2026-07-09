@@ -5,6 +5,7 @@ import { getProgress } from "@/lib/fragments/fragments-server";
 import { hashString, mulberry32 } from "@/lib/three/procedural";
 
 const EXPLORER_COOKIE = "vx_explorer";
+const ACCESS_COOKIE = "vorinthex_access";
 
 interface ThreePayload {
   points: Array<[number, number, number]>;
@@ -26,13 +27,18 @@ interface ThreePayload {
 export async function GET() {
   const cookieStore = await cookies();
   const explorerId = cookieStore.get(EXPLORER_COOKIE)?.value;
+  const accessToken = cookieStore.get(ACCESS_COOKIE)?.value;
 
-  if (backendConfigured() && explorerId) {
+  if (backendConfigured()) {
+    const params = new URLSearchParams({ format: "three" });
+    if (explorerId) params.set("explorer_id", explorerId);
     const result = await backendFetch<{
       global_total: number;
       explorer: { balance: number; collected: string[] } | null;
       three?: ThreePayload;
-    }>(`/fragments/summary?explorer_id=${encodeURIComponent(explorerId)}&format=three`);
+    }>(`/fragments/summary?${params.toString()}`, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+    });
     if (result.ok && result.data) {
       return NextResponse.json({
         ok: true,
