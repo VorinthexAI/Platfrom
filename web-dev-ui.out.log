@@ -1,9 +1,0 @@
-▲ Next.js 16.2.9 (Turbopack)
-- Local:         http://127.0.0.1:3000
-- Network:       http://127.0.0.1:3000
-✓ Ready in 1006ms
-
- HEAD /hunt/opengraph-image 200 in 401ms (next.js: 124ms, proxy.ts: 235ms, application-code: 41ms)
- GET /hunt/opengraph-image 200 in 213ms (next.js: 12ms, proxy.ts: 13ms, application-code: 188ms)
- GET /hunt/twitter-image 200 in 300ms (next.js: 141ms, proxy.ts: 12ms, application-code: 147ms)
-[?25h
