@@ -103,17 +103,29 @@ async function main() {
     return;
   }
 
-  await cfFetch(`/zones/${zoneId}/settings/browser_cache_ttl`, {
-    method: "PATCH",
-    body: JSON.stringify({ value: 1 }),
-  });
-  console.log("[update] browser_cache_ttl=1");
+  try {
+    await cfFetch(`/zones/${zoneId}/settings/browser_cache_ttl`, {
+      method: "PATCH",
+      body: JSON.stringify({ value: 1 }),
+    });
+    console.log("[update] browser_cache_ttl=1");
+  } catch (err) {
+    console.warn(
+      `[cloudflare-cache-policy] WARN: could not update browser_cache_ttl: ${String(err)}`,
+    );
+  }
 
-  await cfFetch(`/zones/${zoneId}/purge_cache`, {
-    method: "POST",
-    body: JSON.stringify({ purge_everything: true }),
-  });
-  console.log("[purge] everything");
+  try {
+    await cfFetch(`/zones/${zoneId}/purge_cache`, {
+      method: "POST",
+      body: JSON.stringify({ purge_everything: true }),
+    });
+    console.log("[purge] everything");
+  } catch (err) {
+    console.warn(
+      `[cloudflare-cache-policy] WARN: could not purge cache: ${String(err)}`,
+    );
+  }
 }
 
 main().catch((err) => {
