@@ -7,10 +7,6 @@ export const colors = {
   accent: "#DDE2E5",
   accentLight: "#FFFFFF",
   border: "#262D36",
-  crystalEdgeBase: "#141922",
-  crystalEdgeFacet: "#1B232C",
-  crystalEdgeHighlight: "#3C434A",
-  crystalEdgeShadow: "#030507",
   danger: "#B04A4A",
 } as const;
 
