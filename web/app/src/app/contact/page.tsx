@@ -4,7 +4,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "Contact | Vorinthex AI",
   description:
-    "Reach the Vorinthex AI team at support@vorinthex.com — questions, access, press, and partnerships.",
+    "Reach the Vorinthex AI team at contact@vorinthex.com — questions, access, press, and partnerships.",
   alternates: { canonical: "/contact" },
 };
 
@@ -34,10 +34,10 @@ export default function ContactPage() {
               it all lands in the same inbox, and we read everything.
             </p>
             <a
-              href="mailto:support@vorinthex.com"
+              href="mailto:contact@vorinthex.com"
               className="mt-5 inline-block font-mono text-sm tracking-[0.08em] text-silver-50 underline decoration-white/25 underline-offset-4 transition-colors hover:decoration-white/60"
             >
-              support@vorinthex.com
+              contact@vorinthex.com
             </a>
           </section>
         </div>

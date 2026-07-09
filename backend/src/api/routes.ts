@@ -181,6 +181,7 @@ export function registerRoutes(app: Hono) {
       authenticated: true,
       identity: result.identity,
       name: result.name,
+      platform_title: result.platformTitle,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
     });

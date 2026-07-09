@@ -58,7 +58,7 @@ export default function AboutPage() {
 
         <div className="mt-14 flex flex-col gap-5 border-t border-white/8 pt-8 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-[0.7rem] text-silver-700">
-            Questions? Reach us at support@vorinthex.com.
+            Questions? Reach us at contact@vorinthex.com.
           </p>
           <Link
             href="/"

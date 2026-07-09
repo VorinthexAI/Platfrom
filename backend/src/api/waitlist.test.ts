@@ -33,8 +33,13 @@ function makeUser(overrides: Partial<User>): User {
   } as User;
 }
 
-function makeDeps(user: User, overrides: Partial<WaitlistVerificationDeps> = {}): WaitlistVerificationDeps {
+function makeDeps(
+  user: User,
+  options: { preexisting?: boolean } = {},
+  overrides: Partial<WaitlistVerificationDeps> = {},
+): WaitlistVerificationDeps {
   return {
+    getUserByEmailHash: mock(async () => (options.preexisting ? user : null)),
     upsertUserByEmail: mock(async () => user),
     adoptExplorerFragments: mock(async () => 0),
     trackPlatformEvent: mock(() => {}),
@@ -51,9 +56,9 @@ function makeDeps(user: User, overrides: Partial<WaitlistVerificationDeps> = {})
 }
 
 describe('requestWaitlistVerification', () => {
-  test('sends the verification email for unverified users', async () => {
+  test('sends the verification email for brand-new signups', async () => {
     const user = makeUser({ isVerified: false });
-    const deps = makeDeps(user);
+    const deps = makeDeps(user, { preexisting: false });
 
     const result = await requestWaitlistVerification('person@example.com', undefined, undefined, undefined, deps);
 
@@ -62,11 +67,11 @@ describe('requestWaitlistVerification', () => {
     expect(deps.requestSignInEmail).not.toHaveBeenCalled();
   });
 
-  test('sends a sign-in email instead when the user is already verified', async () => {
+  test('sends a sign-in email when the account already exists (verified)', async () => {
     const user = makeUser({ isVerified: true });
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
     const handoffExpiresAt = new Date(expiresAt.getTime() + 60 * 1000);
-    const deps = makeDeps(user, {
+    const deps = makeDeps(user, { preexisting: true }, {
       requestSignInEmail: mock(async () => ({
         allowed: true as const,
         expiresAt,
@@ -80,22 +85,37 @@ describe('requestWaitlistVerification', () => {
     expect(result.isVerified).toBe(true);
     expect(deps.requestSignInEmail).toHaveBeenCalledWith('person@example.com');
     expect(deps.sendWaitlistVerificationEmailForUser).not.toHaveBeenCalled();
-    if (result.isVerified) {
-      expect(result.signInEmailSent).toBe(true);
-      expect(result.handoffTokenHash).toBe('signin-handoff');
-    }
+    expect('signInEmailSent' in result && result.signInEmailSent).toBe(true);
+    expect('handoffTokenHash' in result && result.handoffTokenHash).toBe('signin-handoff');
   });
 
-  test('reports signInEmailSent=false when the verified user cannot sign in', async () => {
+  test('sends a sign-in email for existing UNVERIFIED accounts too (signing in verifies)', async () => {
+    const user = makeUser({ isVerified: false });
+    const deps = makeDeps(user, { preexisting: true }, {
+      requestSignInEmail: mock(async () => ({
+        allowed: true as const,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        handoffTokenHash: 'signin-handoff',
+        handoffExpiresAt: new Date(Date.now() + 6 * 60 * 1000),
+      })),
+    });
+
+    const result = await requestWaitlistVerification('person@example.com', undefined, undefined, undefined, deps);
+
+    expect(result.isVerified).toBe(false);
+    expect(deps.requestSignInEmail).toHaveBeenCalledWith('person@example.com');
+    expect(deps.sendWaitlistVerificationEmailForUser).not.toHaveBeenCalled();
+    expect('signInEmailSent' in result && result.signInEmailSent).toBe(true);
+  });
+
+  test('reports signInEmailSent=false when the existing user cannot sign in', async () => {
     const user = makeUser({ isVerified: true });
-    const deps = makeDeps(user);
+    const deps = makeDeps(user, { preexisting: true });
 
     const result = await requestWaitlistVerification('person@example.com', undefined, undefined, undefined, deps);
 
     expect(result.isVerified).toBe(true);
-    if (result.isVerified) {
-      expect(result.signInEmailSent).toBe(false);
-      expect('handoffTokenHash' in result && result.handoffTokenHash).toBeFalsy();
-    }
+    expect('signInEmailSent' in result && result.signInEmailSent).toBe(false);
+    expect('handoffTokenHash' in result && result.handoffTokenHash).toBeFalsy();
   });
 });

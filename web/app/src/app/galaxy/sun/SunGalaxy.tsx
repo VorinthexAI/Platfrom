@@ -11,15 +11,18 @@ import Link from "next/link";
  */
 export function SunGalaxy() {
   const [name, setName] = useState<string | null>(null);
+  const [title, setTitle] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       await Promise.resolve();
       if (cancelled) return;
+      const storedTitle = window.localStorage.getItem("vx_member_title");
+      if (storedTitle?.trim()) setTitle(storedTitle.trim());
       const storedName = window.localStorage.getItem("vx_member_name");
       if (storedName?.trim()) {
-        setName(storedName.trim());
+        setName(storedName.trim().split(/\s+/)[0] ?? null);
         return;
       }
       const email = window.localStorage.getItem("vx_member_email");
@@ -50,14 +53,19 @@ export function SunGalaxy() {
         style={{ background: "var(--gradient-panel)" }}
       >
         <p className="micro-label">The Inner Galaxy</p>
-        <h1 className="font-display mt-4 text-2xl leading-snug tracking-[0.1em] text-silver-50">
-          {name ? `Hi ${name},` : "Hi,"} welcome to the inner galaxy of
-          Vorinthex AI.
+        <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
+          {name ? `Welcome ${name},` : "Welcome,"}
         </h1>
-        <p className="mt-5 text-sm leading-relaxed text-silver-300">
-          Looking forward to working together to form this product as the
-          next generation AI-native platform — enabling anyone to use AI in
-          their day-to-day life.
+        {title ? (
+          <p className="mt-6 font-mono text-[0.62rem] tracking-[0.26em] text-silver-300 uppercase">
+            {title} of Vorinthex AI | The Nexus of Intelligence
+          </p>
+        ) : null}
+        <p className="mt-6 text-sm leading-relaxed text-silver-300">
+          Welcome to the inner galaxy of Vorinthex AI. Looking forward to
+          working together to form this product as the next generation
+          AI-native platform — enabling anyone to use AI in their
+          day-to-day life.
         </p>
         <p className="mt-6 font-mono text-[0.6rem] tracking-[0.24em] text-silver-500 uppercase">
           — Your CEO, Oscar

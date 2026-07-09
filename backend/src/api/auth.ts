@@ -42,6 +42,7 @@ interface LoginIdentity {
   email: string;
   emailHash: string;
   name: string | null;
+  platformTitle: string | null;
   isMfaEnabled: boolean;
   has_request_mfa_reset_link: boolean;
   requested_mfa_reset_link_at: string | null;
@@ -94,6 +95,7 @@ function platformIdentity(user: User): LoginIdentity | null {
       email: user.email,
       emailHash: user.emailHash,
       name: user.name,
+      platformTitle: user.platform_title,
       isMfaEnabled: user.isMfaEnabled,
       has_request_mfa_reset_link: user.has_request_mfa_reset_link,
       requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -108,6 +110,7 @@ function platformIdentity(user: User): LoginIdentity | null {
       email: user.email,
       emailHash: user.emailHash,
       name: user.name,
+      platformTitle: user.platform_title,
       isMfaEnabled: user.isMfaEnabled,
       has_request_mfa_reset_link: user.has_request_mfa_reset_link,
       requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -125,6 +128,7 @@ function memberIdentity(user: User): LoginIdentity {
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
+    platformTitle: user.platform_title,
     isMfaEnabled: user.isMfaEnabled,
     has_request_mfa_reset_link: user.has_request_mfa_reset_link,
     requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -140,6 +144,7 @@ function superAdminIdentity(user: User): LoginIdentity {
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
+    platformTitle: user.platform_title,
     isMfaEnabled: user.isMfaEnabled,
     has_request_mfa_reset_link: user.has_request_mfa_reset_link,
     requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -650,6 +655,7 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
     ok: true as const,
     identity: { key: auth.key, identityType: auth.type },
     name: auth.name,
+    platformTitle: auth.platformTitle,
     ...(await issueTokens(auth)),
   };
 }
@@ -685,6 +691,7 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
   return {
     identity: { key: auth.key, identityType: auth.type },
     name: auth.name,
+    platformTitle: auth.platformTitle,
     ...(await issueTokens(auth)),
   };
 }
