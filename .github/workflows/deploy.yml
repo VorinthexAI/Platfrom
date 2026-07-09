@@ -426,12 +426,32 @@ jobs:
       # job opens port 22 for its own runner IP and closes it when done.
       - name: Open SSH ingress for this runner
         run: |
+          set -euo pipefail
+          test -n "${{ vars.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID repo variable is not set (see .github/.configs/vars.json)."; exit 1; }
           RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
-          aws ec2 authorize-security-group-ingress \
+          if ! out=$(aws ec2 authorize-security-group-ingress \
             --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
-            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" \
-            || echo "::warning::SSH ingress authorize failed; a rule may already exist for ${RUNNER_IP}."
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" 2>&1); then
+            if echo "$out" | grep -q "InvalidPermission.Duplicate"; then
+              echo "SSH ingress rule already exists for ${RUNNER_IP}/32."
+            else
+              echo "::error::Could not authorize SSH ingress for ${RUNNER_IP}/32: $out"
+              exit 1
+            fi
+          fi
+          # Wait until port 22 actually answers (SG propagation) so SSH steps
+          # fail fast with a clear cause instead of a 2-minute timeout.
+          HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
+          for i in $(seq 1 30); do
+            if timeout 3 bash -c "exec 3<>/dev/tcp/${HOST}/22" 2>/dev/null; then
+              echo "Port 22 on the graph-db host is reachable."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Port 22 on the graph-db host is still unreachable 90s after authorizing ${RUNNER_IP}/32. Check the SG and instance state."
+          exit 1
       - name: Set up SSH
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
@@ -519,12 +539,32 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH ingress for this runner
         run: |
+          set -euo pipefail
+          test -n "${{ vars.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID repo variable is not set (see .github/.configs/vars.json)."; exit 1; }
           RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
-          aws ec2 authorize-security-group-ingress \
+          if ! out=$(aws ec2 authorize-security-group-ingress \
             --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
-            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" \
-            || echo "::warning::SSH ingress authorize failed; a rule may already exist for ${RUNNER_IP}."
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" 2>&1); then
+            if echo "$out" | grep -q "InvalidPermission.Duplicate"; then
+              echo "SSH ingress rule already exists for ${RUNNER_IP}/32."
+            else
+              echo "::error::Could not authorize SSH ingress for ${RUNNER_IP}/32: $out"
+              exit 1
+            fi
+          fi
+          # Wait until port 22 actually answers (SG propagation) so SSH steps
+          # fail fast with a clear cause instead of a 2-minute timeout.
+          HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
+          for i in $(seq 1 30); do
+            if timeout 3 bash -c "exec 3<>/dev/tcp/${HOST}/22" 2>/dev/null; then
+              echo "Port 22 on the graph-db host is reachable."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Port 22 on the graph-db host is still unreachable 90s after authorizing ${RUNNER_IP}/32. Check the SG and instance state."
+          exit 1
       - name: Open SSH tunnel to ArangoDB
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
@@ -631,12 +671,32 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH ingress for this runner
         run: |
+          set -euo pipefail
+          test -n "${{ vars.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID repo variable is not set (see .github/.configs/vars.json)."; exit 1; }
           RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
-          aws ec2 authorize-security-group-ingress \
+          if ! out=$(aws ec2 authorize-security-group-ingress \
             --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
-            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" \
-            || echo "::warning::SSH ingress authorize failed; a rule may already exist for ${RUNNER_IP}."
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" 2>&1); then
+            if echo "$out" | grep -q "InvalidPermission.Duplicate"; then
+              echo "SSH ingress rule already exists for ${RUNNER_IP}/32."
+            else
+              echo "::error::Could not authorize SSH ingress for ${RUNNER_IP}/32: $out"
+              exit 1
+            fi
+          fi
+          # Wait until port 22 actually answers (SG propagation) so SSH steps
+          # fail fast with a clear cause instead of a 2-minute timeout.
+          HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
+          for i in $(seq 1 30); do
+            if timeout 3 bash -c "exec 3<>/dev/tcp/${HOST}/22" 2>/dev/null; then
+              echo "Port 22 on the graph-db host is reachable."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::Port 22 on the graph-db host is still unreachable 90s after authorizing ${RUNNER_IP}/32. Check the SG and instance state."
+          exit 1
       - name: Open SSH tunnel to ArangoDB
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
