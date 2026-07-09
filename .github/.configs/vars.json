@@ -2,6 +2,7 @@
   "APP_HEALTH_URL": "https://api.vorinthex.com/api/v1/health",
   "AWS_DEPLOY_ROLE_ARN": "arn:aws:iam::938565868704:role/vorinthex-backend-deploy",
   "AWS_INFRA_ROLE_ARN": "arn:aws:iam::938565868704:role/vorinthex-ai-infra",
+  "GRAPH_DB_SSH_SG_ID": "sg-056a2594926d56338",
   "PROD_INSTANCE_TYPE": "t3.micro",
   "PROD_S3_BUCKET_NAME": "vorinthex-ai-prod-storage",
   "RENDER_ECS_CLUSTER": "vorinthex-production",
