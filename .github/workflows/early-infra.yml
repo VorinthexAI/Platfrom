@@ -22,6 +22,7 @@ on:
       - "backend/**"
       - "web/app/**"
       - "shared/**"
+      - "environments/scripts/cloudflare-cache-policy.ts"
       - "deploy/early/**"
       - ".github/workflows/early-infra.yml"
 
@@ -126,3 +127,11 @@ jobs:
             sleep 10
           done
           aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardOutputContent' --output text | tail -30
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Apply Cloudflare cache policy and purge
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+        run: bun environments/scripts/cloudflare-cache-policy.ts
