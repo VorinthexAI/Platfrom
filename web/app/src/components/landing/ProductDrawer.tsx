@@ -161,7 +161,7 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
         </p>
       </div>
 
-      <div className="flex flex-col justify-center gap-3">
+      <div className="flex flex-col items-start justify-center gap-3">
         <Button
           variant="secondary"
           onClick={() => {
@@ -174,7 +174,7 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
             playVoice(entityAudioUrl(entity.type, entity.slug));
           }}
           icon={<SpeakerIcon animated />}
-          className="min-h-0 w-full px-5 py-3 text-[0.62rem] uppercase sm:w-auto sm:px-6"
+          className="min-h-0 max-w-full self-start px-5 py-3 text-[0.62rem] uppercase sm:px-6"
         >
           Play Briefing
         </Button>

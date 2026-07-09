@@ -6,7 +6,7 @@ import * as THREE from "three";
 
 const SURFACE_SELECTOR = ".chrome-border.card-depth";
 const MAX_SURFACES = 18;
-const MAX_CRYSTALS = 520;
+const MAX_CRYSTALS = 1600;
 
 interface CrystalDatum {
   x: number;
@@ -136,20 +136,19 @@ function collectCrystals() {
     const seed = surfaceSeed(element, surfaceIndex);
     const rand = random01(seed);
     const perimeter = rect.width * 2 + rect.height * 2;
-    const attempts = Math.min(96, Math.max(14, Math.floor(perimeter / 28)));
+    const attempts = Math.min(260, Math.max(32, Math.floor(perimeter / 8)));
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       if (crystals.length >= MAX_CRYSTALS) return;
 
-      const distance = (attempt / attempts) * perimeter + rand() * 18;
+      const distance = (attempt / attempts) * perimeter + rand() * 7;
       const point = edgePoint(rect, distance);
       const noise = smoothNoise(seed, distance / 64);
       const cornerWeight = 1 - Math.min(point.cornerBias * 7, 1);
-      const keep = noise * 0.62 + cornerWeight * 0.34 + rand() * 0.18;
-      if (keep < 0.62) continue;
+      const surfaceVariation = noise * 0.55 + cornerWeight * 0.28 + rand() * 0.17;
 
-      const size = 3.5 + rand() * 7.5 + cornerWeight * 3;
-      const offset = 2 + rand() * 3;
+      const size = 4 + surfaceVariation * 7 + cornerWeight * 2.5;
+      const offset = 1.5 + rand() * 4.5;
       const x =
         point.edge === "left"
           ? point.x - offset
@@ -167,9 +166,9 @@ function collectCrystals() {
         x,
         y,
         size,
-        stretch: 0.65 + rand() * 1.35,
+        stretch: 0.72 + surfaceVariation * 1.2,
         rotation: crystalRotation(point.edge, rand()),
-        colorIndex: rand() > 0.86 ? 2 : rand() > 0.44 ? 1 : 0,
+        colorIndex: surfaceVariation > 0.78 ? 2 : surfaceVariation > 0.32 ? 1 : 0,
       });
     }
   });
@@ -207,8 +206,8 @@ export function CrystalChromeLayer() {
     scene.add(group);
 
     const ambientLight = new THREE.AmbientLight(
-      resolveTokenColor("--vui-color-crystal-edge-base", colors.crystalEdgeBase),
-      1.7,
+      resolveTokenColor("--vui-color-crystal-edge-facet", colors.crystalEdgeFacet),
+      2.1,
     );
     scene.add(ambientLight);
 
@@ -224,16 +223,16 @@ export function CrystalChromeLayer() {
 
     const geometry = new THREE.OctahedronGeometry(1, 0);
     const material = new THREE.MeshStandardMaterial({
-      color: resolveTokenColor("--vui-color-crystal-edge-base", colors.crystalEdgeBase),
-      roughness: 0.86,
-      metalness: 0.18,
+      color: resolveTokenColor("--vui-color-crystal-edge-facet", colors.crystalEdgeFacet),
+      roughness: 0.74,
+      metalness: 0.12,
       emissive: resolveTokenColor(
         "--vui-color-crystal-edge-shadow",
         colors.crystalEdgeShadow,
       ),
-      emissiveIntensity: 0.05,
+      emissiveIntensity: 0.18,
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.98,
       vertexColors: true,
     });
 
@@ -241,10 +240,13 @@ export function CrystalChromeLayer() {
     const dummy = new THREE.Object3D();
     const palette = [
       new THREE.Color(
-        resolveTokenColor("--vui-color-crystal-edge-base", colors.crystalEdgeBase),
+        resolveTokenColor("--vui-color-crystal-edge-facet", colors.crystalEdgeFacet),
       ),
       new THREE.Color(
-        resolveTokenColor("--vui-color-crystal-edge-facet", colors.crystalEdgeFacet),
+        resolveTokenColor(
+          "--vui-color-crystal-edge-highlight",
+          colors.crystalEdgeHighlight,
+        ),
       ),
       new THREE.Color(
         resolveTokenColor(
@@ -278,6 +280,7 @@ export function CrystalChromeLayer() {
 
       mesh = new THREE.InstancedMesh(geometry, material, crystals.length);
       mesh.frustumCulled = false;
+      mesh.renderOrder = 10;
       crystals.forEach((crystal, index) => {
         dummy.position.set(crystal.x, crystal.y, 0);
         dummy.rotation.set(0.65, 0.24, crystal.rotation);
