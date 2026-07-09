@@ -6,7 +6,6 @@ import { CaveAutoStart } from "@/components/caves/CaveAutoStart";
 import { CaveOverlay } from "@/components/caves/CaveOverlay";
 import { JumpOverlay } from "@/components/caves/JumpOverlay";
 import { TransitionVeil } from "@/components/caves/TransitionVeil";
-import { CrystalChromeLayer } from "@/components/ui/CrystalChromeLayer";
 import type { CaveKind } from "@/lib/galaxy-store";
 import { AeoSections } from "./AeoSections";
 import { AnalyticsConductor } from "./AnalyticsConductor";
@@ -66,7 +65,6 @@ export function LandingPage({
         <InteriorOverlay />
         <FragmentOverlay />
         <CaveOverlay />
-        <CrystalChromeLayer />
         <TransitionVeil />
         <JumpOverlay />
         <AnalyticsConductor />
