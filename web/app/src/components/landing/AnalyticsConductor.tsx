@@ -45,8 +45,6 @@ export function AnalyticsConductor() {
       });
       if (caveKind === "signin") {
         trackLandingEvent({ slug: "auth.signin_opened" });
-      } else if (caveKind === "members") {
-        trackLandingEvent({ slug: "auth.member_gate_opened" });
       } else if (caveKind === "privacy" || caveKind === "terms") {
         trackLandingEvent({
           slug: "legal.opened",

@@ -32,7 +32,6 @@ export type CaveKind =
   | "join" // join the waitlist (email form → check inbox)
   | "waitlist-verify" // arrived via /public/waitlist/verify?token_hash=…
   | "signin" // explorer sign-in: waitlist profile + fragments collected
-  | "members" // members gate (email form → magic link → TOTP → private galaxy)
   | "magic" // arrived via /public/auth/token?token_hash=… (TOTP setup/verify)
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault

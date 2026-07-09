@@ -2,7 +2,6 @@
 
 import { syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
 import { trackCtaClick } from "@/lib/analytics";
-import { OpenModalButton } from "./OpenModalButton";
 
 /**
  * Slim fixed footer along the bottom edge, mirroring the reference art.
@@ -49,12 +48,6 @@ export function FooterStrip() {
           >
             Terms
           </button>
-          <OpenModalButton
-            modal="members"
-            className="font-mono text-[0.58rem] tracking-[0.24em] text-silver-500 uppercase transition-colors hover:text-silver-100"
-          >
-            Members
-          </OpenModalButton>
         </nav>
       </div>
     </footer>
