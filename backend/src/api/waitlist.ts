@@ -4,7 +4,7 @@ import {
   insertAuthChallenge,
   updateAuthChallenge,
 } from '@/lib/db/auth-challenges.node';
-import { updateUser, type User } from '@/lib/db/users.node';
+import { getUserByEmailHash, updateUser, type User } from '@/lib/db/users.node';
 import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
@@ -13,7 +13,7 @@ import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './
 import { requestSignInEmail } from './auth';
 import { sendBrandedEmail } from './email';
 import { notifyCountersDirty } from './live-bus';
-import { defaultNameFromEmail, normalizeEmail, upsertUserByEmail } from './users';
+import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
 import { trackPlatformEvent } from '@/platform/events';
 
 const WAITLIST_VERIFY_TTL_MS = 12 * 60 * 60 * 1000;
@@ -118,6 +118,7 @@ export async function sendWaitlistVerificationEmailForUser(user: Pick<User, 'key
 }
 
 export interface WaitlistVerificationDeps {
+  getUserByEmailHash: typeof getUserByEmailHash;
   upsertUserByEmail: typeof upsertUserByEmail;
   adoptExplorerFragments: typeof adoptExplorerFragments;
   trackPlatformEvent: typeof trackPlatformEvent;
@@ -127,6 +128,7 @@ export interface WaitlistVerificationDeps {
 }
 
 const defaultWaitlistDeps: WaitlistVerificationDeps = {
+  getUserByEmailHash,
   upsertUserByEmail,
   adoptExplorerFragments,
   trackPlatformEvent,
@@ -143,6 +145,9 @@ export async function requestWaitlistVerification(
   deps: WaitlistVerificationDeps = defaultWaitlistDeps,
 ) {
   const normalized = normalizeWaitlistEmail(email);
+  // Whoever already has an account is signing in, not joining — decided
+  // BEFORE the upsert so a brand-new signup still gets the verify email.
+  const preexisting = Boolean(await deps.getUserByEmailHash(await hashUserEmail(normalized)));
   const entry = await deps.upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
     is_subscribed_to_updates: true,
@@ -164,13 +169,14 @@ export async function requestWaitlistVerification(
 
   const alias = entry.alias ?? generateAlias(entry.key);
 
-  if (entry.isVerified) {
-    // Re-joining with an already-verified email is a sign-in attempt in
-    // disguise — the UI says "check your inbox", so an email MUST go out.
+  if (preexisting) {
+    // Re-joining with an existing account — verified or not — is a sign-in
+    // attempt in disguise: send the sign-in link (tapping it verifies the
+    // email too), so "check your inbox" is always true.
     const signIn = await deps.requestSignInEmail(entry.email);
     return {
       email: entry.email,
-      isVerified: true as const,
+      isVerified: entry.isVerified,
       alias,
       aliasSlug: entry.alias_slug,
       waitlistNumber: entry.waitlistNumber,

@@ -552,7 +552,7 @@ function LegalFlow({
           <p key={paragraph.slice(0, 24)}>{paragraph}</p>
         ))}
         <p className="text-[0.7rem] text-silver-700">
-          Questions? Reach us at support@vorinthex.com.
+          Questions? Reach us at contact@vorinthex.com.
         </p>
       </div>
     </div>
@@ -594,7 +594,7 @@ function JoinFlow() {
     "idle",
   );
   const [error, setError] = useState("");
-  const [alreadyVerified, setAlreadyVerified] = useState(false);
+  const [signInLinkSent, setSignInLinkSent] = useState(false);
   const formStarted = useRef(false);
   const pendingCollect = useFragmentsStore((s) => s.pendingCollect);
   const markJoined = useFragmentsStore((s) => s.markJoined);
@@ -653,7 +653,7 @@ function JoinFlow() {
         return;
       }
       setEmail(normalizedEmail);
-      setAlreadyVerified(Boolean(data?.isVerified));
+      setSignInLinkSent(Boolean(data?.signInEmailSent));
       markJoined();
       // The treasure is collected for this explorer the moment they join —
       // the backend stores the node right away, before email verification.
@@ -674,17 +674,17 @@ function JoinFlow() {
   if (status === "sent") {
     return (
       <div>
-        <p className="micro-label">{alreadyVerified ? "Welcome back" : "Join"}</p>
+        <p className="micro-label">{signInLinkSent ? "Welcome back" : "Join"}</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
           Check your inbox.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          {alreadyVerified
+          {signInLinkSent
             ? "You are already in The Hunt — we sent you a sign-in link instead. Open it within 15 minutes."
             : "We sent a confirmation link. Open it within 12 hours to finish joining."}
         </p>
         <p className="mt-2 text-sm leading-relaxed text-silver-500">
-          {alreadyVerified
+          {signInLinkSent
             ? "Tap it on any device. Keep this screen open and it signs itself in the moment the link is used."
             : "Verify on any device. Keep this screen open and your galaxy opens right here."}
         </p>
@@ -1278,9 +1278,10 @@ function MagicFlow() {
   // the session stays here (it's genuinely valid) but the visitor is
   // pointed back to where they started instead of landing in a vault
   // they don't intend to keep using.
-  const onTotpSuccess = (name: string | null) => {
-    // The sun greets the member by their real name.
+  const onTotpSuccess = (name: string | null, title: string | null) => {
+    // The sun greets the member by their real name and platform title.
     if (name) window.localStorage.setItem("vx_member_name", name);
+    if (title) window.localStorage.setItem("vx_member_title", title);
     if (!hasPendingHandoff()) {
       setLinkLanding({ action: "member", alias: null, waitlistNumber: null });
       useGalaxyStore.getState().enterCave("sealed");
@@ -1303,7 +1304,7 @@ function TotpSetupPanel({
   onSuccess,
 }: {
   data: TotpSetupData;
-  onSuccess: (name: string | null) => void;
+  onSuccess: (name: string | null, title: string | null) => void;
 }) {
   const [codeA, setCodeA] = useState("");
   const [codeB, setCodeB] = useState("");
@@ -1329,7 +1330,10 @@ function TotpSetupPanel({
         setStatus("error");
         return;
       }
-      onSuccess(typeof result.name === "string" ? result.name : null);
+      onSuccess(
+        typeof result.name === "string" ? result.name : null,
+        typeof result.title === "string" ? result.title : null,
+      );
     } catch {
       setError("The chamber did not answer, try again.");
       setStatus("error");
@@ -1479,7 +1483,7 @@ function TotpVerifyPanel({
   onSuccess,
 }: {
   challenge: string;
-  onSuccess: (name: string | null) => void;
+  onSuccess: (name: string | null, title: string | null) => void;
 }) {
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "error">("idle");
@@ -1499,7 +1503,10 @@ function TotpVerifyPanel({
         setStatus("error");
         return;
       }
-      onSuccess(typeof result.name === "string" ? result.name : null);
+      onSuccess(
+        typeof result.name === "string" ? result.name : null,
+        typeof result.title === "string" ? result.title : null,
+      );
     } catch {
       setStatus("error");
     }

@@ -17,6 +17,8 @@ export const userSchema = z.object({
   alias: z.string().nullable().default(null),
   alias_slug: z.string().regex(/^[a-z]{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable().default(null),
   platform_role: platformRoleSchema.nullable().default(null),
+  /** Display title inside the platform, e.g. "Atlas CEO" — null for everyone else. */
+  platform_title: z.string().nullable().default(null),
   waitlistNumber: z.number().int().nullable().default(null),
   isVerified: z.boolean().default(false),
   is_subscribed_to_updates: z.boolean().default(true),

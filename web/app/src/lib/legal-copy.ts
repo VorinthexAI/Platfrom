@@ -9,7 +9,7 @@ export const PRIVACY_COPY = {
   eyebrow: "Records Vault",
   paragraphs: [
     "Vorinthex AI collects only the email address you submit when joining The Hunt or signing in. It is used solely to contact you about access to Vorinthex AI products.",
-    "We do not sell your data. We do not share it with third parties for advertising. You can request removal at any time by contacting support@vorinthex.com.",
+    "We do not sell your data. We do not share it with third parties for advertising. You can request removal at any time by contacting contact@vorinthex.com.",
     "A full privacy policy will be published before Core launches.",
   ],
 };

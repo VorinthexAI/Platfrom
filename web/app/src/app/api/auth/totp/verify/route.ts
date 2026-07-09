@@ -24,7 +24,11 @@ export async function POST(request: Request) {
   }
 
   if (backendConfigured()) {
-    const result = await backendFetch<{ userId?: string; name?: string | null }>("/auth/totp/verify", {
+    const result = await backendFetch<{
+      userId?: string;
+      name?: string | null;
+      platformTitle?: string | null;
+    }>("/auth/totp/verify", {
       method: "POST",
       body: JSON.stringify(parsed.data),
     });
@@ -38,8 +42,9 @@ export async function POST(request: Request) {
       ok: true,
       authenticated: true,
       name: result.data.name ?? null,
+      title: result.data.platformTitle ?? null,
     });
   }
 
-  return NextResponse.json({ ok: true, authenticated: true, name: null });
+  return NextResponse.json({ ok: true, authenticated: true, name: null, title: null });
 }

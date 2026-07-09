@@ -21,9 +21,9 @@ function generateCuidKey(): string {
   return newId();
 }
 
-async function existingIdentityKey(nodeName: string, emailHash: unknown): Promise<string | null> {
+async function existingIdentity(nodeName: string, emailHash: unknown): Promise<Record<string, unknown> | null> {
   if (typeof emailHash !== 'string' || emailHash.length === 0) return null;
-  if (nodeName === 'users') return (await getUserByEmailHash(emailHash))?.key ?? null;
+  if (nodeName === 'users') return (await getUserByEmailHash(emailHash)) ?? null;
   return null;
 }
 
@@ -72,8 +72,19 @@ async function main() {
       if (typeof doc.email === 'string' && !doc.emailHash) {
         doc.emailHash = await generateEmailHash(doc.email);
       }
-      doc.key = await existingIdentityKey(nodeName, doc.emailHash) ?? doc.key ?? generateCuidKey();
       const now = new Date().toISOString();
+      const existing = await existingIdentity(nodeName, doc.emailHash);
+      if (existing) {
+        // upsertByKey saves a FULL replacement, so merge over the live doc:
+        // a seed entry updates only the fields it declares and never wipes
+        // account state (MFA secret, alias, waitlist number, sessions, …).
+        const seeded = { ...doc };
+        Object.assign(doc, existing, seeded);
+        doc.key = existing.key;
+        doc.updatedAt = now;
+      } else {
+        doc.key = doc.key ?? generateCuidKey();
+      }
       if (!doc.createdAt) doc.createdAt = now;
       if (!doc.updatedAt) doc.updatedAt = now;
       if (NODES_WITH_PLATFORM_ID.has(nodeName) && !doc.platformId) {

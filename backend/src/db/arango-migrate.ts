@@ -370,6 +370,13 @@ async function main() {
     { defaultPlatformId },
   );
 
+  // Backfill the platform display title: null for everyone until seeded.
+  await targetDb.query(`
+    FOR u IN users
+      FILTER !HAS(u, "platform_title")
+      UPDATE u WITH { platform_title: null } IN users
+  `);
+
   await targetDb.query(`
     FOR c IN authChallenges
       FILTER (!HAS(c, "identityKey") || c.identityKey == null || c.identityKey == "")

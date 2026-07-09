@@ -21,7 +21,7 @@ export const organizationJsonLd = {
   contactPoint: {
     "@type": "ContactPoint",
     contactType: "customer support",
-    email: "support@vorinthex.com",
+    email: "contact@vorinthex.com",
     url: absoluteUrl("/contact"),
   },
 };
