@@ -6,8 +6,8 @@ import { useLiveStore } from "@/lib/live/live-store";
 import { useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
- * Big, live waitlist counter under the hero — every digit rolls into
- * place as new explorers join, streamed over SSE in real time.
+ * Big, live collector counter under the hero — every digit rolls into
+ * place as new collectors join The Hunt, streamed over SSE in real time.
  */
 export function WaitlistLiveCounter() {
   const atOverview = useGalaxyStore(
@@ -20,8 +20,8 @@ export function WaitlistLiveCounter() {
     ensureConnected();
   }, [ensureConnected]);
 
-  // A tiny number undermines the social proof — stay hidden until the
-  // waitlist is past 10 explorers.
+  // A tiny number undermines the social proof — stay hidden until The
+  // Hunt is past 10 collectors.
   if (count <= 10) return null;
 
   return (
@@ -34,11 +34,11 @@ export function WaitlistLiveCounter() {
       <div className="flex items-baseline gap-3">
         <RollingNumber value={count} />
         <span className="font-mono text-[0.6rem] tracking-[0.28em] text-silver-300 uppercase">
-          explorers on the waitlist
+          collectors already hunting intelligence fragments
         </span>
       </div>
       <p className="mt-2 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-        Waitlist is growing fast, secure your spot now for free
+        The Hunt is gaining momentum — join now to keep up
       </p>
     </div>
   );
