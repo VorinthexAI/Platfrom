@@ -18,6 +18,12 @@ export const organizationJsonLd = {
   slogan: VORINTHEX_GALAXY_REGISTRY.brand.tagline,
   url: SITE_URL,
   logo: absoluteUrl(VORINTHEX_GALAXY_REGISTRY.brand.logo.src),
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "customer support",
+    email: "support@vorinthex.com",
+    url: absoluteUrl("/contact"),
+  },
 };
 
 export const webSiteJsonLd = {

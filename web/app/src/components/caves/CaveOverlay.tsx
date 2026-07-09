@@ -552,7 +552,7 @@ function LegalFlow({
           <p key={paragraph.slice(0, 24)}>{paragraph}</p>
         ))}
         <p className="text-[0.7rem] text-silver-700">
-          Questions? Reach us at hello@vorinthex.com.
+          Questions? Reach us at support@vorinthex.com.
         </p>
       </div>
     </div>
