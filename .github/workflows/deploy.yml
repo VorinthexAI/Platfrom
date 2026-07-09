@@ -422,6 +422,16 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      # The graph-db SG has no standing SSH ingress (Wave 0 lockdown). Each
+      # job opens port 22 for its own runner IP and closes it when done.
+      - name: Open SSH ingress for this runner
+        run: |
+          RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
+          echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" \
+            || echo "::warning::SSH ingress authorize failed; a rule may already exist for ${RUNNER_IP}."
       - name: Set up SSH
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
@@ -470,6 +480,15 @@ jobs:
           rm -f /tmp/graph-db.env
       - name: Start ArangoDB
         run: ssh graphdbbox "cd ~/vorinthex-db && docker compose up -d --remove-orphans"
+      - name: Close SSH ingress for this runner
+        if: always()
+        run: |
+          if [ -n "${RUNNER_IP:-}" ]; then
+            aws ec2 revoke-security-group-ingress \
+              --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+              --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\"}]}]" \
+              || echo "::warning::SSH ingress revoke failed; remove ${RUNNER_IP}/32 from the graph-db SG manually."
+          fi
 
   backend-migrate:
     name: Migrate graph database
@@ -498,6 +517,14 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Open SSH ingress for this runner
+        run: |
+          RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
+          echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" \
+            || echo "::warning::SSH ingress authorize failed; a rule may already exist for ${RUNNER_IP}."
       - name: Open SSH tunnel to ArangoDB
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
@@ -558,6 +585,15 @@ jobs:
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
           bun run --cwd backend polar:sync
+      - name: Close SSH ingress for this runner
+        if: always()
+        run: |
+          if [ -n "${RUNNER_IP:-}" ]; then
+            aws ec2 revoke-security-group-ingress \
+              --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+              --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\"}]}]" \
+              || echo "::warning::SSH ingress revoke failed; remove ${RUNNER_IP}/32 from the graph-db SG manually."
+          fi
 
   seed-db-secrets:
     name: Upsert db.seeds.secrets.json to production
@@ -593,6 +629,14 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+      - name: Open SSH ingress for this runner
+        run: |
+          RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
+          echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+            --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" \
+            || echo "::warning::SSH ingress authorize failed; a rule may already exist for ${RUNNER_IP}."
       - name: Open SSH tunnel to ArangoDB
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
@@ -660,6 +704,15 @@ jobs:
           fi
           python3 -m json.tool "$SEEDS_FILE" > /dev/null
           bun run --cwd backend seed:secrets
+      - name: Close SSH ingress for this runner
+        if: always()
+        run: |
+          if [ -n "${RUNNER_IP:-}" ]; then
+            aws ec2 revoke-security-group-ingress \
+              --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+              --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\"}]}]" \
+              || echo "::warning::SSH ingress revoke failed; remove ${RUNNER_IP}/32 from the graph-db SG manually."
+          fi
 
   # Rolling deploy of the backend api service. Replaces the former blue-green
   # SSH/scp/deploy-app.sh path on the standalone app EC2. The api task def
