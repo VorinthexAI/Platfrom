@@ -8,6 +8,7 @@ import {
 
 const ACCESS_COOKIE = "vorinthex_access";
 const REFRESH_COOKIE = "vorinthex_refresh";
+const EXPLORER_COOKIE = "vx_explorer";
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 interface HandoffClaimPayload {
@@ -46,9 +47,15 @@ export async function POST() {
     return response;
   }
 
+  // The claiming browser's explorer id rides along so the fragments it
+  // collected anonymously while waiting merge onto the account.
+  const explorerId = jar.get(EXPLORER_COOKIE)?.value;
   const result = await backendFetch<HandoffClaimPayload>("/auth/handoff/claim", {
     method: "POST",
-    body: JSON.stringify({ handoff_token_hash: handoff }),
+    body: JSON.stringify({
+      handoff_token_hash: handoff,
+      ...(explorerId ? { explorer_id: explorerId } : {}),
+    }),
   });
 
   if (!result.ok || !result.data || result.data.status !== "authenticated") {

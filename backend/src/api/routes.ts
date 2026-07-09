@@ -91,8 +91,8 @@ export function registerRoutes(app: Hono) {
   });
 
   app.post('/auth/handoff/claim', async (c) => {
-    const body = await parseJson(c, strictObject({ handoff_token_hash: challengeHash }));
-    const result = await claimHandoff(body.handoff_token_hash);
+    const body = await parseJson(c, strictObject({ handoff_token_hash: challengeHash, explorer_id: explorerIdSchema }));
+    const result = await claimHandoff(body.handoff_token_hash, body.explorer_id);
     if (!result) return c.json({ error: 'handoff is not claimable' }, 401);
     setSessionTokenHeaders(c, result);
     setSessionCookies(c, result);
