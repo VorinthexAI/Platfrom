@@ -54,12 +54,6 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "lush",
     approachLabel: "Descending into the Grove",
   },
-  members: {
-    ...rolledAnchor(),
-    interior: [540, -240, 0],
-    theme: "violet",
-    approachLabel: "Approaching the Members Gate",
-  },
   magic: {
     ...rolledAnchor(),
     interior: [270, -240, 0],
@@ -131,7 +125,7 @@ export function randomRockAnchor(): RockAnchor {
 }
 
 /** Story caves an ordinary-looking asteroid can secretly host. */
-const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "members", "join", "hunt"];
+const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "join", "hunt"];
 
 /**
  * Does this belt bearing sit on one of the hidden story vaults? Diving

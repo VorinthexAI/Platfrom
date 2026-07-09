@@ -138,7 +138,6 @@ export function CaveOverlay() {
                 {caveKind === "sealed" ? <SealedFlow /> : null}
                 {caveKind === "join" ? <JoinFlow /> : null}
                 {caveKind === "signin" ? <ExplorerSigninFlow /> : null}
-                {caveKind === "members" ? <MembersFlow /> : null}
                 {caveKind === "waitlist-verify" ? <WaitlistVerifyFlow /> : null}
                 {caveKind === "magic" ? <MagicFlow /> : null}
                 {caveKind === "privacy" ? <LegalFlow copy={PRIVACY_COPY} /> : null}
@@ -869,7 +868,7 @@ function ExplorerSigninFlow() {
     setStatus("submitting");
     setError("");
     try {
-      const response = await fetch("/api/members", {
+      const response = await fetch("/api/signin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -888,6 +887,9 @@ function ExplorerSigninFlow() {
             globalTotal: data.collect.globalTotal,
           });
         }
+        // Members get a TOTP step after their link; remember who asked so
+        // /galaxy/private can greet them and MFA reset knows the email.
+        window.localStorage.setItem("vx_member_email", normalizedEmail);
         setEmail(normalizedEmail);
         setStatus("sent");
       } else {
@@ -956,107 +958,6 @@ function ExplorerSigninFlow() {
       </Button>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
         {status === "error" ? error : ""}
-      </p>
-    </form>
-  );
-}
-
-/* ---------------------------------------------------------------- */
-/* 5 — the Members Gate (magic link → TOTP → private galaxy)         */
-/* ---------------------------------------------------------------- */
-
-function MembersFlow() {
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "error">(
-    "idle",
-  );
-  const [error, setError] = useState("");
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (status === "submitting") return;
-    let normalizedEmail: string;
-    try {
-      normalizedEmail = normalizeEmailInput(email);
-    } catch {
-      setError("Use a valid email address.");
-      setStatus("error");
-      return;
-    }
-    setStatus("submitting");
-    setError("");
-    try {
-      const response = await fetch("/api/members", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail }),
-      });
-      const data = await response.json().catch(() => null);
-      if (response.ok) {
-        // Remember who asked, so /galaxy/private can greet them by name.
-        window.localStorage.setItem("vx_member_email", normalizedEmail);
-        setEmail(normalizedEmail);
-        setStatus("sent");
-      } else {
-        setError(
-          parseApiError(data, "Could not send your link. Try again."),
-        );
-        setStatus("error");
-      }
-    } catch {
-      setError("Could not reach the Nexus. Try again.");
-      setStatus("error");
-    }
-  }
-
-  if (status === "sent") {
-    return (
-      <div>
-        <p className="micro-label">Members Gate</p>
-        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-          A light is on its way.
-        </h2>
-        <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          If this address belongs to a member, a link is heading to
-          the inbox now. It burns out in 15 minutes and leads to your
-          private galaxy.
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <p className="micro-label">Members Gate</p>
-      <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        The private galaxy awaits.
-      </h2>
-      <p className="mt-3 text-sm leading-relaxed text-silver-500">
-        This gate opens only for approved members. Enter your email and the
-        cipher light will find you.
-      </p>
-      <label className="mt-6 block">
-        <span className="sr-only">Email address</span>
-        <TextInput
-          type="email"
-          required
-          autoFocus
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          placeholder="Enter your email"
-          className="w-full px-5 py-3.5 text-sm"
-        />
-      </label>
-      <Button
-        type="submit"
-        variant="primary"
-        loading={status === "submitting"}
-        className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
-      >
-        Continue
-      </Button>
-      <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error" ? error : "Only available for approved members."}
       </p>
     </form>
   );
@@ -1358,18 +1259,10 @@ function MagicFlow() {
         <Button
           variant="secondary"
           onClick={() => {
-            // Route by the link's flow: explorers belong in the sign-in
-            // grove, only members go to the cipher gate.
-            const flow = new URLSearchParams(window.location.search).get(
-              "flow",
-            );
-            if (flow === "member") {
-              trackCtaClick("member_gate_open", { placement: "magic_failed" });
-              useGalaxyStore.getState().enterCave("members");
-            } else {
-              trackCtaClick("signin_gate_open", { placement: "magic_failed" });
-              useGalaxyStore.getState().enterCave("signin");
-            }
+            // Everyone requests a fresh link in the sign-in grove — the
+            // backend still routes members through their TOTP flow.
+            trackCtaClick("signin_gate_open", { placement: "magic_failed" });
+            useGalaxyStore.getState().enterCave("signin");
           }}
           className="mt-5 min-h-0 px-6 py-3 text-[0.62rem] uppercase"
         >
@@ -1560,7 +1453,7 @@ function TotpVerifyPanel({
   async function requestReset() {
     const email = window.localStorage.getItem("vx_member_email");
     if (!email) {
-      useGalaxyStore.getState().enterCave("members");
+      useGalaxyStore.getState().enterCave("signin");
       return;
     }
     setStatus("submitting");

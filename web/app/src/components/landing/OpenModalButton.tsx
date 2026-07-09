@@ -15,10 +15,9 @@ function hasVerifiedProfile(): boolean {
 
 interface OpenModalButtonProps {
   /**
-   * "waitlist" opens the join cave, "signin" the explorer Grove, and
-   * "members" the Members Gate (magic link → TOTP → private galaxy).
+   * "waitlist" opens the join cave, "signin" the explorer Grove.
    */
-  modal: "waitlist" | "signin" | "members";
+  modal: "waitlist" | "signin";
   variant?: ButtonVariant;
   className?: string;
   children: ReactNode;
@@ -39,7 +38,7 @@ export function OpenModalButton({
 }: OpenModalButtonProps) {
   const enterCave = useGalaxyStore((s) => s.enterCave);
   const startJump = useGalaxyStore((s) => s.startJump);
-  const cave = modal === "waitlist" ? "join" : modal === "signin" ? "signin" : "members";
+  const cave = modal === "waitlist" ? "join" : "signin";
   return (
     <Button
       variant={variant}

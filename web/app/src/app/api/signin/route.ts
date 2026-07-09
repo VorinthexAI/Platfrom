@@ -9,9 +9,9 @@ import {
 import { emailSchema } from "@/lib/email";
 import { collectCollectible } from "@/lib/fragments/fragments-server";
 
-const membersSchema = z.strictObject({
+const signinSchema = z.strictObject({
   email: emailSchema,
-  /** Treasure carried into the sign-in ("Already on waitlist? Sign in"). */
+  /** Treasure carried into the sign-in ("Already hunting? Sign in"). */
   collectibleId: z.string().min(1).max(120).optional(),
 });
 const EXPLORER_COOKIE = "vx_explorer";
@@ -36,9 +36,11 @@ interface CollectPayload {
 }
 
 /**
- * Members sign-in: requests a short-lived magic link from the backend.
- * The response is deliberately identical for unknown members, but production
- * must not claim success if the backend bridge itself is unavailable.
+ * Sign-in: requests a short-lived magic link from the backend. Explorers
+ * get a direct session link; platform members are routed by the backend
+ * into their TOTP flow. The response is deliberately identical for unknown
+ * emails, but production must not claim success if the backend bridge
+ * itself is unavailable.
  *
  * A carried collectible is stored IMMEDIATELY — with the email's hash so
  * the backend attaches it straight to the signing-in user. The fragment
@@ -55,7 +57,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const parsed = membersSchema.safeParse(body);
+  const parsed = signinSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { ok: false, error: "Use a valid email address." },
