@@ -166,13 +166,13 @@ function SealedFlow() {
       {action === "waitlist-verify" ? (
         <>
           <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.08em] text-silver-50">
-            Your spot is secured.
+            Your Hunt profile is secured.
           </h2>
           {landing?.waitlistNumber ? (
             <p className="mt-3 text-sm leading-relaxed text-silver-300">
               You are{" "}
               <span className="text-silver-50">
-                galaxy explorer #{landing.waitlistNumber.toLocaleString("en-US")}
+                Hunt explorer #{landing.waitlistNumber.toLocaleString("en-US")}
               </span>
               . Verification is complete.
             </p>
@@ -642,7 +642,7 @@ function JoinFlow() {
       const data = await response.json().catch(() => null);
       if (!response.ok) {
         setError(
-          parseApiError(data, "Could not join the waitlist. Try again."),
+          parseApiError(data, "Could not join The Hunt. Try again."),
         );
         setStatus("error");
         return;
@@ -787,7 +787,7 @@ function ExplorerSigninFlow() {
           {profile.waitlistNumber ? (
             <p className="flex items-baseline justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm text-silver-300">
               <span className="font-mono text-[0.55rem] tracking-[0.2em] text-silver-500 uppercase">
-                Waitlist spot
+                Hunt place
               </span>
               <span className="text-silver-50">
                 #{profile.waitlistNumber.toLocaleString("en-US")}
@@ -1121,7 +1121,7 @@ function WaitlistVerifyFlow() {
           Reading your sigil…
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-500">
-          The vault is matching this link against the waitlist ledger.
+          The vault is matching this link against the Hunt ledger.
         </p>
         <div className="mt-6 h-1 overflow-hidden rounded-full bg-white/10">
           <div className="h-full w-1/3 animate-[chrome-sheen_1.6s_linear_infinite] rounded-full bg-silver-300/70" />
@@ -1139,8 +1139,8 @@ function WaitlistVerifyFlow() {
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
           Verification links burn out after 12 hours. Join again with the
-          same email and we will send a fresh one, your place is still
-          held for now.
+          same email and we will send a fresh one. Your Hunt profile is still
+          waiting.
         </p>
         <Button
           variant="primary"
@@ -1159,22 +1159,22 @@ function WaitlistVerifyFlow() {
   const { profile } = state;
   return (
     <div>
-      <p className="micro-label">Spot secured</p>
+      <p className="micro-label">Hunt profile secured</p>
       <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.06em] text-silver-50">
         {profile.welcomeLine ??
-          `Welcome${profile.alias ? `, ${profile.alias}` : ""}. You have joined a very exclusive club.`}
+          `Welcome${profile.alias ? `, ${profile.alias}` : ""}. You have joined The Hunt.`}
       </h2>
       {profile.waitlistNumber ? (
         <p className="mt-4 text-sm leading-relaxed text-silver-300">
           You are{" "}
           <span className="text-silver-50">
-            galaxy explorer #{profile.waitlistNumber.toLocaleString("en-US")}
+            Hunt explorer #{profile.waitlistNumber.toLocaleString("en-US")}
           </span>{" "}
-          on the waitlist. Your spot is secured. See you soon.
+          in The Hunt. Your profile is secured. See you soon.
         </p>
       ) : (
         <p className="mt-4 text-sm leading-relaxed text-silver-300">
-          Your spot is secured. See you soon.
+          Your Hunt profile is secured. See you soon.
         </p>
       )}
       {profile.alias ? (

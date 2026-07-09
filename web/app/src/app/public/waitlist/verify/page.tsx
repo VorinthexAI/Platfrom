@@ -3,7 +3,7 @@ import { LandingPage } from "@/components/landing/LandingPage";
 
 export const metadata: Metadata = {
   title: "Verify your email",
-  description: "Confirm your email to secure your Vorinthex waitlist spot.",
+  description: "Confirm your email to start tracking your fragments in The Hunt.",
   robots: { index: false, follow: false },
 };
 
