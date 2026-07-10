@@ -3,6 +3,7 @@ import { generate, generateSecret } from 'otplib';
 import {
   buildMagicLink,
   buildMfaLink,
+  buildOAuthAuthorizationUrl,
   createAccessToken,
   createChallengeTokenHash,
   verifyAccessToken,
@@ -41,6 +42,32 @@ describe('auth helpers', () => {
 
     expect(link).toBe(`https://app.example.com/auth/mfa?token_hash=${tokenHash}`);
     expect(link).not.toContain(rawToken);
+  });
+
+  test('builds Google OAuth authorization URLs with a signed state', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'google-client';
+
+    const url = new URL(await buildOAuthAuthorizationUrl('google', 'https://app.example.com/api/auth/oauth/google/callback'));
+
+    expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(url.searchParams.get('client_id')).toBe('google-client');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://app.example.com/api/auth/oauth/google/callback');
+    expect(url.searchParams.get('scope')).toBe('openid email profile');
+    expect(url.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]+\.[a-f0-9]{64}$/);
+  });
+
+  test('builds Apple OAuth authorization URLs with the callback URI', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    process.env.APPLE_OAUTH_CLIENT_ID = 'com.example.service';
+
+    const url = new URL(await buildOAuthAuthorizationUrl('apple', 'https://app.example.com/api/auth/oauth/apple/callback'));
+
+    expect(url.origin + url.pathname).toBe('https://appleid.apple.com/auth/authorize');
+    expect(url.searchParams.get('client_id')).toBe('com.example.service');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://app.example.com/api/auth/oauth/apple/callback');
+    expect(url.searchParams.get('response_mode')).toBe('query');
+    expect(url.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]+\.[a-f0-9]{64}$/);
   });
 
   test('encrypts and decrypts TOTP secrets', async () => {

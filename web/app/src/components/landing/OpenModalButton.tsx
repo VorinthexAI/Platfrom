@@ -15,7 +15,8 @@ function hasVerifiedProfile(): boolean {
 
 interface OpenModalButtonProps {
   /**
-   * "waitlist" opens the join cave, "signin" the explorer Grove.
+   * The old "waitlist" alias now opens the same sign-in cave: sign-in
+   * creates a new explorer account when needed.
    */
   modal: "waitlist" | "signin";
   variant?: ButtonVariant;
@@ -38,13 +39,13 @@ export function OpenModalButton({
 }: OpenModalButtonProps) {
   const enterCave = useGalaxyStore((s) => s.enterCave);
   const startJump = useGalaxyStore((s) => s.startJump);
-  const cave = modal === "waitlist" ? "join" : "signin";
+  const cave = "signin";
   return (
     <Button
       variant={variant}
       className={className}
       onClick={() => {
-        if (modal === "signin" && hasVerifiedProfile()) {
+        if (hasVerifiedProfile()) {
           trackLandingEvent({
             slug: "auth.signin_authed_jump",
             metadata: { placement: "signin_button" },
@@ -52,7 +53,7 @@ export function OpenModalButton({
           startJump("public");
           return;
         }
-        trackCtaClick(`${modal}_open`, { cave_kind: cave });
+        trackCtaClick("signin_gate_open", { cave_kind: cave, source: modal });
         enterCave(cave);
       }}
     >

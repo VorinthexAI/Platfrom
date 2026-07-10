@@ -5,7 +5,10 @@ import { listAllProducts } from '@/lib/db/products.node';
 import { getUserById } from '@/lib/db/users.node';
 import {
   completeTotpSetup,
+  buildOAuthAuthorizationUrl,
+  completeOAuthSignIn,
   createUserWithAuth,
+  requestFoundersGate,
   requestMfaResetEmail,
   requestSignInEmail,
   resetTotpForChallenge,
@@ -56,6 +59,7 @@ const challengeTokenHashBodyBase = strictObject({
 });
 const emailSchema = z.string().trim().toLowerCase().email().max(254);
 const emailBody = strictObject({ email: emailSchema });
+const oauthProviderSchema = z.enum(['google', 'apple']);
 
 export function registerRoutes(app: Hono) {
   app.post('/auth/signup', async (c) => {
@@ -67,6 +71,9 @@ export function registerRoutes(app: Hono) {
     const body = await parseJson(c, emailBody);
     const result = await requestSignInEmail(body.email);
     if (!result.allowed) {
+      if ('foundersGateRequired' in result) {
+        return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
+      }
       return c.json({ error: 'email is not whitelisted; join the waitlist', action: 'join_waitlist' }, 403);
     }
     return c.json({
@@ -88,6 +95,65 @@ export function registerRoutes(app: Hono) {
           handoff_expires_at: result.handoffExpiresAt.toISOString(),
         }
         : {}),
+    });
+  });
+
+  app.post('/auth/founders-gate', async (c) => {
+    const body = await parseJson(c, emailBody);
+    const result = await requestFoundersGate(body.email);
+    if (!result.allowed) {
+      return c.json({ error: 'founder identity not found' }, 403);
+    }
+    return c.json({
+      ok: true,
+      status: result.status,
+      totp_challenge_token_hash: result.totpChallengeToken,
+      expires_at: result.expiresAt.toISOString(),
+      name: result.name,
+      organization_title: result.organizationTitle,
+    });
+  });
+
+  app.get('/auth/oauth/start', async (c) => {
+    const query = parseQuery(c, strictObject({
+      provider: oauthProviderSchema,
+      redirect_uri: z.string().url(),
+    }));
+    try {
+      return c.json({
+        authorization_url: await buildOAuthAuthorizationUrl(query.provider, query.redirect_uri),
+      });
+    } catch {
+      return c.json({ error: 'oauth provider is not configured' }, 503);
+    }
+  });
+
+  app.post('/auth/oauth/callback', async (c) => {
+    const body = await parseJson(c, strictObject({
+      provider: oauthProviderSchema,
+      code: z.string().min(1),
+      state: z.string().min(1),
+      redirect_uri: z.string().url(),
+    }));
+    const result = await completeOAuthSignIn({
+      provider: body.provider,
+      code: body.code,
+      state: body.state,
+      redirectUri: body.redirect_uri,
+    });
+    if (!result) return c.json({ error: 'oauth sign in failed' }, 401);
+    setSessionTokenHeaders(c, result);
+    setSessionCookies(c, result);
+    return c.json({
+      ok: true,
+      status: result.status,
+      identity: result.identity,
+      access_token: result.accessToken,
+      refresh_token: result.refreshToken,
+      alias: result.alias,
+      alias_slug: result.aliasSlug,
+      waitlist_number: result.waitlistNumber,
+      welcome_line: result.welcomeLine,
     });
   });
 

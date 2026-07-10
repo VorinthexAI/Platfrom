@@ -4,6 +4,8 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
+import { trackCtaClick } from "@/lib/analytics";
+import { useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
  * The Nexus sun: a golden intelligent star that burns and breathes —
@@ -111,6 +113,7 @@ export function NexusSun({ paused }: { paused: boolean }) {
   const haloRef = useRef<THREE.Sprite>(null);
   const haloWideRef = useRef<THREE.Sprite>(null);
   const lightRef = useRef<THREE.PointLight>(null);
+  const holdTimerRef = useRef<number | null>(null);
 
   const uniforms = useMemo(
     () => ({ uTime: { value: 0 }, uPulse: { value: 0 } }),
@@ -171,8 +174,31 @@ export function NexusSun({ paused }: { paused: boolean }) {
     }
   });
 
+  function clearHoldTimer() {
+    if (holdTimerRef.current === null) return;
+    window.clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+  }
+
+  function beginFoundersHold() {
+    clearHoldTimer();
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      trackCtaClick("founders_gate_open", { placement: "sun_long_press" });
+      useGalaxyStore.getState().startJump("sun");
+    }, 3000);
+  }
+
   return (
-    <group>
+    <group
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        beginFoundersHold();
+      }}
+      onPointerUp={clearHoldTimer}
+      onPointerLeave={clearHoldTimer}
+      onPointerCancel={clearHoldTimer}
+    >
       <mesh>
         <sphereGeometry args={[1.35, 64, 64]} />
         <shaderMaterial

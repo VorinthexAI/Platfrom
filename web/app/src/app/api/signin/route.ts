@@ -132,6 +132,8 @@ export async function POST(request: Request) {
   }
 
   const result = await backendFetch<{
+    founders_gate_required?: boolean;
+    action?: string;
     organization_mfa_required?: boolean;
     status?: "totp_setup_required" | "totp_required";
     totp_challenge_token_hash?: string;
@@ -143,6 +145,18 @@ export async function POST(request: Request) {
     method: "POST",
     body: JSON.stringify({ email: parsed.data.email }),
   });
+
+  if (!result.ok && result.status === 403 && result.data?.founders_gate_required) {
+    return NextResponse.json(
+      {
+        ok: false,
+        collect,
+        founders_gate_required: true,
+        error: "Founders enter through the sun.",
+      },
+      { status: 403 },
+    );
+  }
 
   if (!result.ok && result.status !== 403) {
     console.error("members sign-in backend request failed", {

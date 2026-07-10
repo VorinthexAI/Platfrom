@@ -43,12 +43,12 @@ function CollectGateCard() {
   const enterCave = useGalaxyStore((s) => s.enterCave);
   const reducedMotion = useReducedMotion();
 
-  const openDoor = (kind: "join" | "signin") => {
-    trackCtaClick(kind === "join" ? "waitlist_open" : "signin_gate_open", {
+  const openDoor = () => {
+    trackCtaClick("signin_gate_open", {
       placement: "collect_gate",
     });
     dismissCollectGate();
-    enterCave(kind);
+    enterCave("signin");
   };
 
   return (
@@ -57,7 +57,7 @@ function CollectGateCard() {
         <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center px-4">
           <motion.aside
             role="dialog"
-            aria-label="Join or sign in to collect fragments"
+            aria-label="Sign in to collect fragments"
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
@@ -78,21 +78,14 @@ function CollectGateCard() {
               Fragments need an explorer.
             </h2>
             <p className="mt-3 text-sm leading-relaxed text-silver-500">
-              New explorer? Join to send your fragments into the hunt.
-              Already collecting? Sign in to sync your haul.
+              Sign in with your email to save this fragment. New explorers are
+              created automatically.
             </p>
             <div className="mt-6 flex flex-col gap-2">
               <Button
                 variant="primary"
-                onClick={() => openDoor("join")}
+                onClick={openDoor}
                 className="w-full px-5 py-3.5 text-xs uppercase"
-              >
-                Join
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => openDoor("signin")}
-                className="w-full px-5 py-3 text-[0.62rem] uppercase"
               >
                 Sign in
               </Button>
@@ -184,14 +177,14 @@ function CollectibleTooltip() {
             ) : (
               <>
                 <p className="text-[0.72rem] leading-relaxed text-silver-500">
-                  New explorer? Join to send your fragments into the hunt.
-                  Already collecting? Sign in to sync your haul.
+                  Sign in with your email to save this fragment. New explorers
+                  are created automatically.
                 </p>
                 <Button
                   variant="primary"
                   onClick={() => {
-                    // Carry the treasure into the join cave — it's collected
-                    // for this explorer the moment they submit their email.
+                    // Carry the treasure into sign-in; it is collected for
+                    // this explorer the moment they submit their email.
                     trackLandingEvent({
                       slug: "landing.fragment_join_to_collect_clicked",
                       metadata: {
@@ -204,25 +197,9 @@ function CollectibleTooltip() {
                     });
                     setPendingCollect(selected);
                     select(null);
-                    enterCave("join");
-                  }}
-                  className="mt-4 w-full min-h-0 px-5 py-3 text-[0.62rem] uppercase"
-                >
-                  Join
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    // Same treasure, other door: sign-in also stores the
-                    // collect immediately, so the fragment is never lost.
-                    trackCtaClick("signin_to_collect", {
-                      collectible_id: selected.id,
-                    });
-                    setPendingCollect(selected);
-                    select(null);
                     enterCave("signin");
                   }}
-                  className="mt-2 w-full min-h-0 px-5 py-3 text-[0.62rem] uppercase"
+                  className="mt-4 w-full min-h-0 px-5 py-3 text-[0.62rem] uppercase"
                 >
                   Sign in
                 </Button>

@@ -145,12 +145,12 @@ export function CaveOverlay() {
                 )}
 
                 {caveKind === "sealed" ? <SealedFlow /> : null}
-                {caveKind === "join" ? <JoinFlow /> : null}
-                {caveKind === "signin" ? <ExplorerSigninFlow /> : null}
+                {caveKind === "join" || caveKind === "signin" ? <ExplorerSigninFlow /> : null}
                 {caveKind === "waitlist-verify" ? <WaitlistVerifyFlow /> : null}
                 {caveKind === "magic" ? <MagicFlow /> : null}
                 {caveKind === "mfa" ? <MagicFlow /> : null}
                 {caveKind === "organization-signin" ? <MagicFlow /> : null}
+                {caveKind === "oauth-callback" ? <OAuthCallbackFlow /> : null}
                 {caveKind === "privacy" ? <VaultReaderFlow copy={PRIVACY_COPY} /> : null}
                 {caveKind === "terms" ? <VaultReaderFlow copy={TERMS_COPY} /> : null}
                 {caveKind === "about" ? <VaultReaderFlow copy={ABOUT_COPY} /> : null}
@@ -499,27 +499,17 @@ function LeaderboardFlow() {
         ) : profile !== "loading" ? (
           <div className="mt-3 flex flex-col gap-4">
             <p className="text-[0.78rem] leading-relaxed text-silver-500">
-              New explorer? Join to send your fragments into the hunt.
-              Already collecting? Sign in to sync your haul.
+              Sign in with your email to sync your haul. New explorers are
+              created automatically.
             </p>
             <div className="flex flex-col gap-2">
               <Button
                 variant="primary"
                 onClick={() => {
-                  trackCtaClick("waitlist_open", { placement: "hunt_standing" });
-                  enterCave("join");
-                }}
-                className="w-full px-5 py-3.5 text-xs uppercase"
-              >
-                Join
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
                   trackCtaClick("signin_gate_open", { placement: "hunt_standing" });
                   enterCave("signin");
                 }}
-                className="w-full px-5 py-3 text-[0.62rem] uppercase"
+                className="w-full px-5 py-3.5 text-xs uppercase"
               >
                 Sign in
               </Button>
@@ -716,159 +706,81 @@ function useHandoffJump(active: boolean, placement: string) {
   }, [active, placement]);
 }
 
-function JoinFlow() {
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "error">(
-    "idle",
-  );
-  const [error, setError] = useState("");
-  const [signInLinkSent, setSignInLinkSent] = useState(false);
-  const formStarted = useRef(false);
-  const pendingCollect = useFragmentsStore((s) => s.pendingCollect);
-  const markJoined = useFragmentsStore((s) => s.markJoined);
-  const applyCollect = useFragmentsStore((s) => s.applyCollect);
-  useHandoffJump(status === "sent", "join_cave");
+function OAuthCallbackFlow() {
+  const startJump = useGalaxyStore((s) => s.startJump);
+  const [state, setState] = useState<"checking" | "success" | "failed">("checking");
 
-  function updateEmail(value: string) {
-    if (!formStarted.current) {
-      formStarted.current = true;
-      trackLandingEvent({
-        slug: "waitlist.form_started",
-        metadata: {
-          form: "join",
-          pending_collectible_id: pendingCollect?.id ?? null,
-        },
-      });
-    }
-    setEmail(value);
-  }
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (status === "submitting") return;
-    trackLandingEvent({
-      slug: "waitlist.submit_clicked",
-      metadata: {
-        form: "join",
-        pending_collectible_id: pendingCollect?.id ?? null,
-      },
-    });
-    let normalizedEmail: string;
-    try {
-      normalizedEmail = normalizeEmailInput(email);
-    } catch {
-      setError("Use a valid email address.");
-      setStatus("error");
-      return;
-    }
-    setStatus("submitting");
-    setError("");
-    try {
-      const response = await fetch("/api/waitlist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: normalizedEmail,
-          ...(pendingCollect ? { collectibleId: pendingCollect.id } : {}),
-        }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        setError(
-          parseApiError(data, "Could not join The Hunt. Try again."),
-        );
-        setStatus("error");
+  useEffect(() => {
+    let timer = 0;
+    void Promise.resolve().then(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("status") !== "success") {
+        setState("failed");
         return;
       }
-      setEmail(normalizedEmail);
-      setSignInLinkSent(Boolean(data?.signInEmailSent));
-      markJoined();
-      // The treasure is collected for this explorer the moment they join —
-      // the backend stores the node right away, before email verification.
-      if (pendingCollect && data.collect?.ok) {
-        applyCollect(pendingCollect, {
-          fragmentsAwarded: data.collect.fragmentsAwarded,
-          balance: data.collect.balance,
-          globalTotal: data.collect.globalTotal,
-        });
-      }
-      setStatus("sent");
-    } catch {
-      setError("Could not reach the Nexus. Try again.");
-      setStatus("error");
-    }
-  }
+      const profile = {
+        alias: params.get("alias"),
+        aliasSlug: params.get("alias_slug"),
+        waitlistNumber: params.get("waitlist_number")
+          ? Number(params.get("waitlist_number"))
+          : null,
+        welcomeLine: params.get("welcome"),
+      };
+      window.localStorage.setItem("vx_profile", JSON.stringify(profile));
+      window.dispatchEvent(new Event("vx-profile-changed"));
+      setState("success");
+      timer = window.setTimeout(() => startJump("public"), 700);
+    });
+    return () => window.clearTimeout(timer);
+  }, [startJump]);
 
-  if (status === "sent") {
+  if (state === "checking") {
     return (
       <div>
-        <p className="micro-label">{signInLinkSent ? "Welcome back" : "Join"}</p>
+        <p className="micro-label">Provider Gate</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-          Check your inbox.
+          Completing sign in.
         </h2>
-        <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          {signInLinkSent
-            ? "You are already in The Hunt — we sent you a sign-in link instead. Open it within 15 minutes."
-            : "We sent a confirmation link. Open it within 12 hours to finish joining."}
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-silver-500">
-          {signInLinkSent
-            ? "Tap it on any device. Keep this screen open and it signs itself in the moment the link is used."
-            : "Verify on any device. Keep this screen open and your galaxy opens right here."}
-        </p>
-        <p className="mt-4 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-          Sent to {email}
+        <p className="mt-3 text-sm leading-relaxed text-silver-500">
+          The provider callback is being sealed into your explorer profile.
         </p>
       </div>
     );
   }
 
+  if (state === "failed") {
+    return (
+      <div>
+        <p className="micro-label">Provider Gate</p>
+        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
+          Sign in did not complete.
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-silver-500">
+          Try again with email, Google, or Apple.
+        </p>
+        <Button
+          variant="primary"
+          onClick={() => useGalaxyStore.getState().enterCave("signin")}
+          className="mt-5 w-full px-5 py-3.5 text-xs uppercase"
+        >
+          Sign in
+        </Button>
+      </div>
+    );
+  }
+
   return (
-    <form onSubmit={handleSubmit}>
-      <p className="micro-label">Join</p>
+    <div>
+      <p className="micro-label">Provider Gate</p>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        Join the Hunt.
+        Sign in complete.
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-silver-500">
-        Enter your email to start your explorer profile and track your
-        fragments as the Hunt unfolds.
+        Opening your public galaxy.
       </p>
-      {pendingCollect ? (
-        <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 font-mono text-[0.55rem] tracking-[0.2em] text-silver-300 uppercase">
-          Collecting: {pendingCollect.name} · +
-          {pendingCollect.fragments.toLocaleString("en-US")} fragments
-        </p>
-      ) : null}
-      <label className="mt-6 block">
-        <span className="sr-only">Email address</span>
-        <TextInput
-          type="email"
-          required
-          autoFocus
-          value={email}
-          onChange={(event) => updateEmail(event.target.value)}
-          placeholder="Enter your email"
-          className="w-full px-5 py-3.5 text-sm"
-        />
-      </label>
-      <Button
-        type="submit"
-        variant="primary"
-        loading={status === "submitting"}
-        className="mt-4 w-full px-5 py-3.5 text-xs"
-      >
-        Join
-      </Button>
-      <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error" ? error : ""}
-      </p>
-    </form>
+    </div>
   );
 }
-
-/* ---------------------------------------------------------------- */
-/* 4 — explorer sign-in inside the Grove (waitlist profile)          */
-/* ---------------------------------------------------------------- */
 
 interface StoredProfile {
   email?: string;
@@ -1042,7 +954,9 @@ function ExplorerSigninFlow() {
         setStatus("sent");
       } else {
         setError(
-          parseApiError(data, "Could not send your link. Try again."),
+          data?.founders_gate_required
+            ? "Founders enter through the sun. Hold the Nexus sun for three seconds."
+            : parseApiError(data, "Could not send your link. Try again."),
         );
         setStatus("error");
       }
@@ -1072,10 +986,10 @@ function ExplorerSigninFlow() {
   return (
     <form onSubmit={handleSubmit}>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        Return to the Hunt.
+        Sign in to the Hunt.
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-silver-500">
-        Enter the email you joined with to restore your explorer profile,
+        Enter your email to create or restore your explorer profile,
         alias, and fragments.
       </p>
       {pendingCollect ? (
@@ -1104,6 +1018,20 @@ function ExplorerSigninFlow() {
       >
         Sign in
       </Button>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <a
+          href="/api/auth/oauth/google/start"
+          className="vui-button vui-button-secondary inline-flex min-h-0 items-center justify-center px-4 py-3 text-[0.62rem] uppercase"
+        >
+          Google
+        </a>
+        <a
+          href="/api/auth/oauth/apple/start"
+          className="vui-button vui-button-secondary inline-flex min-h-0 items-center justify-center px-4 py-3 text-[0.62rem] uppercase"
+        >
+          Apple
+        </a>
+      </div>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
         {status === "error" ? error : ""}
       </p>

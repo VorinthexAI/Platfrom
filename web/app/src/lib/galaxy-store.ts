@@ -36,6 +36,7 @@ export type CaveKind =
   | "magic" // arrived via /public/auth/token?token_hash=… (TOTP setup/verify)
   | "mfa" // arrived via /auth/mfa?token_hash=… (platform MFA setup/sign-in)
   | "organization-signin" // direct organization MFA after email lookup
+  | "oauth-callback" // OAuth provider callback result
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault
   | "about" // the company story, read inside the Origin Vault

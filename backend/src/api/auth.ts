@@ -33,6 +33,7 @@ export interface SessionTokens {
 
 export type AuthIdentityType = 'user' | 'member' | 'superAdmin';
 export type LoginIdentityType = Exclude<AuthIdentityType, 'user'>;
+export type OAuthProvider = 'google' | 'apple';
 
 export interface AuthIdentity {
   key: string;
@@ -49,6 +50,7 @@ interface LoginIdentity {
   emailHash: string;
   name: string | null;
   organizationTitle: string | null;
+  organizationIsRoot: boolean;
   organizationMfaEnabled: boolean;
   isMfaEnabled: boolean;
   totpSecret: string | null;
@@ -82,12 +84,42 @@ function base64UrlEncode(value: string) {
   return Buffer.from(value).toString('base64url');
 }
 
+function base64UrlEncodeBytes(value: Uint8Array | ArrayBuffer) {
+  return Buffer.from(value instanceof ArrayBuffer ? new Uint8Array(value) : value).toString('base64url');
+}
+
 function base64UrlDecode(value: string) {
   return Buffer.from(value, 'base64url').toString('utf8');
 }
 
+function jsonBase64Url(value: unknown) {
+  return base64UrlEncode(JSON.stringify(value));
+}
+
 async function signAccessTokenPayload(payload: string) {
   return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
+}
+
+async function createSignedOAuthState(provider: OAuthProvider) {
+  const payload = jsonBase64Url({
+    provider,
+    nonce: randomToken('oauth_'),
+    exp: Date.now() + 10 * 60 * 1000,
+  });
+  return `${payload}.${await signAccessTokenPayload(payload)}`;
+}
+
+async function verifySignedOAuthState(provider: OAuthProvider, state: string) {
+  const [payload, signature] = state.split('.');
+  if (!payload || !signature) return false;
+  const expected = await signAccessTokenPayload(payload);
+  if (!timingSafeEqual(signature, expected)) return false;
+  try {
+    const parsed = JSON.parse(base64UrlDecode(payload)) as { provider?: string; exp?: number };
+    return parsed.provider === provider && typeof parsed.exp === 'number' && parsed.exp > Date.now();
+  } catch {
+    return false;
+  }
 }
 
 async function membershipIdentity(
@@ -106,6 +138,7 @@ async function membershipIdentity(
     emailHash: user.emailHash,
     name: user.name,
     organizationTitle: membership.orgTitle,
+    organizationIsRoot: organization.is_root,
     organizationMfaEnabled: organization.mfa_enabled,
     isMfaEnabled: membership.isMfaEnabled,
     totpSecret: membership.totpSecret,
@@ -131,6 +164,15 @@ function strongestMembership(
 async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
   const membership = strongestMembership(await listActiveUserOrganizationsByUser(user.key));
   return membership ? membershipIdentity(user, membership) : null;
+}
+
+async function rootOrganizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
+  const memberships = await listActiveUserOrganizationsByUser(user.key);
+  for (const membership of memberships) {
+    const identity = await membershipIdentity(user, membership);
+    if (identity?.organizationIsRoot) return identity;
+  }
+  return null;
 }
 
 export async function findLoginIdentityByEmail(email: string): Promise<LoginIdentity | null> {
@@ -317,6 +359,171 @@ export function buildMfaLink(tokenHash: string) {
   return url.toString();
 }
 
+function requiredEnv(name: string) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+export async function buildOAuthAuthorizationUrl(provider: OAuthProvider, redirectUri: string) {
+  const state = await createSignedOAuthState(provider);
+  if (provider === 'google') {
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', requiredEnv('GOOGLE_OAUTH_CLIENT_ID'));
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('state', state);
+    url.searchParams.set('prompt', 'select_account');
+    return url.toString();
+  }
+
+  const url = new URL('https://appleid.apple.com/auth/authorize');
+  url.searchParams.set('client_id', requiredEnv('APPLE_OAUTH_CLIENT_ID'));
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'name email');
+  url.searchParams.set('response_mode', 'query');
+  url.searchParams.set('state', state);
+  return url.toString();
+}
+
+function formBody(input: Record<string, string>) {
+  return new URLSearchParams(input).toString();
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const [, payload] = token.split('.');
+  if (!payload) return null;
+  try {
+    return JSON.parse(base64UrlDecode(payload)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function pemBodyToArrayBuffer(pem: string) {
+  const normalized = pem.replace(/\\n/g, '\n');
+  const body = normalized
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\s/g, '');
+  return Buffer.from(body, 'base64');
+}
+
+async function buildAppleClientSecret() {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: 'ES256',
+    kid: requiredEnv('APPLE_OAUTH_KEY_ID'),
+  };
+  const payload = {
+    iss: requiredEnv('APPLE_OAUTH_TEAM_ID'),
+    iat: now,
+    exp: now + 60 * 60 * 24 * 30,
+    aud: 'https://appleid.apple.com',
+    sub: requiredEnv('APPLE_OAUTH_CLIENT_ID'),
+  };
+  const signingInput = `${jsonBase64Url(header)}.${jsonBase64Url(payload)}`;
+  const privateKey = await crypto.subtle.importKey(
+    'pkcs8',
+    pemBodyToArrayBuffer(requiredEnv('APPLE_OAUTH_PRIVATE_KEY')),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    privateKey,
+    new TextEncoder().encode(signingInput),
+  );
+  return `${signingInput}.${base64UrlEncodeBytes(signature)}`;
+}
+
+async function exchangeGoogleCode(code: string, redirectUri: string) {
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody({
+      code,
+      client_id: requiredEnv('GOOGLE_OAUTH_CLIENT_ID'),
+      client_secret: requiredEnv('GOOGLE_OAUTH_CLIENT_SECRET'),
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+  const tokenData = await tokenResponse.json().catch(() => null) as { access_token?: string } | null;
+  if (!tokenResponse.ok || !tokenData?.access_token) return null;
+  const profileResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` },
+  });
+  const profile = await profileResponse.json().catch(() => null) as { email?: string; name?: string; picture?: string; email_verified?: boolean } | null;
+  if (!profileResponse.ok || !profile?.email || profile.email_verified === false) return null;
+  return { email: profile.email, name: profile.name ?? null, profileUrl: profile.picture ?? null };
+}
+
+async function exchangeAppleCode(code: string, redirectUri: string) {
+  const tokenResponse = await fetch('https://appleid.apple.com/auth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody({
+      code,
+      client_id: requiredEnv('APPLE_OAUTH_CLIENT_ID'),
+      client_secret: await buildAppleClientSecret(),
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+  const tokenData = await tokenResponse.json().catch(() => null) as { id_token?: string } | null;
+  if (!tokenResponse.ok || !tokenData?.id_token) return null;
+  const payload = decodeJwtPayload(tokenData.id_token);
+  if (!payload) return null;
+  const email = typeof payload?.email === 'string' ? payload.email : null;
+  if (!email || payload.email_verified === false || payload.email_verified === 'false') return null;
+  return { email, name: null, profileUrl: null };
+}
+
+export async function completeOAuthSignIn(input: {
+  provider: OAuthProvider;
+  code: string;
+  state: string;
+  redirectUri: string;
+}) {
+  if (!await verifySignedOAuthState(input.provider, input.state)) return null;
+  const profile = input.provider === 'google'
+    ? await exchangeGoogleCode(input.code, input.redirectUri)
+    : await exchangeAppleCode(input.code, input.redirectUri);
+  if (!profile) return null;
+  const normalized = normalizeEmail(profile.email);
+  const user = await upsertUserByEmail(normalized, {
+    name: profile.name ?? defaultNameFromEmail(normalized),
+    profileUrl: profile.profileUrl,
+    isVerified: true,
+    lastLoginAt: new Date().toISOString(),
+  });
+  const tokens = await issueUserTokens(user);
+  const alias = user.alias ?? generateAlias(user.key);
+  trackPlatformEvent({
+    slug: 'auth.magic_link_authenticated',
+    userId: user.key,
+    data: {
+      user_id: user.key,
+      email_hash: user.emailHash,
+      provider: input.provider,
+      via: 'oauth',
+    },
+  });
+  return {
+    status: 'authenticated' as const,
+    identity: { key: user.key, identityType: 'user' as const },
+    ...tokens,
+    alias,
+    aliasSlug: user.alias_slug,
+    waitlistNumber: user.waitlistNumber,
+    welcomeLine: pickWelcomeLine(user.key, alias),
+  };
+}
+
 async function deliverSignInEmail(input: { email: string; magicLink: string; expiresAt: Date }) {
   await sendBrandedEmail({
     to: input.email,
@@ -411,6 +618,22 @@ export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
   if (identity) {
+    if (identity.organizationIsRoot) {
+      trackPlatformEvent({
+        slug: 'platform.sign_in_link_requested',
+        userId: identity.key,
+        data: {
+          user_id: identity.key,
+          identity_type: identity.type,
+          email_hash: identity.emailHash,
+          delivery: 'founders_gate_required',
+        },
+      });
+      return {
+        allowed: false as const,
+        foundersGateRequired: true as const,
+      };
+    }
     if (identity.organizationMfaEnabled) {
       const challenge = await createTotpChallengeForIdentity(identity.type, identity.key);
       if (!challenge) return { allowed: false as const };
@@ -466,10 +689,11 @@ export async function requestSignInEmail(email: string) {
   // Waitlist users — verified or not — sign in with the same magic-link
   // email; they get a direct session (no TOTP) that lands in their public
   // galaxy, and signing in doubles as email verification.
-  const user = await getUserByEmailHash(await hashUserEmail(normalized));
-  if (!user) {
-    return { allowed: false as const };
-  }
+  const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
+  const user = existingUser ?? await upsertUserByEmail(normalized, {
+    name: defaultNameFromEmail(normalized),
+    profileUrl: null,
+  });
 
   const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true });
   const magicLink = buildMagicLink(challenge.tokenHash, 'user');
@@ -495,6 +719,34 @@ export async function requestMfaResetEmail(email: string) {
     ok: true as const,
     emailSent: Boolean(identity?.isMfaEnabled),
     expiresAt: new Date(Date.now() + TOTP_CHALLENGE_TTL_MS),
+  };
+}
+
+export async function requestFoundersGate(email: string) {
+  const normalized = normalizeEmail(email);
+  const user = await getUserByEmailHash(await hashUserEmail(normalized));
+  if (!user) return { allowed: false as const };
+  const identity = await rootOrganizationMembershipIdentity(user);
+  if (!identity) return { allowed: false as const };
+  const challenge = await createTotpChallengeForIdentity(identity.type, identity.key);
+  if (!challenge) return { allowed: false as const };
+  trackPlatformEvent({
+    slug: 'platform.sign_in_link_requested',
+    userId: identity.key,
+    data: {
+      user_id: identity.key,
+      identity_type: identity.type,
+      email_hash: identity.emailHash,
+      delivery: 'founders_gate',
+    },
+  });
+  return {
+    allowed: true as const,
+    status: challenge.status,
+    totpChallengeToken: challenge.totpChallengeToken,
+    expiresAt: challenge.expiresAt,
+    name: identity.name,
+    organizationTitle: identity.organizationTitle,
   };
 }
 

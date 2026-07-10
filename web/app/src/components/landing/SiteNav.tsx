@@ -80,7 +80,7 @@ export function SiteNav() {
 
         {/* Short, single-word labels so nothing ever wraps; on phones
             the icon buttons collapse to icon-only. Signed-in explorers get
-            a straight galaxy jump and a sign-out in place of Join/Sign in. */}
+            a straight galaxy jump and a sign-out in place of Sign in. */}
         <div className="flex items-center gap-2 justify-self-end sm:gap-4">
           {signedIn ? (
             <>
@@ -120,20 +120,10 @@ export function SiteNav() {
               <Button
                 variant="primary"
                 onClick={() => {
-                  trackCtaClick("waitlist_open", { placement: "nav" });
-                  enterCave("join");
-                }}
-                className="min-h-0 px-5 py-2.5 text-[0.65rem] whitespace-nowrap"
-              >
-                Join
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
                   trackCtaClick("signin_gate_open", { placement: "nav" });
                   enterCave("signin");
                 }}
-                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+                className="min-h-0 px-5 py-2.5 text-[0.65rem] whitespace-nowrap"
               >
                 Sign in
               </Button>
