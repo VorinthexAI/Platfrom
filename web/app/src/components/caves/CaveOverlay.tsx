@@ -602,32 +602,11 @@ function PricingFlow() {
             </p>
           ))}
         </div>
-        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-          Billed monthly · Lowest cost per Spark
-        </p>
       </SlideUpCard>
 
-      {/* island 2 — on-demand usage */}
+      {/* island 2 — instant top-up packs */}
       <SlideUpCard
         index={1}
-        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
-        style={{ background: "var(--gradient-panel)" }}
-      >
-        <p className="micro-label">On demand</p>
-        <h3 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
-          {onDemand.name}
-        </h3>
-        <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          {onDemand.description}
-        </p>
-        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-          Billed monthly · {onDemand.costTier}
-        </p>
-      </SlideUpCard>
-
-      {/* island 3 — instant top-up packs */}
-      <SlideUpCard
-        index={2}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
@@ -638,8 +617,20 @@ function PricingFlow() {
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
           {topUps.description}
         </p>
-        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-          Instant · {topUps.costTier}
+      </SlideUpCard>
+
+      {/* island 3 — on-demand usage */}
+      <SlideUpCard
+        index={2}
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <p className="micro-label">On demand</p>
+        <h3 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
+          {onDemand.name}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-silver-300">
+          {onDemand.description}
         </p>
       </SlideUpCard>
     </div>

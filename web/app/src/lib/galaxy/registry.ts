@@ -993,7 +993,7 @@ const commandPlans: CommandPlan[] = [
 const sparkPricing = {
   unit: "Sparks",
   summary:
-    "Sparks are the usage currency of Vorinthex AI — everything your AI does draws from your Spark balance. Monthly plans refill it at the lowest cost per Spark.",
+    "Sparks are the usage currency of Vorinthex AI. Everything your AI does draws from your Spark balance, and monthly plans refill it at the lowest cost per Spark.",
   plans: [
     { id: "spark.plan.moon", name: "Moon", priceUsd: 19.99, monthlySparks: 1_000, description: "A steady monthly orbit for personal, everyday AI work." },
     { id: "spark.plan.comet", name: "Comet", priceUsd: 39.99, monthlySparks: 5_000, description: "Momentum for explorers who work with their AI daily." },
@@ -1004,7 +1004,7 @@ const sparkPricing = {
     name: "On-Demand Sparks",
     billing: "monthly" as const,
     description:
-      "Pay only for the Sparks you use beyond your plan — no ceiling, settled monthly.",
+      "Pay only for the Sparks you use beyond your plan. No ceiling, settled monthly.",
     costTier: "Higher cost per Spark",
   },
   topUps: {
@@ -1012,7 +1012,7 @@ const sparkPricing = {
     name: "Spark Top-Ups",
     billing: "one-time" as const,
     description:
-      "One-time Spark packs, credited the instant you need a burst. Pack sizes vary.",
+      "Spark packs you buy once, credited the instant you need a burst. Pack sizes vary.",
     costTier: "Highest cost per Spark",
   },
 };

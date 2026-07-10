@@ -89,15 +89,15 @@ export default function PricingPage() {
           ))}
         </ul>
         <p>Plans are billed monthly and carry the lowest cost per Spark.</p>
-        <h2>{onDemand.name}</h2>
-        <p>
-          {onDemand.description} Billed monthly. {onDemand.costTier} than
-          plans.
-        </p>
         <h2>{topUps.name}</h2>
         <p>
           {topUps.description} One-time purchase, credited instantly.{" "}
           {topUps.costTier} of the three options.
+        </p>
+        <h2>{onDemand.name}</h2>
+        <p>
+          {onDemand.description} Billed monthly. {onDemand.costTier} than
+          plans.
         </p>
       </article>
     </>
