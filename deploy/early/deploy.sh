@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Blue-green deploy for the single-box early-infra app host.
-# Runs ON the app box, invoked via `aws ssm send-command` from early-infra.yml
-# (or the bootstrap on first boot). Zero-downtime: brings the inactive color up,
-# health-checks it, flips Caddy, then retires the old color.
+# Runs ON the app box, invoked via `aws ssm send-command` from deploy.yml or
+# early-infra.yml (or the bootstrap on first boot). Zero-downtime: brings the
+# inactive color up, health-checks it, flips Caddy, then retires the old color.
 #
-#   Usage: deploy.sh <image_tag>
+#   Usage: deploy.sh <web_image_tag> [api_image_tag]
+#
+# The api tag defaults to the web tag. deploy.yml passes them separately
+# because it only builds images for the services a merge actually changed.
 #
 # Runtime env/secrets come from SSM Parameter Store (/vorinthex/prod/*), the same
 # params the ECS stack used — no secrets on disk beyond the short-lived env files
@@ -12,6 +15,7 @@
 set -euo pipefail
 
 TAG="${1:-latest}"
+API_TAG="${2:-$TAG}"
 REGION="eu-north-1"
 ACCOUNT="938565868704"
 ECR="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com"
@@ -82,19 +86,19 @@ APIKEY="$(grep -m1 '^API_KEY=' "$API_ENV" | cut -d= -f2-)"
 # --- pick colors ------------------------------------------------------------
 CUR="$(cat "$STATE" 2>/dev/null || echo none)"
 if [ "$CUR" = "blue" ]; then NEW=green; else NEW=blue; fi
-log "current=${CUR} new=${NEW} tag=${TAG}"
+log "current=${CUR} new=${NEW} web_tag=${TAG} api_tag=${API_TAG}"
 
 # web talks to the api of the SAME new color for its SSR bridge.
 sed "s/__ACTIVE__/${NEW}/" -i "$WEB_ENV"
 
-docker pull "${ECR}/vorinthex-backend:${TAG}"
+docker pull "${ECR}/vorinthex-backend:${API_TAG}"
 docker pull "${ECR}/vorinthex-web:${TAG}"
 
 # --- start the new color ----------------------------------------------------
 docker rm -f "api-${NEW}" "web-${NEW}" >/dev/null 2>&1 || true
 log "starting api-${NEW}"
 docker run -d --name "api-${NEW}" --network "$NET" --restart unless-stopped \
-	--env-file "$API_ENV" "${ECR}/vorinthex-backend:${TAG}"
+	--env-file "$API_ENV" "${ECR}/vorinthex-backend:${API_TAG}"
 log "starting web-${NEW}"
 docker run -d --name "web-${NEW}" --network "$NET" --restart unless-stopped \
 	--env-file "$WEB_ENV" "${ECR}/vorinthex-web:${TAG}"
@@ -142,4 +146,4 @@ if [ "$CUR" != none ] && [ "$CUR" != "$NEW" ]; then
 	log "retired ${CUR}"
 fi
 docker image prune -f >/dev/null 2>&1 || true
-log "deploy complete: ${NEW} @ ${TAG}"
+log "deploy complete: ${NEW} @ web=${TAG} api=${API_TAG}"
