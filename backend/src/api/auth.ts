@@ -10,6 +10,7 @@ import QRCode from 'qrcode';
 import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
 import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
+import { listActiveOrganizationMembersByUser, type OrganizationMember } from '@/lib/db/organization-members.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { trackPlatformEvent } from '@/platform/events';
 import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
@@ -52,9 +53,12 @@ interface LoginIdentity {
 
 type ChallengeIdentityType = typeof authIdentityTypeSchema._type;
 
-export type MagicLinkValidationResult =
+export type TotpChallengeValidationResult =
   | { status: 'totp_setup_required'; totpChallengeToken: string; expiresAt: Date }
-  | { status: 'totp_required'; totpChallengeToken: string; expiresAt: Date }
+  | { status: 'totp_required'; totpChallengeToken: string; expiresAt: Date };
+
+export type MagicLinkValidationResult =
+  | TotpChallengeValidationResult
   | {
     status: 'authenticated';
     identity: AuthIdentity;
@@ -121,6 +125,45 @@ function organizationIdentity(user: User): LoginIdentity | null {
   return null;
 }
 
+function membershipIdentity(
+  user: User,
+  membership: Pick<OrganizationMember, 'role'>,
+): LoginIdentity {
+  return {
+    type: membership.role === 'owner' ? 'superAdmin' : 'member',
+    key: user.key,
+    email: user.email,
+    emailHash: user.emailHash,
+    name: user.name,
+    organizationTitle: user.organization_title,
+    isMfaEnabled: user.isMfaEnabled,
+    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
+    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
+    totpSecret: user.totpSecret,
+    lastTotpTimeStep: user.lastTotpTimeStep,
+  };
+}
+
+function strongestMembership(
+  memberships: OrganizationMember[],
+): OrganizationMember | null {
+  const rank: Record<OrganizationMember['role'], number> = {
+    owner: 4,
+    admin: 3,
+    member: 2,
+    viewer: 1,
+  };
+  return memberships.reduce<OrganizationMember | null>((best, membership) => {
+    if (!best || rank[membership.role] > rank[best.role]) return membership;
+    return best;
+  }, null);
+}
+
+async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
+  const membership = strongestMembership(await listActiveOrganizationMembersByUser(user.key));
+  return membership ? membershipIdentity(user, membership) : null;
+}
+
 function memberIdentity(user: User): LoginIdentity {
   return {
     type: 'member',
@@ -156,14 +199,22 @@ function superAdminIdentity(user: User): LoginIdentity {
 export async function findLoginIdentityByEmail(email: string): Promise<LoginIdentity | null> {
   const normalized = normalizeEmail(email);
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
-  return user ? organizationIdentity(user) : null;
+  if (!user) return null;
+  return organizationIdentity(user) ?? (await organizationMembershipIdentity(user));
 }
 
 async function getLoginIdentity(type: LoginIdentityType, key: string): Promise<LoginIdentity | null> {
   const user = await getUserById(key);
   if (!user) return null;
-  if (type === 'superAdmin') return user.organization_role === 'owner' ? superAdminIdentity(user) : null;
-  return user.organization_role === 'admin' || user.organization_role === 'viewer' ? memberIdentity(user) : null;
+  const legacyIdentity =
+    type === 'superAdmin'
+      ? user.organization_role === 'owner' ? superAdminIdentity(user) : null
+      : user.organization_role === 'admin' || user.organization_role === 'viewer' ? memberIdentity(user) : null;
+  if (legacyIdentity) return legacyIdentity;
+
+  const membership = await organizationMembershipIdentity(user);
+  if (!membership || membership.type !== type) return null;
+  return membership;
 }
 
 async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: Record<string, unknown>) {
@@ -172,7 +223,8 @@ async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: 
 
 async function getLoginIdentityByRefreshTokenHash(refreshTokenHash: string): Promise<LoginIdentity | null> {
   const user = await getUserByRefreshTokenHash(refreshTokenHash);
-  return user ? organizationIdentity(user) : null;
+  if (!user) return null;
+  return organizationIdentity(user) ?? (await organizationMembershipIdentity(user));
 }
 
 export async function createAccessToken(identity: AuthIdentity | string) {
@@ -269,6 +321,21 @@ export async function createChallenge(
     tokenHash: publicTokenHash,
     expiresAt,
     handoffTokenHash: handoff?.publicTokenHash ?? null,
+  };
+}
+
+export async function createTotpChallengeForIdentity(
+  identityType: LoginIdentityType,
+  identityKey: string,
+): Promise<TotpChallengeValidationResult | null> {
+  const auth = await getLoginIdentity(identityType, identityKey);
+  if (!auth) return null;
+
+  const totpChallenge = await createChallenge(auth.key, 'totp', TOTP_CHALLENGE_TTL_MS, auth.type);
+  return {
+    status: auth.has_request_mfa_reset_link ? 'totp_setup_required' : auth.isMfaEnabled ? 'totp_required' : 'totp_setup_required',
+    totpChallengeToken: totpChallenge.tokenHash,
+    expiresAt: totpChallenge.expiresAt,
   };
 }
 
@@ -408,7 +475,7 @@ export async function requestSignInEmail(email: string) {
   if (identity) {
     // A truthy organization_role gets the professional platform email: real
     // name, MFA-aware copy, a 5-minute link, and the /auth/mfa biome.
-    const challenge = await createChallenge(identity.key, 'email', MEMBER_LINK_TTL_MS, identity.type);
+    const challenge = await createChallenge(identity.key, 'email', MEMBER_LINK_TTL_MS, identity.type, { withHandoff: true });
     const magicLink = buildMfaLink(challenge.tokenHash);
     await deliverMemberSignInEmail({
       email: normalized,
@@ -430,6 +497,8 @@ export async function requestSignInEmail(email: string) {
     return {
       allowed: true as const,
       expiresAt: challenge.expiresAt,
+      handoffTokenHash: challenge.handoffTokenHash,
+      handoffExpiresAt: new Date(challenge.expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
     };
   }
 
@@ -548,15 +617,8 @@ export async function validateMagicLink(token: string, explorerId?: string): Pro
     };
   }
 
-  const auth = await getLoginIdentity(emailChallenge.identityType, emailChallenge.identityKey);
-  if (!auth) return null;
-
-  const totpChallenge = await createChallenge(auth.key, 'totp', TOTP_CHALLENGE_TTL_MS, auth.type);
-  return {
-    status: auth.has_request_mfa_reset_link ? 'totp_setup_required' : auth.isMfaEnabled ? 'totp_required' : 'totp_setup_required',
-    totpChallengeToken: totpChallenge.tokenHash,
-    expiresAt: totpChallenge.expiresAt,
-  };
+  await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
+  return createTotpChallengeForIdentity(emailChallenge.identityType, emailChallenge.identityKey);
 }
 
 export async function createUserWithAuth(input: { email: string; name?: string; profile_url?: string }) {

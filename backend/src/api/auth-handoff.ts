@@ -11,7 +11,7 @@ import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { redisConnection } from '@/lib/redis';
 import { trackPlatformEvent } from '@/platform/events';
-import { issueUserTokens } from './auth';
+import { createTotpChallengeForIdentity, issueUserTokens, type LoginIdentityType } from './auth';
 
 /**
  * Cross-device sign-in handoff.
@@ -84,7 +84,6 @@ export function isHandoffClaimable(
   challenge: Pick<AuthChallenge, 'identityType' | 'approvedAt' | 'handoffClaimedAt'>,
   nowMs = Date.now(),
 ) {
-  if (challenge.identityType !== 'user') return false;
   if (challenge.handoffClaimedAt !== null) return false;
   if (!challenge.approvedAt) return false;
   const approvedAt = new Date(challenge.approvedAt).getTime();
@@ -92,6 +91,22 @@ export function isHandoffClaimable(
 }
 
 export type HandoffStatus = 'pending' | 'approved' | 'gone';
+
+type HandoffClaimResult =
+  | {
+    status: 'authenticated';
+    accessToken: string;
+    refreshToken: string;
+    alias: string;
+    aliasSlug: string | null;
+    waitlistNumber: number | null;
+    welcomeLine: string;
+  }
+  | {
+    status: 'totp_setup_required' | 'totp_required';
+    totpChallengeToken: string;
+    expiresAt: Date;
+  };
 
 /** Where a parked handoff stands right now, without consuming anything. */
 export async function getHandoffStatus(handoffPublicHash: string): Promise<HandoffStatus> {
@@ -110,7 +125,7 @@ export async function getHandoffStatus(handoffPublicHash: string): Promise<Hando
  * One-shot claim: trade an approved handoff for a real explorer session.
  * Single use — the first claim wins, every later attempt is refused.
  */
-export async function claimHandoff(handoffPublicHash: string) {
+export async function claimHandoff(handoffPublicHash: string): Promise<HandoffClaimResult | null> {
   const stored = await sha256(handoffPublicHash);
   const challenge = await getAuthChallengeByHandoffTokenHash(stored);
   if (!challenge || !isHandoffClaimable(challenge)) return null;
@@ -119,6 +134,20 @@ export async function claimHandoff(handoffPublicHash: string) {
 
   const user = await getUserById(challenge.identityKey);
   if (!user) return null;
+
+  if (challenge.identityType !== 'user') {
+    const totp = await createTotpChallengeForIdentity(
+      challenge.identityType as LoginIdentityType,
+      challenge.identityKey,
+    );
+    if (!totp) return null;
+    return {
+      status: totp.status,
+      totpChallengeToken: totp.totpChallengeToken,
+      expiresAt: totp.expiresAt,
+    };
+  }
+
   const tokens = await issueUserTokens(user);
   const alias = user.alias ?? generateAlias(user.key);
   trackPlatformEvent({

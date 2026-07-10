@@ -6,6 +6,11 @@ import { getRootOrganizationId } from '@/platform/events';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
 import { getUserByEmailHash } from '@/lib/db/users.node';
+import {
+  getOrganizationMemberByOrganizationAndUser,
+  upsertOrganizationMemberByKey,
+  type OrganizationMember,
+} from '@/lib/db/organization-members.node';
 
 const SEEDS_FILE = process.env.SEEDS_FILE ?? '../environments/backend/db.seeds.secrets.json';
 
@@ -39,6 +44,39 @@ function resolveRefs(value: unknown, idMap: Map<string, string>): unknown {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, resolveRefs(v, idMap)]));
   }
   return value;
+}
+
+function seededMembershipRole(role: unknown): OrganizationMember['role'] | null {
+  if (role === 'owner' || role === 'admin' || role === 'viewer') return role;
+  return null;
+}
+
+async function syncSeededOrganizationMembership(input: {
+  userId: string;
+  organizationId: unknown;
+  organizationRole: unknown;
+  now: string;
+}) {
+  const role = seededMembershipRole(input.organizationRole);
+  if (!role || typeof input.organizationId !== 'string' || !input.organizationId) return null;
+
+  const existing = await getOrganizationMemberByOrganizationAndUser(
+    input.organizationId,
+    input.userId,
+  );
+  const key = existing?.key ?? generateCuidKey();
+  return upsertOrganizationMemberByKey({
+    ...(existing ?? {}),
+    key,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    role,
+    status: 'active',
+    joinedAt: existing?.joinedAt ?? input.now,
+    invitedByUserId: existing?.invitedByUserId ?? null,
+    createdAt: existing?.createdAt ?? input.now,
+    updatedAt: input.now,
+  });
 }
 
 async function main() {
@@ -95,6 +133,18 @@ async function main() {
       const resolved = resolveRefs(doc, idMap) as Record<string, unknown>;
       const saved = (await accessor.upsertByKey(resolved as never)) as { key: string };
       results.push({ node: nodeName, key: saved.key });
+
+      if (nodeName === 'users') {
+        const membership = await syncSeededOrganizationMembership({
+          userId: saved.key,
+          organizationId: resolved.organizationId,
+          organizationRole: resolved.organization_role,
+          now,
+        });
+        if (membership) {
+          results.push({ node: 'organizationMembers', key: membership.key });
+        }
+      }
 
       if (localId) idMap.set(localId, saved.key);
       if (nodeName === 'organizations' && resolved.is_root === true) rootOrganizationId = saved.key;

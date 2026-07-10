@@ -46,3 +46,15 @@ export async function getOrganizationMemberByOrganizationAndUser(
   const doc = await cursor.next();
   return doc ? organizationMemberSchema.parse(withArangoKey(doc)) : null;
 }
+
+export async function listActiveOrganizationMembersByUser(
+  userId: string,
+): Promise<OrganizationMember[]> {
+  const cursor = await db.query(aql`
+    FOR member IN ${db.collection(ORGANIZATION_MEMBERS_COLLECTION)}
+      FILTER member.userId == ${userId} && member.status == "active"
+      RETURN member
+  `);
+  const docs = await cursor.all();
+  return docs.map((doc) => organizationMemberSchema.parse(withArangoKey(doc)));
+}

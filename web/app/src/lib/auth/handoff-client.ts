@@ -17,11 +17,19 @@
 const HANDOFF_MARKER_COOKIE = "vx_handoff_pending";
 
 export interface HandoffProfile {
+  status: "authenticated";
   alias: string | null;
   aliasSlug: string | null;
   waitlistNumber: number | null;
   welcomeLine: string | null;
 }
+
+export interface HandoffTotp {
+  status: "totp_setup_required" | "totp_required";
+  challengeTokenHash: string;
+}
+
+export type HandoffClaim = HandoffProfile | HandoffTotp;
 
 export function hasPendingHandoff(): boolean {
   if (typeof document === "undefined") return false;
@@ -35,7 +43,7 @@ export function hasPendingHandoff(): boolean {
  * is still untapped (or the handoff is gone). Also persists vx_profile so
  * every existing signed-in surface lights up.
  */
-export async function claimHandoffSession(): Promise<HandoffProfile | null> {
+export async function claimHandoffSession(): Promise<HandoffClaim | null> {
   try {
     const response = await fetch("/api/auth/handoff/claim", { method: "POST" });
     const data = (await response.json().catch(() => null)) as
@@ -44,10 +52,23 @@ export async function claimHandoffSession(): Promise<HandoffProfile | null> {
           alias_slug?: string | null;
           waitlist_number?: number | null;
           welcome_line?: string | null;
+          totp_challenge_token_hash?: string;
         })
       | null;
     if (!response.ok || !data?.ok) return null;
+    if (
+      (data.status === "totp_setup_required" ||
+        data.status === "totp_required") &&
+      typeof data.totp_challenge_token_hash === "string"
+    ) {
+      return {
+        status: data.status,
+        challengeTokenHash: data.totp_challenge_token_hash,
+      };
+    }
+    if (data.status !== "authenticated") return null;
     const profile: HandoffProfile = {
+      status: "authenticated",
       alias: data.alias ?? null,
       aliasSlug: data.alias_slug ?? null,
       waitlistNumber: data.waitlist_number ?? null,

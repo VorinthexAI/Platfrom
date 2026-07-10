@@ -94,16 +94,25 @@ export function registerRoutes(app: Hono) {
     const body = await parseJson(c, strictObject({ handoff_token_hash: challengeHash }));
     const result = await claimHandoff(body.handoff_token_hash);
     if (!result) return c.json({ error: 'handoff is not claimable' }, 401);
-    setSessionTokenHeaders(c, result);
-    setSessionCookies(c, result);
+    if (result.status === 'authenticated') {
+      setSessionTokenHeaders(c, result);
+      setSessionCookies(c, result);
+    }
     return c.json({
       status: result.status,
-      access_token: result.accessToken,
-      refresh_token: result.refreshToken,
-      alias: result.alias,
-      alias_slug: result.aliasSlug,
-      waitlist_number: result.waitlistNumber,
-      welcome_line: result.welcomeLine,
+      ...(result.status === 'authenticated'
+        ? {
+          access_token: result.accessToken,
+          refresh_token: result.refreshToken,
+          alias: result.alias,
+          alias_slug: result.aliasSlug,
+          waitlist_number: result.waitlistNumber,
+          welcome_line: result.welcomeLine,
+        }
+        : {
+          totp_challenge_token_hash: result.totpChallengeToken,
+          expires_at: result.expiresAt.toISOString(),
+        }),
     });
   });
 

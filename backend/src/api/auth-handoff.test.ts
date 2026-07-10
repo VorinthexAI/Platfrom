@@ -40,8 +40,8 @@ describe('isHandoffClaimable', () => {
     expect(isHandoffClaimable(challenge({ approvedAt }), NOW)).toBe(true);
   });
 
-  test('never hands a member identity a direct session', () => {
-    expect(isHandoffClaimable(challenge({ identityType: 'member' }), NOW)).toBe(false);
+  test('accepts a member identity for MFA handoff', () => {
+    expect(isHandoffClaimable(challenge({ identityType: 'member' }), NOW)).toBe(true);
   });
 
   test('rejects malformed approval stamps', () => {

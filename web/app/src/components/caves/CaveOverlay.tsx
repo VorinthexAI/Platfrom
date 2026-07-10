@@ -21,7 +21,7 @@ import {
   watchHandoff,
 } from "@/lib/auth/handoff-client";
 import { peekLinkLanding, setLinkLanding } from "@/lib/auth/link-landing";
-import { takeMagicHandoff } from "@/lib/auth/magic-handoff";
+import { setMagicHandoff, takeMagicHandoff } from "@/lib/auth/magic-handoff";
 import { CAVE_CONFIGS } from "@/lib/cave-config";
 import { normalizeEmailInput, parseApiError } from "@/lib/email";
 import { formatFragments } from "@/lib/format";
@@ -201,10 +201,11 @@ function SealedFlow() {
       ) : action === "member" ? (
         <>
           <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.08em] text-silver-50">
-            Your cipher is forged.
+            The gate heard you.
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-silver-300">
-            The vault opened. Your authenticator is verified.
+            Your platform sign in is approved. The MFA chamber is opening
+            on the screen where you requested this link.
           </p>
         </>
       ) : (
@@ -696,11 +697,19 @@ function useHandoffJump(active: boolean, placement: string) {
         const profile = await claimHandoffSession();
         if (!profile || claimed.current) return;
         claimed.current = true;
-        trackLandingEvent({
-          slug: "auth.magic_link_authenticated",
-          metadata: { flow: "handoff", placement },
+        if (profile.status === "authenticated") {
+          trackLandingEvent({
+            slug: "auth.magic_link_authenticated",
+            metadata: { flow: "handoff", placement },
+          });
+          useGalaxyStore.getState().startJump("public");
+          return;
+        }
+        setMagicHandoff({
+          status: profile.status,
+          challengeTokenHash: profile.challengeTokenHash,
         });
-        useGalaxyStore.getState().startJump("public");
+        useGalaxyStore.getState().enterCave("magic");
       })();
     });
   }, [active, placement]);
@@ -1337,8 +1346,26 @@ function MagicFlow() {
           return;
         }
         if (data.status === "totp_setup_required") {
+          if (!hasPendingHandoff()) {
+            setLinkLanding({
+              action: "member",
+              alias: null,
+              waitlistNumber: null,
+            });
+            useGalaxyStore.getState().enterCave("sealed");
+            return;
+          }
           await beginSetup(data.totp_challenge_token_hash);
         } else {
+          if (!hasPendingHandoff()) {
+            setLinkLanding({
+              action: "member",
+              alias: null,
+              waitlistNumber: null,
+            });
+            useGalaxyStore.getState().enterCave("sealed");
+            return;
+          }
           setState({
             phase: "verify",
             challenge: data.totp_challenge_token_hash,
