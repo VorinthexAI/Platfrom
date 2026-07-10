@@ -510,8 +510,14 @@ jobs:
           scp backend/deploy/docker-compose.db.yml graphdbbox:~/vorinthex-db/docker-compose.yml
       - name: Render .env from SSM
         run: |
+          # @json double-quotes and escapes each value (embedded newlines become
+          # literal "\n") so a multi-line SSM value stays on one physical line —
+          # Docker Compose's env-file parser un-escapes \n back on load. Without
+          # this, a value containing a raw newline splits across two lines and
+          # the second half gets parsed as a bogus new KEY, e.g. "unexpected
+          # character '+' in variable name".
           aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json \
-          | jq -r '.[] | (.n | sub("^.*/";"")) + "=" + .v' > /tmp/graph-db.env
+          | jq -r '.[] | (.n | sub("^.*/";"")) + "=" + (.v | @json)' > /tmp/graph-db.env
           test -s /tmp/graph-db.env || { echo "::error::No parameters found under $SSM_PATH"; exit 1; }
           scp /tmp/graph-db.env graphdbbox:~/vorinthex-db/.env
           rm -f /tmp/graph-db.env

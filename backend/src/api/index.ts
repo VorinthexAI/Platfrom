@@ -1,6 +1,7 @@
 import { serve } from 'bun';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { websocket } from 'hono/bun';
 import { errorHandler } from './errors';
 import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
 import { handlePolarWebhook, POLAR_WEBHOOK_PATH } from './payments';
@@ -65,6 +66,7 @@ if (import.meta.main) {
   const server = serve({
     port,
     fetch: app.fetch,
+    websocket,
   });
   console.log(`vorinthex app listening on ${port}`);
 
