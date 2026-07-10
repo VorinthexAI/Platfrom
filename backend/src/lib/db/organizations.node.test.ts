@@ -9,7 +9,6 @@ import { intelligenceFragmentSchema } from './intelligence-fragments.node';
 import { mindCapabilitySchema } from './mind-capabilities.node';
 import { mindSchema } from './minds.node';
 import { orchestratorSchema } from './orchestrators.node';
-import { organizationMemberSchema } from './organization-members.node';
 import { outputAnalyticsSchema } from './output-analytics.node';
 import { outputRelationSchema } from './output-relations.node';
 import { outputSchema } from './outputs.node';
@@ -19,6 +18,7 @@ import { processedWebhookEventSchema } from './processed-webhook-events.node';
 import { productSchema } from './products.node';
 import { subscriptionSchema } from './subscriptions.node';
 import { userEntitlementSchema } from './user-entitlements.node';
+import { userOrganizationSchema } from './user-organization.node';
 import { userSchema } from './users.node';
 import { userSessionSchema } from './user-sessions.node';
 import { userWaitlistLeaderboardChangeSchema } from './user-waitlist-leaderboard-changes.node';
@@ -37,6 +37,7 @@ describe('organization node schema', () => {
     const organization = organizationSchema.parse(baseOrganization);
 
     expect(organization.is_root).toBe(false);
+    expect(organization.mfa_enabled).toBe(false);
     expect(organization.metadata).toEqual({});
     expect(organization.embedding).toEqual([]);
   });
@@ -110,7 +111,6 @@ describe('no node field mentions the retired platform or team nodes', () => {
     mindCapabilities: mindCapabilitySchema,
     minds: mindSchema,
     orchestrators: orchestratorSchema,
-    organizationMembers: organizationMemberSchema,
     organizations: organizationSchema,
     outputAnalytics: outputAnalyticsSchema,
     outputRelations: outputRelationSchema,
@@ -121,6 +121,7 @@ describe('no node field mentions the retired platform or team nodes', () => {
     products: productSchema,
     subscriptions: subscriptionSchema,
     userEntitlements: userEntitlementSchema,
+    user_organization: userOrganizationSchema,
     userSessions: userSessionSchema,
     userWaitlistLeaderboardChanges: userWaitlistLeaderboardChangeSchema,
     users: userSchema,

@@ -8,6 +8,7 @@ import {
   createUserWithAuth,
   requestMfaResetEmail,
   requestSignInEmail,
+  resetTotpForChallenge,
   rotateRefreshToken,
   startTotpSetup,
   validateMagicLink,
@@ -70,8 +71,17 @@ export function registerRoutes(app: Hono) {
     }
     return c.json({
       ok: true,
-      email_sent: true,
+      email_sent: !('organizationMfaRequired' in result),
       expires_at: result.expiresAt.toISOString(),
+      ...('organizationMfaRequired' in result
+        ? {
+          organization_mfa_required: true,
+          status: result.status,
+          totp_challenge_token_hash: result.totpChallengeToken,
+          name: result.name,
+          organization_title: result.organizationTitle,
+        }
+        : {}),
       ...('handoffTokenHash' in result && result.handoffTokenHash
         ? {
           handoff_token_hash: result.handoffTokenHash,
@@ -117,11 +127,27 @@ export function registerRoutes(app: Hono) {
   });
 
   app.post('/auth/totp/reset/request', async (c) => {
-    const body = await parseJson(c, emailBody);
+    const body = await parseJson(c, strictObject({
+      email: emailSchema.optional(),
+      challenge_token_hash: challengeHash.optional(),
+    }));
+    if (body.challenge_token_hash) {
+      const result = await resetTotpForChallenge(body.challenge_token_hash);
+      if (!result) return c.json({ error: 'invalid TOTP challenge' }, 401);
+      return c.json({
+        ok: true,
+        reset: true,
+        setup_challenge_token_hash: result.setupChallengeToken,
+        secret: result.secret,
+        otpauth_url: result.otpauthUrl,
+        qr_code_data_url: result.qrCodeDataUrl,
+      });
+    }
+    if (!body.email) return c.json({ error: 'email or challenge token required' }, 400);
     const result = await requestMfaResetEmail(body.email);
     return c.json({
       ok: result.ok,
-      email_sent: true,
+      email_sent: result.emailSent,
       expires_at: result.expiresAt.toISOString(),
     });
   });

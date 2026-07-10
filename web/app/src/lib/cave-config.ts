@@ -66,6 +66,12 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "ember",
     approachLabel: "Approaching the Solar Gate",
   },
+  "organization-signin": {
+    ...rolledAnchor(),
+    interior: [1170, -240, 0],
+    theme: "ember",
+    approachLabel: "Opening organization sign in",
+  },
   privacy: {
     ...rolledAnchor(),
     interior: [360, -240, 0],

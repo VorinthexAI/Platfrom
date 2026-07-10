@@ -23,7 +23,7 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   // with the fields (scrubbed below); only distinctId + organizationId remain.
   // The platformId index goes with the platform -> organization rename.
   visitors: [['emailHash'], ['userId'], ['platformId']],
-  users: [['platformId'], ['platform_role']],
+  users: [['platformId'], ['platform_role'], ['organization_role']],
   visitorSessions: [['platformId', 'connectedAt']],
   userSessions: [['platformId', 'connectedAt']],
 };
@@ -135,17 +135,16 @@ const collections: CollectionSpec[] = [
       { fields: ['email'], unique: true },
       { fields: ['emailHash'], unique: true },
       { fields: ['alias_slug'], unique: true, sparse: true },
-      { fields: ['organization_role'] },
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
   {
-    name: 'organizationMembers',
+    name: 'user_organization',
     indexes: [
       { fields: ['organizationId'] },
       { fields: ['userId'] },
       { fields: ['organizationId', 'userId'], unique: true },
-      { fields: ['organizationId', 'role'] },
+      { fields: ['organizationId', 'orgRole'] },
     ],
   },
   { name: 'minds', embedKeys: ['name'], indexes: [{ fields: ['userId'], unique: true }] },
@@ -365,6 +364,7 @@ async function main() {
           slug: null,
           description: null,
           isActive: true,
+          mfa_enabled: platform.mfa_enabled === true,
           metadata: platform.metadata && typeof platform.metadata === 'object' ? platform.metadata : {},
           createdAt: nonEmptyString(platform.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -390,6 +390,7 @@ async function main() {
       slug: null,
       description: null,
       isActive: true,
+      mfa_enabled: false,
       metadata: {},
       createdAt: now,
       updatedAt: now,
@@ -398,9 +399,15 @@ async function main() {
     console.log('Created root organization Vorinthex AI');
   }
 
+  await targetDb.query(`
+    FOR organization IN organizations
+      FILTER !HAS(organization, "mfa_enabled")
+      UPDATE organization WITH { mfa_enabled: false } IN organizations
+  `);
+
   // Teams collapse into organizations: a team becomes an ordinary
   // (non-root) organization under the same _key, and each teamMembers row
-  // becomes an organizationMembers row whose organizationId is the old
+  // becomes a user_organization row whose organizationId is the old
   // teamId — so membership links survive the rename untouched. The
   // teamMemberInvites collection retires with the feature (it has no API
   // surface); all three legacy collections are dropped at the end.
@@ -425,6 +432,7 @@ async function main() {
           slug: nonEmptyString(team.slug),
           description: nonEmptyString(team.description),
           isActive: team.isActive !== false,
+          mfa_enabled: team.mfa_enabled === true,
           metadata: {},
           createdAt: nonEmptyString(team.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -440,7 +448,7 @@ async function main() {
 
   const legacyTeamMembersCollection = targetDb.collection('teamMembers');
   if (await legacyTeamMembersCollection.exists()) {
-    const organizationMembersCollection = targetDb.collection('organizationMembers');
+    const userOrganizationCollection = targetDb.collection('user_organization');
     const legacyTeamMembersCursor = await targetDb.query<Record<string, unknown>>(`
       FOR member IN teamMembers
         RETURN member
@@ -451,15 +459,19 @@ async function main() {
       const organizationId = nonEmptyString(member.teamId);
       const userId = nonEmptyString(member.userId);
       if (!key || !organizationId || !userId) continue;
-      await organizationMembersCollection.save(
+      await userOrganizationCollection.save(
         {
           _key: key,
           organizationId,
           userId,
-          role: nonEmptyString(member.role) ?? 'viewer',
+          orgRole: nonEmptyString(member.role) ?? 'viewer',
+          orgTitle: nonEmptyString(member.title),
           status: nonEmptyString(member.status) ?? 'active',
           joinedAt: nonEmptyString(member.joinedAt) ?? nonEmptyString(member.createdAt) ?? new Date().toISOString(),
           invitedByUserId: nonEmptyString(member.invitedByUserId),
+          isMfaEnabled: member.isMfaEnabled === true,
+          totpSecret: nonEmptyString(member.totpSecret),
+          lastTotpTimeStep: typeof member.lastTotpTimeStep === 'number' ? member.lastTotpTimeStep : null,
           createdAt: nonEmptyString(member.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           embedding: [],
@@ -468,8 +480,45 @@ async function main() {
       );
     }
     if (legacyTeamMembers.length > 0) {
-      console.log(`Copied ${legacyTeamMembers.length} teamMembers -> organizationMembers`);
+      console.log(`Copied ${legacyTeamMembers.length} teamMembers -> user_organization`);
     }
+  }
+
+  const legacyOrganizationMembersCollection = targetDb.collection('organizationMembers');
+  if (await legacyOrganizationMembersCollection.exists()) {
+    await targetDb.query(`
+      FOR member IN organizationMembers
+        FILTER HAS(member, "organizationId") && member.organizationId != null && member.organizationId != ""
+          && HAS(member, "userId") && member.userId != null && member.userId != ""
+        UPSERT { organizationId: member.organizationId, userId: member.userId }
+        INSERT {
+          _key: member._key,
+          organizationId: member.organizationId,
+          userId: member.userId,
+          orgRole: HAS(member, "orgRole") ? member.orgRole : (HAS(member, "role") ? member.role : "viewer"),
+          orgTitle: HAS(member, "orgTitle") ? member.orgTitle : (HAS(member, "title") ? member.title : null),
+          status: HAS(member, "status") ? member.status : "active",
+          joinedAt: HAS(member, "joinedAt") ? member.joinedAt : (HAS(member, "createdAt") ? member.createdAt : DATE_ISO8601(DATE_NOW())),
+          invitedByUserId: HAS(member, "invitedByUserId") ? member.invitedByUserId : null,
+          isMfaEnabled: HAS(member, "isMfaEnabled") ? member.isMfaEnabled : false,
+          totpSecret: HAS(member, "totpSecret") ? member.totpSecret : null,
+          lastTotpTimeStep: HAS(member, "lastTotpTimeStep") ? member.lastTotpTimeStep : null,
+          createdAt: HAS(member, "createdAt") ? member.createdAt : DATE_ISO8601(DATE_NOW()),
+          updatedAt: DATE_ISO8601(DATE_NOW()),
+          embedding: []
+        }
+        UPDATE {
+          orgRole: HAS(member, "orgRole") ? member.orgRole : (HAS(member, "role") ? member.role : OLD.orgRole),
+          orgTitle: HAS(member, "orgTitle") ? member.orgTitle : (HAS(member, "title") ? member.title : OLD.orgTitle),
+          status: HAS(member, "status") ? member.status : OLD.status,
+          isMfaEnabled: HAS(member, "isMfaEnabled") ? member.isMfaEnabled : OLD.isMfaEnabled,
+          totpSecret: HAS(member, "totpSecret") ? member.totpSecret : OLD.totpSecret,
+          lastTotpTimeStep: HAS(member, "lastTotpTimeStep") ? member.lastTotpTimeStep : OLD.lastTotpTimeStep,
+          updatedAt: DATE_ISO8601(DATE_NOW())
+        }
+        IN user_organization
+    `);
+    console.log('Copied organizationMembers -> user_organization');
   }
 
   // Rename the platform-era fields on users in one pass: organizationId
@@ -510,20 +559,8 @@ async function main() {
 
   await targetDb.query(`
     FOR u IN users
-      FILTER !HAS(u, "isMfaEnabled")
-        || !HAS(u, "has_request_mfa_reset_link")
-        || HAS(u, "isSuperAdmin")
-        || !HAS(u, "totpSecret")
-        || !HAS(u, "lastTotpTimeStep")
-        || !HAS(u, "requested_mfa_reset_link_at")
-      UPDATE u WITH {
-        isMfaEnabled: HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false,
-        has_request_mfa_reset_link: HAS(u, "has_request_mfa_reset_link") ? u.has_request_mfa_reset_link : false,
-        isSuperAdmin: null,
-        totpSecret: HAS(u, "totpSecret") ? u.totpSecret : null,
-        lastTotpTimeStep: HAS(u, "lastTotpTimeStep") ? u.lastTotpTimeStep : null,
-        requested_mfa_reset_link_at: HAS(u, "requested_mfa_reset_link_at") ? u.requested_mfa_reset_link_at : null
-      } IN users OPTIONS { keepNull: false }
+      FILTER HAS(u, "isSuperAdmin")
+      UPDATE u WITH { isSuperAdmin: null } IN users OPTIONS { keepNull: false }
   `);
 
   let migratedLegacyIdentities = false;
@@ -653,9 +690,77 @@ async function main() {
           } IN users
     `);
   }
+
+  await targetDb.query(
+    `
+    FOR u IN users
+      LET organizationId = (HAS(u, "organizationId") && u.organizationId != null && u.organizationId != "") ? u.organizationId : @rootOrganizationId
+      LET legacyRole = HAS(u, "organization_role") && u.organization_role != null && u.organization_role != ""
+        ? u.organization_role
+        : null
+      LET hasLegacyMfa = HAS(u, "isMfaEnabled")
+        || HAS(u, "totpSecret")
+        || HAS(u, "lastTotpTimeStep")
+      FILTER legacyRole != null || hasLegacyMfa
+      LET normalizedRole = legacyRole == "owner" || legacyRole == "admin" || legacyRole == "member" || legacyRole == "viewer"
+        ? legacyRole
+        : "viewer"
+      UPSERT { organizationId, userId: u._key }
+      INSERT {
+        _key: CONCAT("uorg_", organizationId, "_", u._key),
+        organizationId,
+        userId: u._key,
+        orgRole: normalizedRole,
+        orgTitle: HAS(u, "organization_title") ? u.organization_title : null,
+        status: "active",
+        joinedAt: HAS(u, "createdAt") ? u.createdAt : DATE_ISO8601(DATE_NOW()),
+        invitedByUserId: null,
+        isMfaEnabled: HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false,
+        totpSecret: HAS(u, "totpSecret") ? u.totpSecret : null,
+        lastTotpTimeStep: HAS(u, "lastTotpTimeStep") ? u.lastTotpTimeStep : null,
+        createdAt: HAS(u, "createdAt") ? u.createdAt : DATE_ISO8601(DATE_NOW()),
+        updatedAt: DATE_ISO8601(DATE_NOW()),
+        embedding: []
+      }
+      UPDATE {
+        orgRole: OLD.orgRole == "owner" ? OLD.orgRole : normalizedRole,
+        orgTitle: HAS(u, "organization_title") && u.organization_title != null ? u.organization_title : OLD.orgTitle,
+        isMfaEnabled: HAS(u, "isMfaEnabled") ? u.isMfaEnabled : OLD.isMfaEnabled,
+        totpSecret: HAS(u, "totpSecret") ? u.totpSecret : OLD.totpSecret,
+        lastTotpTimeStep: HAS(u, "lastTotpTimeStep") ? u.lastTotpTimeStep : OLD.lastTotpTimeStep,
+        updatedAt: DATE_ISO8601(DATE_NOW())
+      }
+      IN user_organization
+    `,
+    { rootOrganizationId },
+  );
+
+  await targetDb.query(`
+    FOR u IN users
+      FILTER HAS(u, "organization_role")
+        || HAS(u, "organization_title")
+        || HAS(u, "isMfaEnabled")
+        || HAS(u, "has_request_mfa_reset_link")
+        || HAS(u, "isSuperAdmin")
+        || HAS(u, "totpSecret")
+        || HAS(u, "lastTotpTimeStep")
+        || HAS(u, "requested_mfa_reset_link_at")
+      UPDATE u WITH {
+        organization_role: null,
+        organization_title: null,
+        isMfaEnabled: null,
+        has_request_mfa_reset_link: null,
+        isSuperAdmin: null,
+        totpSecret: null,
+        lastTotpTimeStep: null,
+        requested_mfa_reset_link_at: null
+      } IN users OPTIONS { keepNull: false }
+  `);
+
   if (migratedLegacyIdentities) {
     await backfillCollectionEmbeddings(targetDb, collections.find((spec) => spec.name === 'users')!);
   }
+  await backfillCollectionEmbeddings(targetDb, collections.find((spec) => spec.name === 'user_organization')!);
 
   const oldPostRenders = targetDb.collection('postRenders');
   if (await oldPostRenders.exists()) {
@@ -1081,9 +1186,9 @@ async function main() {
 
   // The platforms collection is fully copied into organizations (same keys)
   // and nothing references it anymore — retire it. Teams follow the same
-  // path (copied into organizations/organizationMembers above), and the
+  // path (copied into organizations/user_organization above), and the
   // invites collection retires with the teams feature.
-  for (const retiredCollectionName of ['platforms', 'teams', 'teamMembers', 'teamMemberInvites']) {
+  for (const retiredCollectionName of ['platforms', 'teams', 'teamMembers', 'teamMemberInvites', 'organizationMembers']) {
     const retiredCollection = targetDb.collection(retiredCollectionName);
     if (await retiredCollection.exists()) {
       await retiredCollection.drop();

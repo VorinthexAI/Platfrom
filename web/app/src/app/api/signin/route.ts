@@ -132,6 +132,11 @@ export async function POST(request: Request) {
   }
 
   const result = await backendFetch<{
+    organization_mfa_required?: boolean;
+    status?: "totp_setup_required" | "totp_required";
+    totp_challenge_token_hash?: string;
+    name?: string | null;
+    organization_title?: string | null;
     handoff_token_hash?: string;
     handoff_expires_at?: string;
   }>("/auth/login", {
@@ -149,6 +154,32 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
+  }
+
+  if (
+    result.ok &&
+    result.data?.organization_mfa_required &&
+    result.data.status &&
+    result.data.totp_challenge_token_hash
+  ) {
+    const response = NextResponse.json({
+      ok: true,
+      collect,
+      organization_mfa_required: true,
+      status: result.data.status,
+      totp_challenge_token_hash: result.data.totp_challenge_token_hash,
+      name: result.data.name ?? null,
+      title: result.data.organization_title ?? null,
+    });
+    if (isNewExplorer) {
+      response.cookies.set(EXPLORER_COOKIE, explorerId, {
+        httpOnly: true,
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 365,
+        path: "/",
+      });
+    }
+    return response;
   }
 
   const response = NextResponse.json({ ok: true, collect });

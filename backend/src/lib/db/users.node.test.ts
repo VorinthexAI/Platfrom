@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { organizationRoleSchema, userSchema } from './users.node';
+import { userSchema } from './users.node';
 
 const baseUser = {
   key: 'usr_test',
@@ -11,31 +11,35 @@ const baseUser = {
 };
 
 describe('user node schema', () => {
-  test('defaults organization role and auth fields for ordinary users', () => {
+  test('keeps organization role and MFA fields off ordinary users', () => {
     const user = userSchema.parse(baseUser);
 
-    expect(user.organization_role).toBeNull();
-    expect(user.isMfaEnabled).toBe(false);
-    expect(user.has_request_mfa_reset_link).toBe(false);
-    expect(user.totpSecret).toBeNull();
-    expect(user.lastTotpTimeStep).toBeNull();
-    expect(user.requested_mfa_reset_link_at).toBeNull();
+    expect('organization_role' in user).toBe(false);
+    expect('organization_title' in user).toBe(false);
+    expect('isMfaEnabled' in user).toBe(false);
+    expect('has_request_mfa_reset_link' in user).toBe(false);
+    expect('totpSecret' in user).toBe(false);
+    expect('lastTotpTimeStep' in user).toBe(false);
+    expect('requested_mfa_reset_link_at' in user).toBe(false);
   });
 
-  test('accepts only organization roles, not legacy booleans', () => {
-    expect(organizationRoleSchema.parse('owner')).toBe('owner');
-    expect(organizationRoleSchema.parse('admin')).toBe('admin');
-    expect(organizationRoleSchema.parse('viewer')).toBe('viewer');
-    expect(() => organizationRoleSchema.parse('member')).toThrow();
-
+  test('strips legacy organization and MFA fields', () => {
     const user = userSchema.parse({
       ...baseUser,
       organization_role: 'viewer',
+      organization_title: 'Operator',
+      isMfaEnabled: true,
+      totpSecret: 'secret',
+      lastTotpTimeStep: 123,
       is_platform_member: true,
       is_platform_owner: true,
     });
 
-    expect(user.organization_role).toBe('viewer');
+    expect('organization_role' in user).toBe(false);
+    expect('organization_title' in user).toBe(false);
+    expect('isMfaEnabled' in user).toBe(false);
+    expect('totpSecret' in user).toBe(false);
+    expect('lastTotpTimeStep' in user).toBe(false);
     expect('is_platform_member' in user).toBe(false);
     expect('is_platform_owner' in user).toBe(false);
   });

@@ -150,6 +150,7 @@ export function CaveOverlay() {
                 {caveKind === "waitlist-verify" ? <WaitlistVerifyFlow /> : null}
                 {caveKind === "magic" ? <MagicFlow /> : null}
                 {caveKind === "mfa" ? <MagicFlow /> : null}
+                {caveKind === "organization-signin" ? <MagicFlow /> : null}
                 {caveKind === "privacy" ? <VaultReaderFlow copy={PRIVACY_COPY} /> : null}
                 {caveKind === "terms" ? <VaultReaderFlow copy={TERMS_COPY} /> : null}
                 {caveKind === "about" ? <VaultReaderFlow copy={ABOUT_COPY} /> : null}
@@ -1014,6 +1015,26 @@ function ExplorerSigninFlow() {
             globalTotal: data.collect.globalTotal,
           });
         }
+        if (
+          data?.organization_mfa_required &&
+          (data.status === "totp_setup_required" ||
+            data.status === "totp_required") &&
+          typeof data.totp_challenge_token_hash === "string"
+        ) {
+          window.localStorage.setItem("vx_member_email", normalizedEmail);
+          if (typeof data.name === "string") {
+            window.localStorage.setItem("vx_member_name", data.name);
+          }
+          if (typeof data.title === "string") {
+            window.localStorage.setItem("vx_member_title", data.title);
+          }
+          setMagicHandoff({
+            status: data.status,
+            challengeTokenHash: data.totp_challenge_token_hash,
+          });
+          useGalaxyStore.getState().enterCave("organization-signin");
+          return;
+        }
         // Members get a TOTP step after their link; remember who asked so
         // the sun can greet them and MFA recovery knows the email.
         window.localStorage.setItem("vx_member_email", normalizedEmail);
@@ -1447,6 +1468,7 @@ function TotpSetupPanel({
   data: TotpSetupData;
   onSuccess: (name: string | null, title: string | null) => void;
 }) {
+  const [setupData, setSetupData] = useState(data);
   const [codeA, setCodeA] = useState("");
   const [codeB, setCodeB] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "error">("idle");
@@ -1461,7 +1483,7 @@ function TotpSetupPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          challenge_token_hash: data.challenge,
+          challenge_token_hash: setupData.challenge,
           codes: [codeA, codeB],
         }),
       });
@@ -1490,7 +1512,7 @@ function TotpSetupPanel({
       <div className="mt-4 flex items-center gap-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={data.qr}
+          src={setupData.qr}
           alt="Authenticator QR code"
           width={124}
           height={124}
@@ -1501,12 +1523,12 @@ function TotpSetupPanel({
             Manual secret
           </p>
           <p className="mt-1 font-mono text-[0.62rem] break-all text-silver-300">
-            {data.secret}
+            {setupData.secret}
           </p>
         </div>
       </div>
       <a
-        href={data.otpauthUrl}
+        href={setupData.otpauthUrl}
         className="vui-button vui-button-secondary mt-4 inline-flex min-h-0 w-full justify-center px-5 py-3 text-[0.62rem] uppercase"
       >
         On mobile? Tap here to open in your auth app
@@ -1558,33 +1580,61 @@ function TotpSetupPanel({
           {error}
         </p>
       ) : null}
-      <MfaRecoveryBlock />
+      <MfaRecoveryBlock
+        challenge={setupData.challenge}
+        onReset={(nextData) => {
+          setSetupData(nextData);
+          setCodeA("");
+          setCodeB("");
+          setError("");
+          setStatus("idle");
+        }}
+      />
     </form>
   );
 }
 
 /**
- * "Lost access to your MFA?" — sends a fresh 5-minute recovery link that
+ * "Lost access to your MFA?" resets the active organization MFA secret and
  * lets the member set up a new authenticator. Shared by both wizards.
  */
-function MfaRecoveryBlock() {
+function MfaRecoveryBlock({
+  challenge,
+  onReset,
+}: {
+  challenge: string;
+  onReset: (data: TotpSetupData) => void;
+}) {
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
     "idle",
   );
 
   async function requestRecovery() {
-    const email = window.localStorage.getItem("vx_member_email");
-    if (!email) {
-      useGalaxyStore.getState().enterCave("signin");
-      return;
-    }
     if (status === "sending") return;
     setStatus("sending");
     try {
-      await fetch("/api/auth/totp/reset/request", {
+      const response = await fetch("/api/auth/totp/reset/request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ challenge_token_hash: challenge }),
+      });
+      const result = await response.json();
+      if (
+        !response.ok ||
+        !result.ok ||
+        typeof result.setup_challenge_token_hash !== "string" ||
+        typeof result.secret !== "string" ||
+        typeof result.otpauth_url !== "string" ||
+        typeof result.qr_code_data_url !== "string"
+      ) {
+        setStatus("error");
+        return;
+      }
+      onReset({
+        challenge: result.setup_challenge_token_hash,
+        secret: result.secret,
+        otpauthUrl: result.otpauth_url,
+        qr: result.qr_code_data_url,
       });
       setStatus("sent");
     } catch {
@@ -1607,8 +1657,8 @@ function MfaRecoveryBlock() {
       {status === "sent" || status === "error" ? (
         <p aria-live="polite" className="mt-3 text-xs text-silver-500">
           {status === "sent"
-            ? "Check your inbox — a recovery link is on its way. It expires in 5 minutes."
-            : "Could not send the recovery link. Try again."}
+            ? "MFA was reset. Set up a new authenticator above."
+            : "Could not reset MFA. Try again."}
         </p>
       ) : null}
     </div>
@@ -1686,7 +1736,18 @@ function TotpVerifyPanel({
           Invalid code, try the next one.
         </p>
       ) : null}
-      <MfaRecoveryBlock />
+      <MfaRecoveryBlock
+        challenge={challenge}
+        onReset={(data) => {
+          setCode("");
+          setStatus("idle");
+          setMagicHandoff({
+            status: "totp_setup_required",
+            challengeTokenHash: data.challenge,
+          });
+          useGalaxyStore.getState().enterCave("organization-signin");
+        }}
+      />
     </form>
   );
 }

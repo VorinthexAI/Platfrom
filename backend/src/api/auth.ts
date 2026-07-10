@@ -10,17 +10,19 @@ import QRCode from 'qrcode';
 import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
 import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
-import { listActiveOrganizationMembersByUser, type OrganizationMember } from '@/lib/db/organization-members.node';
+import { getOrganizationById } from '@/lib/db/organizations.node';
+import {
+  listActiveUserOrganizationsByUser,
+  updateUserOrganization,
+  type UserOrganization,
+} from '@/lib/db/user-organization.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { trackPlatformEvent } from '@/platform/events';
 import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
 import { notifyCountersDirty } from './live-bus';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
-/** Platform-role links (MFA sign-in, setup, recovery) burn out in 5 minutes. */
-const MEMBER_LINK_TTL_MS = 5 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
-const MFA_RESET_LINK_TTL_MS = MEMBER_LINK_TTL_MS;
 const TOTP_PERIOD_SECONDS = 30;
 const ISSUER = 'Vorinthex';
 
@@ -40,13 +42,15 @@ export interface AuthIdentity {
 interface LoginIdentity {
   type: LoginIdentityType;
   key: string;
+  linkKey: string;
+  organizationId: string;
+  orgRole: UserOrganization['orgRole'];
   email: string;
   emailHash: string;
   name: string | null;
   organizationTitle: string | null;
+  organizationMfaEnabled: boolean;
   isMfaEnabled: boolean;
-  has_request_mfa_reset_link: boolean;
-  requested_mfa_reset_link_at: string | null;
   totpSecret: string | null;
   lastTotpTimeStep: number | null;
 }
@@ -70,13 +74,8 @@ export type MagicLinkValidationResult =
     welcomeLine: string;
   };
 
-export function hasUsableMfaResetRequest(input: {
-  has_request_mfa_reset_link: boolean;
-  requested_mfa_reset_link_at: string | null;
-}, nowMs = Date.now()) {
-  if (!input.has_request_mfa_reset_link || !input.requested_mfa_reset_link_at) return false;
-  const requestedAt = new Date(input.requested_mfa_reset_link_at).getTime();
-  return Number.isFinite(requestedAt) && requestedAt + MFA_RESET_LINK_TTL_MS > nowMs;
+export function hasUsableMfaResetRequest() {
+  return false;
 }
 
 function base64UrlEncode(value: string) {
@@ -91,140 +90,78 @@ async function signAccessTokenPayload(payload: string) {
   return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
 }
 
-function organizationIdentity(user: User): LoginIdentity | null {
-  if (user.organization_role === 'owner') {
-    return {
-      type: 'superAdmin',
-      key: user.key,
-      email: user.email,
-      emailHash: user.emailHash,
-      name: user.name,
-      organizationTitle: user.organization_title,
-      isMfaEnabled: user.isMfaEnabled,
-      has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-      requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-      totpSecret: user.totpSecret,
-      lastTotpTimeStep: user.lastTotpTimeStep,
-    };
-  }
-  if (user.organization_role === 'admin' || user.organization_role === 'viewer') {
-    return {
-      type: 'member',
-      key: user.key,
-      email: user.email,
-      emailHash: user.emailHash,
-      name: user.name,
-      organizationTitle: user.organization_title,
-      isMfaEnabled: user.isMfaEnabled,
-      has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-      requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-      totpSecret: user.totpSecret,
-      lastTotpTimeStep: user.lastTotpTimeStep,
-    };
-  }
-  return null;
-}
-
-function membershipIdentity(
+async function membershipIdentity(
   user: User,
-  membership: Pick<OrganizationMember, 'role'>,
-): LoginIdentity {
+  membership: UserOrganization,
+): Promise<LoginIdentity | null> {
+  const organization = await getOrganizationById(membership.organizationId);
+  if (!organization?.isActive) return null;
   return {
-    type: membership.role === 'owner' ? 'superAdmin' : 'member',
+    type: membership.orgRole === 'owner' ? 'superAdmin' : 'member',
     key: user.key,
+    linkKey: membership.key,
+    organizationId: membership.organizationId,
+    orgRole: membership.orgRole,
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
-    organizationTitle: user.organization_title,
-    isMfaEnabled: user.isMfaEnabled,
-    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-    totpSecret: user.totpSecret,
-    lastTotpTimeStep: user.lastTotpTimeStep,
+    organizationTitle: membership.orgTitle,
+    organizationMfaEnabled: organization.mfa_enabled,
+    isMfaEnabled: membership.isMfaEnabled,
+    totpSecret: membership.totpSecret,
+    lastTotpTimeStep: membership.lastTotpTimeStep,
   };
 }
 
 function strongestMembership(
-  memberships: OrganizationMember[],
-): OrganizationMember | null {
-  const rank: Record<OrganizationMember['role'], number> = {
+  memberships: UserOrganization[],
+): UserOrganization | null {
+  const rank: Record<UserOrganization['orgRole'], number> = {
     owner: 4,
     admin: 3,
     member: 2,
     viewer: 1,
   };
-  return memberships.reduce<OrganizationMember | null>((best, membership) => {
-    if (!best || rank[membership.role] > rank[best.role]) return membership;
+  return memberships.reduce<UserOrganization | null>((best, membership) => {
+    if (!best || rank[membership.orgRole] > rank[best.orgRole]) return membership;
     return best;
   }, null);
 }
 
 async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
-  const membership = strongestMembership(await listActiveOrganizationMembersByUser(user.key));
+  const membership = strongestMembership(await listActiveUserOrganizationsByUser(user.key));
   return membership ? membershipIdentity(user, membership) : null;
-}
-
-function memberIdentity(user: User): LoginIdentity {
-  return {
-    type: 'member',
-    key: user.key,
-    email: user.email,
-    emailHash: user.emailHash,
-    name: user.name,
-    organizationTitle: user.organization_title,
-    isMfaEnabled: user.isMfaEnabled,
-    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-    totpSecret: user.totpSecret,
-    lastTotpTimeStep: user.lastTotpTimeStep,
-  };
-}
-
-function superAdminIdentity(user: User): LoginIdentity {
-  return {
-    type: 'superAdmin',
-    key: user.key,
-    email: user.email,
-    emailHash: user.emailHash,
-    name: user.name,
-    organizationTitle: user.organization_title,
-    isMfaEnabled: user.isMfaEnabled,
-    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-    totpSecret: user.totpSecret,
-    lastTotpTimeStep: user.lastTotpTimeStep,
-  };
 }
 
 export async function findLoginIdentityByEmail(email: string): Promise<LoginIdentity | null> {
   const normalized = normalizeEmail(email);
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
   if (!user) return null;
-  return organizationIdentity(user) ?? (await organizationMembershipIdentity(user));
+  return organizationMembershipIdentity(user);
 }
 
 async function getLoginIdentity(type: LoginIdentityType, key: string): Promise<LoginIdentity | null> {
   const user = await getUserById(key);
   if (!user) return null;
-  const legacyIdentity =
-    type === 'superAdmin'
-      ? user.organization_role === 'owner' ? superAdminIdentity(user) : null
-      : user.organization_role === 'admin' || user.organization_role === 'viewer' ? memberIdentity(user) : null;
-  if (legacyIdentity) return legacyIdentity;
-
-  const membership = await organizationMembershipIdentity(user);
-  if (!membership || membership.type !== type) return null;
-  return membership;
+  const memberships = await listActiveUserOrganizationsByUser(user.key);
+  const matching = memberships.filter((membership) => {
+    const membershipType: LoginIdentityType = membership.orgRole === 'owner' ? 'superAdmin' : 'member';
+    return membershipType === type;
+  });
+  const strongest = strongestMembership(matching);
+  return strongest ? membershipIdentity(user, strongest) : null;
 }
 
 async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: Record<string, unknown>) {
-  return updateUser(key, patch as Partial<User>);
+  const identity = await getLoginIdentity(type, key);
+  if (!identity) return null;
+  return updateUserOrganization(identity.linkKey, patch as Partial<UserOrganization>);
 }
 
 async function getLoginIdentityByRefreshTokenHash(refreshTokenHash: string): Promise<LoginIdentity | null> {
   const user = await getUserByRefreshTokenHash(refreshTokenHash);
   if (!user) return null;
-  return organizationIdentity(user) ?? (await organizationMembershipIdentity(user));
+  return organizationMembershipIdentity(user);
 }
 
 export async function createAccessToken(identity: AuthIdentity | string) {
@@ -232,11 +169,12 @@ export async function createAccessToken(identity: AuthIdentity | string) {
     ? { key: identity, identityType: 'user' as const }
     : identity;
   const now = Math.floor(Date.now() / 1000);
+  const ttlSeconds = normalized.identityType === 'user' ? 60 * 60 : 60 * 60 * 24;
   const payload = base64UrlEncode(JSON.stringify({
     sub: normalized.key,
     identityType: normalized.identityType,
     iat: now,
-    exp: now + 60 * 60,
+    exp: now + ttlSeconds,
   }));
   const signature = await signAccessTokenPayload(payload);
   return `vrtx_access_${payload}.${signature}`;
@@ -262,7 +200,7 @@ export async function issueTokens(identity: LoginIdentity): Promise<SessionToken
   const accessToken = await createAccessToken({ key: identity.key, identityType: identity.type });
   const refreshToken = randomToken('vrtx_refresh_');
   const refreshTokenHash = await sha256(refreshToken);
-  await updateLoginIdentity(identity.type, identity.key, {
+  await updateUser(identity.key, {
     refreshTokenHash,
     updatedAt: new Date().toISOString(),
   });
@@ -333,7 +271,7 @@ export async function createTotpChallengeForIdentity(
 
   const totpChallenge = await createChallenge(auth.key, 'totp', TOTP_CHALLENGE_TTL_MS, auth.type);
   return {
-    status: auth.has_request_mfa_reset_link ? 'totp_setup_required' : auth.isMfaEnabled ? 'totp_required' : 'totp_setup_required',
+    status: auth.isMfaEnabled ? 'totp_required' : 'totp_setup_required',
     totpChallengeToken: totpChallenge.tokenHash,
     expiresAt: totpChallenge.expiresAt,
   };
@@ -473,15 +411,38 @@ export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
   if (identity) {
-    // A truthy organization_role gets the professional platform email: real
-    // name, MFA-aware copy, a 5-minute link, and the /auth/mfa biome.
-    const challenge = await createChallenge(identity.key, 'email', MEMBER_LINK_TTL_MS, identity.type, { withHandoff: true });
-    const magicLink = buildMfaLink(challenge.tokenHash);
+    if (identity.organizationMfaEnabled) {
+      const challenge = await createTotpChallengeForIdentity(identity.type, identity.key);
+      if (!challenge) return { allowed: false as const };
+      trackPlatformEvent({
+        slug: 'platform.sign_in_link_requested',
+        userId: identity.key,
+        data: {
+          user_id: identity.key,
+          identity_type: identity.type,
+          email_hash: identity.emailHash,
+          mfa_enabled: true,
+          delivery: 'direct_challenge',
+        },
+      });
+      return {
+        allowed: true as const,
+        organizationMfaRequired: true as const,
+        status: challenge.status,
+        totpChallengeToken: challenge.totpChallengeToken,
+        expiresAt: challenge.expiresAt,
+        name: identity.name,
+        organizationTitle: identity.organizationTitle,
+      };
+    }
+
+    const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type, { withHandoff: true });
+    const magicLink = buildMagicLink(challenge.tokenHash, 'member');
     await deliverMemberSignInEmail({
       email: normalized,
       name: memberGreetingName(identity),
       magicLink,
-      mfaEnabled: identity.isMfaEnabled,
+      mfaEnabled: false,
       expiresAt: challenge.expiresAt,
     });
     trackPlatformEvent({
@@ -491,7 +452,7 @@ export async function requestSignInEmail(email: string) {
         user_id: identity.key,
         identity_type: identity.type,
         email_hash: identity.emailHash,
-        mfa_enabled: identity.isMfaEnabled,
+        mfa_enabled: false,
       },
     });
     return {
@@ -529,40 +490,11 @@ export async function requestSignInEmail(email: string) {
 }
 
 export async function requestMfaResetEmail(email: string) {
-  const normalized = normalizeEmail(email);
-  const identity = await findLoginIdentityByEmail(normalized);
-  if (!identity?.isMfaEnabled) {
-    return {
-      ok: true as const,
-      emailSent: false,
-      expiresAt: new Date(Date.now() + MFA_RESET_LINK_TTL_MS),
-    };
-  }
-
-  const requestedAt = new Date();
-  await updateLoginIdentity(identity.type, identity.key, {
-    has_request_mfa_reset_link: true,
-    requested_mfa_reset_link_at: requestedAt.toISOString(),
-    updatedAt: requestedAt.toISOString(),
-  });
-
-  const challenge = await createChallenge(identity.key, 'email', MFA_RESET_LINK_TTL_MS, identity.type);
-  const magicLink = buildMfaLink(challenge.tokenHash);
-  await deliverMfaResetEmail({
-    email: normalized,
-    name: memberGreetingName(identity),
-    magicLink,
-    expiresAt: challenge.expiresAt,
-  });
-  trackPlatformEvent({
-    slug: 'platform.mfa_recovery_requested',
-    userId: identity.key,
-    data: { user_id: identity.key, email_hash: identity.emailHash },
-  });
+  const identity = await findLoginIdentityByEmail(email);
   return {
     ok: true as const,
-    emailSent: true,
-    expiresAt: challenge.expiresAt,
+    emailSent: Boolean(identity?.isMfaEnabled),
+    expiresAt: new Date(Date.now() + TOTP_CHALLENGE_TTL_MS),
   };
 }
 
@@ -617,8 +549,30 @@ export async function validateMagicLink(token: string, explorerId?: string): Pro
     };
   }
 
+  const auth = await getLoginIdentity(emailChallenge.identityType, emailChallenge.identityKey);
+  if (!auth) return null;
   await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
-  return createTotpChallengeForIdentity(emailChallenge.identityType, emailChallenge.identityKey);
+  if (auth.organizationMfaEnabled) {
+    return createTotpChallengeForIdentity(emailChallenge.identityType, emailChallenge.identityKey);
+  }
+  await updateUser(auth.key, {
+    lastLoginAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  trackPlatformEvent({
+    slug: 'auth.magic_link_authenticated',
+    userId: auth.key,
+    data: { user_id: auth.key, email_hash: auth.emailHash, identity_type: auth.type },
+  });
+  return {
+    status: 'authenticated',
+    identity: { key: auth.key, identityType: auth.type },
+    ...(await issueTokens(auth)),
+    alias: auth.name ?? defaultNameFromEmail(auth.email) ?? auth.email,
+    aliasSlug: null,
+    waitlistNumber: null,
+    welcomeLine: `Welcome back${auth.name ? `, ${auth.name}` : ''}.`,
+  };
 }
 
 export async function createUserWithAuth(input: { email: string; name?: string; profile_url?: string }) {
@@ -634,7 +588,7 @@ export async function startTotpSetup(challengeToken: string) {
   const challenge = await consumeChallenge(challengeToken, 'totp');
   if (!challenge || challenge.identityType === 'user') return null;
   const identity = await getLoginIdentity(challenge.identityType, challenge.identityKey);
-  if (!identity || (identity.isMfaEnabled && !identity.has_request_mfa_reset_link)) return null;
+  if (!identity || identity.isMfaEnabled) return null;
 
   const secret = generateSecret();
   await updateLoginIdentity(identity.type, identity.key, {
@@ -656,6 +610,29 @@ export async function startTotpSetup(challengeToken: string) {
     otpauthUrl,
     qrCodeDataUrl: await QRCode.toDataURL(otpauthUrl, { errorCorrectionLevel: 'M', margin: 1 }),
   };
+}
+
+export async function resetTotpForChallenge(challengeToken: string) {
+  const storedTokenHash = await sha256(challengeToken);
+  const challenge = await getAuthChallengeByTokenHash(storedTokenHash);
+  if (
+    !challenge ||
+    challenge.kind !== 'totp' ||
+    challenge.identityType === 'user' ||
+    challenge.consumedAt !== null ||
+    new Date(challenge.expiresAt).getTime() <= Date.now()
+  ) {
+    return null;
+  }
+  const identity = await getLoginIdentity(challenge.identityType, challenge.identityKey);
+  if (!identity) return null;
+  await updateLoginIdentity(identity.type, identity.key, {
+    isMfaEnabled: false,
+    totpSecret: null,
+    lastTotpTimeStep: null,
+    updatedAt: new Date().toISOString(),
+  });
+  return startTotpSetup(challengeToken);
 }
 
 export async function verifySuccessiveTotpCodes(secret: string, codes: [string, string], epoch = Date.now() / 1000) {
@@ -688,11 +665,7 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
   if (!challenge || challenge.identityType === 'user') return { ok: false as const, error: 'invalid challenge' };
   const auth = await getLoginIdentity(challenge.identityType, challenge.identityKey);
   if (!auth?.totpSecret) return { ok: false as const, error: 'setup unavailable' };
-  if (auth.has_request_mfa_reset_link) {
-    if (!hasUsableMfaResetRequest(auth)) {
-      return { ok: false as const, error: 'mfa reset link expired; request a new reset link' };
-    }
-  } else if (auth.isMfaEnabled) {
+  if (auth.isMfaEnabled) {
     return { ok: false as const, error: 'setup unavailable' };
   }
 
@@ -701,10 +674,11 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
 
   await updateLoginIdentity(auth.type, auth.key, {
     isMfaEnabled: true,
-    has_request_mfa_reset_link: false,
-    requested_mfa_reset_link_at: null,
-    lastLoginAt: new Date().toISOString(),
     lastTotpTimeStep: lastTimeStep,
+    updatedAt: new Date().toISOString(),
+  });
+  await updateUser(auth.key, {
+    lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
   trackPlatformEvent({
@@ -740,8 +714,11 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
   if (!result.valid) return null;
 
   await updateLoginIdentity(auth.type, auth.key, {
-    lastLoginAt: new Date().toISOString(),
     lastTotpTimeStep: result.timeStep,
+    updatedAt: new Date().toISOString(),
+  });
+  await updateUser(auth.key, {
+    lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
   trackPlatformEvent({
