@@ -10,6 +10,7 @@ import {
 import {
   galaxyMotion,
   stepForEntity,
+  syncDocumentTitle,
   syncEntityUrl,
   useGalaxyStore,
 } from "@/lib/galaxy-store";
@@ -105,6 +106,9 @@ export function UniverseStage({
         searchParams: new URLSearchParams(window.location.search),
       });
       setStep(stepForEntity(entity));
+      // pushState never touches document.title, so back/forward across
+      // vault paths must restore it by hand.
+      syncDocumentTitle(window.location.pathname);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
