@@ -28,6 +28,7 @@ import {
   listOrchestratorsPage,
   updateOrchestrator,
 } from '@/lib/db/orchestrators.node';
+import { getVoiceById } from '@/lib/db/voices.node';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { getAuthIdentity, getUserId } from './security';
@@ -45,6 +46,8 @@ const storagePathSchema = z.string().trim().min(1).max(500);
 const nameSchema = z.string().trim().min(1).max(200);
 const modelSchema = z.string().trim().min(1).max(200);
 const roleSchema = z.string().trim().min(1).max(2000);
+const voiceIdSchema = z.string().trim().min(1).max(200);
+const skillSchema = z.string().trim().min(1);
 
 const mindBodySchema = strictObject({
   name: nameSchema.optional(),
@@ -54,14 +57,16 @@ const mindBodySchema = strictObject({
 const orchestratorBodySchema = strictObject({
   key: z.string().trim().min(1).max(200).optional(),
   name: nameSchema,
-  storage_path: storagePathSchema,
-  model: modelSchema,
+  role: roleSchema,
+  voice_id: voiceIdSchema,
+  skill: skillSchema,
 });
 
 const orchestratorPatchSchema = strictObject({
   name: nameSchema.optional(),
-  storage_path: storagePathSchema.optional(),
-  model: modelSchema.optional(),
+  role: roleSchema.optional(),
+  voice_id: voiceIdSchema.optional(),
+  skill: skillSchema.optional(),
 });
 
 const agentBodySchema = strictObject({
@@ -157,8 +162,9 @@ function orchestratorResponse(orchestrator: Awaited<ReturnType<typeof getOrchest
   return {
     id: orchestrator.key,
     name: orchestrator.name,
-    storage_path: orchestrator.storagePath,
-    model: orchestrator.model,
+    role: orchestrator.role,
+    voice_id: orchestrator.voiceId,
+    skill: orchestrator.skill,
     created_at: orchestrator.createdAt,
     updated_at: orchestrator.updatedAt,
   };
@@ -332,13 +338,17 @@ export async function createSystemOrchestrator(c: Context) {
   if ('error' in admin) return admin.error;
 
   const body = await parseJson(c, orchestratorBodySchema);
+  const voice = await getVoiceById(body.voice_id);
+  if (!voice) return c.json({ error: 'voice not found' }, 404);
+
   const timestamp = nowIso();
   try {
     const orchestrator = await insertOrchestrator({
       key: body.key ?? newId(),
       name: body.name,
-      storagePath: body.storage_path,
-      model: body.model,
+      role: body.role,
+      voiceId: voice.key,
+      skill: body.skill,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
@@ -359,10 +369,18 @@ export async function updateSystemOrchestrator(c: Context) {
   if (!orchestrator) return c.json({ error: 'orchestrator not found' }, 404);
 
   const body = await parseJson(c, orchestratorPatchSchema);
+  let voiceId: string | undefined;
+  if (body.voice_id !== undefined) {
+    const voice = await getVoiceById(body.voice_id);
+    if (!voice) return c.json({ error: 'voice not found' }, 404);
+    voiceId = voice.key;
+  }
+
   const updated = await updateOrchestrator(orchestrator.key, {
     ...(body.name === undefined ? {} : { name: body.name }),
-    ...(body.storage_path === undefined ? {} : { storagePath: body.storage_path }),
-    ...(body.model === undefined ? {} : { model: body.model }),
+    ...(body.role === undefined ? {} : { role: body.role }),
+    ...(voiceId === undefined ? {} : { voiceId }),
+    ...(body.skill === undefined ? {} : { skill: body.skill }),
     updatedAt: nowIso(),
   });
   return c.json(orchestratorResponse(updated));

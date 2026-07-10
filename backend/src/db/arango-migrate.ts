@@ -148,7 +148,11 @@ const collections: CollectionSpec[] = [
     ],
   },
   { name: 'minds', embedKeys: ['name'], indexes: [{ fields: ['userId'], unique: true }] },
-  { name: 'orchestrators', embedKeys: ['name', 'model'], indexes: [{ fields: ['name'] }] },
+  {
+    name: 'orchestrators',
+    embedKeys: ['name', 'role'],
+    indexes: [{ fields: ['name'] }, { fields: ['voiceId'] }],
+  },
   {
     name: 'voices',
     embedKeys: ['voice', 'modelLabel', 'language'],
