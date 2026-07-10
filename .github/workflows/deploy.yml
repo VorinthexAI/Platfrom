@@ -8,6 +8,14 @@ name: Unified Deploy
 #   merge to main  ->  Build  ->  Test  ->  Docker Buildx  ->  Push ECR (web + backend)
 #                  ->  [Terraform Plan / Approval / Apply is owned by infra.yml]
 #                  ->  ECS Rolling Deploy (force-new-deployment + wait services-stable + health smoke)
+#                  ->  Early-infra blue-green (SSM) while the ECS cluster is INACTIVE
+#
+# While ECS is not provisioned yet, production traffic is served by the
+# single-box early-infra stack (web + api + redis + caddy behind Caddy). The
+# ECS rollout steps no-op in that state, and the `early-deploy` job performs
+# the same SSM blue-green swap as early-infra.yml so every merge to main still
+# reaches production. Once the cluster/service become ACTIVE the roles flip:
+# ECS rolls and `early-deploy` no-ops.
 #
 # The GitHub `production` environment provides the manual approval gate.
 # Infrastructure provisioning (Terraform plan/apply) lives in infra.yml, not here.
@@ -76,6 +84,7 @@ jobs:
               environments/scripts/cloudflare-cache-policy.ts) web=true ;;
               environments/backend/db.seeds.secrets.json) backend=true ;;
               .github/workflows/deploy.yml) web=true ;;
+              deploy/early/*) web=true ;;
             esac
           }
 
@@ -296,8 +305,15 @@ jobs:
   cloudflare-cache:
     name: Purge Cloudflare cache
     runs-on: ubuntu-latest
-    needs: [changes, deploy-web]
-    if: needs.changes.outputs.web == 'true' && needs.deploy-web.result == 'success' && (github.event_name == 'pull_request' || inputs.deploy)
+    # Runs after early-deploy too — purging before the early-infra box swaps
+    # colors would just refill the cache with the old build.
+    needs: [changes, deploy-web, early-deploy]
+    if: >-
+      always()
+      && needs.changes.outputs.web == 'true'
+      && (github.event_name == 'pull_request' || inputs.deploy)
+      && needs.deploy-web.result == 'success'
+      && needs.early-deploy.result == 'success'
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -893,11 +909,137 @@ jobs:
             fi
           fi
 
+  # ---------------------------------------------------------------------------
+  # EARLY-INFRA: while the ECS cluster is INACTIVE, production traffic is served
+  # by the single-box early-infra stack. This job performs the same SSM
+  # blue-green swap as early-infra.yml so every merge to main still reaches
+  # production. It no-ops once the ECS cluster/service become ACTIVE — from
+  # then on the ECS rollout steps above own the deploy.
+  # ---------------------------------------------------------------------------
+  early-deploy:
+    name: Blue-green deploy to early-infra box
+    runs-on: ubuntu-latest
+    # deploy-web / backend-deploy no-op their ECS rollout while the cluster is
+    # INACTIVE, but sequencing after them keeps the ordering correct in both
+    # eras: images are pushed and DB migrations have run before the swap.
+    needs: [changes, deploy-web, backend-deploy]
+    if: >-
+      always()
+      && (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
+      && (github.event_name == 'pull_request' || inputs.deploy)
+      && (needs.changes.outputs.web != 'true' || needs.deploy-web.result == 'success')
+      && (needs.changes.outputs.backend != 'true' || needs.backend-deploy.result == 'success')
+    environment: production
+    env:
+      APP_INSTANCE_TAG: vorinthex-early-app
+      SITE_URL: ${{ fromJSON(secrets.CONFIG).vorinthex.url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check whether ECS already serves production
+        id: ecs
+        run: |
+          CLUSTER_STATUS=$(aws ecs describe-clusters \
+            --clusters "$ECS_CLUSTER" \
+            --query 'clusters[0].status' \
+            --output text 2>/dev/null || echo INACTIVE)
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_WEB_SERVICE" \
+            --query 'services[0].status' \
+            --output text 2>/dev/null || echo INACTIVE)
+          if [ "$CLUSTER_STATUS" = "ACTIVE" ] && [ "$SERVICE_STATUS" = "ACTIVE" ]; then
+            echo "::notice::Cluster $ECS_CLUSTER and service $ECS_WEB_SERVICE are ACTIVE — production is served by ECS, skipping the early-infra blue-green swap."
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "active=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Blue-green deploy via SSM
+        if: steps.ecs.outputs.active != 'true'
+        env:
+          WEB_CHANGED: ${{ needs.changes.outputs.web }}
+          BACKEND_CHANGED: ${{ needs.changes.outputs.backend }}
+        run: |
+          set -euo pipefail
+          # A changed service deploys the image this run pushed; an unchanged
+          # one redeploys its most recent build (:latest, already live).
+          WEB_TAG=latest
+          API_TAG=latest
+          if [ "$WEB_CHANGED" = "true" ]; then WEB_TAG="$COMMIT_SHA"; fi
+          if [ "$BACKEND_CHANGED" = "true" ]; then API_TAG="$COMMIT_SHA"; fi
+          echo "web tag: $WEB_TAG  api tag: $API_TAG"
+
+          IID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${APP_INSTANCE_TAG}" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          if [ "$IID" = "None" ] || [ -z "$IID" ]; then
+            echo "::error::Early-infra app box (tag Name=${APP_INSTANCE_TAG}) not found while the ECS cluster is INACTIVE — nothing would serve the new build."
+            exit 1
+          fi
+          echo "app box: $IID"
+
+          DEPLOY_B64=$(base64 -w0 deploy/early/deploy.sh)
+          CADDY_B64=$(base64 -w0 deploy/early/Caddyfile.tmpl)
+
+          CMD=$(aws ssm send-command \
+            --instance-ids "$IID" \
+            --document-name AWS-RunShellScript \
+            --comment "unified-deploy early-infra blue-green $COMMIT_SHA" \
+            --timeout-seconds 900 \
+            --parameters commands="[
+              \"set -e\",
+              \"mkdir -p /opt/vorinthex\",
+              \"echo $DEPLOY_B64 | base64 -d > /opt/vorinthex/deploy.sh\",
+              \"echo $CADDY_B64 | base64 -d > /opt/vorinthex/Caddyfile.tmpl\",
+              \"chmod +x /opt/vorinthex/deploy.sh\",
+              \"/opt/vorinthex/deploy.sh $WEB_TAG $API_TAG\"
+            ]" \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $CMD"
+
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'Status' --output text 2>/dev/null || echo Pending)
+            echo "status: $STATUS"
+            case "$STATUS" in
+              Success) break;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardErrorContent' --output text || true
+                exit 1;;
+            esac
+            sleep 10
+          done
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardOutputContent' --output text | tail -30
+
+      - name: Web health smoke check
+        if: steps.ecs.outputs.active != 'true'
+        run: |
+          URL="${SITE_URL:-https://www.vorinthex.com}"
+          for i in $(seq 1 24); do
+            CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
+            if [ "$CODE" = "200" ]; then
+              echo "Web is live (HTTP 200) at $URL on attempt $i/24"
+              exit 0
+            fi
+            echo "attempt $i/24: HTTP $CODE; retrying in 10s"
+            sleep 10
+          done
+          echo "::error::Web health check failed after 4 minutes ($URL)"
+          exit 1
+
   deploy-summary:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render]
+    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy]
     steps:
       - name: Write deploy audit
         run: |
@@ -910,6 +1052,7 @@ jobs:
             echo "| cloudflare cache | ${{ needs.changes.outputs.web }} | ${{ needs.cloudflare-cache.result }} |"
             echo "| api (ECS vorinthex-prod-api) | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-deploy.result }} |"
             echo "| render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
+            echo "| early-infra box (SSM blue-green) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-deploy.result }} |"
             echo ""
             echo "### Changed files"
             echo '```'
