@@ -33,6 +33,7 @@ export function buildLlmsTxt(): string {
   const capabilities = getCapabilitiesForCore();
   const orchestrators = getOrchestratorsForCommand();
   const plans = VORINTHEX_GALAXY_REGISTRY.commandPlans;
+  const sparks = VORINTHEX_GALAXY_REGISTRY.sparkPricing;
   const paidPlans = plans.filter((plan) => plan.priceUsd !== null);
   const priceFloor = Math.min(...paidPlans.map((plan) => plan.priceUsd ?? Infinity));
   const priceCeiling = Math.max(...paidPlans.map((plan) => plan.priceUsd ?? 0));
@@ -75,11 +76,14 @@ ${orchestrators
 
 ## Pricing
 
+- ${sparks.summary} Plans ([full pricing](${absoluteUrl("/pricing")})): ${sparks.plans.map((p) => `${p.name} ($${p.priceUsd}/month, ${p.monthlySparks.toLocaleString("en-US")} Sparks)`).join(", ")}.
+- Beyond plans: ${sparks.onDemand.name} (pay only for what you use, billed monthly, higher cost per Spark) and ${sparks.topUps.name} (one-time packs, credited instantly, highest cost per Spark).
 - Core Capabilities are individual monthly subscriptions ($${Math.min(...capabilities.map((c) => c.price?.amount ?? Infinity))} to $${Math.max(...capabilities.map((c) => c.price?.amount ?? 0))} per month).
 - Command runs on coin based plans from ${paidPlans[0]?.name ?? "Starter"} ($${priceFloor}/month) to ${paidPlans.at(-1)?.name ?? "Sovereign"} ($${priceCeiling.toLocaleString("en-US")}/month), plus custom enterprise terms.
 
 ## Optional
 
+- [Pricing](${absoluteUrl("/pricing")}): Spark plans, on-demand usage, and one-time top-up packs.
 - [About](${absoluteUrl("/about")}): Vorinthex is an AI-native software company building the operating system for AI-powered work.
 - [Contact](${absoluteUrl("/contact")}): reach the team at contact@vorinthex.com.
 - [The Hunt](${absoluteUrl("/hunt")}): the live leaderboard of collectors ranked by Intelligence Fragments.

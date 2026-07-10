@@ -38,6 +38,7 @@ export type CaveKind =
   | "terms" // the terms, read inside the Accord Vault
   | "about" // the company story, read inside the Origin Vault
   | "contact" // the contact channel, read inside the Signal Vault
+  | "pricing" // spark plans, on-demand usage, and top-ups — the Exchange
   | "hunt" // the galaxy hunt hall — live ranks + crystal cave
   | "sealed" // tapped-email-link landing: success state, no way out
   | "rock"; // any ordinary belt asteroid — hollow, near-empty, a few fragments
