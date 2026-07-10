@@ -18,6 +18,8 @@ interface HandoffClaimPayload {
   alias_slug?: string | null;
   waitlist_number?: number | null;
   welcome_line?: string;
+  totp_challenge_token_hash?: string;
+  expires_at?: string;
 }
 
 /**
@@ -51,7 +53,7 @@ export async function POST() {
     body: JSON.stringify({ handoff_token_hash: handoff }),
   });
 
-  if (!result.ok || !result.data || result.data.status !== "authenticated") {
+  if (!result.ok || !result.data) {
     const response = NextResponse.json(
       { ok: false, status: "unclaimable" },
       { status: 200 },
@@ -60,6 +62,28 @@ export async function POST() {
       // Consumed, expired, or bogus: stop future attempts.
       clearHandoffCookies(response);
     }
+    return response;
+  }
+
+  if (
+    result.data.status === "totp_setup_required" ||
+    result.data.status === "totp_required"
+  ) {
+    const response = NextResponse.json({
+      ok: true,
+      status: result.data.status,
+      totp_challenge_token_hash: result.data.totp_challenge_token_hash,
+      expires_at: result.data.expires_at,
+    });
+    clearHandoffCookies(response);
+    return response;
+  }
+
+  if (result.data.status !== "authenticated") {
+    const response = NextResponse.json(
+      { ok: false, status: "unclaimable" },
+      { status: 200 },
+    );
     return response;
   }
 
