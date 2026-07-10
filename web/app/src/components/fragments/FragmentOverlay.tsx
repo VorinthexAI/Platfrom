@@ -26,8 +26,81 @@ export function FragmentOverlay() {
       {/* The floating fragments-count badge is gone — the Galaxy
           Leaderboard asteroid is the home of the numbers now. */}
       <CollectibleTooltip />
+      <CollectGateCard />
       <FragmentToast />
     </>
+  );
+}
+
+/**
+ * The join/sign-in gate: raised whenever a visitor without an explorer
+ * profile tries to collect anything — registry treasure or biome loot.
+ * The loot stays in the scene; the card offers the two doors in.
+ */
+function CollectGateCard() {
+  const open = useFragmentsStore((s) => s.collectGateOpen);
+  const dismissCollectGate = useFragmentsStore((s) => s.dismissCollectGate);
+  const enterCave = useGalaxyStore((s) => s.enterCave);
+  const reducedMotion = useReducedMotion();
+
+  const openDoor = (kind: "join" | "signin") => {
+    trackCtaClick(kind === "join" ? "waitlist_open" : "signin_gate_open", {
+      placement: "collect_gate",
+    });
+    dismissCollectGate();
+    enterCave(kind);
+  };
+
+  return (
+    <AnimatePresence>
+      {open ? (
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center px-4">
+          <motion.aside
+            role="dialog"
+            aria-label="Join or sign in to collect fragments"
+            initial={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: 24 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+            className="chrome-border card-depth pointer-events-auto relative w-full max-w-md rounded-3xl p-7 sm:p-9"
+            style={{ background: "var(--gradient-panel)" }}
+          >
+            <button
+              type="button"
+              onClick={dismissCollectGate}
+              aria-label="Dismiss"
+              className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+            >
+              <CloseIcon width={12} height={12} />
+            </button>
+            <p className="micro-label">The Hunt</p>
+            <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
+              Fragments need an explorer.
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-silver-500">
+              New explorer? Join to send your fragments into the hunt.
+              Already collecting? Sign in to sync your haul.
+            </p>
+            <div className="mt-6 flex flex-col gap-2">
+              <Button
+                variant="primary"
+                onClick={() => openDoor("join")}
+                className="w-full px-5 py-3.5 text-xs uppercase"
+              >
+                Join
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => openDoor("signin")}
+                className="w-full px-5 py-3 text-[0.62rem] uppercase"
+              >
+                Sign in
+              </Button>
+            </div>
+          </motion.aside>
+        </div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 

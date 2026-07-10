@@ -7,7 +7,6 @@ import { galaxyMotion, useGalaxyStore } from "@/lib/galaxy-store";
 import { trackCtaClick } from "@/lib/analytics";
 import { useAuthProfile } from "@/lib/auth/use-auth-profile";
 import { OpenModalButton } from "./OpenModalButton";
-import { WaitlistLiveCounter } from "./WaitlistLiveCounter";
 
 const nexusContent = VORINTHEX_GALAXY_REGISTRY.nexus.content;
 
@@ -121,7 +120,6 @@ export function HeroContent() {
               </>
             )}
           </div>
-          <WaitlistLiveCounter />
         </div>
       </div>
     </div>

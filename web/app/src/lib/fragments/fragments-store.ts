@@ -86,8 +86,13 @@ interface FragmentsState {
   collectLoose: (amount: number) => void;
   /** Ids of procedural biome loot already collected (never respawns). */
   lootCollectedIds: string[];
-  /** Collect a procedural biome fragment or crystal (persists its mesh). */
-  collectBiomeLoot: (loot: BiomeLootInput) => void;
+  /** Collect a procedural biome fragment or crystal (persists its mesh).
+   * Returns false — and raises the join/sign-in gate — when the visitor
+   * has not joined yet, so the loot stays in the scene. */
+  collectBiomeLoot: (loot: BiomeLootInput) => boolean;
+  /** True while the join/sign-in gate card blocks an unauthed collect. */
+  collectGateOpen: boolean;
+  dismissCollectGate: () => void;
   /** Show a toast from outside the collect flow (live leaderboard FOMO). */
   pushToast: (title: string, detail: string) => void;
   dismissToast: () => void;
@@ -104,6 +109,8 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
   hasJoined: false,
   pendingCollect: null,
   lootCollectedIds: [],
+  collectGateOpen: false,
+  dismissCollectGate: () => set({ collectGateOpen: false }),
   select: (selected) => {
     if (selected) {
       trackLandingEvent({
@@ -183,7 +190,22 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
   },
 
   collectBiomeLoot: (loot) => {
-    if (get().lootCollectedIds.includes(loot.id)) return;
+    if (get().lootCollectedIds.includes(loot.id)) return false;
+
+    // Fragments belong to an explorer profile: an unauthed visitor gets
+    // the join/sign-in gate instead, and the loot stays in the scene.
+    if (!get().hasJoined) {
+      set({ collectGateOpen: true });
+      trackLandingEvent({
+        slug: "landing.collect_gate_shown",
+        metadata: {
+          loot_id: loot.id,
+          rarity: loot.rarity,
+          fragments: loot.fragments,
+        },
+      });
+      return false;
+    }
 
     // Optimistic and final: the collectible is decorative, so the local
     // ledger wins immediately and the backend persists in the background.
@@ -235,6 +257,7 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
         },
       }),
     }).catch(() => {});
+    return true;
   },
 
   collectLoose: (amount) => {
@@ -261,6 +284,12 @@ export const useFragmentsStore = create<FragmentsState>((set, get) => ({
 
   collect: async (collectible, mesh) => {
     if (get().collecting) return;
+    // The tooltip already swaps Collect for Join/Sign in, but guard the
+    // action itself too: unauthed collects always raise the gate.
+    if (!get().hasJoined) {
+      set({ collectGateOpen: true, selected: null });
+      return;
+    }
     trackLandingEvent({
       slug: "landing.fragment_collect_clicked",
       metadata: {
