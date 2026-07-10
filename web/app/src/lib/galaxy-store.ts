@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { products, type ProductKey } from "@/data/products";
 import { caveKindAtAnchor } from "@/lib/cave-config";
+import { SITE_NAME, SITE_TAGLINE } from "@/lib/site";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { hashString } from "@/lib/three/procedural";
 import {
@@ -399,6 +400,28 @@ export function stepForEntity(entity: GalaxyEntity): number {
 }
 
 /**
+ * Tab titles for paths that change via pushState. No Next.js navigation
+ * happens on these transitions, so route metadata never re-applies —
+ * each entry mirrors its route's `metadata.title` with the root layout's
+ * `%s | Vorinthex AI` template already applied.
+ */
+const CLIENT_DOC_TITLES: Record<string, string> = {
+  "/": `${SITE_NAME} | ${SITE_TAGLINE}`,
+  "/about": `About | ${SITE_NAME}`,
+  "/pricing": `Pricing | ${SITE_NAME}`,
+  "/contact": `Contact | ${SITE_NAME}`,
+  "/privacy": `Privacy | ${SITE_NAME}`,
+  "/terms": `Terms | ${SITE_NAME}`,
+};
+
+/** Keep the tab title in step with a pushState/popstate path change. */
+export function syncDocumentTitle(path: string) {
+  if (typeof document === "undefined") return;
+  const title = CLIENT_DOC_TITLES[path];
+  if (title) document.title = title;
+}
+
+/**
  * Update the address bar to an entity's canonical path without a
  * navigation, so every focus state is a shareable, SSR-capable link.
  */
@@ -407,6 +430,7 @@ export function syncEntityUrl(
   mode: "push" | "replace" = "push",
 ) {
   if (typeof window === "undefined") return;
+  syncDocumentTitle(path);
   const current = window.location.pathname + window.location.search;
   if (current === path) return;
   if (mode === "push") {
