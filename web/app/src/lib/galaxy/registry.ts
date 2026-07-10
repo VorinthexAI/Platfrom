@@ -1004,7 +1004,7 @@ const sparkPricing = {
     name: "On-Demand Sparks",
     billing: "monthly" as const,
     description:
-      "Pay only for the Sparks you use beyond your plan. No ceiling, settled monthly.",
+      "Pay only for the Sparks you use beyond your plan. No ceiling, settled monthly. Requires the Nova plan.",
     costTier: "Higher cost per Spark",
   },
   topUps: {
