@@ -3,7 +3,7 @@ import { LandingPage } from "@/components/landing/LandingPage";
 import { ABOUT_COPY } from "@/lib/legal-copy";
 
 export const metadata: Metadata = {
-  title: "About | Vorinthex AI",
+  title: "About",
   description:
     "Vorinthex is an AI-native software company building the operating system for AI-powered work.",
   alternates: { canonical: "/about" },

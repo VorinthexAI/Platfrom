@@ -8,7 +8,8 @@ const PRICING_DESCRIPTION =
   "Vorinthex AI pricing: Spark plans from $19.99/month, on-demand usage, and instant one-time top-up packs.";
 
 export const metadata: Metadata = {
-  title: `${PRICING_TITLE} | ${SITE_NAME}`,
+  // The root layout template appends `| Vorinthex AI` — bare title here.
+  title: PRICING_TITLE,
   description: PRICING_DESCRIPTION,
   alternates: { canonical: "/pricing" },
 };

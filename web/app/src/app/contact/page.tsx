@@ -3,7 +3,7 @@ import { LandingPage } from "@/components/landing/LandingPage";
 import { CONTACT_COPY } from "@/lib/legal-copy";
 
 export const metadata: Metadata = {
-  title: "Contact | Vorinthex AI",
+  title: "Contact",
   description:
     "Reach the Vorinthex AI team at contact@vorinthex.com — questions, access, press, and partnerships.",
   alternates: { canonical: "/contact" },
