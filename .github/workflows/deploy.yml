@@ -899,9 +899,11 @@ jobs:
           if [ -n "$RENDER_ECS_CLUSTER" ] && [ -n "$RENDER_ECS_SERVICE" ]; then
             # The render service is provisioned by infra.yml and may not exist
             # yet — registering the revision is the deploy's real job here.
+            # ClusterNotFoundException also covers an INACTIVE cluster during
+            # the early-infra era; production runs on the early box then.
             if ! out=$(aws ecs update-service --cluster "$RENDER_ECS_CLUSTER" --service "$RENDER_ECS_SERVICE" --task-definition "$FAMILY:$REV" --query 'service.serviceName' --output text 2>&1); then
-              if echo "$out" | grep -q "ServiceNotFoundException"; then
-                echo "::warning::Render service $RENDER_ECS_SERVICE does not exist yet; revision $FAMILY:$REV registered, service roll skipped."
+              if echo "$out" | grep -Eq "ServiceNotFoundException|ClusterNotFoundException"; then
+                echo "::warning::Render service $RENDER_ECS_SERVICE is not rollable yet (service or cluster missing/inactive); revision $FAMILY:$REV registered, service roll skipped."
               else
                 echo "::error::Failed to roll render service: $out"
                 exit 1
