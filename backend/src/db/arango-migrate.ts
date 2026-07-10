@@ -140,32 +140,12 @@ const collections: CollectionSpec[] = [
     ],
   },
   {
-    name: 'teams',
-    embedKeys: ['name', 'slug', 'description'],
+    name: 'organizationMembers',
     indexes: [
-      { fields: ['ownerId'] },
-      { fields: ['slug'], unique: true },
-      { fields: ['isActive'] },
-    ],
-  },
-  {
-    name: 'teamMembers',
-    indexes: [
-      { fields: ['teamId'] },
+      { fields: ['organizationId'] },
       { fields: ['userId'] },
-      { fields: ['teamId', 'userId'], unique: true },
-      { fields: ['teamId', 'role'] },
-    ],
-  },
-  {
-    name: 'teamMemberInvites',
-    embedKeys: ['email', 'role', 'status'],
-    indexes: [
-      { fields: ['teamId'] },
-      { fields: ['emailHash'] },
-      { fields: ['tokenHash'], unique: true },
-      { fields: ['teamId', 'emailHash'] },
-      { fields: ['status', 'expiresAt'] },
+      { fields: ['organizationId', 'userId'], unique: true },
+      { fields: ['organizationId', 'role'] },
     ],
   },
   { name: 'minds', embedKeys: ['name'], indexes: [{ fields: ['userId'], unique: true }] },
@@ -224,7 +204,15 @@ const collections: CollectionSpec[] = [
   { name: 'outputs', embedKeys: ['type'], indexes: [{ fields: ['type', 'createdAt'] }] },
   { name: 'outputRelations', embedKeys: ['relationType'], indexes: [{ fields: ['parentOutputId'] }, { fields: ['childOutputId'] }] },
   { name: 'outputAnalytics', indexes: [{ fields: ['outputId', 'snapshotAt'] }] },
-  { name: 'organizations', embedKeys: ['name'], indexes: [{ fields: ['is_root'] }] },
+  {
+    name: 'organizations',
+    embedKeys: ['name', 'slug', 'description'],
+    indexes: [
+      { fields: ['is_root'] },
+      { fields: ['ownerId'] },
+      { fields: ['slug'], unique: true, sparse: true },
+    ],
+  },
   {
     name: 'visitors',
     indexes: [
@@ -373,6 +361,10 @@ async function main() {
           _key: key,
           name,
           is_root: isRoot,
+          ownerId: null,
+          slug: null,
+          description: null,
+          isActive: true,
           metadata: platform.metadata && typeof platform.metadata === 'object' ? platform.metadata : {},
           createdAt: nonEmptyString(platform.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -394,12 +386,90 @@ async function main() {
       _key: rootOrganizationId,
       name: 'Vorinthex AI',
       is_root: true,
+      ownerId: null,
+      slug: null,
+      description: null,
+      isActive: true,
       metadata: {},
       createdAt: now,
       updatedAt: now,
       embedding: await embed({ text: ['_organizations', rootOrganizationId, 'Vorinthex AI'].join(':') }),
     });
     console.log('Created root organization Vorinthex AI');
+  }
+
+  // Teams collapse into organizations: a team becomes an ordinary
+  // (non-root) organization under the same _key, and each teamMembers row
+  // becomes an organizationMembers row whose organizationId is the old
+  // teamId — so membership links survive the rename untouched. The
+  // teamMemberInvites collection retires with the feature (it has no API
+  // surface); all three legacy collections are dropped at the end.
+  const legacyTeamsCollection = targetDb.collection('teams');
+  if (await legacyTeamsCollection.exists()) {
+    const legacyTeamsCursor = await targetDb.query<Record<string, unknown>>(`
+      FOR team IN teams
+        RETURN team
+    `);
+    const legacyTeams = await legacyTeamsCursor.all();
+    for (const team of legacyTeams) {
+      const key = nonEmptyString(team._key);
+      if (!key) continue;
+      const name = String(team.name ?? '');
+      const embedText = buildNodeEmbedText('organizations', key, ['name', 'slug', 'description'], team);
+      await organizationsCollection.save(
+        {
+          _key: key,
+          name,
+          is_root: false,
+          ownerId: nonEmptyString(team.ownerId),
+          slug: nonEmptyString(team.slug),
+          description: nonEmptyString(team.description),
+          isActive: team.isActive !== false,
+          metadata: {},
+          createdAt: nonEmptyString(team.createdAt) ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          embedding: embedText ? await embed({ text: embedText }) : [],
+        },
+        { overwriteMode: 'ignore' },
+      );
+    }
+    if (legacyTeams.length > 0) {
+      console.log(`Copied ${legacyTeams.length} teams -> organizations`);
+    }
+  }
+
+  const legacyTeamMembersCollection = targetDb.collection('teamMembers');
+  if (await legacyTeamMembersCollection.exists()) {
+    const organizationMembersCollection = targetDb.collection('organizationMembers');
+    const legacyTeamMembersCursor = await targetDb.query<Record<string, unknown>>(`
+      FOR member IN teamMembers
+        RETURN member
+    `);
+    const legacyTeamMembers = await legacyTeamMembersCursor.all();
+    for (const member of legacyTeamMembers) {
+      const key = nonEmptyString(member._key);
+      const organizationId = nonEmptyString(member.teamId);
+      const userId = nonEmptyString(member.userId);
+      if (!key || !organizationId || !userId) continue;
+      await organizationMembersCollection.save(
+        {
+          _key: key,
+          organizationId,
+          userId,
+          role: nonEmptyString(member.role) ?? 'viewer',
+          status: nonEmptyString(member.status) ?? 'active',
+          joinedAt: nonEmptyString(member.joinedAt) ?? nonEmptyString(member.createdAt) ?? new Date().toISOString(),
+          invitedByUserId: nonEmptyString(member.invitedByUserId),
+          createdAt: nonEmptyString(member.createdAt) ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          embedding: [],
+        },
+        { overwriteMode: 'ignore' },
+      );
+    }
+    if (legacyTeamMembers.length > 0) {
+      console.log(`Copied ${legacyTeamMembers.length} teamMembers -> organizationMembers`);
+    }
   }
 
   // Rename the platform-era fields on users in one pass: organizationId
@@ -1010,11 +1080,15 @@ async function main() {
   }
 
   // The platforms collection is fully copied into organizations (same keys)
-  // and nothing references it anymore — retire it.
-  const retiredPlatformsCollection = targetDb.collection('platforms');
-  if (await retiredPlatformsCollection.exists()) {
-    await retiredPlatformsCollection.drop();
-    console.log('Dropped collection platforms');
+  // and nothing references it anymore — retire it. Teams follow the same
+  // path (copied into organizations/organizationMembers above), and the
+  // invites collection retires with the teams feature.
+  for (const retiredCollectionName of ['platforms', 'teams', 'teamMembers', 'teamMemberInvites']) {
+    const retiredCollection = targetDb.collection(retiredCollectionName);
+    if (await retiredCollection.exists()) {
+      await retiredCollection.drop();
+      console.log(`Dropped collection ${retiredCollectionName}`);
+    }
   }
 
   console.log('ArangoDB schema is up to date.');
