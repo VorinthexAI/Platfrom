@@ -12,15 +12,13 @@ import { getAllOutputAnalyticsChunked, listOutputAnalyticsPage, upsertOutputAnal
 import { getAllOutputRelationsChunked, listOutputRelationsPage, upsertOutputRelationByKey } from './output-relations.node';
 import { getAllOutputsChunked, listOutputsPage, upsertOutput } from './outputs.node';
 import { getAllOrchestratorsChunked, listOrchestratorsPage, upsertOrchestratorByKey } from './orchestrators.node';
+import { getAllOrganizationMembersChunked, listOrganizationMembersPage, upsertOrganizationMemberByKey } from './organization-members.node';
 import { getAllOrganizationsChunked, listOrganizationsPage, upsertOrganization } from './organizations.node';
 import { getAllPaymentCheckoutsChunked, listPaymentCheckoutsPage, upsertPaymentCheckoutByKey } from './payment-checkouts.node';
 import { getAllPaymentOrdersChunked, listPaymentOrdersPage, upsertPaymentOrderByKey } from './payment-orders.node';
 import { getAllProcessedWebhookEventsChunked, listProcessedWebhookEventsPage, upsertProcessedWebhookEventByKey } from './processed-webhook-events.node';
 import { getAllProductsChunked, listProductsPage, upsertProduct } from './products.node';
 import { getAllSubscriptionsChunked, listSubscriptionsPage, upsertSubscriptionByKey } from './subscriptions.node';
-import { getAllTeamMemberInvitesChunked, listTeamMemberInvitesPage, upsertTeamMemberInviteByKey } from './team-member-invites.node';
-import { getAllTeamMembersChunked, listTeamMembersPage, upsertTeamMemberByKey } from './team-members.node';
-import { getAllTeamsChunked, listTeamsPage, upsertTeamByKey } from './teams.node';
 import { getAllUserEntitlementsChunked, listUserEntitlementsPage, upsertUserEntitlementByKey } from './user-entitlements.node';
 import { getAllUsersChunked, listUsersPage, upsertUserByKey } from './users.node';
 import { getAllVisitorsChunked, listVisitorsPage, upsertVisitorByKey } from './visitors.node';
@@ -58,15 +56,13 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   outputRelations: { listPage: listOutputRelationsPage, getAllChunked: getAllOutputRelationsChunked, upsertByKey: upsertOutputRelationByKey },
   outputs: { listPage: listOutputsPage, getAllChunked: getAllOutputsChunked, upsertByKey: upsertOutput },
   orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked, upsertByKey: upsertOrchestratorByKey },
+  organizationMembers: { listPage: listOrganizationMembersPage, getAllChunked: getAllOrganizationMembersChunked, upsertByKey: upsertOrganizationMemberByKey },
   organizations: { listPage: listOrganizationsPage, getAllChunked: getAllOrganizationsChunked, upsertByKey: upsertOrganization },
   paymentCheckouts: { listPage: listPaymentCheckoutsPage, getAllChunked: getAllPaymentCheckoutsChunked, upsertByKey: upsertPaymentCheckoutByKey },
   paymentOrders: { listPage: listPaymentOrdersPage, getAllChunked: getAllPaymentOrdersChunked, upsertByKey: upsertPaymentOrderByKey },
   processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked, upsertByKey: upsertProcessedWebhookEventByKey },
   products: { listPage: listProductsPage, getAllChunked: getAllProductsChunked, upsertByKey: upsertProduct },
   subscriptions: { listPage: listSubscriptionsPage, getAllChunked: getAllSubscriptionsChunked, upsertByKey: upsertSubscriptionByKey },
-  teamMemberInvites: { listPage: listTeamMemberInvitesPage, getAllChunked: getAllTeamMemberInvitesChunked, upsertByKey: upsertTeamMemberInviteByKey },
-  teamMembers: { listPage: listTeamMembersPage, getAllChunked: getAllTeamMembersChunked, upsertByKey: upsertTeamMemberByKey },
-  teams: { listPage: listTeamsPage, getAllChunked: getAllTeamsChunked, upsertByKey: upsertTeamByKey },
   userEntitlements: { listPage: listUserEntitlementsPage, getAllChunked: getAllUserEntitlementsChunked, upsertByKey: upsertUserEntitlementByKey },
   userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },

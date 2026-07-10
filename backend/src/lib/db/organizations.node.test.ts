@@ -9,6 +9,7 @@ import { intelligenceFragmentSchema } from './intelligence-fragments.node';
 import { mindCapabilitySchema } from './mind-capabilities.node';
 import { mindSchema } from './minds.node';
 import { orchestratorSchema } from './orchestrators.node';
+import { organizationMemberSchema } from './organization-members.node';
 import { outputAnalyticsSchema } from './output-analytics.node';
 import { outputRelationSchema } from './output-relations.node';
 import { outputSchema } from './outputs.node';
@@ -17,9 +18,6 @@ import { paymentOrderSchema } from './payment-orders.node';
 import { processedWebhookEventSchema } from './processed-webhook-events.node';
 import { productSchema } from './products.node';
 import { subscriptionSchema } from './subscriptions.node';
-import { teamMemberInviteSchema } from './team-member-invites.node';
-import { teamMemberSchema } from './team-members.node';
-import { teamSchema } from './teams.node';
 import { userEntitlementSchema } from './user-entitlements.node';
 import { userSchema } from './users.node';
 import { userSessionSchema } from './user-sessions.node';
@@ -100,8 +98,9 @@ describe('organization node schema', () => {
   });
 });
 
-/** The platform node is gone: no node schema may keep a platform-era field. */
-describe('no node field mentions the retired platform', () => {
+/** The platform and team nodes are gone: no node schema may keep a
+ * platform- or team-era field. */
+describe('no node field mentions the retired platform or team nodes', () => {
   const nodeSchemas: Record<string, z.ZodObject<z.ZodRawShape>> = {
     agents: agentSchema,
     authChallenges: authChallengeSchema,
@@ -111,6 +110,7 @@ describe('no node field mentions the retired platform', () => {
     mindCapabilities: mindCapabilitySchema,
     minds: mindSchema,
     orchestrators: orchestratorSchema,
+    organizationMembers: organizationMemberSchema,
     organizations: organizationSchema,
     outputAnalytics: outputAnalyticsSchema,
     outputRelations: outputRelationSchema,
@@ -120,9 +120,6 @@ describe('no node field mentions the retired platform', () => {
     processedWebhookEvents: processedWebhookEventSchema,
     products: productSchema,
     subscriptions: subscriptionSchema,
-    teamMemberInvites: teamMemberInviteSchema,
-    teamMembers: teamMemberSchema,
-    teams: teamSchema,
     userEntitlements: userEntitlementSchema,
     userSessions: userSessionSchema,
     userWaitlistLeaderboardChanges: userWaitlistLeaderboardChangeSchema,
@@ -132,10 +129,11 @@ describe('no node field mentions the retired platform', () => {
   };
 
   for (const [name, schema] of Object.entries(nodeSchemas)) {
-    test(`${name} has no platform-named fields`, () => {
-      const offenders = Object.keys(schema.shape).filter((field) =>
-        field.toLowerCase().includes('platform'),
-      );
+    test(`${name} has no platform- or team-named fields`, () => {
+      const offenders = Object.keys(schema.shape).filter((field) => {
+        const lower = field.toLowerCase();
+        return lower.includes('platform') || lower.includes('team');
+      });
       expect(offenders).toEqual([]);
     });
   }
