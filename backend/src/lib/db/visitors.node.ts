@@ -15,7 +15,7 @@ export const VISITORS_COLLECTION = 'visitors';
  */
 export const visitorSchema = z.object({
   key: z.string(),
-  platformId: z.string(),
+  organizationId: z.string(),
   /** Client-generated distinct id (1-day cookie); null for token-only visitors. */
   distinctId: z.string().nullable().default(null),
   /** sha256 of the normalized email; null until the visitor is known. */

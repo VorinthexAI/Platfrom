@@ -23,7 +23,7 @@ describe('user helpers', () => {
   test('defaults new users to subscribed to updates', () => {
     const user = userSchema.parse({
       key: 'usr_test',
-      platformId: 'plt_this',
+      organizationId: 'org_root',
       email: 'person@example.com',
       emailHash: 'hash',
       createdAt: '2026-07-03T00:00:00.000Z',

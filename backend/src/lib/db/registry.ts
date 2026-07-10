@@ -12,9 +12,9 @@ import { getAllOutputAnalyticsChunked, listOutputAnalyticsPage, upsertOutputAnal
 import { getAllOutputRelationsChunked, listOutputRelationsPage, upsertOutputRelationByKey } from './output-relations.node';
 import { getAllOutputsChunked, listOutputsPage, upsertOutput } from './outputs.node';
 import { getAllOrchestratorsChunked, listOrchestratorsPage, upsertOrchestratorByKey } from './orchestrators.node';
+import { getAllOrganizationsChunked, listOrganizationsPage, upsertOrganization } from './organizations.node';
 import { getAllPaymentCheckoutsChunked, listPaymentCheckoutsPage, upsertPaymentCheckoutByKey } from './payment-checkouts.node';
 import { getAllPaymentOrdersChunked, listPaymentOrdersPage, upsertPaymentOrderByKey } from './payment-orders.node';
-import { getAllPlatformsChunked, listPlatformsPage, upsertPlatform } from './platforms.node';
 import { getAllProcessedWebhookEventsChunked, listProcessedWebhookEventsPage, upsertProcessedWebhookEventByKey } from './processed-webhook-events.node';
 import { getAllProductsChunked, listProductsPage, upsertProduct } from './products.node';
 import { getAllSubscriptionsChunked, listSubscriptionsPage, upsertSubscriptionByKey } from './subscriptions.node';
@@ -58,9 +58,9 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   outputRelations: { listPage: listOutputRelationsPage, getAllChunked: getAllOutputRelationsChunked, upsertByKey: upsertOutputRelationByKey },
   outputs: { listPage: listOutputsPage, getAllChunked: getAllOutputsChunked, upsertByKey: upsertOutput },
   orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked, upsertByKey: upsertOrchestratorByKey },
+  organizations: { listPage: listOrganizationsPage, getAllChunked: getAllOrganizationsChunked, upsertByKey: upsertOrganization },
   paymentCheckouts: { listPage: listPaymentCheckoutsPage, getAllChunked: getAllPaymentCheckoutsChunked, upsertByKey: upsertPaymentCheckoutByKey },
   paymentOrders: { listPage: listPaymentOrdersPage, getAllChunked: getAllPaymentOrdersChunked, upsertByKey: upsertPaymentOrderByKey },
-  platforms: { listPage: listPlatformsPage, getAllChunked: getAllPlatformsChunked, upsertByKey: upsertPlatform },
   processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked, upsertByKey: upsertProcessedWebhookEventByKey },
   products: { listPage: listProductsPage, getAllChunked: getAllProductsChunked, upsertByKey: upsertProduct },
   subscriptions: { listPage: listSubscriptionsPage, getAllChunked: getAllSubscriptionsChunked, upsertByKey: upsertSubscriptionByKey },

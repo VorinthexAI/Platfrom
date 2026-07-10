@@ -13,7 +13,7 @@ describe('visitorSession node schema (anonymous funnel)', () => {
   test('opens with a null disconnect stamp and no emailHash field', () => {
     const session = visitorSessionSchema.parse({
       key: 'vse_test',
-      platformId: 'plt_this',
+      organizationId: 'org_root',
       visitorId: 'vis_test',
       alias: 'Orbit Surfer',
       sessionKey: 'ses_test',
@@ -31,7 +31,7 @@ describe('visitorSession node schema (anonymous funnel)', () => {
   test('keeps both timestamps once disconnected and strips any legacy emailHash', () => {
     const session = visitorSessionSchema.parse({
       key: 'vse_test',
-      platformId: 'plt_this',
+      organizationId: 'org_root',
       visitorId: 'vis_test',
       // A legacy activeVisitors doc may still carry emailHash — it is dropped.
       emailHash: 'b'.repeat(64),
@@ -53,7 +53,7 @@ describe('userSession node schema (authenticated funnel)', () => {
   test('opens keyed by userId with a null disconnect stamp', () => {
     const session = userSessionSchema.parse({
       key: 'use_test',
-      platformId: 'plt_this',
+      organizationId: 'org_root',
       userId: 'usr_test',
       alias: 'Nova Cartographer',
       sessionKey: 'ses_test',
@@ -72,7 +72,7 @@ describe('userSession node schema (authenticated funnel)', () => {
   test('keeps both timestamps once disconnected', () => {
     const session = userSessionSchema.parse({
       key: 'use_test',
-      platformId: 'plt_this',
+      organizationId: 'org_root',
       userId: 'usr_test',
       alias: 'Nova Cartographer',
       sessionKey: 'ses_test',

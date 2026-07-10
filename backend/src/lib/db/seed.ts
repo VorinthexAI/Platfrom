@@ -1,6 +1,6 @@
 import { closeDb } from './client';
 import { newId } from '@/lib/ids';
-import { getPlatformByName, insertPlatform, updatePlatform, type Platform } from './platforms.node';
+import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getProductByProductId, insertProduct, updateProduct, type Product } from './products.node';
 
 type SeedResult = {
@@ -46,32 +46,35 @@ export const SEEDED_PRODUCTS = [
   },
 ];
 
-export const SEEDED_PLATFORM = {
-  name: 'this',
+export const SEEDED_ORGANIZATION = {
+  name: 'Vorinthex AI',
+  is_root: true,
   metadata: {},
 };
 
-async function upsertSeedPlatform(seed: typeof SEEDED_PLATFORM): Promise<SeedResult> {
-  const existing = await getPlatformByName(seed.name);
+async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise<SeedResult> {
+  const existing = await getRootOrganization();
   if (!existing) {
     const key = newId();
-    await insertPlatform({
+    await insertOrganization({
       key,
       name: seed.name,
+      is_root: seed.is_root,
       metadata: seed.metadata,
       createdAt: now(),
       updatedAt: now(),
     });
-    return { collection: 'platforms', key, status: 'created' };
+    return { collection: 'organizations', key, status: 'created' };
   }
 
-  const patch: Partial<Omit<Platform, 'key' | 'embedding'>> = {
+  const patch: Partial<Omit<Organization, 'key' | 'embedding'>> = {
     name: seed.name,
+    is_root: seed.is_root,
     metadata: seed.metadata,
     updatedAt: now(),
   };
-  await updatePlatform(existing.key, patch);
-  return { collection: 'platforms', key: existing.key, status: 'updated' };
+  await updateOrganization(existing.key, patch);
+  return { collection: 'organizations', key: existing.key, status: 'updated' };
 }
 
 async function upsertSeedProduct(seed: (typeof SEEDED_PRODUCTS)[number]): Promise<SeedResult> {
@@ -104,7 +107,7 @@ async function upsertSeedProduct(seed: (typeof SEEDED_PRODUCTS)[number]): Promis
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
 
-  results.push(await upsertSeedPlatform(SEEDED_PLATFORM));
+  results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
 
   for (const product of SEEDED_PRODUCTS) {
     results.push(await upsertSeedProduct(product));

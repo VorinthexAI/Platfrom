@@ -119,7 +119,7 @@ async function requireSuperAdmin(c: Context) {
     return { error: c.json({ error: 'authentication required' }, 401) };
   }
   const user = await getUserById(auth.key);
-  if (user?.platform_role !== 'owner') {
+  if (user?.organization_role !== 'owner') {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
   return { key: auth.key, user };

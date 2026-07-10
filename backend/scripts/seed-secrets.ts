@@ -2,15 +2,15 @@ import { readFileSync } from 'node:fs';
 import { closeDb } from '@/lib/db/client';
 import { NODE_REGISTRY, NODE_NAMES } from '@/lib/db/registry';
 import { newId } from '@/lib/ids';
-import { getDefaultPlatformId } from '@/platform/events';
+import { getRootOrganizationId } from '@/platform/events';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
 import { getUserByEmailHash } from '@/lib/db/users.node';
 
 const SEEDS_FILE = process.env.SEEDS_FILE ?? '../environments/backend/db.seeds.secrets.json';
 
-// These are the only node schemas with a required (non-nullable) platformId.
-const NODES_WITH_PLATFORM_ID = new Set(['users']);
+// These are the only node schemas with a required (non-nullable) organizationId.
+const NODES_WITH_ORGANIZATION_ID = new Set(['users']);
 
 /** Same derivation the app uses at signup (see hashUserEmail in api/users.ts) — kept local so seed docs only need a plaintext "email". */
 function generateEmailHash(email: string): Promise<string> {
@@ -49,7 +49,7 @@ async function main() {
   }
 
   const idMap = new Map<string, string>();
-  let defaultPlatformId: string | null = null;
+  let rootOrganizationId: string | null = null;
   const results: { node: string; key: string }[] = [];
 
   for (const [nodeName, docs] of Object.entries(seeds as Record<string, unknown>)) {
@@ -87,9 +87,9 @@ async function main() {
       }
       if (!doc.createdAt) doc.createdAt = now;
       if (!doc.updatedAt) doc.updatedAt = now;
-      if (NODES_WITH_PLATFORM_ID.has(nodeName) && !doc.platformId) {
-        defaultPlatformId ??= await getDefaultPlatformId();
-        doc.platformId = defaultPlatformId;
+      if (NODES_WITH_ORGANIZATION_ID.has(nodeName) && !doc.organizationId) {
+        rootOrganizationId ??= await getRootOrganizationId();
+        doc.organizationId = rootOrganizationId;
       }
 
       const resolved = resolveRefs(doc, idMap) as Record<string, unknown>;
@@ -97,7 +97,7 @@ async function main() {
       results.push({ node: nodeName, key: saved.key });
 
       if (localId) idMap.set(localId, saved.key);
-      if (nodeName === 'platforms' && resolved.name === 'this') defaultPlatformId = saved.key;
+      if (nodeName === 'organizations' && resolved.is_root === true) rootOrganizationId = saved.key;
     }
   }
 

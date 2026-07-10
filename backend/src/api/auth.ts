@@ -42,7 +42,7 @@ interface LoginIdentity {
   email: string;
   emailHash: string;
   name: string | null;
-  platformTitle: string | null;
+  organizationTitle: string | null;
   isMfaEnabled: boolean;
   has_request_mfa_reset_link: boolean;
   requested_mfa_reset_link_at: string | null;
@@ -87,15 +87,15 @@ async function signAccessTokenPayload(payload: string) {
   return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
 }
 
-function platformIdentity(user: User): LoginIdentity | null {
-  if (user.platform_role === 'owner') {
+function organizationIdentity(user: User): LoginIdentity | null {
+  if (user.organization_role === 'owner') {
     return {
       type: 'superAdmin',
       key: user.key,
       email: user.email,
       emailHash: user.emailHash,
       name: user.name,
-      platformTitle: user.platform_title,
+      organizationTitle: user.organization_title,
       isMfaEnabled: user.isMfaEnabled,
       has_request_mfa_reset_link: user.has_request_mfa_reset_link,
       requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -103,14 +103,14 @@ function platformIdentity(user: User): LoginIdentity | null {
       lastTotpTimeStep: user.lastTotpTimeStep,
     };
   }
-  if (user.platform_role === 'admin' || user.platform_role === 'viewer') {
+  if (user.organization_role === 'admin' || user.organization_role === 'viewer') {
     return {
       type: 'member',
       key: user.key,
       email: user.email,
       emailHash: user.emailHash,
       name: user.name,
-      platformTitle: user.platform_title,
+      organizationTitle: user.organization_title,
       isMfaEnabled: user.isMfaEnabled,
       has_request_mfa_reset_link: user.has_request_mfa_reset_link,
       requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -128,7 +128,7 @@ function memberIdentity(user: User): LoginIdentity {
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
-    platformTitle: user.platform_title,
+    organizationTitle: user.organization_title,
     isMfaEnabled: user.isMfaEnabled,
     has_request_mfa_reset_link: user.has_request_mfa_reset_link,
     requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -144,7 +144,7 @@ function superAdminIdentity(user: User): LoginIdentity {
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
-    platformTitle: user.platform_title,
+    organizationTitle: user.organization_title,
     isMfaEnabled: user.isMfaEnabled,
     has_request_mfa_reset_link: user.has_request_mfa_reset_link,
     requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
@@ -156,14 +156,14 @@ function superAdminIdentity(user: User): LoginIdentity {
 export async function findLoginIdentityByEmail(email: string): Promise<LoginIdentity | null> {
   const normalized = normalizeEmail(email);
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
-  return user ? platformIdentity(user) : null;
+  return user ? organizationIdentity(user) : null;
 }
 
 async function getLoginIdentity(type: LoginIdentityType, key: string): Promise<LoginIdentity | null> {
   const user = await getUserById(key);
   if (!user) return null;
-  if (type === 'superAdmin') return user.platform_role === 'owner' ? superAdminIdentity(user) : null;
-  return user.platform_role === 'admin' || user.platform_role === 'viewer' ? memberIdentity(user) : null;
+  if (type === 'superAdmin') return user.organization_role === 'owner' ? superAdminIdentity(user) : null;
+  return user.organization_role === 'admin' || user.organization_role === 'viewer' ? memberIdentity(user) : null;
 }
 
 async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: Record<string, unknown>) {
@@ -172,7 +172,7 @@ async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: 
 
 async function getLoginIdentityByRefreshTokenHash(refreshTokenHash: string): Promise<LoginIdentity | null> {
   const user = await getUserByRefreshTokenHash(refreshTokenHash);
-  return user ? platformIdentity(user) : null;
+  return user ? organizationIdentity(user) : null;
 }
 
 export async function createAccessToken(identity: AuthIdentity | string) {
@@ -406,7 +406,7 @@ export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
   if (identity) {
-    // A truthy platform_role gets the professional platform email: real
+    // A truthy organization_role gets the professional platform email: real
     // name, MFA-aware copy, a 5-minute link, and the /auth/mfa biome.
     const challenge = await createChallenge(identity.key, 'email', MEMBER_LINK_TTL_MS, identity.type);
     const magicLink = buildMfaLink(challenge.tokenHash);
@@ -655,7 +655,7 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
     ok: true as const,
     identity: { key: auth.key, identityType: auth.type },
     name: auth.name,
-    platformTitle: auth.platformTitle,
+    organizationTitle: auth.organizationTitle,
     ...(await issueTokens(auth)),
   };
 }
@@ -691,7 +691,7 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
   return {
     identity: { key: auth.key, identityType: auth.type },
     name: auth.name,
-    platformTitle: auth.platformTitle,
+    organizationTitle: auth.organizationTitle,
     ...(await issueTokens(auth)),
   };
 }

@@ -98,7 +98,7 @@ describe('appendUserEvents', () => {
         return 'evt_test';
       },
       async resolveEventSource() {
-        return { belongsTo: 'platform' as const, sourceId: 'plt_this' };
+        return { belongsTo: 'organization' as const, sourceId: 'org_root' };
       },
       async updateUser(key: string, patch: Record<string, unknown>) {
         updates.push({ key, patch });
@@ -109,8 +109,8 @@ describe('appendUserEvents', () => {
     expect(result).toEqual({ id: 'usr_test', insertedCount: 1 });
     expect(events[0]).toEqual({
       key: 'evt_test',
-      sourceId: 'plt_this',
-      belongsTo: 'platform',
+      sourceId: 'org_root',
+      belongsTo: 'organization',
       userId: 'usr_test',
       slug: 'waitlist:question',
       data: {

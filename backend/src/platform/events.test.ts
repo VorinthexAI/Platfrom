@@ -57,14 +57,14 @@ describe('event catalog', () => {
   test('event records separate source ownership from optional user ownership', () => {
     expect(eventSchema.parse({
       key: 'evt_test',
-      sourceId: 'plt_this',
-      belongsTo: 'platform',
+      sourceId: 'org_root',
+      belongsTo: 'organization',
       slug: 'waitlist.visited',
       createdAt: '2026-07-04T10:00:00.000Z',
     })).toEqual({
       key: 'evt_test',
-      sourceId: 'plt_this',
-      belongsTo: 'platform',
+      sourceId: 'org_root',
+      belongsTo: 'organization',
       userId: null,
       slug: 'waitlist.visited',
       data: null,

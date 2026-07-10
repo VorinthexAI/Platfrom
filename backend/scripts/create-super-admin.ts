@@ -43,7 +43,7 @@ async function main() {
     const { getUserByEmailHash, insertUser, updateUser } = await import('@/lib/db/users.node');
     const { encryptSecret } = await import('@/lib/crypto');
     const { newId } = await import('@/lib/ids');
-    const { getDefaultPlatformId } = await import('@/platform/events');
+    const { getRootOrganizationId } = await import('@/platform/events');
     const { verifySuccessiveTotpCodes } = await import('@/api/auth');
 
     const email = await askEmail();
@@ -54,14 +54,14 @@ async function main() {
     const now = new Date().toISOString();
     const superAdmin = existingSuperAdmin ?? await insertUser({
       key: newId(),
-      platformId: await getDefaultPlatformId(),
+      organizationId: await getRootOrganizationId(),
       email,
       emailHash,
       name: null,
       profileUrl: null,
       alias: null,
       alias_slug: null,
-      platform_role: 'owner',
+      organization_role: 'owner',
       waitlistNumber: null,
       isVerified: true,
       is_subscribed_to_updates: true,
@@ -77,8 +77,8 @@ async function main() {
       createdAt: now,
       updatedAt: now,
     });
-    if (existingSuperAdmin && existingSuperAdmin.platform_role !== 'owner') {
-      await updateUser(existingSuperAdmin.key, { platform_role: 'owner', updatedAt: now });
+    if (existingSuperAdmin && existingSuperAdmin.organization_role !== 'owner') {
+      await updateUser(existingSuperAdmin.key, { organization_role: 'owner', updatedAt: now });
     }
     const superAdminKey = superAdmin.key;
     console.log(`Super admin identity ${superAdminKey} ready.`);

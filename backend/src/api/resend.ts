@@ -5,7 +5,7 @@ import { insertEvent } from '@/lib/db/events.node';
 import { claimWebhookEvent, deleteProcessedWebhookEventByProviderAndEventId, updateProcessedWebhookEventByProviderAndEventId } from '@/lib/db/processed-webhook-events.node';
 import { deleteUser, getUserByEmailHash } from '@/lib/db/users.node';
 import { newId } from '@/lib/ids';
-import { getDefaultPlatformId } from '@/platform/events';
+import { getRootOrganizationId } from '@/platform/events';
 import { hashUserEmail } from './users';
 
 export const RESEND_WEBHOOK_V1_PATH = '/api/v1/webhooks/resend';
@@ -55,7 +55,7 @@ export interface ResendWebhookDeps {
   getUserByEmailHash: typeof getUserByEmailHash;
   insertEvent: typeof insertEvent;
   deleteUser: typeof deleteUser;
-  getDefaultPlatformId: typeof getDefaultPlatformId;
+  getRootOrganizationId: typeof getRootOrganizationId;
   hashUserEmail: typeof hashUserEmail;
   newId: typeof newId;
 }
@@ -64,7 +64,7 @@ const defaultDeps: ResendWebhookDeps = {
   getUserByEmailHash,
   insertEvent,
   deleteUser,
-  getDefaultPlatformId,
+  getRootOrganizationId,
   hashUserEmail,
   newId,
 };
@@ -94,8 +94,8 @@ export async function recordResendEmailEvent(
   const bounce = event.type === 'email.bounced' ? event.data.bounce : undefined;
   await deps.insertEvent({
     key: deps.newId(),
-    sourceId: await deps.getDefaultPlatformId(),
-    belongsTo: 'platform',
+    sourceId: await deps.getRootOrganizationId(),
+    belongsTo: 'organization',
     userId: user.key,
     slug: event.type,
     data: {

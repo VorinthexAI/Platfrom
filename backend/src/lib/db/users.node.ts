@@ -5,20 +5,20 @@ import { createNodeHelpers, withArangoKey } from './base';
 
 export const USERS_COLLECTION = 'users';
 
-export const platformRoleSchema = z.enum(['owner', 'admin', 'viewer']);
+export const organizationRoleSchema = z.enum(['owner', 'admin', 'viewer']);
 
 export const userSchema = z.object({
   key: z.string(),
-  platformId: z.string(),
+  organizationId: z.string(),
   email: z.string(),
   emailHash: z.string(),
   name: z.string().nullable().default(null),
   profileUrl: z.string().nullable().default(null),
   alias: z.string().nullable().default(null),
   alias_slug: z.string().regex(/^[a-z]{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable().default(null),
-  platform_role: platformRoleSchema.nullable().default(null),
-  /** Display title inside the platform, e.g. "Atlas CEO" — null for everyone else. */
-  platform_title: z.string().nullable().default(null),
+  organization_role: organizationRoleSchema.nullable().default(null),
+  /** Display title inside the organization, e.g. "Atlas CEO" — null for everyone else. */
+  organization_title: z.string().nullable().default(null),
   waitlistNumber: z.number().int().nullable().default(null),
   isVerified: z.boolean().default(false),
   is_subscribed_to_updates: z.boolean().default(true),

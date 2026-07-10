@@ -4,7 +4,7 @@ import { getVisitorByDistinctId, type Visitor } from '@/lib/db/visitors.node';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '@/lib/alias';
 import { sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
-import { getDefaultPlatformId } from '@/platform/events';
+import { getRootOrganizationId } from '@/platform/events';
 
 export function normalizeEmail(email: string) {
   return z.string().email().parse(email.trim().toLowerCase());
@@ -48,14 +48,14 @@ export async function upsertUserByEmail(
   const normalized = normalizeEmail(email);
   const emailHash = await hashUserEmail(normalized);
   const now = new Date().toISOString();
-  const platformId = values.platformId ?? await getDefaultPlatformId();
+  const organizationId = values.organizationId ?? await getRootOrganizationId();
   // The alias travels: whoever explored the galaxy as this anonymous visitor
   // keeps the same "<Prefix> <Role>" identity when they become a user.
   const visitor = await findVisitorForConversion(options.distinctId ?? null);
 
   const existing = await getUserByEmailHash(emailHash);
   if (existing) {
-    const patch: Partial<User> = { ...values, platformId, email: normalized, emailHash, updatedAt: now };
+    const patch: Partial<User> = { ...values, organizationId, email: normalized, emailHash, updatedAt: now };
     if (patch.name === undefined) delete patch.name;
     if (patch.alias === undefined && existing.alias == null && visitor?.alias) {
       patch.alias = visitor.alias;
@@ -78,7 +78,7 @@ export async function upsertUserByEmail(
   const created = await insertUser({
     key,
     ...values,
-    platformId,
+    organizationId,
     email: normalized,
     emailHash,
     name: values.name ?? defaultNameFromEmail(normalized),

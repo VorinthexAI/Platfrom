@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     const result = await backendFetch<{
       userId?: string;
       name?: string | null;
-      platformTitle?: string | null;
+      organizationTitle?: string | null;
     }>("/auth/totp/verify", {
       method: "POST",
       body: JSON.stringify(parsed.data),
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
       ok: true,
       authenticated: true,
       name: result.data.name ?? null,
-      title: result.data.platformTitle ?? null,
+      title: result.data.organizationTitle ?? null,
     });
   }
 

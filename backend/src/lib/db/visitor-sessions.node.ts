@@ -9,7 +9,7 @@ export const presenceSourceSchema = z.enum(['web', 'mobile', 'desktop', 'tv']);
 
 /**
  * One node per anonymous presence session — a sub-node of a `visitors`
- * node, owned by the platform ("this"). Created when an anonymous visitor
+ * node, owned by the root organization. Created when an anonymous visitor
  * joins the live galaxy over the presence pub/sub, closed (disconnectedAt
  * stamped) when they leave or their Redis session key expires. Redis is the
  * live truth; these nodes are the durable ledger it syncs into. Authenticated
@@ -17,7 +17,7 @@ export const presenceSourceSchema = z.enum(['web', 'mobile', 'desktop', 'tv']);
  */
 export const visitorSessionSchema = z.object({
   key: z.string(),
-  platformId: z.string(),
+  organizationId: z.string(),
   /** Parent visitor node. */
   visitorId: z.string(),
   alias: z.string(),
