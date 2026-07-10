@@ -6,6 +6,7 @@ import { trackCtaClick } from "@/lib/analytics";
 /** The footer vaults, in display order, with their canonical paths. */
 const FOOTER_VAULTS = [
   { kind: "about", label: "About", path: "/about" },
+  { kind: "pricing", label: "Pricing", path: "/pricing" },
   { kind: "contact", label: "Contact", path: "/contact" },
   { kind: "privacy", label: "Privacy", path: "/privacy" },
   { kind: "terms", label: "Terms", path: "/terms" },

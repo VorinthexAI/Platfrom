@@ -90,6 +90,12 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "ocean",
     approachLabel: "Opening the Signal Vault",
   },
+  pricing: {
+    ...rolledAnchor(),
+    interior: [1080, -240, 0],
+    theme: "ember",
+    approachLabel: "Opening the Exchange",
+  },
   hunt: {
     ...rolledAnchor(),
     interior: [720, -240, 0],
@@ -148,6 +154,7 @@ const ANCHORED_CAVE_KINDS: CaveKind[] = [
   "privacy",
   "about",
   "contact",
+  "pricing",
   "signin",
   "join",
   "hunt",

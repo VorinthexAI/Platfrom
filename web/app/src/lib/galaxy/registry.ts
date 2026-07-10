@@ -984,6 +984,39 @@ const commandPlans: CommandPlan[] = [
   { id: "command.plan.custom", name: "Custom", priceUsd: null, monthlyCoins: null, description: "Custom, dedicated, and enterprise terms. Contact sales." },
 ];
 
+/**
+ * Spark pricing — Sparks are the usage currency of Vorinthex AI, and this
+ * object is the single source of truth for how they are bought. The
+ * pricing biome (Exchange), the /pricing page body, and llms.txt all
+ * render from it; edit here, never in the routes.
+ */
+const sparkPricing = {
+  unit: "Sparks",
+  summary:
+    "Sparks are the usage currency of Vorinthex AI — everything your AI does draws from your Spark balance. Monthly plans refill it at the lowest cost per Spark.",
+  plans: [
+    { id: "spark.plan.moon", name: "Moon", priceUsd: 19.99, monthlySparks: 1_000, description: "A steady monthly orbit for personal, everyday AI work." },
+    { id: "spark.plan.comet", name: "Comet", priceUsd: 39.99, monthlySparks: 5_000, description: "Momentum for explorers who work with their AI daily." },
+    { id: "spark.plan.nova", name: "Nova", priceUsd: 99.99, monthlySparks: 25_000, description: "Full radiance for heavy, always-on AI usage." },
+  ],
+  onDemand: {
+    id: "spark.on-demand",
+    name: "On-Demand Sparks",
+    billing: "monthly" as const,
+    description:
+      "Pay only for the Sparks you use beyond your plan — no ceiling, settled monthly.",
+    costTier: "Higher cost per Spark",
+  },
+  topUps: {
+    id: "spark.top-ups",
+    name: "Spark Top-Ups",
+    billing: "one-time" as const,
+    description:
+      "One-time Spark packs, credited the instant you need a burst. Pack sizes vary.",
+    costTier: "Highest cost per Spark",
+  },
+};
+
 const fragmentRewards: FragmentReward[] = [
   { id: "reward.early-access-candidate", threshold: 500, name: "Early Access Candidate", description: "Unlock early access eligibility for Core." },
   { id: "reward.founder-badge", threshold: 2_500, name: "Founder Badge", description: "Receive an exclusive Founder badge." },
@@ -1060,6 +1093,7 @@ export const VORINTHEX_GALAXY_REGISTRY = {
     orchestrators.map((o) => [o.slug, o]),
   ) as Record<string, GalaxyEntity>,
   commandPlans,
+  sparkPricing,
   fragmentRewards,
   communityMilestones,
   collectibles,

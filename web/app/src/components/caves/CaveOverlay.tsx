@@ -26,6 +26,7 @@ import { CAVE_CONFIGS } from "@/lib/cave-config";
 import { normalizeEmailInput, parseApiError } from "@/lib/email";
 import { formatFragments } from "@/lib/format";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
+import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import { caveLootIdentity, syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
 import { galaxyPulseLine } from "@/lib/leaderboard/copy";
 import { useLeaderboardStore } from "@/lib/leaderboard/leaderboard-store";
@@ -99,17 +100,20 @@ export function CaveOverlay() {
           // Uncharted rocks get a slim bottom drawer (same hold-then-slide
           // beat as the planet drawer) so the crystal stays center stage.
           <RockDrawer key={`rock-${visitSeed}`} />
-        ) : caveKind === "hunt" ? (
-          // The hunt breaks out of the single card: several floating
-          // islands, each sliding up in its own cascaded beat. This is a
-          // card stack, not a drawer: it owns vertical scroll on mobile.
-          <div className="pointer-events-none absolute inset-0 px-4">
+        ) : caveKind === "hunt" || caveKind === "pricing" ? (
+          // The hunt and the exchange break out of the single card:
+          // several floating islands, each sliding up in its own cascaded
+          // beat. This is a card stack, not a drawer: it owns vertical
+          // scroll on mobile. The scroll layer starts BELOW the fixed nav
+          // (top-20 = SiteNav's h-20) — a full-height pointer-events-auto
+          // scroller would swallow the header buttons' clicks.
+          <div className="pointer-events-none absolute inset-x-0 top-20 bottom-0 px-4">
             <div
-              key={`leaderboard-${visitSeed}`}
+              key={`${caveKind}-${visitSeed}`}
               data-scroll-safe
-              className="scrollbar-hide pointer-events-auto mx-auto h-full w-full max-w-md overflow-y-auto overscroll-contain pt-[calc(env(safe-area-inset-top)+7rem)] pb-[calc(env(safe-area-inset-bottom)+3.5rem)] [touch-action:pan-y] sm:pt-32 sm:pb-12 lg:pt-28"
+              className="scrollbar-hide pointer-events-auto mx-auto h-full w-full max-w-md overflow-y-auto overscroll-contain pt-[calc(env(safe-area-inset-top)+2rem)] pb-[calc(env(safe-area-inset-bottom)+3.5rem)] [touch-action:pan-y] sm:pt-12 sm:pb-12 lg:pt-8"
             >
-              <LeaderboardFlow />
+              {caveKind === "hunt" ? <LeaderboardFlow /> : <PricingFlow />}
             </div>
           </div>
         ) : (
@@ -534,6 +538,108 @@ function LeaderboardFlow() {
         </p>
         <p className="mt-1.5 text-center text-[0.7rem] leading-relaxed text-silver-500">
           {galaxyPulseLine(activeExplorers, updateNonce * 48271 + 7)}
+        </p>
+      </SlideUpCard>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/* the exchange — spark plans, on-demand usage, and top-ups           */
+/* ---------------------------------------------------------------- */
+
+/**
+ * Spark pricing across three floating islands, cascading in like the
+ * hunt: monthly plans first, then on-demand usage, then instant top-up
+ * packs. Registry-driven — the /pricing page body and llms.txt render
+ * the same `sparkPricing` object.
+ */
+function PricingFlow() {
+  const exitCave = useGalaxyStore((s) => s.exitCave);
+  const { summary, plans, onDemand, topUps } =
+    VORINTHEX_GALAXY_REGISTRY.sparkPricing;
+
+  return (
+    <div className="flex flex-col gap-4 sm:gap-6">
+      {/* island 1 — the monthly plans, with the only close control */}
+      <SlideUpCard
+        index={0}
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <button
+          type="button"
+          onClick={() => {
+            trackCtaClick("cave_close", { cave_kind: "pricing" });
+            exitCave();
+            syncEntityUrl("/");
+          }}
+          aria-label="Leave the cave"
+          className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+        >
+          <CloseIcon width={12} height={12} />
+        </button>
+        <p className="micro-label">Pricing</p>
+        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
+          Plans
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-silver-300">{summary}</p>
+        <div className="mt-4 space-y-1">
+          {plans.map((plan) => (
+            <p
+              key={plan.id}
+              className="flex items-baseline gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-2 text-sm"
+            >
+              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+                {plan.name}
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-300 tabular-nums">
+                {plan.monthlySparks.toLocaleString("en-US")} Sparks
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                ${plan.priceUsd}/mo
+              </span>
+            </p>
+          ))}
+        </div>
+        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
+          Billed monthly · Lowest cost per Spark
+        </p>
+      </SlideUpCard>
+
+      {/* island 2 — on-demand usage */}
+      <SlideUpCard
+        index={1}
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <p className="micro-label">On demand</p>
+        <h3 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
+          {onDemand.name}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-silver-300">
+          {onDemand.description}
+        </p>
+        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
+          Billed monthly · {onDemand.costTier}
+        </p>
+      </SlideUpCard>
+
+      {/* island 3 — instant top-up packs */}
+      <SlideUpCard
+        index={2}
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <p className="micro-label">Top-ups</p>
+        <h3 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
+          {topUps.name}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-silver-300">
+          {topUps.description}
+        </p>
+        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
+          Instant · {topUps.costTier}
         </p>
       </SlideUpCard>
     </div>
