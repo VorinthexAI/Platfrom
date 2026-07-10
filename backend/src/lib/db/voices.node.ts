@@ -1,5 +1,7 @@
 import { z } from 'zod';
-import { createNodeHelpers } from './base';
+import { aql } from 'arangojs';
+import { db } from './client';
+import { createNodeHelpers, withArangoKey } from './base';
 
 export const VOICES_COLLECTION = 'voices';
 
@@ -29,3 +31,18 @@ export const deleteVoice = helpers.deleteById;
 export const upsertVoiceByKey = helpers.upsertByKey;
 export const getAllVoicesChunked = helpers.getAllChunked;
 export const listVoicesPage = helpers.listPage;
+
+export async function getVoiceByProviderModelVoice(
+  provider: string,
+  model: string,
+  voice: string,
+): Promise<Voice | null> {
+  const cursor = await db.query(aql`
+    FOR v IN ${db.collection(VOICES_COLLECTION)}
+      FILTER v.provider == ${provider} && v.model == ${model} && v.voice == ${voice}
+      LIMIT 1
+      RETURN v
+  `);
+  const doc = await cursor.next();
+  return doc ? voiceSchema.parse(withArangoKey(doc)) : null;
+}
