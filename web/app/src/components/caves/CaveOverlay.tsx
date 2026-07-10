@@ -602,32 +602,11 @@ function PricingFlow() {
             </p>
           ))}
         </div>
-        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-          Billed monthly · Lowest cost per Spark
-        </p>
       </SlideUpCard>
 
-      {/* island 2 — on-demand usage */}
+      {/* island 2 — instant top-up packs */}
       <SlideUpCard
         index={1}
-        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
-        style={{ background: "var(--gradient-panel)" }}
-      >
-        <p className="micro-label">On demand</p>
-        <h3 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
-          {onDemand.name}
-        </h3>
-        <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          {onDemand.description}
-        </p>
-        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-          Billed monthly · {onDemand.costTier}
-        </p>
-      </SlideUpCard>
-
-      {/* island 3 — instant top-up packs */}
-      <SlideUpCard
-        index={2}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
@@ -638,8 +617,38 @@ function PricingFlow() {
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
           {topUps.description}
         </p>
-        <p className="mt-3 font-mono text-[0.55rem] tracking-[0.22em] text-silver-500 uppercase">
-          Instant · {topUps.costTier}
+        <div className="mt-4 space-y-1">
+          {topUps.packs.map((pack) => (
+            <p
+              key={pack.id}
+              className="flex items-baseline gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-2 text-sm"
+            >
+              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+                {pack.name}
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-300 tabular-nums">
+                {pack.sparks.toLocaleString("en-US")} Sparks
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                ${pack.priceUsd}
+              </span>
+            </p>
+          ))}
+        </div>
+      </SlideUpCard>
+
+      {/* island 3 — on-demand usage */}
+      <SlideUpCard
+        index={2}
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
+        <p className="micro-label">On demand</p>
+        <h3 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
+          {onDemand.name}
+        </h3>
+        <p className="mt-3 text-sm leading-relaxed text-silver-300">
+          {onDemand.description}
         </p>
       </SlideUpCard>
     </div>
