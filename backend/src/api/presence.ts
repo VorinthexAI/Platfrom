@@ -23,7 +23,7 @@ import {
 } from '@/lib/db/visitors.node';
 import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
-import { getDefaultPlatformId, trackPlatformEvent } from '@/platform/events';
+import { getRootOrganizationId, trackPlatformEvent } from '@/platform/events';
 import { getUserId } from './security';
 import { parseJson, strictObject } from './validation';
 
@@ -184,7 +184,7 @@ async function resolvePresenceVisitor(distinctId: string | null): Promise<Visito
     try {
       return await insertVisitor({
         key: newId(),
-        platformId: await getDefaultPlatformId(),
+        organizationId: await getRootOrganizationId(),
         distinctId,
         alias,
         lastSeenAt: now,
@@ -228,7 +228,7 @@ export async function joinPresence(c: Context) {
       await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
       await insertUserSession({
         key: nodeKey,
-        platformId: user.platformId,
+        organizationId: user.organizationId,
         userId: user.key,
         alias,
         source: body.source,
@@ -262,7 +262,7 @@ export async function joinPresence(c: Context) {
   await redisConnection.set(SESSION_PREFIX + sessionKey, JSON.stringify(record), 'EX', SESSION_TTL_SECONDS);
   await insertVisitorSession({
     key: nodeKey,
-    platformId: visitor.platformId,
+    organizationId: visitor.organizationId,
     visitorId: visitor.key,
     alias: visitor.alias,
     source: body.source,

@@ -4,7 +4,7 @@ import { teamMemberSchema } from './team-members.node';
 import { teamSchema } from './teams.node';
 
 describe('team node schemas', () => {
-  test('team has an ownerId and no platform link', () => {
+  test('team has an ownerId and no organization link', () => {
     const team = teamSchema.parse({
       key: 'team_test',
       ownerId: 'usr_owner',
@@ -12,12 +12,12 @@ describe('team node schemas', () => {
       slug: 'vorinthex',
       createdAt: '2026-07-08T00:00:00.000Z',
       updatedAt: '2026-07-08T00:00:00.000Z',
-      platformId: 'legacy_platform',
+      organizationId: 'org_legacy',
     });
 
     expect(team.ownerId).toBe('usr_owner');
     expect(team.isActive).toBe(true);
-    expect('platformId' in team).toBe(false);
+    expect('organizationId' in team).toBe(false);
   });
 
   test('team member stores team-local role and status only', () => {
@@ -33,10 +33,10 @@ describe('team node schemas', () => {
 
     expect(member.status).toBe('active');
     expect(member.invitedByUserId).toBeNull();
-    expect('platformId' in member).toBe(false);
+    expect('organizationId' in member).toBe(false);
   });
 
-  test('team invite tracks invite lifecycle without platformId', () => {
+  test('team invite tracks invite lifecycle without organizationId', () => {
     const invite = teamMemberInviteSchema.parse({
       key: 'tmi_test',
       teamId: 'team_test',
@@ -54,6 +54,6 @@ describe('team node schemas', () => {
     expect(invite.acceptedByUserId).toBeNull();
     expect(invite.acceptedAt).toBeNull();
     expect(invite.revokedAt).toBeNull();
-    expect('platformId' in invite).toBe(false);
+    expect('organizationId' in invite).toBe(false);
   });
 });

@@ -8,7 +8,7 @@ export const USER_SESSIONS_COLLECTION = 'userSessions';
 
 /**
  * One node per authenticated presence session — the authed twin of a
- * `visitorSessions` node, owned by the platform ("this"). Created when a
+ * `visitorSessions` node, owned by the root organization. Created when a
  * signed-in user joins the live galaxy over the presence pub/sub, closed
  * (disconnectedAt stamped) when they leave or their Redis session key
  * expires. A new entry is written per session, exactly like visitorSessions;
@@ -16,7 +16,7 @@ export const USER_SESSIONS_COLLECTION = 'userSessions';
  */
 export const userSessionSchema = z.object({
   key: z.string(),
-  platformId: z.string(),
+  organizationId: z.string(),
   /** The signed-in user this session belongs to. */
   userId: z.string(),
   alias: z.string(),

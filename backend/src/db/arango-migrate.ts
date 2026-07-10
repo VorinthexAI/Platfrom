@@ -20,8 +20,12 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   superAdmins: [['userId'], ['memberId']],
   authChallenges: [['userId', 'kind']],
   // Visitors are anonymous now: the emailHash/userId identity indexes go
-  // with the fields (scrubbed below); only distinctId + platformId remain.
-  visitors: [['emailHash'], ['userId']],
+  // with the fields (scrubbed below); only distinctId + organizationId remain.
+  // The platformId index goes with the platform -> organization rename.
+  visitors: [['emailHash'], ['userId'], ['platformId']],
+  users: [['platformId'], ['platform_role']],
+  visitorSessions: [['platformId', 'connectedAt']],
+  userSessions: [['platformId', 'connectedAt']],
 };
 
 function buildNodeEmbedText(collectionName: string, key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
@@ -127,11 +131,11 @@ const collections: CollectionSpec[] = [
     name: 'users',
     embedKeys: ['email', 'name'],
     indexes: [
-      { fields: ['platformId'] },
+      { fields: ['organizationId'] },
       { fields: ['email'], unique: true },
       { fields: ['emailHash'], unique: true },
       { fields: ['alias_slug'], unique: true, sparse: true },
-      { fields: ['platform_role'] },
+      { fields: ['organization_role'] },
       { fields: ['refreshTokenHash'], unique: true, sparse: true },
     ],
   },
@@ -220,11 +224,11 @@ const collections: CollectionSpec[] = [
   { name: 'outputs', embedKeys: ['type'], indexes: [{ fields: ['type', 'createdAt'] }] },
   { name: 'outputRelations', embedKeys: ['relationType'], indexes: [{ fields: ['parentOutputId'] }, { fields: ['childOutputId'] }] },
   { name: 'outputAnalytics', indexes: [{ fields: ['outputId', 'snapshotAt'] }] },
-  { name: 'platforms', indexes: [{ fields: ['name'], unique: true }] },
+  { name: 'organizations', embedKeys: ['name'], indexes: [{ fields: ['is_root'] }] },
   {
     name: 'visitors',
     indexes: [
-      { fields: ['platformId'] },
+      { fields: ['organizationId'] },
       { fields: ['distinctId'], unique: true, sparse: true },
     ],
   },
@@ -235,7 +239,7 @@ const collections: CollectionSpec[] = [
       { fields: ['source'] },
       { fields: ['sessionKey'], unique: true },
       { fields: ['disconnectedAt'] },
-      { fields: ['platformId', 'connectedAt'] },
+      { fields: ['organizationId', 'connectedAt'] },
     ],
   },
   {
@@ -245,7 +249,7 @@ const collections: CollectionSpec[] = [
       { fields: ['source'] },
       { fields: ['sessionKey'], unique: true },
       { fields: ['disconnectedAt'] },
-      { fields: ['platformId', 'connectedAt'] },
+      { fields: ['organizationId', 'connectedAt'] },
       { fields: ['userId', 'connectedAt'] },
     ],
   },
@@ -333,49 +337,93 @@ async function main() {
     await backfillCollectionEmbeddings(targetDb, spec);
   }
 
-  const platformsCollection = targetDb.collection('platforms');
-  let defaultPlatformId: string | null = null;
-  const defaultPlatformCursor = await targetDb.query<{ _key: string }>(`
-    FOR platform IN platforms
-      FILTER platform.name == "this"
+  // Root organization: the single is_root node every user, visitor,
+  // session, and event hangs off. The legacy `platforms` singleton (named
+  // "this") is copied across PRESERVING its _key, so every stored
+  // platformId value keeps pointing at the right node — only the field
+  // names need renaming, never the ids. `platforms` itself is dropped at
+  // the end of this migration, after all copies and renames completed.
+  const organizationsCollection = targetDb.collection('organizations');
+  let rootOrganizationId: string | null = null;
+  const rootOrganizationCursor = await targetDb.query<{ _key: string }>(`
+    FOR organization IN organizations
+      FILTER organization.is_root == true
       LIMIT 1
-      RETURN { _key: platform._key }
+      RETURN { _key: organization._key }
   `);
-  const existingDefaultPlatform = await defaultPlatformCursor.next();
-  if (existingDefaultPlatform) {
-    defaultPlatformId = existingDefaultPlatform._key;
-  } else {
-    defaultPlatformId = newId();
+  const existingRootOrganization = await rootOrganizationCursor.next();
+  if (existingRootOrganization) {
+    rootOrganizationId = existingRootOrganization._key;
+  }
+
+  const legacyPlatformsCollection = targetDb.collection('platforms');
+  if (await legacyPlatformsCollection.exists()) {
+    const legacyPlatformsCursor = await targetDb.query<Record<string, unknown>>(`
+      FOR platform IN platforms
+        RETURN platform
+    `);
+    const legacyPlatforms = await legacyPlatformsCursor.all();
+    for (const platform of legacyPlatforms) {
+      const key = nonEmptyString(platform._key);
+      if (!key) continue;
+      const isRoot = platform.name === 'this' || legacyPlatforms.length === 1;
+      const name = isRoot ? 'Vorinthex AI' : String(platform.name ?? '');
+      await organizationsCollection.save(
+        {
+          _key: key,
+          name,
+          is_root: isRoot,
+          metadata: platform.metadata && typeof platform.metadata === 'object' ? platform.metadata : {},
+          createdAt: nonEmptyString(platform.createdAt) ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          embedding: await embed({ text: ['_organizations', key, name].join(':') }),
+        },
+        { overwriteMode: 'ignore' },
+      );
+      if (isRoot && !rootOrganizationId) rootOrganizationId = key;
+    }
+    if (legacyPlatforms.length > 0) {
+      console.log(`Copied ${legacyPlatforms.length} platforms -> organizations`);
+    }
+  }
+
+  if (!rootOrganizationId) {
+    rootOrganizationId = newId();
     const now = new Date().toISOString();
-    await platformsCollection.save({
-      _key: defaultPlatformId,
-      name: 'this',
+    await organizationsCollection.save({
+      _key: rootOrganizationId,
+      name: 'Vorinthex AI',
+      is_root: true,
       metadata: {},
       createdAt: now,
       updatedAt: now,
-      embedding: await embed({ text: ['_platforms', defaultPlatformId, 'this'].join(':') }),
+      embedding: await embed({ text: ['_organizations', rootOrganizationId, 'Vorinthex AI'].join(':') }),
     });
+    console.log('Created root organization Vorinthex AI');
   }
 
+  // Rename the platform-era fields on users in one pass: organizationId
+  // takes the old platformId value (same key, see the copy above), and the
+  // role/title pair moves to its organization_* names.
   await targetDb.query(
     `
     FOR u IN users
-      FILTER !HAS(u, "platformId") || u.platformId == null || u.platformId == ""
-        || !HAS(u, "platform_role")
+      FILTER !HAS(u, "organizationId") || u.organizationId == null || u.organizationId == ""
+        || !HAS(u, "organization_role") || !HAS(u, "organization_title")
+        || HAS(u, "platformId") || HAS(u, "platform_role") || HAS(u, "platform_title")
       UPDATE u WITH {
-        platformId: (!HAS(u, "platformId") || u.platformId == null || u.platformId == "") ? @defaultPlatformId : u.platformId,
-        platform_role: HAS(u, "platform_role") ? u.platform_role : null
-      } IN users
+        organizationId: (HAS(u, "organizationId") && u.organizationId != null && u.organizationId != "")
+          ? u.organizationId
+          : ((HAS(u, "platformId") && u.platformId != null && u.platformId != "") ? u.platformId : @rootOrganizationId),
+        organization_role: HAS(u, "organization_role") ? u.organization_role : (HAS(u, "platform_role") ? u.platform_role : null),
+        organization_title: HAS(u, "organization_title") ? u.organization_title : (HAS(u, "platform_title") ? u.platform_title : null),
+        platformId: null,
+        platform_role: null,
+        platform_title: null
+      } IN users OPTIONS { keepNull: false }
     `,
-    { defaultPlatformId },
+    { rootOrganizationId },
   );
-
-  // Backfill the platform display title: null for everyone until seeded.
-  await targetDb.query(`
-    FOR u IN users
-      FILTER !HAS(u, "platform_title")
-      UPDATE u WITH { platform_title: null } IN users
-  `);
 
   await targetDb.query(`
     FOR c IN authChallenges
@@ -415,20 +463,20 @@ async function main() {
     await targetDb.query(
       `
       FOR m IN members
-        FILTER !HAS(m, "platformId")
-          || m.platformId == null
-          || m.platformId == ""
+        FILTER !HAS(m, "organizationId")
+          || m.organizationId == null
+          || m.organizationId == ""
           || !HAS(m, "role")
           || m.role == null
           || m.role == ""
           || HAS(m, "isSuperAdmin")
         UPDATE m WITH {
-          platformId: (!HAS(m, "platformId") || m.platformId == null || m.platformId == "") ? @defaultPlatformId : m.platformId,
+          organizationId: (!HAS(m, "organizationId") || m.organizationId == null || m.organizationId == "") ? @rootOrganizationId : m.organizationId,
           role: (!HAS(m, "role") || m.role == null || m.role == "") ? (m.isSuperAdmin == true ? "owner" : "viewer") : m.role,
           isSuperAdmin: null
         } IN members OPTIONS { keepNull: false }
       `,
-      { defaultPlatformId },
+      { rootOrganizationId },
     );
 
     await targetDb.query(`
@@ -437,14 +485,14 @@ async function main() {
         FILTER existing == null
         INSERT {
           _key: m._key,
-          platformId: HAS(m, "platformId") && m.platformId != null && m.platformId != "" ? m.platformId : @defaultPlatformId,
+          organizationId: HAS(m, "organizationId") && m.organizationId != null && m.organizationId != "" ? m.organizationId : @rootOrganizationId,
           email: m.email,
           emailHash: m.emailHash,
           name: HAS(m, "name") ? m.name : null,
           profileUrl: HAS(m, "profileUrl") ? m.profileUrl : null,
           alias: null,
           alias_slug: null,
-          platform_role: "viewer",
+          organization_role: "viewer",
           waitlistNumber: null,
           isVerified: true,
           is_subscribed_to_updates: true,
@@ -461,14 +509,14 @@ async function main() {
           updatedAt: DATE_ISO8601(DATE_NOW()),
           embedding: []
         } IN users OPTIONS { overwriteMode: "ignore" }
-    `, { defaultPlatformId });
+    `, { rootOrganizationId });
 
     await targetDb.query(`
       FOR m IN members
         FOR u IN users
           FILTER u.emailHash == m.emailHash
           UPDATE u WITH {
-            platform_role: u.platform_role == "owner" || u.platform_role == "admin" ? u.platform_role : "viewer",
+            organization_role: u.organization_role == "owner" || u.organization_role == "admin" ? u.organization_role : "viewer",
             name: HAS(u, "name") && u.name != null ? u.name : (HAS(m, "name") ? m.name : null),
             profileUrl: HAS(u, "profileUrl") && u.profileUrl != null ? u.profileUrl : (HAS(m, "profileUrl") ? m.profileUrl : null),
             isMfaEnabled: HAS(m, "isMfaEnabled") ? m.isMfaEnabled : (HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false),
@@ -492,14 +540,14 @@ async function main() {
         FILTER existing == null
         INSERT {
           _key: admin._key,
-          platformId: HAS(admin, "platformId") && admin.platformId != null && admin.platformId != "" ? admin.platformId : @defaultPlatformId,
+          organizationId: HAS(admin, "organizationId") && admin.organizationId != null && admin.organizationId != "" ? admin.organizationId : @rootOrganizationId,
           email: admin.email,
           emailHash: admin.emailHash,
           name: null,
           profileUrl: null,
           alias: null,
           alias_slug: null,
-          platform_role: "owner",
+          organization_role: "owner",
           waitlistNumber: null,
           isVerified: true,
           is_subscribed_to_updates: true,
@@ -516,14 +564,14 @@ async function main() {
           updatedAt: DATE_ISO8601(DATE_NOW()),
           embedding: []
         } IN users OPTIONS { overwriteMode: "ignore" }
-    `, { defaultPlatformId });
+    `, { rootOrganizationId });
 
     await targetDb.query(`
       FOR admin IN superAdmins
         FOR u IN users
           FILTER u.emailHash == admin.emailHash
           UPDATE u WITH {
-            platform_role: "owner",
+            organization_role: "owner",
             isMfaEnabled: HAS(admin, "isMfaEnabled") ? admin.isMfaEnabled : (HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false),
             has_request_mfa_reset_link: HAS(admin, "has_request_mfa_reset_link") ? admin.has_request_mfa_reset_link : (HAS(u, "has_request_mfa_reset_link") ? u.has_request_mfa_reset_link : false),
             totpSecret: HAS(admin, "totpSecret") ? admin.totpSecret : (HAS(u, "totpSecret") ? u.totpSecret : null),
@@ -599,11 +647,11 @@ async function main() {
         : typeof event.created_at === 'string'
           ? event.created_at
           : new Date().toISOString();
-      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'platform', slug });
+      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'organization', slug });
       await eventsCollection.save({
         _key: key,
-        sourceId: defaultPlatformId,
-        belongsTo: 'platform',
+        sourceId: rootOrganizationId,
+        belongsTo: 'organization',
         userId: user._key,
         slug,
         data: {
@@ -643,12 +691,12 @@ async function main() {
 
       const slug = typeof event.slug === 'string' && event.slug.length > 0 ? event.slug : 'unknown';
       const key = `user_event_${event._key}`;
-      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'platform', slug });
+      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'organization', slug });
       await eventsCollection.save(
         {
           _key: key,
-          sourceId: defaultPlatformId,
-          belongsTo: 'platform',
+          sourceId: rootOrganizationId,
+          belongsTo: 'organization',
           userId: event.userId,
           slug,
           data: event.data && typeof event.data === 'object' ? event.data : {},
@@ -713,14 +761,14 @@ async function main() {
       data: event.data,
     });
     const legacyAppSourceId = event.belongsTo === 'app' ? nonEmptyString(event.sourceId) ?? nonEmptyString(event.entityId) : null;
-    const belongsTo = legacyAppSourceId ? 'app' : 'platform';
+    const belongsTo = legacyAppSourceId ? 'app' : 'organization';
     const legacyPlatformSourceId = event.belongsTo === 'platform' && event.entityId !== userId
       ? nonEmptyString(event.entityId)
       : null;
     const sourceId = legacyAppSourceId
       ?? nonEmptyString(event.sourceId)
       ?? legacyPlatformSourceId
-      ?? defaultPlatformId;
+      ?? rootOrganizationId;
     const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
       ? buildNodeEmbedText('events', event._key, ['belongsTo', 'slug'], { belongsTo, slug: event.slug })
       : null;
@@ -830,7 +878,7 @@ async function main() {
     const userSessionsCollection = targetDb.collection('userSessions');
     const cursor = await targetDb.query<{
       _key: string;
-      platformId?: string;
+      organizationId?: string;
       visitorId?: string;
       emailHash?: string | null;
       alias?: string;
@@ -867,7 +915,7 @@ async function main() {
 
       const base = {
         _key: active._key,
-        platformId: active.platformId,
+        organizationId: active.organizationId,
         alias: active.alias,
         sessionKey: active.sessionKey,
         connectedAt: active.connectedAt,
@@ -916,6 +964,57 @@ async function main() {
       await collection.drop();
       console.log(`Dropped legacy identity collection ${legacyIdentityCollectionName}`);
     }
+  }
+
+  // platform -> organization rename on the remaining owners: visitors and
+  // both session ledgers carry the same key under the new field name. Runs
+  // after every legacy copy above so nothing can reintroduce platformId.
+  for (const ownedCollection of ['visitors', 'visitorSessions', 'userSessions']) {
+    await targetDb.query(
+      `
+      FOR doc IN @@collection
+        FILTER HAS(doc, "platformId")
+          || !HAS(doc, "organizationId") || doc.organizationId == null || doc.organizationId == ""
+        UPDATE doc WITH {
+          organizationId: (HAS(doc, "organizationId") && doc.organizationId != null && doc.organizationId != "")
+            ? doc.organizationId
+            : ((HAS(doc, "platformId") && doc.platformId != null && doc.platformId != "") ? doc.platformId : @rootOrganizationId),
+          platformId: null
+        } IN @@collection OPTIONS { keepNull: false }
+      `,
+      { '@collection': ownedCollection, rootOrganizationId },
+    );
+  }
+
+  // Events flip their ownership label: belongsTo "platform" becomes
+  // "organization" (sourceId already points at the copied node). The
+  // embedding text includes belongsTo, so re-embed the flipped rows —
+  // drained fully before the per-row work, like the legacy passes above.
+  const platformEventsCursor = await targetDb.query<{ _key: string; slug?: string }>(`
+    FOR event IN events
+      FILTER event.belongsTo == "platform"
+      RETURN { _key: event._key, slug: event.slug }
+  `);
+  const platformEvents = await platformEventsCursor.all();
+  if (platformEvents.length > 0) {
+    console.log(`Flipping ${platformEvents.length} events belongsTo platform -> organization`);
+  }
+  for (const event of platformEvents) {
+    const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
+      ? buildNodeEmbedText('events', event._key, ['belongsTo', 'slug'], { belongsTo: 'organization', slug: event.slug })
+      : null;
+    await eventsCollection.update(event._key, {
+      belongsTo: 'organization',
+      embedding: eventEmbedText ? await embed({ text: eventEmbedText }) : [],
+    });
+  }
+
+  // The platforms collection is fully copied into organizations (same keys)
+  // and nothing references it anymore — retire it.
+  const retiredPlatformsCollection = targetDb.collection('platforms');
+  if (await retiredPlatformsCollection.exists()) {
+    await retiredPlatformsCollection.drop();
+    console.log('Dropped collection platforms');
   }
 
   console.log('ArangoDB schema is up to date.');

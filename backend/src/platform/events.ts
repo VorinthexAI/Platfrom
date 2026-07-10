@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { insertEvent } from '@/lib/db/events.node';
-import { getPlatformByName, insertPlatform } from '@/lib/db/platforms.node';
+import { getRootOrganization, insertOrganization } from '@/lib/db/organizations.node';
 import { newId } from '@/lib/ids';
 
 export const eventSlugSchema = z.string().min(1).max(200);
@@ -59,8 +59,8 @@ export async function resolveEventSource(input: EventSourceInput = {}) {
   }
 
   return {
-    belongsTo: 'platform' as const,
-    sourceId: input.sourceId ?? await getDefaultPlatformId(),
+    belongsTo: 'organization' as const,
+    sourceId: input.sourceId ?? await getRootOrganizationId(),
   };
 }
 
@@ -89,14 +89,15 @@ export function trackPlatformEvent(input: {
   });
 }
 
-export async function getDefaultPlatformId() {
-  const existing = await getPlatformByName('this');
+export async function getRootOrganizationId() {
+  const existing = await getRootOrganization();
   if (existing) return existing.key;
 
   const now = new Date().toISOString();
-  const created = await insertPlatform({
+  const created = await insertOrganization({
     key: newId(),
-    name: 'this',
+    name: 'Vorinthex AI',
+    is_root: true,
     metadata: {},
     createdAt: now,
     updatedAt: now,

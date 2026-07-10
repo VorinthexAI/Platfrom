@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       authenticated: boolean;
       userId: string;
       name?: string | null;
-      platform_title?: string | null;
+      organization_title?: string | null;
     }>("/auth/totp/setup/complete", {
       method: "POST",
       body: JSON.stringify(parsed.data),
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       ok: true,
       authenticated: true,
       name: result.data.name ?? null,
-      title: result.data.platform_title ?? null,
+      title: result.data.organization_title ?? null,
     });
   }
 
