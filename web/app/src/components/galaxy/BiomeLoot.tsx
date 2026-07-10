@@ -62,7 +62,8 @@ function FloorFragment({
   position: [number, number, number];
   variant: number;
   entryDelay: number;
-  onCollect: () => void;
+  /** Returns false when the collect was refused (join/sign-in gate). */
+  onCollect: () => boolean;
 }) {
   const visualRef = useRef<THREE.Group>(null);
   const timeRef = useRef(0);
@@ -92,9 +93,10 @@ function FloorFragment({
   const handleCollect = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
     if (taken) return;
+    // A refused collect (join/sign-in gate) keeps the fragment in place.
+    if (!onCollect()) return;
     setTaken(true);
     document.body.style.cursor = "auto";
-    onCollect();
   };
 
   return (
@@ -375,9 +377,7 @@ export function CenterCrystal({
   const handleCollect = (event: ThreeEvent<PointerEvent>) => {
     event.stopPropagation();
     if (taken) return;
-    setTaken(true);
-    document.body.style.cursor = "auto";
-    collectBiomeLoot({
+    const collected = collectBiomeLoot({
       id: lootId,
       name: roll.name,
       rarity: rarityForValue(roll.value),
@@ -390,6 +390,10 @@ export function CenterCrystal({
         params: { value: roll.value },
       },
     });
+    // A refused collect (join/sign-in gate) keeps the crystal in place.
+    if (!collected) return;
+    setTaken(true);
+    document.body.style.cursor = "auto";
     // The find is big enough to end the dive: surface back to where the
     // explorer came from (belt or solar system).
     if (autoExitOnCollect) {

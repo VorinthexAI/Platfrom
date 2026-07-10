@@ -36,6 +36,8 @@ export type CaveKind =
   | "mfa" // arrived via /auth/mfa?token_hash=… (platform MFA setup/sign-in)
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault
+  | "about" // the company story, read inside the Origin Vault
+  | "contact" // the contact channel, read inside the Signal Vault
   | "hunt" // the galaxy hunt hall — live ranks + crystal cave
   | "sealed" // tapped-email-link landing: success state, no way out
   | "rock"; // any ordinary belt asteroid — hollow, near-empty, a few fragments

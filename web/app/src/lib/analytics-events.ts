@@ -17,6 +17,7 @@ export const LANDING_EVENT_SLUGS = [
   "landing.fragment_discovered",
   "landing.fragment_collect_clicked",
   "landing.fragment_join_to_collect_clicked",
+  "landing.collect_gate_shown",
   "waitlist.form_started",
   "waitlist.submit_clicked",
   "waitlist.signup_submitted",

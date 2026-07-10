@@ -78,6 +78,18 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "gem",
     approachLabel: "Opening the Accord Vault",
   },
+  about: {
+    ...rolledAnchor(),
+    interior: [900, -240, 0],
+    theme: "violet",
+    approachLabel: "Opening the Origin Vault",
+  },
+  contact: {
+    ...rolledAnchor(),
+    interior: [990, -240, 0],
+    theme: "ocean",
+    approachLabel: "Opening the Signal Vault",
+  },
   hunt: {
     ...rolledAnchor(),
     interior: [720, -240, 0],
@@ -131,7 +143,15 @@ export function randomRockAnchor(): RockAnchor {
 }
 
 /** Story caves an ordinary-looking asteroid can secretly host. */
-const ANCHORED_CAVE_KINDS: CaveKind[] = ["terms", "privacy", "signin", "join", "hunt"];
+const ANCHORED_CAVE_KINDS: CaveKind[] = [
+  "terms",
+  "privacy",
+  "about",
+  "contact",
+  "signin",
+  "join",
+  "hunt",
+];
 
 /**
  * Does this belt bearing sit on one of the hidden story vaults? Diving

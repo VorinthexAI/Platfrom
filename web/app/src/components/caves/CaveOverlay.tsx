@@ -8,7 +8,7 @@ import {
   type FormEvent,
 } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Button, TextInput } from "@vorinthex/shared/ui/components";
+import { Button, Skeleton, TextInput } from "@vorinthex/shared/ui/components";
 import { rollCenterCrystal } from "@/components/galaxy/BiomeLoot";
 import { CloseIcon } from "@/components/ui/icons";
 import { SlideUpCard } from "@/components/ui/SlideUpCard";
@@ -29,7 +29,13 @@ import { useFragmentsStore } from "@/lib/fragments/fragments-store";
 import { caveLootIdentity, syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
 import { galaxyPulseLine } from "@/lib/leaderboard/copy";
 import { useLeaderboardStore } from "@/lib/leaderboard/leaderboard-store";
-import { PRIVACY_COPY, TERMS_COPY } from "@/lib/legal-copy";
+import {
+  ABOUT_COPY,
+  CONTACT_COPY,
+  PRIVACY_COPY,
+  TERMS_COPY,
+  type VaultCopy,
+} from "@/lib/legal-copy";
 import { crystalOpener, tierForValue } from "@/lib/loot/crystal-tiers";
 
 /**
@@ -140,8 +146,10 @@ export function CaveOverlay() {
                 {caveKind === "waitlist-verify" ? <WaitlistVerifyFlow /> : null}
                 {caveKind === "magic" ? <MagicFlow /> : null}
                 {caveKind === "mfa" ? <MagicFlow /> : null}
-                {caveKind === "privacy" ? <LegalFlow copy={PRIVACY_COPY} /> : null}
-                {caveKind === "terms" ? <LegalFlow copy={TERMS_COPY} /> : null}
+                {caveKind === "privacy" ? <VaultReaderFlow copy={PRIVACY_COPY} /> : null}
+                {caveKind === "terms" ? <VaultReaderFlow copy={TERMS_COPY} /> : null}
+                {caveKind === "about" ? <VaultReaderFlow copy={ABOUT_COPY} /> : null}
+                {caveKind === "contact" ? <VaultReaderFlow copy={CONTACT_COPY} /> : null}
               </div>
             </SlideUpCard>
           </div>
@@ -533,14 +541,11 @@ function LeaderboardFlow() {
 }
 
 /* ---------------------------------------------------------------- */
-/* legal — privacy & terms, read by cavern light                      */
+/* static vaults — privacy, terms, about & contact, read by cavern    */
+/* light                                                              */
 /* ---------------------------------------------------------------- */
 
-function LegalFlow({
-  copy,
-}: {
-  copy: { title: string; eyebrow: string; paragraphs: string[] };
-}) {
+function VaultReaderFlow({ copy }: { copy: VaultCopy }) {
   return (
     <div>
       <p className="micro-label">{copy.eyebrow}</p>
@@ -551,9 +556,7 @@ function LegalFlow({
         {copy.paragraphs.map((paragraph) => (
           <p key={paragraph.slice(0, 24)}>{paragraph}</p>
         ))}
-        <p className="text-[0.7rem] text-silver-700">
-          Questions? Reach us at contact@vorinthex.com.
-        </p>
+        <p className="text-[0.7rem] text-silver-700">{copy.footnote}</p>
       </div>
     </div>
   );
@@ -1234,14 +1237,18 @@ function MagicFlow() {
 
   if (state.phase === "validating") {
     return (
-      <div>
-        <p className="micro-label">Cipher Chamber</p>
-        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-          Unsealing…
-        </h2>
-        <p className="mt-3 text-sm leading-relaxed text-silver-500">
-          Verifying your light against the member ledger.
-        </p>
+      <div
+        className="h-[420px] animate-pulse"
+        aria-busy="true"
+        aria-label="Loading the Solar Gate"
+      >
+        <Skeleton className="h-2 w-24 rounded-full bg-white/10" />
+        <Skeleton className="mt-5 h-7 w-52 rounded-md bg-white/10" />
+        <Skeleton className="mt-9 h-14 w-full rounded-2xl bg-white/8" />
+        <Skeleton className="mt-4 h-12 w-full rounded-full bg-white/8" />
+        <Skeleton className="mt-8 h-px w-full bg-white/8" />
+        <Skeleton className="mx-auto mt-7 h-2 w-32 rounded-full bg-white/8" />
+        <Skeleton className="mt-4 h-11 w-full rounded-full bg-white/8" />
       </div>
     );
   }
@@ -1338,12 +1345,6 @@ function TotpSetupPanel({
       <h2 className="font-display mt-3 text-xl tracking-[0.1em] text-silver-50">
         Forge your cipher.
       </h2>
-      <p className="mt-2 text-[0.78rem] leading-relaxed text-silver-500">
-        Members protect their vault with a one-time-code app (TOTP), a
-        rotating six-digit cipher only your device can forge. Scan the code
-        with any authenticator app, then prove it with two consecutive
-        codes.
-      </p>
       <div className="mt-4 flex items-center gap-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -1410,9 +1411,11 @@ function TotpSetupPanel({
       >
         Verify
       </Button>
-      <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error" ? error : ""}
-      </p>
+      {status === "error" ? (
+        <p aria-live="polite" className="mt-3 text-xs text-silver-500">
+          {error}
+        </p>
+      ) : null}
       <MfaRecoveryBlock />
     </form>
   );
@@ -1448,7 +1451,7 @@ function MfaRecoveryBlock() {
   }
 
   return (
-    <div className="mt-8 border-t border-white/8 pt-6 text-center">
+    <div className="mt-5 border-t border-white/8 pt-5 text-center">
       <p className="text-[0.68rem] text-silver-500">Lost access to your MFA?</p>
       <Button
         type="button"
@@ -1459,13 +1462,13 @@ function MfaRecoveryBlock() {
       >
         Request recovery
       </Button>
-      <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "sent"
-          ? "Check your inbox — a recovery link is on its way. It expires in 5 minutes."
-          : status === "error"
-            ? "Could not send the recovery link. Try again."
-            : ""}
-      </p>
+      {status === "sent" || status === "error" ? (
+        <p aria-live="polite" className="mt-3 text-xs text-silver-500">
+          {status === "sent"
+            ? "Check your inbox — a recovery link is on its way. It expires in 5 minutes."
+            : "Could not send the recovery link. Try again."}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1536,9 +1539,11 @@ function TotpVerifyPanel({
       >
         Verify
       </Button>
-      <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
-        {status === "error" ? "Invalid code, try the next one." : ""}
-      </p>
+      {status === "error" ? (
+        <p aria-live="polite" className="mt-3 text-xs text-silver-500">
+          Invalid code, try the next one.
+        </p>
+      ) : null}
       <MfaRecoveryBlock />
     </form>
   );
