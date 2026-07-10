@@ -9,7 +9,7 @@ import { rotateRefreshToken, verifyAccessToken, type AuthIdentity } from './auth
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
-const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60;
+const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24;
 const REFRESH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 function getClientIp(c: Parameters<MiddlewareHandler>[0]) {

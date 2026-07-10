@@ -2,16 +2,15 @@ import type { Metadata } from "next";
 import { LandingPage } from "@/components/landing/LandingPage";
 
 export const metadata: Metadata = {
-  title: "Join the Hunt",
+  title: "Sign in",
   description:
-    "Enter your email to start your explorer profile and track your fragments as the Hunt unfolds.",
+    "Enter your email to create or restore your explorer profile and track your fragments as the Hunt unfolds.",
   robots: { index: false, follow: false },
 };
 
 /**
- * The join route: dives straight into the waitlist cave on load, where a
- * visitor leaves their email and is told to check their inbox.
+ * Legacy join route: sign-in now creates new explorer profiles too.
  */
 export default function JoinPage() {
-  return <LandingPage initialCave="join" />;
+  return <LandingPage initialCave="signin" />;
 }

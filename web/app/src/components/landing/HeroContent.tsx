@@ -102,22 +102,13 @@ export function HeroContent() {
                 Jump Galaxy
               </Button>
             ) : (
-              <>
-                <OpenModalButton
-                  modal="waitlist"
-                  variant="primary"
-                  className="px-8 py-4 text-xs"
-                >
-                  {nexusContent?.primaryCta ?? "Join"}
-                </OpenModalButton>
-                <OpenModalButton
-                  modal="signin"
-                  variant="secondary"
-                  className="px-8 py-4 text-xs"
-                >
-                  Sign in
-                </OpenModalButton>
-              </>
+              <OpenModalButton
+                modal="signin"
+                variant="primary"
+                className="px-8 py-4 text-xs"
+              >
+                Sign in
+              </OpenModalButton>
             )}
           </div>
         </div>

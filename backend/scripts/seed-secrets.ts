@@ -7,10 +7,10 @@ import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
 import { getUserByEmailHash } from '@/lib/db/users.node';
 import {
-  getOrganizationMemberByOrganizationAndUser,
-  upsertOrganizationMemberByKey,
-  type OrganizationMember,
-} from '@/lib/db/organization-members.node';
+  getUserOrganizationByOrganizationAndUser,
+  upsertUserOrganizationByKey,
+  type UserOrganization,
+} from '@/lib/db/user-organization.node';
 
 const SEEDS_FILE = process.env.SEEDS_FILE ?? '../environments/backend/db.seeds.secrets.json';
 
@@ -46,8 +46,8 @@ function resolveRefs(value: unknown, idMap: Map<string, string>): unknown {
   return value;
 }
 
-function seededMembershipRole(role: unknown): OrganizationMember['role'] | null {
-  if (role === 'owner' || role === 'admin' || role === 'viewer') return role;
+function seededMembershipRole(role: unknown): UserOrganization['orgRole'] | null {
+  if (role === 'owner' || role === 'admin' || role === 'member' || role === 'viewer') return role;
   return null;
 }
 
@@ -55,25 +55,30 @@ async function syncSeededOrganizationMembership(input: {
   userId: string;
   organizationId: unknown;
   organizationRole: unknown;
+  organizationTitle: unknown;
   now: string;
 }) {
   const role = seededMembershipRole(input.organizationRole);
   if (!role || typeof input.organizationId !== 'string' || !input.organizationId) return null;
 
-  const existing = await getOrganizationMemberByOrganizationAndUser(
+  const existing = await getUserOrganizationByOrganizationAndUser(
     input.organizationId,
     input.userId,
   );
   const key = existing?.key ?? generateCuidKey();
-  return upsertOrganizationMemberByKey({
+  return upsertUserOrganizationByKey({
     ...(existing ?? {}),
     key,
     organizationId: input.organizationId,
     userId: input.userId,
-    role,
+    orgRole: role,
+    orgTitle: typeof input.organizationTitle === 'string' ? input.organizationTitle : existing?.orgTitle ?? null,
     status: 'active',
     joinedAt: existing?.joinedAt ?? input.now,
     invitedByUserId: existing?.invitedByUserId ?? null,
+    isMfaEnabled: existing?.isMfaEnabled ?? false,
+    totpSecret: existing?.totpSecret ?? null,
+    lastTotpTimeStep: existing?.lastTotpTimeStep ?? null,
     createdAt: existing?.createdAt ?? input.now,
     updatedAt: input.now,
   });
@@ -139,10 +144,11 @@ async function main() {
           userId: saved.key,
           organizationId: resolved.organizationId,
           organizationRole: resolved.organization_role,
+          organizationTitle: resolved.organization_title,
           now,
         });
         if (membership) {
-          results.push({ node: 'organizationMembers', key: membership.key });
+          results.push({ node: 'user_organization', key: membership.key });
         }
       }
 

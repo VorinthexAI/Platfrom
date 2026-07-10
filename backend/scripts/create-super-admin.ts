@@ -41,6 +41,11 @@ async function main() {
   try {
     const { hashUserEmail } = await import('@/api/users');
     const { getUserByEmailHash, insertUser, updateUser } = await import('@/lib/db/users.node');
+    const {
+      getUserOrganizationByOrganizationAndUser,
+      upsertUserOrganizationByKey,
+      updateUserOrganization,
+    } = await import('@/lib/db/user-organization.node');
     const { encryptSecret } = await import('@/lib/crypto');
     const { newId } = await import('@/lib/ids');
     const { getRootOrganizationId } = await import('@/platform/events');
@@ -52,35 +57,46 @@ async function main() {
     const emailHash = await hashUserEmail(email);
     const existingSuperAdmin = await getUserByEmailHash(emailHash);
     const now = new Date().toISOString();
+    const rootOrganizationId = await getRootOrganizationId();
     const superAdmin = existingSuperAdmin ?? await insertUser({
       key: newId(),
-      organizationId: await getRootOrganizationId(),
+      organizationId: rootOrganizationId,
       email,
       emailHash,
       name: null,
       profileUrl: null,
       alias: null,
       alias_slug: null,
-      organization_role: 'owner',
       waitlistNumber: null,
       isVerified: true,
       is_subscribed_to_updates: true,
       is_subscribed_to_updates_unsubscribe_token_hash: null,
       is_subscribed_to_updates_unsubscribe_requested_at: null,
-      isMfaEnabled: false,
-      has_request_mfa_reset_link: false,
-      totpSecret: null,
-      lastTotpTimeStep: null,
-      requested_mfa_reset_link_at: null,
       refreshTokenHash: null,
       lastLoginAt: null,
       createdAt: now,
       updatedAt: now,
     });
-    if (existingSuperAdmin && existingSuperAdmin.organization_role !== 'owner') {
-      await updateUser(existingSuperAdmin.key, { organization_role: 'owner', updatedAt: now });
-    }
     const superAdminKey = superAdmin.key;
+    if (existingSuperAdmin) {
+      await updateUser(existingSuperAdmin.key, { isVerified: true, updatedAt: now });
+    }
+    const existingLink = await getUserOrganizationByOrganizationAndUser(rootOrganizationId, superAdminKey);
+    const superAdminLink = await upsertUserOrganizationByKey({
+      key: existingLink?.key ?? `root-owner-${superAdminKey}`,
+      organizationId: rootOrganizationId,
+      userId: superAdminKey,
+      orgRole: 'owner',
+      orgTitle: 'Owner',
+      status: 'active',
+      joinedAt: existingLink?.joinedAt ?? now,
+      invitedByUserId: existingLink?.invitedByUserId ?? null,
+      isMfaEnabled: existingLink?.isMfaEnabled ?? false,
+      totpSecret: existingLink?.totpSecret ?? null,
+      lastTotpTimeStep: existingLink?.lastTotpTimeStep ?? null,
+      createdAt: existingLink?.createdAt ?? now,
+      updatedAt: now,
+    });
     console.log(`Super admin identity ${superAdminKey} ready.`);
 
     const secret = generateSecret();
@@ -94,7 +110,7 @@ async function main() {
 
     const lastTotpTimeStep = await verifyTwoCodes(secret, verifySuccessiveTotpCodes);
 
-    await updateUser(superAdminKey, {
+    await updateUserOrganization(superAdminLink.key, {
       totpSecret: await encryptSecret(secret),
       isMfaEnabled: true,
       lastTotpTimeStep,

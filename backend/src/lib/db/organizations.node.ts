@@ -17,6 +17,8 @@ export const organizationSchema = z.object({
   slug: z.string().nullable().default(null),
   description: z.string().nullable().default(null),
   isActive: z.boolean().default(true),
+  /** Organization-level MFA requirement. If false, org users use email magic links. */
+  mfa_enabled: z.boolean().default(false),
   metadata: z.record(z.unknown()).default({}),
   createdAt: z.string(),
   updatedAt: z.string(),

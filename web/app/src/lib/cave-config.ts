@@ -40,7 +40,7 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     ...rolledAnchor(),
     interior: [0, -240, 0],
     theme: "gem",
-    approachLabel: "Opening Join",
+    approachLabel: "Opening sign in",
   },
   "waitlist-verify": {
     ...rolledAnchor(),
@@ -65,6 +65,18 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     interior: [540, -240, 0],
     theme: "ember",
     approachLabel: "Approaching the Solar Gate",
+  },
+  "organization-signin": {
+    ...rolledAnchor(),
+    interior: [1170, -240, 0],
+    theme: "ember",
+    approachLabel: "Opening organization sign in",
+  },
+  "oauth-callback": {
+    ...rolledAnchor(),
+    interior: [1188, -250, 0],
+    theme: "gem",
+    approachLabel: "Completing provider sign in",
   },
   privacy: {
     ...rolledAnchor(),

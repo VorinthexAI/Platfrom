@@ -10,17 +10,19 @@ import QRCode from 'qrcode';
 import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
 import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
-import { listActiveOrganizationMembersByUser, type OrganizationMember } from '@/lib/db/organization-members.node';
+import { getOrganizationById } from '@/lib/db/organizations.node';
+import {
+  listActiveUserOrganizationsByUser,
+  updateUserOrganization,
+  type UserOrganization,
+} from '@/lib/db/user-organization.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { trackPlatformEvent } from '@/platform/events';
 import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
 import { notifyCountersDirty } from './live-bus';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
-/** Platform-role links (MFA sign-in, setup, recovery) burn out in 5 minutes. */
-const MEMBER_LINK_TTL_MS = 5 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
-const MFA_RESET_LINK_TTL_MS = MEMBER_LINK_TTL_MS;
 const TOTP_PERIOD_SECONDS = 30;
 const ISSUER = 'Vorinthex';
 
@@ -31,6 +33,7 @@ export interface SessionTokens {
 
 export type AuthIdentityType = 'user' | 'member' | 'superAdmin';
 export type LoginIdentityType = Exclude<AuthIdentityType, 'user'>;
+export type OAuthProvider = 'google' | 'apple';
 
 export interface AuthIdentity {
   key: string;
@@ -40,13 +43,16 @@ export interface AuthIdentity {
 interface LoginIdentity {
   type: LoginIdentityType;
   key: string;
+  linkKey: string;
+  organizationId: string;
+  orgRole: UserOrganization['orgRole'];
   email: string;
   emailHash: string;
   name: string | null;
   organizationTitle: string | null;
+  organizationIsRoot: boolean;
+  organizationMfaEnabled: boolean;
   isMfaEnabled: boolean;
-  has_request_mfa_reset_link: boolean;
-  requested_mfa_reset_link_at: string | null;
   totpSecret: string | null;
   lastTotpTimeStep: number | null;
 }
@@ -70,161 +76,134 @@ export type MagicLinkValidationResult =
     welcomeLine: string;
   };
 
-export function hasUsableMfaResetRequest(input: {
-  has_request_mfa_reset_link: boolean;
-  requested_mfa_reset_link_at: string | null;
-}, nowMs = Date.now()) {
-  if (!input.has_request_mfa_reset_link || !input.requested_mfa_reset_link_at) return false;
-  const requestedAt = new Date(input.requested_mfa_reset_link_at).getTime();
-  return Number.isFinite(requestedAt) && requestedAt + MFA_RESET_LINK_TTL_MS > nowMs;
+export function hasUsableMfaResetRequest() {
+  return false;
 }
 
 function base64UrlEncode(value: string) {
   return Buffer.from(value).toString('base64url');
 }
 
+function base64UrlEncodeBytes(value: Uint8Array | ArrayBuffer) {
+  return Buffer.from(value instanceof ArrayBuffer ? new Uint8Array(value) : value).toString('base64url');
+}
+
 function base64UrlDecode(value: string) {
   return Buffer.from(value, 'base64url').toString('utf8');
+}
+
+function jsonBase64Url(value: unknown) {
+  return base64UrlEncode(JSON.stringify(value));
 }
 
 async function signAccessTokenPayload(payload: string) {
   return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
 }
 
-function organizationIdentity(user: User): LoginIdentity | null {
-  if (user.organization_role === 'owner') {
-    return {
-      type: 'superAdmin',
-      key: user.key,
-      email: user.email,
-      emailHash: user.emailHash,
-      name: user.name,
-      organizationTitle: user.organization_title,
-      isMfaEnabled: user.isMfaEnabled,
-      has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-      requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-      totpSecret: user.totpSecret,
-      lastTotpTimeStep: user.lastTotpTimeStep,
-    };
-  }
-  if (user.organization_role === 'admin' || user.organization_role === 'viewer') {
-    return {
-      type: 'member',
-      key: user.key,
-      email: user.email,
-      emailHash: user.emailHash,
-      name: user.name,
-      organizationTitle: user.organization_title,
-      isMfaEnabled: user.isMfaEnabled,
-      has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-      requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-      totpSecret: user.totpSecret,
-      lastTotpTimeStep: user.lastTotpTimeStep,
-    };
-  }
-  return null;
+async function createSignedOAuthState(provider: OAuthProvider) {
+  const payload = jsonBase64Url({
+    provider,
+    nonce: randomToken('oauth_'),
+    exp: Date.now() + 10 * 60 * 1000,
+  });
+  return `${payload}.${await signAccessTokenPayload(payload)}`;
 }
 
-function membershipIdentity(
+async function verifySignedOAuthState(provider: OAuthProvider, state: string) {
+  const [payload, signature] = state.split('.');
+  if (!payload || !signature) return false;
+  const expected = await signAccessTokenPayload(payload);
+  if (!timingSafeEqual(signature, expected)) return false;
+  try {
+    const parsed = JSON.parse(base64UrlDecode(payload)) as { provider?: string; exp?: number };
+    return parsed.provider === provider && typeof parsed.exp === 'number' && parsed.exp > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+async function membershipIdentity(
   user: User,
-  membership: Pick<OrganizationMember, 'role'>,
-): LoginIdentity {
+  membership: UserOrganization,
+): Promise<LoginIdentity | null> {
+  const organization = await getOrganizationById(membership.organizationId);
+  if (!organization?.isActive) return null;
   return {
-    type: membership.role === 'owner' ? 'superAdmin' : 'member',
+    type: membership.orgRole === 'owner' ? 'superAdmin' : 'member',
     key: user.key,
+    linkKey: membership.key,
+    organizationId: membership.organizationId,
+    orgRole: membership.orgRole,
     email: user.email,
     emailHash: user.emailHash,
     name: user.name,
-    organizationTitle: user.organization_title,
-    isMfaEnabled: user.isMfaEnabled,
-    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-    totpSecret: user.totpSecret,
-    lastTotpTimeStep: user.lastTotpTimeStep,
+    organizationTitle: membership.orgTitle,
+    organizationIsRoot: organization.is_root,
+    organizationMfaEnabled: organization.mfa_enabled,
+    isMfaEnabled: membership.isMfaEnabled,
+    totpSecret: membership.totpSecret,
+    lastTotpTimeStep: membership.lastTotpTimeStep,
   };
 }
 
 function strongestMembership(
-  memberships: OrganizationMember[],
-): OrganizationMember | null {
-  const rank: Record<OrganizationMember['role'], number> = {
+  memberships: UserOrganization[],
+): UserOrganization | null {
+  const rank: Record<UserOrganization['orgRole'], number> = {
     owner: 4,
     admin: 3,
     member: 2,
     viewer: 1,
   };
-  return memberships.reduce<OrganizationMember | null>((best, membership) => {
-    if (!best || rank[membership.role] > rank[best.role]) return membership;
+  return memberships.reduce<UserOrganization | null>((best, membership) => {
+    if (!best || rank[membership.orgRole] > rank[best.orgRole]) return membership;
     return best;
   }, null);
 }
 
 async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
-  const membership = strongestMembership(await listActiveOrganizationMembersByUser(user.key));
+  const membership = strongestMembership(await listActiveUserOrganizationsByUser(user.key));
   return membership ? membershipIdentity(user, membership) : null;
 }
 
-function memberIdentity(user: User): LoginIdentity {
-  return {
-    type: 'member',
-    key: user.key,
-    email: user.email,
-    emailHash: user.emailHash,
-    name: user.name,
-    organizationTitle: user.organization_title,
-    isMfaEnabled: user.isMfaEnabled,
-    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-    totpSecret: user.totpSecret,
-    lastTotpTimeStep: user.lastTotpTimeStep,
-  };
-}
-
-function superAdminIdentity(user: User): LoginIdentity {
-  return {
-    type: 'superAdmin',
-    key: user.key,
-    email: user.email,
-    emailHash: user.emailHash,
-    name: user.name,
-    organizationTitle: user.organization_title,
-    isMfaEnabled: user.isMfaEnabled,
-    has_request_mfa_reset_link: user.has_request_mfa_reset_link,
-    requested_mfa_reset_link_at: user.requested_mfa_reset_link_at,
-    totpSecret: user.totpSecret,
-    lastTotpTimeStep: user.lastTotpTimeStep,
-  };
+async function rootOrganizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
+  const memberships = await listActiveUserOrganizationsByUser(user.key);
+  for (const membership of memberships) {
+    const identity = await membershipIdentity(user, membership);
+    if (identity?.organizationIsRoot) return identity;
+  }
+  return null;
 }
 
 export async function findLoginIdentityByEmail(email: string): Promise<LoginIdentity | null> {
   const normalized = normalizeEmail(email);
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
   if (!user) return null;
-  return organizationIdentity(user) ?? (await organizationMembershipIdentity(user));
+  return organizationMembershipIdentity(user);
 }
 
 async function getLoginIdentity(type: LoginIdentityType, key: string): Promise<LoginIdentity | null> {
   const user = await getUserById(key);
   if (!user) return null;
-  const legacyIdentity =
-    type === 'superAdmin'
-      ? user.organization_role === 'owner' ? superAdminIdentity(user) : null
-      : user.organization_role === 'admin' || user.organization_role === 'viewer' ? memberIdentity(user) : null;
-  if (legacyIdentity) return legacyIdentity;
-
-  const membership = await organizationMembershipIdentity(user);
-  if (!membership || membership.type !== type) return null;
-  return membership;
+  const memberships = await listActiveUserOrganizationsByUser(user.key);
+  const matching = memberships.filter((membership) => {
+    const membershipType: LoginIdentityType = membership.orgRole === 'owner' ? 'superAdmin' : 'member';
+    return membershipType === type;
+  });
+  const strongest = strongestMembership(matching);
+  return strongest ? membershipIdentity(user, strongest) : null;
 }
 
 async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: Record<string, unknown>) {
-  return updateUser(key, patch as Partial<User>);
+  const identity = await getLoginIdentity(type, key);
+  if (!identity) return null;
+  return updateUserOrganization(identity.linkKey, patch as Partial<UserOrganization>);
 }
 
 async function getLoginIdentityByRefreshTokenHash(refreshTokenHash: string): Promise<LoginIdentity | null> {
   const user = await getUserByRefreshTokenHash(refreshTokenHash);
   if (!user) return null;
-  return organizationIdentity(user) ?? (await organizationMembershipIdentity(user));
+  return organizationMembershipIdentity(user);
 }
 
 export async function createAccessToken(identity: AuthIdentity | string) {
@@ -232,11 +211,12 @@ export async function createAccessToken(identity: AuthIdentity | string) {
     ? { key: identity, identityType: 'user' as const }
     : identity;
   const now = Math.floor(Date.now() / 1000);
+  const ttlSeconds = normalized.identityType === 'user' ? 60 * 60 : 60 * 60 * 24;
   const payload = base64UrlEncode(JSON.stringify({
     sub: normalized.key,
     identityType: normalized.identityType,
     iat: now,
-    exp: now + 60 * 60,
+    exp: now + ttlSeconds,
   }));
   const signature = await signAccessTokenPayload(payload);
   return `vrtx_access_${payload}.${signature}`;
@@ -262,7 +242,7 @@ export async function issueTokens(identity: LoginIdentity): Promise<SessionToken
   const accessToken = await createAccessToken({ key: identity.key, identityType: identity.type });
   const refreshToken = randomToken('vrtx_refresh_');
   const refreshTokenHash = await sha256(refreshToken);
-  await updateLoginIdentity(identity.type, identity.key, {
+  await updateUser(identity.key, {
     refreshTokenHash,
     updatedAt: new Date().toISOString(),
   });
@@ -333,7 +313,7 @@ export async function createTotpChallengeForIdentity(
 
   const totpChallenge = await createChallenge(auth.key, 'totp', TOTP_CHALLENGE_TTL_MS, auth.type);
   return {
-    status: auth.has_request_mfa_reset_link ? 'totp_setup_required' : auth.isMfaEnabled ? 'totp_required' : 'totp_setup_required',
+    status: auth.isMfaEnabled ? 'totp_required' : 'totp_setup_required',
     totpChallengeToken: totpChallenge.tokenHash,
     expiresAt: totpChallenge.expiresAt,
   };
@@ -377,6 +357,171 @@ export function buildMfaLink(tokenHash: string) {
   const url = new URL('/auth/mfa', frontendUrl);
   url.searchParams.set('token_hash', tokenHash);
   return url.toString();
+}
+
+function requiredEnv(name: string) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+export async function buildOAuthAuthorizationUrl(provider: OAuthProvider, redirectUri: string) {
+  const state = await createSignedOAuthState(provider);
+  if (provider === 'google') {
+    const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    url.searchParams.set('client_id', requiredEnv('GOOGLE_OAUTH_CLIENT_ID'));
+    url.searchParams.set('redirect_uri', redirectUri);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('scope', 'openid email profile');
+    url.searchParams.set('state', state);
+    url.searchParams.set('prompt', 'select_account');
+    return url.toString();
+  }
+
+  const url = new URL('https://appleid.apple.com/auth/authorize');
+  url.searchParams.set('client_id', requiredEnv('APPLE_OAUTH_CLIENT_ID'));
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'name email');
+  url.searchParams.set('response_mode', 'query');
+  url.searchParams.set('state', state);
+  return url.toString();
+}
+
+function formBody(input: Record<string, string>) {
+  return new URLSearchParams(input).toString();
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const [, payload] = token.split('.');
+  if (!payload) return null;
+  try {
+    return JSON.parse(base64UrlDecode(payload)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function pemBodyToArrayBuffer(pem: string) {
+  const normalized = pem.replace(/\\n/g, '\n');
+  const body = normalized
+    .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+    .replace(/-----END PRIVATE KEY-----/g, '')
+    .replace(/\s/g, '');
+  return Buffer.from(body, 'base64');
+}
+
+async function buildAppleClientSecret() {
+  const now = Math.floor(Date.now() / 1000);
+  const header = {
+    alg: 'ES256',
+    kid: requiredEnv('APPLE_OAUTH_KEY_ID'),
+  };
+  const payload = {
+    iss: requiredEnv('APPLE_OAUTH_TEAM_ID'),
+    iat: now,
+    exp: now + 60 * 60 * 24 * 30,
+    aud: 'https://appleid.apple.com',
+    sub: requiredEnv('APPLE_OAUTH_CLIENT_ID'),
+  };
+  const signingInput = `${jsonBase64Url(header)}.${jsonBase64Url(payload)}`;
+  const privateKey = await crypto.subtle.importKey(
+    'pkcs8',
+    pemBodyToArrayBuffer(requiredEnv('APPLE_OAUTH_PRIVATE_KEY')),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    privateKey,
+    new TextEncoder().encode(signingInput),
+  );
+  return `${signingInput}.${base64UrlEncodeBytes(signature)}`;
+}
+
+async function exchangeGoogleCode(code: string, redirectUri: string) {
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody({
+      code,
+      client_id: requiredEnv('GOOGLE_OAUTH_CLIENT_ID'),
+      client_secret: requiredEnv('GOOGLE_OAUTH_CLIENT_SECRET'),
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+  const tokenData = await tokenResponse.json().catch(() => null) as { access_token?: string } | null;
+  if (!tokenResponse.ok || !tokenData?.access_token) return null;
+  const profileResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` },
+  });
+  const profile = await profileResponse.json().catch(() => null) as { email?: string; name?: string; picture?: string; email_verified?: boolean } | null;
+  if (!profileResponse.ok || !profile?.email || profile.email_verified === false) return null;
+  return { email: profile.email, name: profile.name ?? null, profileUrl: profile.picture ?? null };
+}
+
+async function exchangeAppleCode(code: string, redirectUri: string) {
+  const tokenResponse = await fetch('https://appleid.apple.com/auth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: formBody({
+      code,
+      client_id: requiredEnv('APPLE_OAUTH_CLIENT_ID'),
+      client_secret: await buildAppleClientSecret(),
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+  });
+  const tokenData = await tokenResponse.json().catch(() => null) as { id_token?: string } | null;
+  if (!tokenResponse.ok || !tokenData?.id_token) return null;
+  const payload = decodeJwtPayload(tokenData.id_token);
+  if (!payload) return null;
+  const email = typeof payload?.email === 'string' ? payload.email : null;
+  if (!email || payload.email_verified === false || payload.email_verified === 'false') return null;
+  return { email, name: null, profileUrl: null };
+}
+
+export async function completeOAuthSignIn(input: {
+  provider: OAuthProvider;
+  code: string;
+  state: string;
+  redirectUri: string;
+}) {
+  if (!await verifySignedOAuthState(input.provider, input.state)) return null;
+  const profile = input.provider === 'google'
+    ? await exchangeGoogleCode(input.code, input.redirectUri)
+    : await exchangeAppleCode(input.code, input.redirectUri);
+  if (!profile) return null;
+  const normalized = normalizeEmail(profile.email);
+  const user = await upsertUserByEmail(normalized, {
+    name: profile.name ?? defaultNameFromEmail(normalized),
+    profileUrl: profile.profileUrl,
+    isVerified: true,
+    lastLoginAt: new Date().toISOString(),
+  });
+  const tokens = await issueUserTokens(user);
+  const alias = user.alias ?? generateAlias(user.key);
+  trackPlatformEvent({
+    slug: 'auth.magic_link_authenticated',
+    userId: user.key,
+    data: {
+      user_id: user.key,
+      email_hash: user.emailHash,
+      provider: input.provider,
+      via: 'oauth',
+    },
+  });
+  return {
+    status: 'authenticated' as const,
+    identity: { key: user.key, identityType: 'user' as const },
+    ...tokens,
+    alias,
+    aliasSlug: user.alias_slug,
+    waitlistNumber: user.waitlistNumber,
+    welcomeLine: pickWelcomeLine(user.key, alias),
+  };
 }
 
 async function deliverSignInEmail(input: { email: string; magicLink: string; expiresAt: Date }) {
@@ -473,15 +618,54 @@ export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
   if (identity) {
-    // A truthy organization_role gets the professional platform email: real
-    // name, MFA-aware copy, a 5-minute link, and the /auth/mfa biome.
-    const challenge = await createChallenge(identity.key, 'email', MEMBER_LINK_TTL_MS, identity.type, { withHandoff: true });
-    const magicLink = buildMfaLink(challenge.tokenHash);
+    if (identity.organizationIsRoot) {
+      trackPlatformEvent({
+        slug: 'platform.sign_in_link_requested',
+        userId: identity.key,
+        data: {
+          user_id: identity.key,
+          identity_type: identity.type,
+          email_hash: identity.emailHash,
+          delivery: 'founders_gate_required',
+        },
+      });
+      return {
+        allowed: false as const,
+        foundersGateRequired: true as const,
+      };
+    }
+    if (identity.organizationMfaEnabled) {
+      const challenge = await createTotpChallengeForIdentity(identity.type, identity.key);
+      if (!challenge) return { allowed: false as const };
+      trackPlatformEvent({
+        slug: 'platform.sign_in_link_requested',
+        userId: identity.key,
+        data: {
+          user_id: identity.key,
+          identity_type: identity.type,
+          email_hash: identity.emailHash,
+          mfa_enabled: true,
+          delivery: 'direct_challenge',
+        },
+      });
+      return {
+        allowed: true as const,
+        organizationMfaRequired: true as const,
+        status: challenge.status,
+        totpChallengeToken: challenge.totpChallengeToken,
+        expiresAt: challenge.expiresAt,
+        name: identity.name,
+        organizationTitle: identity.organizationTitle,
+      };
+    }
+
+    const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type, { withHandoff: true });
+    const magicLink = buildMagicLink(challenge.tokenHash, 'member');
     await deliverMemberSignInEmail({
       email: normalized,
       name: memberGreetingName(identity),
       magicLink,
-      mfaEnabled: identity.isMfaEnabled,
+      mfaEnabled: false,
       expiresAt: challenge.expiresAt,
     });
     trackPlatformEvent({
@@ -491,7 +675,7 @@ export async function requestSignInEmail(email: string) {
         user_id: identity.key,
         identity_type: identity.type,
         email_hash: identity.emailHash,
-        mfa_enabled: identity.isMfaEnabled,
+        mfa_enabled: false,
       },
     });
     return {
@@ -505,10 +689,11 @@ export async function requestSignInEmail(email: string) {
   // Waitlist users — verified or not — sign in with the same magic-link
   // email; they get a direct session (no TOTP) that lands in their public
   // galaxy, and signing in doubles as email verification.
-  const user = await getUserByEmailHash(await hashUserEmail(normalized));
-  if (!user) {
-    return { allowed: false as const };
-  }
+  const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
+  const user = existingUser ?? await upsertUserByEmail(normalized, {
+    name: defaultNameFromEmail(normalized),
+    profileUrl: null,
+  });
 
   const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true });
   const magicLink = buildMagicLink(challenge.tokenHash, 'user');
@@ -529,40 +714,39 @@ export async function requestSignInEmail(email: string) {
 }
 
 export async function requestMfaResetEmail(email: string) {
-  const normalized = normalizeEmail(email);
-  const identity = await findLoginIdentityByEmail(normalized);
-  if (!identity?.isMfaEnabled) {
-    return {
-      ok: true as const,
-      emailSent: false,
-      expiresAt: new Date(Date.now() + MFA_RESET_LINK_TTL_MS),
-    };
-  }
-
-  const requestedAt = new Date();
-  await updateLoginIdentity(identity.type, identity.key, {
-    has_request_mfa_reset_link: true,
-    requested_mfa_reset_link_at: requestedAt.toISOString(),
-    updatedAt: requestedAt.toISOString(),
-  });
-
-  const challenge = await createChallenge(identity.key, 'email', MFA_RESET_LINK_TTL_MS, identity.type);
-  const magicLink = buildMfaLink(challenge.tokenHash);
-  await deliverMfaResetEmail({
-    email: normalized,
-    name: memberGreetingName(identity),
-    magicLink,
-    expiresAt: challenge.expiresAt,
-  });
-  trackPlatformEvent({
-    slug: 'platform.mfa_recovery_requested',
-    userId: identity.key,
-    data: { user_id: identity.key, email_hash: identity.emailHash },
-  });
+  const identity = await findLoginIdentityByEmail(email);
   return {
     ok: true as const,
-    emailSent: true,
+    emailSent: Boolean(identity?.isMfaEnabled),
+    expiresAt: new Date(Date.now() + TOTP_CHALLENGE_TTL_MS),
+  };
+}
+
+export async function requestFoundersGate(email: string) {
+  const normalized = normalizeEmail(email);
+  const user = await getUserByEmailHash(await hashUserEmail(normalized));
+  if (!user) return { allowed: false as const };
+  const identity = await rootOrganizationMembershipIdentity(user);
+  if (!identity) return { allowed: false as const };
+  const challenge = await createTotpChallengeForIdentity(identity.type, identity.key);
+  if (!challenge) return { allowed: false as const };
+  trackPlatformEvent({
+    slug: 'platform.sign_in_link_requested',
+    userId: identity.key,
+    data: {
+      user_id: identity.key,
+      identity_type: identity.type,
+      email_hash: identity.emailHash,
+      delivery: 'founders_gate',
+    },
+  });
+  return {
+    allowed: true as const,
+    status: challenge.status,
+    totpChallengeToken: challenge.totpChallengeToken,
     expiresAt: challenge.expiresAt,
+    name: identity.name,
+    organizationTitle: identity.organizationTitle,
   };
 }
 
@@ -617,8 +801,30 @@ export async function validateMagicLink(token: string, explorerId?: string): Pro
     };
   }
 
+  const auth = await getLoginIdentity(emailChallenge.identityType, emailChallenge.identityKey);
+  if (!auth) return null;
   await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
-  return createTotpChallengeForIdentity(emailChallenge.identityType, emailChallenge.identityKey);
+  if (auth.organizationMfaEnabled) {
+    return createTotpChallengeForIdentity(emailChallenge.identityType, emailChallenge.identityKey);
+  }
+  await updateUser(auth.key, {
+    lastLoginAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  trackPlatformEvent({
+    slug: 'auth.magic_link_authenticated',
+    userId: auth.key,
+    data: { user_id: auth.key, email_hash: auth.emailHash, identity_type: auth.type },
+  });
+  return {
+    status: 'authenticated',
+    identity: { key: auth.key, identityType: auth.type },
+    ...(await issueTokens(auth)),
+    alias: auth.name ?? defaultNameFromEmail(auth.email) ?? auth.email,
+    aliasSlug: null,
+    waitlistNumber: null,
+    welcomeLine: `Welcome back${auth.name ? `, ${auth.name}` : ''}.`,
+  };
 }
 
 export async function createUserWithAuth(input: { email: string; name?: string; profile_url?: string }) {
@@ -634,7 +840,7 @@ export async function startTotpSetup(challengeToken: string) {
   const challenge = await consumeChallenge(challengeToken, 'totp');
   if (!challenge || challenge.identityType === 'user') return null;
   const identity = await getLoginIdentity(challenge.identityType, challenge.identityKey);
-  if (!identity || (identity.isMfaEnabled && !identity.has_request_mfa_reset_link)) return null;
+  if (!identity || identity.isMfaEnabled) return null;
 
   const secret = generateSecret();
   await updateLoginIdentity(identity.type, identity.key, {
@@ -656,6 +862,29 @@ export async function startTotpSetup(challengeToken: string) {
     otpauthUrl,
     qrCodeDataUrl: await QRCode.toDataURL(otpauthUrl, { errorCorrectionLevel: 'M', margin: 1 }),
   };
+}
+
+export async function resetTotpForChallenge(challengeToken: string) {
+  const storedTokenHash = await sha256(challengeToken);
+  const challenge = await getAuthChallengeByTokenHash(storedTokenHash);
+  if (
+    !challenge ||
+    challenge.kind !== 'totp' ||
+    challenge.identityType === 'user' ||
+    challenge.consumedAt !== null ||
+    new Date(challenge.expiresAt).getTime() <= Date.now()
+  ) {
+    return null;
+  }
+  const identity = await getLoginIdentity(challenge.identityType, challenge.identityKey);
+  if (!identity) return null;
+  await updateLoginIdentity(identity.type, identity.key, {
+    isMfaEnabled: false,
+    totpSecret: null,
+    lastTotpTimeStep: null,
+    updatedAt: new Date().toISOString(),
+  });
+  return startTotpSetup(challengeToken);
 }
 
 export async function verifySuccessiveTotpCodes(secret: string, codes: [string, string], epoch = Date.now() / 1000) {
@@ -688,11 +917,7 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
   if (!challenge || challenge.identityType === 'user') return { ok: false as const, error: 'invalid challenge' };
   const auth = await getLoginIdentity(challenge.identityType, challenge.identityKey);
   if (!auth?.totpSecret) return { ok: false as const, error: 'setup unavailable' };
-  if (auth.has_request_mfa_reset_link) {
-    if (!hasUsableMfaResetRequest(auth)) {
-      return { ok: false as const, error: 'mfa reset link expired; request a new reset link' };
-    }
-  } else if (auth.isMfaEnabled) {
+  if (auth.isMfaEnabled) {
     return { ok: false as const, error: 'setup unavailable' };
   }
 
@@ -701,10 +926,11 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
 
   await updateLoginIdentity(auth.type, auth.key, {
     isMfaEnabled: true,
-    has_request_mfa_reset_link: false,
-    requested_mfa_reset_link_at: null,
-    lastLoginAt: new Date().toISOString(),
     lastTotpTimeStep: lastTimeStep,
+    updatedAt: new Date().toISOString(),
+  });
+  await updateUser(auth.key, {
+    lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
   trackPlatformEvent({
@@ -740,8 +966,11 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
   if (!result.valid) return null;
 
   await updateLoginIdentity(auth.type, auth.key, {
-    lastLoginAt: new Date().toISOString(),
     lastTotpTimeStep: result.timeStep,
+    updatedAt: new Date().toISOString(),
+  });
+  await updateUser(auth.key, {
+    lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
   trackPlatformEvent({

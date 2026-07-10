@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
+import { Button, TextInput } from "@vorinthex/shared/ui/components";
+import { setMagicHandoff } from "@/lib/auth/magic-handoff";
+import { normalizeEmailInput } from "@/lib/email";
 
 /**
  * Inside the star. The member surfs into the sun after MFA: every wall,
@@ -12,15 +15,20 @@ import Link from "next/link";
 export function SunGalaxy() {
   const [name, setName] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(null);
+  const [gateOpen, setGateOpen] = useState(true);
+  const [email, setEmail] = useState("");
+  const [gateStatus, setGateStatus] = useState<"idle" | "submitting" | "error">("idle");
+  const [gateError, setGateError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       await Promise.resolve();
       if (cancelled) return;
-      const storedTitle = window.localStorage.getItem("vx_member_title");
-      if (storedTitle?.trim()) setTitle(storedTitle.trim());
       const storedName = window.localStorage.getItem("vx_member_name");
+      const storedTitle = window.localStorage.getItem("vx_member_title");
+      if (storedName || storedTitle) setGateOpen(false);
+      if (storedTitle?.trim()) setTitle(storedTitle.trim());
       if (storedName?.trim()) {
         setName(storedName.trim().split(/\s+/)[0] ?? null);
         return;
@@ -35,6 +43,50 @@ export function SunGalaxy() {
       cancelled = true;
     };
   }, []);
+
+  async function submitFoundersGate(event: FormEvent) {
+    event.preventDefault();
+    if (gateStatus === "submitting") return;
+    let normalizedEmail: string;
+    try {
+      normalizedEmail = normalizeEmailInput(email);
+    } catch {
+      setGateError("Use a valid email address.");
+      setGateStatus("error");
+      return;
+    }
+    setGateStatus("submitting");
+    setGateError("");
+    try {
+      const response = await fetch("/api/auth/founders-gate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail }),
+      });
+      const data = await response.json();
+      if (
+        !response.ok ||
+        !data.ok ||
+        typeof data.totp_challenge_token_hash !== "string" ||
+        (data.status !== "totp_setup_required" && data.status !== "totp_required")
+      ) {
+        setGateError(data.error ?? "Founder identity not found.");
+        setGateStatus("error");
+        return;
+      }
+      window.localStorage.setItem("vx_member_email", normalizedEmail);
+      if (typeof data.name === "string") window.localStorage.setItem("vx_member_name", data.name);
+      if (typeof data.title === "string") window.localStorage.setItem("vx_member_title", data.title);
+      setMagicHandoff({
+        status: data.status,
+        challengeTokenHash: data.totp_challenge_token_hash,
+      });
+      window.location.href = "/auth/mfa";
+    } catch {
+      setGateError("The Founders Gate did not answer. Try again.");
+      setGateStatus("error");
+    }
+  }
 
   return (
     <main className="relative flex min-h-svh items-center justify-center overflow-hidden px-4 py-14 sm:py-16">
@@ -65,24 +117,62 @@ export function SunGalaxy() {
         className="chrome-border card-depth relative z-10 w-full max-w-lg rounded-3xl p-7 text-center sm:p-10"
         style={{ background: "var(--gradient-panel)" }}
       >
-        <p className="micro-label">The Inner Galaxy</p>
-        <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
-          {name ? `Welcome ${name},` : "Welcome,"}
-        </h1>
-        {title ? (
-          <p className="mt-6 font-mono text-[0.62rem] tracking-[0.26em] text-silver-300 uppercase">
-            {title} of Vorinthex AI | The Nexus of Intelligence
-          </p>
-        ) : null}
-        <p className="mt-6 text-sm leading-relaxed text-silver-300">
-          Welcome to the inner galaxy of Vorinthex AI. Looking forward to
-          working together to form this product as the next generation
-          AI-native platform — enabling anyone to use AI in their
-          day-to-day life.
-        </p>
-        <p className="mt-6 font-mono text-[0.6rem] tracking-[0.24em] text-silver-500 uppercase">
-          — Your CEO, Oscar
-        </p>
+        {gateOpen ? (
+          <form onSubmit={submitFoundersGate}>
+            <p className="micro-label">Founders Gate</p>
+            <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
+              Enter the sun.
+            </h1>
+            <p className="mt-5 text-sm leading-relaxed text-silver-300">
+              Founder access uses your organization MFA. Enter your email to
+              open setup or verification.
+            </p>
+            <label className="mt-6 block">
+              <span className="sr-only">Founder email</span>
+              <TextInput
+                type="email"
+                required
+                autoFocus
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Founder email"
+                className="w-full px-5 py-3.5 text-sm"
+              />
+            </label>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={gateStatus === "submitting"}
+              className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
+            >
+              Open Founders Gate
+            </Button>
+            <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
+              {gateStatus === "error" ? gateError : ""}
+            </p>
+          </form>
+        ) : (
+          <>
+            <p className="micro-label">The Inner Galaxy</p>
+            <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
+              {name ? `Welcome ${name},` : "Welcome,"}
+            </h1>
+            {title ? (
+              <p className="mt-6 font-mono text-[0.62rem] tracking-[0.26em] text-silver-300 uppercase">
+                {title} of Vorinthex AI | The Nexus of Intelligence
+              </p>
+            ) : null}
+            <p className="mt-6 text-sm leading-relaxed text-silver-300">
+              Welcome to the inner galaxy of Vorinthex AI. Looking forward to
+              working together to form this product as the next generation
+              AI-native platform - enabling anyone to use AI in their
+              day-to-day life.
+            </p>
+            <p className="mt-6 font-mono text-[0.6rem] tracking-[0.24em] text-silver-500 uppercase">
+              - Your CEO, Oscar
+            </p>
+          </>
+        )}
         <div className="mt-9 border-t border-white/8 pt-7">
           <Link
             href="/"

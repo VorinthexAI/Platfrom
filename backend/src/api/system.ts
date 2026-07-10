@@ -14,6 +14,7 @@ import {
   updateCapability,
 } from '@/lib/db/capabilities.node';
 import { getUserById } from '@/lib/db/users.node';
+import { listActiveUserOrganizationsByUser } from '@/lib/db/user-organization.node';
 import {
   deleteMindCapability,
   getMindCapabilityByPair,
@@ -119,7 +120,8 @@ async function requireSuperAdmin(c: Context) {
     return { error: c.json({ error: 'authentication required' }, 401) };
   }
   const user = await getUserById(auth.key);
-  if (user?.organization_role !== 'owner') {
+  const memberships = user ? await listActiveUserOrganizationsByUser(user.key) : [];
+  if (!memberships.some((membership) => membership.orgRole === 'owner')) {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
   return { key: auth.key, user };

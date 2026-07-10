@@ -3,9 +3,9 @@ import { generate, generateSecret } from 'otplib';
 import {
   buildMagicLink,
   buildMfaLink,
+  buildOAuthAuthorizationUrl,
   createAccessToken,
   createChallengeTokenHash,
-  hasUsableMfaResetRequest,
   verifyAccessToken,
   verifySuccessiveTotpCodes,
 } from './auth';
@@ -44,6 +44,32 @@ describe('auth helpers', () => {
     expect(link).not.toContain(rawToken);
   });
 
+  test('builds Google OAuth authorization URLs with a signed state', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'google-client';
+
+    const url = new URL(await buildOAuthAuthorizationUrl('google', 'https://app.example.com/api/auth/oauth/google/callback'));
+
+    expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
+    expect(url.searchParams.get('client_id')).toBe('google-client');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://app.example.com/api/auth/oauth/google/callback');
+    expect(url.searchParams.get('scope')).toBe('openid email profile');
+    expect(url.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]+\.[a-f0-9]{64}$/);
+  });
+
+  test('builds Apple OAuth authorization URLs with the callback URI', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    process.env.APPLE_OAUTH_CLIENT_ID = 'com.example.service';
+
+    const url = new URL(await buildOAuthAuthorizationUrl('apple', 'https://app.example.com/api/auth/oauth/apple/callback'));
+
+    expect(url.origin + url.pathname).toBe('https://appleid.apple.com/auth/authorize');
+    expect(url.searchParams.get('client_id')).toBe('com.example.service');
+    expect(url.searchParams.get('redirect_uri')).toBe('https://app.example.com/api/auth/oauth/apple/callback');
+    expect(url.searchParams.get('response_mode')).toBe('query');
+    expect(url.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]+\.[a-f0-9]{64}$/);
+  });
+
   test('encrypts and decrypts TOTP secrets', async () => {
     process.env.TOTP_SECRET_ENCRYPTION_KEY = 'test-key';
 
@@ -73,24 +99,5 @@ describe('auth helpers', () => {
 
     expect(await verifySuccessiveTotpCodes(secret, [first, second], submittedAtEpoch)).toBeGreaterThan(0);
     expect(await verifySuccessiveTotpCodes(secret, [first, first], submittedAtEpoch)).toBeNull();
-  });
-
-  test('accepts MFA reset requests only inside the 5 minute window', () => {
-    const requestedAt = '2026-07-03T10:00:00.000Z';
-
-    expect(hasUsableMfaResetRequest({
-      has_request_mfa_reset_link: true,
-      requested_mfa_reset_link_at: requestedAt,
-    }, Date.parse('2026-07-03T10:04:59.000Z'))).toBe(true);
-
-    expect(hasUsableMfaResetRequest({
-      has_request_mfa_reset_link: true,
-      requested_mfa_reset_link_at: requestedAt,
-    }, Date.parse('2026-07-03T10:05:00.000Z'))).toBe(false);
-
-    expect(hasUsableMfaResetRequest({
-      has_request_mfa_reset_link: false,
-      requested_mfa_reset_link_at: requestedAt,
-    }, Date.parse('2026-07-03T10:01:00.000Z'))).toBe(false);
   });
 });

@@ -132,12 +132,31 @@ export async function POST(request: Request) {
   }
 
   const result = await backendFetch<{
+    founders_gate_required?: boolean;
+    action?: string;
+    organization_mfa_required?: boolean;
+    status?: "totp_setup_required" | "totp_required";
+    totp_challenge_token_hash?: string;
+    name?: string | null;
+    organization_title?: string | null;
     handoff_token_hash?: string;
     handoff_expires_at?: string;
   }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email: parsed.data.email }),
   });
+
+  if (!result.ok && result.status === 403 && result.data?.founders_gate_required) {
+    return NextResponse.json(
+      {
+        ok: false,
+        collect,
+        founders_gate_required: true,
+        error: "Founders enter through the sun.",
+      },
+      { status: 403 },
+    );
+  }
 
   if (!result.ok && result.status !== 403) {
     console.error("members sign-in backend request failed", {
@@ -149,6 +168,32 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
+  }
+
+  if (
+    result.ok &&
+    result.data?.organization_mfa_required &&
+    result.data.status &&
+    result.data.totp_challenge_token_hash
+  ) {
+    const response = NextResponse.json({
+      ok: true,
+      collect,
+      organization_mfa_required: true,
+      status: result.data.status,
+      totp_challenge_token_hash: result.data.totp_challenge_token_hash,
+      name: result.data.name ?? null,
+      title: result.data.organization_title ?? null,
+    });
+    if (isNewExplorer) {
+      response.cookies.set(EXPLORER_COOKIE, explorerId, {
+        httpOnly: true,
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24 * 365,
+        path: "/",
+      });
+    }
+    return response;
   }
 
   const response = NextResponse.json({ ok: true, collect });
