@@ -24,6 +24,7 @@ import { userSessionSchema } from './user-sessions.node';
 import { userWaitlistLeaderboardChangeSchema } from './user-waitlist-leaderboard-changes.node';
 import { visitorSchema } from './visitors.node';
 import { visitorSessionSchema } from './visitor-sessions.node';
+import { voiceSchema } from './voices.node';
 
 const baseOrganization = {
   key: 'org_root',
@@ -127,6 +128,7 @@ describe('no node field mentions the retired platform or team nodes', () => {
     users: userSchema,
     visitorSessions: visitorSessionSchema,
     visitors: visitorSchema,
+    voices: voiceSchema,
   };
 
   for (const [name, schema] of Object.entries(nodeSchemas)) {

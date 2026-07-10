@@ -22,6 +22,7 @@ import { getAllSubscriptionsChunked, listSubscriptionsPage, upsertSubscriptionBy
 import { getAllUserEntitlementsChunked, listUserEntitlementsPage, upsertUserEntitlementByKey } from './user-entitlements.node';
 import { getAllUsersChunked, listUsersPage, upsertUserByKey } from './users.node';
 import { getAllVisitorsChunked, listVisitorsPage, upsertVisitorByKey } from './visitors.node';
+import { getAllVoicesChunked, listVoicesPage, upsertVoiceByKey } from './voices.node';
 
 export interface NodeAccessors {
   /** One resumable page — for stateless HTTP pagination (GET /api/v1/nodes). */
@@ -68,6 +69,7 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },
   visitorSessions: { listPage: listVisitorSessionsPage, getAllChunked: getAllVisitorSessionsChunked, upsertByKey: upsertVisitorSessionByKey },
   visitors: { listPage: listVisitorsPage, getAllChunked: getAllVisitorsChunked, upsertByKey: upsertVisitorByKey },
+  voices: { listPage: listVoicesPage, getAllChunked: getAllVoicesChunked, upsertByKey: upsertVoiceByKey },
 };
 
 export const NODE_NAMES = Object.keys(NODE_REGISTRY).sort();
