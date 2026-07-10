@@ -1012,8 +1012,14 @@ const sparkPricing = {
     name: "Spark Top-Ups",
     billing: "one-time" as const,
     description:
-      "Spark packs you buy once, credited the instant you need a burst. Pack sizes vary.",
+      "Spark packs you buy once, credited the instant you need a burst.",
     costTier: "Highest cost per Spark",
+    packs: [
+      { id: "spark.pack.small", name: "Small", sparks: 500, priceUsd: 14.99 },
+      { id: "spark.pack.medium", name: "Medium", sparks: 2_500, priceUsd: 49.99 },
+      { id: "spark.pack.large", name: "Large", sparks: 10_000, priceUsd: 149.99 },
+      { id: "spark.pack.xl", name: "XL", sparks: 50_000, priceUsd: 599.99 },
+    ],
   },
 };
 

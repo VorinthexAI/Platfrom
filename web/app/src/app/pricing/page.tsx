@@ -57,6 +57,20 @@ const pricingJsonLd = [
       url: absoluteUrl("/pricing"),
     })),
   },
+  {
+    "@context": "https://schema.org",
+    "@type": "OfferCatalog",
+    name: "Vorinthex AI Spark Top-Up Packs",
+    url: absoluteUrl("/pricing"),
+    itemListElement: topUps.packs.map((pack) => ({
+      "@type": "Offer",
+      name: `${pack.name} Spark Pack`,
+      description: `One-time pack of ${pack.sparks.toLocaleString("en-US")} Sparks, credited instantly.`,
+      price: pack.priceUsd,
+      priceCurrency: "USD",
+      url: absoluteUrl("/pricing"),
+    })),
+  },
 ];
 
 /**
@@ -94,6 +108,14 @@ export default function PricingPage() {
           {topUps.description} One-time purchase, credited instantly.{" "}
           {topUps.costTier} of the three options.
         </p>
+        <ul>
+          {topUps.packs.map((pack) => (
+            <li key={pack.id}>
+              {pack.name} — ${pack.priceUsd} one-time, includes{" "}
+              {pack.sparks.toLocaleString("en-US")} Sparks.
+            </li>
+          ))}
+        </ul>
         <h2>{onDemand.name}</h2>
         <p>
           {onDemand.description} Billed monthly. {onDemand.costTier} than

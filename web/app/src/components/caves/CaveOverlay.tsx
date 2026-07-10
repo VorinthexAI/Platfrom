@@ -617,6 +617,24 @@ function PricingFlow() {
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
           {topUps.description}
         </p>
+        <div className="mt-4 space-y-1">
+          {topUps.packs.map((pack) => (
+            <p
+              key={pack.id}
+              className="flex items-baseline gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-2 text-sm"
+            >
+              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+                {pack.name}
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-300 tabular-nums">
+                {pack.sparks.toLocaleString("en-US")} Sparks
+              </span>
+              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                ${pack.priceUsd}
+              </span>
+            </p>
+          ))}
+        </div>
       </SlideUpCard>
 
       {/* island 3 — on-demand usage */}
