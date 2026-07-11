@@ -8,9 +8,11 @@ Vorinthex platform monorepo. Top-level workspaces:
 
 - `web/app`: the single Next.js app (the "universe" landing experience).
   `web/` itself is not a workspace — it's just the parent folder. The app
-  builds to ONE container image (`vorinthex-web` in ECR) and runs as the
-  `vorinthex-prod-web` ECS service on the shared `vorinthex-production`
-  cluster behind the ALB. That single image serves every subdomain —
+  builds to ONE container image (`vorinthex-web` in ECR). Production
+  currently runs on the single-box early-infra stack (see Deployments
+  below); the `vorinthex-prod-web` ECS service on the shared
+  `vorinthex-production` cluster behind the ALB takes over once the
+  cluster is provisioned. That single image serves every subdomain —
   entity subdomains (orbit.vorinthex.com, …) and cave subdomains
   (hunt.vorinthex.com → /hunt) are routed inside the app via
   `web/app/src/proxy.ts`. (Vercel has been fully removed.)
@@ -119,4 +121,4 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - Run the relevant checks before considering a task complete.
 - Ask before introducing a new major dependency or framework.
 - This repo is its own monorepo; do not add git submodules for `web/app`, `backend`, or `shared`.
-- Deployments are AWS-ECS-only and happen ONLY through the Unified Deploy GitHub workflow (`.github/workflows/deploy.yml`): merge to `main` builds the `vorinthex-web` and `vorinthex-backend` images, pushes them to ECR, and rolls the `vorinthex-prod-web` and `vorinthex-prod-api` ECS services via `aws ecs update-service --force-new-deployment`. Vercel is GONE — there are no Vercel projects, no `vercel` CLI, and no git-connected hosting; do not reintroduce any of them. Infrastructure itself (Terraform plan/approval/apply) is provisioned by `infra.yml`, not `deploy.yml`.
+- Deployments happen ONLY through the Unified Deploy GitHub workflow (`.github/workflows/deploy.yml`): merge to `main` builds the `vorinthex-web` and `vorinthex-backend` images and pushes them to ECR. **Current state: to keep costs low early on, production is served by the single-box early-infra stack** — one EC2 box running web + api + redis behind Caddy (see `deploy/early/`) — and every merge reaches it via an SSM blue-green swap (`deploy/early/deploy.sh`). The AWS-ECS rollout steps (`vorinthex-prod-web` / `vorinthex-prod-api` on the `vorinthex-production` cluster via `aws ecs update-service --force-new-deployment`) exist in the same workflow but no-op while the cluster is INACTIVE; once ECS is provisioned the roles flip automatically and the early-infra job no-ops instead. Vercel is GONE — there are no Vercel projects, no `vercel` CLI, and no git-connected hosting; do not reintroduce any of them. Infrastructure itself (Terraform plan/approval/apply) is provisioned by `infra.yml`, not `deploy.yml`.
