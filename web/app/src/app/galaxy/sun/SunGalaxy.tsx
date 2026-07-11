@@ -1,21 +1,38 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button, TextInput } from "@vorinthex/shared/ui/components";
-import { setMagicHandoff } from "@/lib/auth/magic-handoff";
+import { TotpSetupPanel, TotpVerifyPanel, type TotpSetupData } from "@/components/auth/TotpWizard";
+import { CloseIcon } from "@/components/ui/icons";
 import { normalizeEmailInput } from "@/lib/email";
 
+type FoundersGatePhase =
+  | { kind: "gate" }
+  | { kind: "setup"; data: TotpSetupData }
+  | { kind: "verify"; challenge: string }
+  | { kind: "welcome"; name: string | null; title: string | null };
+
+/** A returning, already-verified member — skip straight past the gate. */
+function returningMemberWelcome(): { name: string | null; title: string | null } | null {
+  const storedName = window.localStorage.getItem("vx_member_name")?.trim() || null;
+  const storedTitle = window.localStorage.getItem("vx_member_title")?.trim() || null;
+  if (!storedName && !storedTitle) return null;
+  if (storedName) return { name: storedName.split(/\s+/)[0] ?? null, title: storedTitle };
+  const email = window.localStorage.getItem("vx_member_email");
+  const handle = email?.split("@")[0]?.split(".")[0] ?? "";
+  return { name: handle ? handle.charAt(0).toUpperCase() + handle.slice(1) : null, title: storedTitle };
+}
+
 /**
- * Inside the star. The member surfs into the sun after MFA: every wall,
- * the floor, and the ceiling glow like the solar interior — layered
- * plasma gradients breathing slowly around a single chrome card carrying
- * the CEO's welcome.
+ * Inside the star — the Nexus. One continuous chamber for the whole
+ * founders-gate journey: email gate, MFA setup or verification, then the
+ * CEO's welcome, all in place with no further navigation or hyperjump —
+ * the long-press into the sun is the only jump this visit gets.
  */
 export function SunGalaxy() {
-  const [name, setName] = useState<string | null>(null);
-  const [title, setTitle] = useState<string | null>(null);
-  const [gateOpen, setGateOpen] = useState(true);
+  const router = useRouter();
+  const [phase, setPhase] = useState<FoundersGatePhase>({ kind: "gate" });
   const [email, setEmail] = useState("");
   const [gateStatus, setGateStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [gateError, setGateError] = useState("");
@@ -25,24 +42,20 @@ export function SunGalaxy() {
     (async () => {
       await Promise.resolve();
       if (cancelled) return;
-      const storedName = window.localStorage.getItem("vx_member_name");
-      const storedTitle = window.localStorage.getItem("vx_member_title");
-      if (storedName || storedTitle) setGateOpen(false);
-      if (storedTitle?.trim()) setTitle(storedTitle.trim());
-      if (storedName?.trim()) {
-        setName(storedName.trim().split(/\s+/)[0] ?? null);
-        return;
-      }
-      const email = window.localStorage.getItem("vx_member_email");
-      if (email) {
-        const handle = email.split("@")[0]?.split(".")[0] ?? "";
-        if (handle) setName(handle.charAt(0).toUpperCase() + handle.slice(1));
-      }
+      const welcome = returningMemberWelcome();
+      if (welcome) setPhase({ kind: "welcome", ...welcome });
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  function onTotpSuccess(name: string | null, title: string | null) {
+    // The sun greets the member by their real name and platform title.
+    if (name) window.localStorage.setItem("vx_member_name", name);
+    if (title) window.localStorage.setItem("vx_member_title", title);
+    setPhase({ kind: "welcome", name, title });
+  }
 
   async function submitFoundersGate(event: FormEvent) {
     event.preventDefault();
@@ -58,6 +71,9 @@ export function SunGalaxy() {
     setGateStatus("submitting");
     setGateError("");
     try {
+      // Look the email up against the root organization: only a founder
+      // identity gets a challenge back, and setup vs. verify depends on
+      // whether they already have an authenticator registered.
       const response = await fetch("/api/auth/founders-gate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -77,11 +93,32 @@ export function SunGalaxy() {
       window.localStorage.setItem("vx_member_email", normalizedEmail);
       if (typeof data.name === "string") window.localStorage.setItem("vx_member_name", data.name);
       if (typeof data.title === "string") window.localStorage.setItem("vx_member_title", data.title);
-      setMagicHandoff({
-        status: data.status,
-        challengeTokenHash: data.totp_challenge_token_hash,
+
+      if (data.status === "totp_required") {
+        setPhase({ kind: "verify", challenge: data.totp_challenge_token_hash });
+        return;
+      }
+
+      const setupResponse = await fetch("/api/auth/totp/setup/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge_token_hash: data.totp_challenge_token_hash }),
       });
-      window.location.href = "/auth/mfa";
+      const setupData = await setupResponse.json();
+      if (!setupResponse.ok || !setupData.ok) {
+        setGateError("Could not start authenticator setup. Try again.");
+        setGateStatus("error");
+        return;
+      }
+      setPhase({
+        kind: "setup",
+        data: {
+          challenge: setupData.setup_challenge_token_hash,
+          qr: setupData.qr_code_data_url,
+          secret: setupData.secret,
+          otpauthUrl: setupData.otpauth_url,
+        },
+      });
     } catch {
       setGateError("The Founders Gate did not answer. Try again.");
       setGateStatus("error");
@@ -117,11 +154,20 @@ export function SunGalaxy() {
         className="chrome-border card-depth relative z-10 w-full max-w-lg rounded-3xl p-7 text-center sm:p-10"
         style={{ background: "var(--gradient-panel)" }}
       >
-        {gateOpen ? (
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          aria-label="Close"
+          className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+        >
+          <CloseIcon width={12} height={12} />
+        </button>
+
+        {phase.kind === "gate" ? (
           <form onSubmit={submitFoundersGate}>
             <p className="micro-label">Founders Gate</p>
             <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
-              Enter the sun.
+              Enter the Nexus.
             </h1>
             <p className="mt-5 text-sm leading-relaxed text-silver-300">
               Founder access uses your organization MFA. Enter your email to
@@ -145,21 +191,40 @@ export function SunGalaxy() {
               loading={gateStatus === "submitting"}
               className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
             >
-              Open Founders Gate
+              Continue
             </Button>
             <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
               {gateStatus === "error" ? gateError : ""}
             </p>
           </form>
-        ) : (
+        ) : null}
+
+        {phase.kind === "setup" ? (
+          <TotpSetupPanel
+            eyebrow="Founders Gate"
+            data={phase.data}
+            onSuccess={onTotpSuccess}
+          />
+        ) : null}
+
+        {phase.kind === "verify" ? (
+          <TotpVerifyPanel
+            eyebrow="Founders Gate"
+            challenge={phase.challenge}
+            onSuccess={onTotpSuccess}
+            onLostAccess={(data) => setPhase({ kind: "setup", data })}
+          />
+        ) : null}
+
+        {phase.kind === "welcome" ? (
           <>
             <p className="micro-label">The Inner Galaxy</p>
             <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
-              {name ? `Welcome ${name},` : "Welcome,"}
+              {phase.name ? `Welcome ${phase.name},` : "Welcome,"}
             </h1>
-            {title ? (
+            {phase.title ? (
               <p className="mt-6 font-mono text-[0.62rem] tracking-[0.26em] text-silver-300 uppercase">
-                {title} of Vorinthex AI | The Nexus of Intelligence
+                {phase.title} of Vorinthex AI | The Nexus of Intelligence
               </p>
             ) : null}
             <p className="mt-6 text-sm leading-relaxed text-silver-300">
@@ -172,15 +237,7 @@ export function SunGalaxy() {
               - Your CEO, Oscar
             </p>
           </>
-        )}
-        <div className="mt-9 border-t border-white/8 pt-7">
-          <Link
-            href="/"
-            className="vui-button vui-button-secondary min-h-0 px-7 py-3 text-xs uppercase"
-          >
-            Back to the galaxy
-          </Link>
-        </div>
+        ) : null}
       </section>
 
       <style jsx>{`
