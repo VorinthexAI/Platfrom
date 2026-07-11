@@ -1113,7 +1113,17 @@ jobs:
 
   early-infra-standalone-deploy:
     name: Early-infra deploy (standalone) / deploy
-    needs: [early-infra-standalone-build]
+    # backend-migrate is an explicit dependency (not just early-infra-standalone-build)
+    # so this box's blue-green swap can never flip live traffic to new backend code
+    # before a graph-db schema/collection rename (e.g. arango-migrate.ts) has actually
+    # landed in prod — otherwise the new code could briefly read a not-yet-populated
+    # collection. backend-migrate is skipped (not failed) on web-only deploys, so the
+    # explicit always()-guarded condition below tolerates skipped as well as success.
+    needs: [early-infra-standalone-build, backend-migrate]
+    if: |
+      always() &&
+      needs.early-infra-standalone-build.result == 'success' &&
+      (needs.backend-migrate.result == 'success' || needs.backend-migrate.result == 'skipped')
     runs-on: ubuntu-latest
     environment: production
     env:

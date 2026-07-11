@@ -8,7 +8,7 @@ describe('node registry schema contracts', () => {
   test('registry serves organizations and user links, never the retired team/platform nodes', () => {
     expect(NODE_NAMES).toContain('users');
     expect(NODE_NAMES).toContain('organizations');
-    expect(NODE_NAMES).toContain('user_organization');
+    expect(NODE_NAMES).toContain('userOrganizations');
     expect(NODE_NAMES).not.toContain('organizationMembers');
     expect(NODE_NAMES).not.toContain('platforms');
     expect(NODE_NAMES).not.toContain('teams');

@@ -139,7 +139,10 @@ const collections: CollectionSpec[] = [
     ],
   },
   {
-    name: 'user_organization',
+    // Renamed from the legacy 'user_organization' (snake_case, singular —
+    // every other collection is camelCase plural) — see the copy-and-drop
+    // step near the end of main() that moves live rows across on deploy.
+    name: 'userOrganizations',
     indexes: [
       { fields: ['organizationId'] },
       { fields: ['userId'] },
@@ -769,7 +772,6 @@ async function main() {
   if (migratedLegacyIdentities) {
     await backfillCollectionEmbeddings(targetDb, collections.find((spec) => spec.name === 'users')!);
   }
-  await backfillCollectionEmbeddings(targetDb, collections.find((spec) => spec.name === 'user_organization')!);
 
   const oldPostRenders = targetDb.collection('postRenders');
   if (await oldPostRenders.exists()) {
@@ -1193,11 +1195,54 @@ async function main() {
     });
   }
 
+  // user_organization -> userOrganizations rename: copy every row across
+  // (preserving _key so nothing else needs to change), UPSERT'd on the same
+  // (organizationId, userId) pair the unique index enforces so this is safe
+  // to run again. Runs after every block above that still writes into the
+  // legacy 'user_organization' name so it picks up rows those backfills
+  // just wrote. The old collection is dropped alongside the other retired
+  // collections below, in this same run.
+  const legacyUserOrganizationCollection = targetDb.collection('user_organization');
+  if (await legacyUserOrganizationCollection.exists()) {
+    await targetDb.query(`
+      FOR link IN user_organization
+        UPSERT { organizationId: link.organizationId, userId: link.userId }
+        INSERT {
+          _key: link._key,
+          organizationId: link.organizationId,
+          userId: link.userId,
+          orgRole: link.orgRole,
+          orgTitle: HAS(link, "orgTitle") ? link.orgTitle : null,
+          status: HAS(link, "status") ? link.status : "active",
+          joinedAt: link.joinedAt,
+          invitedByUserId: HAS(link, "invitedByUserId") ? link.invitedByUserId : null,
+          isMfaEnabled: HAS(link, "isMfaEnabled") ? link.isMfaEnabled : false,
+          totpSecret: HAS(link, "totpSecret") ? link.totpSecret : null,
+          lastTotpTimeStep: HAS(link, "lastTotpTimeStep") ? link.lastTotpTimeStep : null,
+          createdAt: link.createdAt,
+          updatedAt: link.updatedAt,
+          embedding: []
+        }
+        UPDATE {
+          orgRole: link.orgRole,
+          orgTitle: HAS(link, "orgTitle") ? link.orgTitle : OLD.orgTitle,
+          status: HAS(link, "status") ? link.status : OLD.status,
+          isMfaEnabled: HAS(link, "isMfaEnabled") ? link.isMfaEnabled : OLD.isMfaEnabled,
+          totpSecret: HAS(link, "totpSecret") ? link.totpSecret : OLD.totpSecret,
+          lastTotpTimeStep: HAS(link, "lastTotpTimeStep") ? link.lastTotpTimeStep : OLD.lastTotpTimeStep,
+          updatedAt: link.updatedAt
+        }
+        IN userOrganizations
+    `);
+    console.log('Copied user_organization -> userOrganizations');
+  }
+
   // The platforms collection is fully copied into organizations (same keys)
   // and nothing references it anymore — retire it. Teams follow the same
-  // path (copied into organizations/user_organization above), and the
-  // invites collection retires with the teams feature.
-  for (const retiredCollectionName of ['platforms', 'teams', 'teamMembers', 'teamMemberInvites', 'organizationMembers']) {
+  // path (copied into organizations/userOrganizations above), and the
+  // invites collection retires with the teams feature. user_organization
+  // retires here too, now that its rows live in userOrganizations above.
+  for (const retiredCollectionName of ['platforms', 'teams', 'teamMembers', 'teamMemberInvites', 'organizationMembers', 'user_organization']) {
     const retiredCollection = targetDb.collection(retiredCollectionName);
     if (await retiredCollection.exists()) {
       await retiredCollection.drop();

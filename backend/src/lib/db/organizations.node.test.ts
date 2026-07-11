@@ -122,7 +122,7 @@ describe('no node field mentions the retired platform or team nodes', () => {
     products: productSchema,
     subscriptions: subscriptionSchema,
     userEntitlements: userEntitlementSchema,
-    user_organization: userOrganizationSchema,
+    userOrganizations: userOrganizationSchema,
     userSessions: userSessionSchema,
     userWaitlistLeaderboardChanges: userWaitlistLeaderboardChangeSchema,
     users: userSchema,
