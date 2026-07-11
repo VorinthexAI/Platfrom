@@ -796,6 +796,7 @@ interface StoredProfile {
  */
 function ExplorerSigninFlow() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
+  const enterCave = useGalaxyStore((s) => s.enterCave);
   const balance = useFragmentsStore((s) => s.balance);
   const collectedCount = useFragmentsStore((s) => s.collectedIds.length);
   const pendingCollect = useFragmentsStore((s) => s.pendingCollect);
@@ -803,6 +804,7 @@ function ExplorerSigninFlow() {
   const [profile, setProfile] = useState<StoredProfile | null | "loading">(
     "loading",
   );
+  const [method, setMethod] = useState<"choose" | "email">("choose");
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "sent" | "error">(
     "idle",
@@ -810,6 +812,12 @@ function ExplorerSigninFlow() {
   const [error, setError] = useState("");
   const formStarted = useRef(false);
   useHandoffJump(status === "sent", "signin_cave");
+
+  function openLegalVault(kind: "terms" | "privacy") {
+    trackCtaClick("legal_open", { legal_kind: kind, placement: "signin_cave" });
+    enterCave(kind);
+    syncEntityUrl(`/${kind}`);
+  }
 
   useEffect(() => {
     (async () => {
@@ -983,10 +991,90 @@ function ExplorerSigninFlow() {
     );
   }
 
+  // Step 1: choose a way in. Email opens the second step below; Google
+  // and Apple hand off straight to the provider gate.
+  if (method === "choose") {
+    return (
+      <div>
+        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
+          Sign in to the Hunt.
+        </h2>
+        <p className="mt-3 text-sm leading-relaxed text-silver-500">
+          Continue with email, Google, or Apple to create or restore your
+          explorer profile, alias, and fragments.
+        </p>
+        {pendingCollect ? (
+          <p className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 font-mono text-[0.55rem] tracking-[0.2em] text-silver-300 uppercase">
+            Collecting: {pendingCollect.name} · +
+            {pendingCollect.fragments.toLocaleString("en-US")} fragments
+          </p>
+        ) : null}
+        <div className="mt-6 flex flex-col gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              trackCtaClick("signin_method_email", { placement: "signin_cave" });
+              setMethod("email");
+            }}
+            className="w-full px-5 py-3.5 text-xs uppercase"
+          >
+            Continue with email
+          </Button>
+          <a
+            href="/api/auth/oauth/google/start"
+            onClick={() =>
+              trackCtaClick("signin_method_google", { placement: "signin_cave" })
+            }
+            className="vui-button vui-button-secondary inline-flex w-full items-center justify-center px-5 py-3.5 text-xs uppercase"
+          >
+            Continue with Google
+          </a>
+          <a
+            href="/api/auth/oauth/apple/start"
+            onClick={() =>
+              trackCtaClick("signin_method_apple", { placement: "signin_cave" })
+            }
+            className="vui-button vui-button-secondary inline-flex w-full items-center justify-center px-5 py-3.5 text-xs uppercase"
+          >
+            Continue with Apple
+          </a>
+        </div>
+        <p className="mt-5 text-center text-[0.68rem] leading-relaxed text-silver-500">
+          By continuing you agree to our{" "}
+          <button
+            type="button"
+            onClick={() => openLegalVault("terms")}
+            className="underline decoration-white/20 underline-offset-2 transition-colors hover:text-silver-100"
+          >
+            Terms of Service
+          </button>{" "}
+          and{" "}
+          <button
+            type="button"
+            onClick={() => openLegalVault("privacy")}
+            className="underline decoration-white/20 underline-offset-2 transition-colors hover:text-silver-100"
+          >
+            Privacy Policy
+          </button>
+          .
+        </p>
+      </div>
+    );
+  }
+
+  // Step 2: email. Reached only via "Continue with email" above.
   return (
     <form onSubmit={handleSubmit}>
+      <button
+        type="button"
+        onClick={() => setMethod("choose")}
+        className="font-mono text-[0.58rem] tracking-[0.24em] text-silver-500 uppercase transition-colors hover:text-silver-100"
+      >
+        ← Back
+      </button>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        Sign in to the Hunt.
+        Sign in with email.
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-silver-500">
         Enter your email to create or restore your explorer profile,
@@ -1018,20 +1106,6 @@ function ExplorerSigninFlow() {
       >
         Sign in
       </Button>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <a
-          href="/api/auth/oauth/google/start"
-          className="vui-button vui-button-secondary inline-flex min-h-0 items-center justify-center px-4 py-3 text-[0.62rem] uppercase"
-        >
-          Google
-        </a>
-        <a
-          href="/api/auth/oauth/apple/start"
-          className="vui-button vui-button-secondary inline-flex min-h-0 items-center justify-center px-4 py-3 text-[0.62rem] uppercase"
-        >
-          Apple
-        </a>
-      </div>
       <p aria-live="polite" className="mt-3 min-h-4 text-xs text-silver-500">
         {status === "error" ? error : ""}
       </p>
