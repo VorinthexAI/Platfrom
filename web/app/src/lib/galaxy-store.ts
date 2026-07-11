@@ -137,6 +137,15 @@ export const galaxyMotion = {
   orbitVelocity: 0,
   /** True while a pointer is actively dragging — the camera follows 1:1. */
   dragging: false,
+  /**
+   * True while a pointer/touch is holding down on the sun for the founders
+   * gate (see NexusSun). The whole canvas is one DOM element, so
+   * UniverseStage's own drag-to-rotate pointer/touch handlers would
+   * otherwise treat that same press as "grab the cosmos and spin it" —
+   * checked by those handlers so a sun long-press is never reinterpreted
+   * as a rotate/swipe gesture.
+   */
+  holdingSun: false,
   /** ms timestamp of the last scroll input (for momentum decay). */
   lastScrollAt: 0,
   /** ms timestamp of the last interior-to-interior warp (streak burst). */
