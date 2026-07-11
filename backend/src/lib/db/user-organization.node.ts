@@ -3,7 +3,7 @@ import { aql } from 'arangojs';
 import { db } from './client';
 import { createNodeHelpers, withArangoKey } from './base';
 
-export const USER_ORGANIZATION_COLLECTION = 'user_organization';
+export const USER_ORGANIZATION_COLLECTION = 'userOrganizations';
 
 export const userOrganizationRoleSchema = z.enum(['owner', 'admin', 'member', 'viewer']);
 export const userOrganizationStatusSchema = z.enum(['active', 'suspended']);

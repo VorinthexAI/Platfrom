@@ -24,9 +24,15 @@ import { useGalaxyStore } from "@/lib/galaxy-store";
  * - "waitlist-verify": /public/waitlist/verify?token_hash=…
  * - "magic": /public/auth/token?token_hash=…&flow=user (explorer session;
  *   member links keep the Cipher Chamber TOTP flow instead)
+ * - "oauth-callback": /auth/oauth/callback?status=…&alias=… — the OAuth
+ *   exchange already happened server-side (see the Next.js route handler),
+ *   so unlike the token-based kinds above there's nothing left to verify;
+ *   this just reads the result out of the query string. Always same-surface
+ *   (the whole redirect chain stays in one browser), so there's no
+ *   cross-device "sealed" case to handle like the token-based kinds have.
  */
 
-type ArrivalKind = "waitlist-verify" | "magic";
+type ArrivalKind = "waitlist-verify" | "magic" | "oauth-callback";
 
 type ArrivalResult =
   | { outcome: "jump" }
@@ -123,6 +129,24 @@ async function validateMagicToken(token: string): Promise<ArrivalResult> {
   return { outcome: "cave" };
 }
 
+function resolveOAuthArrival(): ArrivalResult {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("status") !== "success") return { outcome: "cave" };
+  window.localStorage.setItem(
+    "vx_profile",
+    JSON.stringify({
+      alias: params.get("alias"),
+      aliasSlug: params.get("alias_slug"),
+      waitlistNumber: params.get("waitlist_number")
+        ? Number(params.get("waitlist_number"))
+        : null,
+      welcomeLine: params.get("welcome"),
+    }),
+  );
+  window.dispatchEvent(new Event("vx-profile-changed"));
+  return { outcome: "jump" };
+}
+
 export function ArrivalJump({ kind }: { kind: ArrivalKind }) {
   const mode = useGalaxyStore((s) => s.mode);
   const [result, setResult] = useState<ArrivalResult | null>(null);
@@ -135,14 +159,18 @@ export function ArrivalJump({ kind }: { kind: ArrivalKind }) {
     requested.current = true;
     (async () => {
       await Promise.resolve();
-      const token = new URLSearchParams(window.location.search).get(
-        "token_hash",
-      );
-      if (!token) {
-        setResult({ outcome: "cave" });
-        return;
-      }
       try {
+        if (kind === "oauth-callback") {
+          setResult(resolveOAuthArrival());
+          return;
+        }
+        const token = new URLSearchParams(window.location.search).get(
+          "token_hash",
+        );
+        if (!token) {
+          setResult({ outcome: "cave" });
+          return;
+        }
         setResult(
           kind === "waitlist-verify"
             ? await verifyWaitlistToken(token)

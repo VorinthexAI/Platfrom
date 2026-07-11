@@ -148,7 +148,7 @@ async function main() {
           now,
         });
         if (membership) {
-          results.push({ node: 'user_organization', key: membership.key });
+          results.push({ node: 'userOrganizations', key: membership.key });
         }
       }
 

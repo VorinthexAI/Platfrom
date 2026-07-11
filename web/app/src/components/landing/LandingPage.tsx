@@ -31,7 +31,7 @@ interface LandingPageProps {
    * landing, verify the token in the background, then hyper-jump straight
    * to the public galaxy — no biome on the way.
    */
-  arrival?: "waitlist-verify" | "magic";
+  arrival?: "waitlist-verify" | "magic" | "oauth-callback";
   /** Optional server-rendered deep-link detail, kept for crawlers. */
   detail?: ReactNode;
 }

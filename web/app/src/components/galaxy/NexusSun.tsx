@@ -5,7 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import { trackCtaClick } from "@/lib/analytics";
-import { useGalaxyStore } from "@/lib/galaxy-store";
+import { galaxyMotion, useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
  * The Nexus sun: a golden intelligent star that burns and breathes —
@@ -175,6 +175,7 @@ export function NexusSun({ paused }: { paused: boolean }) {
   });
 
   function clearHoldTimer() {
+    galaxyMotion.holdingSun = false;
     if (holdTimerRef.current === null) return;
     window.clearTimeout(holdTimerRef.current);
     holdTimerRef.current = null;
@@ -182,8 +183,15 @@ export function NexusSun({ paused }: { paused: boolean }) {
 
   function beginFoundersHold() {
     clearHoldTimer();
+    // Claim the gesture before UniverseStage's own pointerdown/touchstart
+    // listeners on the canvas see it — otherwise the resting overview state
+    // (canRotate() === true) turns this same press into a camera-drag,
+    // which reorients the ray under a still cursor and makes R3F think the
+    // pointer left the sun mesh, cancelling the hold well before 3s.
+    galaxyMotion.holdingSun = true;
     holdTimerRef.current = window.setTimeout(() => {
       holdTimerRef.current = null;
+      galaxyMotion.holdingSun = false;
       trackCtaClick("founders_gate_open", { placement: "sun_long_press" });
       useGalaxyStore.getState().startJump("sun");
     }, 3000);

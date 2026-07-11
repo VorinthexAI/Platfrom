@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { countUsers, getUserByAliasSlug, getUserByEmailHash, insertUser, updateUser, type User } from '@/lib/db/users.node';
 import { getVisitorByDistinctId, type Visitor } from '@/lib/db/visitors.node';
+import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '@/lib/alias';
 import { sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
@@ -53,8 +54,7 @@ export async function upsertUserByEmail(
   // keeps the same "<Prefix> <Role>" identity when they become a user.
   const visitor = await findVisitorForConversion(options.distinctId ?? null);
 
-  const existing = await getUserByEmailHash(emailHash);
-  if (existing) {
+  async function reconcileWithExisting(existing: User): Promise<User> {
     const patch: Partial<User> = { ...values, organizationId, email: normalized, emailHash, updatedAt: now };
     if (patch.name === undefined) delete patch.name;
     if (patch.alias === undefined && existing.alias == null && visitor?.alias) {
@@ -70,23 +70,40 @@ export async function upsertUserByEmail(
     return updateUser(existing.key, patch);
   }
 
+  const existing = await getUserByEmailHash(emailHash);
+  if (existing) return reconcileWithExisting(existing);
+
   // Exact-once precision on the waitlist number is not critical; a COUNT
   // right before the insert is close enough for a marketing counter.
   const key = newId();
   const waitlistNumber = values.waitlistNumber ?? (await countUsers()) + 1;
   const alias = values.alias ?? visitor?.alias ?? generateAlias(key);
-  const created = await insertUser({
-    key,
-    ...values,
-    organizationId,
-    email: normalized,
-    emailHash,
-    name: values.name ?? defaultNameFromEmail(normalized),
-    alias,
-    alias_slug: values.alias_slug ?? await createUniqueAliasSlug(alias, key),
-    waitlistNumber,
-    createdAt: now,
-    updatedAt: now,
-  });
-  return created;
+  try {
+    return await insertUser({
+      key,
+      ...values,
+      organizationId,
+      email: normalized,
+      emailHash,
+      name: values.name ?? defaultNameFromEmail(normalized),
+      alias,
+      alias_slug: values.alias_slug ?? await createUniqueAliasSlug(alias, key),
+      waitlistNumber,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (err) {
+    // Two concurrent upserts for the same brand-new email (a double-tapped
+    // "Continue with Google", a retried OAuth callback, or a magic-link
+    // request racing an OAuth callback for the same address) can both pass
+    // the emailHash lookup above before either has inserted. The unique
+    // index on emailHash is the real backstop here — resolve to whichever
+    // row won the race instead of surfacing a raw 500 (same pattern as the
+    // other emailHash/idempotency-key races handled elsewhere, e.g.
+    // payments.ts checkout creation).
+    if (!isArangoUniqueConstraintError(err)) throw err;
+    const winner = await getUserByEmailHash(emailHash);
+    if (!winner) throw err;
+    return reconcileWithExisting(winner);
+  }
 }

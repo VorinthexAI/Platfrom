@@ -20,6 +20,19 @@ describe('user helpers', () => {
     expect(normalizedHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  // completeOAuthSignIn (backend/src/api/auth.ts) and the magic-link/waitlist
+  // flows all resolve users through this same hashUserEmail, then
+  // upsertUserByEmail's getUserByEmailHash-before-insert lookup — so an
+  // account created via magic link and later signed into via OAuth (or vice
+  // versa) with a differently-cased/whitespaced but otherwise identical
+  // provider-supplied email resolves to the SAME user, never a duplicate.
+  test('an OAuth-provider email hashes identically to a manually-typed magic-link email', async () => {
+    const magicLinkEmail = 'person@example.com';
+    const googleProfileEmail = ' Person@Example.com ';
+
+    expect(await hashUserEmail(googleProfileEmail)).toBe(await hashUserEmail(magicLinkEmail));
+  });
+
   test('defaults new users to subscribed to updates', () => {
     const user = userSchema.parse({
       key: 'usr_test',

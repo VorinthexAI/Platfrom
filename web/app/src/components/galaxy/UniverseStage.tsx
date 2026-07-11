@@ -268,6 +268,10 @@ export function UniverseStage({
     const onTouchMove = (event: TouchEvent) => {
       if (touchStartY === null || touchStartX === null) return;
       if (insideScrollSafe(event.target)) return;
+      // A long-tap founders-gate hold on the sun owns this gesture — don't
+      // let natural finger drift during the 3s hold get reinterpreted as a
+      // rotate/step swipe (see the matching guard in onPointerDown above).
+      if (galaxyMotion.holdingSun) return;
       const x = event.touches[0]?.clientX ?? touchStartX;
       const y = event.touches[0]?.clientY ?? touchStartY;
       const totalX = x - touchStartX;
@@ -323,6 +327,10 @@ export function UniverseStage({
       // Only bare canvas starts a drag — buttons and cards keep clicking.
       if (!(event.target instanceof HTMLCanvasElement)) return;
       if (!canRotate()) return;
+      // The sun's founders-gate long-press claims the gesture first — the
+      // whole scene is one canvas element, so without this a press that
+      // lands on the sun would also start a camera drag.
+      if (galaxyMotion.holdingSun) return;
       mouseDragging = true;
       mouseLastX = event.clientX;
       mouseLastAt = performance.now();
