@@ -37,6 +37,11 @@ export type CaveKind =
   | "mfa" // arrived via /auth/mfa?token_hash=… (platform MFA setup/sign-in)
   | "organization-signin" // direct organization MFA after email lookup
   | "oauth-callback" // OAuth provider callback result
+  // A founder's email hit sign-in or OAuth — deliberately unbranded (no
+  // "founders gate" label, no hint at the real entry method): the reveal
+  // lives entirely in the copy, not in anything that looks like a special
+  // screen.
+  | "founders-mystery"
   | "privacy" // the privacy policy, read inside the Records Vault
   | "terms" // the terms, read inside the Accord Vault
   | "about" // the company story, read inside the Origin Vault

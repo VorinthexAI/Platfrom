@@ -53,10 +53,20 @@ export async function GET(
     alias_slug?: string | null;
     waitlist_number?: number | null;
     welcome_line?: string | null;
+    founders_gate_required?: boolean;
   }>("/auth/oauth/callback", {
     method: "POST",
     body: JSON.stringify({ provider, code, state, redirect_uri: redirectUri }),
   });
+
+  if (result.status === 403 && result.data?.founders_gate_required) {
+    // Same non-answer as the email sign-in path: no error, no reason a
+    // curious founder could read off the network tab — just a redirect
+    // the frontend routes into the unbranded founders-mystery cave.
+    return NextResponse.redirect(
+      new URL("/auth/oauth/callback?status=failed&reason=founders_gate", origin),
+    );
+  }
 
   if (!result.ok || !result.data) {
     console.error(

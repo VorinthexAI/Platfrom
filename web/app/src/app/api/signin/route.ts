@@ -147,12 +147,15 @@ export async function POST(request: Request) {
   });
 
   if (!result.ok && result.status === 403 && result.data?.founders_gate_required) {
+    // The frontend routes on founders_gate_required alone and never
+    // renders this error string — keep it a non-answer here too, in case
+    // anyone reads the network response directly.
     return NextResponse.json(
       {
         ok: false,
         collect,
         founders_gate_required: true,
-        error: "Founders enter through the sun.",
+        error: "Not this way.",
       },
       { status: 403 },
     );

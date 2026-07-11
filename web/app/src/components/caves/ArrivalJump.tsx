@@ -38,7 +38,8 @@ type ArrivalResult =
   | { outcome: "jump" }
   | { outcome: "sealed" }
   | { outcome: "cave" }
-  | { outcome: "totp" };
+  | { outcome: "totp" }
+  | { outcome: "founders-mystery" };
 
 /** Never leave a verified visitor stranded if the intro flight stalls. */
 const INTRO_BACKSTOP_MS = 7000;
@@ -131,6 +132,9 @@ async function validateMagicToken(token: string): Promise<ArrivalResult> {
 
 function resolveOAuthArrival(): ArrivalResult {
   const params = new URLSearchParams(window.location.search);
+  if (params.get("reason") === "founders_gate") {
+    return { outcome: "founders-mystery" };
+  }
   if (params.get("status") !== "success") return { outcome: "cave" };
   window.localStorage.setItem(
     "vx_profile",
@@ -208,6 +212,8 @@ export function ArrivalJump({ kind }: { kind: ArrivalKind }) {
       store.enterCave("sealed");
     } else if (result.outcome === "totp") {
       store.enterCave("magic");
+    } else if (result.outcome === "founders-mystery") {
+      store.enterCave("founders-mystery");
     } else {
       store.enterCave(kind);
     }

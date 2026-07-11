@@ -78,6 +78,13 @@ export const CAVE_CONFIGS: Record<CaveKind, CaveConfig> = {
     theme: "gem",
     approachLabel: "Completing provider sign in",
   },
+  // No hint at what this actually is, even while flying in.
+  "founders-mystery": {
+    ...rolledAnchor(),
+    interior: [1260, -240, 0],
+    theme: "violet",
+    approachLabel: "Approaching an unmarked door",
+  },
   privacy: {
     ...rolledAnchor(),
     interior: [360, -240, 0],

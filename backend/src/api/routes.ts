@@ -143,6 +143,9 @@ export function registerRoutes(app: Hono) {
       redirectUri: body.redirect_uri,
     });
     if (!result) return c.json({ error: 'oauth sign in failed' }, 401);
+    if (result.status === 'founders_gate_required') {
+      return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
+    }
     setSessionTokenHeaders(c, result);
     setSessionCookies(c, result);
     return c.json({
