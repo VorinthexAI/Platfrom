@@ -17,6 +17,11 @@ name: Unified Deploy
 # reaches production. Once the cluster/service become ACTIVE the roles flip:
 # ECS rolls and `early-deploy` no-ops.
 #
+# `early-infra-standalone` also invokes early-infra.yml directly (as a
+# reusable workflow) on every merge, deliberately in addition to
+# `early-deploy` — a second independent build + blue-green swap against the
+# same box. Kept intentionally duplicated rather than sequenced or merged.
+#
 # The GitHub `production` environment provides the manual approval gate.
 # Infrastructure provisioning (Terraform plan/apply) lives in infra.yml, not here.
 
@@ -1043,11 +1048,30 @@ jobs:
           echo "::error::Web health check failed after 4 minutes ($URL)"
           exit 1
 
+  # ---------------------------------------------------------------------------
+  # Also invokes the standalone early-infra.yml workflow on every merge — a
+  # second, independent build + blue-green swap against the same early-infra
+  # box, from its own freshly-built images rather than the ones early-deploy
+  # above already pushed. This deliberately duplicates early-deploy (which
+  # already performs the same swap using this run's images and per-service
+  # tag selection); the two are not sequenced against each other.
+  # ---------------------------------------------------------------------------
+  early-infra-standalone:
+    name: Early-infra deploy (standalone workflow)
+    needs: [changes]
+    if: >-
+      (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
+      && (github.event_name == 'pull_request' || inputs.deploy)
+    uses: ./.github/workflows/early-infra.yml
+    with:
+      image_tag: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+    secrets: inherit
+
   deploy-summary:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy]
+    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy, early-infra-standalone]
     steps:
       - name: Write deploy audit
         run: |
@@ -1061,6 +1085,7 @@ jobs:
             echo "| api (ECS vorinthex-prod-api) | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-deploy.result }} |"
             echo "| render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo "| early-infra box (SSM blue-green) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-deploy.result }} |"
+            echo "| early-infra box (standalone workflow) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-infra-standalone.result }} |"
             echo ""
             echo "### Changed files"
             echo '```'
