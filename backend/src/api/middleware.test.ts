@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
-import { rateLimitByIp, requireEnvApiKey } from './middleware';
+import { rateLimitByIp, requireEnvApiKey, validateQueryParams } from './middleware';
 
-function middlewareContext(path: string, headers: Record<string, string> = {}) {
+function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
   return {
     req: {
       path,
       header(name: string) {
         return headers[name.toLowerCase()];
       },
-      url: `https://api.example.com${path}`,
+      url: `https://api.example.com${path}${search}`,
     },
     header() {},
     json(payload: unknown, status = 200) {
@@ -80,5 +80,49 @@ describe('api middleware webhook exemptions', () => {
       if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
       else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
     }
+  });
+});
+
+describe('validateQueryParams', () => {
+  test('allows the OAuth start query params through the global whitelist', async () => {
+    const redirectUri = encodeURIComponent('https://vorinthex.com/api/auth/oauth/google/callback');
+    let nextCalls = 0;
+
+    await validateQueryParams(
+      middlewareContext('/api/v1/auth/oauth/start', {}, `?provider=google&redirect_uri=${redirectUri}`),
+      async () => {
+        nextCalls += 1;
+      },
+    );
+
+    expect(nextCalls).toBe(1);
+  });
+
+  test('rejects unknown query params on the OAuth start path', async () => {
+    let nextCalls = 0;
+
+    await expect(
+      validateQueryParams(
+        middlewareContext('/api/v1/auth/oauth/start', {}, '?provider=google&redirect_uri=https%3A%2F%2Fvorinthex.com%2Fcb&extra=1'),
+        async () => {
+          nextCalls += 1;
+        },
+      ),
+    ).rejects.toThrow();
+    expect(nextCalls).toBe(0);
+  });
+
+  test('still rejects query params on paths without a whitelist entry', async () => {
+    let nextCalls = 0;
+
+    await expect(
+      validateQueryParams(
+        middlewareContext('/api/v1/auth/login', {}, '?provider=google'),
+        async () => {
+          nextCalls += 1;
+        },
+      ),
+    ).rejects.toThrow();
+    expect(nextCalls).toBe(0);
   });
 });

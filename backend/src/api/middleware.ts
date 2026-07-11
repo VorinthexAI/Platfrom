@@ -81,6 +81,12 @@ function querySchemaForPath(path: string) {
   if (apiPath === '/auth/handoff/stream' || apiPath === '/auth/handoff/status') {
     return strictObject({ handoff: z.string().regex(/^[a-f0-9]{64}$/) });
   }
+  if (apiPath === '/auth/oauth/start') {
+    return strictObject({
+      provider: z.enum(['google', 'apple']),
+      redirect_uri: z.string().url(),
+    });
+  }
   if (apiPath === '/fragments/summary') {
     return strictObject({
       explorer_id: z.string().optional(),
