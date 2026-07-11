@@ -16,19 +16,12 @@ on:
         description: "Image tag to deploy (default: this commit SHA)"
         required: false
         default: ""
-  # Also invoked directly from deploy.yml's merge pipeline (see the
-  # early-infra-standalone job there) — runs its own build+deploy alongside
-  # deploy.yml's own early-deploy job, which already does the same blue-green
-  # swap against the same box using images deploy.yml already built. Wiring
-  # this in too means the box gets deployed twice per merge, from two
-  # separate image builds; that duplication was accepted deliberately.
-  workflow_call:
-    inputs:
-      image_tag:
-        description: "Image tag to deploy (default: this commit SHA)"
-        required: false
-        type: string
-        default: ""
+  # deploy.yml's merge pipeline mirrors this workflow's build+deploy steps
+  # inline as early-infra-standalone-build/-deploy rather than calling this
+  # file via workflow_call: a job inside a called reusable workflow gets a
+  # different OIDC token subject than a top-level job, and the deploy role's
+  # trust policy only allows the top-level shape. Keep any edits to the
+  # build/deploy logic mirrored between here and deploy.yml.
 
 concurrency:
   group: early-infra-deploy
