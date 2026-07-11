@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendConfigured, backendFetch } from "@/lib/backend";
+import { SITE_URL } from "@/lib/site";
 
 const ACCESS_COOKIE = "vorinthex_access";
 const REFRESH_COOKIE = "vorinthex_refresh";
@@ -11,7 +12,10 @@ export async function GET(
 ) {
   const { provider } = await params;
   const url = new URL(request.url);
-  const origin = url.origin;
+  // Same fix as the start route: request.url's origin is unreliable behind
+  // the ALB (resolves to 0.0.0.0:3000), so redirects and the redirect_uri
+  // sent to the backend must use the canonical SITE_URL instead.
+  const origin = SITE_URL;
   if (!providers.has(provider)) {
     return NextResponse.redirect(new URL("/auth/oauth/callback?status=failed", origin));
   }
