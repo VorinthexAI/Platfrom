@@ -712,81 +712,38 @@ const OAUTH_FAILURE_COPY: Record<string, string> = {
   provider_denied: "The provider sign-in was cancelled.",
 };
 
+/**
+ * Only ever entered on a FAILED OAuth callback — ArrivalJump handles the
+ * success path itself (arrival="oauth-callback" on the callback page),
+ * hyper-jumping straight to the public galaxy with no biome stop. This
+ * cave is ArrivalJump's fallback when the provider callback reports
+ * anything other than status=success.
+ */
 function OAuthCallbackFlow() {
-  const startJump = useGalaxyStore((s) => s.startJump);
-  const [state, setState] = useState<"checking" | "success" | "failed">("checking");
-  const [failureReason, setFailureReason] = useState<string | null>(null);
-
-  useEffect(() => {
-    let timer = 0;
-    void Promise.resolve().then(() => {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("status") !== "success") {
-        setFailureReason(params.get("reason"));
-        setState("failed");
-        return;
-      }
-      const profile = {
-        alias: params.get("alias"),
-        aliasSlug: params.get("alias_slug"),
-        waitlistNumber: params.get("waitlist_number")
-          ? Number(params.get("waitlist_number"))
-          : null,
-        welcomeLine: params.get("welcome"),
-      };
-      window.localStorage.setItem("vx_profile", JSON.stringify(profile));
-      window.dispatchEvent(new Event("vx-profile-changed"));
-      setState("success");
-      timer = window.setTimeout(() => startJump("public"), 700);
-    });
-    return () => window.clearTimeout(timer);
-  }, [startJump]);
-
-  if (state === "checking") {
-    return (
-      <div>
-        <p className="micro-label">Provider Gate</p>
-        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-          Completing sign in.
-        </h2>
-        <p className="mt-3 text-sm leading-relaxed text-silver-500">
-          The provider callback is being sealed into your explorer profile.
-        </p>
-      </div>
-    );
-  }
-
-  if (state === "failed") {
-    return (
-      <div>
-        <p className="micro-label">Provider Gate</p>
-        <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-          Sign in did not complete.
-        </h2>
-        <p className="mt-3 text-sm leading-relaxed text-silver-500">
-          {(failureReason && OAUTH_FAILURE_COPY[failureReason]) ??
-            "Try again with email, Google, or Apple."}
-        </p>
-        <Button
-          variant="primary"
-          onClick={() => useGalaxyStore.getState().enterCave("signin")}
-          className="mt-5 w-full px-5 py-3.5 text-xs uppercase"
-        >
-          Sign in
-        </Button>
-      </div>
-    );
-  }
+  // Only ever mounted client-side (see the doc comment above) after
+  // ArrivalJump has already decided this is a failure, so reading the
+  // query string in the initializer is safe — no SSR mismatch to dodge.
+  const [failureReason] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("reason"),
+  );
 
   return (
     <div>
       <p className="micro-label">Provider Gate</p>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-        Sign in complete.
+        Sign in did not complete.
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-silver-500">
-        Opening your public galaxy.
+        {(failureReason && OAUTH_FAILURE_COPY[failureReason]) ??
+          "Try again with email, Google, or Apple."}
       </p>
+      <Button
+        variant="primary"
+        onClick={() => useGalaxyStore.getState().enterCave("signin")}
+        className="mt-5 w-full px-5 py-3.5 text-xs uppercase"
+      >
+        Sign in
+      </Button>
     </div>
   );
 }

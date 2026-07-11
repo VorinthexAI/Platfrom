@@ -6,5 +6,5 @@ export const metadata = {
 };
 
 export default function OAuthCallbackPage() {
-  return <LandingPage initialCave="oauth-callback" />;
+  return <LandingPage arrival="oauth-callback" />;
 }
