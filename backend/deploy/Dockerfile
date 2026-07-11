@@ -26,15 +26,31 @@ RUN apt-get update \
     xdg-utils \
   && rm -rf /var/lib/apt/lists/*
 
+# Retry: under QEMU-emulated arm64 builds, bun install occasionally fails
+# mid-extraction on a transient tarball read ("Fail extracting tarball for
+# fb-dotslash") — a known emulation flake, not a real dependency problem. A
+# clean retry succeeds every time this has been seen.
 FROM base AS deps
 COPY backend/package.json backend/bun.lock ./
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile --production
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+	for i in 1 2 3; do \
+		if bun install --frozen-lockfile --production; then break; fi; \
+		echo "bun install failed (attempt $i/3), retrying..."; \
+		if [ "$i" = 3 ]; then exit 1; fi; \
+		sleep 5; \
+	done
 
 FROM base AS dev
 WORKDIR /app
 ENV NODE_ENV=development
 COPY backend/package.json backend/bun.lock ./
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+	for i in 1 2 3; do \
+		if bun install --frozen-lockfile; then break; fi; \
+		echo "bun install failed (attempt $i/3), retrying..."; \
+		if [ "$i" = 3 ]; then exit 1; fi; \
+		sleep 5; \
+	done
 ENTRYPOINT ["bun", "run"]
 CMD ["--hot", "src/api/index.ts"]
 

@@ -21,7 +21,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # correct across all workspaces.
 COPY . .
 
-RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
+# Retry: under QEMU-emulated arm64 builds, bun install occasionally fails
+# mid-extraction on a transient tarball read ("Fail extracting tarball for
+# fb-dotslash") — a known emulation flake, not a real dependency problem. A
+# clean retry succeeds every time this has been seen.
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+	for i in 1 2 3; do \
+		if bun install --frozen-lockfile; then break; fi; \
+		echo "bun install failed (attempt $i/3), retrying..."; \
+		if [ "$i" = 3 ]; then exit 1; fi; \
+		sleep 5; \
+	done
 RUN cd web/app && bun run build
 
 # ---- Runtime -----------------------------------------------------------------
