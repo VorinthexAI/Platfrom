@@ -48,10 +48,18 @@ API_ENV="${ROOT}/api.env"
 umask 077
 : > "$API_ENV"
 log "fetching backend env from SSM ${SSM_PREFIX}/*"
+# --output text breaks on a value with an embedded real newline (e.g. the
+# Apple Sign In PEM private key): the value spills across multiple tab-
+# separated rows, and the while loop below reads the PEM's own
+# "-----END PRIVATE KEY-----" footer line as a bogus new key with no value.
+# jq's gsub collapses any real newline in a value to a literal "\n" (two
+# characters) so every parameter is exactly one physical line here — the
+# app already un-escapes that same "\n" back into a real newline at read
+# time (see pemBodyToArrayBuffer in backend/src/api/auth.ts).
 aws ssm get-parameters-by-path --path "$SSM_PREFIX" --recursive --with-decryption \
-	--region "$REGION" --query 'Parameters[].[Name,Value]' --output text |
-	while IFS=$'\t' read -r name value; do
-		key="${name##*/}"
+	--region "$REGION" --output json |
+	jq -r '.Parameters[] | (.Name | sub("^.*/";"")) + "\t" + (.Value | gsub("\n"; "\\n"))' |
+	while IFS=$'\t' read -r key value; do
 		# web-only NEXT_PUBLIC_* and platform env are set explicitly below.
 		case "$key" in NEXT_PUBLIC_*|NODE_ENV|PORT|AWS_REGION) continue;; esac
 		printf '%s=%s\n' "$key" "$value" >> "$API_ENV"
