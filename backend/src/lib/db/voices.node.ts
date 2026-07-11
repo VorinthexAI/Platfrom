@@ -11,6 +11,9 @@ export const voiceSchema = z.object({
   model: z.string(),
   modelLabel: z.string(),
   voice: z.string(),
+  /** Human-facing name — the orchestrator it's mapped to (e.g. "Atlas",
+   * "Mercury"), or "Brand Primary" for the launch-asset voiceover default. */
+  label: z.string(),
   language: z.string(),
   format: z.string(),
   createdAt: z.string(),
@@ -20,7 +23,7 @@ export const voiceSchema = z.object({
 
 export type Voice = z.infer<typeof voiceSchema>;
 
-export const voicesEmbedKeys = z.enum(['voice', 'modelLabel', 'language']);
+export const voicesEmbedKeys = z.enum(['voice', 'label', 'modelLabel', 'language']);
 
 const helpers = createNodeHelpers(VOICES_COLLECTION, voiceSchema, voicesEmbedKeys.options);
 

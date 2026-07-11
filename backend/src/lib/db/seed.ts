@@ -55,30 +55,10 @@ export const SEEDED_ORGANIZATION = {
   metadata: {},
 };
 
-// Sourced from scripts/orchestrators/*/message.metadata.json — every Kokoro
-// voice already used for a generated Command orchestrator greeting, plus the
-// premium Gemini TTS voice used for launch-asset voiceovers.
-export const SEEDED_VOICES = [
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'am_onyx', language: 'en', format: 'mp3' }, // atlas-ceo
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'am_michael', language: 'en', format: 'mp3' }, // apollo-cso
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'af_kore', language: 'en', format: 'mp3' }, // athena-cpo
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'am_fenrir', language: 'en', format: 'mp3' }, // forge-cto
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'bm_daniel', language: 'en', format: 'mp3' }, // hermes-coo
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'af_aoede', language: 'en', format: 'mp3' }, // iris-cco
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'bm_george', language: 'en', format: 'mp3' }, // ledger-cfo
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'am_echo', language: 'en', format: 'mp3' }, // mercury-cro
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'bf_emma', language: 'en', format: 'mp3' }, // metis-cio
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'af_nova', language: 'en', format: 'mp3' }, // orbit-cmo
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'am_adam', language: 'en', format: 'mp3' }, // sentinel-ciso
-  { provider: 'openrouter', model: 'hexgrad/kokoro-82m', modelLabel: 'Kokoro 82M', voice: 'bf_isabella', language: 'en', format: 'mp3' }, // themis-clo
-  // Premium AI product voiceover default (launch assets), distinct from the
-  // Kokoro orchestrator greetings above.
-  { provider: 'openrouter', model: 'google/gemini-3.1-flash-tts-preview', modelLabel: 'Gemini 3.1 Flash TTS Preview', voice: 'Charon', language: 'en', format: 'mp3' },
-];
-
 // The Command orchestrator roster: one per scripts/orchestrators/<slug>-<role>
 // directory. `voice` here must match a (provider, model, voice) already in
-// SEEDED_VOICES above, and `dir` locates that orchestrator's SKILL.md.
+// SEEDED_VOICES below (derived from this list), and `dir` locates that
+// orchestrator's SKILL.md.
 const SEEDED_ORCHESTRATOR_SOURCES = [
   { dir: 'atlas-ceo', name: 'Atlas', role: 'CEO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_onyx' },
   { dir: 'apollo-cso', name: 'Apollo', role: 'CSO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_michael' },
@@ -92,6 +72,33 @@ const SEEDED_ORCHESTRATOR_SOURCES = [
   { dir: 'orbit-cmo', name: 'Orbit', role: 'CMO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'af_nova' },
   { dir: 'sentinel-ciso', name: 'Sentinel', role: 'CISO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_adam' },
   { dir: 'themis-clo', name: 'Themis', role: 'CLO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'bf_isabella' },
+];
+
+// Sourced from scripts/orchestrators/*/message.metadata.json — every Kokoro
+// voice already used for a generated Command orchestrator greeting, labeled
+// with that orchestrator's own name (derived from SEEDED_ORCHESTRATOR_SOURCES
+// above so the two never drift apart), plus the premium Gemini TTS voice used
+// for launch-asset voiceovers — not tied to any one orchestrator, so it gets
+// the brand's own label instead.
+export const SEEDED_VOICES = [
+  ...SEEDED_ORCHESTRATOR_SOURCES.map((orchestrator) => ({
+    provider: orchestrator.provider,
+    model: orchestrator.model,
+    modelLabel: 'Kokoro 82M',
+    voice: orchestrator.voice,
+    label: orchestrator.name,
+    language: 'en',
+    format: 'mp3',
+  })),
+  {
+    provider: 'openrouter',
+    model: 'google/gemini-3.1-flash-tts-preview',
+    modelLabel: 'Gemini 3.1 Flash TTS Preview',
+    voice: 'Charon',
+    label: 'Brand Primary',
+    language: 'en',
+    format: 'mp3',
+  },
 ];
 
 // backend/src/lib/db -> repo root, then into the checked-in orchestrator
@@ -170,6 +177,7 @@ async function upsertSeedVoice(seed: (typeof SEEDED_VOICES)[number]): Promise<Se
 
   const patch: Partial<Omit<Voice, 'key' | 'embedding'>> = {
     modelLabel: seed.modelLabel,
+    label: seed.label,
     language: seed.language,
     format: seed.format,
     updatedAt: now(),

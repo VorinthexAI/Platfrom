@@ -158,7 +158,7 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'voices',
-    embedKeys: ['voice', 'modelLabel', 'language'],
+    embedKeys: ['voice', 'label', 'modelLabel', 'language'],
     indexes: [{ fields: ['provider', 'model', 'voice'], unique: true }],
   },
   {
