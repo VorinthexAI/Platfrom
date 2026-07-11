@@ -62,6 +62,17 @@ env:
   IMAGE_PLATFORM: linux/arm64
   COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
   SSM_PATH: /vorinthex/prod/
+  # The one true production domain — matches the sole redirect_uri registered
+  # with Google/Apple OAuth. Deliberately NOT sourced from secrets.CONFIG:
+  # deploy-web and early-infra-standalone-build both push the SAME mutable
+  # image tag (vorinthex-web:$COMMIT_SHA / :latest), so whichever job's push
+  # lands last wins for every consumer of that tag — if the two jobs baked in
+  # different NEXT_PUBLIC_SITE_URL values (e.g. the CONFIG secret holding a
+  # stale https://www.vorinthex.com from the pre-Vercel-removal setup), which
+  # domain actually goes live becomes a coin flip per deploy. Both web image
+  # builds pass this literal value as their NEXT_PUBLIC_SITE_URL build-arg so
+  # the two builds are byte-identical on this setting and the race is moot.
+  CANONICAL_SITE_URL: https://vorinthex.com
 
 jobs:
   changes:
@@ -255,7 +266,7 @@ jobs:
           platforms: ${{ env.IMAGE_PLATFORM }}
           push: true
           build-args: |
-            NEXT_PUBLIC_SITE_URL=${{ env.SITE_URL }}
+            NEXT_PUBLIC_SITE_URL=${{ env.CANONICAL_SITE_URL }}
           tags: |
             ${{ steps.meta.outputs.image }}
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:latest
@@ -1097,6 +1108,8 @@ jobs:
           file: web/app/Dockerfile
           platforms: ${{ env.IMAGE_PLATFORM }}
           push: true
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=${{ env.CANONICAL_SITE_URL }}
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:${{ env.COMMIT_SHA }}
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:latest

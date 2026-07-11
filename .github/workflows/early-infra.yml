@@ -63,6 +63,12 @@ jobs:
           file: web/app/Dockerfile
           platforms: ${{ env.IMAGE_PLATFORM }}
           push: true
+          # Matches the sole redirect_uri registered with Google/Apple OAuth.
+          # Explicit here (not just the Dockerfile default) so this workflow
+          # can never push a differently-configured image to the same
+          # mutable vorinthex-web tag deploy.yml's builds also push to.
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=https://vorinthex.com
           tags: |
             ${{ env.ECR_REGISTRY }}/vorinthex-web:${{ steps.tag.outputs.tag }}
             ${{ env.ECR_REGISTRY }}/vorinthex-web:latest
