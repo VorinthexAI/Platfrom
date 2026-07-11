@@ -1062,10 +1062,14 @@ jobs:
   # `uses: ./.github/workflows/early-infra.yml` (workflow_call): a job inside
   # a called reusable workflow gets a different OIDC token subject than a
   # top-level job, and this repo's deploy-role trust policy only allows the
-  # top-level shape — every other job here authenticates fine, but a
-  # workflow_call'd early-infra.yml job hit "Not authorized to perform
-  # sts:AssumeRoleWithWebIdentity". Keep any edits to this logic mirrored in
-  # early-infra.yml (still the standalone entry point for manual dispatch).
+  # top-level shape — a workflow_call'd early-infra.yml job hit "Not
+  # authorized to perform sts:AssumeRoleWithWebIdentity". The trust policy is
+  # further scoped to the `production` GitHub environment specifically (every
+  # other job in this file that assumes the role sets `environment:
+  # production`), so these two jobs need it as well — omitting it hits the
+  # exact same AssumeRoleWithWebIdentity error, just from a different subject
+  # claim mismatch. Keep any edits to this logic mirrored in early-infra.yml
+  # (still the standalone entry point for manual dispatch).
   # ---------------------------------------------------------------------------
   early-infra-standalone-build:
     name: Early-infra deploy (standalone) / build
@@ -1074,6 +1078,7 @@ jobs:
       (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event_name == 'pull_request' || inputs.deploy)
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1110,6 +1115,7 @@ jobs:
     name: Early-infra deploy (standalone) / deploy
     needs: [early-infra-standalone-build]
     runs-on: ubuntu-latest
+    environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app
     steps:

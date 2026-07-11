@@ -20,8 +20,11 @@ on:
   # inline as early-infra-standalone-build/-deploy rather than calling this
   # file via workflow_call: a job inside a called reusable workflow gets a
   # different OIDC token subject than a top-level job, and the deploy role's
-  # trust policy only allows the top-level shape. Keep any edits to the
-  # build/deploy logic mirrored between here and deploy.yml.
+  # trust policy only allows the top-level shape. The trust policy is also
+  # scoped to the `production` GitHub environment specifically, so every job
+  # here that assumes the role must set `environment: production` too —
+  # omitting it fails OIDC auth the same way workflow_call does. Keep any
+  # edits to the build/deploy logic mirrored between here and deploy.yml.
 
 concurrency:
   group: early-infra-deploy
@@ -40,6 +43,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: production
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
@@ -76,6 +80,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
