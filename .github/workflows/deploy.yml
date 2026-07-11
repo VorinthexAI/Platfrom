@@ -17,10 +17,12 @@ name: Unified Deploy
 # reaches production. Once the cluster/service become ACTIVE the roles flip:
 # ECS rolls and `early-deploy` no-ops.
 #
-# `early-infra-standalone` also invokes early-infra.yml directly (as a
-# reusable workflow) on every merge, deliberately in addition to
+# `early-infra-standalone-build`/`-deploy` mirror early-infra.yml's own
+# build+deploy steps on every merge, deliberately in addition to
 # `early-deploy` — a second independent build + blue-green swap against the
-# same box. Kept intentionally duplicated rather than sequenced or merged.
+# same box. Kept intentionally duplicated rather than sequenced or merged,
+# and inlined here (not called via workflow_call) to avoid an OIDC subject
+# mismatch — see the comment above early-infra-standalone-build below.
 #
 # The GitHub `production` environment provides the manual approval gate.
 # Infrastructure provisioning (Terraform plan/apply) lives in infra.yml, not here.
@@ -1049,29 +1051,127 @@ jobs:
           exit 1
 
   # ---------------------------------------------------------------------------
-  # Also invokes the standalone early-infra.yml workflow on every merge — a
-  # second, independent build + blue-green swap against the same early-infra
-  # box, from its own freshly-built images rather than the ones early-deploy
-  # above already pushed. This deliberately duplicates early-deploy (which
-  # already performs the same swap using this run's images and per-service
-  # tag selection); the two are not sequenced against each other.
+  # Mirrors early-infra.yml's own build+deploy jobs on every merge — a second,
+  # independent build + blue-green swap against the same early-infra box,
+  # from its own freshly-built images rather than the ones early-deploy above
+  # already pushed. This deliberately duplicates early-deploy (which already
+  # performs the same swap using this run's images and per-service tag
+  # selection); the two are not sequenced against each other.
+  #
+  # Inlined here (steps copied from early-infra.yml) rather than invoked via
+  # `uses: ./.github/workflows/early-infra.yml` (workflow_call): a job inside
+  # a called reusable workflow gets a different OIDC token subject than a
+  # top-level job, and this repo's deploy-role trust policy only allows the
+  # top-level shape — every other job here authenticates fine, but a
+  # workflow_call'd early-infra.yml job hit "Not authorized to perform
+  # sts:AssumeRoleWithWebIdentity". Keep any edits to this logic mirrored in
+  # early-infra.yml (still the standalone entry point for manual dispatch).
   # ---------------------------------------------------------------------------
-  early-infra-standalone:
-    name: Early-infra deploy (standalone workflow)
+  early-infra-standalone-build:
+    name: Early-infra deploy (standalone) / build
     needs: [changes]
     if: >-
       (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event_name == 'pull_request' || inputs.deploy)
-    uses: ./.github/workflows/early-infra.yml
-    with:
-      image_tag: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build + push web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/app/Dockerfile
+          platforms: ${{ env.IMAGE_PLATFORM }}
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:${{ env.COMMIT_SHA }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_WEB_REPOSITORY }}:latest
+      - name: Build + push api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/deploy/Dockerfile
+          platforms: ${{ env.IMAGE_PLATFORM }}
+          push: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:${{ env.COMMIT_SHA }}
+            ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest
+
+  early-infra-standalone-deploy:
+    name: Early-infra deploy (standalone) / deploy
+    needs: [early-infra-standalone-build]
+    runs-on: ubuntu-latest
+    env:
+      APP_INSTANCE_TAG: vorinthex-early-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Blue-green deploy via SSM
+        run: |
+          set -euo pipefail
+          IID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${APP_INSTANCE_TAG}" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          if [ "$IID" = "None" ] || [ -z "$IID" ]; then echo "app box not found"; exit 1; fi
+          echo "app box: $IID  tag: $COMMIT_SHA"
+
+          DEPLOY_B64=$(base64 -w0 deploy/early/deploy.sh)
+          CADDY_B64=$(base64 -w0 deploy/early/Caddyfile.tmpl)
+
+          CMD=$(aws ssm send-command \
+            --instance-ids "$IID" \
+            --document-name AWS-RunShellScript \
+            --comment "unified-deploy early-infra-standalone blue-green $COMMIT_SHA" \
+            --timeout-seconds 900 \
+            --parameters commands="[
+              \"set -e\",
+              \"mkdir -p /opt/vorinthex\",
+              \"echo $DEPLOY_B64 | base64 -d > /opt/vorinthex/deploy.sh\",
+              \"echo $CADDY_B64 | base64 -d > /opt/vorinthex/Caddyfile.tmpl\",
+              \"chmod +x /opt/vorinthex/deploy.sh\",
+              \"/opt/vorinthex/deploy.sh $COMMIT_SHA\"
+            ]" \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $CMD"
+
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'Status' --output text 2>/dev/null || echo Pending)
+            echo "status: $STATUS"
+            case "$STATUS" in
+              Success) break;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardErrorContent' --output text || true
+                exit 1;;
+            esac
+            sleep 10
+          done
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardOutputContent' --output text | tail -30
+      - uses: oven-sh/setup-bun@v2
+      - name: Apply Cloudflare cache policy and purge
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+        run: bun environments/scripts/cloudflare-cache-policy.ts
 
   deploy-summary:
     name: Deployment summary
     runs-on: ubuntu-latest
     if: always() && (github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true)
-    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy, early-infra-standalone]
+    needs: [changes, deploy-web, cloudflare-cache, backend-deploy, backend-render, early-deploy, early-infra-standalone-build, early-infra-standalone-deploy]
     steps:
       - name: Write deploy audit
         run: |
@@ -1085,7 +1185,7 @@ jobs:
             echo "| api (ECS vorinthex-prod-api) | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-deploy.result }} |"
             echo "| render | ${{ needs.changes.outputs.backend }} | ${{ needs.backend-render.result }} |"
             echo "| early-infra box (SSM blue-green) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-deploy.result }} |"
-            echo "| early-infra box (standalone workflow) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-infra-standalone.result }} |"
+            echo "| early-infra box (standalone build+deploy) | ${{ needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true' }} | ${{ needs.early-infra-standalone-deploy.result }} |"
             echo ""
             echo "### Changed files"
             echo '```'
