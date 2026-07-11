@@ -152,6 +152,7 @@ export function CaveOverlay() {
                 {caveKind === "mfa" ? <MagicFlow /> : null}
                 {caveKind === "organization-signin" ? <MagicFlow /> : null}
                 {caveKind === "oauth-callback" ? <OAuthCallbackFlow /> : null}
+                {caveKind === "founders-mystery" ? <FoundersMysteryFlow /> : null}
                 {caveKind === "privacy" ? <VaultReaderFlow copy={PRIVACY_COPY} /> : null}
                 {caveKind === "terms" ? <VaultReaderFlow copy={TERMS_COPY} /> : null}
                 {caveKind === "about" ? <VaultReaderFlow copy={ABOUT_COPY} /> : null}
@@ -749,6 +750,25 @@ function OAuthCallbackFlow() {
   );
 }
 
+/**
+ * A founder's email hit ordinary sign-in or OAuth. Deliberately no
+ * "Founders Gate" label, no CTA, no hint at the real entry method — the
+ * close button above (shared by every non-sealed cave) is the only way
+ * out, same as it is everywhere else.
+ */
+function FoundersMysteryFlow() {
+  return (
+    <div>
+      <h2 className="font-display mt-3 text-2xl leading-snug tracking-[0.08em] text-silver-50">
+        You are not like the others.
+      </h2>
+      <p className="mt-3 text-sm leading-relaxed text-silver-300">
+        Somewhere in this system, another door already knows your name.
+      </p>
+    </div>
+  );
+}
+
 interface StoredProfile {
   email?: string;
   alias?: string | null;
@@ -927,12 +947,13 @@ function ExplorerSigninFlow() {
         window.localStorage.setItem("vx_member_email", normalizedEmail);
         setEmail(normalizedEmail);
         setStatus("sent");
+      } else if (data?.founders_gate_required) {
+        // No hint at the real entry method — just an unbranded, mysterious
+        // non-answer, same as OAuth gets for the same email.
+        useGalaxyStore.getState().enterCave("founders-mystery");
+        return;
       } else {
-        setError(
-          data?.founders_gate_required
-            ? "Founders enter through the sun. Hold the Nexus sun for three seconds."
-            : parseApiError(data, "Could not send your link. Try again."),
-        );
+        setError(parseApiError(data, "Could not send your link. Try again."));
         setStatus("error");
       }
     } catch {

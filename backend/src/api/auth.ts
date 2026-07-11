@@ -495,6 +495,15 @@ export async function completeOAuthSignIn(input: {
     : await exchangeAppleCode(input.code, input.redirectUri);
   if (!profile) return null;
   const normalized = normalizeEmail(profile.email);
+
+  // Founders (root-organization members) never get a session through
+  // OAuth, same as the email magic-link path — a provider click can't be
+  // allowed to skip the MFA gate for a founder's known email.
+  const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
+  if (existingUser && await rootOrganizationMembershipIdentity(existingUser)) {
+    return { status: 'founders_gate_required' as const };
+  }
+
   const user = await upsertUserByEmail(normalized, {
     name: profile.name ?? defaultNameFromEmail(normalized),
     profileUrl: profile.profileUrl,
