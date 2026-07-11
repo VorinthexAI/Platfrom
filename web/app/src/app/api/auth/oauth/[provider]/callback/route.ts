@@ -13,16 +13,27 @@ export async function GET(
   const { provider } = await params;
   const url = new URL(request.url);
   // Same fix as the start route: request.url's origin is unreliable behind
-  // the ALB (resolves to 0.0.0.0:3000), so redirects and the redirect_uri
-  // sent to the backend must use the canonical SITE_URL instead.
+  // the reverse proxy (resolves to 0.0.0.0:3000), so redirects and the
+  // redirect_uri sent to the backend must use the canonical SITE_URL
+  // instead.
   const origin = SITE_URL;
   if (!providers.has(provider)) {
-    return NextResponse.redirect(new URL("/auth/oauth/callback?status=failed", origin));
+    return NextResponse.redirect(new URL("/auth/oauth/callback?status=failed&reason=unknown_provider", origin));
   }
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   if (!code || !state) {
-    return NextResponse.redirect(new URL("/auth/oauth/callback?status=failed", origin));
+    // The provider itself redirected here without a code — typically the
+    // visitor cancelled the consent screen, or (if this shows up
+    // repeatedly) the redirect_uri registered with the provider doesn't
+    // match what we send, so it's bouncing us back some other way.
+    const providerError = url.searchParams.get("error");
+    console.error(
+      `[oauth/callback] missing code/state for ${provider}: provider_error=${providerError}`,
+    );
+    return NextResponse.redirect(
+      new URL(`/auth/oauth/callback?status=failed&reason=${providerError ? "provider_denied" : "missing_params"}`, origin),
+    );
   }
 
   if (!backendConfigured()) {
@@ -48,7 +59,13 @@ export async function GET(
   });
 
   if (!result.ok || !result.data) {
-    return NextResponse.redirect(new URL("/auth/oauth/callback?status=failed", origin));
+    console.error(
+      `[oauth/callback] backend rejected ${provider} exchange: status=${result.status} data=${JSON.stringify(result.data)}`,
+    );
+    const reason = result.status === 503 ? "provider_not_configured" : "exchange_failed";
+    return NextResponse.redirect(
+      new URL(`/auth/oauth/callback?status=failed&reason=${reason}`, origin),
+    );
   }
 
   const doneUrl = new URL("/auth/oauth/callback", origin);

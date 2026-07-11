@@ -12,11 +12,12 @@ export async function GET(
   if (!providers.has(provider)) {
     return NextResponse.json({ error: "Unknown OAuth provider." }, { status: 404 });
   }
-  // Never trust request.url's origin here: behind the ALB, Next's
-  // trustHostHeader defaults to false, so it resolves to the container's
-  // bind address (0.0.0.0:3000) instead of the real domain. The redirect
-  // URI must also exactly match what's registered with Google/Apple, so
-  // the canonical SITE_URL is the only correct source.
+  // Never trust request.url's origin here: behind the reverse proxy (Caddy
+  // in prod), Next's trustHostHeader defaults to false, so it resolves to
+  // the container's bind address (0.0.0.0:3000) instead of the real
+  // domain. The redirect URI must also exactly match what's registered
+  // with Google/Apple, so the canonical SITE_URL is the only correct
+  // source.
   const origin = SITE_URL;
   const redirectUri = `${origin}/api/auth/oauth/${provider}/callback`;
 
@@ -33,8 +34,15 @@ export async function GET(
     `/auth/oauth/start?provider=${encodeURIComponent(provider)}&redirect_uri=${encodeURIComponent(redirectUri)}`,
   );
   if (!result.ok || !result.data?.authorization_url) {
+    // Surfaced in server logs (not to the browser) so a misconfigured
+    // provider — e.g. a missing GOOGLE_OAUTH_CLIENT_ID/SECRET in SSM — is a
+    // one-line CloudWatch/docker-logs lookup instead of a guessing game.
+    console.error(
+      `[oauth/start] backend rejected ${provider} start: status=${result.status} data=${JSON.stringify(result.data)}`,
+    );
+    const reason = result.status === 503 ? "provider_not_configured" : "start_failed";
     return NextResponse.redirect(
-      new URL("/auth/oauth/callback?status=failed", origin),
+      new URL(`/auth/oauth/callback?status=failed&reason=${reason}`, origin),
     );
   }
   return NextResponse.redirect(result.data.authorization_url);

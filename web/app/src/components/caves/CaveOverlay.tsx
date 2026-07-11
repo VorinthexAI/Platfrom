@@ -706,15 +706,23 @@ function useHandoffJump(active: boolean, placement: string) {
   }, [active, placement]);
 }
 
+const OAUTH_FAILURE_COPY: Record<string, string> = {
+  provider_not_configured:
+    "This sign-in method isn't set up yet. Try email instead.",
+  provider_denied: "The provider sign-in was cancelled.",
+};
+
 function OAuthCallbackFlow() {
   const startJump = useGalaxyStore((s) => s.startJump);
   const [state, setState] = useState<"checking" | "success" | "failed">("checking");
+  const [failureReason, setFailureReason] = useState<string | null>(null);
 
   useEffect(() => {
     let timer = 0;
     void Promise.resolve().then(() => {
       const params = new URLSearchParams(window.location.search);
       if (params.get("status") !== "success") {
+        setFailureReason(params.get("reason"));
         setState("failed");
         return;
       }
@@ -756,7 +764,8 @@ function OAuthCallbackFlow() {
           Sign in did not complete.
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-500">
-          Try again with email, Google, or Apple.
+          {(failureReason && OAUTH_FAILURE_COPY[failureReason]) ??
+            "Try again with email, Google, or Apple."}
         </p>
         <Button
           variant="primary"
