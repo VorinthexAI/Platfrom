@@ -336,6 +336,17 @@ async function main() {
     await backfillCollectionEmbeddings(targetDb, spec);
   }
 
+  // Legacy scratch collection the org-migration steps below write into
+  // before the final user_organization -> userOrganizations copy. Not part
+  // of `collections` above (that's the current schema, and this name is
+  // retired at the end of this run) but must exist for those AQL writes to
+  // resolve even when there's no legacy data to migrate (e.g. a fresh CI
+  // database).
+  if (!(await targetDb.collection('user_organization').exists())) {
+    await targetDb.collection('user_organization').create();
+    console.log('Created legacy scratch collection user_organization');
+  }
+
   // Root organization: the single is_root node every user, visitor,
   // session, and event hangs off. The legacy `platforms` singleton (named
   // "this") is copied across PRESERVING its _key, so every stored
