@@ -47,5 +47,9 @@ export async function getVoiceByProviderModelVoice(
       RETURN v
   `);
   const doc = await cursor.next();
-  return doc ? voiceSchema.parse(withArangoKey(doc)) : null;
+  if (!doc) return null;
+  // `label` was added after voices already existed in prod; tolerate it
+  // being absent here so upsertSeedVoice's existence check succeeds and its
+  // UPDATE patch (which always sets label from seed data) can backfill it.
+  return voiceSchema.parse({ label: '', ...withArangoKey(doc) });
 }
