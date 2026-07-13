@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
@@ -181,6 +181,11 @@ export function NexusSun({ paused }: { paused: boolean }) {
     holdTimerRef.current = null;
   }
 
+  // If the scene unmounts mid-hold (a jump begins, WebGL drops), release
+  // the shared holdingSun claim — a leaked true would permanently disable
+  // drag-to-rotate across the whole stage.
+  useEffect(() => clearHoldTimer, []);
+
   function beginFoundersHold() {
     clearHoldTimer();
     // Claim the gesture before UniverseStage's own pointerdown/touchstart
@@ -198,16 +203,21 @@ export function NexusSun({ paused }: { paused: boolean }) {
   }
 
   return (
-    <group
-      onPointerDown={(event) => {
-        event.stopPropagation();
-        beginFoundersHold();
-      }}
-      onPointerUp={clearHoldTimer}
-      onPointerLeave={clearHoldTimer}
-      onPointerCancel={clearHoldTimer}
-    >
-      <mesh>
+    <group>
+      {/* Only the star's body claims the founders-gate hold. The ring,
+          halos and lights below must stay out of the raycaster: they span
+          up to ~15 world units around the sun, so letting them catch
+          pointer events turns most of the screen center into a dead zone
+          where holdingSun swallows every drag-to-rotate gesture. */}
+      <mesh
+        onPointerDown={(event) => {
+          event.stopPropagation();
+          beginFoundersHold();
+        }}
+        onPointerUp={clearHoldTimer}
+        onPointerLeave={clearHoldTimer}
+        onPointerCancel={clearHoldTimer}
+      >
         <sphereGeometry args={[1.35, 64, 64]} />
         <shaderMaterial
           ref={materialRef}
@@ -219,7 +229,7 @@ export function NexusSun({ paused }: { paused: boolean }) {
       {/* the Vorinthex ring — the sun burns within the brand mark */}
       <Billboard>
         <group ref={ringRef}>
-          <mesh>
+          <mesh raycast={() => null}>
             <planeGeometry args={[4.7, 4.7]} />
             <meshBasicMaterial
               map={markTexture}
@@ -232,7 +242,7 @@ export function NexusSun({ paused }: { paused: boolean }) {
       </Billboard>
 
       {/* layered halo, breathing with the pulse */}
-      <sprite ref={haloRef} scale={[6.5, 6.5, 1]}>
+      <sprite ref={haloRef} scale={[6.5, 6.5, 1]} raycast={() => null}>
         <spriteMaterial
           map={glowTexture}
           transparent
@@ -240,7 +250,7 @@ export function NexusSun({ paused }: { paused: boolean }) {
           blending={THREE.AdditiveBlending}
         />
       </sprite>
-      <sprite ref={haloWideRef} scale={[13, 13, 1]}>
+      <sprite ref={haloWideRef} scale={[13, 13, 1]} raycast={() => null}>
         <spriteMaterial
           map={glowTexture}
           transparent

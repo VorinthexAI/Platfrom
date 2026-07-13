@@ -221,13 +221,15 @@ export async function getUserStanding(
 }
 
 /**
- * An anonymous explorer's local haul: total fragments and entry count for the
- * device's not-yet-adopted entries. Unranked — the board is signed-in-only,
- * so this powers the "you're holding N, join to rank" prompt only.
+ * An anonymous explorer's standing: the device's haul plus the 1-based place
+ * that haul earns against the adopted board (everyone with a strictly higher
+ * total, plus one) — the same rank rule as `getUserStanding`, so the "you"
+ * card never has to invent a place. Rank is null only when the explorer has
+ * collected nothing.
  */
 export async function getExplorerStanding(
   explorerId: string,
-): Promise<{ total: number; entries: number }> {
+): Promise<{ total: number; entries: number; rank: number | null }> {
   const cursor = await db.query(aql`
     LET mine = SUM(
       FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
@@ -239,12 +241,21 @@ export async function getExplorerStanding(
         FILTER f.explorerId == ${explorerId}
         RETURN 1
     )
-    RETURN { mine, entries }
+    LET ahead = LENGTH(
+      FOR f IN ${db.collection(INTELLIGENCE_FRAGMENTS_COLLECTION)}
+        FILTER f.userId != null
+        COLLECT other = f.userId AGGREGATE total = SUM(f.fragments)
+        FILTER total > mine
+        RETURN 1
+    )
+    RETURN { mine, entries, ahead }
   `);
   const row = await cursor.next();
+  const entries = row && typeof row.entries === 'number' ? row.entries : 0;
   return {
     total: row && typeof row.mine === 'number' ? row.mine : 0,
-    entries: row && typeof row.entries === 'number' ? row.entries : 0,
+    entries,
+    rank: entries > 0 ? (row && typeof row.ahead === 'number' ? row.ahead : 0) + 1 : null,
   };
 }
 
