@@ -22,18 +22,25 @@ Vorinthex platform monorepo. Top-level workspaces:
 
 ## Setup
 
-Install dependencies from the repository root:
+New machine, in order:
 
-```bash
-bun install
-```
+1. Install `git-crypt` (`brew install git-crypt` / `apt install git-crypt` /
+   `choco install git-crypt`).
+2. Get the git-crypt symmetric key from a teammate (out-of-band — Slack,
+   password manager, however your team already shares it; there is no
+   git/GitHub-mediated handoff for this).
+3. Clone the repo, then unlock it: `git-crypt unlock <path-to-key>`.
+4. Install graphify (see the Graphify section below) and run `graphify
+   install` once to register it with your AI assistant.
+5. `bun install` from the repository root.
 
 All vars and secrets, for both dev and prod, live in one git-crypt-encrypted
 file: `.github/environments.json` (`{ vars: {...}, secrets: { dev: {...}, prod:
 {...} } }`, keyed per workspace — `vorinthex`, `web`, `backend`). It IS
 committed (unlike the old per-workspace `.env.*` files it replaces) because
-git-crypt encrypts it at rest; `git-crypt unlock` decrypts your local working
-copy the same way it already does for `launch/.env`.
+git-crypt encrypts it at rest; step 3 above decrypts your local working copy
+the same way it already does for `launch/.env`. Never add a new plaintext env
+file — edit `.github/environments.json` directly once unlocked.
 
 Local dev tooling reads this file directly or generates a plain `.env.local`
 from it via `bun run .github/scripts/write-local-env.ts <dev|prod> <section>
@@ -63,7 +70,11 @@ This repo uses a newer Next.js version with breaking changes. Before changing Ne
 
 ## Graphify
 
-For codebase navigation questions, prefer `graphify explain` over broad `graphify query`.
+Always use graphify for codebase navigation — it's the default, not a fallback.
+
+Install: `uv tool install graphifyy` (or `pipx install graphifyy`), then run
+`graphify install` once to register it with your AI assistant. Repo:
+https://github.com/Graphify-Labs/graphify. Requires Python 3.10+.
 
 Order:
 
