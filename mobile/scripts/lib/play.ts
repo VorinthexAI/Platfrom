@@ -150,33 +150,6 @@ export class PlayClient {
     return files.length;
   }
 
-  /** Upload an .aab and return its versionCode. */
-  async uploadBundle(packageName: string, editId: string, aabPath: string): Promise<number> {
-    const result = await this.request<{ versionCode: number }>(
-      "POST",
-      `${UPLOAD_API}/applications/${packageName}/edits/${editId}/bundles?uploadType=media`,
-      Bun.file(aabPath),
-      "application/octet-stream",
-    );
-    return result.versionCode;
-  }
-
-  async setTrackRelease(
-    packageName: string,
-    editId: string,
-    track: string,
-    release: {
-      status: string;
-      versionCodes?: number[];
-      releaseNotes: Array<{ language: string; text: string }>;
-    },
-  ): Promise<void> {
-    await this.request("PUT", `${API}/applications/${packageName}/edits/${editId}/tracks/${track}`, {
-      track,
-      releases: [release],
-    });
-  }
-
   /**
    * Country availability is READ-ONLY in the public API (GET
    * edits.countryavailability) — Google offers no write endpoint, so the

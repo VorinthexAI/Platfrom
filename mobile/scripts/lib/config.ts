@@ -45,10 +45,6 @@ const appleSchema = z.strictObject({
     localizations: z.record(localeKey, appleVersionLocalizationSchema),
   }),
   screenshots: z.record(z.string(), z.string()),
-  artifacts: z.strictObject({
-    ipa: z.string(),
-    note: z.string().optional(),
-  }),
 });
 
 const googleSchema = z.strictObject({
@@ -73,15 +69,8 @@ const googleSchema = z.strictObject({
     sevenInchScreenshots: z.string().optional(),
     tenInchScreenshots: z.string().optional(),
   }),
-  release: z.strictObject({
-    track: z.string(),
-    status: z.enum(["draft", "completed", "inProgress", "halted"]),
-    releaseNotes: z.record(localeKey, z.string().max(500)),
-  }),
-  artifacts: z.strictObject({
-    aab: z.string(),
-    note: z.string().optional(),
-  }),
+  /** Track whose country availability the script reads for the diff report. */
+  availabilityCheckTrack: z.string(),
 });
 
 const storesSchema = z.strictObject({
@@ -99,26 +88,6 @@ const storesSchema = z.strictObject({
   }),
   apple: appleSchema,
   google: googleSchema,
-  screenshotGenerator: z.strictObject({
-    note: z.string().optional(),
-    routes: z.array(
-      z.strictObject({
-        path: z.string().startsWith("/"),
-        name: z.string(),
-        waitMs: z.number().int().min(0).max(30000),
-      }),
-    ),
-    targets: z.array(
-      z.strictObject({
-        store: z.enum(["apple", "google"]),
-        label: z.string(),
-        dir: z.string(),
-        width: z.number().int(),
-        height: z.number().int(),
-        deviceScaleFactor: z.number().int().min(1).max(4),
-      }),
-    ),
-  }),
 });
 
 export type StoresConfig = z.infer<typeof storesSchema>;
