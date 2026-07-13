@@ -1,4 +1,4 @@
-﻿import Svg, { Path } from "react-native-svg";
+﻿import Svg, { Circle } from "react-native-svg";
 export type MoreHorizontalIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
 export type MoreHorizontalIconSize = "sm" | "md" | "lg";
 export type MoreHorizontalIconProps = {
@@ -19,8 +19,9 @@ export function MoreHorizontalIcon({ variant = "default", size = "md", strokeWid
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Circle cx={5} cy={12} r={1.4} fill={color} />
+      <Circle cx={12} cy={12} r={1.4} fill={color} />
+      <Circle cx={19} cy={12} r={1.4} fill={color} />
     </Svg>
   );
 }

@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "Vorinthex Core",
+    "slug": "vorinthex-core",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/brand/vorinthex-mark.png",
+    "scheme": "vorinthexcore",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#030507",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#030507",
+        "foregroundImage": "./assets/brand/vorinthex-mark.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#030507",
+          "image": "./assets/brand/vorinthex-mark.png",
+          "imageWidth": 96
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

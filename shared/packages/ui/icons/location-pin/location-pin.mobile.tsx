@@ -1,4 +1,4 @@
-﻿import Svg, { Path } from "react-native-svg";
+﻿import Svg, { Circle, Path } from "react-native-svg";
 export type LocationPinIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
 export type LocationPinIconSize = "sm" | "md" | "lg";
 export type LocationPinIconProps = {
@@ -19,8 +19,14 @@ export function LocationPinIcon({ variant = "default", size = "md", strokeWidth 
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path
+        d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={10} r={3} stroke={color} strokeWidth={strokeWidth} />
     </Svg>
   );
 }
