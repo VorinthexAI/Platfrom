@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { Button } from "@vorinthex/shared/ui/components";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
-import { galaxyMotion, useGalaxyStore } from "@/lib/galaxy-store";
+import { galaxyMotion, syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
 import { trackCtaClick } from "@/lib/analytics";
 import { useAuthProfile } from "@/lib/auth/use-auth-profile";
 import { OpenModalButton } from "./OpenModalButton";
@@ -33,6 +33,7 @@ export function HeroContent() {
     (s) => s.step === 0 && s.mode === "system",
   );
   const startJump = useGalaxyStore((s) => s.startJump);
+  const enterCave = useGalaxyStore((s) => s.enterCave);
   const { signedIn } = useAuthProfile();
   const [headlineTop, headlineRest] = splitHeadline(
     nexusContent?.headline ?? "The Nexus of Intelligence",
@@ -99,7 +100,7 @@ export function HeroContent() {
                 }}
                 className="px-8 py-4 text-xs"
               >
-                Jump Galaxy
+                Your galaxy
               </Button>
             ) : (
               <OpenModalButton
@@ -110,6 +111,17 @@ export function HeroContent() {
                 Sign in
               </OpenModalButton>
             )}
+            <Button
+              variant="secondary"
+              onClick={() => {
+                trackCtaClick("hunt_open", { placement: "hero" });
+                enterCave("hunt");
+                syncEntityUrl("/hunt");
+              }}
+              className="px-8 py-4 text-xs uppercase"
+            >
+              Hunt
+            </Button>
           </div>
         </div>
       </div>
