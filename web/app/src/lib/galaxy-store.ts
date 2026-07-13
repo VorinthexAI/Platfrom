@@ -151,6 +151,16 @@ export const galaxyMotion = {
    * as a rotate/swipe gesture.
    */
   holdingSun: false,
+  sunHold: null as null | {
+    id: number;
+    pointerId: number;
+    pointerType: string;
+    startX: number;
+    startY: number;
+    startedAt: number;
+  },
+  sunHoldId: 0,
+  cancelSunHold: null as null | (() => void),
   /** ms timestamp of the last scroll input (for momentum decay). */
   lastScrollAt: 0,
   /** ms timestamp of the last interior-to-interior warp (streak burst). */
