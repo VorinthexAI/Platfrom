@@ -1092,7 +1092,7 @@ export const VORINTHEX_GALAXY_REGISTRY = {
     name: "Vorinthex AI",
     tagline: "The Nexus of Intelligence",
     logo: {
-      src: "/logos/logo-symbol.png",
+      src: "/logos/vorinthex-mark.png",
       alt: "Vorinthex AI logo",
       kind: "png" as const,
     },

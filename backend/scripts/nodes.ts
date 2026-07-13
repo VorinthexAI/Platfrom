@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { writeFile } from 'node:fs/promises';
-import { chooseEnvironment, closeProdSshTunnel, loadEnvironment, verifyProdDatabaseConnection } from './lib/environment';
+import { chooseEnvironment, closeProdSshTunnel, loadEnvironment, verifyDatabaseConnection } from './lib/environment';
 import { selectMenu } from './lib/menu';
 
 const rl = createInterface({ input, output });
@@ -77,7 +77,7 @@ async function main() {
   const environment = await chooseEnvironment(rl);
   rl.pause();
   loadEnvironment(environment);
-  if (environment === 'prod') await verifyProdDatabaseConnection();
+  await verifyDatabaseConnection(environment);
 
   try {
     // Imported after env vars are loaded, since this transitively opens the Arango connection.
