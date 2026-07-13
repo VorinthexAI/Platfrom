@@ -101,7 +101,10 @@ jobs:
               shared/*) shared=true ;;
               .github/scripts/cloudflare-cache-policy.ts) web=true ;;
               .github/environments.json) web=true; backend=true ;;
-              .github/workflows/deploy.yml) web=true ;;
+              # deploy.yml defines the backend jobs (image, db, migrate,
+              # api roll) as much as the web ones — a workflow change must
+              # re-run both pipelines, not just web.
+              .github/workflows/deploy.yml) web=true; backend=true ;;
               deploy/early/*) web=true ;;
             esac
           }
@@ -583,10 +586,20 @@ jobs:
         with:
           git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
       - name: Extract config
+        # This job's default working-directory is backend/ (for the bun run
+        # steps), but environments.json lives at the repo root. Without the
+        # override, jq silently reads a nonexistent file inside $(...), the
+        # echo still succeeds, and AWS_DEPLOY_ROLE_ARN lands empty — which
+        # only surfaces later as "Could not load credentials from any
+        # providers". jq -re + set -e make a missing value fail right here.
+        working-directory: .
         run: |
+          set -euo pipefail
+          AWS_DEPLOY_ROLE_ARN="$(jq -re '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+          GRAPH_DB_SSH_SG_ID="$(jq -re '.vars.GRAPH_DB_SSH_SG_ID' .github/environments.json)"
           {
-            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
-            echo "GRAPH_DB_SSH_SG_ID=$(jq -r '.vars.GRAPH_DB_SSH_SG_ID' .github/environments.json)"
+            echo "AWS_DEPLOY_ROLE_ARN=$AWS_DEPLOY_ROLE_ARN"
+            echo "GRAPH_DB_SSH_SG_ID=$GRAPH_DB_SSH_SG_ID"
           } >> "$GITHUB_ENV"
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
