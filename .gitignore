@@ -3,6 +3,9 @@
 prod.env
 .env.local
 .env.*.local
+# Locally generated plaintext env material (secrets belong git-crypt-encrypted
+# in .github/environments.json)
+environments/
 
 # These secret-bearing files are allowed in git only because .gitattributes
 # stores them through git-crypt.

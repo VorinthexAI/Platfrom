@@ -12,7 +12,6 @@
     "start:server": "bun run load-local-env && bun --env-file=.env.local run src/api/index.ts",
     "start:app": "bun run load-local-env && bun --env-file=.env.local run src/api/index.ts",
     "start:render": "bun run load-local-env && bun --env-file=.env.local run src/render-worker/index.ts",
-    "manage": "bun run scripts/manage.ts",
     "reset": "bun run scripts/reset.ts",
     "create:super-admin": "bun run scripts/create-super-admin.ts",
     "nodes": "bun run scripts/nodes.ts",
