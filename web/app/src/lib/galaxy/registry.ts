@@ -84,7 +84,7 @@ const core: GalaxyEntity = {
   isLive: true,
   visibility: "live",
   launchDate: "TBD",
-  statusLabel: "Available first",
+  statusLabel: "Launching First",
   logo: { src: "", alt: "Core", kind: "procedural", iconKey: "brain" },
   visual: {
     celestialKind: "planet",
@@ -392,6 +392,7 @@ const archive = capability({
   isLive: true,
   visibility: "live",
   launchDate: "TBD",
+  statusLabel: "Launching First",
   price: { amount: 9.99, currency: "USD", interval: "month" },
   visual: {
     celestialKind: "asteroid",
@@ -453,6 +454,7 @@ const gallery = capability({
   isLive: true,
   visibility: "live",
   launchDate: "TBD",
+  statusLabel: "Launching First",
   price: { amount: 19.99, currency: "USD", interval: "month" },
   visual: {
     celestialKind: "asteroid",
@@ -514,6 +516,7 @@ const signal = capability({
   isLive: true,
   visibility: "live",
   launchDate: "TBD",
+  statusLabel: "Launching First",
   price: { amount: 29.99, currency: "USD", interval: "month" },
   visual: {
     celestialKind: "asteroid",
@@ -575,6 +578,7 @@ const compass = capability({
   isLive: true,
   visibility: "live",
   launchDate: "TBD",
+  statusLabel: "Launching First",
   price: { amount: 14.99, currency: "USD", interval: "month" },
   visual: {
     celestialKind: "asteroid",
@@ -636,6 +640,7 @@ const ascend = capability({
   isLive: true,
   visibility: "live",
   launchDate: "TBD",
+  statusLabel: "Launching First",
   price: { amount: 24.99, currency: "USD", interval: "month" },
   visual: {
     celestialKind: "asteroid",

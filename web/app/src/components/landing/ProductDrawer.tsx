@@ -9,7 +9,7 @@ import {
   getOwningProduct,
   getStatusPrefix,
 } from "@/lib/galaxy/registry-helpers";
-import { CloseIcon, LockIcon } from "@/components/ui/icons";
+import { CloseIcon } from "@/components/ui/icons";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { trackCtaClick } from "@/lib/analytics";
 import {
@@ -148,8 +148,7 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
               </span>
             ) : null
           ) : (
-            <span className="flex items-center gap-1.5 rounded-full border border-white/12 px-3 py-1 font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
-              <LockIcon width={10} height={10} />
+            <span className="rounded-full border border-white/12 px-3 py-1 font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
               {statusPrefix ?? entity.statusLabel ?? "Coming Soon"}
             </span>
           )}
