@@ -343,6 +343,23 @@ interface HunterProfile {
   alias?: string | null;
 }
 
+type HuntBoardRow =
+  | {
+      kind: "leader";
+      key: string;
+      place: number;
+      alias: string | null;
+      total: number;
+      isMe: boolean;
+    }
+  | {
+      kind: "standing";
+      key: "my-standing";
+      place: number | "—";
+      total: number;
+      tier: keyof typeof STANDING_TITLES;
+    };
+
 function LeaderboardFlow() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
   const enterCave = useGalaxyStore((s) => s.enterCave);
@@ -381,14 +398,48 @@ function LeaderboardFlow() {
 
   const isAuthed = profile !== "loading" && profile !== null;
 
-  // The board renders only real seats, plus the visitor's own standing
-  // card under them. If the visitor is in the top rows they also render
-  // among them, unmistakably marked. The place always comes from the
-  // server's standing (ranked against the same board query) — inventing
-  // "last seat + 1" here once showed a 2,400-fragment hunter in 6th
-  // behind five sub-100 rows while their standing was still unadopted.
+  // The board renders the signed-in visitor inside the same ordered list.
+  // If they are not present in the top rows yet, insert their server-ranked
+  // standing at that position instead of dropping it below the table.
   const topRows = rows.slice(0, 10);
   const myPlace = myRank ?? "—";
+  const boardRows: HuntBoardRow[] = topRows.map((row, index) => ({
+    kind: "leader",
+    key: row.userId,
+    place: index + 1,
+    alias: row.alias,
+    total: row.total,
+    isMe: Boolean(myUserId) && row.userId === myUserId,
+  }));
+  const hasVisibleStanding = boardRows.some((row) => row.kind === "leader" && row.isMe);
+  let insertedStandingAt: number | null = null;
+
+  if (isAuthed && !hasVisibleStanding) {
+    const insertAt =
+      typeof myRank === "number"
+        ? Math.max(0, Math.min(myRank - 1, boardRows.length))
+        : boardRows.length;
+    insertedStandingAt = insertAt;
+    boardRows.splice(insertAt, 0, {
+      kind: "standing",
+      key: "my-standing",
+      place: myPlace,
+      total: myTotal,
+      tier: standingTier,
+    });
+  }
+
+  if (
+    insertedStandingAt !== null &&
+    typeof myRank === "number" &&
+    insertedStandingAt < boardRows.length - 1
+  ) {
+    boardRows.forEach((row, index) => {
+      if (row.kind === "leader" && index > insertedStandingAt) {
+        row.place = index + 1;
+      }
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
@@ -452,27 +503,50 @@ function LeaderboardFlow() {
         style={{ background: "var(--gradient-panel)" }}
       >
         <div className="pr-1">
-        <div className="space-y-1">
-          {topRows.map((row, index) => {
-            const isMe = Boolean(myUserId) && row.userId === myUserId;
+        <div className="space-y-2">
+          {boardRows.map((row) => {
+            if (row.kind === "standing") {
+              return (
+                <div
+                  key={row.key}
+                  className="rounded-xl border border-silver-300/35 bg-white/[0.065] px-3.5 py-2.5 shadow-[0_0_32px_rgba(196,204,212,0.1)]"
+                >
+                  <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
+                    {STANDING_TITLES[row.tier]}
+                  </p>
+                  <p className="mt-1 flex items-baseline gap-3 text-sm">
+                    <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
+                      {row.place}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+                      You
+                    </span>
+                    <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
+                      {formatFragments(row.total)}
+                    </span>
+                  </p>
+                </div>
+              );
+            }
+
             return (
               <p
-                key={row.userId}
+                key={row.key}
                 className={`flex items-baseline gap-3 rounded-xl border px-3.5 py-1.5 text-sm ${
-                  isMe
+                  row.isMe
                     ? "border-silver-300/40 bg-white/[0.07]"
                     : "border-white/8 bg-white/[0.02]"
                 }`}
               >
                 <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-500">
-                  {index + 1}
+                  {row.place}
                 </span>
                 <span
                   className={`min-w-0 flex-1 truncate text-[0.82rem] ${
-                    isMe ? "text-silver-50" : "text-silver-200"
+                    row.isMe ? "text-silver-50" : "text-silver-200"
                   }`}
                 >
-                  {isMe ? "You" : (row.alias ?? "Unnamed Explorer")}
+                  {row.isMe ? "You" : (row.alias ?? "Unnamed Explorer")}
                 </span>
                 <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
                   {formatFragments(row.total)}
@@ -482,26 +556,8 @@ function LeaderboardFlow() {
           })}
         </div>
 
-        {/* the visitor's standing: signed in gets the pure row, everyone
-            else gets the join/sign-in call instead */}
-        {isAuthed ? (
-          <div className="mt-3 rounded-xl border border-silver-300/30 bg-white/[0.05] px-3.5 py-2.5">
-            <p className="font-mono text-[0.5rem] tracking-[0.26em] text-silver-500 uppercase">
-              {STANDING_TITLES[standingTier]}
-            </p>
-            <p className="mt-1 flex items-baseline gap-3 text-sm">
-              <span className="w-6 shrink-0 font-mono text-[0.6rem] tracking-[0.2em] text-silver-300">
-                {myPlace}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
-                You
-              </span>
-              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-                {formatFragments(myTotal)}
-              </span>
-            </p>
-          </div>
-        ) : profile !== "loading" ? (
+        {/* Signed-out visitors get the join/sign-in call after the board. */}
+        {!isAuthed && profile !== "loading" ? (
           <div className="mt-3 flex flex-col gap-4">
             <p className="text-[0.78rem] leading-relaxed text-silver-500">
               Sign in with your email to sync your haul. New explorers are

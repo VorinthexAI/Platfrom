@@ -55,14 +55,11 @@ export function OrbitRail() {
 
   if (mode === "cave" || mode === "jump" || mode === "intro") return null;
 
-  // Camera movement while exploring the rail no longer rewrites the
-  // address bar — only returning all the way to the overview does. The
-  // product/capability/orchestrator routes stay real and crawlable; they
-  // just don't chase the camera during interactive navigation.
+  // Orbit rail movement keeps the camera and the canonical entity route in sync.
   const go = (stepIndex: number, path: string) => {
     trackCtaClick("orbit_rail", { step_index: stepIndex, route: path });
     setStep(stepIndex);
-    if (path === "/") syncEntityUrl(path);
+    syncEntityUrl(path);
   };
 
   const currentPath = ORBIT_STEPS[step]?.path ?? "/";

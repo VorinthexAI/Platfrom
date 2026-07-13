@@ -126,7 +126,7 @@ export function SunGalaxy() {
   }
 
   return (
-    <main className="relative flex min-h-svh items-center justify-center overflow-hidden px-4 py-14 sm:py-16">
+    <main className="relative min-h-svh overflow-hidden bg-[#070100] px-3 py-4 sm:px-6 sm:py-7">
       {/* Wide solar chamber, framed like a biome interior instead of a close crop. */}
       <div aria-hidden className="sun-chamber absolute inset-0">
         <div className="sun-convection sun-convection-slow" />
@@ -134,6 +134,10 @@ export function SunGalaxy() {
         <div className="sun-dome" />
         <div className="sun-floor" />
         <div className="sun-horizon" />
+        <div className="sun-heart">
+          <div className="sun-heart-texture" />
+          <div className="sun-heart-mark" />
+        </div>
         <div className="sun-core" />
         <div className="sun-pulse" />
         <div className="sun-flare sun-flare-a" />
@@ -151,7 +155,7 @@ export function SunGalaxy() {
       </div>
 
       <section
-        className="chrome-border card-depth relative z-10 w-full max-w-lg rounded-3xl p-7 text-center sm:p-10"
+        className="chrome-border card-depth sun-console z-10 rounded-3xl p-5 text-left sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
         <button
@@ -166,10 +170,10 @@ export function SunGalaxy() {
         {phase.kind === "gate" ? (
           <form onSubmit={submitFoundersGate}>
             <p className="micro-label">Founders Gate</p>
-            <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
+            <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50 sm:text-4xl">
               Enter the Nexus.
             </h1>
-            <p className="mt-5 text-sm leading-relaxed text-silver-300">
+            <p className="mt-5 max-w-xl text-sm leading-relaxed text-silver-300">
               Founder access uses your organization MFA. Enter your email to
               open setup or verification.
             </p>
@@ -219,7 +223,7 @@ export function SunGalaxy() {
         {phase.kind === "welcome" ? (
           <>
             <p className="micro-label">The Inner Galaxy</p>
-            <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50">
+            <h1 className="font-display mt-4 text-3xl leading-snug tracking-[0.1em] text-silver-50 sm:text-4xl">
               {phase.name ? `Welcome ${phase.name},` : "Welcome,"}
             </h1>
             {phase.title ? (
@@ -227,7 +231,7 @@ export function SunGalaxy() {
                 {phase.title} of Vorinthex AI | The Nexus of Intelligence
               </p>
             ) : null}
-            <p className="mt-6 text-sm leading-relaxed text-silver-300">
+            <p className="mt-6 max-w-2xl text-sm leading-relaxed text-silver-300">
               Welcome to the inner galaxy of Vorinthex AI. Looking forward to
               working together to form this product as the next generation
               AI-native platform - enabling anyone to use AI in their
@@ -262,6 +266,7 @@ export function SunGalaxy() {
         .sun-dome,
         .sun-floor,
         .sun-horizon,
+        .sun-heart,
         .sun-wall,
         .sun-convection,
         .sun-pulse,
@@ -390,6 +395,96 @@ export function SunGalaxy() {
           filter: blur(18px);
           opacity: 0.82;
           transform: translateX(-50%) translateZ(-170px);
+        }
+        .sun-heart {
+          z-index: 2;
+          top: 6%;
+          width: min(430px, 64vw);
+          aspect-ratio: 1;
+          border-radius: 50%;
+          overflow: hidden;
+          background:
+            radial-gradient(
+              circle at 36% 30%,
+              rgba(255, 241, 195, 0.92) 0 8%,
+              rgba(255, 190, 86, 0.82) 18%,
+              rgba(239, 89, 18, 0.52) 42%,
+              rgba(76, 12, 3, 0.2) 74%,
+              transparent 100%
+            ),
+            radial-gradient(
+              circle at 62% 64%,
+              rgba(255, 217, 128, 0.56) 0 10%,
+              rgba(214, 73, 14, 0.42) 32%,
+              transparent 68%
+            ),
+            #5a1605;
+          box-shadow:
+            0 0 52px rgba(255, 220, 157, 0.42),
+            0 0 150px rgba(249, 102, 28, 0.42),
+            inset 0 0 68px rgba(255, 236, 188, 0.18),
+            inset 0 -28px 84px rgba(44, 6, 1, 0.72);
+          opacity: 0.96;
+          transform: translateX(-50%);
+          animation: sun-heart-orbit 3.8s ease-in-out infinite;
+        }
+        .sun-heart::before,
+        .sun-heart::after,
+        .sun-heart-texture,
+        .sun-heart-mark {
+          content: "";
+          position: absolute;
+          inset: 0;
+          border-radius: inherit;
+          pointer-events: none;
+        }
+        .sun-heart::before {
+          background:
+            repeating-conic-gradient(
+              from 8deg,
+              rgba(255, 226, 158, 0.26) 0deg 8deg,
+              rgba(238, 92, 20, 0.18) 8deg 17deg,
+              rgba(86, 14, 4, 0.22) 17deg 24deg
+            ),
+            radial-gradient(circle at 50% 50%, transparent 0 54%, rgba(12, 2, 0, 0.4) 84%);
+          mix-blend-mode: screen;
+          opacity: 0.68;
+          animation: sun-texture-spin 15s linear infinite;
+        }
+        .sun-heart::after {
+          inset: -12%;
+          border: 1px solid rgba(255, 219, 151, 0.22);
+          box-shadow:
+            inset 0 0 38px rgba(255, 212, 135, 0.2),
+            0 0 34px rgba(255, 141, 44, 0.22);
+          opacity: 0.72;
+          animation: sun-pulse-shell 3.8s ease-in-out infinite;
+        }
+        .sun-heart-texture {
+          background:
+            radial-gradient(circle at 24% 34%, rgba(255, 242, 199, 0.55) 0 5%, transparent 12%),
+            radial-gradient(circle at 68% 28%, rgba(255, 171, 70, 0.5) 0 8%, transparent 18%),
+            radial-gradient(circle at 78% 62%, rgba(255, 230, 168, 0.32) 0 6%, transparent 16%),
+            radial-gradient(circle at 40% 78%, rgba(201, 58, 11, 0.42) 0 10%, transparent 22%),
+            repeating-radial-gradient(
+              circle at 48% 48%,
+              rgba(255, 233, 176, 0.16) 0 2px,
+              rgba(123, 22, 5, 0.08) 2px 18px,
+              transparent 18px 34px
+            );
+          filter: blur(2px) saturate(1.28);
+          mix-blend-mode: screen;
+          animation: sun-heartbeat 3.8s ease-in-out infinite;
+        }
+        .sun-heart-mark {
+          inset: 19%;
+          background: url("/logos/vorinthex-mark.png") center / contain no-repeat;
+          filter:
+            drop-shadow(0 0 18px rgba(255, 236, 190, 0.55))
+            drop-shadow(0 0 42px rgba(252, 113, 31, 0.46));
+          opacity: 0.36;
+          mix-blend-mode: screen;
+          animation: sun-mark-float 3.8s ease-in-out infinite;
         }
         .sun-core {
           position: absolute;
@@ -685,6 +780,78 @@ export function SunGalaxy() {
             rgba(4, 1, 0, 0.85) 100%
           );
         }
+        .sun-console {
+          position: absolute;
+          left: 50%;
+          bottom: 1rem;
+          width: calc(100% - 1.5rem);
+          max-width: 48rem;
+          max-height: min(42svh, 520px);
+          overflow-y: auto;
+          border-color: rgba(255, 231, 188, 0.2);
+          box-shadow:
+            0 24px 90px rgba(9, 2, 0, 0.7),
+            0 0 80px rgba(247, 114, 31, 0.12),
+            inset 0 1px 0 rgba(255, 241, 211, 0.08);
+          backdrop-filter: blur(18px) saturate(1.18);
+          transform: translateX(-50%);
+        }
+        .sun-console :global(input) {
+          text-align: left;
+        }
+        @media (min-width: 640px) {
+          .sun-console {
+            bottom: 1.75rem;
+            width: calc(100% - 3rem);
+          }
+        }
+        @keyframes sun-heart-orbit {
+          0%,
+          100% {
+            transform: translateX(-50%) scale(0.985);
+          }
+          36% {
+            transform: translateX(-50%) translateY(-1.2%) scale(1.035);
+          }
+          58% {
+            transform: translateX(-50%) translateY(-0.4%) scale(1.01);
+          }
+        }
+        @keyframes sun-texture-spin {
+          to {
+            transform: rotate(360deg);
+          }
+        }
+        @keyframes sun-pulse-shell {
+          0%,
+          100% {
+            transform: scale(0.92);
+            opacity: 0.42;
+          }
+          38% {
+            transform: scale(1.04);
+            opacity: 0.78;
+          }
+          62% {
+            transform: scale(1.18);
+            opacity: 0.22;
+          }
+        }
+        @keyframes sun-mark-float {
+          0%,
+          100% {
+            transform: scale(0.98);
+            opacity: 0.28;
+          }
+          36% {
+            transform: scale(1.05);
+            opacity: 0.44;
+          }
+          58% {
+            transform: scale(1.01);
+            opacity: 0.36;
+          }
+        }
         @keyframes sun-breathe {
           0%,
           100% {
@@ -808,6 +975,11 @@ export function SunGalaxy() {
         }
         @media (prefers-reduced-motion: reduce) {
           .sun-core,
+          .sun-heart,
+          .sun-heart::before,
+          .sun-heart::after,
+          .sun-heart-texture,
+          .sun-heart-mark,
           .sun-flare,
           .sun-convection,
           .sun-pulse,

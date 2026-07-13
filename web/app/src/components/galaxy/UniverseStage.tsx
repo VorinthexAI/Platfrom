@@ -8,6 +8,7 @@ import {
   getEntityById,
 } from "@/lib/galaxy/registry-helpers";
 import {
+  ORBIT_STEPS,
   galaxyMotion,
   stepForEntity,
   syncDocumentTitle,
@@ -126,13 +127,9 @@ export function UniverseStage({
     let touchConsumed = false;
     let sunHoldTimer: number | null = null;
 
-    // Scroll/swipe stepping moves the camera without rewriting the
-    // address bar — only landing back on the overview (step 0) does.
-    // Product/capability/orchestrator routes stay real for direct links
-    // and crawlers; they just don't chase interactive exploration.
     const syncStepPath = () => {
       const { step } = useGalaxyStore.getState();
-      if (step === 0) syncEntityUrl("/");
+      syncEntityUrl(ORBIT_STEPS[step]?.path ?? "/");
     };
 
     const step = (direction: 1 | -1) => {
