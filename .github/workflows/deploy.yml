@@ -36,7 +36,7 @@ on:
       target:
         description: 'Deployment target'
         type: choice
-        options: [all, web, backend, selective]
+        options: [all, web, backend, mobile, selective]
         default: all
       deploy:
         description: 'Deploy after verification'
@@ -82,6 +82,7 @@ jobs:
     outputs:
       web: ${{ steps.decide.outputs.web }}
       backend: ${{ steps.decide.outputs.backend }}
+      mobile: ${{ steps.decide.outputs.mobile }}
       changed_files: ${{ steps.decide.outputs.changed_files }}
     steps:
       - uses: actions/checkout@v4
@@ -98,6 +99,7 @@ jobs:
             case "$1" in
               web/app/*) web=true ;;
               backend/*) backend=true ;;
+              mobile/*) mobile=true ;;
               shared/*) shared=true ;;
               .github/scripts/cloudflare-cache-policy.ts) web=true ;;
               .github/environments.json) web=true; backend=true ;;
@@ -111,6 +113,7 @@ jobs:
 
           web=false
           backend=false
+          mobile=false
           shared=false
           files=""
 
@@ -119,12 +122,16 @@ jobs:
               all)
                 web=true
                 backend=true
+                mobile=true
                 ;;
               web)
                 web=true
                 ;;
               backend)
                 backend=true
+                ;;
+              mobile)
+                mobile=true
                 ;;
               selective)
                 files="$(git diff --name-only HEAD~1 HEAD || true)"
@@ -143,12 +150,13 @@ jobs:
             done <<< "$files"
           fi
 
-          # shared/ is consumed by BOTH the web app and the backend.
-          if [ "$shared" = true ]; then web=true; backend=true; fi
+          # shared/ is consumed by the web app, the backend, AND the mobile app.
+          if [ "$shared" = true ]; then web=true; backend=true; mobile=true; fi
 
           {
             echo "web=$web"
             echo "backend=$backend"
+            echo "mobile=$mobile"
             echo "changed_files<<EOF"
             printf '%s\n' "${files:-manual:${{ inputs.target || 'all' }}}"
             echo "EOF"
@@ -187,6 +195,49 @@ jobs:
         run: bun run backend:check
       - name: Test
         run: bun run backend:test
+
+  # ---------------------------------------------------------------------------
+  # MOBILE: queue EAS production builds for the store binaries whenever
+  # mobile/ or shared/ changed on a merge to main. The Expo token comes from
+  # the git-crypt encrypted environments.json (secrets.prod.mobile.EXPO_TOKEN).
+  # --no-wait queues the cloud build and returns — the runner does not sit
+  # through the ~15 min EAS build; artifacts land on expo.dev, ready for
+  # bun run submit / manual store upload.
+  # ---------------------------------------------------------------------------
+  mobile-distro:
+    name: Mobile distro build (EAS)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract Expo token
+        run: |
+          set -euo pipefail
+          EXPO_TOKEN="$(jq -re '.secrets.prod.mobile.EXPO_TOKEN' .github/environments.json)"
+          test -n "$EXPO_TOKEN" && [ "$EXPO_TOKEN" != "null" ] || { echo "::error::secrets.prod.mobile.EXPO_TOKEN is not configured in .github/environments.json."; exit 1; }
+          echo "::add-mask::$EXPO_TOKEN"
+          echo "EXPO_TOKEN=$EXPO_TOKEN" >> "$GITHUB_ENV"
+
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --linker=hoisted
+      - name: Typecheck mobile
+        run: bun run mobile:typecheck
+
+      # iOS: switch to --platform all once iOS distribution credentials are
+      # configured on expo.dev (eas credentials -p ios) — non-interactive iOS
+      # builds fail without them. Android keystores are auto-managed by EAS.
+      - name: Queue EAS production build (Android app bundle)
+        working-directory: mobile/app
+        run: bunx eas-cli@latest build --platform android --profile production --non-interactive --no-wait
 
   # ---------------------------------------------------------------------------
   # WEB: build the Next standalone image, push to ECR (vorinthex-web), and roll
