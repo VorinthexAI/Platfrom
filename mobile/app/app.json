@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Vorinthex AI",
-    "slug": "vorinthex-core",
+    "slug": "vorinthex-ai",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/brand/vorinthex-mark.png",
@@ -38,7 +38,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "f1210228-6157-44f3-89b8-b842bc4711b3"
+        "projectId": "2a9ba74e-cefe-49e6-9fd0-9b38a69c8d18"
       }
     },
     "owner": "vorinthex-ai"
