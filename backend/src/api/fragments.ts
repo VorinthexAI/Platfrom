@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import {
+  adoptExplorerFragments,
   countFragmentEntries,
   getExplorerStanding,
   getUserStanding,
@@ -137,14 +138,26 @@ export async function collectFragment(c: Context) {
  * 1-based leaderboard rank. For a signed-in user, total + rank come from the
  * SAME COLLECT/SUM query family as `listTopCollectors` (the board), so the
  * in-list "You" row and the standing card can never structurally disagree.
- * An anonymous explorer gets their local (unadopted) haul with `rank: null` —
- * the board is signed-in-only, they join/sign in to rank.
+ * A signed-in caller with an explorer cookie first adopts any fragments still
+ * stranded on the anonymous id (collected while the session was expired, or
+ * missed by an interrupted sign-in) so their board seat reflects the full
+ * haul. An anonymous explorer gets their device haul ranked against the same
+ * board — a real place, never a number the UI has to invent.
  */
 export async function getFragmentsStanding(c: Context) {
   const query = parseQuery(c, fragmentsStandingQuerySchema);
   const userId = await getUserId(c);
 
   if (userId) {
+    // Heal before ranking: fragments collected under this device's anonymous
+    // id while signed out would otherwise stay off the board forever.
+    if (query.explorer_id) {
+      const adopted = await adoptExplorerFragments(query.explorer_id, userId);
+      if (adopted > 0) {
+        trackUserPlaceChange(userId);
+        notifyCountersDirty();
+      }
+    }
     const standing = await getUserStanding(userId);
     if (standing) {
       return c.json({
@@ -164,7 +177,7 @@ export async function getFragmentsStanding(c: Context) {
     return c.json({
       user_id: userId,
       total: standing.total,
-      rank: null,
+      rank: standing.rank,
       entries: standing.entries,
       adopted: false,
     });

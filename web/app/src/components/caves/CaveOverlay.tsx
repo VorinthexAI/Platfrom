@@ -383,9 +383,12 @@ function LeaderboardFlow() {
 
   // The board renders only real seats, plus the visitor's own standing
   // card under them. If the visitor is in the top rows they also render
-  // among them, unmistakably marked.
+  // among them, unmistakably marked. The place always comes from the
+  // server's standing (ranked against the same board query) — inventing
+  // "last seat + 1" here once showed a 2,400-fragment hunter in 6th
+  // behind five sub-100 rows while their standing was still unadopted.
   const topRows = rows.slice(0, 10);
-  const myPlace = myRank ?? Math.max(rows.length, topRows.length) + 1;
+  const myPlace = myRank ?? "—";
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
