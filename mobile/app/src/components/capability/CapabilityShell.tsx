@@ -6,8 +6,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChevronLeftIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
-import { NeuralField } from "@/components/NeuralField";
 import { PressableScale } from "@/components/PressableScale";
+import { NeuralField3D } from "@/components/three/NeuralField3D";
 import { SearchBar } from "@/components/SearchBar";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { Capability } from "@/data/registry";
@@ -51,13 +51,12 @@ export function CapabilityShell({ capability, children }: CapabilityShellProps) 
         showsVerticalScrollIndicator={false}
       >
         <Animated.View entering={FadeIn.duration(durations.reveal)} style={styles.hero}>
-          <NeuralField
-            width={width}
-            height={HERO_HEIGHT}
+          <NeuralField3D
             seed={capability.slug.length * 13 + 5}
-            nodeCount={34}
-            pulseCount={4}
-            style={styles.heroField}
+            count={70}
+            radius={5.5}
+            speed={0.04}
+            style={[styles.heroField, { width, height: HERO_HEIGHT }]}
           />
           <ChromeIcon source={capabilityIconSource[capability.slug]} size={96} glow={0.7} />
         </Animated.View>

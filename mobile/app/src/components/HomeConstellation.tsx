@@ -1,10 +1,10 @@
 import { StyleSheet, View, useWindowDimensions } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
-import Svg, { Circle, Defs, Path, RadialGradient, Stop } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
-import { NeuralField } from "@/components/NeuralField";
 import { PressableScale } from "@/components/PressableScale";
+import { NeuralField3D } from "@/components/three/NeuralField3D";
 import { capabilityIconSource } from "@/data/capability-icons";
 import { CAPABILITIES, type CapabilitySlug } from "@/data/registry";
 import { durations } from "@/theme/motion";
@@ -21,7 +21,8 @@ const NODE_POSITIONS: Record<CapabilitySlug, { x: number; y: number }> = {
   ascend: { x: 0.79, y: 0.75 },
 };
 
-const CENTER = { x: 0.5, y: 0.46 };
+// Matches the 3D field's core glow, which sits at the canvas center.
+const CENTER = { x: 0.5, y: 0.5 };
 
 function filamentPath(
   width: number,
@@ -57,22 +58,15 @@ export function HomeConstellation({ onOpen }: HomeConstellationProps) {
 
   return (
     <View style={[styles.root, { width, height }]}>
-      <NeuralField
-        width={width}
-        height={height}
+      <NeuralField3D
         seed={31}
-        nodeCount={54}
-        pulseCount={7}
-        style={StyleSheet.absoluteFill}
+        count={110}
+        radius={5}
+        speed={0.05}
+        coreGlow
+        style={[StyleSheet.absoluteFill, { width, height }]}
       />
       <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
-        <Defs>
-          <RadialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
-            <Stop offset="0%" stopColor={palette.silver100} stopOpacity={0.34} />
-            <Stop offset="60%" stopColor={palette.silver100} stopOpacity={0.1} />
-            <Stop offset="100%" stopColor={palette.silver100} stopOpacity={0} />
-          </RadialGradient>
-        </Defs>
         {CAPABILITIES.map((capability, i) => (
           <Path
             key={capability.slug}
@@ -83,13 +77,6 @@ export function HomeConstellation({ onOpen }: HomeConstellationProps) {
             fill="none"
           />
         ))}
-        <Circle cx={CENTER.x * width} cy={CENTER.y * height} r={56} fill="url(#coreGlow)" />
-        <Circle
-          cx={CENTER.x * width}
-          cy={CENTER.y * height}
-          r={3.2}
-          fill={palette.silver50}
-        />
       </Svg>
 
       {CAPABILITIES.map((capability, i) => {

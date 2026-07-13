@@ -28,8 +28,12 @@ folder) — they are not committed.
 ## Structure
 
 - `src/app` — expo-router routes (thin screens)
-- `src/components` — card stack, capability shell, chrome icon treatment,
-  neural backgrounds (all animation via Reanimated)
+- `src/components` — card stack, capability shell, chrome icon treatment
+  (UI animation via Reanimated)
+- `src/components/three` — all 3D rendered with three.js via
+  @react-three/fiber (expo-gl on native, DOM canvas on web), mirroring
+  web/app's galaxy language: the neural brain build scene and the
+  rotating neural constellation fields
 - `src/data` — Zod-validated capability registry + mock content
 - `src/state` — Zustand stores (onboarding decisions, local UI state)
 - `src/theme` — tokens extending `@vorinthex/shared/ui/tokens`, motion vocabulary

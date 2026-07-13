@@ -46,12 +46,14 @@
       "version": "0.1.0",
       "dependencies": {
         "@expo-google-fonts/geist": "^0.4.2",
+        "@react-three/fiber": "^9",
         "@tanstack/react-query": "^5.90.0",
         "@vorinthex/shared": "workspace:*",
         "axios": "^1.18.1",
         "expo": "~57.0.4",
         "expo-constants": "~57.0.3",
         "expo-font": "~57.0.0",
+        "expo-gl": "~57.0.1",
         "expo-haptics": "~57.0.0",
         "expo-image": "~57.0.0",
         "expo-linking": "~57.0.2",
@@ -69,11 +71,13 @@
         "react-native-svg": "^15.15.5",
         "react-native-web": "~0.21.0",
         "react-native-worklets": "0.10.0",
+        "three": "^0.180.0",
         "zod": "^4.4.3",
         "zustand": "^5.0.0",
       },
       "devDependencies": {
         "@types/react": "~19.2.2",
+        "@types/three": "^0.180.0",
         "typescript": "~6.0.3",
       },
     },
@@ -1310,6 +1314,8 @@
     "expo-file-system": ["expo-file-system@57.0.0", "", { "peerDependencies": { "expo": "*", "react-native": "*" } }, "sha512-G+eytNuNGMiS7dbdj1j0nAYMowXnNr1vpO+jss6nQvBlRxshcGBFMtk8xfc67ynz0MUVkzod7WwKO7Vf1iOaJw=="],
 
     "expo-font": ["expo-font@57.0.0", "", { "dependencies": { "fontfaceobserver": "^2.1.0" }, "peerDependencies": { "expo": "*", "react": "*", "react-native": "*" } }, "sha512-zF+J7WrNFjqyAADwdvDgkFEoIQv9DqcjJ57HVstNEH7/7Tx1ThPEhKraodEQOwSjMYWirP+4BYsVbdb+/Zr4QQ=="],
+
+    "expo-gl": ["expo-gl@57.0.1", "", { "dependencies": { "invariant": "^2.2.4" }, "peerDependencies": { "expo": "*", "react": "*", "react-dom": "*", "react-native": "*", "react-native-reanimated": "*", "react-native-web": "*" }, "optionalPeers": ["react-dom", "react-native-reanimated", "react-native-web"] }, "sha512-0TAaFtpB5IwvDezoNKpqG5o25op8sqeX/JDRfLc6DeJoWVQJ608VyLBu7gpjs0YQDJKz6FDobNsXlekL38J3LQ=="],
 
     "expo-glass-effect": ["expo-glass-effect@57.0.0", "", { "peerDependencies": { "expo": "*", "react": "*", "react-native": "*" } }, "sha512-QadzKSKpjXOlkIEnkX7SqHwCgUJZLjhWUvg1AauaUgKVnz35Ror41juM4y+KNr9pFxnukSDUz8L+UvdZVCNu6Q=="],
 
