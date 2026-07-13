@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Vorinthex Core",
+    "name": "Vorinthex AI",
     "slug": "vorinthex-core",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/brand/vorinthex-mark.png",
     "scheme": "vorinthexcore",
@@ -10,10 +10,10 @@
     "backgroundColor": "#030507",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.vorinthex.core"
+      "bundleIdentifier": "app.vorinthex.com"
     },
     "android": {
-      "package": "com.vorinthex.core",
+      "package": "app.vorinthex.com",
       "adaptiveIcon": {
         "backgroundColor": "#030507",
         "foregroundImage": "./assets/brand/vorinthex-mark.png"

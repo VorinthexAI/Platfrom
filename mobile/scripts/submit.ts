@@ -1,21 +1,22 @@
 /**
- * Vorinthex Core — store submission automation.
+ * Vorinthex AI — store submission automation.
  *
- * Run from the repo root:  bun run submit  [apple|google|all|assets|validate]
+ * Run from the repo root:  bun run submit  [apple|google|all|validate]
  *
  * Automates everything the public store APIs allow:
  *  - App Store Connect: categories, name/subtitle/privacy URL, version
- *    metadata per locale, screenshot upload, and the exact territory list
- *    (EU + EFTA Europe + GB + US/CA/AU only).
+ *    metadata per locale, screenshot upload from the drop-in folders in
+ *    assets/, and the exact territory list (EU + EFTA Europe + GB +
+ *    US/CA/AU only).
  *  - Google Play: contact details, listings per locale, icon/feature
- *    graphic/screenshots, optional .aab upload with a draft release, and
- *    a country-availability diff (Play has no write API for countries —
- *    the script prints the exact Console checklist instead).
- *  - Store assets: screenshots + feature graphic + icon generated from
- *    the real app via its web export.
+ *    graphic/screenshots from assets/, and a country-availability diff
+ *    (Play has no write API for countries — the script prints the exact
+ *    Console checklist instead).
  *
- * Binaries: you upload the .ipa yourself (Transporter/altool/eas submit);
- * the .aab is uploaded automatically when mobile/artifacts/*.aab exists.
+ * Binaries (.ipa / .aab) are uploaded by hand in App Store Connect and
+ * Play Console — this script never touches them. Screenshots are NOT
+ * generated; drop finished images into mobile/scripts/assets (see the
+ * README there for exact sizes).
  */
 import { existsSync } from "node:fs";
 
@@ -31,9 +32,8 @@ import {
 } from "./lib/config";
 import { selectMenu } from "./lib/menu";
 import { PlayClient, imageFiles } from "./lib/play";
-import { generateStoreAssets } from "./lib/screenshots";
 
-type Target = "apple" | "google" | "all" | "assets" | "validate";
+type Target = "apple" | "google" | "all" | "validate";
 
 const manualSteps: string[] = [];
 
@@ -57,35 +57,30 @@ function validate(config: StoresConfig): boolean {
   console.log(`  countries    ${countries.length}: ${countries.join(" ")}`);
   console.log(`  apple terr.  ${appleTerritories(config).join(" ")}`);
 
-  const checks: Array<{ label: string; path: string; required: boolean }> = [
+  const assetChecks: Array<{ label: string; path: string }> = [
     ...Object.entries(config.apple.screenshots).map(([displayType, dir]) => ({
       label: `apple screenshots ${displayType}`,
       path: dir,
-      required: true,
     })),
-    { label: "play icon", path: config.google.images.icon, required: true },
-    { label: "play feature graphic", path: config.google.images.featureGraphic, required: true },
-    { label: "play phone screenshots", path: config.google.images.phoneScreenshots, required: true },
-    { label: "ipa (manual upload)", path: config.apple.artifacts.ipa, required: false },
-    { label: "aab (auto upload)", path: config.google.artifacts.aab, required: false },
+    { label: "play icon", path: config.google.images.icon },
+    { label: "play feature graphic", path: config.google.images.featureGraphic },
+    { label: "play phone screenshots", path: config.google.images.phoneScreenshots },
   ];
-  for (const check of checks) {
+  for (const check of assetChecks) {
     const path = resolveScriptPath(check.path);
     const isDir = !/\.[a-z0-9]+$/i.test(path);
     const exists = existsSync(path) && (!isDir || imageFiles(path).length > 0);
-    const mark = exists ? "ok " : check.required ? "MISSING" : "absent (optional)";
-    if (!exists && check.required) ok = false;
-    console.log(`  ${mark.padEnd(18)} ${check.label} -> ${check.path}`);
+    const mark = exists ? "ok" : "empty (drop files in, that step is skipped)";
+    console.log(`  ${mark.padEnd(40)} ${check.label} -> ${check.path}`);
   }
 
   const playShots = imageFiles(resolveScriptPath(config.google.images.phoneScreenshots));
   if (playShots.length > 0 && (playShots.length < 2 || playShots.length > 8)) {
-    console.log(`  WARN Play requires 2-8 phone screenshots (found ${playShots.length}).`);
+    console.log(`  FAIL Play requires 2-8 phone screenshots (found ${playShots.length}).`);
     ok = false;
   }
   console.log(`  creds apple  ${appleCredentials() ? "found" : "missing (ASC_ISSUER_ID / ASC_KEY_ID / ASC_PRIVATE_KEY[_PATH])"}`);
   console.log(`  creds google ${googleCredentials() ? "found" : "missing (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON|_PATH)"}`);
-  if (!ok) console.log('\n  Run "bun run submit assets" to generate missing screenshots/graphics.');
   return ok;
 }
 
@@ -133,10 +128,15 @@ async function submitApple(config: StoresConfig): Promise<void> {
   const localizationIds = await asc.updateVersionLocalizations(version.id, config.apple.version.localizations);
   console.log(`  ${[...localizationIds.keys()].join(", ")} updated`);
 
-  step("Screenshots");
+  step("Screenshots (from the assets drop-in folders)");
   for (const [locale, localizationId] of localizationIds) {
     for (const [displayType, dir] of Object.entries(config.apple.screenshots)) {
-      const count = await asc.replaceScreenshots(localizationId, displayType, resolveScriptPath(dir));
+      const resolved = resolveScriptPath(dir);
+      if (imageFiles(resolved).length === 0) {
+        console.log(`  ${locale} ${displayType}: folder empty, skipped`);
+        continue;
+      }
+      const count = await asc.replaceScreenshots(localizationId, displayType, resolved);
       console.log(`  ${locale} ${displayType}: ${count} uploaded`);
     }
   }
@@ -147,13 +147,10 @@ async function submitApple(config: StoresConfig): Promise<void> {
   const current = await asc.getTerritoryAvailability(app.id);
   console.log(`  declared ${territories.length}, store now reports ${current.length}: ${current.join(" ")}`);
 
-  const ipa = resolveScriptPath(config.apple.artifacts.ipa);
   manualSteps.push(
-    existsSync(ipa)
-      ? `Apple: upload the build — the REST API cannot ingest .ipa files. From macOS: Transporter.app, or "xcrun altool --upload-app -f ${ipa} -t ios --apiKey ${creds.keyId} --apiIssuer ${creds.issuerId}", or "eas submit -p ios".`
-      : `Apple: build the .ipa, drop it at ${config.apple.artifacts.ipa}, then upload it with Transporter / altool / "eas submit -p ios".`,
-    "Apple: complete the App Privacy questionnaire (privacy nutrition labels) in App Store Connect — not exposed by the public API.",
-    "Apple: confirm the age-rating questionnaire and Free pricing, attach the uploaded build to the version, then submit for review.",
+    "Apple: upload the .ipa build yourself in App Store Connect (Transporter or Xcode Organizer), then attach it to the version.",
+    "Apple: complete the App Privacy questionnaire (privacy nutrition labels) — not exposed by the public API.",
+    "Apple: confirm the age-rating questionnaire and Free pricing, then submit for review.",
   );
 }
 
@@ -190,7 +187,7 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
     console.log(`  listing ${language} updated`);
   }
 
-  step("Images");
+  step("Images (from the assets drop-in folders)");
   const language = config.google.listing.defaultLanguage;
   const imageSets: Array<[string, string[]]> = [
     ["icon", [resolveScriptPath(config.google.images.icon)].filter((f) => existsSync(f))],
@@ -212,35 +209,15 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
     console.log(`  ${type}: ${count} uploaded`);
   }
 
-  step("Binary (.aab)");
-  const aab = resolveScriptPath(config.google.artifacts.aab);
-  if (existsSync(aab)) {
-    const versionCode = await play.uploadBundle(pkg, editId, aab);
-    console.log(`  uploaded bundle versionCode ${versionCode}`);
-    await play.setTrackRelease(pkg, editId, config.google.release.track, {
-      status: config.google.release.status,
-      versionCodes: [versionCode],
-      releaseNotes: Object.entries(config.google.release.releaseNotes).map(([lang, text]) => ({
-        language: lang,
-        text,
-      })),
-    });
-    console.log(`  ${config.google.release.status} release staged on track "${config.google.release.track}"`);
-  } else {
-    console.log(`  ${config.google.artifacts.aab} not found — skipping (upload later and re-run).`);
-    manualSteps.push(
-      `Google: build the .aab, drop it at ${config.google.artifacts.aab} and re-run "bun run submit google" to upload it and stage the release.`,
-    );
-  }
-
   step("Country availability check (Play has no write API for this)");
   const desired = allCountries(config);
+  const track = config.google.availabilityCheckTrack;
   try {
-    const availability = await play.getCountryAvailability(pkg, editId, config.google.release.track);
+    const availability = await play.getCountryAvailability(pkg, editId, track);
     const current = (availability.countries ?? []).map((c) => c.countryCode).sort();
     const missing = desired.filter((c) => !current.includes(c));
     const extra = current.filter((c) => !desired.includes(c));
-    console.log(`  current: ${current.length ? current.join(" ") : "(none / defaults)"}`);
+    console.log(`  current (${track}): ${current.length ? current.join(" ") : "(none / defaults)"}`);
     console.log(`  restOfWorld: ${availability.restOfWorld ?? false}, syncWithProduction: ${availability.syncWithProduction ?? false}`);
     if (missing.length || extra.length || availability.restOfWorld) {
       manualSteps.push(
@@ -266,6 +243,7 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
   console.log("  edit validated and committed");
 
   manualSteps.push(
+    "Google: upload the .aab build yourself in Play Console (Release > Production/Testing > Create release).",
     "Google: complete the one-time Console questionnaires the API does not cover — content rating (IARC), data safety form, target audience, and app access.",
   );
 }
@@ -275,29 +253,21 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
 /* ------------------------------------------------------------------ */
 
 async function main(): Promise<void> {
-  console.log("Vorinthex Core — store submission");
+  console.log("Vorinthex AI — store submission");
   const config = loadStores();
 
   const argTarget = process.argv[2] as Target | undefined;
   const target =
-    argTarget && ["apple", "google", "all", "assets", "validate"].includes(argTarget)
+    argTarget && ["apple", "google", "all", "validate"].includes(argTarget)
       ? argTarget
       : await selectMenu<Target>("Submit to which store?", [
           { label: "Apple", value: "apple", hint: "App Store Connect: metadata, screenshots, territories" },
-          { label: "Google", value: "google", hint: "Play Console: listing, images, aab, country check" },
+          { label: "Google", value: "google", hint: "Play Console: listing, images, country check" },
           { label: "All", value: "all", hint: "Apple then Google" },
-          { label: "Generate store assets", value: "assets", hint: "screenshots + feature graphic + icon from the app" },
           { label: "Validate only", value: "validate", hint: "dry-run: config, files, credentials" },
         ]);
   if (!target) {
     console.log("Cancelled.");
-    return;
-  }
-
-  if (target === "assets") {
-    heading("Generate store assets");
-    await generateStoreAssets(config);
-    validate(config);
     return;
   }
 
@@ -307,7 +277,7 @@ async function main(): Promise<void> {
     return;
   }
   if (!valid) {
-    throw new Error('stores.json validation failed — fix the MISSING entries above (try "bun run submit assets").');
+    throw new Error("stores.json validation failed — fix the FAIL entries above.");
   }
 
   if (target === "apple" || target === "all") await submitApple(config);

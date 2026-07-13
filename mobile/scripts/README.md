@@ -5,11 +5,10 @@ submission as their public APIs allow, driven by one data file
 (`stores.json`) and one command:
 
 ```bash
-bun run submit            # arrow-key menu: Apple / Google / All / assets / validate
+bun run submit            # arrow-key menu: Apple / Google / All / Validate
 bun run submit apple      # or skip the menu
 bun run submit google
 bun run submit all
-bun run submit assets     # generate screenshots + feature graphic + icon
 bun run submit validate   # dry-run: config, files, credentials
 ```
 
@@ -17,21 +16,31 @@ Zero extra dependencies: plain Bun + `fetch` + `node:crypto` (ES256 JWT
 for Apple, RS256 service-account JWT for Google), and the same arrow-key
 menu pattern as `backend/scripts`.
 
+App identity: **Vorinthex AI**, bundle id / package name
+**app.vorinthex.com** (also set in `mobile/app/app.json`).
+
 ## What is automated vs. manual
 
 | Step | Apple (App Store Connect API) | Google (Play Developer API v3) |
 |---|---|---|
 | Listing metadata per locale | ✅ `appInfoLocalizations` + `appStoreVersionLocalizations` | ✅ `edits.listings` |
 | Categories / contact details | ✅ `appInfos` categories | ✅ `edits.details` |
-| Screenshots | ✅ reserve → chunked upload → md5 commit (`appScreenshots`) | ✅ `edits.images` (delete-all + upload) |
-| Icon + feature graphic | n/a (comes from the binary) | ✅ `edits.images` |
+| Screenshots / icon / feature graphic | ✅ uploaded from `assets/` (reserve → chunked upload → md5 commit) | ✅ uploaded from `assets/` (`edits.images`, delete-all + upload) |
 | Country availability | ✅ `POST /v2/appAvailabilities` with an explicit territory list | ❌ **read-only** (`edits.countryavailability` is GET-only) — the script diffs current vs desired and prints the exact Console checklist |
-| Binary upload | ❌ no REST endpoint for .ipa — use Transporter (macOS), `xcrun altool`, or `eas submit -p ios` | ✅ `edits.bundles` uploads the .aab and stages a draft release when `mobile/artifacts/vorinthex-core.aab` exists |
+| Binary upload (.ipa / .aab) | ❌ manual — you upload in App Store Connect (Transporter/Xcode) | ❌ manual — you upload in Play Console (Create release) |
 | App record creation | ❌ one-time manual (My Apps → +) | ❌ one-time manual (Create app) |
-| Privacy labels / data safety / content rating | ❌ questionnaires, Console/ASC only | ❌ questionnaires, Console only |
+| Privacy labels / data safety / content rating | ❌ questionnaires, ASC only | ❌ questionnaires, Console only |
 
-Everything in an edit on the Google side is committed atomically
-(`edits.validate` then `edits.commit`).
+Everything on the Google side happens inside one edit that is committed
+atomically (`edits.validate` then `edits.commit`).
+
+## Screenshots and graphics — drop-in folders
+
+Nothing is generated. Drop finished images into `assets/` and re-run;
+empty folders are simply skipped so you can push metadata first and
+images later. See `assets/README.md` for the exact size requirements
+(App Store 1290×2796 iPhone shots; Play 2–8 phone shots, 512px icon,
+1024×500 feature graphic).
 
 ## Country availability policy
 
@@ -62,25 +71,3 @@ encrypted `.github/environments.json` under `secrets.prod.mobile` (then
   `GOOGLE_PLAY_SERVICE_ACCOUNT_PATH`. Create a Google Cloud service
   account, enable the Google Play Android Developer API, then invite the
   service-account email in Play Console → Users and permissions.
-
-## Store assets
-
-`bun run submit assets` builds the Expo web export, serves it, and
-captures every route in `stores.json > screenshotGenerator.routes` with
-headless Chrome at exact store sizes:
-
-- Apple iPhone 6.7" — 1290×2796 (the only required iPhone size; Apple
-  scales it down for smaller devices; iPad shots aren't required because
-  `supportsTablet` is false)
-- Play phone — 1080×2340 JPEG (Play: 2–8 shots, 320–3840px, no alpha)
-- Play feature graphic 1024×500 (JPEG) and 512×512 icon (PNG), rendered
-  from the real brand mark
-
-Output lands in `assets/` (committed) so listings are reviewable in git.
-
-## Binaries
-
-Drop builds into `mobile/artifacts/` as `vorinthex-core.ipa` /
-`vorinthex-core.aab` (gitignored). The .aab is uploaded automatically on
-the next `bun run submit google`; the .ipa must go through
-Transporter/altool/EAS — the script prints the exact command.
