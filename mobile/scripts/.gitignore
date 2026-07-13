@@ -1,0 +1,6 @@
+# Never commit store credentials or key material next to the scripts —
+# they live git-crypt encrypted in .github/environments.json
+# (secrets.prod.mobile).
+*.p8
+*service-account*.json
+.chrome-profile/
