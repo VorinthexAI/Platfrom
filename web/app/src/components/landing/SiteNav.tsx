@@ -92,7 +92,7 @@ export function SiteNav() {
                 }}
                 className="min-h-0 px-5 py-2.5 text-[0.65rem] whitespace-nowrap"
               >
-                Jump Galaxy
+                Your galaxy
               </Button>
               <Button
                 variant="secondary"
