@@ -74,3 +74,22 @@ override.
   a string). Create a Google Cloud service account, enable the Google
   Play Android Developer API, then invite the service-account email in
   Play Console → Users and permissions.
+
+### Keyless Google auth (org policy blocks key creation)
+
+If your organization enforces `iam.disableServiceAccountKeyCreation`
+(the "Service account key creation is disabled" dialog), skip the JSON
+key entirely: grant your own user the **Service Account Token Creator**
+role on the service account, then mint a 1-hour token and run the
+script with it:
+
+```bash
+gcloud auth login
+set GOOGLE_PLAY_ACCESS_TOKEN=$(gcloud auth print-access-token --impersonate-service-account=SA_EMAIL)
+bun run submit google
+```
+
+`GOOGLE_PLAY_ACCESS_TOKEN` is checked whenever the service-account JSON
+is absent. (Alternatively, an Organization Policy Administrator can
+override the constraint on the project, create the key, and re-enable
+it — existing keys keep working.)

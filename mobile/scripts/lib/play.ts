@@ -31,6 +31,10 @@ export class PlayClient {
   constructor(private readonly creds: GoogleCredentials) {}
 
   private async token(): Promise<string> {
+    // Keyless mode: a pre-minted OAuth token (e.g. from gcloud service
+    // account impersonation) is used as-is.
+    if (this.creds.kind === "accessToken") return this.creds.accessToken;
+
     const now = Math.floor(Date.now() / 1000);
     if (this.tokenValue && now < this.tokenExpiresAt - 60) return this.tokenValue;
 

@@ -80,7 +80,8 @@ function validate(config: StoresConfig): boolean {
     ok = false;
   }
   console.log(`  creds apple  ${appleCredentials() ? "found" : "missing — fill secrets.prod.mobile in .github/environments.json (ASC_ISSUER_ID / ASC_KEY_ID / ASC_PRIVATE_KEY)"}`);
-  console.log(`  creds google ${googleCredentials() ? "found" : "missing — fill secrets.prod.mobile in .github/environments.json (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)"}`);
+  const google = googleCredentials();
+  console.log(`  creds google ${google ? `found (${google.kind})` : "missing — fill GOOGLE_PLAY_SERVICE_ACCOUNT_JSON in .github/environments.json, or set GOOGLE_PLAY_ACCESS_TOKEN (keyless, see README)"}`);
   return ok;
 }
 
@@ -165,8 +166,9 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
     throw new Error(
       "Google credentials missing. Fill in GOOGLE_PLAY_SERVICE_ACCOUNT_JSON (the service " +
         "account JSON as a string) under secrets.prod.mobile in the git-crypt encrypted " +
-        ".github/environments.json (env vars work as a local override). Create a service " +
-        "account in Google Cloud, then invite its email in Play Console > Users and " +
+        ".github/environments.json — or, if your org blocks key creation, set " +
+        "GOOGLE_PLAY_ACCESS_TOKEN via gcloud impersonation (see mobile/scripts/README.md). " +
+        "Either way the service-account email must be invited in Play Console > Users and " +
         "permissions with app access.",
     );
   }
