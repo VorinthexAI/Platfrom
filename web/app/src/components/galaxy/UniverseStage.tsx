@@ -34,6 +34,7 @@ interface UniverseStageProps {
 const STEP_COOLDOWN_MS = 900;
 const WHEEL_THRESHOLD = 90;
 const SWIPE_THRESHOLD = 60;
+const ROTATE_START_THRESHOLD = 10;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -123,6 +124,7 @@ export function UniverseStage({
     let wheelAccumulator = 0;
     let touchStartY: number | null = null;
     let touchConsumed = false;
+    let sunHoldTimer: number | null = null;
 
     // Scroll/swipe stepping moves the camera without rewriting the
     // address bar — only landing back on the overview (step 0) does.
@@ -191,6 +193,62 @@ export function UniverseStage({
     /** Gestures inside scrollable drawer/cave content keep native behavior. */
     const insideScrollSafe = (target: EventTarget | null) =>
       target instanceof Element && target.closest("[data-scroll-safe]");
+
+    const isInteractiveTarget = (target: EventTarget | null) =>
+      target instanceof Element &&
+      Boolean(target.closest("a,button,input,textarea,select,[role='button']"));
+
+    const isSunPressTarget = (event: MouseEvent | Touch) => {
+      const state = useGalaxyStore.getState();
+      if (state.mode !== "system" || state.step !== 0) return false;
+      const sunX = window.innerWidth * 0.5;
+      const sunY = window.innerHeight * 0.53;
+      const radius = Math.max(54, Math.min(112, window.innerWidth * 0.12));
+      return Math.hypot(event.clientX - sunX, event.clientY - sunY) <= radius;
+    };
+
+    const clearStageSunHold = () => {
+      galaxyMotion.holdingSun = false;
+      galaxyMotion.sunHold = null;
+      galaxyMotion.sunHoldId += 1;
+      galaxyMotion.cancelSunHold = null;
+      if (sunHoldTimer === null) return;
+      window.clearTimeout(sunHoldTimer);
+      sunHoldTimer = null;
+    };
+
+    const beginStageSunHold = (
+      pointerId: number,
+      pointerType: string,
+      clientX: number,
+      clientY: number,
+    ) => {
+      if (galaxyMotion.cancelSunHold && galaxyMotion.cancelSunHold !== clearStageSunHold) {
+        galaxyMotion.cancelSunHold();
+      }
+      clearStageSunHold();
+      const holdId = galaxyMotion.sunHoldId + 1;
+      galaxyMotion.sunHoldId = holdId;
+      galaxyMotion.holdingSun = true;
+      galaxyMotion.sunHold = {
+        id: holdId,
+        pointerId,
+        pointerType,
+        startX: clientX,
+        startY: clientY,
+        startedAt: performance.now(),
+      };
+      galaxyMotion.cancelSunHold = clearStageSunHold;
+      sunHoldTimer = window.setTimeout(() => {
+        if (!galaxyMotion.holdingSun || galaxyMotion.sunHoldId !== holdId) return;
+        sunHoldTimer = null;
+        galaxyMotion.holdingSun = false;
+        galaxyMotion.sunHold = null;
+        galaxyMotion.sunHoldId += 1;
+        galaxyMotion.cancelSunHold = null;
+        useGalaxyStore.getState().startJump("sun");
+      }, 3000);
+    };
 
     const onWheel = (event: WheelEvent) => {
       if (insideScrollSafe(event.target)) return;
@@ -263,19 +321,26 @@ export function UniverseStage({
       touchLastAt = performance.now();
       touchAxis = null;
       touchConsumed = false;
+      const touch = event.touches[0];
+      if (touch && !isInteractiveTarget(event.target) && isSunPressTarget(touch)) {
+        beginStageSunHold(touch.identifier, "touch", touch.clientX, touch.clientY);
+      }
     };
 
     const onTouchMove = (event: TouchEvent) => {
       if (touchStartY === null || touchStartX === null) return;
       if (insideScrollSafe(event.target)) return;
-      // A long-tap founders-gate hold on the sun owns this gesture — don't
-      // let natural finger drift during the 3s hold get reinterpreted as a
-      // rotate/step swipe (see the matching guard in onPointerDown above).
-      if (galaxyMotion.holdingSun) return;
       const x = event.touches[0]?.clientX ?? touchStartX;
       const y = event.touches[0]?.clientY ?? touchStartY;
       const totalX = x - touchStartX;
       const totalY = touchStartY - y;
+      // A stationary sun hold opens the founders gate; intentional
+      // movement cancels that hold and becomes the normal swipe gesture.
+      if (galaxyMotion.holdingSun) {
+        const moved = Math.hypot(totalX, -totalY);
+        if (moved < ROTATE_START_THRESHOLD) return;
+        galaxyMotion.cancelSunHold?.();
+      }
 
       // First decisive movement locks the gesture's axis: sideways
       // rotates the camera, vertical steps/feeds — never both, and a
@@ -309,6 +374,7 @@ export function UniverseStage({
     };
 
     const onTouchEnd = () => {
+      if (galaxyMotion.holdingSun) galaxyMotion.cancelSunHold?.();
       touchStartY = null;
       touchStartX = null;
       touchAxis = null;
@@ -319,26 +385,60 @@ export function UniverseStage({
     // Mouse: grab the cosmos and drag it around. The camera follows the
     // pointer's own speed — a fast flick keeps spinning at flick speed.
     let mouseDragging = false;
+    let mousePending = false;
     let mouseLastX = 0;
+    let mouseStartX = 0;
+    let mouseStartY = 0;
     let mouseLastAt = 0;
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType !== "mouse" || event.button !== 0) return;
+      if (!isInteractiveTarget(event.target) && isSunPressTarget(event)) {
+        beginStageSunHold(event.pointerId, "mouse", event.clientX, event.clientY);
+        return;
+      }
       // Only bare canvas starts a drag — buttons and cards keep clicking.
       if (!(event.target instanceof HTMLCanvasElement)) return;
       if (!canRotate()) return;
-      // The sun's founders-gate long-press claims the gesture first — the
-      // whole scene is one canvas element, so without this a press that
-      // lands on the sun would also start a camera drag.
-      if (galaxyMotion.holdingSun) return;
-      mouseDragging = true;
+      mousePending = true;
+      mouseStartX = event.clientX;
+      mouseStartY = event.clientY;
       mouseLastX = event.clientX;
       mouseLastAt = performance.now();
-      galaxyMotion.dragging = true;
-      document.body.style.cursor = "grabbing";
     };
 
     const onPointerMove = (event: PointerEvent) => {
+      const sunHold = galaxyMotion.sunHold;
+      if (
+        !mouseDragging &&
+        sunHold?.pointerType === "mouse"
+      ) {
+        const moved = Math.hypot(
+          event.clientX - sunHold.startX,
+          event.clientY - sunHold.startY,
+        );
+        if (moved < ROTATE_START_THRESHOLD) return;
+        galaxyMotion.cancelSunHold?.();
+        if (!canRotate()) return;
+        mousePending = false;
+        mouseDragging = true;
+        mouseLastX = sunHold.startX;
+        mouseLastAt = sunHold.startedAt;
+        galaxyMotion.dragging = true;
+        document.body.style.cursor = "grabbing";
+      }
+      if (mousePending && !mouseDragging) {
+        const moved = Math.hypot(
+          event.clientX - mouseStartX,
+          event.clientY - mouseStartY,
+        );
+        if (moved < ROTATE_START_THRESHOLD) return;
+        mousePending = false;
+        mouseDragging = true;
+        mouseLastX = mouseStartX;
+        galaxyMotion.dragging = true;
+        document.body.style.cursor = "grabbing";
+      }
       if (!mouseDragging) return;
       const now = performance.now();
       applyRotation(event.clientX - mouseLastX, now - mouseLastAt);
@@ -348,7 +448,9 @@ export function UniverseStage({
     };
 
     const onPointerUp = () => {
-      if (!mouseDragging) return;
+      if (galaxyMotion.holdingSun) galaxyMotion.cancelSunHold?.();
+      if (!mouseDragging && !mousePending) return;
+      mousePending = false;
       mouseDragging = false;
       galaxyMotion.dragging = false;
       document.body.style.cursor = canRotate() ? "grab" : "";
@@ -429,6 +531,7 @@ export function UniverseStage({
       stage.removeEventListener("pointermove", onHoverMove);
       stage.removeEventListener("pointerleave", onHoverLeave);
       galaxyMotion.dragging = false;
+      clearStageSunHold();
       document.body.style.cursor = "";
     };
   }, [setStep, stepBy, markExplored]);

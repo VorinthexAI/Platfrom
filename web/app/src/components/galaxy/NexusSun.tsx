@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
+import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import { trackCtaClick } from "@/lib/analytics";
 import { galaxyMotion, useGalaxyStore } from "@/lib/galaxy-store";
@@ -176,6 +177,9 @@ export function NexusSun({ paused }: { paused: boolean }) {
 
   function clearHoldTimer() {
     galaxyMotion.holdingSun = false;
+    galaxyMotion.sunHold = null;
+    galaxyMotion.sunHoldId += 1;
+    galaxyMotion.cancelSunHold = null;
     if (holdTimerRef.current === null) return;
     window.clearTimeout(holdTimerRef.current);
     holdTimerRef.current = null;
@@ -186,17 +190,35 @@ export function NexusSun({ paused }: { paused: boolean }) {
   // drag-to-rotate across the whole stage.
   useEffect(() => clearHoldTimer, []);
 
-  function beginFoundersHold() {
+  function beginFoundersHold(event: ThreeEvent<PointerEvent>) {
+    if (galaxyMotion.cancelSunHold && galaxyMotion.cancelSunHold !== clearHoldTimer) {
+      galaxyMotion.cancelSunHold();
+    }
     clearHoldTimer();
+    const holdId = galaxyMotion.sunHoldId + 1;
+    galaxyMotion.sunHoldId = holdId;
     // Claim the gesture before UniverseStage's own pointerdown/touchstart
     // listeners on the canvas see it — otherwise the resting overview state
     // (canRotate() === true) turns this same press into a camera-drag,
     // which reorients the ray under a still cursor and makes R3F think the
     // pointer left the sun mesh, cancelling the hold well before 3s.
     galaxyMotion.holdingSun = true;
+    galaxyMotion.sunHold = {
+      id: holdId,
+      pointerId: event.pointerId,
+      pointerType: event.pointerType,
+      startX: event.clientX,
+      startY: event.clientY,
+      startedAt: performance.now(),
+    };
+    galaxyMotion.cancelSunHold = clearHoldTimer;
     holdTimerRef.current = window.setTimeout(() => {
+      if (!galaxyMotion.holdingSun || galaxyMotion.sunHoldId !== holdId) return;
       holdTimerRef.current = null;
       galaxyMotion.holdingSun = false;
+      galaxyMotion.sunHold = null;
+      galaxyMotion.sunHoldId += 1;
+      galaxyMotion.cancelSunHold = null;
       trackCtaClick("founders_gate_open", { placement: "sun_long_press" });
       useGalaxyStore.getState().startJump("sun");
     }, 3000);
@@ -212,7 +234,7 @@ export function NexusSun({ paused }: { paused: boolean }) {
       <mesh
         onPointerDown={(event) => {
           event.stopPropagation();
-          beginFoundersHold();
+          beginFoundersHold(event);
         }}
         onPointerUp={clearHoldTimer}
         onPointerLeave={clearHoldTimer}
