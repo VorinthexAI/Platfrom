@@ -9,6 +9,7 @@ import {
   getOrchestratorsForCommand,
 } from "@/lib/galaxy/registry-helpers";
 import {
+  ORBIT_STEPS,
   stepForEntity,
   stepIndexForFocus,
   syncEntityUrl,
@@ -126,11 +127,6 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
 
   const paused = reducedMotion || hidden;
 
-  // Product/capability/orchestrator pages stay real, crawlable routes —
-  // direct links and search results still land exactly there — but
-  // camera movement while exploring the galaxy no longer rewrites the
-  // address bar to match. Only leaving all the way back to the overview
-  // still syncs the URL.
   function selectProduct(data: ProductPlanetData) {
     const state = useGalaxyStore.getState();
     if (state.mode !== "system") return;
@@ -139,13 +135,17 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
       setStep(0);
       syncEntityUrl("/");
     } else {
-      setStep(stepIndexForFocus(data.key));
+      const nextStep = stepIndexForFocus(data.key);
+      setStep(nextStep);
+      syncEntityUrl(ORBIT_STEPS[nextStep]?.path ?? "/");
     }
   }
 
   function selectChild(entity: GalaxyEntity) {
     if (useGalaxyStore.getState().mode !== "system") return;
-    setStep(stepForEntity(entity));
+    const nextStep = stepForEntity(entity);
+    setStep(nextStep);
+    syncEntityUrl(ORBIT_STEPS[nextStep]?.path ?? "/");
   }
 
   return (

@@ -99,6 +99,7 @@ export function SiteNav() {
                 onClick={() => {
                   trackCtaClick("hunt_open", { placement: "nav" });
                   enterCave("hunt");
+                  syncEntityUrl("/hunt");
                 }}
                 className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
               >
@@ -132,6 +133,7 @@ export function SiteNav() {
                 onClick={() => {
                   trackCtaClick("hunt_open", { placement: "nav" });
                   enterCave("hunt");
+                  syncEntityUrl("/hunt");
                 }}
                 className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
               >
