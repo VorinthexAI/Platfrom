@@ -37,10 +37,12 @@ export const ABOUT_COPY: VaultCopy = {
   title: "About",
   eyebrow: "Origin Vault",
   paragraphs: [
-    "Vorinthex is an AI-native software company building the next generation of productivity tools for the AI era.",
-    "Our mission is simple: make AI and autonomous agents accessible, practical, and useful for everyone.",
-    "We believe AI shouldn't be fragmented across dozens of disconnected apps. Instead, people should have one intelligent platform where AI can think, collaborate, and help accomplish real work.",
-    "Today we're building Core, with Command, Studio, and Launch following as part of the long-term vision.",
+    "Vorinthex is an AI-native software company building a unified AI platform for consumers, founders, creators, and businesses.",
+    "Our mission is to make AI practical, accessible, and deeply integrated into everyday work by replacing fragmented AI tools with one intelligent ecosystem.",
+    "Today we are building Core, a personal AI Brain that learns, remembers, and grows with each user. Over time, Core will expand through AI Capabilities for memory, communication, productivity, creativity, discovery, and personal growth.",
+    "Alongside Core, we are developing Command, an AI executive team with specialized business orchestrators; Studio, a unified workspace for chat, image, video, music, code, documents, and research; and Launch, a platform for building, deploying, and managing AI agents and automations.",
+    "Vorinthex is designed as a global AI-native platform, built on modern cloud infrastructure and connected to leading foundation models so users can move from idea to action without stitching together disconnected tools.",
+    "We are currently in active development and onboarding early users through our waitlist.",
   ],
   footnote: "Questions? Reach us at contact@vorinthex.com.",
 };

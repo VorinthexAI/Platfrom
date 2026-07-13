@@ -84,7 +84,7 @@ ${orchestrators
 ## Optional
 
 - [Pricing](${absoluteUrl("/pricing")}): Spark plans, on-demand usage, and one-time top-up packs.
-- [About](${absoluteUrl("/about")}): Vorinthex is an AI-native software company building the operating system for AI-powered work.
+- [About](${absoluteUrl("/about")}): Vorinthex is an AI-native software company building a unified AI platform for consumers, founders, creators, and businesses.
 - [Contact](${absoluteUrl("/contact")}): reach the team at contact@vorinthex.com.
 - [The Hunt](${absoluteUrl("/hunt")}): the live leaderboard of collectors ranked by Intelligence Fragments.
 - [llms-full.txt](${absoluteUrl("/llms-full.txt")}): the complete entity reference with per-page URLs and statuses.

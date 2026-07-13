@@ -5,7 +5,7 @@ import { ABOUT_COPY } from "@/lib/legal-copy";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "Vorinthex is an AI-native software company building the operating system for AI-powered work.",
+    "Vorinthex is an AI-native software company building a unified AI platform for consumers, founders, creators, and businesses.",
   alternates: { canonical: "/about" },
 };
 
