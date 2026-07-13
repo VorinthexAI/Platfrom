@@ -133,7 +133,9 @@ export const ALPHA2_TO_APPLE_TERRITORY: Record<string, string> = {
 /* ------------------------------------------------------------------ */
 
 export type AppleCredentials = { issuerId: string; keyId: string; privateKey: string };
-export type GoogleCredentials = { clientEmail: string; privateKey: string };
+export type GoogleCredentials =
+  | { kind: "serviceAccountKey"; clientEmail: string; privateKey: string }
+  | { kind: "accessToken"; accessToken: string };
 
 type EnvSection = Record<string, string>;
 
@@ -182,12 +184,24 @@ export function googleCredentials(): GoogleCredentials | null {
   const raw = maybeFile(
     secret("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON") ?? secret("GOOGLE_PLAY_SERVICE_ACCOUNT_PATH"),
   );
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as { client_email?: string; private_key?: string };
-    if (!parsed.client_email || !parsed.private_key) return null;
-    return { clientEmail: parsed.client_email, privateKey: parsed.private_key };
-  } catch {
-    return null;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as { client_email?: string; private_key?: string };
+      if (parsed.client_email && parsed.private_key) {
+        return {
+          kind: "serviceAccountKey",
+          clientEmail: parsed.client_email,
+          privateKey: parsed.private_key,
+        };
+      }
+    } catch {
+      // fall through to the keyless path
+    }
   }
+
+  // Keyless alternative for orgs enforcing iam.disableServiceAccountKeyCreation:
+  //   gcloud auth print-access-token --impersonate-service-account=SA_EMAIL
+  const accessToken = secret("GOOGLE_PLAY_ACCESS_TOKEN");
+  if (accessToken) return { kind: "accessToken", accessToken };
+  return null;
 }
