@@ -1,4 +1,4 @@
-import Svg, { Path, Rect } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 export type SignalIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
 export type SignalIconSize = "sm" | "md" | "lg";
 export type SignalIconProps = {
@@ -19,8 +19,13 @@ export function SignalIcon({ variant = "default", size = "md", strokeWidth = 1.5
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Rect x={3} y={5} width={18} height={14} rx={2} stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-      <Path d="m4 7 8 6 8-6" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path
+        d="M3 12h3.5l2.5-7 4 14 2.5-7H21"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </Svg>
   );
 }

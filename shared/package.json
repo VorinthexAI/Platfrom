@@ -9,6 +9,8 @@
     "./ui": "./packages/ui/index.ts",
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
+    "./ui/icons-mobile": "./packages/ui/icons-mobile.ts",
+    "./ui/tokens": "./packages/ui/tokens.ts",
     "./ui/theme.css": "./packages/ui/theme.css"
   },
   "dependencies": {

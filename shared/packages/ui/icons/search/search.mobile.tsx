@@ -1,4 +1,4 @@
-﻿import Svg, { Path } from "react-native-svg";
+﻿import Svg, { Circle, Path } from "react-native-svg";
 export type SearchIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
 export type SearchIconSize = "sm" | "md" | "lg";
 export type SearchIconProps = {
@@ -19,8 +19,8 @@ export function SearchIcon({ variant = "default", size = "md", strokeWidth = 1.4
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={strokeWidth} />
+      <Path d="m20.5 20.5-4.3-4.3" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
     </Svg>
   );
 }
