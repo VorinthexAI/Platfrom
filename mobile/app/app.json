@@ -9,9 +9,11 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#030507",
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vorinthex.core"
     },
     "android": {
+      "package": "com.vorinthex.core",
       "adaptiveIcon": {
         "backgroundColor": "#030507",
         "foregroundImage": "./assets/brand/vorinthex-mark.png"

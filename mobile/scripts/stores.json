@@ -1,0 +1,115 @@
+{
+  "app": {
+    "name": "Vorinthex Core",
+    "bundleId": "com.vorinthex.core",
+    "packageName": "com.vorinthex.core",
+    "primaryLocale": "en-US",
+    "versionString": "0.1.0",
+    "copyright": "© 2026 Vorinthex AI"
+  },
+  "availability": {
+    "note": "Whole EU + rest of EFTA Europe + Great Britain, then USA, Canada and Australia. No other countries. Codes are ISO 3166-1 alpha-2; the submit script maps them to Apple's alpha-3 territory ids.",
+    "regions": {
+      "europeanUnion": [
+        "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+        "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
+        "PL", "PT", "RO", "SK", "SI", "ES", "SE"
+      ],
+      "europeExtra": ["GB", "IS", "LI", "NO", "CH"],
+      "northAmerica": ["US", "CA"],
+      "oceania": ["AU"]
+    }
+  },
+  "apple": {
+    "appInfo": {
+      "primaryCategory": "PRODUCTIVITY",
+      "secondaryCategory": "LIFESTYLE",
+      "localizations": {
+        "en-US": {
+          "name": "Vorinthex Core",
+          "subtitle": "Your AI Brain",
+          "privacyPolicyUrl": "https://vorinthex.com/privacy"
+        }
+      }
+    },
+    "version": {
+      "releaseType": "MANUAL",
+      "localizations": {
+        "en-US": {
+          "description": "Vorinthex Core is your personal AI Brain — a central intelligence that learns, remembers, and evolves with you.\n\nExpand your Brain with five powerful Capabilities:\n\nARCHIVE — Store, organize and retrieve everything that matters. Notes, ideas and research connected into a living knowledge graph.\n\nGALLERY — Generate, collect and curate images and visual inspiration, organized into living albums.\n\nSIGNAL — Stay updated with real-time insights and important signals. Only what matters reaches you.\n\nCOMPASS — Navigate decisions with clarity and directional guidance. Your places, memories and journeys, mapped.\n\nASCEND — Evolve continuously and unlock your highest potential. Goals, habits and growth with a personal AI coach.\n\nBuilt in an obsidian-black, chrome-and-silver design. One Brain. Five Capabilities. The Nexus of Intelligence.",
+          "keywords": "ai,second brain,notes,memory,assistant,goals,habits,gallery,knowledge,inbox",
+          "promotionalText": "One Brain. Five Capabilities. Archive, Gallery, Signal, Compass and Ascend — a personal intelligence that grows with you.",
+          "whatsNew": "Initial release of Vorinthex Core.",
+          "supportUrl": "https://vorinthex.com/contact",
+          "marketingUrl": "https://vorinthex.com/core"
+        }
+      }
+    },
+    "screenshots": {
+      "APP_IPHONE_67": "assets/screenshots/apple/iphone-6-7"
+    },
+    "artifacts": {
+      "ipa": "../artifacts/vorinthex-core.ipa",
+      "note": "The .ipa cannot be uploaded through the App Store Connect REST API — upload it with Transporter (macOS), `xcrun altool`, or `eas submit`. The script prints exact instructions."
+    }
+  },
+  "google": {
+    "listing": {
+      "defaultLanguage": "en-US",
+      "contactEmail": "contact@vorinthex.com",
+      "contactWebsite": "https://vorinthex.com",
+      "localizations": {
+        "en-US": {
+          "title": "Vorinthex Core",
+          "shortDescription": "Your personal AI Brain — memory, images, signals, journeys and growth.",
+          "fullDescription": "Vorinthex Core is your personal AI Brain — a central intelligence that learns, remembers, and evolves with you.\n\nExpand your Brain with five powerful Capabilities:\n\nARCHIVE — Store, organize and retrieve everything that matters. Notes, ideas and research connected into a living knowledge graph.\n\nGALLERY — Generate, collect and curate images and visual inspiration, organized into living albums.\n\nSIGNAL — Stay updated with real-time insights and important signals. Only what matters reaches you.\n\nCOMPASS — Navigate decisions with clarity and directional guidance. Your places, memories and journeys, mapped.\n\nASCEND — Evolve continuously and unlock your highest potential. Goals, habits and growth with a personal AI coach.\n\nBuilt in an obsidian-black, chrome-and-silver design. One Brain. Five Capabilities. The Nexus of Intelligence."
+        }
+      }
+    },
+    "images": {
+      "icon": "assets/store/play-icon-512.png",
+      "featureGraphic": "assets/store/feature-graphic-1024x500.jpg",
+      "phoneScreenshots": "assets/screenshots/google/phone"
+    },
+    "release": {
+      "track": "internal",
+      "status": "draft",
+      "releaseNotes": {
+        "en-US": "Initial release of Vorinthex Core."
+      }
+    },
+    "artifacts": {
+      "aab": "../artifacts/vorinthex-core.aab",
+      "note": "Optional: when this .aab exists the script uploads it and attaches it to a draft release on the configured track. Otherwise the binary step is skipped and printed as a manual step."
+    }
+  },
+  "screenshotGenerator": {
+    "note": "Captures store screenshots from the app's web export with headless Chrome. Apple requires only the largest iPhone size (auto-scaled down); iPad shots are not required because supportsTablet is false. Play accepts 320-3840px JPEG, no alpha.",
+    "routes": [
+      { "path": "/onboarding", "name": "01-onboarding", "waitMs": 3500 },
+      { "path": "/building", "name": "02-building-your-brain", "waitMs": 3000 },
+      { "path": "/brain", "name": "03-your-brain", "waitMs": 5200 },
+      { "path": "/capability/archive", "name": "04-archive", "waitMs": 4200 },
+      { "path": "/capability/gallery", "name": "05-gallery", "waitMs": 4200 },
+      { "path": "/capability/ascend", "name": "06-ascend", "waitMs": 4500 }
+    ],
+    "targets": [
+      {
+        "store": "apple",
+        "label": "iPhone 6.7\"",
+        "dir": "assets/screenshots/apple/iphone-6-7",
+        "width": 1290,
+        "height": 2796,
+        "deviceScaleFactor": 3
+      },
+      {
+        "store": "google",
+        "label": "Play phone",
+        "dir": "assets/screenshots/google/phone",
+        "width": 1080,
+        "height": 2340,
+        "deviceScaleFactor": 3
+      }
+    ]
+  }
+}
