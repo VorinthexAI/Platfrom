@@ -34,6 +34,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f1210228-6157-44f3-89b8-b842bc4711b3"
+      }
+    },
+    "owner": "vorinthex-ai"
   }
 }
