@@ -99,8 +99,8 @@ jobs:
               web/app/*) web=true ;;
               backend/*) backend=true ;;
               shared/*) shared=true ;;
-              environments/scripts/cloudflare-cache-policy.ts) web=true ;;
-              environments/backend/db.seeds.secrets.json) backend=true ;;
+              .github/scripts/cloudflare-cache-policy.ts) web=true ;;
+              .github/environments.json) web=true; backend=true ;;
               .github/workflows/deploy.yml) web=true ;;
               deploy/early/*) web=true ;;
             esac
@@ -151,36 +151,6 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-  sync-configs:
-    name: Sync configs to GitHub
-    runs-on: ubuntu-latest
-    needs: changes
-    if: >-
-      (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
-      && (github.event_name == 'pull_request' || inputs.deploy)
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.COMMIT_SHA }}
-      - name: Unlock encrypted environments/**/.env.* files
-        env:
-          GIT_CRYPT_KEY_B64: ${{ secrets.GIT_CRYPT_KEY }}
-        run: |
-          if [ -z "$GIT_CRYPT_KEY_B64" ]; then
-            echo "::warning::GIT_CRYPT_KEY is not configured; continuing because production env values are provided by GitHub/AWS SSM secrets."
-            exit 0
-          fi
-          sudo apt-get update && sudo apt-get install -y git-crypt
-          echo "$GIT_CRYPT_KEY_B64" | base64 -d > /tmp/git-crypt.key
-          git-crypt unlock /tmp/git-crypt.key
-          rm -f /tmp/git-crypt.key
-      - name: Sync .github/.configs/vars.json to repo Variables
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          test -n "$GH_TOKEN" || { echo "::error::GH_PAT is not configured (needed to manage repo Variables/Secrets — the default GITHUB_TOKEN can't)."; exit 1; }
-          bash environments/scripts/sync-configs.sh vars
-
   verify-web:
     name: Verify web
     runs-on: ubuntu-latest
@@ -224,20 +194,28 @@ jobs:
   deploy-web:
     name: Build image and roll web ECS service
     runs-on: ubuntu-latest
-    needs: [changes, sync-configs, verify-web]
+    needs: [changes, verify-web]
     if: needs.changes.outputs.web == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     environment: production
-    env:
-      SITE_URL: ${{ fromJSON(secrets.CONFIG).vorinthex.url }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
 
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "SITE_URL=$(jq -r '.secrets.prod.vorinthex.url' .github/environments.json)"
+          } >> "$GITHUB_ENV"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -338,13 +316,19 @@ jobs:
         with:
           ref: ${{ env.COMMIT_SHA }}
 
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: echo "CLOUDFLARE_ZONE_ID=$(jq -r '.vars.CLOUDFLARE_ZONE_ID' .github/environments.json)" >> "$GITHUB_ENV"
+
       - uses: oven-sh/setup-bun@v2
 
       - name: Apply Cloudflare cache policy and purge
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-        run: bun environments/scripts/cloudflare-cache-policy.ts
+          CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
+        run: bun .github/scripts/cloudflare-cache-policy.ts
 
   # ---------------------------------------------------------------------------
   # BACKEND
@@ -352,18 +336,30 @@ jobs:
   backend-secrets:
     name: Sync backend secrets
     runs-on: ubuntu-latest
-    needs: [changes, sync-configs, verify-backend]
+    needs: [changes, verify-backend]
     if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
     environment: production
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "CONFIG_ENV<<EOF_CONFIG_ENV"
+            jq -c '.secrets.prod.env' .github/environments.json
+            echo "EOF_CONFIG_ENV"
+          } >> "$GITHUB_ENV"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Sync config.env into SSM
-        env:
-          CONFIG_ENV: ${{ toJSON(fromJSON(secrets.CONFIG).env) }}
         run: |
           test -n "$CONFIG_ENV" && [ "$CONFIG_ENV" != "null" ] || { echo "::error::config.env is not configured."; exit 1; }
           count=0
@@ -395,10 +391,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Login to Amazon ECR
         id: ecr-login
@@ -434,8 +435,8 @@ jobs:
   # dependency). It could not be safely moved to `aws ecs run-task` because the
   # runtime image only ships backend/src (not backend/scripts), so polar:sync and
   # seed:secrets are unavailable inside the api image, and seed:secrets also needs
-  # the git-crypt-encrypted environments/backend/db.seeds.secrets.json which is not
-  # baked into any image. Schema migrate + node seed + Polar sync therefore keep
+  # the git-crypt-encrypted .github/environments.json (secrets.prod.db_seeds) which
+  # is not baked into any image. Schema migrate + node seed + Polar sync therefore keep
   # running from a full checkout over the tunnel.
   backend-db:
     name: Deploy graph database
@@ -452,21 +453,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "GRAPH_DB_SSH_SG_ID=$(jq -r '.vars.GRAPH_DB_SSH_SG_ID' .github/environments.json)"
+          } >> "$GITHUB_ENV"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       # The graph-db SG has no standing SSH ingress (Wave 0 lockdown). Each
       # job opens port 22 for its own runner IP and closes it when done.
       - name: Open SSH ingress for this runner
         run: |
           set -euo pipefail
-          test -n "${{ vars.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID repo variable is not set (see .github/.configs/vars.json)."; exit 1; }
+          test -n "${{ env.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID is not set in .github/environments.json."; exit 1; }
           RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
           if ! out=$(aws ec2 authorize-security-group-ingress \
-            --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+            --group-id "${{ env.GRAPH_DB_SSH_SG_ID }}" \
             --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" 2>&1); then
             if echo "$out" | grep -q "InvalidPermission.Duplicate"; then
               echo "SSH ingress rule already exists for ${RUNNER_IP}/32."
@@ -546,7 +556,7 @@ jobs:
         run: |
           if [ -n "${RUNNER_IP:-}" ]; then
             aws ec2 revoke-security-group-ingress \
-              --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+              --group-id "${{ env.GRAPH_DB_SSH_SG_ID }}" \
               --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\"}]}]" \
               || echo "::warning::SSH ingress revoke failed; remove ${RUNNER_IP}/32 from the graph-db SG manually."
           fi
@@ -569,6 +579,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "GRAPH_DB_SSH_SG_ID=$(jq -r '.vars.GRAPH_DB_SSH_SG_ID' .github/environments.json)"
+          } >> "$GITHUB_ENV"
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         working-directory: .
@@ -576,16 +595,16 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH ingress for this runner
         run: |
           set -euo pipefail
-          test -n "${{ vars.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID repo variable is not set (see .github/.configs/vars.json)."; exit 1; }
+          test -n "${{ env.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID is not set in .github/environments.json."; exit 1; }
           RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
           if ! out=$(aws ec2 authorize-security-group-ingress \
-            --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+            --group-id "${{ env.GRAPH_DB_SSH_SG_ID }}" \
             --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" 2>&1); then
             if echo "$out" | grep -q "InvalidPermission.Duplicate"; then
               echo "SSH ingress rule already exists for ${RUNNER_IP}/32."
@@ -671,7 +690,7 @@ jobs:
         run: |
           if [ -n "${RUNNER_IP:-}" ]; then
             aws ec2 revoke-security-group-ingress \
-              --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+              --group-id "${{ env.GRAPH_DB_SSH_SG_ID }}" \
               --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\"}]}]" \
               || echo "::warning::SSH ingress revoke failed; remove ${RUNNER_IP}/32 from the graph-db SG manually."
           fi
@@ -687,37 +706,35 @@ jobs:
       EC2_USER: ${{ secrets.GRAPH_DB_EC2_USER }}
       EC2_SSH_KEY: ${{ secrets.GRAPH_DB_EC2_SSH_KEY }}
       EC2_SSH_KEY_B64: ${{ secrets.GRAPH_DB_EC2_SSH_KEY_B64 }}
-      GIT_CRYPT_KEY_B64: ${{ secrets.GIT_CRYPT_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
-      - name: Unlock encrypted environments/**/.env.* and db.seeds.secrets.json
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
         run: |
-          if [ -z "$GIT_CRYPT_KEY_B64" ]; then
-            echo "::warning::GIT_CRYPT_KEY is not configured; continuing and seed step will skip if db.seeds.secrets.json is absent."
-            exit 0
-          fi
-          sudo apt-get update && sudo apt-get install -y git-crypt
-          echo "$GIT_CRYPT_KEY_B64" | base64 -d > /tmp/git-crypt.key
-          git-crypt unlock /tmp/git-crypt.key
-          rm -f /tmp/git-crypt.key
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "GRAPH_DB_SSH_SG_ID=$(jq -r '.vars.GRAPH_DB_SSH_SG_ID' .github/environments.json)"
+          } >> "$GITHUB_ENV"
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         run: bun install --frozen-lockfile --linker=hoisted
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH ingress for this runner
         run: |
           set -euo pipefail
-          test -n "${{ vars.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID repo variable is not set (see .github/.configs/vars.json)."; exit 1; }
+          test -n "${{ env.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID is not set in .github/environments.json."; exit 1; }
           RUNNER_IP="$(curl -fsS https://checkip.amazonaws.com)"
           echo "RUNNER_IP=$RUNNER_IP" >> "$GITHUB_ENV"
           if ! out=$(aws ec2 authorize-security-group-ingress \
-            --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+            --group-id "${{ env.GRAPH_DB_SSH_SG_ID }}" \
             --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\",\"Description\":\"github-actions run ${GITHUB_RUN_ID}\"}]}]" 2>&1); then
             if echo "$out" | grep -q "InvalidPermission.Duplicate"; then
               echo "SSH ingress rule already exists for ${RUNNER_IP}/32."
@@ -787,33 +804,18 @@ jobs:
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
-          SEEDS_FILE: ${{ github.workspace }}/environments/backend/db.seeds.secrets.json
-          DB_SEEDS_SECRETS_JSON_B64: ${{ secrets.DB_SEEDS_SECRETS_JSON_B64 }}
-          DB_SEEDS_SECRETS_JSON: ${{ secrets.DB_SEEDS_SECRETS_JSON }}
+          SEEDS_FILE: ${{ github.workspace }}/db-seeds.secrets.json
         run: |
-          # The checked-out file is git-crypt encrypted unless GIT_CRYPT_KEY
-          # unlocked it above — treat a non-JSON file the same as a missing
-          # one and fall back to the secret.
-          if [ ! -f "$SEEDS_FILE" ] || ! python3 -m json.tool "$SEEDS_FILE" > /dev/null 2>&1; then
-            if [ -n "$DB_SEEDS_SECRETS_JSON_B64" ]; then
-              mkdir -p "$(dirname "$SEEDS_FILE")"
-              printf '%s' "$DB_SEEDS_SECRETS_JSON_B64" | tr -d '\r\n\t ' | base64 -d > "$SEEDS_FILE"
-            elif [ -n "$DB_SEEDS_SECRETS_JSON" ]; then
-              mkdir -p "$(dirname "$SEEDS_FILE")"
-              printf '%s' "$DB_SEEDS_SECRETS_JSON" > "$SEEDS_FILE"
-            else
-              echo "::notice::$SEEDS_FILE is absent/locked and DB_SEEDS_SECRETS_JSON_B64 is not configured; skipping secret seed upsert."
-              exit 0
-            fi
-          fi
+          jq -c '.secrets.prod.db_seeds' .github/environments.json > "$SEEDS_FILE"
           python3 -m json.tool "$SEEDS_FILE" > /dev/null
           bun run --cwd backend seed:secrets
+          rm -f "$SEEDS_FILE"
       - name: Close SSH ingress for this runner
         if: always()
         run: |
           if [ -n "${RUNNER_IP:-}" ]; then
             aws ec2 revoke-security-group-ingress \
-              --group-id "${{ vars.GRAPH_DB_SSH_SG_ID }}" \
+              --group-id "${{ env.GRAPH_DB_SSH_SG_ID }}" \
               --ip-permissions "[{\"IpProtocol\":\"tcp\",\"FromPort\":22,\"ToPort\":22,\"IpRanges\":[{\"CidrIp\":\"${RUNNER_IP}/32\"}]}]" \
               || echo "::warning::SSH ingress revoke failed; remove ${RUNNER_IP}/32 from the graph-db SG manually."
           fi
@@ -833,10 +835,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "APP_HEALTH_URL=$(jq -r '.vars.APP_HEALTH_URL' .github/environments.json)"
+          } >> "$GITHUB_ENV"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Roll api ECS service
         run: |
@@ -867,8 +878,8 @@ jobs:
           echo "Waiting for $ECS_API_SERVICE to reach a steady state..."
           aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_API_SERVICE"
       - name: External api health check
-        if: vars.APP_HEALTH_URL != ''
-        run: bash backend/deploy/health-check.sh "${{ vars.APP_HEALTH_URL }}"
+        if: env.APP_HEALTH_URL != ''
+        run: bash backend/deploy/health-check.sh "${{ env.APP_HEALTH_URL }}"
 
   # Optional render worker (desired count is 0 by default). Registers a new task
   # definition revision with the freshly built image and rolls the service only
@@ -882,23 +893,31 @@ jobs:
       && (github.event_name == 'pull_request' || inputs.deploy)
       && needs.backend-migrate.result == 'success'
       && needs.backend-deploy.result != 'failure' && needs.backend-deploy.result != 'cancelled'
-      && vars.RENDER_TASK_FAMILY != ''
     environment: production
     env:
       IMAGE: ${{ needs.backend-image.outputs.image }}
-      FAMILY: ${{ vars.RENDER_TASK_FAMILY }}
-      RENDER_ECS_CLUSTER: ${{ vars.RENDER_ECS_CLUSTER }}
-      RENDER_ECS_SERVICE: ${{ vars.RENDER_ECS_SERVICE }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "FAMILY=$(jq -r '.vars.RENDER_TASK_FAMILY' .github/environments.json)"
+            echo "RENDER_ECS_CLUSTER=$(jq -r '.vars.RENDER_ECS_CLUSTER' .github/environments.json)"
+            echo "RENDER_ECS_SERVICE=$(jq -r '.vars.RENDER_ECS_SERVICE' .github/environments.json)"
+          } >> "$GITHUB_ENV"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Register revision and optionally roll service
+        if: env.FAMILY != '' && env.FAMILY != 'null'
         run: |
           set -e
           FAMILY="$(python3 -c 'import os; print(os.environ["FAMILY"].lstrip("﻿").strip())')"
@@ -958,16 +977,25 @@ jobs:
     environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app
-      SITE_URL: ${{ fromJSON(secrets.CONFIG).vorinthex.url }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
 
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "SITE_URL=$(jq -r '.secrets.prod.vorinthex.url' .github/environments.json)"
+          } >> "$GITHUB_ENV"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Check whether ECS already serves production
@@ -1094,10 +1122,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
@@ -1145,9 +1178,18 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "CLOUDFLARE_ZONE_ID=$(jq -r '.vars.CLOUDFLARE_ZONE_ID' .github/environments.json)"
+          } >> "$GITHUB_ENV"
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Blue-green deploy via SSM
         run: |
@@ -1193,8 +1235,8 @@ jobs:
       - name: Apply Cloudflare cache policy and purge
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-        run: bun environments/scripts/cloudflare-cache-policy.ts
+          CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
+        run: bun .github/scripts/cloudflare-cache-policy.ts
 
   deploy-summary:
     name: Deployment summary

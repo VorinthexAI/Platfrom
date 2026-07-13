@@ -10,7 +10,7 @@ Agents own managers. Managers validate role completion against their assignment 
 
 ## Local Development
 
-1. Copy `../environments/backend/.env.example` to `../environments/backend/.env.dev`.
+1. Run `git-crypt unlock` at the repo root so `.github/environments.json` decrypts.
 2. Run `bun install`.
 3. Start local dev with `bun start`. This brings up Docker Compose infra, applies dev migrations, and starts the API.
 4. Reset local dev data with `bun reset`. This runs `docker compose down -v`.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Idempotent Cloudflare DNS synchronization for the Vorinthex universe.
 //
-// Source of truth: environments/domains.json, generated from the galaxy
+// Source of truth: .github/scripts/domains.json, generated from the galaxy
 // registry by another script. Shape:
 //
 //   { "vorinthex.com": ["core", "command", ..., "hunt"] }
@@ -18,7 +18,7 @@
 //
 // Usage:
 //   CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ZONE_ID=... \
-//     bun environments/scripts/cloudflare-dns-sync.ts
+//     bun .github/scripts/cloudflare-dns-sync.ts
 //
 // Env:
 //   CLOUDFLARE_API_TOKEN   (required) scoped token with Zone.DNS edit rights
@@ -39,7 +39,7 @@ const API_BASE = "https://api.cloudflare.com/client/v4";
 // CLOUDFLARE_DNS_TARGET. (Was a CloudFront domain; that distribution is retired.)
 const DEFAULT_TARGET = "ec2-13-49-39-46.eu-north-1.compute.amazonaws.com";
 const DEFAULT_APEX = "vorinthex.com";
-const DEFAULT_DOMAINS_FILE = "environments/domains.json";
+const DEFAULT_DOMAINS_FILE = ".github/scripts/domains.json";
 const MAX_RETRIES = 5;
 
 type CloudflareError = { code: number; message: string };

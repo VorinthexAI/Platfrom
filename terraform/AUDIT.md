@@ -28,7 +28,7 @@ of this task (see the WAF section).
 - **Data:** `aws_caller_identity.current`.
 - **Locals:** `environment`, `tags`, `normalized_ssm_prefix`, `ssm_path`,
   `prod_env_path`/`prod_env_lines`/`prod_env_entries`/`prod_env_values`
-  (parses repo-root `environments/backend/.env.prod`), `effective_ssh_public_key`,
+  (parses repo-root `.tmp-backend-prod.env`, generated at CI-time from `.github/environments.json`), `effective_ssh_public_key`,
   `graph_db_subnet_id`, `generated_env_values`, `generated_env_keys`,
   `ssm_values`, `ssm_keys`, `ssm_arns`, `effective_web_image`,
   `effective_api_image`.

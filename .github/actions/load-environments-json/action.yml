@@ -1,0 +1,20 @@
+name: Load environments.json
+description: >-
+  Unlocks git-crypt using the GIT_CRYPT_KEY repo secret so the calling job can
+  read .github/environments.json (vars + dev/prod secrets) with jq in a
+  following step. Must run after actions/checkout.
+inputs:
+  git-crypt-key-b64:
+    required: true
+    description: Base64-encoded git-crypt symmetric key (pass secrets.GIT_CRYPT_KEY)
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        test -n "${{ inputs.git-crypt-key-b64 }}" || { echo "::error::GIT_CRYPT_KEY is not configured; cannot unlock .github/environments.json."; exit 1; }
+        sudo apt-get update -qq && sudo apt-get install -y -qq git-crypt
+        echo "${{ inputs.git-crypt-key-b64 }}" | base64 -d > /tmp/git-crypt.key
+        git-crypt unlock /tmp/git-crypt.key
+        rm -f /tmp/git-crypt.key
+        test -s .github/environments.json || { echo "::error::.github/environments.json is missing or still encrypted after unlock."; exit 1; }

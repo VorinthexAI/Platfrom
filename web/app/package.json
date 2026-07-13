@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "bun --env-file=../../environments/web/.env.dev next dev",
+    "dev": "bun run ../../.github/scripts/write-local-env.ts dev web web/app/.env.local && next dev",
     "build": "next build",
-    "start": "bun --env-file=../../environments/web/.env.prod next start",
+    "start": "bun run ../../.github/scripts/write-local-env.ts prod vorinthex web/app/.env.local && next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit"
   },

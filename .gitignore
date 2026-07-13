@@ -1,16 +1,17 @@
 .env
 *.env
 prod.env
-.github/.configs/secrets.json
-environments/**/.env.dev
-environments/**/.env.prod
-environments/**/db.seeds.secrets.json
+.env.local
+.env.*.local
 
 # These secret-bearing files are allowed in git only because .gitattributes
 # stores them through git-crypt.
 !launch/.env
+!.github/environments.json
 .temp
 backend/scripts/tmp-*.ts
+backend/.tmp-db-seeds.secrets.json
+.tmp-backend-prod.env
 
 node_modules/
 .next/

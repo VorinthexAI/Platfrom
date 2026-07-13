@@ -1,7 +1,6 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
-import { config as loadEnv } from 'dotenv';
 import type { Interface } from 'node:readline/promises';
 import { selectMenu } from './menu';
 
@@ -22,27 +21,30 @@ export async function chooseEnvironment(rl: Interface): Promise<EnvironmentName>
   return environment;
 }
 
-function resolveEnvironmentFile(environment: EnvironmentName) {
-  const candidates = environment === 'dev'
-    ? ['../environments/backend/.env.dev']
-    : ['../environments/backend/.env.prod', '../environments/backend/.env.production'];
+const ENVIRONMENTS_JSON_PATH = '../.github/environments.json';
 
-  return candidates.find((file) => existsSync(file));
+function loadEnvironmentSection(environment: EnvironmentName): Record<string, unknown> | null {
+  if (!existsSync(ENVIRONMENTS_JSON_PATH)) return null;
+  const parsed = JSON.parse(readFileSync(ENVIRONMENTS_JSON_PATH, 'utf8'));
+  const section = environment === 'dev' ? parsed?.secrets?.dev?.backend : parsed?.secrets?.prod?.env;
+  return section && typeof section === 'object' ? section : null;
 }
 
 export function loadEnvironment(environment: EnvironmentName) {
-  const envFile = resolveEnvironmentFile(environment);
-  if (envFile) {
-    loadEnv({ path: envFile, override: true });
-    console.log(`Loaded ${envFile}`);
-    return envFile;
+  const section = loadEnvironmentSection(environment);
+  if (section) {
+    for (const [key, value] of Object.entries(section)) {
+      if (typeof value === 'string' && value !== '') process.env[key] = value;
+    }
+    console.log(`Loaded secrets.${environment}.${environment === 'dev' ? 'backend' : 'env'} from .github/environments.json`);
+    return ENVIRONMENTS_JSON_PATH;
   }
 
   if (environment === 'prod') {
-    throw new Error('No environments/backend/.env.prod or environments/backend/.env.production file found. Copy environments/backend/.env.example to environments/backend/.env.prod and set ARANGO_URL.');
+    throw new Error('.github/environments.json is missing, still git-crypt encrypted, or has no secrets.prod.env section. Run `git-crypt unlock` first.');
   }
 
-  console.log('No environments/backend/.env.dev file found. Using current process environment.');
+  console.log('.github/environments.json not found or has no secrets.dev.backend section. Using current process environment.');
   return null;
 }
 

@@ -28,16 +28,17 @@ Install dependencies from the repository root:
 bun install
 ```
 
-Environment files live under `environments/`, one directory per workspace since
-vorinthex, orbit, and backend each have their own separate config with no
-shared/prefixed keys:
+All vars and secrets, for both dev and prod, live in one git-crypt-encrypted
+file: `.github/environments.json` (`{ vars: {...}, secrets: { dev: {...}, prod:
+{...} } }`, keyed per workspace — `vorinthex`, `web`, `backend`). It IS
+committed (unlike the old per-workspace `.env.*` files it replaces) because
+git-crypt encrypts it at rest; `git-crypt unlock` decrypts your local working
+copy the same way it already does for `launch/.env`.
 
-- `environments/vorinthex/.env.example` / `.env.dev` / `.env.prod`
-- `environments/orbit/.env.example` / `.env.dev` / `.env.prod`
-- `environments/hunt/.env.example` / `.env.dev` / `.env.prod`
-- `environments/backend/.env.example` / `.env.dev` / `.env.prod`
-
-Only `.env.example` files should be committed. `.env.dev` and `.env.prod` are local secret-bearing files and must stay ignored.
+Local dev tooling reads this file directly or generates a plain `.env.local`
+from it via `bun run .github/scripts/write-local-env.ts <dev|prod> <section>
+<outFile>` (see the `dev`/`start` scripts in `web/app/package.json` and
+`backend/package.json`, which call it automatically).
 
 ## Common Commands
 
@@ -111,7 +112,7 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 
 - Keep changes scoped and match the surrounding code style.
 - Add or update tests for behavior changes.
-- Do not commit secrets. Use the ignored files under `environments/`.
+- Do not commit secrets in plaintext. All vars/secrets (dev + prod) live git-crypt-encrypted in `.github/environments.json` — edit it locally after `git-crypt unlock`, never add a new plaintext env file.
 - Keep shared code in the top-level `shared/` folder, not nested inside `web/app/src/shared` or `backend/src/shared`.
 - Validate backend endpoint JSON payloads and query parameters with Zod strict object schemas; reject unknown fields instead of silently accepting them.
 - Keep backend HTTP endpoints behind the env API key middleware and Redis-backed per-IP rate limiting unless a task explicitly changes that security model.

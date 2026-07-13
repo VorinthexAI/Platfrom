@@ -8,8 +8,12 @@ locals {
 
   normalized_ssm_prefix = trimprefix(var.ssm_parameter_prefix, "/")
   ssm_path              = "/${local.normalized_ssm_prefix}"
-  prod_env_path         = abspath("${path.root}/../../../environments/backend/.env.prod")
-  prod_env_lines        = fileexists(local.prod_env_path) ? split("\n", file(local.prod_env_path)) : []
+  # Generated at CI-time from .github/environments.json's secrets.prod.env by
+  # `bun run .github/scripts/write-local-env.ts prod backend .tmp-backend-prod.env`
+  # (see infra.yml's terraform job) — optional, same as the old per-workspace
+  # .env.prod file this replaces: fileexists() below just skips it if absent.
+  prod_env_path  = abspath("${path.root}/../../../.tmp-backend-prod.env")
+  prod_env_lines = fileexists(local.prod_env_path) ? split("\n", file(local.prod_env_path)) : []
   prod_env_entries = [
     for raw_line in local.prod_env_lines : {
       key   = trimspace(split("=", raw_line)[0])

@@ -72,21 +72,6 @@ env:
   AWS_REGION: eu-north-1
   TF_WORKING_DIR: terraform/environments/production
   TF_VAR_aws_region: eu-north-1
-  TF_VAR_instance_type: ${{ inputs.instance_type || vars.PROD_INSTANCE_TYPE || 't3.small' }}
-  TF_VAR_graph_db_instance_type: ${{ inputs.graph_db_instance_type || vars.PROD_GRAPH_DB_INSTANCE_TYPE || 't3.small' }}
-  TF_VAR_graph_db_volume_size: ${{ inputs.graph_db_volume_size || vars.PROD_GRAPH_DB_VOLUME_SIZE || '30' }}
-  TF_VAR_task_cpu: ${{ inputs.task_cpu || vars.PROD_TASK_CPU || '1024' }}
-  TF_VAR_task_memory: ${{ inputs.task_memory || vars.PROD_TASK_MEMORY || '2048' }}
-  TF_VAR_redis_node_type: ${{ inputs.redis_node_type || vars.PROD_REDIS_NODE_TYPE || 'cache.t4g.micro' }}
-  TF_VAR_s3_bucket_name: ${{ vars.PROD_S3_BUCKET_NAME }}
-  TF_VAR_ssm_parameter_prefix: ${{ vars.SSM_PARAMETER_PREFIX || 'vorinthex/prod' }}
-  # Additive: SSH ingress is a JSON list; default '[]' matches the new safe
-  # (no world-open SSH) Terraform default. Set the input or PROD_SSH_INGRESS_CIDR_BLOCKS
-  # to a JSON list to allow SSH again before an apply that still deploys via SSH.
-  TF_VAR_ssh_ingress_cidr_blocks: ${{ inputs.ssh_ingress_cidr_blocks || vars.PROD_SSH_INGRESS_CIDR_BLOCKS || '[]' }}
-  TF_VAR_app_ami_id: ${{ inputs.app_ami_id || vars.PROD_APP_AMI_ID || '' }}
-  TF_VAR_graph_db_ami_id: ${{ inputs.graph_db_ami_id || vars.PROD_GRAPH_DB_AMI_ID || '' }}
-  TF_VAR_enable_app_platform: ${{ inputs.enable_app_platform || vars.PROD_ENABLE_APP_PLATFORM || 'false' }}
 
 jobs:
   terraform:
@@ -96,27 +81,80 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+
+      - name: Compute Terraform variables
+        env:
+          IN_INSTANCE_TYPE: ${{ inputs.instance_type }}
+          IN_GRAPH_DB_INSTANCE_TYPE: ${{ inputs.graph_db_instance_type }}
+          IN_GRAPH_DB_VOLUME_SIZE: ${{ inputs.graph_db_volume_size }}
+          IN_TASK_CPU: ${{ inputs.task_cpu }}
+          IN_TASK_MEMORY: ${{ inputs.task_memory }}
+          IN_REDIS_NODE_TYPE: ${{ inputs.redis_node_type }}
+          IN_SSH_INGRESS_CIDR_BLOCKS: ${{ inputs.ssh_ingress_cidr_blocks }}
+          IN_APP_AMI_ID: ${{ inputs.app_ami_id }}
+          IN_GRAPH_DB_AMI_ID: ${{ inputs.graph_db_ami_id }}
+          IN_ENABLE_APP_PLATFORM: ${{ inputs.enable_app_platform }}
+        run: |
+          # pick <input-value> <vars.json key> <default> — first non-empty wins,
+          # matching the previous `inputs.x || vars.Y || 'default'` precedence.
+          pick() {
+            local input_value="$1" vars_key="$2" default_value="$3"
+            local vars_value
+            vars_value=$(jq -r --arg k "$vars_key" '.vars[$k] // empty' .github/environments.json)
+            if [ -n "$input_value" ]; then echo "$input_value"
+            elif [ -n "$vars_value" ]; then echo "$vars_value"
+            else echo "$default_value"
+            fi
+          }
+          v() { jq -r --arg k "$1" '.vars[$k] // empty' .github/environments.json; }
+          {
+            echo "AWS_INFRA_ROLE_ARN=$(v AWS_INFRA_ROLE_ARN)"
+            echo "TF_STATE_BUCKET=$(v TF_STATE_BUCKET)"
+            echo "TF_STATE_REGION=$(pick '' TF_STATE_REGION "$AWS_REGION")"
+            echo "TF_VAR_instance_type=$(pick "$IN_INSTANCE_TYPE" PROD_INSTANCE_TYPE t3.small)"
+            echo "TF_VAR_graph_db_instance_type=$(pick "$IN_GRAPH_DB_INSTANCE_TYPE" PROD_GRAPH_DB_INSTANCE_TYPE t3.small)"
+            echo "TF_VAR_graph_db_volume_size=$(pick "$IN_GRAPH_DB_VOLUME_SIZE" PROD_GRAPH_DB_VOLUME_SIZE 30)"
+            echo "TF_VAR_task_cpu=$(pick "$IN_TASK_CPU" PROD_TASK_CPU 1024)"
+            echo "TF_VAR_task_memory=$(pick "$IN_TASK_MEMORY" PROD_TASK_MEMORY 2048)"
+            echo "TF_VAR_redis_node_type=$(pick "$IN_REDIS_NODE_TYPE" PROD_REDIS_NODE_TYPE cache.t4g.micro)"
+            echo "TF_VAR_s3_bucket_name=$(v PROD_S3_BUCKET_NAME)"
+            echo "TF_VAR_ssm_parameter_prefix=$(pick '' SSM_PARAMETER_PREFIX vorinthex/prod)"
+            echo "TF_VAR_ssh_ingress_cidr_blocks=$(pick "$IN_SSH_INGRESS_CIDR_BLOCKS" PROD_SSH_INGRESS_CIDR_BLOCKS '[]')"
+            echo "TF_VAR_app_ami_id=$(pick "$IN_APP_AMI_ID" PROD_APP_AMI_ID '')"
+            echo "TF_VAR_graph_db_ami_id=$(pick "$IN_GRAPH_DB_AMI_ID" PROD_GRAPH_DB_AMI_ID '')"
+            echo "TF_VAR_enable_app_platform=$(pick "$IN_ENABLE_APP_PLATFORM" PROD_ENABLE_APP_PLATFORM false)"
+          } >> "$GITHUB_ENV"
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_INFRA_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_INFRA_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: hashicorp/setup-terraform@v3
 
       - name: Validate required variables
         run: |
-          test -n "${{ vars.AWS_INFRA_ROLE_ARN }}" || { echo "::error::AWS_INFRA_ROLE_ARN variable is required"; exit 1; }
-          test -n "${{ vars.TF_STATE_BUCKET }}" || { echo "::error::TF_STATE_BUCKET variable is required"; exit 1; }
-          test -n "${{ vars.PROD_S3_BUCKET_NAME }}" || { echo "::error::PROD_S3_BUCKET_NAME variable is required"; exit 1; }
+          test -n "${{ env.AWS_INFRA_ROLE_ARN }}" || { echo "::error::AWS_INFRA_ROLE_ARN is not set in .github/environments.json"; exit 1; }
+          test -n "${{ env.TF_STATE_BUCKET }}" || { echo "::error::TF_STATE_BUCKET is not set in .github/environments.json"; exit 1; }
+          test -n "${{ env.TF_VAR_s3_bucket_name }}" || { echo "::error::PROD_S3_BUCKET_NAME is not set in .github/environments.json"; exit 1; }
+
+      - uses: oven-sh/setup-bun@v2
+      - name: Generate backend prod env for Terraform
+        # main.tf's local.prod_env_path reads this optional scratch file to
+        # override generated SSM parameter values — see the comment there.
+        run: bun run .github/scripts/write-local-env.ts prod backend .tmp-backend-prod.env
 
       - name: Terraform init
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform init \
-            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="bucket=${{ env.TF_STATE_BUCKET }}" \
             -backend-config="key=vorinthex/production/terraform.tfstate" \
-            -backend-config="region=${{ vars.TF_STATE_REGION || env.AWS_REGION }}" \
+            -backend-config="region=${{ env.TF_STATE_REGION }}" \
             -backend-config="use_lockfile=true"
 
       - name: Terraform fmt
@@ -160,19 +198,32 @@ jobs:
     name: Cloudflare DNS sync
     if: ${{ inputs.run_dns_sync }}
     # Deliberately independent of the terraform job so DNS sync never blocks or
-    # is blocked by plan/apply. It only reads the committed environments/domains.json.
+    # is blocked by plan/apply. It only reads the committed .github/scripts/domains.json.
     runs-on: ubuntu-latest
     environment: production
     steps:
       - uses: actions/checkout@v4
 
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          v() { jq -r --arg k "$1" '.vars[$k] // empty' .github/environments.json; }
+          {
+            echo "CLOUDFLARE_ZONE_ID=$(v CLOUDFLARE_ZONE_ID)"
+            echo "CLOUDFLARE_SSL_MODE=$(v CLOUDFLARE_SSL_MODE)"
+            echo "CLOUDFLARE_DNS_TARGET=$(v CLOUDFLARE_DNS_TARGET)"
+            echo "DNS_APEX=$(v DNS_APEX)"
+          } >> "$GITHUB_ENV"
+
       - name: Check Cloudflare credentials
         id: check
-        # secrets/vars are not available in job-level `if`, so gate here and
-        # skip gracefully (without failing the workflow) when unset.
+        # secrets are not available in job-level `if`, so gate here and skip
+        # gracefully (without failing the workflow) when unset.
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ZONE_ID" ]; then
             echo "::warning::Skipping Cloudflare DNS sync: set the CLOUDFLARE_API_TOKEN secret and CLOUDFLARE_ZONE_ID variable to enable it."
@@ -191,23 +242,26 @@ jobs:
         # The early-infra app box serves HTTPS on :443 with a self-signed internal
         # cert, so the zone must be "full" (Cloudflare re-encrypts to the origin).
         # NOT "flexible" — Caddy redirects :80→:443 for named hosts, so a flexible
-        # (HTTP-to-origin) zone would redirect-loop. Override with vars.CLOUDFLARE_SSL_MODE.
+        # (HTTP-to-origin) zone would redirect-loop. Override with the CLOUDFLARE_SSL_MODE var in .github/environments.json.
         if: ${{ steps.check.outputs.skip != 'true' && !inputs.dns_dry_run }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-          SSL_MODE: ${{ vars.CLOUDFLARE_SSL_MODE || 'full' }}
+          CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
+          SSL_MODE: ${{ env.CLOUDFLARE_SSL_MODE }}
         run: |
           curl -fsS -X PATCH "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/settings/ssl" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" \
-            -d "{\"value\":\"$SSL_MODE\"}" | head -c 300; echo
+            -d "{\"value\":\"${SSL_MODE:-full}\"}" | head -c 300; echo
 
       - name: Sync Cloudflare DNS
         if: steps.check.outputs.skip != 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-          CLOUDFLARE_DNS_TARGET: ${{ vars.CLOUDFLARE_DNS_TARGET || 'ec2-13-49-39-46.eu-north-1.compute.amazonaws.com' }}
-          DNS_APEX: ${{ vars.DNS_APEX || 'vorinthex.com' }}
+          CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_DNS_TARGET: ${{ env.CLOUDFLARE_DNS_TARGET }}
+          DNS_APEX: ${{ env.DNS_APEX }}
           DRY_RUN: ${{ inputs.dns_dry_run && '1' || '0' }}
-        run: bun environments/scripts/cloudflare-dns-sync.ts
+        run: |
+          export CLOUDFLARE_DNS_TARGET="${CLOUDFLARE_DNS_TARGET:-ec2-13-49-39-46.eu-north-1.compute.amazonaws.com}"
+          export DNS_APEX="${DNS_APEX:-vorinthex.com}"
+          bun .github/scripts/cloudflare-dns-sync.ts

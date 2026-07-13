@@ -26,7 +26,7 @@ Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert
 
 ## DNS
 
-Cloudflare proxied CNAMEs (apex + every subdomain in `environments/domains.json`)
+Cloudflare proxied CNAMEs (apex + every subdomain in `.github/scripts/domains.json`)
 point at the app box's public DNS, set via the `CLOUDFLARE_DNS_TARGET` repo
 variable (`ec2-13-49-39-46.eu-north-1.compute.amazonaws.com`). The zone SSL mode
 is **Full** (Caddy serves a self-signed cert for `vorinthex.com` + `*.vorinthex.com`).

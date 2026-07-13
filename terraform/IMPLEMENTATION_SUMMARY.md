@@ -78,9 +78,9 @@ No `terraform/environments/staging/` directory was created.
 - The app EC2 instance does not get direct SSM read access unless
   `allow_app_instance_ssm_read = true`; the existing deploy workflow renders
   `.env` from SSM on the GitHub runner.
-- `environments/backend/.env.prod`, if present, is parsed into SecureString SSM parameters. Real
-  production secrets should not be committed because Terraform state will store
-  those values.
+- A `.tmp-backend-prod.env` scratch file, generated at CI-time from the git-crypt-encrypted
+  `.github/environments.json`, is parsed into SecureString SSM parameters if present. Terraform
+  state will store those values regardless of where they came from.
 
 ## Verification Performed
 

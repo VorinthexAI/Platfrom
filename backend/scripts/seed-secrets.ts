@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { closeDb } from '@/lib/db/client';
 import { NODE_REGISTRY, NODE_NAMES } from '@/lib/db/registry';
 import { newId } from '@/lib/ids';
@@ -12,7 +12,25 @@ import {
   type UserOrganization,
 } from '@/lib/db/user-organization.node';
 
-const SEEDS_FILE = process.env.SEEDS_FILE ?? '../environments/backend/db.seeds.secrets.json';
+const ENVIRONMENTS_JSON_PATH = '../.github/environments.json';
+
+function resolveSeedsFile(): string {
+  if (process.env.SEEDS_FILE) return process.env.SEEDS_FILE;
+  if (!existsSync(ENVIRONMENTS_JSON_PATH)) return ENVIRONMENTS_JSON_PATH;
+
+  // Local runs: pull secrets.prod.db_seeds out of environments.json into a
+  // scratch file so the rest of this script can keep reading a plain
+  // { nodeName: [documents] } JSON file, same shape CI's SEEDS_FILE override uses.
+  const parsed = JSON.parse(readFileSync(ENVIRONMENTS_JSON_PATH, 'utf8'));
+  const dbSeeds = parsed?.secrets?.prod?.db_seeds;
+  if (!dbSeeds || typeof dbSeeds !== 'object') return ENVIRONMENTS_JSON_PATH;
+
+  const scratchFile = '.tmp-db-seeds.secrets.json';
+  writeFileSync(scratchFile, JSON.stringify(dbSeeds));
+  return scratchFile;
+}
+
+const SEEDS_FILE = resolveSeedsFile();
 
 // These are the only node schemas with a required (non-nullable) organizationId.
 const NODES_WITH_ORGANIZATION_ID = new Set(['users']);

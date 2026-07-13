@@ -34,7 +34,7 @@
     "audio:voice-samples": "bun run --cwd scripts/audio voice-samples",
     "audio:merge": "bun run --cwd scripts/audio merge",
     "audio:validate": "bun run --cwd scripts/audio validate",
-    "domains:generate": "bun run environments/scripts/generate-domains.ts",
+    "domains:generate": "bun run .github/scripts/generate-domains.ts",
     "web:dev": "bun run --cwd web/app dev",
     "web:build": "bun run --cwd web/app build",
     "web:lint": "bun run --cwd web/app lint",

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Generates environments/domains.json — the apex domain and every subdomain
+ * Generates .github/scripts/domains.json — the apex domain and every subdomain
  * slug the platform serves, DERIVED FROM THE GALAXY REGISTRY so the list is
  * never hand-maintained.
  *
@@ -12,8 +12,8 @@
  * entities. Add a product/capability/orchestrator to the registry, or a cave
  * below, and re-running this picks it up automatically.
  *
- *   DO NOT EDIT environments/domains.json BY HAND — it is generated.
- *   Regenerate with:  bun run environments/scripts/generate-domains.ts
+ *   DO NOT EDIT .github/scripts/domains.json BY HAND — it is generated.
+ *   Regenerate with:  bun run .github/scripts/generate-domains.ts
  *                     (or:  bun run domains:generate)
  */
 
@@ -94,7 +94,7 @@ function buildDomains(): Record<string, string[]> {
   return result;
 }
 
-const outPath = resolve(dirname(fileURLToPath(import.meta.url)), "..", "domains.json");
+const outPath = resolve(dirname(fileURLToPath(import.meta.url)), "domains.json");
 const domains = buildDomains();
 writeFileSync(outPath, `${JSON.stringify(domains, null, 2)}\n`, "utf8");
 

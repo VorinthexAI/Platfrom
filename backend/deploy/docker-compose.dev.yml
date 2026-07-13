@@ -68,7 +68,7 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       S3_BUCKET: vorinthex-dev
-    env_file: ../../environments/backend/.env.dev
+    env_file: ../.env.local
     ports:
       - '3001:3001'
     volumes:
@@ -102,7 +102,7 @@ services:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
       S3_BUCKET: vorinthex-dev
-    env_file: ../../environments/backend/.env.dev
+    env_file: ../.env.local
     volumes:
       - ../src:/app/src
       - ../tsconfig.json:/app/tsconfig.json

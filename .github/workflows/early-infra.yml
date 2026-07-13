@@ -6,7 +6,7 @@ name: Early-infra deploy
 # zero-downtime color swap. The DB box (ArangoDB) is provisioned separately and
 # is not touched by this workflow.
 #
-# Requires the deploy role (vars.AWS_DEPLOY_ROLE_ARN) to allow ecr:* on the two
+# Requires the deploy role (.github/environments.json vars.AWS_DEPLOY_ROLE_ARN) to allow ecr:* on the two
 # repos and ssm:SendCommand/GetCommandInvocation on the app instance.
 
 on:
@@ -50,10 +50,15 @@ jobs:
       - uses: actions/checkout@v4
       - id: tag
         run: echo "tag=${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - uses: aws-actions/amazon-ecr-login@v2
       - name: Build + push web
@@ -89,9 +94,18 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+      - name: Extract config
+        run: |
+          {
+            echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
+            echo "CLOUDFLARE_ZONE_ID=$(jq -r '.vars.CLOUDFLARE_ZONE_ID' .github/environments.json)"
+          } >> "$GITHUB_ENV"
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Blue-green deploy via SSM
         env:
@@ -141,5 +155,5 @@ jobs:
       - name: Apply Cloudflare cache policy and purge
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
-        run: bun environments/scripts/cloudflare-cache-policy.ts
+          CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
+        run: bun .github/scripts/cloudflare-cache-policy.ts

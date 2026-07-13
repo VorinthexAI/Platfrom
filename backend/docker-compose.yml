@@ -75,7 +75,7 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       S3_BUCKET: vorinthex-dev
       SQS_QUEUE_URL: http://sqs.eu-north-1.localhost.localstack.cloud:4566/000000000000/vorinthex-file-events
-    env_file: ../environments/backend/.env.dev
+    env_file: .env.local
     ports:
       - '3001:3001'
     volumes:
@@ -112,7 +112,7 @@ services:
       AWS_SECRET_ACCESS_KEY: test
       S3_BUCKET: vorinthex-dev
       SQS_QUEUE_URL: http://sqs.eu-north-1.localhost.localstack.cloud:4566/000000000000/vorinthex-file-events
-    env_file: ../environments/backend/.env.dev
+    env_file: .env.local
     volumes:
       - ./src:/app/src
       - ./tsconfig.json:/app/tsconfig.json
