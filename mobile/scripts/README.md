@@ -60,14 +60,17 @@ Canada, and Australia — 35 countries, defined once in
 
 ## Credentials
 
-Environment variables win; otherwise the script reads the git-crypt
-encrypted `.github/environments.json` under `secrets.prod.mobile` (then
-`secrets.dev.mobile`) — add a `mobile` object there with the same keys:
+Keys live ONLY in the git-crypt encrypted `.github/environments.json`,
+under `secrets.prod.mobile` (placeholders are already there — unlock
+with git-crypt and fill them in). Never put key files next to these
+scripts; `.gitignore` here blocks `*.p8` and service-account JSONs as a
+safety net. Environment variables with the same names work as a local
+override.
 
-- `ASC_ISSUER_ID`, `ASC_KEY_ID`, and `ASC_PRIVATE_KEY` (inline .p8 PEM)
-  or `ASC_PRIVATE_KEY_PATH`. Create the key in App Store Connect → Users
-  and Access → Integrations (role: App Manager).
-- `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (inline JSON) or
-  `GOOGLE_PLAY_SERVICE_ACCOUNT_PATH`. Create a Google Cloud service
-  account, enable the Google Play Android Developer API, then invite the
-  service-account email in Play Console → Users and permissions.
+- `ASC_ISSUER_ID`, `ASC_KEY_ID`, `ASC_PRIVATE_KEY` (paste the full .p8
+  PEM contents). Create the key in App Store Connect → Users and Access
+  → Integrations (role: App Manager).
+- `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (paste the service-account JSON as
+  a string). Create a Google Cloud service account, enable the Google
+  Play Android Developer API, then invite the service-account email in
+  Play Console → Users and permissions.

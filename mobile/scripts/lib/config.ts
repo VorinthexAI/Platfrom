@@ -138,9 +138,10 @@ export type GoogleCredentials = { clientEmail: string; privateKey: string };
 type EnvSection = Record<string, string>;
 
 /**
- * Secrets follow the repo convention: env vars win, then the git-crypt
- * encrypted .github/environments.json (secrets.prod.mobile, then
- * secrets.dev.mobile). Returns null when the file is absent or locked.
+ * Secrets follow the repo convention: the git-crypt encrypted
+ * .github/environments.json is the canonical store (secrets.prod.mobile,
+ * then secrets.dev.mobile); env vars are only a local override. Returns
+ * null when the file is absent or locked.
  */
 function environmentsMobileSection(): EnvSection | null {
   const path = resolve(REPO_ROOT, ".github/environments.json");
@@ -159,7 +160,8 @@ function environmentsMobileSection(): EnvSection | null {
 }
 
 function secret(name: string): string | undefined {
-  return process.env[name] ?? environmentsMobileSection()?.[name];
+  const fromFile = environmentsMobileSection()?.[name];
+  return (fromFile !== undefined && fromFile !== "" ? fromFile : undefined) ?? process.env[name];
 }
 
 function maybeFile(value: string | undefined): string | undefined {

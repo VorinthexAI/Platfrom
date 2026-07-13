@@ -79,8 +79,8 @@ function validate(config: StoresConfig): boolean {
     console.log(`  FAIL Play requires 2-8 phone screenshots (found ${playShots.length}).`);
     ok = false;
   }
-  console.log(`  creds apple  ${appleCredentials() ? "found" : "missing (ASC_ISSUER_ID / ASC_KEY_ID / ASC_PRIVATE_KEY[_PATH])"}`);
-  console.log(`  creds google ${googleCredentials() ? "found" : "missing (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON|_PATH)"}`);
+  console.log(`  creds apple  ${appleCredentials() ? "found" : "missing — fill secrets.prod.mobile in .github/environments.json (ASC_ISSUER_ID / ASC_KEY_ID / ASC_PRIVATE_KEY)"}`);
+  console.log(`  creds google ${googleCredentials() ? "found" : "missing — fill secrets.prod.mobile in .github/environments.json (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)"}`);
   return ok;
 }
 
@@ -93,10 +93,10 @@ async function submitApple(config: StoresConfig): Promise<void> {
   const creds = appleCredentials();
   if (!creds) {
     throw new Error(
-      "Apple credentials missing. Provide ASC_ISSUER_ID, ASC_KEY_ID and ASC_PRIVATE_KEY " +
-        "(inline .p8 PEM) or ASC_PRIVATE_KEY_PATH — via env or .github/environments.json " +
-        "(secrets.prod.mobile). Create the key in App Store Connect > Users and Access > " +
-        "Integrations, role App Manager.",
+      "Apple credentials missing. Fill in ASC_ISSUER_ID, ASC_KEY_ID and ASC_PRIVATE_KEY " +
+        "(the .p8 PEM contents) under secrets.prod.mobile in the git-crypt encrypted " +
+        ".github/environments.json (env vars work as a local override). Create the key in " +
+        "App Store Connect > Users and Access > Integrations, role App Manager.",
     );
   }
   const asc = new AscClient(creds);
@@ -163,10 +163,11 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
   const creds = googleCredentials();
   if (!creds) {
     throw new Error(
-      "Google credentials missing. Provide GOOGLE_PLAY_SERVICE_ACCOUNT_JSON (inline) or " +
-        "GOOGLE_PLAY_SERVICE_ACCOUNT_PATH — via env or .github/environments.json " +
-        "(secrets.prod.mobile). Create a service account in Google Cloud, then invite its " +
-        "email in Play Console > Users and permissions with app access.",
+      "Google credentials missing. Fill in GOOGLE_PLAY_SERVICE_ACCOUNT_JSON (the service " +
+        "account JSON as a string) under secrets.prod.mobile in the git-crypt encrypted " +
+        ".github/environments.json (env vars work as a local override). Create a service " +
+        "account in Google Cloud, then invite its email in Play Console > Users and " +
+        "permissions with app access.",
     );
   }
   const play = new PlayClient(creds);
