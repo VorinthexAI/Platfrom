@@ -41,6 +41,7 @@
     "web:lint": "bun run --cwd web/app lint",
     "web:typecheck": "bun run --cwd web/app typecheck",
     "mobile:start": "bun run --cwd mobile/app start",
+    "submit": "bun run mobile/scripts/submit.ts",
     "mobile:typecheck": "bun run --cwd mobile/app typecheck",
     "backend:check": "bun run --cwd backend check",
     "backend:test": "bun run --cwd backend test",
