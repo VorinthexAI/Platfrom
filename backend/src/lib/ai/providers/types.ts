@@ -120,7 +120,7 @@ export const chatToolSchema = z
 
 export type ChatTool = z.infer<typeof chatToolSchema>;
 
-/** Input for `core.chat` / `core.reason` (and any other chat-shaped action). */
+/** Input for `core.ask` / `core.reason` (and any other chat-shaped action). */
 export const chatInputSchema = z
   .object({
     messages: z.array(chatMessageSchema).min(1),

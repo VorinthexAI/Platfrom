@@ -69,9 +69,9 @@ function mockAdapter(id: ProviderId, behavior: (request: ProviderExecuteRequest)
 const chatModel: ModelDefinition = {
   id: 'anthropic.claude-sonnet',
   name: 'Claude Sonnet',
-  actions: ['core.chat', 'core.reason'],
+  actions: ['core.ask', 'core.reason'],
   actionProfiles: {
-    'core.chat': { quality: 0.9, speed: 0.5, costEfficiency: 0.5, reliability: 0.95 },
+    'core.ask': { quality: 0.9, speed: 0.5, costEfficiency: 0.5, reliability: 0.95 },
     'core.reason': { quality: 0.95, speed: 0.4, costEfficiency: 0.4, reliability: 0.95 },
   },
   routes: [
@@ -104,7 +104,7 @@ describe('runAgentTool — the execution pipeline', () => {
     const options = optionsWith({ adapters: { anthropic } });
 
     const { response, run } = await runAgentTool<{ text: string }>(
-      { agentId: 'vorinthex.assistant', toolId: 'chat.reply', organizationId: ORG, input: chatInput },
+      { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput },
       options,
     );
 
@@ -114,13 +114,13 @@ describe('runAgentTool — the execution pipeline', () => {
     // The run records metadata, tokens, timing, steps, and output metadata.
     expect(run.status).toBe('succeeded');
     expect(run.agentId).toBe('vorinthex.assistant');
-    expect(run.toolId).toBe('chat.reply');
-    expect(run.actionId).toBe('core.chat');
+    expect(run.toolId).toBe('ask.answer');
+    expect(run.actionId).toBe('core.ask');
     expect(run.modelId).toBe('anthropic.claude-sonnet');
     expect(run.providerId).toBe('anthropic');
     expect(run.usage).toEqual({ inputTokens: 12, outputTokens: 34, totalTokens: 46 });
     expect(run.steps.map((step) => step.type)).toEqual(['route-selected', 'provider-executed']);
-    expect(run.output).toEqual({ type: 'core.chat', stopReason: 'end_turn', itemCount: null });
+    expect(run.output).toEqual({ type: 'core.ask', stopReason: 'end_turn', itemCount: null });
     expect(run.finishedAt).not.toBeNull();
     expect(run.durationMs).not.toBeNull();
     expect(options.store.get(run.key)).toEqual(run);
@@ -139,7 +139,7 @@ describe('runAgentTool — the execution pipeline', () => {
     const options = optionsWith({ adapters: { anthropic, openrouter } });
 
     const { run } = await runAgentTool(
-      { agentId: 'vorinthex.assistant', toolId: 'chat.reply', organizationId: ORG, input: chatInput },
+      { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput },
       options,
     );
     expect(run.status).toBe('succeeded');
@@ -154,7 +154,7 @@ describe('runAgentTool — the execution pipeline', () => {
     const options = optionsWith({ adapters: { anthropic } });
 
     await expect(
-      runAgentTool({ agentId: 'vorinthex.assistant', toolId: 'chat.reply', organizationId: ORG, input: chatInput }, options),
+      runAgentTool({ agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput }, options),
     ).rejects.toThrow();
 
     const [run] = [...options.store.values()];
@@ -170,15 +170,15 @@ describe('runAgentTool — the execution pipeline', () => {
       name: 'Guardrailed',
       description: 'Scoped to scope_support only',
       skill: 'Support only.',
-      toolIds: ['chat.reply'],
+      toolIds: ['ask.answer'],
       guardrails: [{ scopeId: 'scope_support' }],
     });
     const anthropic = mockAdapter('anthropic', () => ({ text: 'never' }));
     const options = optionsWith({ adapters: { anthropic } });
 
-    // chat.reply is unscoped — denied for a guardrailed agent.
+    // ask.answer is unscoped — denied for a guardrailed agent.
     await expect(
-      runAgentTool({ agentId: 'org.guardrailed', toolId: 'chat.reply', organizationId: ORG, input: chatInput }, options),
+      runAgentTool({ agentId: 'org.guardrailed', toolId: 'ask.answer', organizationId: ORG, input: chatInput }, options),
     ).rejects.toBeInstanceOf(GuardrailViolationError);
     expect(options.store.size).toBe(0);
     expect(anthropic.calls).toHaveLength(0);
@@ -205,7 +205,7 @@ describe('runAgentTool — the execution pipeline', () => {
     });
 
     const { run } = await runAgentTool(
-      { agentId: 'vorinthex.assistant', toolId: 'chat.reply', organizationId: ORG, input: chatInput },
+      { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput },
       options,
     );
     expect(run.providerId).toBe('openrouter');
@@ -215,11 +215,11 @@ describe('runAgentTool — the execution pipeline', () => {
   test('rejects malformed run requests with a typed error', async () => {
     const options = optionsWith({});
     await expect(
-      runAgentTool({ agentId: '', toolId: 'chat.reply', organizationId: ORG, input: {} }, options),
+      runAgentTool({ agentId: '', toolId: 'ask.answer', organizationId: ORG, input: {} }, options),
     ).rejects.toBeInstanceOf(InvalidRunRequestError);
     await expect(
       runAgentTool(
-        { agentId: 'vorinthex.assistant', toolId: 'chat.reply', organizationId: ORG, input: {}, extra: true } as never,
+        { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: {}, extra: true } as never,
         options,
       ),
     ).rejects.toBeInstanceOf(InvalidRunRequestError);
@@ -229,8 +229,8 @@ describe('runAgentTool — the execution pipeline', () => {
 
 describe('output metadata', () => {
   test('derives shape facts only — never content', () => {
-    expect(buildOutputMetadata('core.chat', { text: 'secret content', toolCalls: [], stopReason: 'end_turn' })).toEqual({
-      type: 'core.chat',
+    expect(buildOutputMetadata('core.ask', { text: 'secret content', toolCalls: [], stopReason: 'end_turn' })).toEqual({
+      type: 'core.ask',
       stopReason: 'end_turn',
       itemCount: null,
     });
@@ -239,7 +239,7 @@ describe('output metadata', () => {
       stopReason: null,
       itemCount: 1,
     });
-    const metadata = buildOutputMetadata('core.chat', { text: 'secret content' });
+    const metadata = buildOutputMetadata('core.ask', { text: 'secret content' });
     expect(JSON.stringify(metadata)).not.toContain('secret content');
   });
 });

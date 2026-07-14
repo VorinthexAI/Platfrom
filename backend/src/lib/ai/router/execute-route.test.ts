@@ -41,7 +41,7 @@ function failingAdapter(id: ProviderId, error: ProviderError): MockAdapter {
 
 function chatDecision(overrides: Partial<RouteDecision> = {}): RouteDecision {
   return {
-    actionId: 'core.chat',
+    actionId: 'core.ask',
     organizationId: ORG,
     modelId: 'anthropic.claude-sonnet',
     providerId: 'anthropic',
@@ -213,8 +213,8 @@ describe('executeAction', () => {
   const model: ModelDefinition = {
     id: 'anthropic.claude-sonnet',
     name: 'Claude Sonnet',
-    actions: ['core.chat'],
-    actionProfiles: { 'core.chat': { quality: 0.9, speed: 0.5, costEfficiency: 0.5, reliability: 0.9 } },
+    actions: ['core.ask'],
+    actionProfiles: { 'core.ask': { quality: 0.9, speed: 0.5, costEfficiency: 0.5, reliability: 0.9 } },
     routes: [
       { providerId: 'anthropic', externalModelId: 'claude-sonnet-test', enabled: true },
       { providerId: 'openrouter', externalModelId: 'anthropic/claude-sonnet-test', enabled: true },
@@ -239,7 +239,7 @@ describe('executeAction', () => {
     const openrouter = mockAdapter('openrouter', () => ({ text: 'routed', toolCalls: [], stopReason: 'stop' }));
 
     const response = await executeAction<unknown, { text: string }>(
-      { mode: 'auto', organizationId: ORG, actionId: 'core.chat' },
+      { mode: 'auto', organizationId: ORG, actionId: 'core.ask' },
       { messages: [{ role: 'user', content: 'hello' }] },
       deps({ anthropic, openrouter }),
     );
@@ -248,7 +248,7 @@ describe('executeAction', () => {
     expect(response.providerId).toBe('openrouter');
     expect(anthropic.calls[0]?.externalModelId).toBe('claude-sonnet-test');
     expect(openrouter.calls[0]?.externalModelId).toBe('anthropic/claude-sonnet-test');
-    expect(openrouter.calls[0]?.actionId).toBe('core.chat');
+    expect(openrouter.calls[0]?.actionId).toBe('core.ask');
     expect(openrouter.calls[0]?.organizationId).toBe(ORG);
   });
 });

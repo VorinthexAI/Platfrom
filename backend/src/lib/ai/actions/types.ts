@@ -9,8 +9,8 @@ import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
  * derive from it.
  */
 export const ACTION_IDS = [
+  'core.ask',
   'core.reason',
-  'core.chat',
 
   'web.search',
   'web.deep-research',

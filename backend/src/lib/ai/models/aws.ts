@@ -9,9 +9,9 @@ export const AWS_MODELS = {
   'aws.nova-pro': {
     id: 'aws.nova-pro',
     name: 'Amazon Nova Pro',
-    actions: ['core.chat'],
+    actions: ['core.ask'],
     actionProfiles: {
-      'core.chat': { quality: 0.75, speed: 0.7, costEfficiency: 0.8, reliability: 0.8 },
+      'core.ask': { quality: 0.75, speed: 0.7, costEfficiency: 0.8, reliability: 0.8 },
     },
     routes: [{ providerId: 'aws-bedrock', externalModelId: 'amazon.nova-pro-v1:0', enabled: false }],
     enabled: true,

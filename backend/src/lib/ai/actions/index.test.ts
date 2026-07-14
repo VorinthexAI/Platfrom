@@ -23,7 +23,7 @@ describe('action registry', () => {
   });
 
   test('rejects malformed ids', () => {
-    for (const bad of ['core', 'Core.chat', 'core.Chat', 'core..chat', 'a.b.c', 'core.chat-', '-core.chat', 'core_chat.x!']) {
+    for (const bad of ['core', 'Core.chat', 'core.Chat', 'core..chat', 'a.b.c', 'core.ask-', '-core.ask', 'core_chat.x!']) {
       expect(isValidActionIdFormat(bad)).toBe(false);
     }
   });
@@ -40,7 +40,7 @@ describe('action registry', () => {
     expect(getAction('image.generate').safeToRetry).toBe(false);
     expect(getAction('video.generate').safeToRetry).toBe(false);
     expect(getAction('audio.generate-music').safeToRetry).toBe(false);
-    expect(getAction('core.chat').safeToRetry).toBe(true);
+    expect(getAction('core.ask').safeToRetry).toBe(true);
     expect(getAction('audio.transcribe').safeToRetry).toBe(true);
   });
 });

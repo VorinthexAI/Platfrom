@@ -4,10 +4,10 @@ export const ANTHROPIC_MODELS = {
   'anthropic.claude-sonnet': {
     id: 'anthropic.claude-sonnet',
     name: 'Claude Sonnet',
-    actions: ['core.reason', 'core.chat'],
+    actions: ['core.reason', 'core.ask'],
     actionProfiles: {
       'core.reason': { quality: 0.95, speed: 0.5, costEfficiency: 0.45, reliability: 0.95 },
-      'core.chat': { quality: 0.92, speed: 0.6, costEfficiency: 0.5, reliability: 0.95 },
+      'core.ask': { quality: 0.92, speed: 0.6, costEfficiency: 0.5, reliability: 0.95 },
     },
     routes: [
       { providerId: 'anthropic', externalModelId: 'claude-sonnet-4-5', enabled: true },
@@ -22,10 +22,10 @@ export const ANTHROPIC_MODELS = {
   'anthropic.claude-haiku': {
     id: 'anthropic.claude-haiku',
     name: 'Claude Haiku',
-    actions: ['core.reason', 'core.chat'],
+    actions: ['core.reason', 'core.ask'],
     actionProfiles: {
       'core.reason': { quality: 0.7, speed: 0.9, costEfficiency: 0.9, reliability: 0.95 },
-      'core.chat': { quality: 0.75, speed: 0.92, costEfficiency: 0.92, reliability: 0.95 },
+      'core.ask': { quality: 0.75, speed: 0.92, costEfficiency: 0.92, reliability: 0.95 },
     },
     routes: [
       { providerId: 'anthropic', externalModelId: 'claude-haiku-4-5', enabled: true },
