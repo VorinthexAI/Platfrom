@@ -11,18 +11,19 @@ import { providerIdSchema, type ProviderId } from '@/lib/ai/providers/types';
 export const ORGANIZATION_PROVIDERS_COLLECTION = 'organization_providers';
 
 /**
- * Intentionally minimal document. Per repo convention the public
- * primary-key field is `key` (translated to Arango's `_key` only at the
- * storage boundary). `organizationId` is validated as a non-empty string,
- * not `.cuid2()`, because legacy organization keys predate CUID2.
+ * Intentionally minimal document. Per repo convention the primary-key
+ * field is ALWAYS `key` — application code never reads or writes Arango's
+ * `_key` directly; only the shared base.ts translators touch it. Like the
+ * node schemas, this parses in zod's default strip mode so Arango system
+ * attributes (`_key`/`_id`/`_rev`) drop away silently on read.
+ * `organizationId` is validated as a non-empty string, not `.cuid2()`,
+ * because legacy organization keys predate CUID2.
  */
-export const organizationProviderSchema = z
-  .object({
-    key: z.string().min(1),
-    organizationId: organizationIdSchema,
-    providerId: providerIdSchema,
-  })
-  .strict();
+export const organizationProviderSchema = z.object({
+  key: z.string().min(1),
+  organizationId: organizationIdSchema,
+  providerId: providerIdSchema,
+});
 
 export type OrganizationProvider = z.infer<typeof organizationProviderSchema>;
 

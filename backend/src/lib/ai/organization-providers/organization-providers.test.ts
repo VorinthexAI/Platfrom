@@ -59,13 +59,19 @@ function createFakeDb() {
 }
 
 describe('organization provider schema', () => {
-  test('is intentionally minimal and strict', () => {
+  test('is intentionally minimal — key, organizationId, providerId, nothing else', () => {
     const parsed = organizationProviderSchema.parse({ key: 'org1:openai', organizationId: 'org1', providerId: 'openai' });
     expect(parsed).toEqual({ key: 'org1:openai', organizationId: 'org1', providerId: 'openai' });
-    // No enabled boolean — document existence IS enablement.
-    expect(() =>
-      organizationProviderSchema.parse({ key: 'k', organizationId: 'org1', providerId: 'openai', enabled: true }),
-    ).toThrow();
+    // No enabled boolean — document existence IS enablement. Extra fields
+    // (including Arango's own _key/_id/_rev on read) strip away silently.
+    const stripped = organizationProviderSchema.parse({
+      key: 'k',
+      _key: 'k',
+      organizationId: 'org1',
+      providerId: 'openai',
+      enabled: true,
+    });
+    expect(stripped).toEqual({ key: 'k', organizationId: 'org1', providerId: 'openai' });
   });
 
   test('rejects unknown provider ids', () => {

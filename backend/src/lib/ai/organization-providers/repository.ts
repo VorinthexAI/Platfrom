@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { isArangoNotFoundError, isArangoUniqueConstraintError } from '@/lib/db/base';
+import { isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { organizationIdSchema } from '@/lib/ai/shared/ids';
 import { providerIdSchema, type ProviderId } from '@/lib/ai/providers/types';
 import {
@@ -81,18 +81,19 @@ export function createOrganizationProviderRepository(
     async addProvider(organizationId, providerId) {
       const validOrganizationId = parseOrganizationId(organizationId);
       const validProviderId = parseProviderId(providerId);
-      const document = {
-        _key: organizationProviderKey(validOrganizationId, validProviderId),
+      // Application code only ever handles `key` — the rename to Arango's
+      // `_key` happens exclusively through the shared base.ts translators.
+      const document = organizationProviderSchema.parse({
+        key: organizationProviderKey(validOrganizationId, validProviderId),
         organizationId: validOrganizationId,
         providerId: validProviderId,
-      };
+      });
       try {
         const result = await database
           .collection(ORGANIZATION_PROVIDERS_COLLECTION)
-          .save(document, { returnNew: true });
-        const saved = (result as { new?: Record<string, unknown> }).new ?? document;
-        const { _key, ...rest } = saved as Record<string, unknown> & { _key: string };
-        return organizationProviderSchema.parse({ key: _key, ...rest }) satisfies OrganizationProvider;
+          .save(toArangoDoc({ ...document }), { returnNew: true });
+        const saved = (result as { new?: Record<string, unknown> }).new;
+        return (saved ? organizationProviderSchema.parse(withArangoKey(saved)) : document) satisfies OrganizationProvider;
       } catch (err) {
         if (isArangoUniqueConstraintError(err)) {
           throw new DuplicateOrganizationProviderError(validOrganizationId, validProviderId);
