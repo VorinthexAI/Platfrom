@@ -634,25 +634,28 @@ function PricingFlow() {
         </button>
         <p className="micro-label">Pricing</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-          Plans
+          Monthly Sparks
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">{summary}</p>
-        <div className="mt-4 space-y-1">
+        <div className="mt-5 space-y-2">
           {plans.map((plan) => (
-            <p
+            <div
               key={plan.id}
-              className="flex items-baseline gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-2 text-sm"
+              className="rounded-xl border border-white/8 bg-white/[0.02] px-3.5 py-3"
             >
-              <span className="min-w-0 flex-1 truncate text-[0.82rem] text-silver-50">
+              <p className="text-[0.72rem] tracking-[0.16em] text-silver-400 uppercase">
                 {plan.name}
-              </span>
-              <span className="shrink-0 font-mono text-[0.72rem] text-silver-300 tabular-nums">
-                {plan.monthlySparks.toLocaleString("en-US")} Sparks
-              </span>
-              <span className="shrink-0 font-mono text-[0.72rem] text-silver-50 tabular-nums">
-                ${plan.priceUsd}/mo
-              </span>
-            </p>
+              </p>
+              <div className="mt-1 flex items-baseline justify-between gap-3">
+                <p className="font-display text-xl tracking-[0.04em] text-silver-50 tabular-nums">
+                  {plan.monthlySparks.toLocaleString("en-US")} Sparks
+                </p>
+                <p className="shrink-0 font-mono text-[0.7rem] text-silver-300 tabular-nums">
+                  ${plan.priceUsd}/mo
+                </p>
+              </div>
+              <p className="mt-1 text-xs text-silver-500">{plan.description}</p>
+            </div>
           ))}
         </div>
       </SlideUpCard>
@@ -668,7 +671,7 @@ function PricingFlow() {
           {topUps.name}
         </h3>
         <p className="mt-3 text-sm leading-relaxed text-silver-300">
-          {topUps.description}
+          {topUps.description} {topUps.costTier}.
         </p>
         <div className="mt-4 space-y-1">
           {topUps.packs.map((pack) => (

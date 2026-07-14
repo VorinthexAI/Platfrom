@@ -5,7 +5,7 @@ import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site";
 
 const PRICING_TITLE = "Pricing";
 const PRICING_DESCRIPTION =
-  "Vorinthex AI pricing: Spark plans from $19.99/month, on-demand usage, and instant one-time top-up packs.";
+  "Vorinthex AI pricing: monthly Sparks from $19.99, on-demand usage, and instant one-time top-up packs.";
 
 export const metadata: Metadata = {
   // The root layout template appends `| Vorinthex AI` — bare title here.
@@ -47,11 +47,11 @@ const pricingJsonLd = [
   {
     "@context": "https://schema.org",
     "@type": "OfferCatalog",
-    name: "Vorinthex AI Spark Plans",
+    name: "Vorinthex AI Monthly Sparks",
     url: absoluteUrl("/pricing"),
     itemListElement: plans.map((plan) => ({
       "@type": "Offer",
-      name: `${plan.name} Plan`,
+      name: `${plan.name} Spark Subscription`,
       description: `${plan.description} Includes ${plan.monthlySparks.toLocaleString("en-US")} Sparks per month.`,
       price: plan.priceUsd,
       priceCurrency: "USD",
@@ -93,7 +93,7 @@ export default function PricingPage() {
       <article className="sr-only">
         <h1>{PRICING_TITLE}</h1>
         <p>{summary}</p>
-        <h2>Plans</h2>
+        <h2>Monthly Sparks</h2>
         <ul>
           {plans.map((plan) => (
             <li key={plan.id}>
@@ -103,7 +103,7 @@ export default function PricingPage() {
             </li>
           ))}
         </ul>
-        <p>Plans are billed monthly and carry the lowest cost per Spark.</p>
+        <p>Subscriptions are billed monthly and carry the lowest cost per Spark.</p>
         <h2>{topUps.name}</h2>
         <p>
           {topUps.description} One-time purchase, credited instantly.{" "}
@@ -118,10 +118,7 @@ export default function PricingPage() {
           ))}
         </ul>
         <h2>{onDemand.name}</h2>
-        <p>
-          {onDemand.description} Billed monthly. {onDemand.costTier} than
-          plans.
-        </p>
+        <p>{onDemand.description} Higher cost per Spark than subscriptions.</p>
       </article>
     </>
   );
