@@ -8,7 +8,7 @@ import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
  * `ActionId` type, the zod enum, and the registry integrity checks all
  * derive from it.
  */
-export const ACTION_IDS = [
+export const ACTION_SLUGS = [
   'core.ask',
   'core.reason',
 
@@ -31,9 +31,9 @@ export const ACTION_IDS = [
   'audio.generate-music',
 ] as const;
 
-export type ActionId = (typeof ACTION_IDS)[number];
+export type ActionId = (typeof ACTION_SLUGS)[number];
 
-export const actionIdSchema = z.enum(ACTION_IDS);
+export const actionIdSchema = z.enum(ACTION_SLUGS);
 
 export interface ActionDefinition {
   id: ActionId;

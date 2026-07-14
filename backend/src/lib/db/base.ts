@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
 import { embed } from '@/lib/embed';
@@ -107,8 +107,15 @@ function createPageReader<T>(collectionName: string, schema: z.ZodTypeAny) {
   };
 }
 
-function assertNodeSchemaShape(schema: z.AnyZodObject, embedKeys: readonly string[]) {
-  const shapeKeys = Object.keys(schema.shape);
+function unwrapObjectSchema(schema: z.ZodTypeAny): z.AnyZodObject {
+  let current = schema;
+  while (current instanceof z.ZodEffects) current = current.innerType();
+  if (!(current instanceof z.ZodObject)) throw new Error('Node schemas must resolve to a Zod object.');
+  return current;
+}
+
+function assertNodeSchemaShape(schema: z.ZodTypeAny, embedKeys: readonly string[]) {
+  const shapeKeys = Object.keys(unwrapObjectSchema(schema).shape);
   if (!shapeKeys.includes('key')) {
     throw new Error('Every node schema must declare a "key" field (z.string()) as its primary key — not Arango\'s own "_key".');
   }
@@ -123,7 +130,7 @@ function assertNodeSchemaShape(schema: z.AnyZodObject, embedKeys: readonly strin
 }
 
 export function createNodeHelpers<
-  Schema extends z.AnyZodObject,
+  Schema extends z.ZodTypeAny,
   Keys extends readonly Extract<keyof z.infer<Schema>, string>[] = [],
 >(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys) {
   type T = z.infer<Schema>;
@@ -185,7 +192,7 @@ export function createNodeHelpers<
 }
 
 export function createEdgeHelpers<
-  Schema extends z.AnyZodObject,
+  Schema extends z.ZodTypeAny,
   Keys extends readonly Extract<keyof z.infer<Schema>, string>[] = [],
 >(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys) {
   type T = z.infer<Schema>;

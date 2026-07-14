@@ -1,6 +1,11 @@
 import { join } from 'node:path';
 import { closeDb } from './client';
 import { newId } from '@/lib/ids';
+import { getActionById, getActionBySlug, insertAction, updateAction, type Action } from './actions.node';
+import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
+import { getModelBySlug, insertModel, updateModel, type Model } from './models.node';
+import { getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
+import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getProductByProductId, insertProduct, updateProduct, type Product } from './products.node';
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
@@ -13,6 +18,250 @@ type SeedResult = {
 };
 
 const now = () => new Date().toISOString();
+
+export const SEEDED_ACTIONS = [
+  {
+    key: 'cm9action01vorinthexseed',
+    slug: 'core.ask',
+    name: 'Ask',
+    description: 'Answer a natural-language request within the active agent role and scope.',
+    objective: 'Provide a clear and useful response while respecting skill, guardrails, tools, permissions, and schema.',
+    inputDescription: 'A question, instruction, or conversational message with optional context and runtime metadata.',
+    outputDescription: 'A schema-valid answer with mandatory metadata containing accepted or rejected status, a reason of at most ten words, and a self-assessed score.',
+    handlerKey: 'core.ask',
+    enabled: true,
+  },
+  {
+    key: 'cm9action02vorinthexseed',
+    slug: 'core.reason',
+    name: 'Reason',
+    description: 'Perform deliberate analysis, planning, comparison, evaluation, decomposition, or decision support.',
+    objective: 'Produce a structured conclusion or plan from available context, constraints, evidence, alternatives, and success criteria.',
+    inputDescription: 'A problem, objective, decision, planning request, evaluation target, or structured facts and constraints.',
+    outputDescription: 'A validated recommendation, plan, comparison, decision, or evaluation with mandatory metadata.',
+    handlerKey: 'core.reason',
+    enabled: true,
+  },
+  {
+    key: 'cm9action03vorinthexseed',
+    slug: 'web.search',
+    name: 'Web Search',
+    description: 'Search the public web for relevant pages, documents, sources, products, entities, facts, or current information.',
+    objective: 'Retrieve focused web results for grounded evidence or downstream use.',
+    inputDescription: 'A search query with optional recency, domain, language, region, result count, and content-type constraints.',
+    outputDescription: 'Normalized search results with titles, snippets, source references, and mandatory metadata.',
+    handlerKey: 'web.search',
+    enabled: true,
+  },
+  {
+    key: 'cm9action04vorinthexseed',
+    slug: 'web.deep-research',
+    name: 'Deep Research',
+    description: 'Conduct iterative multi-source web research with synthesis, comparison, contradiction handling, and evidence-based conclusions.',
+    objective: 'Produce a comprehensive and defensible research result with uncertainty and gaps made explicit.',
+    inputDescription: 'A research question or investigation target with optional source, geography, date, depth, and output constraints.',
+    outputDescription: 'A structured research report with findings, sources, caveats, unresolved questions, and mandatory metadata.',
+    handlerKey: 'web.deep-research',
+    enabled: true,
+  },
+  {
+    key: 'cm9action05vorinthexseed',
+    slug: 'image.generate',
+    name: 'Generate Image',
+    description: 'Create one or more new images from text and optional reference assets or brand direction.',
+    objective: 'Generate image output matching the requested subject, composition, style, format, dimensions, and intended use.',
+    inputDescription: 'A detailed image prompt with optional references, aspect ratio, dimensions, quantity, transparency, style, and negative constraints.',
+    outputDescription: 'Generated image artifacts with normalized media metadata and mandatory metadata.',
+    handlerKey: 'image.generate',
+    enabled: true,
+  },
+  {
+    key: 'cm9action06vorinthexseed',
+    slug: 'image.edit',
+    name: 'Edit Image',
+    description: 'Modify an existing image by adding, removing, replacing, restyling, retouching, enhancing, extending, or correcting content.',
+    objective: 'Produce an edited image that preserves required source characteristics while applying requested changes accurately.',
+    inputDescription: 'Source image references, editing instructions, optional masks, regions, dimensions, preservation constraints, and format.',
+    outputDescription: 'Edited image artifacts with normalized media metadata and mandatory metadata.',
+    handlerKey: 'image.edit',
+    enabled: true,
+  },
+  {
+    key: 'cm9action07vorinthexseed',
+    slug: 'image.create-slideshow',
+    name: 'Create Slideshow',
+    description: 'Create a coherent multi-slide visual slideshow from a topic, objective, source material, brand context, and audience.',
+    objective: 'Produce a complete slideshow with logical narrative, consistent design, suitable pacing, and platform-aware content.',
+    inputDescription: 'A topic, goal, source text, audience, platform, slide count, aspect ratio, brand rules, tone, and call to action.',
+    outputDescription: 'An ordered slideshow with slide copy, asset references, layout metadata, narrative flow, and mandatory metadata.',
+    handlerKey: 'image.create-slideshow',
+    enabled: true,
+  },
+  {
+    key: 'cm9action08vorinthexseed',
+    slug: 'video.generate',
+    name: 'Generate Video',
+    description: 'Create a new video from text instructions and optional visual, audio, character, brand, or reference inputs.',
+    objective: 'Generate a video matching the requested subject, motion, timing, composition, style, duration, and publishing context.',
+    inputDescription: 'A video prompt with optional references, aspect ratio, duration, resolution, frame rate, audio, camera, motion, and style constraints.',
+    outputDescription: 'A generated video artifact with normalized metadata, duration, dimensions, previews when available, and mandatory metadata.',
+    handlerKey: 'video.generate',
+    enabled: true,
+  },
+  {
+    key: 'cm9action09vorinthexseed',
+    slug: 'video.edit',
+    name: 'Edit Video',
+    description: 'Modify an existing video by changing content, timing, pacing, visuals, audio, captions, transitions, framing, or production elements.',
+    objective: 'Produce an edited video that preserves required source material while applying requested changes coherently.',
+    inputDescription: 'A source video, editing instructions, optional time ranges, replacement assets, crop, subtitle, audio, brand, and output settings.',
+    outputDescription: 'An edited video artifact with normalized metadata, an edit summary, previews when available, and mandatory metadata.',
+    handlerKey: 'video.edit',
+    enabled: true,
+  },
+  {
+    key: 'cm9action10vorinthexseed',
+    slug: 'video.extend',
+    name: 'Extend Video',
+    description: 'Continue an existing video beyond its current ending while preserving continuity, identity, motion, style, and scene logic.',
+    objective: 'Generate a seamless continuation satisfying the requested direction and duration.',
+    inputDescription: 'A source video, extension duration, continuation prompt, continuity constraints, optional end-frame guidance, audio, and format.',
+    outputDescription: 'An extended video artifact with normalized metadata, extension duration, continuity notes when available, and mandatory metadata.',
+    handlerKey: 'video.extend',
+    enabled: true,
+  },
+  {
+    key: 'cm9action11vorinthexseed',
+    slug: 'video.analyze',
+    name: 'Analyze Video',
+    description: 'Inspect video content including scenes, objects, people, actions, speech, timing, quality, structure, or compliance.',
+    objective: 'Return a grounded structured analysis of the supplied video according to requested dimensions.',
+    inputDescription: 'A video reference with analysis objectives, optional time ranges, categories, questions, quality criteria, and detail level.',
+    outputDescription: 'A structured analysis with observations, timestamps, findings, issues, summaries, and mandatory metadata.',
+    handlerKey: 'video.analyze',
+    enabled: true,
+  },
+  {
+    key: 'cm9action12vorinthexseed',
+    slug: 'video.create-variation',
+    name: 'Create Video Variation',
+    description: 'Create a new variation of an existing video while preserving selected characteristics and changing specified attributes.',
+    objective: 'Produce an alternative version for testing, localization, platform adaptation, targeting, or stylistic exploration.',
+    inputDescription: 'A source video, variation brief, preserved and changed attributes, target audience or platform, duration, ratio, and output settings.',
+    outputDescription: 'A new video variation with normalized metadata, a concise description of changes, and mandatory metadata.',
+    handlerKey: 'video.create-variation',
+    enabled: true,
+  },
+  {
+    key: 'cm9action13vorinthexseed',
+    slug: 'audio.transcribe',
+    name: 'Transcribe Audio',
+    description: 'Convert spoken audio into text with optional speakers, timestamps, languages, sections, or confidence information.',
+    objective: 'Produce an accurate, readable, and structurally useful transcription.',
+    inputDescription: 'An audio or video reference with optional language, diarization, timestamps, formatting, vocabulary, and segmentation preferences.',
+    outputDescription: 'A structured transcript with text, optional speakers, timestamps, language, segments, and mandatory metadata.',
+    handlerKey: 'audio.transcribe',
+    enabled: true,
+  },
+  {
+    key: 'cm9action14vorinthexseed',
+    slug: 'audio.generate-speech',
+    name: 'Generate Speech',
+    description: 'Generate spoken audio from text using a requested voice, tone, pacing, language, pronunciation, and delivery style.',
+    objective: 'Produce natural and intelligible speech matching the requested vocal direction.',
+    inputDescription: 'Text with optional voice identifier, language, tone, pace, emphasis, pronunciation hints, emotion, format, and quality settings.',
+    outputDescription: 'A generated speech artifact with normalized metadata, duration when available, and mandatory metadata.',
+    handlerKey: 'audio.generate-speech',
+    enabled: true,
+  },
+  {
+    key: 'cm9action15vorinthexseed',
+    slug: 'audio.analyze',
+    name: 'Analyze Audio',
+    description: 'Inspect audio for speech, sound events, music, speaker characteristics, sentiment, quality, structure, or compliance.',
+    objective: 'Return a grounded structured interpretation according to requested analytical criteria.',
+    inputDescription: 'An audio reference with an analysis objective, optional time ranges, target properties, categories, quality criteria, and detail level.',
+    outputDescription: 'A structured analysis with observations, timestamps, detected properties, issues, summaries, and mandatory metadata.',
+    handlerKey: 'audio.analyze',
+    enabled: true,
+  },
+  {
+    key: 'cm9action16vorinthexseed',
+    slug: 'audio.generate-music',
+    name: 'Generate Music',
+    description: 'Create original music from a text brief and optional structural, instrumental, stylistic, emotional, or temporal constraints.',
+    objective: 'Generate coherent music matching the requested mood, genre, instrumentation, structure, duration, energy, and use.',
+    inputDescription: 'A music brief with optional genre, mood, instruments, tempo, duration, structure, vocals, references, loop requirement, and format.',
+    outputDescription: 'A generated music artifact with normalized metadata, duration, structural notes when available, and mandatory metadata.',
+    handlerKey: 'audio.generate-music',
+    enabled: true,
+  },
+] as const;
+
+export const SEEDED_PROVIDERS = [
+  {
+    key: 'cmrl6mtn60005a1b23aushlt0',
+    slug: 'openai',
+    name: 'OpenAI',
+    description: 'Provides language, reasoning, image, audio, and multimodal AI models through OpenAI APIs.',
+    supportedUseCases: 'Conversational AI, reasoning, structured outputs, image generation, audio generation, transcription, and multimodal workflows.',
+    handlerKey: 'openai',
+    enabled: true,
+  },
+] as const;
+
+export const SEEDED_MODELS = [
+  {
+    key: 'cmrl6mtn60001a1b2hmukitfl',
+    slug: 'openai.gpt-5.4-mini',
+    name: 'GPT-5.4 Mini',
+    description: 'A balanced language model optimized for high-quality reasoning, conversations, structured outputs, and agent execution.',
+    supportedUseCases: 'Conversational AI, reasoning, planning, structured outputs, coding, analysis, research, and general-purpose agent workloads.',
+    enabled: true,
+  },
+  {
+    key: 'cmrl6mtn60002a1b2ixo6nudr',
+    slug: 'openai.gpt-5.4-nano',
+    name: 'GPT-5.4 Nano',
+    description: 'A lightweight language model optimized for fast execution, low latency, and inexpensive agent operations.',
+    supportedUseCases: 'Classification, routing, validation, metadata generation, lightweight reasoning, structured outputs, and low-cost agent workflows.',
+    enabled: true,
+  },
+] as const;
+
+export const SEEDED_MODEL_ACTIONS = [
+  {
+    key: 'cmrl7b6gc0001e1c5az7x8wqf',
+    modelSlug: 'openai.gpt-5.4-nano',
+    actionSlug: 'core.ask',
+    priority: 100,
+    enabled: true,
+  },
+  {
+    key: 'cmrl7b6gc0002e1c5b8m9ytkl',
+    modelSlug: 'openai.gpt-5.4-mini',
+    actionSlug: 'core.reason',
+    priority: 100,
+    enabled: true,
+  },
+] as const;
+
+export const SEEDED_MODEL_PROVIDERS = [
+  {
+    key: 'cmrl6mtn60003a1b248h6bnwj',
+    modelSlug: 'openai.gpt-5.4-mini',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-5.4-mini',
+    enabled: true,
+  },
+  {
+    key: 'cmrl6mtn60004a1b22r2z407l',
+    modelSlug: 'openai.gpt-5.4-nano',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-5.4-nano',
+    enabled: true,
+  },
+] as const;
 
 export const SEEDED_PRODUCTS = [
   {
@@ -108,6 +357,116 @@ const ORCHESTRATORS_SOURCE_DIR = join(import.meta.dir, '../../../../scripts/orch
 
 function loadOrchestratorSkill(dir: string): Promise<string> {
   return Bun.file(join(ORCHESTRATORS_SOURCE_DIR, dir, 'SKILL.md')).text();
+}
+
+async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
+  const existing = await getActionById(seed.key);
+  if (!existing) {
+    await insertAction({
+      ...seed,
+      createdAt: now(),
+      updatedAt: now(),
+    });
+    return { collection: 'actions', key: seed.key, status: 'created' };
+  }
+
+  const patch: Partial<Omit<Action, 'key' | 'embedding' | 'createdAt'>> = {
+    slug: seed.slug,
+    name: seed.name,
+    description: seed.description,
+    objective: seed.objective,
+    inputDescription: seed.inputDescription,
+    outputDescription: seed.outputDescription,
+    handlerKey: seed.handlerKey,
+    enabled: seed.enabled,
+    updatedAt: now(),
+  };
+  await updateAction(existing.key, patch);
+  return { collection: 'actions', key: existing.key, status: 'updated' };
+}
+
+async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult> {
+  const existing = await getProviderBySlug(seed.slug);
+  if (!existing) {
+    await insertProvider(seed);
+    return { collection: 'providers', key: seed.key, status: 'created' };
+  }
+
+  const patch: Partial<Omit<Provider, 'key' | 'embedding'>> = {
+    name: seed.name,
+    description: seed.description,
+    supportedUseCases: seed.supportedUseCases,
+    handlerKey: seed.handlerKey,
+    enabled: seed.enabled,
+  };
+  await updateProvider(existing.key, patch);
+  return { collection: 'providers', key: existing.key, status: 'updated' };
+}
+
+async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult> {
+  const existing = await getModelBySlug(seed.slug);
+  if (!existing) {
+    await insertModel(seed);
+    return { collection: 'models', key: seed.key, status: 'created' };
+  }
+
+  const patch: Partial<Omit<Model, 'key' | 'embedding'>> = {
+    name: seed.name,
+    description: seed.description,
+    supportedUseCases: seed.supportedUseCases,
+    enabled: seed.enabled,
+  };
+  await updateModel(existing.key, patch);
+  return { collection: 'models', key: existing.key, status: 'updated' };
+}
+
+async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult> {
+  const parsed = modelActionSeedSchema.parse(seed);
+  const model = await getModelBySlug(parsed.modelSlug);
+  if (!model) throw new Error(`Seed model not found for modelAction: ${parsed.modelSlug}`);
+  const action = await getActionBySlug(parsed.actionSlug);
+  if (!action) throw new Error(`Seed action not found for modelAction: ${parsed.actionSlug}`);
+
+  const existing = await getModelActionByPair(model.key, action.key);
+  if (!existing) {
+    await insertModelAction({
+      key: parsed.key,
+      modelKey: model.key,
+      actionKey: action.key,
+      priority: parsed.priority,
+      enabled: parsed.enabled,
+    });
+    return { collection: 'modelActions', key: parsed.key, status: 'created' };
+  }
+
+  await updateModelAction(existing.key, { priority: parsed.priority, enabled: parsed.enabled });
+  return { collection: 'modelActions', key: existing.key, status: 'updated' };
+}
+
+async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult> {
+  const parsed = modelProviderSeedSchema.parse(seed);
+  const model = await getModelBySlug(parsed.modelSlug);
+  if (!model) throw new Error(`Seed model not found for modelProvider: ${parsed.modelSlug}`);
+  const provider = await getProviderBySlug(parsed.providerSlug);
+  if (!provider) throw new Error(`Seed provider not found for modelProvider: ${parsed.providerSlug}`);
+
+  const existing = await getModelProviderByPair(model.key, provider.key);
+  if (!existing) {
+    await insertModelProvider({
+      key: parsed.key,
+      modelKey: model.key,
+      providerKey: provider.key,
+      providerModelId: parsed.providerModelId,
+      enabled: parsed.enabled,
+    });
+    return { collection: 'modelProviders', key: parsed.key, status: 'created' };
+  }
+
+  await updateModelProvider(existing.key, {
+    providerModelId: parsed.providerModelId,
+    enabled: parsed.enabled,
+  });
+  return { collection: 'modelProviders', key: existing.key, status: 'updated' };
 }
 
 async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise<SeedResult> {
@@ -220,6 +579,26 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
+
+  for (const action of SEEDED_ACTIONS) {
+    results.push(await upsertSeedAction(action));
+  }
+
+  for (const provider of SEEDED_PROVIDERS) {
+    results.push(await upsertSeedProvider(provider));
+  }
+
+  for (const model of SEEDED_MODELS) {
+    results.push(await upsertSeedModel(model));
+  }
+
+  for (const modelAction of SEEDED_MODEL_ACTIONS) {
+    results.push(await upsertSeedModelAction(modelAction));
+  }
+
+  for (const modelProvider of SEEDED_MODEL_PROVIDERS) {
+    results.push(await upsertSeedModelProvider(modelProvider));
+  }
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
 

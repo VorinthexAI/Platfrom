@@ -22,7 +22,7 @@ function validateOrganizationId(organizationId: string): string {
 
 /**
  * Provider ids arrive from clients here — they are ALWAYS validated
- * against `PROVIDER_IDS` before touching the database; a client can never
+ * against `PROVIDER_SLUGS` before touching the database; a client can never
  * enable (or query) a provider the platform does not know.
  */
 function validateProviderId(providerId: string): ProviderId {

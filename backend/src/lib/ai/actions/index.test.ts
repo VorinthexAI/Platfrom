@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { ACTION_IDS, ACTION_REGISTRY, assertActionRegistryIntegrity, getAction } from './index';
+import { ACTION_SLUGS, ACTION_REGISTRY, assertActionRegistryIntegrity, getAction } from './index';
 import { actionDefinitionSchema, isValidActionIdFormat } from './types';
 
 describe('action registry', () => {
@@ -7,17 +7,17 @@ describe('action registry', () => {
     expect(() => assertActionRegistryIntegrity()).not.toThrow();
   });
 
-  test('contains every ACTION_IDS entry and nothing else', () => {
+  test('contains every ACTION_SLUGS entry and nothing else', () => {
     const registryKeys = Object.keys(ACTION_REGISTRY).sort();
-    expect(registryKeys).toEqual([...ACTION_IDS].sort());
+    expect(registryKeys).toEqual([...ACTION_SLUGS].sort());
   });
 
   test('has no duplicate action ids', () => {
-    expect(new Set(ACTION_IDS).size).toBe(ACTION_IDS.length);
+    expect(new Set(ACTION_SLUGS).size).toBe(ACTION_SLUGS.length);
   });
 
   test('every id follows <domain>.<action> dot notation', () => {
-    for (const id of ACTION_IDS) {
+    for (const id of ACTION_SLUGS) {
       expect(isValidActionIdFormat(id)).toBe(true);
     }
   });

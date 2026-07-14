@@ -38,7 +38,7 @@ export interface CandidateGenerationContext {
  */
 export function generateCandidates(request: RouteRequest, context: CandidateGenerationContext): RouteCandidate[] {
   const { actionId, organizationId } = request;
-  // The request schema already constrains actionId to ACTION_IDS; this
+  // The request schema already constrains actionId to ACTION_SLUGS; this
   // registry check keeps the invariant when callers bypass parsing.
   if (!(actionId in ACTION_REGISTRY)) {
     throw new NoEligibleRouteError(actionId, 'action is not registered');

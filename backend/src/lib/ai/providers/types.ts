@@ -8,7 +8,7 @@ import type { TokenUsage } from '@/lib/ai/shared/usage';
  * provider categories (direct/cloud/gateway/...) — from the Vorinthex
  * runtime perspective all of these are simply providers.
  */
-export const PROVIDER_IDS = [
+export const PROVIDER_SLUGS = [
   'openai',
   'anthropic',
   'xai',
@@ -18,9 +18,11 @@ export const PROVIDER_IDS = [
   'openrouter',
 ] as const;
 
-export type ProviderId = (typeof PROVIDER_IDS)[number];
+export type ProviderSlug = (typeof PROVIDER_SLUGS)[number];
+export type ProviderId = ProviderSlug;
 
-export const providerIdSchema = z.enum(PROVIDER_IDS);
+export const providerSlugSchema = z.enum(PROVIDER_SLUGS);
+export const providerIdSchema = providerSlugSchema;
 
 /**
  * Human-readable display name per provider. Static (unlike the adapter

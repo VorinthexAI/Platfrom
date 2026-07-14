@@ -18,9 +18,9 @@ the `agentRuns` ledger.
 | Module | Owns |
 | --- | --- |
 | `shared/` | id/dot-notation helpers, normalized token usage, `AiError` base + `Result` |
-| `actions/` | `ACTION_IDS` (`<domain>.<action>`), `ACTION_REGISTRY`, per-action `safeToRetry` |
-| `providers/` | `PROVIDER_IDS`, the `ProviderAdapter` contract, one module per provider (auth config, client construction, request transform, response + error + usage normalization, streaming where available), `PROVIDER_FACTORIES` |
-| `models/` | `MODEL_IDS` (stable internal ids), `MODEL_REGISTRY` — per-model actions, per-ACTION routing profiles (quality/speed/costEfficiency/reliability ∈ [0,1]), and routes (one model × one provider each, with the provider-specific external model id) |
+| `actions/` | `ACTION_SLUGS` (`<domain>.<action>`), `ACTION_REGISTRY`, per-action `safeToRetry` |
+| `providers/` | `PROVIDER_SLUGS`, the `ProviderAdapter` contract, one module per provider (auth config, client construction, request transform, response + error + usage normalization, streaming where available), `PROVIDER_REGISTRY` |
+| `models/` | `MODEL_SLUGS` (stable internal slugs), `MODEL_REGISTRY` — runtime definitions mirrored by the persisted models, modelActions, and modelProviders collections |
 | `organization-providers/` | the `organizationProviders` ArangoDB allow-list: document existence = enabled, no `enabled` boolean, unique persistent index on `(organizationId, providerId)` |
 | `router/` | request schemas (`auto` / `model` / `fixed`), candidate generation, centralized strategy weights + deterministic scoring/tie-breaking, `selectRoute`, `executeAction` with organization-safe fallbacks |
 | `organization-scopes/` | the `organizationScopes` collection: minimal `{key (CUID2), name}` nodes with a unique name index — the unit guardrails point at |

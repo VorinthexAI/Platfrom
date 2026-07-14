@@ -1,19 +1,13 @@
-import { PROVIDER_IDS } from '@/lib/ai/providers/types';
-import { ACTION_IDS, actionIdSchema, type ActionId } from '@/lib/ai/actions/types';
-import { isDotNotationId } from '@/lib/ai/shared/ids';
+import { PROVIDER_SLUGS } from '@/lib/ai/providers/types';
+import { ACTION_SLUGS, actionIdSchema, type ActionId } from '@/lib/ai/actions/types';
 import { AiError } from '@/lib/ai/shared/result';
-import { ANTHROPIC_MODELS } from './anthropic';
-import { AWS_MODELS } from './aws';
-import { AZURE_MODELS } from './azure';
-import { GOOGLE_MODELS } from './google';
 import { OPENAI_MODELS } from './openai';
-import { OPENROUTER_MODELS } from './openrouter';
-import { XAI_MODELS } from './xai';
 import {
-  MODEL_IDS,
+  MODEL_SLUGS,
   modelActionProfileSchema,
   modelDefinitionSchema,
   modelIdSchema,
+  modelSlugSchema,
   modelRouteSchema,
   type ModelActionProfile,
   type ModelDefinition,
@@ -22,12 +16,14 @@ import {
 } from './types';
 
 export {
-  MODEL_IDS,
+  MODEL_SLUGS,
   modelIdSchema,
+  modelSlugSchema,
   modelRouteSchema,
   modelActionProfileSchema,
   modelDefinitionSchema,
   type ModelId,
+  type ModelSlug,
   type ModelRoute,
   type ModelActionProfile,
   type ModelDefinition,
@@ -42,12 +38,6 @@ export { OPENROUTER_MODELS } from './openrouter';
 
 export const MODEL_REGISTRY = {
   ...OPENAI_MODELS,
-  ...ANTHROPIC_MODELS,
-  ...XAI_MODELS,
-  ...GOOGLE_MODELS,
-  ...AZURE_MODELS,
-  ...AWS_MODELS,
-  ...OPENROUTER_MODELS,
 } satisfies Record<ModelId, ModelDefinition>;
 
 export function getModel(modelId: ModelId): ModelDefinition {
@@ -66,23 +56,23 @@ export function getRoutesForModel(modelId: ModelId): readonly ModelRoute[] {
 }
 
 /**
- * Verifies registry consistency: every MODEL_IDS entry present, no unknown
+ * Verifies registry consistency: every MODEL_SLUGS entry present, no unknown
  * keys, dot notation, known providers/actions on every route, an action
  * profile for every claimed action, all scores within [0, 1].
  */
 export function assertModelRegistryIntegrity(): void {
-  const knownProviders = new Set<string>(PROVIDER_IDS);
-  const knownActions = new Set<string>(ACTION_IDS);
+  const knownProviders = new Set<string>(PROVIDER_SLUGS);
+  const knownActions = new Set<string>(ACTION_SLUGS);
 
   const seen = new Set<string>();
-  for (const id of MODEL_IDS) {
-    if (seen.has(id)) throw new Error(`Duplicate model id in MODEL_IDS: ${id}`);
+  for (const id of MODEL_SLUGS) {
+    if (seen.has(id)) throw new Error(`Duplicate model slug in MODEL_SLUGS: ${id}`);
     seen.add(id);
-    if (!isDotNotationId(id)) throw new Error(`Model id does not follow <vendor>.<model> dot notation: ${id}`);
+    if (!modelSlugSchema.safeParse(id).success) throw new Error(`Invalid model slug: ${id}`);
   }
 
   const registryKeys = Object.keys(MODEL_REGISTRY);
-  for (const id of MODEL_IDS) {
+  for (const id of MODEL_SLUGS) {
     if (!registryKeys.includes(id)) throw new Error(`MODEL_REGISTRY is missing model: ${id}`);
   }
   for (const key of registryKeys) {

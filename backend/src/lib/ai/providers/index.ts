@@ -8,7 +8,8 @@ import { xaiProviderFactory } from './xai';
 import type { ProviderAdapter, ProviderFactory, ProviderId } from './types';
 
 export {
-  PROVIDER_IDS,
+  PROVIDER_SLUGS,
+  providerSlugSchema,
   providerIdSchema,
   providerExecuteRequestSchema,
   chatInputSchema,
@@ -19,6 +20,7 @@ export {
   speechInputSchema,
   resolveRequestSignal,
   type ProviderId,
+  type ProviderSlug,
   type ProviderAdapter,
   type ProviderFactory,
   type ProviderExecuteRequest,
@@ -69,7 +71,7 @@ export { createOpenRouterProvider, openRouterProviderConfigSchema, openRouterPro
  * adapters) because secrets load at runtime — no external SDK client is
  * constructed at module import time.
  */
-export const PROVIDER_FACTORIES: Record<ProviderId, ProviderFactory> = {
+export const PROVIDER_REGISTRY: Record<ProviderId, ProviderFactory> = {
   openai: openAIProviderFactory,
   anthropic: anthropicProviderFactory,
   xai: xaiProviderFactory,
@@ -88,7 +90,7 @@ export function createProviderAdaptersFromEnv(
   env: Record<string, string | undefined> = process.env,
 ): Partial<Record<ProviderId, ProviderAdapter>> {
   const adapters: Partial<Record<ProviderId, ProviderAdapter>> = {};
-  for (const factory of Object.values(PROVIDER_FACTORIES)) {
+  for (const factory of Object.values(PROVIDER_REGISTRY)) {
     const adapter = factory.fromEnv(env);
     if (adapter) adapters[factory.id] = adapter;
   }

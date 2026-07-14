@@ -132,6 +132,43 @@ async function backfillCollectionEmbeddings(targetDb: Database, spec: Collection
 
 const collections: CollectionSpec[] = [
   {
+    name: 'actions',
+    embedKeys: ['name', 'description', 'objective', 'inputDescription', 'outputDescription'],
+    indexes: [
+      { fields: ['slug'], unique: true },
+      { fields: ['handlerKey'] },
+      { fields: ['enabled'] },
+    ],
+  },
+  {
+    name: 'providers',
+    embedKeys: ['name', 'description', 'supportedUseCases'],
+    indexes: [
+      { fields: ['slug'], unique: true },
+      { fields: ['handlerKey'] },
+      { fields: ['enabled'] },
+    ],
+  },
+  {
+    name: 'models',
+    embedKeys: ['name', 'description', 'supportedUseCases'],
+    indexes: [{ fields: ['slug'], unique: true }],
+  },
+  {
+    name: 'modelActions',
+    indexes: [
+      { fields: ['modelKey', 'actionKey'], unique: true },
+      { fields: ['actionKey', 'enabled', 'priority'] },
+    ],
+  },
+  {
+    name: 'modelProviders',
+    indexes: [
+      { fields: ['modelKey', 'providerKey'], unique: true },
+      { fields: ['providerKey', 'enabled'] },
+    ],
+  },
+  {
     name: 'users',
     embedKeys: ['email', 'name'],
     indexes: [
