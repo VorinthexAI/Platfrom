@@ -59,9 +59,20 @@ function createFakeDb() {
 }
 
 describe('organization provider schema', () => {
-  test('is intentionally minimal — key, organizationId, providerId, nothing else', () => {
-    const parsed = organizationProviderSchema.parse({ key: 'org1:openai', organizationId: 'org1', providerId: 'openai' });
-    expect(parsed).toEqual({ key: 'org1:openai', organizationId: 'org1', providerId: 'openai' });
+  test('carries key, organizationId, providerId, display name, and embedding — nothing else', () => {
+    const parsed = organizationProviderSchema.parse({
+      key: 'org1:openai',
+      organizationId: 'org1',
+      providerId: 'openai',
+      name: 'OpenAI',
+    });
+    expect(parsed).toEqual({
+      key: 'org1:openai',
+      organizationId: 'org1',
+      providerId: 'openai',
+      name: 'OpenAI',
+      embedding: [],
+    });
     // No enabled boolean — document existence IS enablement. Extra fields
     // (including Arango's own _key/_id/_rev on read) strip away silently.
     const stripped = organizationProviderSchema.parse({
@@ -69,9 +80,10 @@ describe('organization provider schema', () => {
       _key: 'k',
       organizationId: 'org1',
       providerId: 'openai',
+      name: 'OpenAI',
       enabled: true,
     });
-    expect(stripped).toEqual({ key: 'k', organizationId: 'org1', providerId: 'openai' });
+    expect(stripped).toEqual({ key: 'k', organizationId: 'org1', providerId: 'openai', name: 'OpenAI', embedding: [] });
   });
 
   test('rejects unknown provider ids', () => {
@@ -87,7 +99,13 @@ describe('organization provider repository', () => {
     const repository = createOrganizationProviderRepository(fake);
 
     const added = await repository.addProvider('org1', 'openai');
-    expect(added).toEqual({ key: organizationProviderKey('org1', 'openai'), organizationId: 'org1', providerId: 'openai' });
+    expect(added).toEqual({
+      key: organizationProviderKey('org1', 'openai'),
+      organizationId: 'org1',
+      providerId: 'openai',
+      name: 'OpenAI',
+      embedding: [],
+    });
     await repository.addProvider('org1', 'anthropic');
     await repository.addProvider('org2', 'xai');
 

@@ -24,6 +24,10 @@ export const organizationProviderSchema = z.object({
   key: z.string().min(1),
   organizationId: organizationIdSchema,
   providerId: providerIdSchema,
+  /** Human-readable provider name (PROVIDER_NAMES) — the embedded text. */
+  name: z.string().min(1),
+  /** Backfilled by arango-migrate from embedKeys; ids are never embedded. */
+  embedding: z.array(z.number()).default([]),
 });
 
 export type OrganizationProvider = z.infer<typeof organizationProviderSchema>;

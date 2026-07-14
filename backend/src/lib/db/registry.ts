@@ -8,9 +8,6 @@ import { getAllEventsChunked, listEventsPage, upsertEventByKey } from './events.
 import { getAllIntelligenceFragmentsChunked, listIntelligenceFragmentsPage, upsertIntelligenceFragmentByKey } from './intelligence-fragments.node';
 import { getAllMindCapabilitiesChunked, listMindCapabilitiesPage, upsertMindCapabilityByKey } from './mind-capabilities.node';
 import { getAllMindsChunked, listMindsPage, upsertMindByKey } from './minds.node';
-import { getAllOutputAnalyticsChunked, listOutputAnalyticsPage, upsertOutputAnalyticsByKey } from './output-analytics.node';
-import { getAllOutputRelationsChunked, listOutputRelationsPage, upsertOutputRelationByKey } from './output-relations.node';
-import { getAllOutputsChunked, listOutputsPage, upsertOutput } from './outputs.node';
 import { getAllOrchestratorsChunked, listOrchestratorsPage, upsertOrchestratorByKey } from './orchestrators.node';
 import { getAllUserOrganizationsChunked, listUserOrganizationsPage, upsertUserOrganizationByKey } from './user-organization.node';
 import { getAllOrganizationsChunked, listOrganizationsPage, upsertOrganization } from './organizations.node';
@@ -53,9 +50,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   intelligenceFragments: { listPage: listIntelligenceFragmentsPage, getAllChunked: getAllIntelligenceFragmentsChunked, upsertByKey: upsertIntelligenceFragmentByKey },
   mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },
   minds: { listPage: listMindsPage, getAllChunked: getAllMindsChunked, upsertByKey: upsertMindByKey },
-  outputAnalytics: { listPage: listOutputAnalyticsPage, getAllChunked: getAllOutputAnalyticsChunked, upsertByKey: upsertOutputAnalyticsByKey },
-  outputRelations: { listPage: listOutputRelationsPage, getAllChunked: getAllOutputRelationsChunked, upsertByKey: upsertOutputRelationByKey },
-  outputs: { listPage: listOutputsPage, getAllChunked: getAllOutputsChunked, upsertByKey: upsertOutput },
   orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked, upsertByKey: upsertOrchestratorByKey },
   organizations: { listPage: listOrganizationsPage, getAllChunked: getAllOrganizationsChunked, upsertByKey: upsertOrganization },
   paymentCheckouts: { listPage: listPaymentCheckoutsPage, getAllChunked: getAllPaymentCheckoutsChunked, upsertByKey: upsertPaymentCheckoutByKey },

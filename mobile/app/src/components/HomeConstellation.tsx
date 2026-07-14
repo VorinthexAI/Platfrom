@@ -7,6 +7,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as THREE from "three";
 import { ChevronLeftIcon } from "@vorinthex/shared/ui/icons-mobile";
@@ -18,9 +19,10 @@ import {
 import { CapabilityDrawer } from "@/components/CapabilityDrawer";
 import {
   capabilityPositions,
-  clampSystemPitch,
   galaxyCamera,
-  systemRotation,
+  SYSTEM_PITCH_LIMIT,
+  systemPitch,
+  systemYaw,
 } from "@/components/galaxy/galaxy-refs";
 import { GalaxyScene } from "@/components/galaxy/GalaxyScene";
 import { InteriorEmblem } from "@/components/InteriorEmblem";
@@ -30,13 +32,16 @@ import {
   type Capability,
   type CapabilitySlug,
 } from "@/data/registry";
+import { useAppAudio } from "@/lib/app-audio";
 import { useGalaxyStore } from "@/state/galaxy";
 
 const CAROUSEL_OVERLAP = 30;
-/** Full-width horizontal swipe spins the system a bit more than half a turn. */
-const YAW_PER_WIDTH = Math.PI * 1.15;
+/** Full-width horizontal swipe spins the system well past half a turn. */
+const YAW_PER_WIDTH = Math.PI * 1.35;
 /** Full-height vertical swipe covers the whole tilt range. */
-const PITCH_PER_HEIGHT = 2.2;
+const PITCH_PER_HEIGHT = 2.6;
+/** How much of the release velocity carries on as momentum. */
+const FLING_CARRY = 0.14;
 /** Screen-space radius (dp) a tap may land from a planet's center. */
 const PLANET_TAP_RADIUS = 44;
 
@@ -103,6 +108,22 @@ export function HomeConstellation({
     return () => subscription.remove();
   }, [exit, phase]);
 
+  // Arriving inside a biome auto-plays its briefing (over the still-running
+  // soundtrack); returning to orbit lets it go quiet again. Warping biome
+  // to biome re-fires with the new target. Depends ONLY on the transition —
+  // going through a ref keeps a naturally-finished briefing from
+  // restarting itself.
+  const audio = useAppAudio();
+  const audioRef = useRef(audio);
+  audioRef.current = audio;
+  useEffect(() => {
+    if (phase === "inside" && targetSlug) {
+      audioRef.current.playBriefing(targetSlug);
+    } else if (phase === "overview") {
+      audioRef.current.stopBriefing();
+    }
+  }, [phase, targetSlug]);
+
   const selected = capabilities[selectedIndex];
   const targetCapability =
     capabilities.find((capability) => capability.slug === targetSlug) ?? null;
@@ -142,38 +163,57 @@ export function HomeConstellation({
     fieldWidth,
     select,
   };
-  const panStartRef = useRef({ yaw: 0, pitch: 0 });
+
+  // UI-thread mirrors for the pan worklet — it must never hop to the JS
+  // thread (that queue is busy rendering frames, and hopping made swipes
+  // feel dead unless they were slow and axis-aligned).
+  const panEnabled = useSharedValue(phase === "overview" ? 1 : 0);
+  const fieldSize = useSharedValue({ width: fieldWidth, height: fieldHeightNow });
+  const panStartYaw = useSharedValue(0);
+  const panStartPitch = useSharedValue(0);
+  useEffect(() => {
+    panEnabled.value = phase === "overview" ? 1 : 0;
+  }, [panEnabled, phase]);
+  useEffect(() => {
+    fieldSize.value = { width: fieldWidth, height: fieldHeightNow };
+  }, [fieldHeightNow, fieldSize, fieldWidth]);
 
   const fieldGesture = useMemo(() => {
+    // Pure worklet pan: every event lands on the UI thread and writes the
+    // rotation targets directly — any direction, any speed, no waiting on
+    // the JS thread. minDistance stays tiny so a wild diagonal scribble
+    // activates instantly (taps still win the race on quick release).
     const pan = Gesture.Pan()
-      .runOnJS(true)
-      .minDistance(10)
+      .minDistance(6)
       .onStart(() => {
-        panStartRef.current = {
-          yaw: systemRotation.yaw,
-          pitch: systemRotation.pitch,
-        };
+        panStartYaw.value = systemYaw.value;
+        panStartPitch.value = systemPitch.value;
       })
       .onChange((event) => {
-        if (useGalaxyStore.getState().phase !== "overview") return;
-        const state = gestureStateRef.current;
-        systemRotation.yaw =
-          panStartRef.current.yaw +
-          (event.translationX / state.fieldWidth) * YAW_PER_WIDTH;
-        systemRotation.pitch = clampSystemPitch(
-          panStartRef.current.pitch +
-            (event.translationY / state.fieldHeight) * PITCH_PER_HEIGHT,
+        if (!panEnabled.value) return;
+        const size = fieldSize.value;
+        systemYaw.value =
+          panStartYaw.value + (event.translationX / size.width) * YAW_PER_WIDTH;
+        const pitch =
+          panStartPitch.value +
+          (event.translationY / size.height) * PITCH_PER_HEIGHT;
+        systemPitch.value = Math.max(
+          -SYSTEM_PITCH_LIMIT,
+          Math.min(SYSTEM_PITCH_LIMIT, pitch),
         );
       })
       .onEnd((event) => {
-        if (useGalaxyStore.getState().phase !== "overview") return;
-        const state = gestureStateRef.current;
-        // A little momentum: the fling keeps carrying, the rig damps it out.
-        systemRotation.yaw +=
-          (event.velocityX / state.fieldWidth) * YAW_PER_WIDTH * 0.12;
-        systemRotation.pitch = clampSystemPitch(
-          systemRotation.pitch +
-            (event.velocityY / state.fieldHeight) * PITCH_PER_HEIGHT * 0.12,
+        if (!panEnabled.value) return;
+        const size = fieldSize.value;
+        // Momentum: the fling keeps carrying, the rig damps it out.
+        systemYaw.value +=
+          (event.velocityX / size.width) * YAW_PER_WIDTH * FLING_CARRY;
+        const pitch =
+          systemPitch.value +
+          (event.velocityY / size.height) * PITCH_PER_HEIGHT * FLING_CARRY;
+        systemPitch.value = Math.max(
+          -SYSTEM_PITCH_LIMIT,
+          Math.min(SYSTEM_PITCH_LIMIT, pitch),
         );
       });
 

@@ -19,6 +19,8 @@ export const ORGANIZATION_SCOPES_COLLECTION = 'organizationScopes';
 export const organizationScopeSchema = z.object({
   key: z.string().min(1),
   name: z.string().min(1),
+  /** Backfilled by arango-migrate from embedKeys (the scope name). */
+  embedding: z.array(z.number()).default([]),
 });
 
 export type OrganizationScope = z.infer<typeof organizationScopeSchema>;

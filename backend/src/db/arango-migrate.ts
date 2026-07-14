@@ -6,6 +6,7 @@ import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
 import { ensureOrganizationScopesCollection } from '../lib/ai/organization-scopes/indexes';
 import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
+import { PROVIDER_NAMES } from '../lib/ai/providers/types';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -215,9 +216,6 @@ const collections: CollectionSpec[] = [
     embedKeys: ['belongsTo', 'slug'],
     indexes: [{ fields: ['slug', 'createdAt'] }, { fields: ['belongsTo', 'sourceId', 'createdAt'] }, { fields: ['userId', 'createdAt'] }],
   },
-  { name: 'outputs', embedKeys: ['type'], indexes: [{ fields: ['type', 'createdAt'] }] },
-  { name: 'outputRelations', embedKeys: ['relationType'], indexes: [{ fields: ['parentOutputId'] }, { fields: ['childOutputId'] }] },
-  { name: 'outputAnalytics', indexes: [{ fields: ['outputId', 'snapshotAt'] }] },
   {
     name: 'organizations',
     embedKeys: ['name', 'slug', 'description'],
@@ -276,6 +274,17 @@ const collections: CollectionSpec[] = [
       { fields: ['createdAt'] },
     ],
   },
+  // AI framework nodes. Creation + read-path indexes are owned by the
+  // ensure*Collection modules under src/lib/ai (called from main below);
+  // these entries exist so the generic embedding backfill covers them.
+  // Embedding policy: only human text is embedded — ids, enums, and
+  // timestamps are queryable with plain filters and are never embed text.
+  { name: 'organizationScopes', embedKeys: ['name'] },
+  { name: 'organizationProviders', embedKeys: ['name'] },
+  // Every top-level agentRuns field is an id/enum/timestamp, so no
+  // embedKeys: the ledger keeps a normalized empty embedding until a
+  // prose field (e.g. a run summary) exists to embed.
+  { name: 'agentRuns' },
 ];
 
 const droppedCollections = [
@@ -291,6 +300,14 @@ const droppedCollections = [
   'outputAppLinks',
   'blueprints',
   'eventDefinitions',
+  // The output ledger is retired: outputs, its edge collection, and its
+  // analytics snapshots go together. postRenders (the pre-outputs legacy
+  // ledger this file used to migrate INTO outputs) has nowhere to land
+  // anymore and is dropped with them.
+  'outputs',
+  'outputRelations',
+  'outputAnalytics',
+  'postRenders',
 ];
 
 async function main() {
@@ -309,6 +326,25 @@ async function main() {
       console.log(`Dropped collection ${name}`);
     }
   }
+
+  // AI framework collections: creation + read-path indexes are owned by
+  // their ensure* modules. Runs BEFORE the `collections` loop so the
+  // generic embedding backfill below sees them fully set up.
+  await ensureOrganizationProvidersCollection(targetDb);
+  await ensureOrganizationScopesCollection(targetDb);
+  await ensureAgentRunsCollection(targetDb);
+
+  // Providers written before the display-name field existed: stamp the
+  // static PROVIDER_NAMES text (the embedded field — ids are never embed
+  // text) so the embedding backfill below has something to embed.
+  await targetDb.query(
+    `
+      FOR doc IN organizationProviders
+        FILTER doc.name == null
+        UPDATE doc WITH { name: @names[doc.providerId] || doc.providerId } IN organizationProviders
+    `,
+    { names: PROVIDER_NAMES },
+  );
 
   for (const spec of collections) {
     const collection = targetDb.collection(spec.name);
@@ -367,12 +403,6 @@ async function main() {
     console.log(`Copied ${legacy} -> ${current} and dropped ${legacy}`);
   }
 
-  // AI execution layer collections: intentionally minimal documents (no
-  // embedding field), so they live outside the node `collections` list and
-  // own their idempotent setup (unique/read-path indexes).
-  await ensureOrganizationProvidersCollection(targetDb);
-  await ensureOrganizationScopesCollection(targetDb);
-  await ensureAgentRunsCollection(targetDb);
 
   // Legacy scratch collection the org-migration steps below write into
   // before the final user_organization -> userOrganizations copy. Not part
@@ -820,46 +850,6 @@ async function main() {
 
   if (migratedLegacyIdentities) {
     await backfillCollectionEmbeddings(targetDb, collections.find((spec) => spec.name === 'users')!);
-  }
-
-  const oldPostRenders = targetDb.collection('postRenders');
-  if (await oldPostRenders.exists()) {
-    const outputs = targetDb.collection('outputs');
-    const cursor = await targetDb.query<{
-      _key: string;
-      status?: string;
-      results?: unknown[];
-      createdAt?: string;
-      updatedAt?: string;
-    }>(`
-      FOR render IN postRenders
-        RETURN render
-    `);
-    // Drain before the slow embed() work — see the legacy-events note.
-    const renders = await cursor.all();
-    for (const render of renders) {
-      const key = newId();
-      const type = 'post.render';
-      const outputEmbedText = buildNodeEmbedText('outputs', key, ['type'], { type });
-      await outputs.save(
-        {
-          _key: key,
-          type,
-          data: {
-            postId: render._key,
-            status: render.status ?? 'done',
-            results: Array.isArray(render.results) ? render.results : [],
-          },
-          storagePath: null,
-          usageCount: 0,
-          embedding: outputEmbedText ? await embed({ text: outputEmbedText }) : [],
-          createdAt: render.createdAt ?? render.updatedAt ?? new Date().toISOString(),
-        },
-        { overwriteMode: 'replace' },
-      );
-    }
-    await oldPostRenders.drop();
-    console.log('Migrated postRenders -> outputs and dropped collection postRenders');
   }
 
   const usersWithEventsCursor = await targetDb.query<{

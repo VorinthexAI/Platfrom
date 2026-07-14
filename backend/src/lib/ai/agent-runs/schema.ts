@@ -73,6 +73,15 @@ export const agentRunSchema = z.object({
 
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
+
+  /**
+   * Present for node-shape parity, always normalized to [] by
+   * arango-migrate. Deliberately NO embedKeys: every top-level field on a
+   * run is an id, an enum, or a timestamp — all queryable with plain
+   * filters — and ids/statuses are never embedded. If a prose field (e.g.
+   * a run summary) is added later, embed that.
+   */
+  embedding: z.array(z.number()).default([]),
 });
 
 export type AgentRun = z.infer<typeof agentRunSchema>;

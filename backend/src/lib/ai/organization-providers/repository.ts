@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { organizationIdSchema } from '@/lib/ai/shared/ids';
-import { providerIdSchema, type ProviderId } from '@/lib/ai/providers/types';
+import { PROVIDER_NAMES, providerIdSchema, type ProviderId } from '@/lib/ai/providers/types';
 import {
   ORGANIZATION_PROVIDERS_COLLECTION,
   organizationProviderKey,
@@ -87,6 +87,7 @@ export function createOrganizationProviderRepository(
         key: organizationProviderKey(validOrganizationId, validProviderId),
         organizationId: validOrganizationId,
         providerId: validProviderId,
+        name: PROVIDER_NAMES[validProviderId],
       });
       try {
         const result = await database

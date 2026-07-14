@@ -85,7 +85,14 @@ export default function BrainRoute() {
 
       <View
         style={
-          immersed ? styles.constellationWrapImmersed : styles.constellationWrap
+          immersed
+            ? styles.constellationWrapImmersed
+            : [
+                styles.constellationWrap,
+                // Keep the carousel clear of the Android gesture/nav bar —
+                // the page background still runs edge-to-edge beneath it.
+                { paddingBottom: Math.max(24, 12 + insets.bottom) },
+              ]
         }
       >
         <HomeConstellation
@@ -139,7 +146,6 @@ const styles = StyleSheet.create({
   constellationWrap: {
     flex: 1,
     justifyContent: "center",
-    paddingBottom: 24,
   },
   constellationWrapImmersed: {
     flex: 1,

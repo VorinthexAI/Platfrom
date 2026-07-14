@@ -1,3 +1,4 @@
+import { makeMutable } from "react-native-reanimated";
 import * as THREE from "three";
 
 /**
@@ -22,20 +23,17 @@ export function trackedVector(
 /**
  * User-steered orientation of the whole solar system: horizontal swipes
  * spin it around the vertical axis (yaw), vertical swipes tilt it (pitch).
- * Written by the pan gesture on the JS thread, damped toward by the
- * SystemRig every frame — same singleton pattern as the positions above.
+ * These are Reanimated mutables so the pan gesture writes them straight
+ * from the UI thread — zero runOnJS hops, so a wild diagonal scribble
+ * tracks the finger even while the JS thread is busy rendering frames.
+ * The SystemRig reads `.value` synchronously in useFrame and damps toward
+ * them.
  */
-export const systemRotation = {
-  yaw: 0,
-  pitch: 0,
-};
+export const systemYaw = makeMutable(0);
+export const systemPitch = makeMutable(0);
 
 /** Tilt limit so the system can lean steeply but never flips over. */
 export const SYSTEM_PITCH_LIMIT = 1.15;
-
-export function clampSystemPitch(pitch: number): number {
-  return Math.max(-SYSTEM_PITCH_LIMIT, Math.min(SYSTEM_PITCH_LIMIT, pitch));
-}
 
 /** The live scene camera, published by the CameraRig for screen-space hit tests. */
 export const galaxyCamera: { current: THREE.Camera | null } = {

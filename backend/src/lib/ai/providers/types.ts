@@ -23,6 +23,21 @@ export type ProviderId = (typeof PROVIDER_IDS)[number];
 export const providerIdSchema = z.enum(PROVIDER_IDS);
 
 /**
+ * Human-readable display name per provider. Static (unlike the adapter
+ * `name`, which lives on runtime-constructed instances behind secrets) so
+ * persistence and migrations can stamp names without touching adapters.
+ */
+export const PROVIDER_NAMES: Record<ProviderId, string> = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  xai: 'xAI',
+  'google-vertex': 'Google Vertex AI',
+  'azure-ai-foundry': 'Azure AI Foundry',
+  'aws-bedrock': 'AWS Bedrock',
+  openrouter: 'OpenRouter',
+};
+
+/**
  * Normalized request every adapter receives. `modelId` is the INTERNAL
  * model id — typed as a plain string here because the provider layer sits
  * below the model registry in the dependency order (models import provider
