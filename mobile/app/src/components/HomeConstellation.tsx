@@ -9,11 +9,18 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
-import { CapabilityArcCarousel } from "@/components/CapabilityArcCarousel";
+import {
+  CAPABILITY_CAROUSEL_HEIGHT,
+  CapabilityArcCarousel,
+} from "@/components/CapabilityArcCarousel";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { NeuralField3D } from "@/components/three/NeuralField3D";
 import { capabilityIconSource } from "@/data/capability-icons";
-import { CAPABILITIES, type Capability, type CapabilitySlug } from "@/data/registry";
+import {
+  CAPABILITIES,
+  type Capability,
+  type CapabilitySlug,
+} from "@/data/registry";
 
 const FIELD_SPEED = 0.05;
 const CORE_ICON_SIZE = 82;
@@ -25,12 +32,18 @@ export type HomeConstellationProps = {
 };
 
 /** Neural field with one synchronized core Capability and a wrapped arc carousel. */
-export function HomeConstellation({ enabledSlugs, onOpen }: HomeConstellationProps) {
+export function HomeConstellation({
+  enabledSlugs,
+  onOpen,
+}: HomeConstellationProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const width = Math.min(screenWidth - 16, 390);
   const fieldHeight = Math.max(270, Math.min(450, screenHeight - 310));
   const capabilities = useMemo(
-    () => CAPABILITIES.filter((capability) => enabledSlugs.includes(capability.slug)),
+    () =>
+      CAPABILITIES.filter((capability) =>
+        enabledSlugs.includes(capability.slug),
+      ),
     [enabledSlugs],
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -98,7 +111,16 @@ export function HomeConstellation({ enabledSlugs, onOpen }: HomeConstellationPro
       </View>
 
       {capabilities.length > 0 ? (
-        <View style={[styles.carousel, { top: fieldHeight - CAROUSEL_OVERLAP }]}>
+        <View
+          pointerEvents="box-none"
+          style={[
+            styles.carousel,
+            {
+              top: fieldHeight - CAROUSEL_OVERLAP,
+              height: CAPABILITY_CAROUSEL_HEIGHT,
+            },
+          ]}
+        >
           <CapabilityArcCarousel
             capabilities={capabilities}
             selectedIndex={selectedIndex}

@@ -1,8 +1,9 @@
 import { StyleSheet, Text, View } from "react-native";
 import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 
+import { BrandButton } from "@/components/BrandButton";
+import { ChromePanel } from "@/components/ChromePanel";
 import { ChromeIcon } from "@/components/ChromeIcon";
-import { PressableScale } from "@/components/PressableScale";
 import { ProgressDots } from "@/components/ProgressDots";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { Capability } from "@/data/registry";
@@ -32,8 +33,7 @@ export function OnboardingCard({
   onToggleBriefing,
 }: OnboardingCardProps) {
   return (
-    <View style={[styles.card, { width, height }]}>
-      <View style={styles.insetHighlight} />
+    <ChromePanel radius={radii.xl} style={[styles.card, { width, height }]}>
       <View style={styles.content}>
         <ChromeIcon
           source={capabilityIconSource[capability.slug]}
@@ -41,45 +41,31 @@ export function OnboardingCard({
           glow={0.6}
         />
         <Text style={styles.name}>{capability.name.toUpperCase()}</Text>
-        <Text style={styles.description}>{capability.onboardingDescription}</Text>
-        <PressableScale
-          accessibilityRole="button"
+        <Text style={styles.description}>
+          {capability.onboardingDescription}
+        </Text>
+        <BrandButton
           accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${capability.name} briefing`}
+          compact
+          icon={<VolumeIcon size="sm" variant="inverse" />}
+          label={briefingPlaying ? "Stop Briefing" : "Play Briefing"}
           onPress={onToggleBriefing}
           style={styles.briefingButton}
-        >
-          <VolumeIcon size="sm" variant="inverse" />
-          <Text style={styles.briefingText}>
-            {briefingPlaying ? "STOP BRIEFING" : "PLAY BRIEFING"}
-          </Text>
-        </PressableScale>
+          variant="primary"
+        />
       </View>
-      <ProgressDots count={CAPABILITIES.length} activeIndex={index} style={styles.dots} />
-    </View>
+      <ProgressDots
+        count={CAPABILITIES.length}
+        activeIndex={index}
+        style={styles.dots}
+      />
+    </ChromePanel>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#0B0F15",
-    borderRadius: radii.xl,
-    borderWidth: 1,
-    borderColor: "rgba(221, 226, 229, 0.16)",
-    overflow: "hidden",
-    shadowColor: palette.voidBlack,
-    shadowOpacity: 0.6,
-    shadowRadius: 32,
-    shadowOffset: { width: 0, height: 24 },
-    elevation: 14,
-  },
-  insetHighlight: {
-    position: "absolute",
-    top: 0,
-    left: 18,
-    right: 18,
-    height: 1,
-    borderRadius: 1,
-    backgroundColor: palette.insetHighlight,
+    overflow: "visible",
   },
   content: {
     flex: 1,
@@ -108,21 +94,7 @@ const styles = StyleSheet.create({
   },
   briefingButton: {
     minWidth: 156,
-    height: 38,
     marginTop: 24,
-    paddingHorizontal: 18,
-    borderRadius: 19,
-    backgroundColor: palette.silver100,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  briefingText: {
-    color: palette.page,
-    fontFamily: fonts.medium,
-    fontSize: 10,
-    letterSpacing: tracking.micro,
   },
   dots: {
     position: "absolute",

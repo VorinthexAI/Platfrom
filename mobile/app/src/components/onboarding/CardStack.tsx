@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
@@ -13,15 +13,22 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 
+import { BrandButton } from "@/components/BrandButton";
 import { OnboardingCard } from "@/components/onboarding/OnboardingCard";
-import { PressableScale } from "@/components/PressableScale";
-import { CAPABILITIES, type Capability, type CapabilitySlug } from "@/data/registry";
+import {
+  CAPABILITIES,
+  type Capability,
+  type CapabilitySlug,
+} from "@/data/registry";
 import { useAppAudio } from "@/lib/app-audio";
 import { completionHaptic, decisionHaptic } from "@/lib/haptics";
 import { createRandom } from "@/lib/random";
 import { durations, springs, swipe } from "@/theme/motion";
-import { fonts, palette, radii, tracking } from "@/theme/tokens";
-import { useOnboardingStore, type CapabilityDecision } from "@/state/onboarding";
+import { palette, radii } from "@/theme/tokens";
+import {
+  useOnboardingStore,
+  type CapabilityDecision,
+} from "@/state/onboarding";
 
 const VISIBLE_DEPTH = 3;
 const DEPTH_OFFSET_Y = -16;
@@ -37,18 +44,21 @@ type DustParticleSpec = {
 };
 
 const dustRandom = createRandom(947);
-const DUST_PARTICLES: readonly DustParticleSpec[] = Array.from({ length: 68 }, () => {
-  const angle = dustRandom() * Math.PI * 2;
-  const distance = 54 + dustRandom() * 150;
-  return {
-    x: dustRandom(),
-    y: dustRandom(),
-    dx: Math.cos(angle) * distance,
-    dy: Math.sin(angle) * distance - 28 * dustRandom(),
-    delay: dustRandom() * 0.16,
-    size: 2 + dustRandom() * 4,
-  };
-});
+const DUST_PARTICLES: readonly DustParticleSpec[] = Array.from(
+  { length: 68 },
+  () => {
+    const angle = dustRandom() * Math.PI * 2;
+    const distance = 54 + dustRandom() * 150;
+    return {
+      x: dustRandom(),
+      y: dustRandom(),
+      dx: Math.cos(angle) * distance,
+      dy: Math.sin(angle) * distance - 28 * dustRandom(),
+      delay: dustRandom() * 0.03,
+      size: 2 + dustRandom() * 4,
+    };
+  },
+);
 
 function DustParticle({
   decision,
@@ -159,11 +169,16 @@ function SwipeCard({
   const exiting = useSharedValue(0);
   const appear = useSharedValue(depth >= VISIBLE_DEPTH - 1 ? 0 : 1);
   const burst = useSharedValue(0);
-  const [burstDecision, setBurstDecision] = useState<CapabilityDecision | null>(null);
+  const [burstDecision, setBurstDecision] = useState<CapabilityDecision | null>(
+    null,
+  );
 
   // Rear cards reveal from behind; depth changes spring the card forward
   // so the next card pops from the stack instead of jumping.
-  const depthValue = useDerivedValue(() => withSpring(depth, springs.promote), [depth]);
+  const depthValue = useDerivedValue(
+    () => withSpring(depth, springs.promote),
+    [depth],
+  );
 
   useEffect(() => {
     appear.value = withTiming(1, { duration: durations.base });
@@ -175,13 +190,15 @@ function SwipeCard({
       exiting.value = 1;
       decisionHaptic();
       setBurstDecision(decision);
-      burst.value = withTiming(
-        1,
-        { duration: durations.dustBurst, easing: Easing.linear },
-        (finished) => {
-          if (finished) runOnJS(onCommit)(capability.slug, decision);
-        },
-      );
+      requestAnimationFrame(() => {
+        burst.value = withTiming(
+          1,
+          { duration: durations.dustBurst, easing: Easing.linear },
+          (finished) => {
+            if (finished) runOnJS(onCommit)(capability.slug, decision);
+          },
+        );
+      });
     },
     [burst, capability.slug, exiting, onCommit],
   );
@@ -203,7 +220,9 @@ function SwipeCard({
       const passedDistance = Math.abs(tx.value) > width * swipe.distanceFactor;
       const passedVelocity = Math.abs(event.velocityX) > swipe.velocity;
       if (passedDistance || passedVelocity) {
-        const direction = passedVelocity ? Math.sign(event.velocityX) : Math.sign(tx.value);
+        const direction = passedVelocity
+          ? Math.sign(event.velocityX)
+          : Math.sign(tx.value);
         runOnJS(exitCard)(direction > 0 ? "enabled" : "skipped");
       } else {
         // Cancelled drag: spring back to a perfectly frontal rest pose.
@@ -236,10 +255,20 @@ function SwipeCard({
   }));
 
   const dissolveStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(burst.value, [0, 0.75, 0.84, 1], [1, 1, 0, 0]),
+    opacity: interpolate(burst.value, [0, 0.08, 0.55, 1], [1, 0.78, 0.08, 0]),
     transform: [
-      { scale: interpolate(burst.value, [0, 0.62, 1], [1, 1.035, 0.96]) },
+      {
+        scale: interpolate(
+          burst.value,
+          [0, 0.2, 0.55, 1],
+          [1, 1.02, 1.035, 0.96],
+        ),
+      },
     ],
+  }));
+
+  const shieldStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(burst.value, [0, 0.88, 1], [1, 1, 0]),
   }));
 
   return (
@@ -248,6 +277,10 @@ function SwipeCard({
         style={[styles.cardWrap, animatedStyle]}
         pointerEvents={active ? "auto" : "none"}
       >
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.burstShield, shieldStyle]}
+        />
         <Animated.View style={dissolveStyle}>
           <OnboardingCard
             capability={capability}
@@ -315,15 +348,25 @@ export function CardStack({ onComplete }: CardStackProps) {
 
   return (
     <View style={styles.root}>
-      <View style={[styles.stackArea, { width: cardWidth, height: cardHeight + 44 }]}>
+      <View
+        style={[
+          styles.stackArea,
+          { width: cardWidth, height: cardHeight + 44 },
+        ]}
+      >
         {CAPABILITIES.map((capability, index) => {
           const depth = index - activeIndex;
           if (depth < 0 || depth >= VISIBLE_DEPTH) return null;
           return { capability, index, depth };
         })
           .filter(
-            (entry): entry is { capability: Capability; index: number; depth: number } =>
-              entry !== null,
+            (
+              entry,
+            ): entry is {
+              capability: Capability;
+              index: number;
+              depth: number;
+            } => entry !== null,
           )
           // Draw deepest first so the active card naturally sits on top.
           .sort((a, b) => b.depth - a.depth)
@@ -346,26 +389,28 @@ export function CardStack({ onComplete }: CardStackProps) {
 
       <View style={styles.footer}>
         <View style={styles.fallbackRow}>
-          <PressableScale
-            accessibilityRole="button"
+          <BrandButton
             accessibilityLabel={
-              activeCapability ? `Skip ${activeCapability.name}` : "Skip capability"
+              activeCapability
+                ? `Skip ${activeCapability.name}`
+                : "Skip capability"
             }
+            label="Skip"
             onPress={() => exitRef.current?.("skipped")}
             style={[styles.fallbackButton, styles.skipButton]}
-          >
-            <Text style={styles.fallbackText}>SKIP</Text>
-          </PressableScale>
-          <PressableScale
-            accessibilityRole="button"
+            variant="secondary"
+          />
+          <BrandButton
             accessibilityLabel={
-              activeCapability ? `Enable ${activeCapability.name}` : "Enable capability"
+              activeCapability
+                ? `Enable ${activeCapability.name}`
+                : "Enable capability"
             }
+            label="Enable"
             onPress={() => exitRef.current?.("enabled")}
             style={[styles.fallbackButton, styles.enableButton]}
-          >
-            <Text style={styles.enableText}>ENABLE</Text>
-          </PressableScale>
+            variant="primary"
+          />
         </View>
       </View>
     </View>
@@ -402,6 +447,15 @@ const styles = StyleSheet.create({
     left: 0,
     overflow: "visible",
   },
+  burstShield: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: radii.xl,
+    backgroundColor: palette.page,
+  },
   dustParticle: {
     position: "absolute",
     shadowOpacity: 1,
@@ -417,30 +471,12 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   fallbackButton: {
-    minWidth: 112,
-    height: 38,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
+    minWidth: 128,
   },
   skipButton: {
-    borderWidth: 1,
-    borderColor: palette.hairline,
+    shadowOpacity: 0,
   },
   enableButton: {
-    backgroundColor: palette.silver100,
-  },
-  fallbackText: {
-    color: palette.silver500,
-    fontFamily: fonts.medium,
-    fontSize: 11,
-    letterSpacing: tracking.micro,
-  },
-  enableText: {
-    color: palette.page,
-    fontFamily: fonts.medium,
-    fontSize: 11,
-    letterSpacing: tracking.micro,
+    shadowOpacity: 0.18,
   },
 });
