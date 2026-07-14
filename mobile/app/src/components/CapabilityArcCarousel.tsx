@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -27,7 +27,7 @@ import { fonts, palette, radii } from "@/theme/tokens";
 export const CAPABILITY_CAROUSEL_HEIGHT = 184;
 
 const SWIPE_VELOCITY = 650;
-const FACE_TOP = 22;
+const FACE_TOP = 20;
 const MAX_VISIBLE = 2.35;
 const ROTATE_PER_STEP = 34;
 const ARC_RISE = 9;
@@ -58,6 +58,10 @@ type CapabilityArcCarouselProps = {
  * Wrapping 3D cube carousel: every capability is a chrome cube face on a
  * shared ring. A single continuous offset tracks the finger, faces rotate
  * away like cube walls, and the resting face carries a silver glow.
+ *
+ * Fabric-safe by construction: the pan gesture is memoized (never rebuilt
+ * mid-swipe), worklets touch only transform/opacity, and stacking order is
+ * plain per-render zIndex — no layout props are animated.
  */
 export function CapabilityArcCarousel({
   capabilities,
@@ -76,11 +80,17 @@ export function CapabilityArcCarousel({
   const panStart = useSharedValue(0);
   const committedRef = useRef(selectedIndex);
 
-  const commit = (target: number) => {
-    const index = wrap(Math.round(target), count);
+  // Stable across renders so the memoized gesture never goes stale.
+  const stateRef = useRef({ count, onSelect, selectedIndex });
+  stateRef.current = { count, onSelect, selectedIndex };
+
+  const commit = useCallback((target: number) => {
+    const state = stateRef.current;
+    if (state.count < 1) return;
+    const index = wrap(Math.round(target), state.count);
     committedRef.current = index;
-    if (index !== selectedIndex) onSelect(index);
-  };
+    if (index !== state.selectedIndex) state.onSelect(index);
+  }, []);
 
   useEffect(() => {
     if (committedRef.current === selectedIndex || count < 1) return;
@@ -90,27 +100,31 @@ export function CapabilityArcCarousel({
     offset.value = withSpring(current + rel, springs.carousel);
   }, [count, offset, selectedIndex]);
 
-  const pan = Gesture.Pan()
-    .enabled(count > 1)
-    .activeOffsetX([-8, 8])
-    .failOffsetY([-22, 22])
-    .onStart(() => {
-      panStart.value = offset.value;
-    })
-    .onChange((event) => {
-      offset.value = panStart.value - event.translationX / spacing;
-    })
-    .onEnd((event) => {
-      let target = Math.round(offset.value);
-      if (
-        Math.abs(event.velocityX) > SWIPE_VELOCITY &&
-        target === Math.round(panStart.value)
-      ) {
-        target += event.velocityX < 0 ? 1 : -1;
-      }
-      offset.value = withSpring(target, springs.carousel);
-      runOnJS(commit)(target);
-    });
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(count > 1)
+        .activeOffsetX([-8, 8])
+        .failOffsetY([-22, 22])
+        .onStart(() => {
+          panStart.value = offset.value;
+        })
+        .onChange((event) => {
+          offset.value = panStart.value - event.translationX / spacing;
+        })
+        .onEnd((event) => {
+          let target = Math.round(offset.value);
+          if (
+            Math.abs(event.velocityX) > SWIPE_VELOCITY &&
+            target === Math.round(panStart.value)
+          ) {
+            target += event.velocityX < 0 ? 1 : -1;
+          }
+          offset.value = withSpring(target, springs.carousel);
+          runOnJS(commit)(target);
+        }),
+    [commit, count, offset, panStart, spacing],
+  );
 
   if (count === 0) return null;
 
@@ -176,6 +190,9 @@ export function CapabilityArcCarousel({
             index={index}
             offset={offset}
             spacing={spacing}
+            stackOrder={
+              100 - Math.round(Math.abs(wrapSigned(index - selectedIndex, count)) * 10)
+            }
             stageWidth={width}
             onPress={() => pressFace(index)}
           />
@@ -193,6 +210,8 @@ type CubeFaceProps = {
   index: number;
   offset: SharedValue<number>;
   spacing: number;
+  /** Static per-render stacking order — zIndex is never animated (Fabric). */
+  stackOrder: number;
   stageWidth: number;
   onPress: () => void;
 };
@@ -205,6 +224,7 @@ function CubeFace({
   index,
   offset,
   spacing,
+  stackOrder,
   stageWidth,
   onPress,
 }: CubeFaceProps) {
@@ -215,7 +235,6 @@ function CubeFace({
     return {
       opacity:
         Math.abs(rel) > MAX_VISIBLE ? 0 : 1 - 0.3 * Math.min(magnitude, 2),
-      zIndex: 100 - Math.round(magnitude * 10),
       transform: [
         { perspective: 1200 },
         { translateX: clamped * spacing },
@@ -231,12 +250,6 @@ function CubeFace({
     return { opacity: Math.max(0, 1 - Math.abs(rel) / 0.6) };
   });
 
-  const glowStyle = useAnimatedStyle(() => {
-    const rel = wrapSigned(index - offset.value, count);
-    const focus = Math.max(0, 1 - Math.abs(rel) / 0.6);
-    return { shadowOpacity: 0.08 + focus * 0.26 };
-  });
-
   return (
     <Animated.View
       style={[
@@ -246,39 +259,39 @@ function CubeFace({
           height: faceHeight,
           left: stageWidth / 2 - faceWidth / 2,
           top: FACE_TOP,
+          zIndex: stackOrder,
+          elevation: stackOrder,
         },
         faceStyle,
       ]}
     >
-      <Animated.View style={[styles.faceGlow, glowStyle]}>
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel={`Open ${capability.name}`}
-          onPress={onPress}
-          style={styles.facePress}
-        >
-          <ChromePanel radius={radii.md} style={styles.facePanel}>
-            <ChromeIcon
-              source={capabilityIconSource[capability.slug]}
-              size={44}
-              glow={0.4}
-            />
-            <Text numberOfLines={1} style={styles.name}>
-              {capability.name.toUpperCase()}
-            </Text>
-            <Animated.Text
-              numberOfLines={2}
-              style={[styles.description, focusStyle]}
-            >
-              {capability.onboardingDescription}
-            </Animated.Text>
-            <Animated.View
-              pointerEvents="none"
-              style={[styles.activeBorder, focusStyle]}
-            />
-          </ChromePanel>
-        </PressableScale>
-      </Animated.View>
+      <PressableScale
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${capability.name}`}
+        onPress={onPress}
+        style={styles.facePress}
+      >
+        <ChromePanel radius={radii.md} style={styles.facePanel}>
+          <ChromeIcon
+            source={capabilityIconSource[capability.slug]}
+            size={44}
+            glow={0.4}
+          />
+          <Text numberOfLines={1} style={styles.name}>
+            {capability.name.toUpperCase()}
+          </Text>
+          <Animated.Text
+            numberOfLines={2}
+            style={[styles.description, focusStyle]}
+          >
+            {capability.onboardingDescription}
+          </Animated.Text>
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.activeBorder, focusStyle]}
+          />
+        </ChromePanel>
+      </PressableScale>
     </Animated.View>
   );
 }
@@ -295,14 +308,10 @@ const styles = StyleSheet.create({
   },
   faceSlot: {
     position: "absolute",
-  },
-  faceGlow: {
-    flex: 1,
     shadowColor: palette.silver100,
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.18,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 0 },
-    elevation: 8,
   },
   facePress: {
     flex: 1,
@@ -310,8 +319,9 @@ const styles = StyleSheet.create({
   facePanel: {
     flex: 1,
     alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 10,
-    paddingTop: 12,
+    paddingVertical: 10,
   },
   name: {
     marginTop: 8,
@@ -328,6 +338,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 13,
     textAlign: "center",
+    minHeight: 26,
   },
   activeBorder: {
     position: "absolute",

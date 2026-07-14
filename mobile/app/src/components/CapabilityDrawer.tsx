@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
@@ -65,22 +65,26 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
     );
   }, [open, translateY]);
 
-  const pan = Gesture.Pan()
-    .activeOffsetY([-14, 8])
-    .onChange((event) => {
-      // Elastic downward drag only (web dragElastic bottom: 0.55).
-      translateY.value = Math.max(0, event.translationY) * 0.55;
-    })
-    .onEnd((event) => {
-      if (
-        event.translationY > CLOSE_DISTANCE ||
-        event.velocityY > CLOSE_VELOCITY
-      ) {
-        runOnJS(exit)();
-      } else {
-        translateY.value = withSpring(0, springs.snapBack);
-      }
-    });
+  const pan = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetY([-14, 8])
+        .onChange((event) => {
+          // Elastic downward drag only (web dragElastic bottom: 0.55).
+          translateY.value = Math.max(0, event.translationY) * 0.55;
+        })
+        .onEnd((event) => {
+          if (
+            event.translationY > CLOSE_DISTANCE ||
+            event.velocityY > CLOSE_VELOCITY
+          ) {
+            runOnJS(exit)();
+          } else {
+            translateY.value = withSpring(0, springs.snapBack);
+          }
+        }),
+    [exit, translateY],
+  );
 
   const slideStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],
