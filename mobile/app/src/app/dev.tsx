@@ -1,7 +1,6 @@
 import { useLocalSearchParams } from "expo-router";
 import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HomeConstellation } from "@/components/HomeConstellation";
 import { TransitionVeil } from "@/components/TransitionVeil";
@@ -17,7 +16,6 @@ const ALL_SLUGS = CAPABILITIES.map((capability) => capability.slug);
  * can't swipe the carousel).
  */
 export default function DevRoute() {
-  const insets = useSafeAreaInsets();
   const { dive } = useLocalSearchParams<{ dive?: string }>();
   const enter = useGalaxyStore((state) => state.enter);
 
@@ -29,7 +27,7 @@ export default function DevRoute() {
   }, [dive, enter]);
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 10 }]}>
+    <View style={styles.root}>
       <HomeConstellation enabledSlugs={ALL_SLUGS} onOpen={() => {}} />
       {/* Drives the enter/exit phase hand-offs — must be mounted here too. */}
       <TransitionVeil />
@@ -40,7 +38,6 @@ export default function DevRoute() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    justifyContent: "center",
     backgroundColor: palette.page,
   },
 });

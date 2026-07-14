@@ -63,13 +63,20 @@ export default function BrainRoute() {
   );
 
   return (
-    <View style={[styles.root, { paddingTop: immersed ? 0 : insets.top + 10 }]}>
+    <View style={styles.root}>
+      {/* The galaxy owns the whole screen; every overlay floats above it. */}
+      <HomeConstellation enabledSlugs={enabledSlugs} onOpen={openCapability} />
+
       {immersed ? null : (
         <Animated.View
           entering={FadeInDown.duration(durations.base)}
-          style={styles.header}
+          // Transparent overlay — orbits pass BEHIND the greeting; empty
+          // header space stays swipeable (box-none), only the texts and
+          // the settings button catch touches.
+          pointerEvents="box-none"
+          style={[styles.header, { paddingTop: insets.top + 10 }]}
         >
-          <View>
+          <View pointerEvents="none">
             <Text style={styles.greeting}>{typedGreeting}</Text>
             <Text style={styles.name}>{typedName}</Text>
           </View>
@@ -83,26 +90,8 @@ export default function BrainRoute() {
         </Animated.View>
       )}
 
-      <View
-        style={
-          immersed
-            ? styles.constellationWrapImmersed
-            : [
-                styles.constellationWrap,
-                // Keep the carousel clear of the Android gesture/nav bar —
-                // the page background still runs edge-to-edge beneath it.
-                { paddingBottom: Math.max(24, 12 + insets.bottom) },
-              ]
-        }
-      >
-        <HomeConstellation
-          enabledSlugs={enabledSlugs}
-          onOpen={openCapability}
-        />
-      </View>
-
-      {/* Route-level veil: covers header AND scene, so the fullscreen
-          layout swap always happens in total darkness. */}
+      {/* Route-level veil: covers header AND scene, so every teleport
+          happens in total darkness. */}
       <TransitionVeil />
     </View>
   );
@@ -114,11 +103,15 @@ const styles = StyleSheet.create({
     backgroundColor: palette.page,
   },
   header: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
   },
   greeting: {
     minHeight: 18,
@@ -142,12 +135,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(221, 226, 229, 0.18)",
     backgroundColor: "rgba(255, 255, 255, 0.03)",
-  },
-  constellationWrap: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  constellationWrapImmersed: {
-    flex: 1,
   },
 });

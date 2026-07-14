@@ -23,7 +23,9 @@ import {
   galaxyCamera,
   SYSTEM_PITCH_LIMIT,
   systemPitch,
+  systemPitchLive,
   systemYaw,
+  systemYawLive,
 } from "@/components/galaxy/galaxy-refs";
 import { GalaxyScene } from "@/components/galaxy/GalaxyScene";
 import { InteriorEmblem } from "@/components/InteriorEmblem";
@@ -36,7 +38,6 @@ import {
 import { useAppAudio } from "@/lib/app-audio";
 import { useGalaxyStore } from "@/state/galaxy";
 
-const CAROUSEL_OVERLAP = 30;
 /** Full-width horizontal swipe spins the system well past half a turn. */
 const YAW_PER_WIDTH = Math.PI * 1.35;
 /** Full-height vertical swipe covers the whole tilt range. */
@@ -54,12 +55,12 @@ export type HomeConstellationProps = {
 };
 
 /**
- * The brain galaxy steered by the wrapped cube carousel AND the field
- * itself: pans rotate the solar system (horizontal = spin, vertical =
- * tilt), a tap on a planet dives into it, and swiping the carousel commits
- * a capability the same way. Once inside a biome the scene takes the whole
- * screen — no header, no carousel — with the back chevron (and the Android
- * hardware back) returning to orbit.
+ * The brain galaxy, rendered FULLSCREEN at all times — the header and
+ * carousel float over it as transparent overlays, so orbits pass behind
+ * them. Pans rotate the solar system (horizontal = spin, vertical = tilt),
+ * a tap on a planet dives into it, and swiping the carousel commits a
+ * capability the same way. Inside a biome the overlays go away and the
+ * back chevron (and Android hardware back) returns to orbit.
  */
 export function HomeConstellation({
   enabledSlugs,
@@ -67,8 +68,7 @@ export function HomeConstellation({
 }: HomeConstellationProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const width = Math.min(screenWidth - 16, 390);
-  const fieldHeight = Math.max(270, Math.min(450, screenHeight - 310));
+  const carouselWidth = Math.min(screenWidth - 16, 390);
   const capabilities = useMemo(
     () =>
       CAPABILITIES.filter((capability) =>
@@ -85,10 +85,6 @@ export function HomeConstellation({
   const warp = useGalaxyStore((state) => state.warp);
   const exit = useGalaxyStore((state) => state.exit);
 
-  // The GL surface is resized only while the veil is fully dark: expansion
-  // lands at "inside" (after the enter blackout), shrink at "overview"
-  // (after the exit blackout) — so "exit" keeps the immersive layout.
-  const immersed = phase === "inside" || phase === "exit";
   const carouselShown =
     (phase === "overview" || phase === "fly") && capabilities.length > 0;
 
@@ -128,7 +124,10 @@ export function HomeConstellation({
   const selected = capabilities[selectedIndex];
   const targetCapability =
     capabilities.find((capability) => capability.slug === targetSlug) ?? null;
-  const open = (capability: Capability) => onOpen(capability.slug);
+  const open = useCallback(
+    (capability: Capability) => onOpen(capability.slug),
+    [onOpen],
+  );
 
   const select = useCallback(
     (index: number) => {
@@ -147,21 +146,18 @@ export function HomeConstellation({
     [capabilities, enter, retarget, warp],
   );
 
-  const fieldWidth = immersed ? screenWidth : width;
-  const fieldHeightNow = immersed ? screenHeight : fieldHeight;
-
   // Stable across renders so the memoized gestures never go stale — a
   // gesture rebuilt mid-swipe has crashed native before.
   const gestureStateRef = useRef({
     capabilities,
-    fieldHeight: fieldHeightNow,
-    fieldWidth,
+    fieldHeight: screenHeight,
+    fieldWidth: screenWidth,
     select,
   });
   gestureStateRef.current = {
     capabilities,
-    fieldHeight: fieldHeightNow,
-    fieldWidth,
+    fieldHeight: screenHeight,
+    fieldWidth: screenWidth,
     select,
   };
 
@@ -169,15 +165,15 @@ export function HomeConstellation({
   // thread (that queue is busy rendering frames, and hopping made swipes
   // feel dead unless they were slow and axis-aligned).
   const panEnabled = useSharedValue(phase === "overview" ? 1 : 0);
-  const fieldSize = useSharedValue({ width: fieldWidth, height: fieldHeightNow });
+  const fieldSize = useSharedValue({ width: screenWidth, height: screenHeight });
   const panStartYaw = useSharedValue(0);
   const panStartPitch = useSharedValue(0);
   useEffect(() => {
     panEnabled.value = phase === "overview" ? 1 : 0;
   }, [panEnabled, phase]);
   useEffect(() => {
-    fieldSize.value = { width: fieldWidth, height: fieldHeightNow };
-  }, [fieldHeightNow, fieldSize, fieldWidth]);
+    fieldSize.value = { width: screenWidth, height: screenHeight };
+  }, [fieldSize, screenHeight, screenWidth]);
 
   // Stable identity (the memoized tap worklet captures it): projects every
   // live planet position into field pixels and dives into the nearest one
@@ -212,13 +208,18 @@ export function HomeConstellation({
   const fieldGesture = useMemo(() => {
     // Pure worklet pan: every event lands on the UI thread and writes the
     // rotation targets directly — any direction, any speed, no waiting on
-    // the JS thread. minDistance stays tiny so a wild diagonal scribble
-    // activates instantly (taps still win the race on quick release).
+    // the JS thread.
     const pan = Gesture.Pan()
       .minDistance(6)
       .onStart(() => {
-        panStartYaw.value = systemYaw.value;
-        panStartPitch.value = systemPitch.value;
+        // GRAB the rendered orientation and kill leftover momentum — a
+        // finger on the glass stops the globe instantly; without this a
+        // re-swipe fights the previous fling's still-gliding target and
+        // feels stuck for seconds.
+        panStartYaw.value = systemYawLive.value;
+        panStartPitch.value = systemPitchLive.value;
+        systemYaw.value = systemYawLive.value;
+        systemPitch.value = systemPitchLive.value;
       })
       .onChange((event) => {
         if (!panEnabled.value) return;
@@ -262,35 +263,18 @@ export function HomeConstellation({
   }, []);
 
   return (
-    <View
-      style={
-        immersed
-          ? styles.rootImmersed
-          : [styles.root, { width, height: fieldHeight + 154 }]
-      }
-    >
+    <View style={styles.root}>
       <GestureDetector gesture={fieldGesture}>
-        <View
-          collapsable={false}
-          style={[
-            styles.field,
-            immersed ? styles.fieldImmersed : { width, height: fieldHeight },
-          ]}
-        >
+        <View collapsable={false} style={styles.field}>
           <GalaxyScene
             enabledSlugs={enabledSlugs}
             selectedSlug={selected?.slug ?? null}
             style={StyleSheet.absoluteFill}
           />
           <InteriorEmblem capability={targetCapability} />
-          <CapabilityDrawer capability={targetCapability} />
+          <CapabilityDrawer capability={targetCapability} onOpen={open} />
           {phase !== "overview" ? (
-            <View
-              style={[
-                styles.backButton,
-                { top: immersed ? insets.top + 8 : 10 },
-              ]}
-            >
+            <View style={[styles.backButton, { top: insets.top + 8 }]}>
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel="Return to orbit"
@@ -311,7 +295,7 @@ export function HomeConstellation({
           style={[
             styles.carousel,
             {
-              top: fieldHeight - CAROUSEL_OVERLAP,
+              bottom: insets.bottom + 6,
               height: CAPABILITY_CAROUSEL_HEIGHT,
             },
           ]}
@@ -319,7 +303,7 @@ export function HomeConstellation({
           <CapabilityArcCarousel
             capabilities={capabilities}
             selectedIndex={selectedIndex}
-            width={width}
+            width={carouselWidth}
             onOpen={open}
             onSelect={select}
           />
@@ -331,9 +315,6 @@ export function HomeConstellation({
 
 const styles = StyleSheet.create({
   root: {
-    alignSelf: "center",
-  },
-  rootImmersed: {
     position: "absolute",
     top: 0,
     right: 0,
@@ -341,11 +322,6 @@ const styles = StyleSheet.create({
     left: 0,
   },
   field: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-  },
-  fieldImmersed: {
     position: "absolute",
     top: 0,
     right: 0,
@@ -356,6 +332,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
+    alignItems: "center",
   },
   backButton: {
     position: "absolute",
