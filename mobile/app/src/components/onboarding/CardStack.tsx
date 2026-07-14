@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+  Easing,
   interpolate,
   runOnJS,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
+  type SharedValue,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
@@ -16,13 +18,114 @@ import { PressableScale } from "@/components/PressableScale";
 import { CAPABILITIES, type Capability, type CapabilitySlug } from "@/data/registry";
 import { useAppAudio } from "@/lib/app-audio";
 import { completionHaptic, decisionHaptic } from "@/lib/haptics";
-import { durations, easings, springs, swipe } from "@/theme/motion";
+import { createRandom } from "@/lib/random";
+import { durations, springs, swipe } from "@/theme/motion";
 import { fonts, palette, radii, tracking } from "@/theme/tokens";
 import { useOnboardingStore, type CapabilityDecision } from "@/state/onboarding";
 
 const VISIBLE_DEPTH = 3;
 const DEPTH_OFFSET_Y = -16;
 const DEPTH_SCALE = 0.05;
+
+type DustParticleSpec = {
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+  delay: number;
+  size: number;
+};
+
+const dustRandom = createRandom(947);
+const DUST_PARTICLES: readonly DustParticleSpec[] = Array.from({ length: 68 }, () => {
+  const angle = dustRandom() * Math.PI * 2;
+  const distance = 54 + dustRandom() * 150;
+  return {
+    x: dustRandom(),
+    y: dustRandom(),
+    dx: Math.cos(angle) * distance,
+    dy: Math.sin(angle) * distance - 28 * dustRandom(),
+    delay: dustRandom() * 0.16,
+    size: 2 + dustRandom() * 4,
+  };
+});
+
+function DustParticle({
+  decision,
+  height,
+  particle,
+  progress,
+  width,
+}: {
+  decision: CapabilityDecision | null;
+  height: number;
+  particle: DustParticleSpec;
+  progress: SharedValue<number>;
+  width: number;
+}) {
+  const style = useAnimatedStyle(() => {
+    const localProgress = interpolate(
+      progress.value,
+      [particle.delay, 1],
+      [0, 1],
+      "clamp",
+    );
+    return {
+      opacity: interpolate(localProgress, [0, 0.12, 0.62, 1], [0, 1, 0.72, 0]),
+      transform: [
+        { translateX: particle.dx * localProgress },
+        { translateY: particle.dy * localProgress },
+        { scale: interpolate(localProgress, [0, 0.4, 1], [0.5, 1.3, 0]) },
+      ],
+    };
+  });
+
+  const color = decision === "enabled" ? palette.silver50 : palette.silver500;
+  return (
+    <Animated.View
+      style={[
+        styles.dustParticle,
+        {
+          left: particle.x * width,
+          top: particle.y * height,
+          width: particle.size,
+          height: particle.size,
+          borderRadius: particle.size / 2,
+          backgroundColor: color,
+          shadowColor: color,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+function DustBurst({
+  decision,
+  height,
+  progress,
+  width,
+}: {
+  decision: CapabilityDecision | null;
+  height: number;
+  progress: SharedValue<number>;
+  width: number;
+}) {
+  return (
+    <View pointerEvents="none" style={[styles.dustBurst, { width, height }]}>
+      {DUST_PARTICLES.map((particle, index) => (
+        <DustParticle
+          key={index}
+          decision={decision}
+          height={height}
+          particle={particle}
+          progress={progress}
+          width={width}
+        />
+      ))}
+    </View>
+  );
+}
 
 type ExitFn = (decision: CapabilityDecision) => void;
 
@@ -55,6 +158,8 @@ function SwipeCard({
   const ty = useSharedValue(0);
   const exiting = useSharedValue(0);
   const appear = useSharedValue(depth >= VISIBLE_DEPTH - 1 ? 0 : 1);
+  const burst = useSharedValue(0);
+  const [burstDecision, setBurstDecision] = useState<CapabilityDecision | null>(null);
 
   // Rear cards reveal from behind; depth changes spring the card forward
   // so the next card pops from the stack instead of jumping.
@@ -69,17 +174,16 @@ function SwipeCard({
       if (exiting.value === 1) return;
       exiting.value = 1;
       decisionHaptic();
-      const direction = decision === "enabled" ? 1 : -1;
-      ty.value = withTiming(28, { duration: durations.cardExit, easing: easings.out });
-      tx.value = withTiming(
-        direction * width * 1.35,
-        { duration: durations.cardExit, easing: easings.out },
+      setBurstDecision(decision);
+      burst.value = withTiming(
+        1,
+        { duration: durations.dustBurst, easing: Easing.linear },
         (finished) => {
           if (finished) runOnJS(onCommit)(capability.slug, decision);
         },
       );
     },
-    [capability.slug, exiting, onCommit, tx, ty, width],
+    [burst, capability.slug, exiting, onCommit],
   );
 
   useEffect(() => {
@@ -131,21 +235,36 @@ function SwipeCard({
     opacity: interpolate(depthValue.value, [0, 2], [0, 0.4], "clamp"),
   }));
 
+  const dissolveStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(burst.value, [0, 0.75, 0.84, 1], [1, 1, 0, 0]),
+    transform: [
+      { scale: interpolate(burst.value, [0, 0.62, 1], [1, 1.035, 0.96]) },
+    ],
+  }));
+
   return (
     <GestureDetector gesture={pan}>
       <Animated.View
         style={[styles.cardWrap, animatedStyle]}
         pointerEvents={active ? "auto" : "none"}
       >
-        <OnboardingCard
-          capability={capability}
-          index={index}
-          width={width}
+        <Animated.View style={dissolveStyle}>
+          <OnboardingCard
+            capability={capability}
+            index={index}
+            width={width}
+            height={height}
+            briefingPlaying={briefingPlaying}
+            onToggleBriefing={onToggleBriefing}
+          />
+          <Animated.View pointerEvents="none" style={[styles.dim, dimStyle]} />
+        </Animated.View>
+        <DustBurst
+          decision={burstDecision}
           height={height}
-          briefingPlaying={briefingPlaying}
-          onToggleBriefing={onToggleBriefing}
+          progress={burst}
+          width={width}
         />
-        <Animated.View pointerEvents="none" style={[styles.dim, dimStyle]} />
       </Animated.View>
     </GestureDetector>
   );
@@ -276,6 +395,18 @@ const styles = StyleSheet.create({
     bottom: 0,
     borderRadius: radii.xl,
     backgroundColor: palette.voidBlack,
+  },
+  dustBurst: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    overflow: "visible",
+  },
+  dustParticle: {
+    position: "absolute",
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 8,
   },
   footer: {
     alignItems: "center",
