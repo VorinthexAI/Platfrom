@@ -634,7 +634,7 @@ function PricingFlow() {
         >
           <CloseIcon width={12} height={12} />
         </button>
-        <p className="micro-label">💡 New to Vorinthex?</p>
+        <p className="micro-label">New to Vorinthex?</p>
         <p className="mt-2 pr-10 text-sm leading-relaxed text-silver-300">
           New users start with at least 1,000 free Sparks to explore and
           test before subscribing.
