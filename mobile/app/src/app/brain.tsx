@@ -7,8 +7,10 @@ import { SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { HomeConstellation } from "@/components/HomeConstellation";
 import { PressableScale } from "@/components/PressableScale";
+import { TransitionVeil } from "@/components/TransitionVeil";
 import { MOCK_USER, greetingForHour } from "@/data/mock";
 import { CAPABILITIES, type CapabilitySlug } from "@/data/registry";
+import { useGalaxyStore } from "@/state/galaxy";
 import { useOnboardingStore } from "@/state/onboarding";
 import { durations } from "@/theme/motion";
 import { fonts, palette, spacing } from "@/theme/tokens";
@@ -17,6 +19,10 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 export default function BrainRoute() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const phase = useGalaxyStore((state) => state.phase);
+  // Inside a biome the scene owns the WHOLE screen: no header, no padding.
+  // The swap happens while the TransitionVeil below is fully dark.
+  const immersed = phase === "inside" || phase === "exit";
   const greeting = greetingForHour(new Date().getHours());
   const decisions = useOnboardingStore((state) => state.decisions);
   const enabledSlugs = useMemo(
@@ -57,30 +63,40 @@ export default function BrainRoute() {
   );
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top + 10 }]}>
-      <Animated.View
-        entering={FadeInDown.duration(durations.base)}
-        style={styles.header}
-      >
-        <View>
-          <Text style={styles.greeting}>{typedGreeting}</Text>
-          <Text style={styles.name}>{typedName}</Text>
-        </View>
-        <PressableScale
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-          style={styles.settingsButton}
+    <View style={[styles.root, { paddingTop: immersed ? 0 : insets.top + 10 }]}>
+      {immersed ? null : (
+        <Animated.View
+          entering={FadeInDown.duration(durations.base)}
+          style={styles.header}
         >
-          <SettingsIcon size="md" variant="accent" />
-        </PressableScale>
-      </Animated.View>
+          <View>
+            <Text style={styles.greeting}>{typedGreeting}</Text>
+            <Text style={styles.name}>{typedName}</Text>
+          </View>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            style={styles.settingsButton}
+          >
+            <SettingsIcon size="md" variant="accent" />
+          </PressableScale>
+        </Animated.View>
+      )}
 
-      <View style={styles.constellationWrap}>
+      <View
+        style={
+          immersed ? styles.constellationWrapImmersed : styles.constellationWrap
+        }
+      >
         <HomeConstellation
           enabledSlugs={enabledSlugs}
           onOpen={openCapability}
         />
       </View>
+
+      {/* Route-level veil: covers header AND scene, so the fullscreen
+          layout swap always happens in total darkness. */}
+      <TransitionVeil />
     </View>
   );
 }
@@ -124,5 +140,8 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     paddingBottom: 24,
+  },
+  constellationWrapImmersed: {
+    flex: 1,
   },
 });

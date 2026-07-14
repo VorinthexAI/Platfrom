@@ -48,7 +48,11 @@ export const useGalaxyStore = create<GalaxyState>((set, get) => ({
   warp: (slug) =>
     set({ phase: "enter", targetSlug: slug, visitSeed: nextVisitSeed() }),
   exit: () => {
-    if (get().phase === "inside") set({ phase: "exit" });
+    const { phase } = get();
+    // From inside: close the veil and leave through it. Mid-flight: no
+    // veil yet, just abort straight back to the overview framing.
+    if (phase === "inside") set({ phase: "exit" });
+    else if (phase === "fly") set({ phase: "overview", targetSlug: null });
   },
   finishExit: () => {
     if (get().phase === "exit") set({ phase: "overview", targetSlug: null });

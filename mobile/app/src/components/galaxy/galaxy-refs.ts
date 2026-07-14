@@ -18,3 +18,26 @@ export function trackedVector(
   }
   return vector;
 }
+
+/**
+ * User-steered orientation of the whole solar system: horizontal swipes
+ * spin it around the vertical axis (yaw), vertical swipes tilt it (pitch).
+ * Written by the pan gesture on the JS thread, damped toward by the
+ * SystemRig every frame — same singleton pattern as the positions above.
+ */
+export const systemRotation = {
+  yaw: 0,
+  pitch: 0,
+};
+
+/** Tilt limit so the system can lean steeply but never flips over. */
+export const SYSTEM_PITCH_LIMIT = 1.15;
+
+export function clampSystemPitch(pitch: number): number {
+  return Math.max(-SYSTEM_PITCH_LIMIT, Math.min(SYSTEM_PITCH_LIMIT, pitch));
+}
+
+/** The live scene camera, published by the CameraRig for screen-space hit tests. */
+export const galaxyCamera: { current: THREE.Camera | null } = {
+  current: null,
+};

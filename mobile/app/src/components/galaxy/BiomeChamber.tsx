@@ -47,7 +47,10 @@ const rockFragmentShader = /* glsl */ `
   void main() {
     vec3 q = normalize(vLocal);
     float blotch = fbm(q * 3.2 + vec3(4.7));
-    float seams = smoothstep(0.62, 0.95, 1.0 - abs(snoise(q * 5.1 + vec3(blotch))));
+    float seams = smoothstep(0.55, 0.93, 1.0 - abs(snoise(q * 5.1 + vec3(blotch))));
+    // A second, finer filament layer that slowly crawls — the electric
+    // wisp look of the web chamber's painted vein maps.
+    float filaments = smoothstep(0.72, 0.97, 1.0 - abs(snoise(q * 9.4 + vec3(uTime * 0.05))));
     float speckle = 0.5 + 0.5 * snoise(q * 22.0);
 
     vec3 rock = mix(uBase, uHigh, clamp(0.5 + 0.5 * blotch, 0.0, 1.0));
@@ -58,8 +61,9 @@ const rockFragmentShader = /* glsl */ `
     vec3 L = normalize(uLightPos - vWorldPos);
     float lambert = 0.3 + 0.8 * abs(dot(normalize(vWorldNormal), L));
 
-    float pulse = 0.4 + 0.3 * sin(uTime * 1.3 + vLocal.y * 1.4);
-    vec3 veins = uEmissive * seams * pulse;
+    float pulse = 0.55 + 0.35 * sin(uTime * 1.3 + vLocal.y * 1.4);
+    float flicker = 0.6 + 0.4 * sin(uTime * 2.1 + vLocal.x * 2.2);
+    vec3 veins = uEmissive * (seams * pulse * 1.35 + filaments * flicker * 0.9);
 
     gl_FragColor = vec4(rock * lambert + veins, 1.0);
   }
@@ -284,11 +288,11 @@ export function BiomeChamber({ styleKey, seed }: BiomeChamberProps) {
         </bufferGeometry>
         <pointsMaterial
           color={style.moteColor}
-          size={0.075}
+          size={0.095}
           sizeAttenuation
           map={getDotTexture()}
           transparent
-          opacity={0.75}
+          opacity={0.85}
           depthWrite={false}
         />
       </points>

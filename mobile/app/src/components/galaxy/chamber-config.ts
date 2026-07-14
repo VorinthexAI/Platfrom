@@ -1,5 +1,7 @@
 import * as THREE from "three";
 
+import { orbitForSlug } from "@/components/galaxy/galaxy-config";
+import type { CapabilitySlug } from "@/data/registry";
 import type { PlanetBiome } from "@/lib/three/planet";
 
 /**
@@ -78,6 +80,22 @@ export function chamberStyleForBiome(biome: PlanetBiome): ChamberStyleKey {
     default:
       return "gem";
   }
+}
+
+/**
+ * Per-capability interior overrides where the live site's hashed biome
+ * differs from the mobile planet's surface biome — Archive opens into the
+ * violet cipher chamber on vorinthex.com, so it does here too.
+ */
+const CHAMBER_STYLE_OVERRIDES: Partial<Record<CapabilitySlug, ChamberStyleKey>> = {
+  archive: "violet",
+};
+
+export function chamberStyleForSlug(slug: CapabilitySlug): ChamberStyleKey {
+  return (
+    CHAMBER_STYLE_OVERRIDES[slug] ??
+    chamberStyleForBiome(orbitForSlug(slug).biome)
+  );
 }
 
 /** Far below the galaxy — beyond the fog so neither scene sees the other. */

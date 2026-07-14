@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { CHAMBER_POSITION } from "@/components/galaxy/chamber-config";
-import { capabilityPositions } from "@/components/galaxy/galaxy-refs";
+import { capabilityPositions, galaxyCamera } from "@/components/galaxy/galaxy-refs";
 import { useGalaxyStore, type GalaxyPhase } from "@/state/galaxy";
 
 export const OVERVIEW_POSITION = new THREE.Vector3(0, 2.1, 9.4);
@@ -38,6 +38,8 @@ export function CameraRig() {
 
   useFrame((state, delta) => {
     const { camera } = state;
+    // Published for screen-space planet hit tests (tap-to-enter).
+    galaxyCamera.current = camera;
     const { phase, targetSlug, beginEnter } = useGalaxyStore.getState();
     const lookTarget = lookTargetRef.current;
 
