@@ -1000,9 +1000,9 @@ const sparkPricing = {
   summary:
     "Everything in Vorinthex runs on Sparks. Every action you perform consumes Sparks. Every subscription simply refills your balance each month. Spend them anywhere.",
   plans: [
-    { id: "spark.plan.moon", name: "Moon", priceUsd: 19.99, monthlySparks: 1_000, description: "Great for personal use." },
-    { id: "spark.plan.comet", name: "Comet", priceUsd: 39.99, monthlySparks: 5_000, description: "Perfect for daily workflows." },
-    { id: "spark.plan.nova", name: "Nova", priceUsd: 99.99, monthlySparks: 25_000, description: "Unlimited teams & On-Demand access." },
+    { id: "spark.plan.moon", name: "Moon", priceUsd: 19.99, monthlySparks: 1_000, description: "Great for early users." },
+    { id: "spark.plan.comet", name: "Comet", priceUsd: 39.99, monthlySparks: 5_000, description: "Perfect for serious users." },
+    { id: "spark.plan.nova", name: "Nova", priceUsd: 99.99, monthlySparks: 25_000, description: "Highest value and On-Demand access." },
   ],
   onDemand: {
     id: "spark.on-demand",
