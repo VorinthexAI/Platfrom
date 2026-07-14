@@ -6,9 +6,11 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { BrandButton } from "@/components/BrandButton";
@@ -23,6 +25,7 @@ import { easings, springs } from "@/theme/motion";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 const SLIDE_IN_MS = 650;
+const SLIDE_IN_DELAY_MS = 200;
 const SLIDE_OUT_MS = 600;
 const CLOSE_DISTANCE = 70;
 const CLOSE_VELOCITY = 500;
@@ -41,6 +44,7 @@ type CapabilityDrawerProps = {
 export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
   const phase = useGalaxyStore((state) => state.phase);
   const exit = useGalaxyStore((state) => state.exit);
+  const insets = useSafeAreaInsets();
   const { playingBriefing, toggleBriefing } = useAppAudio();
 
   const open = phase === "inside" && capability !== null;
@@ -53,10 +57,16 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
   useEffect(() => {
     if (open) {
       setRendered(true);
-      translateY.value = withTiming(0, {
-        duration: SLIDE_IN_MS,
-        easing: easings.luxury,
-      });
+      // A short beat after the veil starts lifting, then the luxury glide
+      // up — arriving feels sequenced instead of everything at once.
+      translateY.value = OFFSCREEN;
+      translateY.value = withDelay(
+        SLIDE_IN_DELAY_MS,
+        withTiming(0, {
+          duration: SLIDE_IN_MS,
+          easing: easings.luxury,
+        }),
+      );
       return;
     }
     translateY.value = withTiming(OFFSCREEN, {
@@ -99,7 +109,9 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
   return (
     <Animated.View
       accessibilityViewIsModal
-      style={[styles.root, slideStyle]}
+      // Floats above the Android gesture/nav bar: the SCENE runs
+      // edge-to-edge underneath; only floating chrome gets the inset.
+      style={[styles.root, { bottom: 8 + insets.bottom }, slideStyle]}
     >
       <GestureDetector gesture={pan}>
         <ChromePanel radius={radii.xl} style={styles.panel}>
@@ -151,7 +163,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 8,
     right: 8,
-    bottom: 8,
     zIndex: 25,
   },
   panel: {
