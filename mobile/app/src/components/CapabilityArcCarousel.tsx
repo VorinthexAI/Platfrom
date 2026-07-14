@@ -2,28 +2,28 @@ import { useCallback } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  Easing,
-  FadeIn,
-  interpolate,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
-  withTiming,
 } from "react-native-reanimated";
 import Svg, { Path } from "react-native-svg";
 import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 
+import { BrandButton } from "@/components/BrandButton";
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { ChromePanel } from "@/components/ChromePanel";
 import { PressableScale } from "@/components/PressableScale";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { Capability } from "@/data/registry";
 import { useAppAudio } from "@/lib/app-audio";
 import { springs } from "@/theme/motion";
-import { fonts, palette, radii, tracking } from "@/theme/tokens";
+import { fonts, palette, radii } from "@/theme/tokens";
 
-const CAROUSEL_HEIGHT = 184;
-const SWIPE_THRESHOLD = 42;
+export const CAPABILITY_CAROUSEL_HEIGHT = 184;
+
+const SWIPE_DISTANCE = 34;
+const SWIPE_VELOCITY = 650;
 
 function wrap(index: number, count: number): number {
   return ((index % count) + count) % count;
@@ -45,46 +45,47 @@ export function CapabilityArcCarousel({
   onSelect,
 }: CapabilityArcCarouselProps) {
   const dragX = useSharedValue(0);
-  const reveal = useSharedValue(1);
   const { playingBriefing, toggleBriefing } = useAppAudio();
   const count = capabilities.length;
   const selected = capabilities[selectedIndex];
+  const compact = width < 350;
+  const currentWidth = compact ? 220 : 248;
+  const sideWidth = compact ? 72 : 86;
+  const sideHeight = compact ? 88 : 96;
 
   const move = useCallback(
     (step: number) => {
       if (count < 2) return;
-      reveal.value = 0;
       onSelect(wrap(selectedIndex + step, count));
-      reveal.value = withTiming(1, { duration: 360, easing: Easing.out(Easing.cubic) });
+      dragX.value = step > 0 ? 46 : -46;
+      dragX.value = withSpring(0, springs.carousel);
     },
-    [count, onSelect, reveal, selectedIndex],
+    [count, dragX, onSelect, selectedIndex],
   );
 
   const pan = Gesture.Pan()
-    .activeOffsetX([-12, 12])
-    .failOffsetY([-18, 18])
+    .activeOffsetX([-8, 8])
+    .failOffsetY([-22, 22])
     .onChange((event) => {
-      dragX.value = event.translationX;
+      dragX.value = Math.max(-120, Math.min(120, event.translationX * 0.72));
     })
     .onEnd((event) => {
       const shouldMove =
-        Math.abs(event.translationX) > SWIPE_THRESHOLD || Math.abs(event.velocityX) > 650;
-      if (shouldMove) runOnJS(move)(event.translationX < 0 ? 1 : -1);
-      dragX.value = withSpring(0, springs.snapBack);
+        Math.abs(event.translationX) > SWIPE_DISTANCE ||
+        Math.abs(event.velocityX) > SWIPE_VELOCITY;
+      if (shouldMove) {
+        const direction =
+          Math.abs(event.velocityX) > SWIPE_VELOCITY
+            ? Math.sign(event.velocityX)
+            : Math.sign(event.translationX);
+        runOnJS(move)(direction < 0 ? 1 : -1);
+      } else {
+        dragX.value = withSpring(0, springs.carousel);
+      }
     });
 
   const stageStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: dragX.value * 0.14 }],
-  }));
-
-  const currentStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(reveal.value, [0, 1], [0.25, 1]),
-    transform: [
-      { perspective: 900 },
-      { translateY: interpolate(reveal.value, [0, 1], [14, 0]) },
-      { scale: interpolate(reveal.value, [0, 1], [0.92, 1]) },
-      { rotateX: "-4deg" },
-    ],
+    transform: [{ translateX: dragX.value }],
   }));
 
   if (!selected) return null;
@@ -95,43 +96,61 @@ export function CapabilityArcCarousel({
 
   return (
     <GestureDetector gesture={pan}>
-      <View style={[styles.root, { width, height: CAROUSEL_HEIGHT }]}>
+      <View
+        collapsable={false}
+        style={[styles.root, { width, height: CAPABILITY_CAROUSEL_HEIGHT }]}
+      >
         <Svg
           width={width}
-          height={CAROUSEL_HEIGHT}
+          height={CAPABILITY_CAROUSEL_HEIGHT}
           style={StyleSheet.absoluteFill}
           pointerEvents="none"
         >
           <Path
-            d={`M 8 30 Q ${width / 2} 166 ${width - 8} 30`}
-            stroke="rgba(221, 226, 229, 0.16)"
+            d={`M 8 27 Q ${width / 2} 170 ${width - 8} 27`}
+            stroke="rgba(255, 255, 255, 0.12)"
             strokeWidth={1}
             fill="none"
           />
           <Path
-            d={`M 30 28 Q ${width / 2} 142 ${width - 30} 28`}
-            stroke="rgba(255, 255, 255, 0.05)"
+            d={`M 28 28 Q ${width / 2} 148 ${width - 28} 28`}
+            stroke="rgba(255, 255, 255, 0.03)"
             strokeWidth={8}
             fill="none"
           />
         </Svg>
 
-        <Animated.View style={[StyleSheet.absoluteFill, stageStyle]}>
+        <Animated.View
+          pointerEvents="box-none"
+          style={[StyleSheet.absoluteFill, stageStyle]}
+        >
           {count > 1 && previous ? (
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel={`Select ${previous.name}`}
+              hitSlop={16}
               onPress={() => move(-1)}
-              style={[styles.sideSlot, styles.leftSlot]}
+              style={[
+                styles.sideSlot,
+                styles.leftSlot,
+                { width: sideWidth, height: sideHeight },
+              ]}
             >
-              <View style={[styles.glassCube, styles.sideCube, styles.leftCube]}>
-                <View style={styles.specularEdge} />
+              <ChromePanel
+                radius={radii.md}
+                style={[
+                  styles.cubeGlow,
+                  styles.sideCube,
+                  styles.leftCube,
+                  { width: sideWidth, height: sideHeight },
+                ]}
+              >
                 <ChromeIcon
                   source={capabilityIconSource[previous.slug]}
-                  size={52}
+                  size={compact ? 50 : 56}
                   glow={0.34}
                 />
-              </View>
+              </ChromePanel>
             </PressableScale>
           ) : null}
 
@@ -139,27 +158,46 @@ export function CapabilityArcCarousel({
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel={`Select ${next.name}`}
+              hitSlop={16}
               onPress={() => move(1)}
-              style={[styles.sideSlot, styles.rightSlot]}
+              style={[
+                styles.sideSlot,
+                styles.rightSlot,
+                { width: sideWidth, height: sideHeight },
+              ]}
             >
-              <View style={[styles.glassCube, styles.sideCube, styles.rightCube]}>
-                <View style={styles.specularEdge} />
+              <ChromePanel
+                radius={radii.md}
+                style={[
+                  styles.cubeGlow,
+                  styles.sideCube,
+                  styles.rightCube,
+                  { width: sideWidth, height: sideHeight },
+                ]}
+              >
                 <ChromeIcon
                   source={capabilityIconSource[next.slug]}
-                  size={52}
+                  size={compact ? 50 : 56}
                   glow={0.34}
                 />
-              </View>
+              </ChromePanel>
             </PressableScale>
           ) : null}
 
           <Animated.View
-            key={selected.slug}
-            entering={FadeIn.duration(180)}
-            style={[styles.currentSlot, currentStyle]}
+            style={[
+              styles.currentSlot,
+              { width: currentWidth, marginLeft: -currentWidth / 2 },
+            ]}
           >
-            <View style={[styles.glassCube, styles.currentCube]}>
-              <View style={styles.specularEdge} />
+            <ChromePanel
+              radius={radii.lg}
+              style={[
+                styles.cubeGlow,
+                styles.currentCube,
+                { width: currentWidth },
+              ]}
+            >
               <PressableScale
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${selected.name}`}
@@ -168,7 +206,7 @@ export function CapabilityArcCarousel({
               >
                 <ChromeIcon
                   source={capabilityIconSource[selected.slug]}
-                  size={50}
+                  size={44}
                   glow={0.42}
                 />
                 <View style={styles.copy}>
@@ -178,20 +216,16 @@ export function CapabilityArcCarousel({
                   </Text>
                 </View>
               </PressableScale>
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel={
-                  `${briefingPlaying ? "Stop" : "Play"} ${selected.name} briefing`
-                }
+              <BrandButton
+                accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${selected.name} briefing`}
+                compact
+                icon={<VolumeIcon size="sm" variant="inverse" />}
+                label={briefingPlaying ? "Stop Briefing" : "Play Briefing"}
                 onPress={() => toggleBriefing(selected.slug)}
                 style={styles.briefingButton}
-              >
-                <VolumeIcon size="sm" variant="inverse" />
-                <Text style={styles.briefingText}>
-                  {briefingPlaying ? "STOP BRIEFING" : "PLAY BRIEFING"}
-                </Text>
-              </PressableScale>
-            </View>
+                variant="primary"
+              />
+            </ChromePanel>
           </Animated.View>
         </Animated.View>
       </View>
@@ -206,64 +240,53 @@ const styles = StyleSheet.create({
   },
   sideSlot: {
     position: "absolute",
-    top: 20,
+    top: 18,
     zIndex: 1,
   },
   leftSlot: {
-    left: 8,
+    left: 4,
   },
   rightSlot: {
-    right: 8,
+    right: 4,
   },
   currentSlot: {
     position: "absolute",
     left: "50%",
     bottom: 0,
-    width: 224,
-    marginLeft: -112,
     zIndex: 2,
   },
-  glassCube: {
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(221, 226, 229, 0.28)",
-    backgroundColor: "rgba(16, 21, 28, 0.84)",
-    shadowColor: palette.chromeWhite,
-    shadowOpacity: 0.12,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
-  },
-  specularEdge: {
-    position: "absolute",
-    top: 0,
-    left: 14,
-    right: 14,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.5)",
+  cubeGlow: {
+    shadowColor: palette.silver100,
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
   },
   sideCube: {
-    width: 80,
-    height: 88,
-    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(13, 17, 23, 0.72)",
   },
   leftCube: {
-    transform: [{ perspective: 700 }, { rotateY: "22deg" }, { rotateZ: "-4deg" }],
+    transform: [
+      { perspective: 1400 },
+      { rotateY: "18deg" },
+      { rotateZ: "-3deg" },
+    ],
   },
   rightCube: {
-    transform: [{ perspective: 700 }, { rotateY: "-22deg" }, { rotateZ: "4deg" }],
+    transform: [
+      { perspective: 1400 },
+      { rotateY: "-18deg" },
+      { rotateZ: "3deg" },
+    ],
   },
   currentCube: {
-    width: 224,
-    height: 148,
-    padding: 14,
-    borderRadius: radii.sm,
+    height: 158,
+    padding: 16,
+    transform: [{ perspective: 1400 }, { rotateX: "1.3deg" }],
   },
   currentInfo: {
-    minHeight: 68,
+    minHeight: 72,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
@@ -274,8 +297,9 @@ const styles = StyleSheet.create({
   name: {
     color: palette.silver50,
     fontFamily: fonts.medium,
-    fontSize: 12,
-    letterSpacing: tracking.micro,
+    fontSize: 15,
+    lineHeight: 18,
+    letterSpacing: 3.6,
   },
   description: {
     marginTop: 5,
@@ -286,19 +310,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
   },
   briefingButton: {
-    height: 34,
-    marginTop: 10,
-    borderRadius: 17,
-    backgroundColor: palette.silver100,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  briefingText: {
-    color: palette.page,
-    fontFamily: fonts.medium,
-    fontSize: 9,
-    letterSpacing: tracking.micro,
+    height: 38,
+    marginTop: 12,
   },
 });
