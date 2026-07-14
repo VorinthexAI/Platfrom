@@ -14,7 +14,7 @@ export class DuplicateAgentError extends AiError {
 }
 
 /** Built-in agents shipped with the framework. Unguardrailed by default —
- * guardrails reference organization scope ids that exist only at runtime,
+ * guardrails reference scope ids that exist only at runtime,
  * so scoped agents are registered dynamically via {@link registerAgent}. */
 export const BUILT_IN_AGENTS: readonly AgentDefinition[] = [
   agentDefinitionSchema.parse({

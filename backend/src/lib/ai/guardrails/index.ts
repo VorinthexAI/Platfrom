@@ -3,7 +3,7 @@ import { AiError } from '@/lib/ai/shared/result';
 
 /**
  * A guardrail contains ONLY a scopeId — nothing else, by spec. An agent's
- * guardrails form a strict allow-list over organization scopes: a
+ * guardrails form a strict allow-list over scopes: a
  * guardrailed agent may only invoke tools whose `scopeId` appears in its
  * guardrail list. An agent with no guardrails is unrestricted.
  */
