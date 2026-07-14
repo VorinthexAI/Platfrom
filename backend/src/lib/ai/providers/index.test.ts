@@ -1,33 +1,33 @@
 import { describe, expect, test } from 'bun:test';
-import { createProviderAdaptersFromEnv, PROVIDER_FACTORIES } from './index';
+import { createProviderAdaptersFromEnv, PROVIDER_REGISTRY } from './index';
 import { normalizeProviderError, PRE_EXECUTION_ERROR_CODES, ProviderError, providerErrorCodeForStatus } from './errors';
-import { PROVIDER_IDS, chatInputSchema } from './types';
+import { PROVIDER_SLUGS, chatInputSchema } from './types';
 
 describe('provider registry', () => {
-  test('contains a factory for every PROVIDER_IDS entry and nothing else', () => {
-    expect(Object.keys(PROVIDER_FACTORIES).sort()).toEqual([...PROVIDER_IDS].sort());
+  test('contains a factory for every PROVIDER_SLUGS entry and nothing else', () => {
+    expect(Object.keys(PROVIDER_REGISTRY).sort()).toEqual([...PROVIDER_SLUGS].sort());
   });
 
   test('every factory id matches its registry key', () => {
-    for (const [key, factory] of Object.entries(PROVIDER_FACTORIES)) {
-      expect(factory.id).toBe(key as (typeof PROVIDER_IDS)[number]);
+    for (const [key, factory] of Object.entries(PROVIDER_REGISTRY)) {
+      expect(factory.id).toBe(key as (typeof PROVIDER_SLUGS)[number]);
     }
   });
 
   test('every factory rejects an empty config', () => {
-    for (const factory of Object.values(PROVIDER_FACTORIES)) {
+    for (const factory of Object.values(PROVIDER_REGISTRY)) {
       expect(() => factory.create({})).toThrow();
     }
   });
 
   test('adapters built from create() carry the right id', () => {
-    const adapter = PROVIDER_FACTORIES.openai.create({ apiKey: 'test-key' });
+    const adapter = PROVIDER_REGISTRY.openai.create({ apiKey: 'test-key' });
     expect(adapter.id).toBe('openai');
     expect(adapter.name).toBe('OpenAI');
   });
 
   test('google-vertex requires apiKey or accessToken + projectId', () => {
-    const factory = PROVIDER_FACTORIES['google-vertex'];
+    const factory = PROVIDER_REGISTRY['google-vertex'];
     expect(() => factory.create({ location: 'us-central1' })).toThrow();
     expect(() => factory.create({ accessToken: 'tok' })).toThrow();
     expect(factory.create({ apiKey: 'k' }).id).toBe('google-vertex');
@@ -35,7 +35,7 @@ describe('provider registry', () => {
   });
 
   test('fromEnv returns null when configuration is missing', () => {
-    for (const factory of Object.values(PROVIDER_FACTORIES)) {
+    for (const factory of Object.values(PROVIDER_REGISTRY)) {
       expect(factory.fromEnv({})).toBeNull();
     }
   });

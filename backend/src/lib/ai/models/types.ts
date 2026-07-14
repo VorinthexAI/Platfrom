@@ -7,23 +7,22 @@ import { providerIdSchema, type ProviderId } from '@/lib/ai/providers/types';
  * change when a provider renames a deployment — provider-specific external
  * model ids live on each route instead.
  */
-export const MODEL_IDS = [
-  'openai.gpt-5',
-  'openai.gpt-5-mini',
-  'openai.gpt-image',
-  'openai.whisper',
-  'openai.tts',
-  'anthropic.claude-sonnet',
-  'anthropic.claude-haiku',
-  'xai.grok',
-  'google.gemini-pro',
-  'google.gemini-flash',
-  'aws.nova-pro',
+export const MODEL_SLUGS = [
+  'openai.gpt-5.4-mini',
+  'openai.gpt-5.4-nano',
 ] as const;
 
-export type ModelId = (typeof MODEL_IDS)[number];
+export const modelSlugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, 'Model slug must use lowercase dot or hyphen notation');
 
-export const modelIdSchema = z.enum(MODEL_IDS);
+export type ModelSlug = z.infer<typeof modelSlugSchema>;
+export type ModelId = ModelSlug;
+
+export const modelIdSchema = modelSlugSchema;
 
 /** One model exposed through one provider — a separately executable route. */
 export interface ModelRoute {

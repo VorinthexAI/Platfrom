@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { z } from 'zod';
+import { actionSchema } from './actions.node';
 import { organizationSchema } from './organizations.node';
 import { agentSchema } from './agents.node';
 import { authChallengeSchema } from './auth-challenges.node';
@@ -8,11 +9,15 @@ import { eventSchema } from './events.node';
 import { intelligenceFragmentSchema } from './intelligence-fragments.node';
 import { mindCapabilitySchema } from './mind-capabilities.node';
 import { mindSchema } from './minds.node';
+import { modelSchema } from './models.node';
+import { modelActionSchema } from './model-actions.node';
+import { modelProviderSchema } from './model-providers.node';
 import { orchestratorSchema } from './orchestrators.node';
 import { paymentCheckoutSchema } from './payment-checkouts.node';
 import { paymentOrderSchema } from './payment-orders.node';
 import { processedWebhookEventSchema } from './processed-webhook-events.node';
 import { productSchema } from './products.node';
+import { providerObjectSchema } from './providers.node';
 import { subscriptionSchema } from './subscriptions.node';
 import { userEntitlementSchema } from './user-entitlements.node';
 import { userOrganizationSchema } from './user-organization.node';
@@ -101,6 +106,7 @@ describe('organization node schema', () => {
  * platform- or team-era field. */
 describe('no node field mentions the retired platform or team nodes', () => {
   const nodeSchemas: Record<string, z.ZodObject<z.ZodRawShape>> = {
+    actions: actionSchema,
     agents: agentSchema,
     authChallenges: authChallengeSchema,
     capabilities: capabilitySchema,
@@ -108,11 +114,15 @@ describe('no node field mentions the retired platform or team nodes', () => {
     intelligenceFragments: intelligenceFragmentSchema,
     mindCapabilities: mindCapabilitySchema,
     minds: mindSchema,
+    modelActions: modelActionSchema,
+    modelProviders: modelProviderSchema,
+    models: modelSchema,
     orchestrators: orchestratorSchema,
     organizations: organizationSchema,
     paymentCheckouts: paymentCheckoutSchema,
     paymentOrders: paymentOrderSchema,
     processedWebhookEvents: processedWebhookEventSchema,
+    providers: providerObjectSchema,
     products: productSchema,
     subscriptions: subscriptionSchema,
     userEntitlements: userEntitlementSchema,

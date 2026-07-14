@@ -51,7 +51,7 @@ export function createOrganizationProviderRepository(
       );
       const raw = await cursor.all();
       // Documents referencing providers that no longer exist in
-      // PROVIDER_IDS are silently ignored — the allow-list can only ever
+      // PROVIDER_SLUGS are silently ignored — the allow-list can only ever
       // widen to known providers.
       return raw
         .map((value) => providerIdSchema.safeParse(value))
