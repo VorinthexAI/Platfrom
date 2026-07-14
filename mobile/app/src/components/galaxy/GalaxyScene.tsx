@@ -1,4 +1,5 @@
-import type { StyleProp, ViewStyle } from "react-native";
+import { Component, type ReactNode } from "react";
+import { View, type StyleProp, type ViewStyle } from "react-native";
 
 import { BiomeChamber } from "@/components/galaxy/BiomeChamber";
 import { CameraRig, OVERVIEW_POSITION } from "@/components/galaxy/CameraRig";
@@ -15,6 +16,34 @@ import type { CapabilitySlug } from "@/data/registry";
 import { useGalaxyStore } from "@/state/galaxy";
 
 const OBSIDIAN = "#030507";
+
+/**
+ * A JS error anywhere in the 3D tree must never take the app down — the
+ * field goes dark instead and the rest of the screen keeps working.
+ */
+class SceneBoundary extends Component<
+  { children: ReactNode; style?: StyleProp<ViewStyle> },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[GalaxyScene] render error:", error);
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <View style={[{ backgroundColor: OBSIDIAN }, this.props.style]} />
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export type GalaxySceneProps = {
   enabledSlugs: readonly CapabilitySlug[];
@@ -42,12 +71,16 @@ export function GalaxyScene({
   const orbits = CAPABILITY_ORBITS.filter((orbit) =>
     enabledSlugs.includes(orbit.slug),
   );
-  // Mount the chamber as soon as the flight starts so its shaders compile
-  // while the veil/approach still hides it (web InteriorWarmup's job).
-  const diveTarget = phase !== "overview" && targetSlug ? targetSlug : null;
+  // Mount the chamber only once the veil is closing/closed — its shader
+  // compile happens in the dark, never during the swipe gesture itself.
+  const diveTarget =
+    (phase === "enter" || phase === "inside" || phase === "exit") && targetSlug
+      ? targetSlug
+      : null;
 
   return (
-    <Canvas
+    <SceneBoundary style={style}>
+      <Canvas
       style={style}
       camera={{
         position: [OVERVIEW_POSITION.x, OVERVIEW_POSITION.y, OVERVIEW_POSITION.z],
@@ -78,6 +111,7 @@ export function GalaxyScene({
           seed={visitSeed}
         />
       ) : null}
-    </Canvas>
+      </Canvas>
+    </SceneBoundary>
   );
 }

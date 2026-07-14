@@ -1,17 +1,10 @@
-import { useState, type ReactNode } from "react";
-import {
-  StyleSheet,
-  View,
-  type LayoutChangeEvent,
-  type StyleProp,
-  type ViewStyle,
-} from "react-native";
+import type { ReactNode } from "react";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import Animated, {
   interpolateColor,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
-  type SharedValue,
 } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 
@@ -35,7 +28,22 @@ export type BrandButtonProps = Omit<
   variant?: BrandButtonVariant;
 };
 
-/** Native equivalent of the web app's shared vui-button component. */
+/**
+ * Brushed-chrome pill in the brand silvers. Deliberately simple: one
+ * corner-to-corner gradient (the most basic LinearGradient usage — no
+ * measuring, no rotation, renders identically everywhere) built only from
+ * light metal tones, so no dark band can appear at any button size.
+ * Press feedback = the shared scale spring plus a soft white sheen.
+ */
+const CHROME_COLORS = [
+  "#FFFFFF",
+  "#DDE2E5",
+  "#AEB6BC",
+  "#C9CED2",
+  "#F5F7F8",
+] as const;
+const CHROME_LOCATIONS = [0, 0.3, 0.58, 0.8, 1] as const;
+
 export function BrandButton({
   compact = false,
   disabled,
@@ -46,27 +54,28 @@ export function BrandButton({
   ...props
 }: BrandButtonProps) {
   const primary = variant === "primary";
-  const [size, setSize] = useState({ width: 0, height: 0 });
 
-  // Press stands in for the web hover: the chrome sheet slides on its own
-  // 800ms clock while glow/border/text settle in 400ms.
-  const slide = useSharedValue(0);
-  const state = useSharedValue(0);
+  // Press stands in for the web hover; opacity-only animations.
+  const press = useSharedValue(0);
 
   const glowStyle = useAnimatedStyle(() => {
     if (!primary || disabled) {
       return { shadowOpacity: 0 };
     }
     return {
-      shadowOpacity: 0.18 + state.value * 0.12,
-      shadowRadius: 17 + state.value * 5,
+      shadowOpacity: 0.18 + press.value * 0.12,
+      shadowRadius: 17 + press.value * 5,
     };
   });
 
+  const sheenStyle = useAnimatedStyle(() => ({
+    opacity: press.value * 0.22,
+  }));
+
   const secondaryFillStyle = useAnimatedStyle(() => ({
-    backgroundColor: `rgba(255, 255, 255, ${0.03 + state.value * 0.03})`,
+    backgroundColor: `rgba(255, 255, 255, ${0.03 + press.value * 0.03})`,
     borderColor: interpolateColor(
-      state.value,
+      press.value,
       [0, 1],
       ["rgba(221, 226, 229, 0.18)", "rgba(221, 226, 229, 0.4)"],
     ),
@@ -76,18 +85,11 @@ export function BrandButton({
     color: disabled
       ? palette.muted
       : interpolateColor(
-          state.value,
+          press.value,
           [0, 1],
           [palette.silver100, palette.chromeWhite],
         ),
   }));
-
-  const onLayout = (event: LayoutChangeEvent) => {
-    const { width, height } = event.nativeEvent.layout;
-    if (width !== size.width || height !== size.height) {
-      setSize({ width, height });
-    }
-  };
 
   return (
     <PressableScale
@@ -101,27 +103,15 @@ export function BrandButton({
         style,
       ]}
       {...props}
-      onLayout={(event) => {
-        onLayout(event);
-        props.onLayout?.(event);
-      }}
       onPressIn={(event) => {
-        slide.value = withTiming(1, {
-          duration: durations.chromeSlide,
-          easing: easings.luxury,
-        });
-        state.value = withTiming(1, {
+        press.value = withTiming(1, {
           duration: durations.buttonState,
           easing: easings.luxury,
         });
         props.onPressIn?.(event);
       }}
       onPressOut={(event) => {
-        slide.value = withTiming(0, {
-          duration: durations.chromeSlide,
-          easing: easings.luxury,
-        });
-        state.value = withTiming(0, {
+        press.value = withTiming(0, {
           duration: durations.buttonState,
           easing: easings.luxury,
         });
@@ -131,14 +121,22 @@ export function BrandButton({
       <Animated.View
         pointerEvents="none"
         style={[
-          StyleSheet.absoluteFill,
-          styles.glowHost,
+          styles.fillHost,
           primary && !disabled && styles.primaryShadow,
           glowStyle,
         ]}
       >
         {primary && !disabled ? (
-          <ChromeFill height={size.height} slide={slide} width={size.width} />
+          <View style={styles.chromeClip}>
+            <LinearGradient
+              colors={CHROME_COLORS}
+              locations={CHROME_LOCATIONS}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <Animated.View style={[styles.sheen, sheenStyle]} />
+          </View>
         ) : (
           <Animated.View
             style={[
@@ -165,80 +163,6 @@ export function BrandButton({
   );
 }
 
-/** --vui-gradient-chrome stops, verbatim from the web theme. */
-const CHROME_COLORS = [
-  "#FFFFFF",
-  "#AEB6BC",
-  "#3C434A",
-  "#F5F7F8",
-  "#7B858C",
-  "#FFFFFF",
-] as const;
-const CHROME_LOCATIONS = [0, 0.18, 0.38, 0.55, 0.76, 1] as const;
-
-/**
- * The web chrome sheet: --vui-gradient-chrome at background-size 200% 200%,
- * resting at position 0% 0% (light half of the sweep) and sliding to
- * 100% 100% while pressed. A 2x expo-linear-gradient panel translates
- * inside the clipped pill — native gradient rendering, no SVG banding.
- */
-function ChromeFill({
-  height,
-  slide,
-  width,
-}: {
-  height: number;
-  slide: SharedValue<number>;
-  width: number;
-}) {
-  const slideStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: -width * slide.value },
-      { translateY: -height * slide.value },
-    ],
-  }));
-
-  if (width === 0 || height === 0) {
-    return <View style={[styles.flatFill, styles.chromeFallback]} />;
-  }
-
-  // CSS `linear-gradient(135deg, ...)` runs at a fixed 45° regardless of
-  // aspect ratio, with gradient-line length |W·sin45| + |H·cos45| over the
-  // 2x sheet. Reproduce it with primitives that behave identically on
-  // native and web: a square of side √2·(w+h) centered on the sheet,
-  // rotated 45°, carrying a plain horizontal gradient (start/end fixed in
-  // range). The square covers the whole sheet, so every window position
-  // the press slide can reach shows the exact CSS projection.
-  const side = Math.SQRT2 * (width + height);
-
-  return (
-    <View pointerEvents="none" style={styles.chromeClip}>
-      <Animated.View
-        style={[
-          styles.chromeSheet,
-          { width: width * 2, height: height * 2 },
-          slideStyle,
-        ]}
-      >
-        <LinearGradient
-          colors={CHROME_COLORS}
-          locations={CHROME_LOCATIONS}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={{
-            position: "absolute",
-            width: side,
-            height: side,
-            left: width - side / 2,
-            top: height - side / 2,
-            transform: [{ rotate: "45deg" }],
-          }}
-        />
-      </Animated.View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: {
     position: "relative",
@@ -257,32 +181,34 @@ const styles = StyleSheet.create({
     height: 38,
     paddingHorizontal: 20,
   },
-  primaryShadow: {
-    shadowColor: palette.silver100,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 5,
-  },
   disabledRoot: {
     opacity: 0.7,
   },
-  glowHost: {
-    borderRadius: 999,
-  },
-  chromeClip: {
+  fillHost: {
     position: "absolute",
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
     borderRadius: 999,
+  },
+  primaryShadow: {
+    shadowColor: palette.silver100,
+    shadowOffset: { width: 0, height: 0 },
+  },
+  chromeClip: {
+    flex: 1,
+    borderRadius: 999,
     overflow: "hidden",
   },
-  chromeFallback: {
-    backgroundColor: palette.silver300,
-  },
-  chromeSheet: {
+  sheen: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     backgroundColor: "#FFFFFF",
-    overflow: "hidden",
+    opacity: 0,
   },
   flatFill: {
     position: "absolute",

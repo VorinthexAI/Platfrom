@@ -228,8 +228,12 @@ function CubeFace({
   stageWidth,
   onPress,
 }: CubeFaceProps) {
+  // All worklet math is inlined — no captured helper functions, only
+  // numbers, plain arithmetic, and transform/opacity output.
   const faceStyle = useAnimatedStyle(() => {
-    const rel = wrapSigned(index - offset.value, count);
+    let rel = (index - offset.value) % count;
+    if (rel > count / 2) rel -= count;
+    if (rel < -count / 2) rel += count;
     const magnitude = Math.min(Math.abs(rel), MAX_VISIBLE);
     const clamped = Math.max(-MAX_VISIBLE, Math.min(MAX_VISIBLE, rel));
     return {
@@ -246,7 +250,9 @@ function CubeFace({
   });
 
   const focusStyle = useAnimatedStyle(() => {
-    const rel = wrapSigned(index - offset.value, count);
+    let rel = (index - offset.value) % count;
+    if (rel > count / 2) rel -= count;
+    if (rel < -count / 2) rel += count;
     return { opacity: Math.max(0, 1 - Math.abs(rel) / 0.6) };
   });
 
@@ -270,9 +276,12 @@ function CubeFace({
         accessibilityRole="button"
         accessibilityLabel={`Open ${capability.name}`}
         onPress={onPress}
-        style={styles.facePress}
+        style={{ width: faceWidth, height: faceHeight }}
       >
-        <ChromePanel radius={radii.md} style={styles.facePanel}>
+        <ChromePanel
+          radius={radii.md}
+          style={[styles.facePanel, { width: faceWidth, height: faceHeight }]}
+        >
           <ChromeIcon
             source={capabilityIconSource[capability.slug]}
             size={44}
