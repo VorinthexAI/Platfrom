@@ -36,7 +36,7 @@ function buildDecision(
 
 /**
  * Resolves the best executable route for a request. The organization's
- * enabled providers are loaded server-side from `organization_providers`
+ * enabled providers are loaded server-side from `organizationProviders`
  * (never accepted from the client), models come from the registry, and
  * only providers with a constructable adapter are considered.
  */

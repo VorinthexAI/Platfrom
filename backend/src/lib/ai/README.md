@@ -1,15 +1,17 @@
-# AI Execution Layer
+# AI Execution Layer & Agent Framework
 
 Modular execution layer for every AI call the backend makes.
 
 ```text
-Agent → Tool → Action → Router → Model → Provider
+Agent → Tool → Action → Router → Model → Provider → Response → Validation → agentRuns
 ```
 
 A tool never hardcodes a provider endpoint. It references an **action**
 (what must be done), and the **router** picks the best executable
 model/provider route — restricted to the providers enabled for the calling
-organization.
+organization. Agents compose tools, guardrails allow-list the organization
+scopes an agent may operate in, and every execution lands as metadata in
+the `agentRuns` ledger.
 
 ## Modules (dependency order, bottom-up)
 
@@ -19,8 +21,14 @@ organization.
 | `actions/` | `ACTION_IDS` (`<domain>.<action>`), `ACTION_REGISTRY`, per-action `safeToRetry` |
 | `providers/` | `PROVIDER_IDS`, the `ProviderAdapter` contract, one module per provider (auth config, client construction, request transform, response + error + usage normalization, streaming where available), `PROVIDER_FACTORIES` |
 | `models/` | `MODEL_IDS` (stable internal ids), `MODEL_REGISTRY` — per-model actions, per-ACTION routing profiles (quality/speed/costEfficiency/reliability ∈ [0,1]), and routes (one model × one provider each, with the provider-specific external model id) |
-| `organization-providers/` | the `organization_providers` ArangoDB allow-list: document existence = enabled, no `enabled` boolean, unique persistent index on `(organizationId, providerId)` |
+| `organization-providers/` | the `organizationProviders` ArangoDB allow-list: document existence = enabled, no `enabled` boolean, unique persistent index on `(organizationId, providerId)` |
 | `router/` | request schemas (`auto` / `model` / `fixed`), candidate generation, centralized strategy weights + deterministic scoring/tie-breaking, `selectRoute`, `executeAction` with organization-safe fallbacks |
+| `organization-scopes/` | the `organizationScopes` collection: minimal `{key (CUID2), name}` nodes with a unique name index — the unit guardrails point at |
+| `guardrails/` | `{scopeId}`-only guardrail schema + allow-list evaluation: no guardrails → unrestricted; guardrails present → only tools whose scope is listed |
+| `tools/` | `TOOL_REGISTRY` — tools reference **actions only** (never providers/endpoints), optionally carry routing *preferences* (router stays authoritative) and a `scopeId` |
+| `agents/` | `AgentDefinition` (skill + toolIds + guardrails), SKILL.md compile/parse, deterministic prompt compilation, built-in + runtime agent registry |
+| `agent-runs/` | the `agentRuns` ledger: status, route ids (never registry data), normalized usage, timing, steps, output *metadata* (never content) |
+| `pipeline/` | `runAgentTool` — grant + guardrail checks, prompt injection for chat actions, route + execute, response validation, run recording |
 
 Modules only import downward (providers never import models; models never
 import the router; actions import nothing but shared).
@@ -37,7 +45,7 @@ reliability → quality → model id → provider id. Routing is never random.
 
 Candidate filter chain: action registered → models claiming the action →
 mode filters → expand routes → drop disabled models/routes → drop providers
-not in `organization_providers` for the org (loaded server-side, never
+not in `organizationProviders` for the org (loaded server-side, never
 client-supplied) → drop providers without a configured adapter → drop
 routes lacking an action profile → typed `NoEligibleRouteError` when empty.
 

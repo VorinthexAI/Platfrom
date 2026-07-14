@@ -6,9 +6,10 @@ import { providerIdSchema, type ProviderId } from '@/lib/ai/providers/types';
  * Strict allow-list: one document per provider enabled for one
  * organization. Existence of the document MEANS enabled — there is
  * deliberately no `enabled` boolean; disabling a provider deletes its
- * document. The collection name is fixed by the execution-layer spec.
+ * document. Named per the repo's camelCase-plural collection convention
+ * (the legacy organization_providers name is migrated in arango-migrate).
  */
-export const ORGANIZATION_PROVIDERS_COLLECTION = 'organization_providers';
+export const ORGANIZATION_PROVIDERS_COLLECTION = 'organizationProviders';
 
 /**
  * Intentionally minimal document. Per repo convention the primary-key

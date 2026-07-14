@@ -4,6 +4,8 @@ import { embed } from '../lib/embed';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
+import { ensureOrganizationScopesCollection } from '../lib/ai/organization-scopes/indexes';
+import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -337,10 +339,40 @@ async function main() {
     await backfillCollectionEmbeddings(targetDb, spec);
   }
 
-  // AI execution layer allow-list: intentionally minimal documents (no
-  // embedding field), so it lives outside the node `collections` list and
-  // owns its idempotent setup (unique index on organizationId+providerId).
+  // AI-layer collections rename: the first cut shipped snake_case names;
+  // every other collection is camelCase plural, so copy the documents
+  // across (preserving _key) and retire the legacy collections. Runs
+  // BEFORE the ensure* calls below so indexes land on the new names.
+  // overwriteMode ignore makes reruns no-ops.
+  const aiCollectionRenames: Array<{ legacy: string; current: string }> = [
+    { legacy: 'organization_providers', current: 'organizationProviders' },
+    { legacy: 'organization_scopes', current: 'organizationScopes' },
+    { legacy: 'agent_runs', current: 'agentRuns' },
+  ];
+  for (const { legacy, current } of aiCollectionRenames) {
+    const legacyCollection = targetDb.collection(legacy);
+    if (!(await legacyCollection.exists())) continue;
+    const currentCollection = targetDb.collection(current);
+    if (!(await currentCollection.exists())) {
+      await currentCollection.create();
+    }
+    await targetDb.query(
+      `
+      FOR doc IN @@legacy
+        INSERT doc INTO @@current OPTIONS { overwriteMode: "ignore" }
+      `,
+      { '@legacy': legacy, '@current': current },
+    );
+    await legacyCollection.drop();
+    console.log(`Copied ${legacy} -> ${current} and dropped ${legacy}`);
+  }
+
+  // AI execution layer collections: intentionally minimal documents (no
+  // embedding field), so they live outside the node `collections` list and
+  // own their idempotent setup (unique/read-path indexes).
   await ensureOrganizationProvidersCollection(targetDb);
+  await ensureOrganizationScopesCollection(targetDb);
+  await ensureAgentRunsCollection(targetDb);
 
   // Legacy scratch collection the org-migration steps below write into
   // before the final user_organization -> userOrganizations copy. Not part

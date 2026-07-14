@@ -3,7 +3,7 @@ import { ORGANIZATION_PROVIDERS_COLLECTION } from './schema';
 import type { OrganizationProvidersSetupDatabase } from './types';
 
 /**
- * Idempotent setup for the `organization_providers` collection: creates
+ * Idempotent setup for the `organizationProviders` collection: creates
  * the collection when missing and ensures the unique persistent compound
  * index over (organizationId, providerId). `ensureIndex` is a no-op when
  * an identical index already exists, so this is safe to run on every
