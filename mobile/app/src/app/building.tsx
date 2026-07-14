@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import Animated, {
   useAnimatedProps,
@@ -10,11 +10,14 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { NeuralBrain3D } from "@/components/three/NeuralBrain3D";
+import { BRAIN_BUILD_MESSAGES } from "@/data/brain-build-messages";
 import { durations, easings } from "@/theme/motion";
 import { fonts, palette, tracking } from "@/theme/tokens";
 
 Animated.addWhitelistedNativeProps({ text: true });
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
+const MESSAGE_INTERVAL_MS = 700;
+const MESSAGE_STEP = 17;
 
 /**
  * Building Your Brain: the monochrome neural brain assembles center-out
@@ -24,6 +27,9 @@ export default function BuildingRoute() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const [messageIndex, setMessageIndex] = useState(() =>
+    Math.floor(Math.random() * BRAIN_BUILD_MESSAGES.length),
+  );
 
   const progress = useSharedValue(0);
 
@@ -33,7 +39,13 @@ export default function BuildingRoute() {
       easing: easings.inOut,
     });
     const timer = setTimeout(() => router.replace("/brain"), durations.buildExitDelay);
-    return () => clearTimeout(timer);
+    const messageTimer = setInterval(() => {
+      setMessageIndex((current) => (current + MESSAGE_STEP) % BRAIN_BUILD_MESSAGES.length);
+    }, MESSAGE_INTERVAL_MS);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(messageTimer);
+    };
   }, [progress, router]);
 
   const lineStyle = useAnimatedStyle(() => ({
@@ -73,6 +85,7 @@ export default function BuildingRoute() {
           style={styles.percent}
           accessibilityLabel="Build progress"
         />
+        <Text style={styles.status}>{BRAIN_BUILD_MESSAGES[messageIndex]}</Text>
       </View>
     </View>
   );
@@ -100,8 +113,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   progressBlock: {
+    width: "100%",
     alignItems: "center",
-    gap: 16,
+    gap: 14,
   },
   track: {
     width: 190,
@@ -121,5 +135,17 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     padding: 0,
     textAlign: "center",
+  },
+  status: {
+    width: "86%",
+    maxWidth: 320,
+    height: 36,
+    color: palette.silver500,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+    lineHeight: 18,
+    letterSpacing: 0,
+    textAlign: "center",
+    textAlignVertical: "center",
   },
 });
