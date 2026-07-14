@@ -51,7 +51,7 @@ import { crystalOpener, tierForValue } from "@/lib/loot/crystal-tiers";
  *  4. signin          — explorer profile: welcome line + fragments haul
  *  5. magic / mfa     — validates ?token_hash → TOTP setup (QR + 2 codes)
  *  6. magic / mfa     — returning member: single TOTP code
- *  7. success         — hyper jump into /galaxy/sun or /galaxy/public
+ *  7. success         — hyper jump into /nexus or /galaxy/public
  */
 export function CaveOverlay() {
   const mode = useGalaxyStore((s) => s.mode);

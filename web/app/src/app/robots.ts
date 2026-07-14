@@ -7,7 +7,7 @@ import { BLOCK_INDEXING, SITE_URL } from "@/lib/site";
  * robots.txt disallow keeps well-behaved crawlers (including AI agents) out
  * of them entirely.
  */
-const DISALLOW_PRIVATE = ["/auth", "/signin", "/galaxy", "/public/"];
+const DISALLOW_PRIVATE = ["/auth", "/signin", "/galaxy", "/nexus", "/public/"];
 
 /**
  * GEO / AEO allowlist: answer engines and AI crawlers we explicitly welcome

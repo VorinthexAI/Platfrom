@@ -23,7 +23,7 @@ import {
  *   belt from outside, looking in.
  * - "cave": the camera dives into a belt asteroid whose interior hosts an
  *   auth story (join / verify / sign-in / TOTP).
- * - "jump": hyper-jump transition into /galaxy/*.
+ * - "jump": hyper-jump transition into /nexus or /galaxy/public.
  */
 
 export type GalaxyMode = "intro" | "system" | "belt" | "cave" | "jump";

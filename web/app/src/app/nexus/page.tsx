@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { SunGalaxy } from "./SunGalaxy";
+import { NexusGate } from "./NexusGate";
 
 export const metadata: Metadata = {
-  title: "The Inner Galaxy",
+  title: "The Nexus",
   description: "Inside the Vorinthex star.",
   robots: { index: false, follow: false },
 };
 
-export default function SunGalaxyPage() {
-  return <SunGalaxy />;
+export default function NexusPage() {
+  return <NexusGate />;
 }

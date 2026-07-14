@@ -9,7 +9,6 @@ import { createRandom } from "@/lib/random";
 
 const SILVER_50 = "#f5f7f8";
 const SILVER_300 = "#aeb6bc";
-const SILVER_500 = "#7b858c";
 const OBSIDIAN = "#030507";
 
 /** Same curve the progress line uses (Reanimated Easing.inOut(cubic)). */
@@ -33,7 +32,6 @@ type BrainGeometry = {
   positions: Float32Array;
   edges: Float32Array;
   pulses: Float32Array;
-  streams: Float32Array;
 };
 
 function buildBrain(seed: number): BrainGeometry {
@@ -82,26 +80,7 @@ function buildBrain(seed: number): BrainGeometry {
   const pulses = new Float32Array(pulsePoints.length * 3);
   pulsePoints.forEach((p, i) => p.toArray(pulses, i * 3));
 
-  // Filament streams descending from the stem toward the progress line,
-  // flattened into one segment list so a single material drives them all.
-  const streamSegments: number[] = [];
-  [-0.06, 0, 0.06].forEach((offset, s) => {
-    const sway = (random() - 0.5) * 0.5;
-    const top = new THREE.Vector3(0.32 + offset * 2, -1.05, offset);
-    const segments = 14;
-    let prevX = top.x;
-    let prevY = top.y;
-    for (let i = 1; i <= segments; i++) {
-      const t = i / segments;
-      const y = top.y - t * 1.7;
-      const x = top.x + Math.sin(t * Math.PI * (1.3 + s * 0.3)) * sway * t;
-      streamSegments.push(prevX, prevY, top.z, x, y, top.z);
-      prevX = x;
-      prevY = y;
-    }
-  });
-
-  return { positions, edges, pulses, streams: new Float32Array(streamSegments) };
+  return { positions, edges, pulses };
 }
 
 function BrainScene({ seed, durationMs }: { seed: number; durationMs: number }) {
@@ -109,9 +88,8 @@ function BrainScene({ seed, durationMs }: { seed: number; durationMs: number }) 
   const pointsGeometryRef = useRef<THREE.BufferGeometry>(null);
   const edgesGeometryRef = useRef<THREE.BufferGeometry>(null);
   const pulseMaterialRef = useRef<THREE.PointsMaterial>(null);
-  const streamMaterialRef = useRef<THREE.LineBasicMaterial>(null);
 
-  const { positions, edges, pulses, streams } = useMemo(() => buildBrain(seed), [seed]);
+  const { positions, edges, pulses } = useMemo(() => buildBrain(seed), [seed]);
   const pointCount = positions.length / 3;
   const edgeCount = edges.length / 6;
 
@@ -129,10 +107,6 @@ function BrainScene({ seed, durationMs }: { seed: number; durationMs: number }) 
     if (pulseMaterialRef.current) {
       const t = state.clock.elapsedTime;
       pulseMaterialRef.current.opacity = progress * (0.55 + 0.4 * Math.sin(t * 2.1));
-    }
-    if (streamMaterialRef.current) {
-      streamMaterialRef.current.opacity =
-        Math.max(0, Math.min(1, (progress - 0.75) / 0.25)) * 0.4;
     }
     if (groupRef.current) {
       // Gentle sway keeps the profile readable while showing its depth.
@@ -177,18 +151,6 @@ function BrainScene({ seed, durationMs }: { seed: number; durationMs: number }) 
           depthWrite={false}
         />
       </points>
-      <lineSegments>
-        <bufferGeometry>
-          <bufferAttribute attach="attributes-position" args={[streams, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial
-          ref={streamMaterialRef}
-          color={SILVER_500}
-          transparent
-          opacity={0}
-          depthWrite={false}
-        />
-      </lineSegments>
     </group>
   );
 }
