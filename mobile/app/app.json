@@ -4,7 +4,7 @@
     "slug": "vorinthex-ai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/brand/vorinthex-mark.png",
+    "icon": "./assets/brand/app-icon.png",
     "scheme": "vorinthexcore",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#030507",
@@ -16,7 +16,7 @@
       "package": "app.vorinthex.com",
       "adaptiveIcon": {
         "backgroundColor": "#030507",
-        "foregroundImage": "./assets/brand/vorinthex-mark.png"
+        "foregroundImage": "./assets/brand/adaptive-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -28,6 +28,14 @@
           "backgroundColor": "#030507",
           "image": "./assets/brand/vorinthex-mark.png",
           "imageWidth": 96
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "recordAudioAndroid": false,
+          "microphonePermission": false
         }
       ]
     ],

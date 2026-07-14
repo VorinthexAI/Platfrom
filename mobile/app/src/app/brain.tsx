@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -8,7 +8,8 @@ import { SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { HomeConstellation } from "@/components/HomeConstellation";
 import { PressableScale } from "@/components/PressableScale";
 import { MOCK_USER, greetingForHour } from "@/data/mock";
-import type { CapabilitySlug } from "@/data/registry";
+import { CAPABILITIES, type CapabilitySlug } from "@/data/registry";
+import { useOnboardingStore } from "@/state/onboarding";
 import { durations } from "@/theme/motion";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
@@ -17,6 +18,33 @@ export default function BrainRoute() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const greeting = greetingForHour(new Date().getHours());
+  const decisions = useOnboardingStore((state) => state.decisions);
+  const enabledSlugs = useMemo(
+    () =>
+      CAPABILITIES.filter((capability) => decisions[capability.slug] === "enabled").map(
+        (capability) => capability.slug,
+      ),
+    [decisions],
+  );
+  const fullName = `${MOCK_USER.firstName}.`;
+  const [typedCharacters, setTypedCharacters] = useState(0);
+  const totalCharacters = greeting.length + fullName.length;
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTypedCharacters((current) => {
+        if (current >= totalCharacters) {
+          clearInterval(timer);
+          return current;
+        }
+        return current + 1;
+      });
+    }, 55);
+    return () => clearInterval(timer);
+  }, [totalCharacters]);
+
+  const typedGreeting = greeting.slice(0, typedCharacters);
+  const typedName = fullName.slice(0, Math.max(0, typedCharacters - greeting.length));
 
   const openCapability = useCallback(
     (slug: CapabilitySlug) => {
@@ -29,8 +57,8 @@ export default function BrainRoute() {
     <View style={[styles.root, { paddingTop: insets.top + 10 }]}>
       <Animated.View entering={FadeInDown.duration(durations.base)} style={styles.header}>
         <View>
-          <Text style={styles.greeting}>{greeting}</Text>
-          <Text style={styles.name}>{MOCK_USER.firstName}.</Text>
+          <Text style={styles.greeting}>{typedGreeting}</Text>
+          <Text style={styles.name}>{typedName}</Text>
         </View>
         <PressableScale
           accessibilityRole="button"
@@ -42,7 +70,7 @@ export default function BrainRoute() {
       </Animated.View>
 
       <View style={styles.constellationWrap}>
-        <HomeConstellation onOpen={openCapability} />
+        <HomeConstellation enabledSlugs={enabledSlugs} onOpen={openCapability} />
       </View>
     </View>
   );
@@ -61,11 +89,13 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
   },
   greeting: {
+    minHeight: 18,
     color: palette.silver300,
     fontFamily: fonts.regular,
     fontSize: 15,
   },
   name: {
+    minHeight: 31,
     marginTop: 2,
     color: palette.silver50,
     fontFamily: fonts.semibold,

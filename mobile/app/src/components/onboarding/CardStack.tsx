@@ -14,6 +14,7 @@ import Animated, {
 import { OnboardingCard } from "@/components/onboarding/OnboardingCard";
 import { PressableScale } from "@/components/PressableScale";
 import { CAPABILITIES, type Capability, type CapabilitySlug } from "@/data/registry";
+import { useAppAudio } from "@/lib/app-audio";
 import { completionHaptic, decisionHaptic } from "@/lib/haptics";
 import { durations, easings, springs, swipe } from "@/theme/motion";
 import { fonts, palette, radii, tracking } from "@/theme/tokens";
@@ -34,6 +35,8 @@ type SwipeCardProps = {
   height: number;
   onCommit: (slug: CapabilitySlug, decision: CapabilityDecision) => void;
   registerExit: (fn: ExitFn) => void;
+  briefingPlaying: boolean;
+  onToggleBriefing: () => void;
 };
 
 function SwipeCard({
@@ -45,6 +48,8 @@ function SwipeCard({
   height,
   onCommit,
   registerExit,
+  briefingPlaying,
+  onToggleBriefing,
 }: SwipeCardProps) {
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
@@ -132,7 +137,14 @@ function SwipeCard({
         style={[styles.cardWrap, animatedStyle]}
         pointerEvents={active ? "auto" : "none"}
       >
-        <OnboardingCard capability={capability} index={index} width={width} height={height} />
+        <OnboardingCard
+          capability={capability}
+          index={index}
+          width={width}
+          height={height}
+          briefingPlaying={briefingPlaying}
+          onToggleBriefing={onToggleBriefing}
+        />
         <Animated.View pointerEvents="none" style={[styles.dim, dimStyle]} />
       </Animated.View>
     </GestureDetector>
@@ -155,6 +167,7 @@ export function CardStack({ onComplete }: CardStackProps) {
 
   const activeIndex = useOnboardingStore((state) => state.activeIndex);
   const decide = useOnboardingStore((state) => state.decide);
+  const { playingBriefing, stopBriefing, toggleBriefing } = useAppAudio();
 
   const exitRef = useRef<ExitFn | null>(null);
   const completedRef = useRef(false);
@@ -165,6 +178,7 @@ export function CardStack({ onComplete }: CardStackProps) {
 
   const handleCommit = useCallback(
     (slug: CapabilitySlug, decision: CapabilityDecision) => {
+      stopBriefing();
       decide(slug, decision);
       if (
         useOnboardingStore.getState().activeIndex >= CAPABILITIES.length &&
@@ -175,7 +189,7 @@ export function CardStack({ onComplete }: CardStackProps) {
         setTimeout(onComplete, 420);
       }
     },
-    [decide, onComplete],
+    [decide, onComplete, stopBriefing],
   );
 
   const activeCapability = CAPABILITIES[activeIndex];
@@ -205,6 +219,8 @@ export function CardStack({ onComplete }: CardStackProps) {
               height={cardHeight}
               onCommit={handleCommit}
               registerExit={registerExit}
+              briefingPlaying={playingBriefing === capability.slug}
+              onToggleBriefing={() => toggleBriefing(capability.slug)}
             />
           ))}
       </View>
@@ -217,7 +233,7 @@ export function CardStack({ onComplete }: CardStackProps) {
               activeCapability ? `Skip ${activeCapability.name}` : "Skip capability"
             }
             onPress={() => exitRef.current?.("skipped")}
-            style={styles.fallbackButton}
+            style={[styles.fallbackButton, styles.skipButton]}
           >
             <Text style={styles.fallbackText}>SKIP</Text>
           </PressableScale>
@@ -227,12 +243,11 @@ export function CardStack({ onComplete }: CardStackProps) {
               activeCapability ? `Enable ${activeCapability.name}` : "Enable capability"
             }
             onPress={() => exitRef.current?.("enabled")}
-            style={styles.fallbackButton}
+            style={[styles.fallbackButton, styles.enableButton]}
           >
-            <Text style={styles.fallbackText}>ENABLE</Text>
+            <Text style={styles.enableText}>ENABLE</Text>
           </PressableScale>
         </View>
-        <Text style={styles.helper}>{"Swipe left to skip   ·   Swipe right to enable"}</Text>
       </View>
     </View>
   );
@@ -264,7 +279,6 @@ const styles = StyleSheet.create({
   },
   footer: {
     alignItems: "center",
-    gap: 18,
     paddingBottom: 26,
   },
   fallbackRow: {
@@ -272,11 +286,19 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   fallbackButton: {
+    minWidth: 112,
+    height: 38,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  skipButton: {
     borderWidth: 1,
     borderColor: palette.hairline,
-    borderRadius: 999,
-    paddingHorizontal: 24,
-    paddingVertical: 9,
+  },
+  enableButton: {
+    backgroundColor: palette.silver100,
   },
   fallbackText: {
     color: palette.silver500,
@@ -284,10 +306,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: tracking.micro,
   },
-  helper: {
-    color: palette.silver500,
-    fontFamily: fonts.regular,
-    fontSize: 12,
-    letterSpacing: 0.4,
+  enableText: {
+    color: palette.page,
+    fontFamily: fonts.medium,
+    fontSize: 11,
+    letterSpacing: tracking.micro,
   },
 });

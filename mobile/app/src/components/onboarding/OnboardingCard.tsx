@@ -1,6 +1,8 @@
 import { StyleSheet, Text, View } from "react-native";
+import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
+import { PressableScale } from "@/components/PressableScale";
 import { ProgressDots } from "@/components/ProgressDots";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { Capability } from "@/data/registry";
@@ -12,6 +14,8 @@ export type OnboardingCardProps = {
   index: number;
   width: number;
   height: number;
+  briefingPlaying: boolean;
+  onToggleBriefing: () => void;
 };
 
 /**
@@ -19,7 +23,14 @@ export type OnboardingCardProps = {
  * capability name, concise description, monochrome progress marker.
  * Thin neutral chrome border, subtle inset highlight, deep soft shadow.
  */
-export function OnboardingCard({ capability, index, width, height }: OnboardingCardProps) {
+export function OnboardingCard({
+  capability,
+  index,
+  width,
+  height,
+  briefingPlaying,
+  onToggleBriefing,
+}: OnboardingCardProps) {
   return (
     <View style={[styles.card, { width, height }]}>
       <View style={styles.insetHighlight} />
@@ -31,6 +42,17 @@ export function OnboardingCard({ capability, index, width, height }: OnboardingC
         />
         <Text style={styles.name}>{capability.name.toUpperCase()}</Text>
         <Text style={styles.description}>{capability.onboardingDescription}</Text>
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${capability.name} briefing`}
+          onPress={onToggleBriefing}
+          style={styles.briefingButton}
+        >
+          <VolumeIcon size="sm" variant="inverse" />
+          <Text style={styles.briefingText}>
+            {briefingPlaying ? "STOP BRIEFING" : "PLAY BRIEFING"}
+          </Text>
+        </PressableScale>
       </View>
       <ProgressDots count={CAPABILITIES.length} activeIndex={index} style={styles.dots} />
     </View>
@@ -83,6 +105,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     textAlign: "center",
+  },
+  briefingButton: {
+    minWidth: 156,
+    height: 38,
+    marginTop: 24,
+    paddingHorizontal: 18,
+    borderRadius: 19,
+    backgroundColor: palette.silver100,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  briefingText: {
+    color: palette.page,
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    letterSpacing: tracking.micro,
   },
   dots: {
     position: "absolute",

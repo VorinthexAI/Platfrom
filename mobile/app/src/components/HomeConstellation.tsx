@@ -44,6 +44,7 @@ function filamentPath(
 }
 
 export type HomeConstellationProps = {
+  enabledSlugs: readonly CapabilitySlug[];
   onOpen: (slug: CapabilitySlug) => void;
 };
 
@@ -51,10 +52,13 @@ export type HomeConstellationProps = {
  * The AI brain home: a neural constellation with the five capability
  * nodes orbiting a glowing core.
  */
-export function HomeConstellation({ onOpen }: HomeConstellationProps) {
+export function HomeConstellation({ enabledSlugs, onOpen }: HomeConstellationProps) {
   const { width: screenWidth } = useWindowDimensions();
   const width = Math.min(screenWidth - 16, 390);
   const height = 450;
+  const enabledCapabilities = CAPABILITIES.filter((capability) =>
+    enabledSlugs.includes(capability.slug),
+  );
 
   return (
     <View style={[styles.root, { width, height }]}>
@@ -67,7 +71,7 @@ export function HomeConstellation({ onOpen }: HomeConstellationProps) {
         style={[StyleSheet.absoluteFill, { width, height }]}
       />
       <Svg width={width} height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
-        {CAPABILITIES.map((capability, i) => (
+        {enabledCapabilities.map((capability, i) => (
           <Path
             key={capability.slug}
             d={filamentPath(width, height, NODE_POSITIONS[capability.slug], i % 2 === 0 ? 16 : -16)}
@@ -79,7 +83,7 @@ export function HomeConstellation({ onOpen }: HomeConstellationProps) {
         ))}
       </Svg>
 
-      {CAPABILITIES.map((capability, i) => {
+      {enabledCapabilities.map((capability, i) => {
         const position = NODE_POSITIONS[capability.slug];
         return (
           <Animated.View
