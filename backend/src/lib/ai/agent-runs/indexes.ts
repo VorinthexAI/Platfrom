@@ -3,7 +3,7 @@ import { AGENT_RUNS_COLLECTION } from './schema';
 import type { AgentRunsSetupDatabase } from './types';
 
 /**
- * Idempotent setup for `agent_runs`: creates the collection when missing
+ * Idempotent setup for `agentRuns`: creates the collection when missing
  * and ensures the read-path indexes (per-organization and per-agent
  * timelines, status sweeps). Safe to run on every deploy — called from
  * `src/db/arango-migrate.ts`.

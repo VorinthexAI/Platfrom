@@ -339,6 +339,34 @@ async function main() {
     await backfillCollectionEmbeddings(targetDb, spec);
   }
 
+  // AI-layer collections rename: the first cut shipped snake_case names;
+  // every other collection is camelCase plural, so copy the documents
+  // across (preserving _key) and retire the legacy collections. Runs
+  // BEFORE the ensure* calls below so indexes land on the new names.
+  // overwriteMode ignore makes reruns no-ops.
+  const aiCollectionRenames: Array<{ legacy: string; current: string }> = [
+    { legacy: 'organization_providers', current: 'organizationProviders' },
+    { legacy: 'organization_scopes', current: 'organizationScopes' },
+    { legacy: 'agent_runs', current: 'agentRuns' },
+  ];
+  for (const { legacy, current } of aiCollectionRenames) {
+    const legacyCollection = targetDb.collection(legacy);
+    if (!(await legacyCollection.exists())) continue;
+    const currentCollection = targetDb.collection(current);
+    if (!(await currentCollection.exists())) {
+      await currentCollection.create();
+    }
+    await targetDb.query(
+      `
+      FOR doc IN @@legacy
+        INSERT doc INTO @@current OPTIONS { overwriteMode: "ignore" }
+      `,
+      { '@legacy': legacy, '@current': current },
+    );
+    await legacyCollection.drop();
+    console.log(`Copied ${legacy} -> ${current} and dropped ${legacy}`);
+  }
+
   // AI execution layer collections: intentionally minimal documents (no
   // embedding field), so they live outside the node `collections` list and
   // own their idempotent setup (unique/read-path indexes).

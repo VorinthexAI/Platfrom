@@ -100,7 +100,7 @@ function buildRouteRequest(
  * The execution pipeline:
  *
  *   Agent → Tool → Action → Router → Model → Provider → Response
- *   → Validation → agent_runs
+ *   → Validation → agentRuns
  *
  * Guardrails are enforced before anything executes; the router only ever
  * sees actions (tools never name providers); the run ledger records
@@ -178,7 +178,7 @@ export async function runAgentTool<TOutput = unknown>(
       externalModelId: response.externalModelId,
     });
 
-    // Validation → agent_runs.
+    // Validation → agentRuns.
     const validated = validateProviderResponse(response);
     const finishedAtMs = Date.now();
     const finalRun = await runs.updateRun(run.key, {

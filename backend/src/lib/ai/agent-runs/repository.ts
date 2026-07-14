@@ -5,7 +5,7 @@ import { AGENT_RUNS_COLLECTION, agentRunSchema, type AgentRun } from './schema';
 import { AgentRunNotFoundError, type AgentRunRepository, type AgentRunsDatabase } from './types';
 
 /**
- * Data access for the `agent_runs` execution ledger. Application code only
+ * Data access for the `agentRuns` execution ledger. Application code only
  * ever handles `key`; the `_key` rename happens exclusively through the
  * shared base.ts translators. Queries are parameterized.
  */

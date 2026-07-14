@@ -2,7 +2,7 @@
  * Vorinthex AI execution layer and agent framework — public API.
  *
  * Execution chain: Agent → Tool → Action → Router → Model → Provider
- * → Response → Validation → agent_runs.
+ * → Response → Validation → agentRuns.
  * See ./README.md for the architecture overview.
  */
 export * from './shared';

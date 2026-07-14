@@ -5,8 +5,9 @@ import { organizationIdSchema } from '@/lib/ai/shared/ids';
 import { tokenUsageSchema } from '@/lib/ai/shared/usage';
 import { routingStrategySchema } from '@/lib/ai/router/types';
 
-/** Execution ledger for the agent framework. Collection name fixed by spec. */
-export const AGENT_RUNS_COLLECTION = 'agent_runs';
+/** Execution ledger for the agent framework. Named per the repo's camelCase-plural
+ * collection convention (the legacy agent_runs name is migrated in arango-migrate). */
+export const AGENT_RUNS_COLLECTION = 'agentRuns';
 
 export const AGENT_RUN_STATUSES = ['running', 'succeeded', 'failed'] as const;
 

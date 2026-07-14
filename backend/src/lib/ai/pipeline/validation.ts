@@ -35,7 +35,7 @@ export function validateProviderResponse<TOutput>(response: ProviderExecuteRespo
 }
 
 /**
- * Derives the output METADATA recorded in agent_runs — shape facts only
+ * Derives the output METADATA recorded in agentRuns — shape facts only
  * (kind, stop reason, item count), never the generated content itself.
  */
 export function buildOutputMetadata(actionId: ActionId, output: unknown): AgentRunOutputMetadata {

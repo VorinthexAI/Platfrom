@@ -11,7 +11,7 @@ import {
 } from './types';
 
 /**
- * Data access for `organization_scopes`. Application code only ever
+ * Data access for `organizationScopes`. Application code only ever
  * handles `key`; the `_key` rename happens exclusively through the shared
  * base.ts translators. All queries are parameterized.
  */

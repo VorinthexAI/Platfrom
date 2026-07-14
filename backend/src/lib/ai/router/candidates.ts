@@ -7,7 +7,7 @@ import type { RouteCandidate } from './types';
 
 /** Everything candidate generation needs, resolved by the caller — keeps this module pure and deterministic. */
 export interface CandidateGenerationContext {
-  /** Provider ids loaded server-side from `organization_providers` for THIS organization. */
+  /** Provider ids loaded server-side from `organizationProviders` for THIS organization. */
   enabledProviderIds: readonly ProviderId[];
   /** Providers whose adapter is actually constructable right now (configured secrets). */
   availableProviderIds: ReadonlySet<ProviderId>;

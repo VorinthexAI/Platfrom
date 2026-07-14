@@ -30,7 +30,7 @@ function parseProviderId(providerId: string): ProviderId {
 }
 
 /**
- * Data access for the `organization_providers` allow-list. All queries are
+ * Data access for the `organizationProviders` allow-list. All queries are
  * parameterized (bind vars) — untrusted strings are never interpolated
  * into AQL.
  */

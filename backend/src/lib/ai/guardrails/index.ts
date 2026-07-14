@@ -27,7 +27,7 @@ interface ScopedTool {
 }
 
 /**
- * Allow-list semantics mirroring organization_providers: presence of
+ * Allow-list semantics mirroring organizationProviders: presence of
  * guardrails RESTRICTS. No guardrails → every tool allowed. With
  * guardrails → only tools scoped to one of the allowed scopeIds; an
  * unscoped tool is denied for a guardrailed agent.
