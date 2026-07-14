@@ -259,8 +259,9 @@ function CubeFace({
           height: faceHeight,
           left: stageWidth / 2 - faceWidth / 2,
           top: FACE_TOP,
+          // zIndex alone orders siblings on Fabric (Android included);
+          // elevation would also cast giant shadows at these magnitudes.
           zIndex: stackOrder,
-          elevation: stackOrder,
         },
         faceStyle,
       ]}
