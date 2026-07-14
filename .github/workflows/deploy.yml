@@ -197,12 +197,12 @@ jobs:
         run: bun run backend:test
 
   # ---------------------------------------------------------------------------
-  # MOBILE: queue EAS production builds for the store binaries whenever
+  # MOBILE: queue EAS internal Android distribution builds whenever
   # mobile/ or shared/ changed on a merge to main. The Expo token comes from
   # the git-crypt encrypted environments.json (secrets.prod.mobile.EXPO_TOKEN).
   # --no-wait queues the cloud build and returns — the runner does not sit
-  # through the ~15 min EAS build; artifacts land on expo.dev, ready for
-  # bun run submit / manual store upload.
+  # through the ~15 min EAS build; APK artifacts land on expo.dev for
+  # internal distribution.
   # ---------------------------------------------------------------------------
   mobile-distro:
     name: Mobile distro build (EAS)
@@ -232,12 +232,9 @@ jobs:
       - name: Typecheck mobile
         run: bun run mobile:typecheck
 
-      # iOS: switch to --platform all once iOS distribution credentials are
-      # configured on expo.dev (eas credentials -p ios) — non-interactive iOS
-      # builds fail without them. Android keystores are auto-managed by EAS.
-      - name: Queue EAS production build (Android app bundle)
+      - name: Queue EAS internal distribution build (Android APK)
         working-directory: mobile/app
-        run: bunx eas-cli@latest build --platform android --profile production --non-interactive --no-wait
+        run: bunx eas-cli@latest build --platform android --profile preview --non-interactive --no-wait
 
   # ---------------------------------------------------------------------------
   # WEB: build the Next standalone image, push to ECR (vorinthex-web), and roll
