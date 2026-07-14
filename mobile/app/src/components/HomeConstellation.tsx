@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
-import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { ChevronLeftIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import {
@@ -17,7 +16,6 @@ import {
   type CapabilitySlug,
 } from "@/data/registry";
 import { useGalaxyStore } from "@/state/galaxy";
-import { durations } from "@/theme/motion";
 
 const CAROUSEL_OVERLAP = 30;
 
@@ -87,11 +85,7 @@ export function HomeConstellation({
         <TransitionVeil />
         <CapabilityDrawer capability={targetCapability} />
         {phase !== "overview" ? (
-          <Animated.View
-            entering={FadeIn.duration(durations.base)}
-            exiting={FadeOut.duration(durations.fast)}
-            style={styles.backButton}
-          >
+          <View style={styles.backButton}>
             <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Return to orbit"
@@ -101,7 +95,7 @@ export function HomeConstellation({
             >
               <ChevronLeftIcon size="md" variant="accent" />
             </PressableScale>
-          </Animated.View>
+          </View>
         ) : null}
       </View>
 

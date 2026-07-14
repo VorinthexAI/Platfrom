@@ -47,6 +47,9 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
   const [rendered, setRendered] = useState(open);
   const translateY = useSharedValue(OFFSCREEN);
 
+  // Unmount via a JS timer, not a withTiming completion callback —
+  // worklet→JS completion trampolines racing unmounts have segfaulted
+  // the worklets runtime on Android.
   useEffect(() => {
     if (open) {
       setRendered(true);
@@ -56,13 +59,12 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
       });
       return;
     }
-    translateY.value = withTiming(
-      OFFSCREEN,
-      { duration: SLIDE_OUT_MS, easing: Easing.inOut(Easing.cubic) },
-      (finished) => {
-        if (finished) runOnJS(setRendered)(false);
-      },
-    );
+    translateY.value = withTiming(OFFSCREEN, {
+      duration: SLIDE_OUT_MS,
+      easing: Easing.inOut(Easing.cubic),
+    });
+    const timer = setTimeout(() => setRendered(false), SLIDE_OUT_MS + 60);
+    return () => clearTimeout(timer);
   }, [open, translateY]);
 
   const pan = useMemo(

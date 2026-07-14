@@ -65,6 +65,39 @@ const rockFragmentShader = /* glsl */ `
   }
 `;
 
+const crystalVertexShader = /* glsl */ `
+  varying vec3 vViewNormal;
+  varying vec3 vLocal;
+  void main() {
+    vLocal = position;
+    vViewNormal = normalize(normalMatrix * normal);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+/**
+ * Unlit crystal: faceted top-light shading plus a pulsing emissive rim —
+ * no scene lights, no PBR pipeline, the cheapest possible GL surface.
+ */
+const crystalFragmentShader = /* glsl */ `
+  uniform vec3 uColor;
+  uniform vec3 uEmissive;
+  uniform float uStrength;
+  uniform float uTime;
+  varying vec3 vViewNormal;
+  varying vec3 vLocal;
+  void main() {
+    vec3 N = normalize(vViewNormal);
+    float topLight = 0.5 + 0.5 * N.y;
+    float facing = abs(N.z);
+    float rim = pow(1.0 - facing, 1.6);
+    float pulse = 0.75 + 0.25 * sin(uTime * 1.2 + vLocal.y * 3.0);
+    vec3 color = uColor * (0.35 + 0.65 * topLight)
+      + uEmissive * uStrength * pulse * (0.35 + 0.65 * rim);
+    gl_FragColor = vec4(color, 1.0);
+  }
+`;
+
 type CrystalSeed = {
   position: [number, number, number];
   scale: number;
@@ -142,12 +175,37 @@ export function BiomeChamber({ styleKey, seed }: BiomeChamberProps) {
     [seed, style.moteCount],
   );
 
+  const heartUniforms = useMemo(
+    () => ({
+      uColor: { value: new THREE.Color(style.crystal) },
+      uEmissive: { value: new THREE.Color(style.emissive) },
+      uStrength: { value: 0.85 },
+      uTime: { value: 0 },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [styleKey],
+  );
+
+  // One shared uniforms object drives every satellite crystal.
+  const satelliteUniforms = useMemo(
+    () => ({
+      uColor: { value: new THREE.Color(style.crystal) },
+      uEmissive: { value: new THREE.Color(style.emissive) },
+      uStrength: { value: 0.5 },
+      uTime: { value: 0 },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [styleKey],
+  );
+
   useFrame((state, delta) => {
     const t = state.clock.elapsedTime;
     if (rockRef.current) {
       const time = rockRef.current.uniforms.uTime;
       if (time) time.value = t;
     }
+    if (heartUniforms.uTime) heartUniforms.uTime.value = t;
+    if (satelliteUniforms.uTime) satelliteUniforms.uTime.value = t;
     if (heartRef.current) {
       heartRef.current.rotation.y += delta * 0.35;
       const breathe = 1 + Math.sin(t * 1.1) * 0.04;
@@ -165,7 +223,11 @@ export function BiomeChamber({ styleKey, seed }: BiomeChamberProps) {
   });
 
   return (
-    <group position={CHAMBER_POSITION}>
+    // Position passed as a plain array: fiber applies arrays with
+    // fromArray and never needs an instanceof check on our Vector3.
+    <group
+      position={[CHAMBER_POSITION.x, CHAMBER_POSITION.y, CHAMBER_POSITION.z]}
+    >
       {/* cavern shell */}
       <mesh>
         <sphereGeometry args={[CHAMBER_RADIUS, 48, 48]} />
@@ -181,12 +243,10 @@ export function BiomeChamber({ styleKey, seed }: BiomeChamberProps) {
       {/* glowing crystal heart — the emblem-free centerpiece */}
       <mesh ref={heartRef} position={[0, 0.3, 0]}>
         <octahedronGeometry args={[0.52, 0]} />
-        <meshStandardMaterial
-          color={style.crystal}
-          emissive={style.emissive}
-          emissiveIntensity={0.42}
-          roughness={0.4}
-          metalness={0.45}
+        <shaderMaterial
+          vertexShader={crystalVertexShader}
+          fragmentShader={crystalFragmentShader}
+          uniforms={heartUniforms}
         />
       </mesh>
       <sprite position={[0, 0.3, 0]} scale={2.6}>
@@ -209,12 +269,10 @@ export function BiomeChamber({ styleKey, seed }: BiomeChamberProps) {
           scale={crystal.scale}
         >
           <octahedronGeometry args={[0.5, 0]} />
-          <meshStandardMaterial
-            color={style.crystal}
-            emissive={style.emissive}
-            emissiveIntensity={0.28}
-            roughness={0.45}
-            metalness={0.35}
+          <shaderMaterial
+            vertexShader={crystalVertexShader}
+            fragmentShader={crystalFragmentShader}
+            uniforms={satelliteUniforms}
           />
         </mesh>
       ))}
@@ -234,11 +292,6 @@ export function BiomeChamber({ styleKey, seed }: BiomeChamberProps) {
           depthWrite={false}
         />
       </points>
-
-      {/* chamber lighting */}
-      <pointLight position={[0, 2.4, 0]} intensity={14} color={style.glow} />
-      <pointLight position={[2.2, -1, 2.4]} intensity={5} color={style.emissive} />
-      <ambientLight intensity={0.35} color={style.rockHigh} />
     </group>
   );
 }
