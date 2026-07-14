@@ -174,8 +174,7 @@ export function NexusGate() {
                 Enter the Nexus.
               </h1>
               <p className="mt-3 text-sm leading-relaxed text-silver-500">
-                Founder access uses your organization MFA. Enter your email to
-                open setup or verification.
+                Enter your email to continue.
               </p>
               <label className="mt-6 block">
                 <span className="sr-only">Founder email</span>
@@ -222,7 +221,7 @@ export function NexusGate() {
 
           {phase.kind === "welcome" ? (
             <>
-              <p className="micro-label">The Inner Galaxy</p>
+              <p className="micro-label">The Nexus</p>
               <h1 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
                 {phase.name ? `Welcome ${phase.name},` : "Welcome,"}
               </h1>
@@ -232,7 +231,7 @@ export function NexusGate() {
                 </p>
               ) : null}
               <p className="mt-5 text-sm leading-relaxed text-silver-300">
-                Welcome to the inner galaxy of Vorinthex AI. Looking forward to
+                Welcome to the Nexus of Vorinthex AI. Looking forward to
                 working together to form this product as the next generation
                 AI-native platform - enabling anyone to use AI in their
                 day-to-day life.
