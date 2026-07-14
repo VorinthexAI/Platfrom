@@ -4,7 +4,7 @@ import { embed } from '../lib/embed';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
-import { ensureOrganizationScopesCollection } from '../lib/ai/organization-scopes/indexes';
+import { ensureScopeChildrenCollection, ensureScopesCollection, ensureScopeUsersCollection } from '../lib/ai/scopes/indexes';
 import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 import { PROVIDER_NAMES } from '../lib/ai/providers/types';
 
@@ -316,7 +316,11 @@ const collections: CollectionSpec[] = [
   // these entries exist so the generic embedding backfill covers them.
   // Embedding policy: only human text is embedded — ids, enums, and
   // timestamps are queryable with plain filters and are never embed text.
-  { name: 'organizationScopes', embedKeys: ['name'] },
+  { name: 'scopes', embedKeys: ['name', 'description'] },
+  // Pure link nodes (scope tree edges, scope memberships) — ids only, so
+  // nothing to embed.
+  { name: 'scopeChildren' },
+  { name: 'scopeUsers' },
   { name: 'organizationProviders', embedKeys: ['name'] },
   // Every top-level agentRuns field is an id/enum/timestamp, so no
   // embedKeys: the ledger keeps a normalized empty embedding until a
@@ -345,6 +349,10 @@ const droppedCollections = [
   'outputRelations',
   'outputAnalytics',
   'postRenders',
+  // Scopes were renamed from organizationScopes (and its snake_case
+  // predecessor) before any API could write to them — nothing to copy.
+  'organizationScopes',
+  'organization_scopes',
 ];
 
 async function main() {
@@ -368,7 +376,9 @@ async function main() {
   // their ensure* modules. Runs BEFORE the `collections` loop so the
   // generic embedding backfill below sees them fully set up.
   await ensureOrganizationProvidersCollection(targetDb);
-  await ensureOrganizationScopesCollection(targetDb);
+  await ensureScopesCollection(targetDb);
+  await ensureScopeChildrenCollection(targetDb);
+  await ensureScopeUsersCollection(targetDb);
   await ensureAgentRunsCollection(targetDb);
 
   // Providers written before the display-name field existed: stamp the
@@ -544,6 +554,37 @@ async function main() {
       FILTER organization.is_root == true && organization.mfa_enabled != true
       UPDATE organization WITH { mfa_enabled: true } IN organizations
   `);
+
+  // Seed the one platform wide scope: the root of the scope tree for the
+  // root organization. Idempotent by (organizationId, name).
+  const rootScopeName = 'Vorinthex AI';
+  const rootScopeCursor = await targetDb.query<{ _key: string }>(
+    `
+      FOR scope IN scopes
+        FILTER scope.organizationId == @organizationId && scope.name == @name
+        LIMIT 1
+        RETURN { _key: scope._key }
+    `,
+    { organizationId: rootOrganizationId, name: rootScopeName },
+  );
+  if (!(await rootScopeCursor.next())) {
+    const rootScopeKey = newId();
+    const rootScopeDescription =
+      'The root scope of Vorinthex AI. It spans every capability, tool, and agent on the platform and is the parent under which all narrower scopes and their members are organized.';
+    const nowIso = new Date().toISOString();
+    await targetDb.collection('scopes').save({
+      _key: rootScopeKey,
+      organizationId: rootOrganizationId,
+      name: rootScopeName,
+      description: rootScopeDescription,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      embedding: await embed({
+        text: ['_scopes', rootScopeKey, rootScopeName, rootScopeDescription].join(':'),
+      }),
+    });
+    console.log('Seeded root scope Vorinthex AI');
+  }
 
   // Teams collapse into organizations: a team becomes an ordinary
   // (non-root) organization under the same _key, and each teamMembers row
