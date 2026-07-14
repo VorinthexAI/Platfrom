@@ -602,10 +602,11 @@ function LeaderboardFlow() {
 /* ---------------------------------------------------------------- */
 
 /**
- * Spark pricing across three floating islands, cascading in like the
- * hunt: monthly plans first, then on-demand usage, then instant top-up
- * packs. Registry-driven — the /pricing page body and llms.txt render
- * the same `sparkPricing` object.
+ * Spark pricing across four floating islands, cascading in like the
+ * hunt: a newcomer note (with the stack's close control) first, then
+ * monthly plans, instant top-up packs, and on-demand usage.
+ * Registry-driven — the /pricing page body and llms.txt render the
+ * same `sparkPricing` object.
  */
 function PricingFlow() {
   const exitCave = useGalaxyStore((s) => s.exitCave);
@@ -614,10 +615,11 @@ function PricingFlow() {
 
   return (
     <div className="flex flex-col gap-4 sm:gap-6">
-      {/* island 1 — the monthly plans, with the only close control */}
+      {/* island 1 — the newcomer note, carrying the stack's only close
+          control */}
       <SlideUpCard
         index={0}
-        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        className="chrome-border card-depth relative w-full rounded-3xl px-6 py-4 sm:px-7"
         style={{ background: "var(--gradient-panel)" }}
       >
         <button
@@ -628,10 +630,23 @@ function PricingFlow() {
             syncEntityUrl("/");
           }}
           aria-label="Leave the cave"
-          className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
+          className="absolute top-3.5 right-3.5 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
         >
           <CloseIcon width={12} height={12} />
         </button>
+        <p className="micro-label">💡 New to Vorinthex?</p>
+        <p className="mt-2 pr-10 text-sm leading-relaxed text-silver-300">
+          New users start with at least 1,000 free Sparks to explore and
+          test before subscribing.
+        </p>
+      </SlideUpCard>
+
+      {/* island 2 — the monthly plans */}
+      <SlideUpCard
+        index={1}
+        className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
+        style={{ background: "var(--gradient-panel)" }}
+      >
         <p className="micro-label">Pricing</p>
         <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
           Monthly Sparks
@@ -647,10 +662,10 @@ function PricingFlow() {
                 {plan.name}
               </p>
               <div className="mt-1 flex items-baseline justify-between gap-3">
-                <p className="font-display text-xl tracking-[0.04em] text-silver-50 tabular-nums">
+                <p className="font-display text-[1.4rem] tracking-[0.04em] text-silver-50 tabular-nums">
                   {plan.monthlySparks.toLocaleString("en-US")} Sparks
                 </p>
-                <p className="shrink-0 font-mono text-[0.7rem] text-silver-300 tabular-nums">
+                <p className="shrink-0 font-mono text-[0.8rem] text-silver-300 tabular-nums">
                   ${plan.priceUsd}/mo
                 </p>
               </div>
@@ -660,9 +675,9 @@ function PricingFlow() {
         </div>
       </SlideUpCard>
 
-      {/* island 2 — instant top-up packs */}
+      {/* island 3 — instant top-up packs */}
       <SlideUpCard
-        index={1}
+        index={2}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
@@ -693,9 +708,9 @@ function PricingFlow() {
         </div>
       </SlideUpCard>
 
-      {/* island 3 — on-demand usage */}
+      {/* island 4 — on-demand usage */}
       <SlideUpCard
-        index={2}
+        index={3}
         className="chrome-border card-depth relative w-full rounded-3xl p-6 sm:p-7"
         style={{ background: "var(--gradient-panel)" }}
       >
