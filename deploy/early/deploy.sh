@@ -26,9 +26,52 @@ SSM_PREFIX="/vorinthex/prod"
 
 log() { echo "[deploy $(date -u +%H:%M:%S)] $*"; }
 
+cleanup_docker_disk() {
+	log "docker disk usage before cleanup"
+	docker system df || true
+
+	# Previous deploys leave immutable SHA-tagged images behind. They are not
+	# dangling, so plain `docker image prune -f` does not remove them and the
+	# small early-infra root disk eventually fills while registering new layers.
+	docker container prune -f >/dev/null 2>&1 || true
+	docker builder prune -af >/dev/null 2>&1 || true
+	docker image prune -af >/dev/null 2>&1 || true
+
+	log "docker disk usage after cleanup"
+	docker system df || true
+	df -h / || true
+}
+
+acquire_deploy_lock() {
+	if command -v flock >/dev/null 2>&1; then
+		exec 9>"${ROOT}/deploy.lock"
+		log "waiting for deploy lock"
+		flock -w 900 9
+		log "acquired deploy lock"
+		return
+	fi
+
+	local lock_dir="${ROOT}/deploy.lock.d"
+	for _ in $(seq 1 900); do
+		if mkdir "$lock_dir" 2>/dev/null; then
+			trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+			log "acquired deploy lock"
+			return
+		fi
+		sleep 1
+	done
+
+	log "timed out waiting for deploy lock"
+	exit 1
+}
+
+acquire_deploy_lock
+
 # --- overrides: DB_PRIVATE_IP (ArangoDB box) + local redis URL --------------
 # shellcheck disable=SC1091
 source "${ROOT}/overrides.env"   # sets DB_PRIVATE_IP; REDIS_URL is forced below
+
+cleanup_docker_disk
 
 log "ECR login"
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$ECR"
@@ -99,11 +142,13 @@ log "current=${CUR} new=${NEW} web_tag=${TAG} api_tag=${API_TAG}"
 # web talks to the api of the SAME new color for its SSR bridge.
 sed "s/__ACTIVE__/${NEW}/" -i "$WEB_ENV"
 
+docker rm -f "api-${NEW}" "web-${NEW}" >/dev/null 2>&1 || true
+cleanup_docker_disk
+
 docker pull "${ECR}/vorinthex-backend:${API_TAG}"
 docker pull "${ECR}/vorinthex-web:${TAG}"
 
 # --- start the new color ----------------------------------------------------
-docker rm -f "api-${NEW}" "web-${NEW}" >/dev/null 2>&1 || true
 log "starting api-${NEW}"
 docker run -d --name "api-${NEW}" --network "$NET" --restart unless-stopped \
 	--env-file "$API_ENV" "${ECR}/vorinthex-backend:${API_TAG}"
@@ -153,5 +198,5 @@ if [ "$CUR" != none ] && [ "$CUR" != "$NEW" ]; then
 	docker rm -f "api-${CUR}" "web-${CUR}" >/dev/null 2>&1 || true
 	log "retired ${CUR}"
 fi
-docker image prune -f >/dev/null 2>&1 || true
+cleanup_docker_disk
 log "deploy complete: ${NEW} @ web=${TAG} api=${API_TAG}"
