@@ -49,7 +49,7 @@ function createFakeDb() {
 describe('organization scope schema', () => {
   test('is minimal — key and name; Arango system fields strip on read', () => {
     const parsed = organizationScopeSchema.parse({ key: 'scope1', _key: 'scope1', _rev: 'x', name: 'support' });
-    expect(parsed).toEqual({ key: 'scope1', name: 'support' });
+    expect(parsed).toEqual({ key: 'scope1', name: 'support', embedding: [] });
   });
 });
 

@@ -9,9 +9,6 @@ import { intelligenceFragmentSchema } from './intelligence-fragments.node';
 import { mindCapabilitySchema } from './mind-capabilities.node';
 import { mindSchema } from './minds.node';
 import { orchestratorSchema } from './orchestrators.node';
-import { outputAnalyticsSchema } from './output-analytics.node';
-import { outputRelationSchema } from './output-relations.node';
-import { outputSchema } from './outputs.node';
 import { paymentCheckoutSchema } from './payment-checkouts.node';
 import { paymentOrderSchema } from './payment-orders.node';
 import { processedWebhookEventSchema } from './processed-webhook-events.node';
@@ -113,9 +110,6 @@ describe('no node field mentions the retired platform or team nodes', () => {
     minds: mindSchema,
     orchestrators: orchestratorSchema,
     organizations: organizationSchema,
-    outputAnalytics: outputAnalyticsSchema,
-    outputRelations: outputRelationSchema,
-    outputs: outputSchema,
     paymentCheckouts: paymentCheckoutSchema,
     paymentOrders: paymentOrderSchema,
     processedWebhookEvents: processedWebhookEventSchema,
