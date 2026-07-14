@@ -455,7 +455,9 @@ async function main() {
           slug: null,
           description: null,
           isActive: true,
-          mfa_enabled: platform.mfa_enabled === true,
+          // mfa_enabled is THE source of truth for MFA enforcement; the
+          // root organization always enforces it.
+          mfa_enabled: isRoot || platform.mfa_enabled === true,
           metadata: platform.metadata && typeof platform.metadata === 'object' ? platform.metadata : {},
           createdAt: nonEmptyString(platform.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -481,7 +483,7 @@ async function main() {
       slug: null,
       description: null,
       isActive: true,
-      mfa_enabled: false,
+      mfa_enabled: true,
       metadata: {},
       createdAt: now,
       updatedAt: now,
@@ -494,6 +496,16 @@ async function main() {
     FOR organization IN organizations
       FILTER !HAS(organization, "mfa_enabled")
       UPDATE organization WITH { mfa_enabled: false } IN organizations
+  `);
+
+  // mfa_enabled is THE source of truth for MFA enforcement (auth code
+  // never derives it from is_root) — align the root organization, which
+  // has always been enforced in practice, so the data says what the
+  // code does.
+  await targetDb.query(`
+    FOR organization IN organizations
+      FILTER organization.is_root == true && organization.mfa_enabled != true
+      UPDATE organization WITH { mfa_enabled: true } IN organizations
   `);
 
   // Teams collapse into organizations: a team becomes an ordinary

@@ -3,13 +3,13 @@ import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 
@@ -90,7 +90,7 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
             event.translationY > CLOSE_DISTANCE ||
             event.velocityY > CLOSE_VELOCITY
           ) {
-            runOnJS(exit)();
+            scheduleOnRN(exit);
           } else {
             translateY.value = withSpring(0, springs.snapBack);
           }

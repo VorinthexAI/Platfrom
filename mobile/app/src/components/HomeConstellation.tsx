@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSharedValue } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as THREE from "three";
 import { ChevronLeftIcon } from "@vorinthex/shared/ui/icons-mobile";
@@ -178,6 +179,36 @@ export function HomeConstellation({
     fieldSize.value = { width: fieldWidth, height: fieldHeightNow };
   }, [fieldHeightNow, fieldSize, fieldWidth]);
 
+  // Stable identity (the memoized tap worklet captures it): projects every
+  // live planet position into field pixels and dives into the nearest one
+  // within thumb range.
+  const handleFieldTap = useCallback((tapX: number, tapY: number) => {
+    if (useGalaxyStore.getState().phase !== "overview") return;
+    const camera = galaxyCamera.current;
+    const state = gestureStateRef.current;
+    if (!camera) return;
+    let bestSlug: CapabilitySlug | null = null;
+    let bestDistance = PLANET_TAP_RADIUS;
+    for (const capability of state.capabilities) {
+      const world = capabilityPositions.get(capability.slug);
+      if (!world) continue;
+      const projected = scratchProjection.copy(world).project(camera);
+      if (projected.z > 1 || projected.z < -1) continue;
+      const px = ((projected.x + 1) / 2) * state.fieldWidth;
+      const py = ((1 - projected.y) / 2) * state.fieldHeight;
+      const distance = Math.hypot(px - tapX, py - tapY);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSlug = capability.slug;
+      }
+    }
+    if (!bestSlug) return;
+    const index = state.capabilities.findIndex(
+      (capability) => capability.slug === bestSlug,
+    );
+    if (index >= 0) state.select(index);
+  }, []);
+
   const fieldGesture = useMemo(() => {
     // Pure worklet pan: every event lands on the UI thread and writes the
     // rotation targets directly — any direction, any speed, no waiting on
@@ -217,39 +248,17 @@ export function HomeConstellation({
         );
       });
 
+    // The hit test needs the JS world (store, camera, THREE math), so the
+    // worklet schedules it across with scheduleOnRN (the react-native-
+    // worklets successor to Reanimated's deprecated JS-scheduling API).
     const tap = Gesture.Tap()
-      .runOnJS(true)
       .maxDuration(320)
       .onEnd((event) => {
-        if (useGalaxyStore.getState().phase !== "overview") return;
-        const camera = galaxyCamera.current;
-        const state = gestureStateRef.current;
-        if (!camera) return;
-        // Project every live planet position into field pixels and dive
-        // into the nearest one within thumb range.
-        let bestSlug: CapabilitySlug | null = null;
-        let bestDistance = PLANET_TAP_RADIUS;
-        for (const capability of state.capabilities) {
-          const world = capabilityPositions.get(capability.slug);
-          if (!world) continue;
-          const projected = scratchProjection.copy(world).project(camera);
-          if (projected.z > 1 || projected.z < -1) continue;
-          const px = ((projected.x + 1) / 2) * state.fieldWidth;
-          const py = ((1 - projected.y) / 2) * state.fieldHeight;
-          const distance = Math.hypot(px - event.x, py - event.y);
-          if (distance < bestDistance) {
-            bestDistance = distance;
-            bestSlug = capability.slug;
-          }
-        }
-        if (!bestSlug) return;
-        const index = state.capabilities.findIndex(
-          (capability) => capability.slug === bestSlug,
-        );
-        if (index >= 0) state.select(index);
+        scheduleOnRN(handleFieldTap, event.x, event.y);
       });
 
     return Gesture.Race(pan, tap);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
