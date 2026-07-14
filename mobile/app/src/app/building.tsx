@@ -9,7 +9,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { NeuralBrain3D } from "@/components/three/NeuralBrain3D";
+import { BrainCore3D } from "@/components/three/BrainCore3D";
 import { BRAIN_BUILD_MESSAGES } from "@/data/brain-build-messages";
 import { durations, easings } from "@/theme/motion";
 import { fonts, palette, tracking } from "@/theme/tokens";
@@ -65,7 +65,7 @@ export default function BuildingRoute() {
       <Text style={styles.title}>{"BUILDING\nYOUR BRAIN"}</Text>
 
       <View style={styles.brainWrap}>
-        <NeuralBrain3D
+        <BrainCore3D
           durationMs={durations.buildTotal}
           style={{
             width: Math.min(width * 0.9, 360),

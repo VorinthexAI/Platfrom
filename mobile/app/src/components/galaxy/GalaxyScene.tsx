@@ -1,0 +1,83 @@
+import type { StyleProp, ViewStyle } from "react-native";
+
+import { BiomeChamber } from "@/components/galaxy/BiomeChamber";
+import { CameraRig, OVERVIEW_POSITION } from "@/components/galaxy/CameraRig";
+import { CapabilityPlanet } from "@/components/galaxy/CapabilityPlanet";
+import { chamberStyleForBiome } from "@/components/galaxy/chamber-config";
+import {
+  CAPABILITY_ORBITS,
+  orbitForSlug,
+} from "@/components/galaxy/galaxy-config";
+import { Starfield } from "@/components/galaxy/Starfield";
+import { Canvas } from "@/components/three/Canvas";
+import { BrainCoreObject } from "@/components/three/BrainCore3D";
+import type { CapabilitySlug } from "@/data/registry";
+import { useGalaxyStore } from "@/state/galaxy";
+
+const OBSIDIAN = "#030507";
+
+export type GalaxySceneProps = {
+  enabledSlugs: readonly CapabilitySlug[];
+  selectedSlug: CapabilitySlug | null;
+  paused?: boolean;
+  style?: StyleProp<ViewStyle>;
+};
+
+/**
+ * The mobile galaxy: the wireframe brain core at the origin where the web
+ * landing keeps its sun, capability worlds orbiting on alternating
+ * equatorial/polar planes — a 3D globe of orbits around the mind. Diving
+ * into a world teleports (under the veil) to its BiomeChamber far below.
+ */
+export function GalaxyScene({
+  enabledSlugs,
+  selectedSlug,
+  paused = false,
+  style,
+}: GalaxySceneProps) {
+  const phase = useGalaxyStore((state) => state.phase);
+  const targetSlug = useGalaxyStore((state) => state.targetSlug);
+  const visitSeed = useGalaxyStore((state) => state.visitSeed);
+
+  const orbits = CAPABILITY_ORBITS.filter((orbit) =>
+    enabledSlugs.includes(orbit.slug),
+  );
+  // Mount the chamber as soon as the flight starts so its shaders compile
+  // while the veil/approach still hides it (web InteriorWarmup's job).
+  const diveTarget = phase !== "overview" && targetSlug ? targetSlug : null;
+
+  return (
+    <Canvas
+      style={style}
+      camera={{
+        position: [OVERVIEW_POSITION.x, OVERVIEW_POSITION.y, OVERVIEW_POSITION.z],
+        fov: 48,
+        near: 0.1,
+        far: 160,
+      }}
+      gl={{ antialias: true, powerPreference: "high-performance" }}
+      dpr={[1, 1.75]}
+    >
+      <color attach="background" args={[OBSIDIAN]} />
+      <fog attach="fog" args={[OBSIDIAN, 18, 60]} />
+      <CameraRig />
+      <Starfield paused={paused} />
+      <BrainCoreObject motion="spin" scale={1.05} />
+      {orbits.map((orbit) => (
+        <CapabilityPlanet
+          key={orbit.slug}
+          orbit={orbit}
+          focused={orbit.slug === (targetSlug ?? selectedSlug)}
+          paused={paused}
+        />
+      ))}
+      {diveTarget ? (
+        <BiomeChamber
+          key={`${diveTarget}-${visitSeed}`}
+          styleKey={chamberStyleForBiome(orbitForSlug(diveTarget).biome)}
+          seed={visitSeed}
+        />
+      ) : null}
+    </Canvas>
+  );
+}

@@ -1,29 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View, useWindowDimensions } from "react-native";
-import Animated, {
-  Easing,
-  FadeIn,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
+import { ChevronLeftIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import {
   CAPABILITY_CAROUSEL_HEIGHT,
   CapabilityArcCarousel,
 } from "@/components/CapabilityArcCarousel";
-import { ChromeIcon } from "@/components/ChromeIcon";
-import { NeuralField3D } from "@/components/three/NeuralField3D";
-import { capabilityIconSource } from "@/data/capability-icons";
+import { CapabilityDrawer } from "@/components/CapabilityDrawer";
+import { GalaxyScene } from "@/components/galaxy/GalaxyScene";
+import { PressableScale } from "@/components/PressableScale";
+import { TransitionVeil } from "@/components/TransitionVeil";
 import {
   CAPABILITIES,
   type Capability,
   type CapabilitySlug,
 } from "@/data/registry";
+import { useGalaxyStore } from "@/state/galaxy";
+import { durations } from "@/theme/motion";
 
-const FIELD_SPEED = 0.05;
-const CORE_ICON_SIZE = 82;
 const CAROUSEL_OVERLAP = 30;
 
 export type HomeConstellationProps = {
@@ -31,7 +26,11 @@ export type HomeConstellationProps = {
   onOpen: (slug: CapabilitySlug) => void;
 };
 
-/** Neural field with one synchronized core Capability and a wrapped arc carousel. */
+/**
+ * The brain galaxy steered by the wrapped cube carousel: swiping commits a
+ * capability and dives the camera into its biome (first swipe flies in,
+ * later swipes warp biome to biome, the back chevron returns to orbit).
+ */
 export function HomeConstellation({
   enabledSlugs,
   onOpen,
@@ -47,65 +46,61 @@ export function HomeConstellation({
     [enabledSlugs],
   );
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const rotation = useSharedValue(0);
+
+  const phase = useGalaxyStore((state) => state.phase);
+  const targetSlug = useGalaxyStore((state) => state.targetSlug);
+  const enter = useGalaxyStore((state) => state.enter);
+  const retarget = useGalaxyStore((state) => state.retarget);
+  const warp = useGalaxyStore((state) => state.warp);
+  const exit = useGalaxyStore((state) => state.exit);
 
   useEffect(() => {
     if (selectedIndex >= capabilities.length) setSelectedIndex(0);
   }, [capabilities.length, selectedIndex]);
 
-  useEffect(() => {
-    rotation.value = withRepeat(
-      withTiming(1, {
-        duration: (Math.PI * 2 * 1000) / FIELD_SPEED,
-        easing: Easing.linear,
-      }),
-      -1,
-      false,
-    );
-  }, [rotation]);
-
-  const coreStyle = useAnimatedStyle(() => ({
-    transform: [
-      { perspective: 800 },
-      { rotateX: "10.3deg" },
-      { rotateY: `${rotation.value * 360}deg` },
-    ],
-  }));
-
   const selected = capabilities[selectedIndex];
+  const targetCapability =
+    capabilities.find((capability) => capability.slug === targetSlug) ?? null;
   const open = (capability: Capability) => onOpen(capability.slug);
+
+  const select = (index: number) => {
+    setSelectedIndex(index);
+    const capability = capabilities[index];
+    if (!capability) return;
+    if (phase === "overview") {
+      enter(capability.slug);
+    } else if (phase === "fly") {
+      retarget(capability.slug);
+    } else {
+      warp(capability.slug);
+    }
+  };
 
   return (
     <View style={[styles.root, { width, height: fieldHeight + 154 }]}>
       <View style={[styles.field, { width, height: fieldHeight }]}>
-        <NeuralField3D
-          seed={31}
-          count={110}
-          radius={5}
-          speed={FIELD_SPEED}
-          coreGlow
+        <GalaxyScene
+          enabledSlugs={enabledSlugs}
+          selectedSlug={selected?.slug ?? null}
           style={StyleSheet.absoluteFill}
         />
-
-        {selected ? (
+        <TransitionVeil />
+        <CapabilityDrawer capability={targetCapability} />
+        {phase !== "overview" ? (
           <Animated.View
-            key={selected.slug}
-            entering={FadeIn.duration(240)}
-            pointerEvents="none"
-            style={[
-              styles.coreIcon,
-              {
-                left: width / 2 - CORE_ICON_SIZE / 2,
-                top: fieldHeight / 2 - CORE_ICON_SIZE / 2,
-              },
-              coreStyle,
-            ]}
+            entering={FadeIn.duration(durations.base)}
+            exiting={FadeOut.duration(durations.fast)}
+            style={styles.backButton}
           >
-            <ChromeIcon
-              source={capabilityIconSource[selected.slug]}
-              size={CORE_ICON_SIZE}
-              glow={0.68}
-            />
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Return to orbit"
+              hitSlop={12}
+              onPress={exit}
+              style={styles.backPress}
+            >
+              <ChevronLeftIcon size="md" variant="accent" />
+            </PressableScale>
           </Animated.View>
         ) : null}
       </View>
@@ -126,7 +121,7 @@ export function HomeConstellation({
             selectedIndex={selectedIndex}
             width={width}
             onOpen={open}
-            onSelect={setSelectedIndex}
+            onSelect={select}
           />
         </View>
       ) : null}
@@ -143,12 +138,25 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
   },
-  coreIcon: {
-    position: "absolute",
-  },
   carousel: {
     position: "absolute",
     left: 0,
     right: 0,
+  },
+  backButton: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    zIndex: 30,
+  },
+  backPress: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(221, 226, 229, 0.18)",
+    backgroundColor: "rgba(3, 5, 7, 0.55)",
   },
 });

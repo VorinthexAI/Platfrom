@@ -11,11 +11,17 @@ export const durations = {
   dustBurst: 480,
   buildTotal: 4200,
   buildExitDelay: 4800,
+  /** Web .vui-button background-position transition (800ms luxury). */
+  chromeSlide: 800,
+  /** Web .vui-button color/border/shadow transition (400ms luxury). */
+  buttonState: 400,
 } as const;
 
 export const easings = {
   out: Easing.out(Easing.cubic),
   inOut: Easing.inOut(Easing.cubic),
+  /** Web --vui-ease-luxury: cubic-bezier(0.16, 1, 0.3, 1). */
+  luxury: Easing.bezier(0.16, 1, 0.3, 1),
 } as const;
 
 export const springs = {
