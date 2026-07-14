@@ -76,8 +76,8 @@ ${orchestrators
 
 ## Pricing
 
-- ${sparks.summary} Plans ([full pricing](${absoluteUrl("/pricing")})): ${sparks.plans.map((p) => `${p.name} ($${p.priceUsd}/month, ${p.monthlySparks.toLocaleString("en-US")} Sparks)`).join(", ")}.
-- Beyond plans: ${sparks.topUps.name} (one-time packs, credited instantly, highest cost per Spark: ${sparks.topUps.packs.map((pack) => `${pack.name} $${pack.priceUsd} for ${pack.sparks.toLocaleString("en-US")} Sparks`).join(", ")}) and ${sparks.onDemand.name} (pay only for what you use, billed monthly, higher cost per Spark, requires the Nova plan).
+- ${sparks.summary} Monthly Sparks ([full pricing](${absoluteUrl("/pricing")})): ${sparks.plans.map((p) => `${p.name} ($${p.priceUsd}/month, ${p.monthlySparks.toLocaleString("en-US")} Sparks; ${p.description})`).join(", ")}.
+- Beyond subscriptions: ${sparks.topUps.name} (one-time packs, credited instantly, highest cost per Spark: ${sparks.topUps.packs.map((pack) => `${pack.name} $${pack.priceUsd} for ${pack.sparks.toLocaleString("en-US")} Sparks`).join(", ")}) and ${sparks.onDemand.name} (${sparks.onDemand.description} Higher cost per Spark).
 - Core Capabilities are individual monthly subscriptions ($${Math.min(...capabilities.map((c) => c.price?.amount ?? Infinity))} to $${Math.max(...capabilities.map((c) => c.price?.amount ?? 0))} per month).
 - Command runs on coin based plans from ${paidPlans[0]?.name ?? "Starter"} ($${priceFloor}/month) to ${paidPlans.at(-1)?.name ?? "Sovereign"} ($${priceCeiling.toLocaleString("en-US")}/month), plus custom enterprise terms.
 

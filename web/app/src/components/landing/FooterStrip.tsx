@@ -14,8 +14,8 @@ const FOOTER_VAULTS = [
 
 /**
  * Slim fixed footer along the bottom edge, mirroring the reference art.
- * Desktop only. About, Contact, Privacy, and Terms open their asteroid
- * vaults instead of flat pages — and the whole strip hides while you're
+ * About, Contact, Privacy, and Terms open their asteroid vaults instead
+ * of flat pages — and the whole strip hides while you're
  * inside any world, so nothing outside the cavern can be clicked.
  */
 export function FooterStrip() {
@@ -37,18 +37,21 @@ export function FooterStrip() {
   };
 
   return (
-    <footer className="absolute inset-x-0 bottom-0 z-20 hidden lg:block">
-      <div className="mx-auto flex h-12 w-full max-w-7xl items-center justify-between px-10">
-        <p className="font-mono text-[0.58rem] tracking-[0.12em] text-silver-700">
+    <footer className="absolute inset-x-0 bottom-[env(safe-area-inset-bottom)] z-20">
+      <div className="mx-auto flex h-10 w-full max-w-7xl items-center justify-center px-3 lg:h-12 lg:justify-between lg:px-10">
+        <p className="hidden font-mono text-[0.58rem] tracking-[0.12em] text-silver-700 lg:block">
           © {new Date().getFullYear()} Vorinthex AI. All rights reserved.
         </p>
-        <nav aria-label="Company and legal" className="flex items-center gap-8">
+        <nav
+          aria-label="Company and legal"
+          className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-center sm:gap-6 lg:gap-8"
+        >
           {FOOTER_VAULTS.map((vault) => (
             <button
               key={vault.kind}
               type="button"
               onClick={() => openVault(vault)}
-              className="font-mono text-[0.58rem] tracking-[0.24em] text-silver-500 uppercase transition-colors hover:text-silver-100"
+              className="font-mono text-[0.52rem] tracking-[0.14em] text-silver-500 uppercase transition-colors hover:text-silver-100 sm:text-[0.58rem] sm:tracking-[0.2em] lg:tracking-[0.24em]"
             >
               {vault.label}
             </button>
