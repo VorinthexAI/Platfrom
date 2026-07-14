@@ -9,7 +9,7 @@ import { mulberry32 } from "@/lib/three/procedural";
 /**
  * The star-wars hyper-jump: a camera-locked tunnel of light streaks that
  * race past and stretch as the jump accelerates. Platform members surf
- * solar-gold light into /galaxy/sun; explorers ride warm ember-silver
+ * solar-gold light into /nexus; explorers ride warm ember-silver
  * into /galaxy/public. The same tunnel fires as a short silver burst when
  * warping between world interiors.
  */

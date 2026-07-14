@@ -10,7 +10,7 @@ const JUMP_DURATION_MS = 1600;
 
 /**
  * DOM side of the hyper jump: while the in-canvas streak tunnel fires,
- * this ramps a white-out and then routes into /galaxy/sun (platform
+ * this ramps a white-out and then routes into /nexus (platform
  * members surf into the star) or /galaxy/public (verified explorers).
  */
 export function JumpOverlay() {
@@ -20,7 +20,7 @@ export function JumpOverlay() {
 
   useEffect(() => {
     if (mode !== "jump" || !jumpTarget) return;
-    const targetPath = jumpTarget === "sun" ? "/galaxy/sun" : "/galaxy/public";
+    const targetPath = jumpTarget === "sun" ? "/nexus" : "/galaxy/public";
     // Warm the destination + preload the fragment jar during the white-out so
     // /galaxy/public paints a full jar on first frame (no empty-then-fill).
     if (jumpTarget === "public") {

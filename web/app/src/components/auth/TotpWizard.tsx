@@ -6,7 +6,7 @@ import { Button, TextInput } from "@vorinthex/shared/ui/components";
 /**
  * TOTP setup/verify UI shared by every MFA surface in the app — the
  * Cipher Chamber cave (emailed member links) and the founders-gate flow
- * (SunGalaxy) both drive the same backend challenge endpoints and want
+ * (NexusGate) both drive the same backend challenge endpoints and want
  * identical wizard UI, just different surrounding chrome and different
  * "what happens next" behavior on success/recovery.
  */
