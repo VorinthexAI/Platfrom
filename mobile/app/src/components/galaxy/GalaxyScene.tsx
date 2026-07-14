@@ -4,12 +4,10 @@ import { View, type StyleProp, type ViewStyle } from "react-native";
 import { BiomeChamber } from "@/components/galaxy/BiomeChamber";
 import { CameraRig, OVERVIEW_POSITION } from "@/components/galaxy/CameraRig";
 import { CapabilityPlanet } from "@/components/galaxy/CapabilityPlanet";
-import { chamberStyleForBiome } from "@/components/galaxy/chamber-config";
-import {
-  CAPABILITY_ORBITS,
-  orbitForSlug,
-} from "@/components/galaxy/galaxy-config";
+import { chamberStyleForSlug } from "@/components/galaxy/chamber-config";
+import { CAPABILITY_ORBITS } from "@/components/galaxy/galaxy-config";
 import { Starfield } from "@/components/galaxy/Starfield";
+import { SystemRig } from "@/components/galaxy/SystemRig";
 import { Canvas } from "@/components/three/Canvas";
 import { BrainCoreObject } from "@/components/three/BrainCore3D";
 import type { CapabilitySlug } from "@/data/registry";
@@ -95,19 +93,23 @@ export function GalaxyScene({
       <fog attach="fog" args={[OBSIDIAN, 18, 60]} />
       <CameraRig />
       <Starfield paused={paused} />
-      <BrainCoreObject motion="spin" scale={1.05} />
-      {orbits.map((orbit) => (
-        <CapabilityPlanet
-          key={orbit.slug}
-          orbit={orbit}
-          focused={orbit.slug === (targetSlug ?? selectedSlug)}
-          paused={paused}
-        />
-      ))}
+      {/* Swipe-steered system mount: everything that should rotate under
+          the finger lives here; the chamber below must not. */}
+      <SystemRig>
+        <BrainCoreObject motion="spin" scale={1.05} />
+        {orbits.map((orbit) => (
+          <CapabilityPlanet
+            key={orbit.slug}
+            orbit={orbit}
+            focused={orbit.slug === (targetSlug ?? selectedSlug)}
+            paused={paused}
+          />
+        ))}
+      </SystemRig>
       {diveTarget ? (
         <BiomeChamber
           key={`${diveTarget}-${visitSeed}`}
-          styleKey={chamberStyleForBiome(orbitForSlug(diveTarget).biome)}
+          styleKey={chamberStyleForSlug(diveTarget)}
           seed={visitSeed}
         />
       ) : null}

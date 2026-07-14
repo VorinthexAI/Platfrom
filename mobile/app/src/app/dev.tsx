@@ -4,6 +4,7 @@ import { StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { HomeConstellation } from "@/components/HomeConstellation";
+import { TransitionVeil } from "@/components/TransitionVeil";
 import { CAPABILITIES, capabilitySlugSchema } from "@/data/registry";
 import { useGalaxyStore } from "@/state/galaxy";
 import { palette } from "@/theme/tokens";
@@ -30,6 +31,8 @@ export default function DevRoute() {
   return (
     <View style={[styles.root, { paddingTop: insets.top + 10 }]}>
       <HomeConstellation enabledSlugs={ALL_SLUGS} onOpen={() => {}} />
+      {/* Drives the enter/exit phase hand-offs — must be mounted here too. */}
+      <TransitionVeil />
     </View>
   );
 }
