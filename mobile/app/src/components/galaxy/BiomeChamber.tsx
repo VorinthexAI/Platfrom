@@ -63,7 +63,7 @@ const rockFragmentShader = /* glsl */ `
 
     float pulse = 0.55 + 0.35 * sin(uTime * 1.3 + vLocal.y * 1.4);
     float flicker = 0.6 + 0.4 * sin(uTime * 2.1 + vLocal.x * 2.2);
-    vec3 veins = uEmissive * (seams * pulse * 1.35 + filaments * flicker * 0.9);
+    vec3 veins = uEmissive * (seams * pulse * 0.95 + filaments * flicker * 0.6);
 
     gl_FragColor = vec4(rock * lambert + veins, 1.0);
   }

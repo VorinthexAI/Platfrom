@@ -33,6 +33,8 @@ const OFFSCREEN = 420;
 
 type CapabilityDrawerProps = {
   capability: Capability | null;
+  /** Primary CTA — same action as tapping the capability in the carousel. */
+  onOpen: (capability: Capability) => void;
 };
 
 /**
@@ -41,7 +43,7 @@ type CapabilityDrawerProps = {
  * capability's identity and briefing. Dragging it down (or the X) closes
  * the drawer and leaves the world — same contract as the web.
  */
-export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
+export function CapabilityDrawer({ capability, onOpen }: CapabilityDrawerProps) {
   const phase = useGalaxyStore((state) => state.phase);
   const exit = useGalaxyStore((state) => state.exit);
   const insets = useSafeAreaInsets();
@@ -111,7 +113,7 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
       accessibilityViewIsModal
       // Floats above the Android gesture/nav bar: the SCENE runs
       // edge-to-edge underneath; only floating chrome gets the inset.
-      style={[styles.root, { bottom: 8 + insets.bottom }, slideStyle]}
+      style={[styles.root, { bottom: 20 + insets.bottom }, slideStyle]}
     >
       <GestureDetector gesture={pan}>
         <ChromePanel radius={radii.xl} style={styles.panel}>
@@ -143,15 +145,23 @@ export function CapabilityDrawer({ capability }: CapabilityDrawerProps) {
           </Text>
           <Text style={styles.body}>{capability.onboardingDescription}</Text>
 
-          <BrandButton
-            accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${capability.name} briefing`}
-            compact
-            icon={<VolumeIcon size="sm" variant="inverse" />}
-            label={briefingPlaying ? "Stop Briefing" : "Play Briefing"}
-            onPress={() => toggleBriefing(capability.slug)}
-            style={styles.briefing}
-            variant="primary"
-          />
+          <View style={styles.actions}>
+            <BrandButton
+              accessibilityLabel={`Open ${capability.name}`}
+              label="Open"
+              onPress={() => onOpen(capability)}
+              style={styles.action}
+              variant="primary"
+            />
+            <BrandButton
+              accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${capability.name} briefing`}
+              icon={<VolumeIcon size="sm" variant="accent" />}
+              label={briefingPlaying ? "Stop Briefing" : "Play Briefing"}
+              onPress={() => toggleBriefing(capability.slug)}
+              style={styles.action}
+              variant="secondary"
+            />
+          </View>
         </ChromePanel>
       </GestureDetector>
     </Animated.View>
@@ -166,13 +176,13 @@ const styles = StyleSheet.create({
     zIndex: 25,
   },
   panel: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
   },
   handleRow: {
     alignItems: "center",
-    paddingTop: 10,
-    paddingBottom: 4,
+    paddingTop: 12,
+    paddingBottom: 8,
   },
   handle: {
     width: 40,
@@ -204,7 +214,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    marginTop: 4,
+    marginTop: 8,
   },
   logoRing: {
     width: 34,
@@ -224,7 +234,7 @@ const styles = StyleSheet.create({
     letterSpacing: 4.3,
   },
   tagline: {
-    marginTop: 6,
+    marginTop: 12,
     color: palette.silver500,
     fontFamily: fonts.medium,
     fontSize: 8.5,
@@ -232,14 +242,17 @@ const styles = StyleSheet.create({
     letterSpacing: tracking.micro,
   },
   body: {
-    marginTop: 10,
+    marginTop: 14,
     color: palette.silver300,
     fontFamily: fonts.regular,
     fontSize: 13,
-    lineHeight: 19,
+    lineHeight: 20,
   },
-  briefing: {
-    marginTop: 14,
-    alignSelf: "flex-start",
+  actions: {
+    marginTop: 20,
+    gap: 10,
+  },
+  action: {
+    alignSelf: "stretch",
   },
 });

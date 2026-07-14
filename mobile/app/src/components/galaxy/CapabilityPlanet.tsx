@@ -20,22 +20,27 @@ type CapabilityPlanetProps = {
 };
 
 /**
- * The capability's mark, billboarded at the planet's heart so the world
- * sits WITHIN its logo — port of the web PlanetLogoRing. Billboarding is
- * done against the full parent chain (orbit plane + SystemRig rotation),
- * not just the camera, so it stays screen-aligned however the system is
+ * The capability's LOGO is what orbits: the chrome ring emblem rides the
+ * orbit, billboarded to the screen, with the planet baked into its center
+ * — same composition as the web PlanetLogoRing. The plane sits slightly
+ * BEHIND the sphere's center along the view axis, so the opaque planet
+ * always occludes the mark's inner glyph and only the ring frames it.
+ * Billboarding is done against the full parent chain (orbit plane +
+ * SystemRig rotation), so it stays screen-aligned however the system is
  * swiped around.
  */
 function PlanetLogo({
   slug,
   size,
+  planetRadius,
   focused,
 }: {
   slug: CapabilitySlug;
   size: number;
+  planetRadius: number;
   focused: boolean;
 }) {
-  const meshRef = useRef<THREE.Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
   const scratchQuaternion = useRef(new THREE.Quaternion());
   const texture = useMemo(
     () => getCapabilityLogoTexture(capabilityIconSource[slug] as number),
@@ -43,24 +48,28 @@ function PlanetLogo({
   );
 
   useFrame(({ camera }) => {
-    const mesh = meshRef.current;
-    if (!mesh || !mesh.parent) return;
-    mesh.parent.getWorldQuaternion(scratchQuaternion.current);
-    mesh.quaternion
+    const group = groupRef.current;
+    if (!group || !group.parent) return;
+    group.parent.getWorldQuaternion(scratchQuaternion.current);
+    group.quaternion
       .copy(scratchQuaternion.current.invert())
       .multiply(camera.quaternion);
   });
 
   return (
-    <mesh ref={meshRef}>
-      <planeGeometry args={[size, size]} />
-      <meshBasicMaterial
-        map={texture}
-        transparent
-        opacity={focused ? 0.7 : 0.5}
-        depthWrite={false}
-      />
-    </mesh>
+    <group ref={groupRef}>
+      {/* -z in billboard space = away from the camera: the glyph hides
+          behind the planet, the ring stays visible around it. */}
+      <mesh position={[0, 0, -planetRadius * 0.55]}>
+        <planeGeometry args={[size, size]} />
+        <meshBasicMaterial
+          map={texture}
+          transparent
+          opacity={focused ? 0.92 : 0.72}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -111,7 +120,12 @@ export function CapabilityPlanet({
           paused={paused}
           focused={focused}
         />
-        <PlanetLogo slug={orbit.slug} size={orbit.size * 3.1} focused={focused} />
+        <PlanetLogo
+          slug={orbit.slug}
+          size={orbit.size * 3.4}
+          planetRadius={orbit.size}
+          focused={focused}
+        />
       </group>
     </group>
   );

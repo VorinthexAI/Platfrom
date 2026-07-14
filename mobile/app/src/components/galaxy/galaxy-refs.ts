@@ -33,6 +33,16 @@ export function trackedVector(
 export const systemYaw = makeMutable(0);
 export const systemPitch = makeMutable(0);
 
+/**
+ * The RENDERED rotation, published back by the SystemRig every frame.
+ * Touching down grabs THIS (and snaps the target to it) — like stopping a
+ * spinning globe with your finger. Without it, a new pan starts from a
+ * target the rig is still chasing after a fling, and the scene feels
+ * stuck for seconds while the damping closes the gap.
+ */
+export const systemYawLive = makeMutable(0);
+export const systemPitchLive = makeMutable(0);
+
 /** Tilt limit so the system can lean steeply but never flips over. */
 export const SYSTEM_PITCH_LIMIT = 1.15;
 

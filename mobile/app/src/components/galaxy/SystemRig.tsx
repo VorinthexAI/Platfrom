@@ -2,7 +2,12 @@ import { useRef, type ReactNode } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
-import { systemPitch, systemYaw } from "@/components/galaxy/galaxy-refs";
+import {
+  systemPitch,
+  systemPitchLive,
+  systemYaw,
+  systemYawLive,
+} from "@/components/galaxy/galaxy-refs";
 
 /**
  * The swipe-steered mount for the whole solar system (brain core, orbit
@@ -30,6 +35,10 @@ export function SystemRig({ children }: { children: ReactNode }) {
       9,
       delta,
     );
+    // Publish the rendered orientation so a new touch can grab it
+    // mid-glide instead of fighting leftover momentum.
+    systemYawLive.value = group.rotation.y;
+    systemPitchLive.value = group.rotation.x;
   });
 
   return <group ref={groupRef}>{children}</group>;
