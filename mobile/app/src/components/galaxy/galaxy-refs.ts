@@ -24,8 +24,9 @@ export function trackedVector(
  * User-steered orientation of the whole solar system: horizontal swipes
  * spin it around the vertical axis (yaw), vertical swipes tilt it (pitch).
  * These are Reanimated mutables so the pan gesture writes them straight
- * from the UI thread — zero runOnJS hops, so a wild diagonal scribble
- * tracks the finger even while the JS thread is busy rendering frames.
+ * from the UI thread — no cross-thread scheduling, so a wild diagonal
+ * scribble tracks the finger even while the JS thread is busy rendering
+ * frames.
  * The SystemRig reads `.value` synchronously in useFrame and damps toward
  * them.
  */

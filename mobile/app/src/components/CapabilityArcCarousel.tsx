@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   type SharedValue,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import Svg, {
   Defs,
   Ellipse,
@@ -121,7 +121,7 @@ export function CapabilityArcCarousel({
             target += event.velocityX < 0 ? 1 : -1;
           }
           offset.value = withSpring(target, springs.carousel);
-          runOnJS(commit)(target);
+          scheduleOnRN(commit, target);
         }),
     [commit, count, offset, panStart, spacing],
   );

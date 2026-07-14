@@ -4,7 +4,6 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Easing,
   interpolate,
-  runOnJS,
   useAnimatedStyle,
   useDerivedValue,
   useSharedValue,
@@ -12,6 +11,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 
 import { BrandButton } from "@/components/BrandButton";
 import { OnboardingCard } from "@/components/onboarding/OnboardingCard";
@@ -195,7 +195,7 @@ function SwipeCard({
           1,
           { duration: durations.dustBurst, easing: Easing.linear },
           (finished) => {
-            if (finished) runOnJS(onCommit)(capability.slug, decision);
+            if (finished) scheduleOnRN(onCommit, capability.slug, decision);
           },
         );
       });
@@ -223,7 +223,7 @@ function SwipeCard({
         const direction = passedVelocity
           ? Math.sign(event.velocityX)
           : Math.sign(tx.value);
-        runOnJS(exitCard)(direction > 0 ? "enabled" : "skipped");
+        scheduleOnRN(exitCard, direction > 0 ? "enabled" : "skipped");
       } else {
         // Cancelled drag: spring back to a perfectly frontal rest pose.
         tx.value = withSpring(0, springs.snapBack);
