@@ -29,7 +29,7 @@ describe('agent definition schema', () => {
       name: 'Test',
       description: 'Test agent',
       skill: 'Do the thing.',
-      toolIds: ['chat.reply'],
+      toolIds: ['ask.answer'],
     };
     expect(agentDefinitionSchema.parse(base).defaultStrategy).toBe('balanced');
     expect(() => agentDefinitionSchema.parse({ ...base, toolIds: ['not.a-tool'] })).toThrow();
@@ -54,7 +54,7 @@ describe('agent registry', () => {
       name: 'Support Agent',
       description: 'Scoped support agent',
       skill: 'Help with support tickets.',
-      toolIds: ['chat.reply'],
+      toolIds: ['ask.answer'],
       guardrails: [{ scopeId: 'scope_support' }],
     });
     expect(getAgent('org.support-agent')).toEqual(scoped);
@@ -85,8 +85,8 @@ describe('prompt compilation', () => {
     expect(prompt).toContain('# Vorinthex Assistant');
     expect(prompt).toContain('You are the Vorinthex assistant.');
     expect(prompt).toContain('## Available tools');
-    expect(prompt).toContain('- chat.reply — Reply:');
-    expect(prompt).toContain('(action core.chat:');
+    expect(prompt).toContain('- ask.answer — Ask:');
+    expect(prompt).toContain('(action core.ask:');
     // Providers and models never leak into prompts.
     expect(prompt).not.toContain('openai');
     expect(prompt).not.toContain('anthropic');

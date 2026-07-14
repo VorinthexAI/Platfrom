@@ -57,9 +57,10 @@ export interface AgentToolRunResult<TOutput> {
 }
 
 /**
- * For chat-shaped actions the agent's compiled system prompt is prepended
- * to whatever system text the caller provided. Non-chat inputs pass
- * through untouched — the provider adapter validates them per action.
+ * For ask-shaped actions (message-history inputs) the agent's compiled
+ * system prompt is prepended to whatever system text the caller provided.
+ * Other inputs pass through untouched — the provider adapter validates
+ * them per action.
  */
 function withCompiledPrompt(agent: AgentDefinition, input: unknown): unknown {
   const chat = chatInputSchema.safeParse(input);

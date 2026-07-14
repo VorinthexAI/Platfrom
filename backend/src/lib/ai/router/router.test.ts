@@ -40,9 +40,9 @@ function orgProvidersWith(...providerIds: ProviderId[]): RouterDependencies['org
 const claude: ModelDefinition = {
   id: 'anthropic.claude-sonnet',
   name: 'Claude Sonnet',
-  actions: ['core.chat', 'core.reason'],
+  actions: ['core.ask', 'core.reason'],
   actionProfiles: {
-    'core.chat': { quality: 0.9, speed: 0.5, costEfficiency: 0.4, reliability: 0.95 },
+    'core.ask': { quality: 0.9, speed: 0.5, costEfficiency: 0.4, reliability: 0.95 },
     'core.reason': { quality: 0.95, speed: 0.4, costEfficiency: 0.4, reliability: 0.95 },
   },
   routes: [
@@ -55,9 +55,9 @@ const claude: ModelDefinition = {
 const gpt: ModelDefinition = {
   id: 'openai.gpt-5',
   name: 'GPT-5',
-  actions: ['core.chat'],
+  actions: ['core.ask'],
   actionProfiles: {
-    'core.chat': { quality: 0.8, speed: 0.6, costEfficiency: 0.9, reliability: 0.85 },
+    'core.ask': { quality: 0.8, speed: 0.6, costEfficiency: 0.9, reliability: 0.85 },
   },
   routes: [
     { providerId: 'openai', externalModelId: 'gpt-5-test', enabled: true },
@@ -69,9 +69,9 @@ const gpt: ModelDefinition = {
 const disabledModel: ModelDefinition = {
   id: 'xai.grok',
   name: 'Grok (disabled)',
-  actions: ['core.chat'],
+  actions: ['core.ask'],
   actionProfiles: {
-    'core.chat': { quality: 1, speed: 1, costEfficiency: 1, reliability: 1 },
+    'core.ask': { quality: 1, speed: 1, costEfficiency: 1, reliability: 1 },
   },
   routes: [{ providerId: 'xai', externalModelId: 'grok-test', enabled: true }],
   enabled: false,
@@ -102,7 +102,7 @@ function depsWith(overrides: Partial<RouterDependencies> = {}): RouterDependenci
 describe('selectRoute — organization allow-list', () => {
   test('selects only providers enabled for the organization', async () => {
     const decision = await selectRoute(
-      { mode: 'auto', organizationId: ORG, actionId: 'core.chat' },
+      { mode: 'auto', organizationId: ORG, actionId: 'core.ask' },
       depsWith({ organizationProviders: orgProvidersWith('openai') }),
     );
     expect(decision.providerId).toBe('openai');
@@ -111,7 +111,7 @@ describe('selectRoute — organization allow-list', () => {
   });
 
   test('fallbacks contain only enabled providers', async () => {
-    const decision = await selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.chat' }, depsWith());
+    const decision = await selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.ask' }, depsWith());
     const providersUsed = [decision.providerId, ...decision.fallbacks.map((fallback) => fallback.providerId)];
     for (const providerId of providersUsed) {
       expect(['openai', 'anthropic', 'openrouter']).toContain(providerId);
@@ -122,7 +122,7 @@ describe('selectRoute — organization allow-list', () => {
 
   test('an organization with no providers gets a typed error', async () => {
     expect(
-      selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.chat' }, depsWith({ organizationProviders: orgProvidersWith() })),
+      selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.ask' }, depsWith({ organizationProviders: orgProvidersWith() })),
     ).rejects.toBeInstanceOf(NoEligibleRouteError);
   });
 
@@ -132,7 +132,7 @@ describe('selectRoute — organization allow-list', () => {
         {
           mode: 'auto',
           organizationId: ORG,
-          actionId: 'core.chat',
+          actionId: 'core.ask',
           enabledProviders: ['xai'],
         } as never,
         depsWith(),
@@ -143,7 +143,7 @@ describe('selectRoute — organization allow-list', () => {
   test('fixed mode rejects a provider the organization has not enabled, even when its adapter exists', async () => {
     expect(
       selectRoute(
-        { mode: 'fixed', organizationId: ORG, actionId: 'core.chat', modelId: 'xai.grok', providerId: 'xai' },
+        { mode: 'fixed', organizationId: ORG, actionId: 'core.ask', modelId: 'xai.grok', providerId: 'xai' },
         depsWith({ organizationProviders: orgProvidersWith('openai') }),
       ),
     ).rejects.toBeInstanceOf(ProviderNotEnabledForOrganizationError);
@@ -153,7 +153,7 @@ describe('selectRoute — organization allow-list', () => {
 describe('selectRoute — eligibility filters', () => {
   test('never selects a disabled model', async () => {
     const decision = await selectRoute(
-      { mode: 'auto', organizationId: ORG, actionId: 'core.chat', strategy: 'quality' },
+      { mode: 'auto', organizationId: ORG, actionId: 'core.ask', strategy: 'quality' },
       depsWith({ organizationProviders: orgProvidersWith('openai', 'anthropic', 'xai', 'openrouter') }),
     );
     // disabledModel has perfect scores but is disabled — it must never win.
@@ -163,7 +163,7 @@ describe('selectRoute — eligibility filters', () => {
 
   test('never selects a disabled route', async () => {
     const decision = await selectRoute(
-      { mode: 'auto', organizationId: ORG, actionId: 'core.chat' },
+      { mode: 'auto', organizationId: ORG, actionId: 'core.ask' },
       depsWith({ organizationProviders: orgProvidersWith('openai', 'azure-ai-foundry') }),
     );
     const providersUsed = [decision.providerId, ...decision.fallbacks.map((fallback) => fallback.providerId)];
@@ -178,7 +178,7 @@ describe('selectRoute — eligibility filters', () => {
 
   test('routes without a configured adapter are unavailable', async () => {
     const decision = await selectRoute(
-      { mode: 'auto', organizationId: ORG, actionId: 'core.chat' },
+      { mode: 'auto', organizationId: ORG, actionId: 'core.ask' },
       depsWith({ adapters: adaptersFor('anthropic') }),
     );
     expect(decision.providerId).toBe('anthropic');
@@ -195,7 +195,7 @@ describe('selectRoute — eligibility filters', () => {
 describe('selectRoute — modes', () => {
   test('model mode stays on the selected model', async () => {
     const decision = await selectRoute(
-      { mode: 'model', organizationId: ORG, actionId: 'core.chat', modelId: 'anthropic.claude-sonnet' },
+      { mode: 'model', organizationId: ORG, actionId: 'core.ask', modelId: 'anthropic.claude-sonnet' },
       depsWith(),
     );
     expect(decision.modelId).toBe('anthropic.claude-sonnet');
@@ -208,7 +208,7 @@ describe('selectRoute — modes', () => {
   test('model mode with a model missing from the registry is a typed error', async () => {
     expect(
       selectRoute(
-        { mode: 'model', organizationId: ORG, actionId: 'core.chat', modelId: 'google.gemini-pro' },
+        { mode: 'model', organizationId: ORG, actionId: 'core.ask', modelId: 'google.gemini-pro' },
         depsWith(),
       ),
     ).rejects.toBeInstanceOf(UnknownModelError);
@@ -219,7 +219,7 @@ describe('selectRoute — modes', () => {
       {
         mode: 'fixed',
         organizationId: ORG,
-        actionId: 'core.chat',
+        actionId: 'core.ask',
         modelId: 'anthropic.claude-sonnet',
         providerId: 'openrouter',
       },
@@ -236,7 +236,7 @@ describe('selectRoute — modes', () => {
       {
         mode: 'fixed',
         organizationId: ORG,
-        actionId: 'core.chat',
+        actionId: 'core.ask',
         modelId: 'anthropic.claude-sonnet',
         providerId: 'openrouter',
         allowFallback: true,
@@ -251,11 +251,11 @@ describe('selectRoute — modes', () => {
   });
 
   test('rejects malformed requests with a typed validation error', async () => {
-    expect(selectRoute({ mode: 'auto', organizationId: '', actionId: 'core.chat' }, depsWith())).rejects.toBeInstanceOf(
+    expect(selectRoute({ mode: 'auto', organizationId: '', actionId: 'core.ask' }, depsWith())).rejects.toBeInstanceOf(
       RouteValidationError,
     );
     expect(
-      selectRoute({ mode: 'fixed', organizationId: ORG, actionId: 'core.chat', modelId: 'openai.gpt-5', providerId: 'perplexity' } as never, depsWith()),
+      selectRoute({ mode: 'fixed', organizationId: ORG, actionId: 'core.ask', modelId: 'openai.gpt-5', providerId: 'perplexity' } as never, depsWith()),
     ).rejects.toBeInstanceOf(RouteValidationError);
     expect(selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'not.an-action' } as never, depsWith())).rejects.toBeInstanceOf(
       RouteValidationError,
@@ -265,18 +265,18 @@ describe('selectRoute — modes', () => {
 
 describe('selectRoute — determinism and strategies', () => {
   test('auto mode returns identical decisions for identical inputs', async () => {
-    const first = await selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.chat' }, depsWith());
-    const second = await selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.chat' }, depsWith());
+    const first = await selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.ask' }, depsWith());
+    const second = await selectRoute({ mode: 'auto', organizationId: ORG, actionId: 'core.ask' }, depsWith());
     expect(second).toEqual(first);
   });
 
   test('strategy changes the winner deterministically', async () => {
     const quality = await selectRoute(
-      { mode: 'auto', organizationId: ORG, actionId: 'core.chat', strategy: 'quality' },
+      { mode: 'auto', organizationId: ORG, actionId: 'core.ask', strategy: 'quality' },
       depsWith(),
     );
     const cost = await selectRoute(
-      { mode: 'auto', organizationId: ORG, actionId: 'core.chat', strategy: 'cost' },
+      { mode: 'auto', organizationId: ORG, actionId: 'core.ask', strategy: 'cost' },
       depsWith(),
     );
     expect(quality.modelId).toBe('anthropic.claude-sonnet');
@@ -295,8 +295,8 @@ describe('selectRoute — determinism and strategies', () => {
     const modelA: ModelDefinition = {
       id: 'anthropic.claude-haiku',
       name: 'A',
-      actions: ['core.chat'],
-      actionProfiles: { 'core.chat': profile },
+      actions: ['core.ask'],
+      actionProfiles: { 'core.ask': profile },
       routes: [
         { providerId: 'openrouter', externalModelId: 'a-via-openrouter', enabled: true },
         { providerId: 'anthropic', externalModelId: 'a-via-anthropic', enabled: true },
@@ -306,13 +306,13 @@ describe('selectRoute — determinism and strategies', () => {
     const modelB: ModelDefinition = {
       id: 'openai.gpt-5-mini',
       name: 'B',
-      actions: ['core.chat'],
-      actionProfiles: { 'core.chat': profile },
+      actions: ['core.ask'],
+      actionProfiles: { 'core.ask': profile },
       routes: [{ providerId: 'openai', externalModelId: 'b-via-openai', enabled: true }],
       enabled: true,
     };
     const candidates: RouteCandidate[] = [modelB, modelA].flatMap((model) =>
-      model.routes.map((route) => ({ actionId: 'core.chat' as const, model, route, profile })),
+      model.routes.map((route) => ({ actionId: 'core.ask' as const, model, route, profile })),
     );
     const ranked = rankCandidates(candidates, 'balanced');
     expect(ranked.map((candidate) => `${candidate.model.id}/${candidate.route.providerId}`)).toEqual([

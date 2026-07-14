@@ -6,7 +6,7 @@ import { routingStrategySchema, type RoutingStrategy } from '@/lib/ai/router/typ
 
 /** Built-in tool ids in `<domain>.<tool>` dot notation. */
 export const TOOL_IDS = [
-  'chat.reply',
+  'ask.answer',
   'reason.solve',
   'image.create',
   'audio.transcribe-file',

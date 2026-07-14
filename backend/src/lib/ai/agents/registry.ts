@@ -25,7 +25,7 @@ export const BUILT_IN_AGENTS: readonly AgentDefinition[] = [
       'You are the Vorinthex assistant. Answer precisely and concretely.',
       'Use reason.solve for multi-step problems before replying; keep answers grounded in what you actually derived.',
     ].join('\n'),
-    toolIds: ['chat.reply', 'reason.solve'],
+    toolIds: ['ask.answer', 'reason.solve'],
   }),
   agentDefinitionSchema.parse({
     id: 'vorinthex.creator',
@@ -35,7 +35,7 @@ export const BUILT_IN_AGENTS: readonly AgentDefinition[] = [
       'You are the Vorinthex creator. Turn briefs into finished media.',
       'Confirm the brief conversationally, then produce the asset with the matching creation tool.',
     ].join('\n'),
-    toolIds: ['chat.reply', 'image.create', 'speech.narrate'],
+    toolIds: ['ask.answer', 'image.create', 'speech.narrate'],
     defaultStrategy: 'quality',
   }),
 ];

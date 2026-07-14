@@ -28,7 +28,15 @@ the `agentRuns` ledger.
 | `tools/` | `TOOL_REGISTRY` — tools reference **actions only** (never providers/endpoints), optionally carry routing *preferences* (router stays authoritative) and a `scopeId` |
 | `agents/` | `AgentDefinition` (skill + toolIds + guardrails), SKILL.md compile/parse, deterministic prompt compilation, built-in + runtime agent registry |
 | `agent-runs/` | the `agentRuns` ledger: status, route ids (never registry data), normalized usage, timing, steps, output *metadata* (never content) |
-| `pipeline/` | `runAgentTool` — grant + guardrail checks, prompt injection for chat actions, route + execute, response validation, run recording |
+| `pipeline/` | `runAgentTool` — grant + guardrail checks, prompt injection for ask-shaped actions, route + execute, response validation, run recording |
+
+**Agents don't chat — agents answer.** The conversational capability is
+`core.ask` (via the `ask.answer` tool). An agent's tool grants are its
+interaction contract: no `ask.answer` → no conversational surface exists
+for that agent, and a UI should render each agent from its tools
+(`ask.answer` → message box, `image.create` → prompt-and-image,
+`audio.transcribe-file` → audio upload) instead of hardcoding per-agent
+screens.
 
 Modules only import downward (providers never import models; models never
 import the router; actions import nothing but shared).
@@ -60,7 +68,7 @@ so a retry can never mint a second billable image/video/music output.
 import { executeAction } from '@/lib/ai';
 
 const response = await executeAction(
-  { mode: 'auto', organizationId, actionId: 'core.chat', strategy: 'quality' },
+  { mode: 'auto', organizationId, actionId: 'core.ask', strategy: 'quality' },
   { messages: [{ role: 'user', content: 'Hello' }] },
 );
 // response.output, response.usage {inputTokens, outputTokens, totalTokens}

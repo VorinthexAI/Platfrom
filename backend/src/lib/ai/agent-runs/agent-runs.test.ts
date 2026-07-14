@@ -43,8 +43,8 @@ function createFakeDb() {
 const baseInsert = {
   organizationId: 'org1',
   agentId: 'vorinthex.assistant',
-  toolId: 'chat.reply',
-  actionId: 'core.chat',
+  toolId: 'ask.answer',
+  actionId: 'core.ask',
   status: 'running',
   startedAt: '2026-07-14T00:00:00.000Z',
 } as const;
@@ -101,7 +101,7 @@ describe('agent run repository', () => {
         { index: 0, type: 'route-selected', at: '2026-07-14T00:00:01.000Z', modelId: 'anthropic.claude-sonnet' },
         { index: 1, type: 'provider-executed', at: '2026-07-14T00:00:02.000Z', durationMs: 900 },
       ],
-      output: { type: 'core.chat', stopReason: 'end_turn' },
+      output: { type: 'core.ask', stopReason: 'end_turn' },
       finishedAt: '2026-07-14T00:00:02.000Z',
       durationMs: 2000,
     });

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
-import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
+import { ASK_ACTION_IDS, unsupportedAction } from './openai-compatible';
 import {
   chatInputSchema,
   resolveRequestSignal,
@@ -110,7 +110,7 @@ export function createGoogleVertexProvider(config: GoogleVertexProviderConfig): 
     name: 'Google Vertex AI',
 
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       const input = chatInputSchema.parse(request.input);
       const { url, headers } = buildEndpoint(parsed, request.externalModelId);
       try {

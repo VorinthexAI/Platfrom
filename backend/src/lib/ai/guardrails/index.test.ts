@@ -11,7 +11,7 @@ describe('guardrail schema', () => {
 });
 
 describe('guardrail evaluation', () => {
-  const scopedTool = { id: 'chat.reply', scopeId: 'scope1' };
+  const scopedTool = { id: 'ask.answer', scopeId: 'scope1' };
   const otherScopedTool = { id: 'image.create', scopeId: 'scope2' };
   const unscopedTool = { id: 'reason.solve', scopeId: null };
 

@@ -18,11 +18,11 @@ export class UnknownToolError extends AiError {
  * organization-scoped variant is defined.
  */
 export const TOOL_REGISTRY = {
-  'chat.reply': {
-    id: 'chat.reply',
-    name: 'Reply',
-    description: 'Answer the user conversationally over the current message history.',
-    actionId: 'core.chat',
+  'ask.answer': {
+    id: 'ask.answer',
+    name: 'Ask',
+    description: 'Answer the user over the current message history. Granting this tool is what gives an agent a conversational surface at all.',
+    actionId: 'core.ask',
     scopeId: null,
   },
 

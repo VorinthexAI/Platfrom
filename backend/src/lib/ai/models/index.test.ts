@@ -62,7 +62,7 @@ describe('model registry', () => {
 
   test('lookup helpers resolve models, actions, and routes', () => {
     expect(getModel('anthropic.claude-sonnet').name).toBe('Claude Sonnet');
-    const chatModels = getModelsForAction('core.chat');
+    const chatModels = getModelsForAction('core.ask');
     expect(chatModels.map((model) => model.id)).toContain('openai.gpt-5');
     expect(chatModels.map((model) => model.id)).not.toContain('openai.gpt-image');
     expect(getRoutesForModel('xai.grok').map((route) => route.providerId)).toEqual(['xai', 'openrouter']);

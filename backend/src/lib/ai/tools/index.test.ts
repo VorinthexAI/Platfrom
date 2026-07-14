@@ -30,12 +30,12 @@ describe('tool registry', () => {
   test('routing preferences are optional hints with validated shapes', () => {
     expect(TOOL_REGISTRY['reason.solve'].routing?.strategy).toBe('quality');
     expect(() =>
-      toolDefinitionSchema.parse({ ...TOOL_REGISTRY['chat.reply'], routing: { providerId: 'openai' } }),
+      toolDefinitionSchema.parse({ ...TOOL_REGISTRY['ask.answer'], routing: { providerId: 'openai' } }),
     ).toThrow();
   });
 
   test('getTool resolves known tools and rejects unknown ids', () => {
-    expect(getTool('chat.reply').actionId).toBe('core.chat');
+    expect(getTool('ask.answer').actionId).toBe('core.ask');
     expect(() => getTool('nope.missing')).toThrow(UnknownToolError);
   });
 });

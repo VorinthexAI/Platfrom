@@ -4,10 +4,10 @@ export const OPENAI_MODELS = {
   'openai.gpt-5': {
     id: 'openai.gpt-5',
     name: 'GPT-5',
-    actions: ['core.reason', 'core.chat'],
+    actions: ['core.reason', 'core.ask'],
     actionProfiles: {
       'core.reason': { quality: 0.95, speed: 0.45, costEfficiency: 0.35, reliability: 0.9 },
-      'core.chat': { quality: 0.9, speed: 0.55, costEfficiency: 0.4, reliability: 0.9 },
+      'core.ask': { quality: 0.9, speed: 0.55, costEfficiency: 0.4, reliability: 0.9 },
     },
     routes: [
       { providerId: 'openai', externalModelId: 'gpt-5', enabled: true },
@@ -22,10 +22,10 @@ export const OPENAI_MODELS = {
   'openai.gpt-5-mini': {
     id: 'openai.gpt-5-mini',
     name: 'GPT-5 mini',
-    actions: ['core.reason', 'core.chat'],
+    actions: ['core.reason', 'core.ask'],
     actionProfiles: {
       'core.reason': { quality: 0.75, speed: 0.8, costEfficiency: 0.85, reliability: 0.9 },
-      'core.chat': { quality: 0.75, speed: 0.85, costEfficiency: 0.9, reliability: 0.9 },
+      'core.ask': { quality: 0.75, speed: 0.85, costEfficiency: 0.9, reliability: 0.9 },
     },
     routes: [
       { providerId: 'openai', externalModelId: 'gpt-5-mini', enabled: true },
