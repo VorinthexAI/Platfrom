@@ -17,7 +17,14 @@ export const organizationSchema = z.object({
   slug: z.string().nullable().default(null),
   description: z.string().nullable().default(null),
   isActive: z.boolean().default(true),
-  /** Organization-level MFA requirement. If false, org users use email magic links. */
+  /**
+   * THE source of truth for org-wide MFA enforcement: when true, every
+   * member must sign in through TOTP (root members via the founders gate,
+   * everyone else via the direct challenge) and OAuth sessions are
+   * refused. When false, members use email magic links. Never derive MFA
+   * requirements from is_root — the root organization simply carries
+   * mfa_enabled: true (set by arango-migrate).
+   */
   mfa_enabled: z.boolean().default(false),
   metadata: z.record(z.unknown()).default({}),
   createdAt: z.string(),

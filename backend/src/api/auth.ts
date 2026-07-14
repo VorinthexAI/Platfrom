@@ -175,6 +175,26 @@ async function rootOrganizationMembershipIdentity(user: User): Promise<LoginIden
   return null;
 }
 
+/**
+ * Whether ANY of the user's active memberships belongs to an organization
+ * that enforces MFA. `organization.mfa_enabled` is the single source of
+ * truth for that decision — `is_root` only routes WHICH sign-in front door
+ * is used (founders gate vs the regular TOTP flow), never whether MFA is
+ * required. Prefers a root membership so founders always land on their
+ * gate.
+ */
+async function mfaEnforcedMembershipIdentity(user: User): Promise<LoginIdentity | null> {
+  const memberships = await listActiveUserOrganizationsByUser(user.key);
+  let enforced: LoginIdentity | null = null;
+  for (const membership of memberships) {
+    const identity = await membershipIdentity(user, membership);
+    if (!identity?.organizationMfaEnabled) continue;
+    if (identity.organizationIsRoot) return identity;
+    enforced ??= identity;
+  }
+  return enforced;
+}
+
 export async function findLoginIdentityByEmail(email: string): Promise<LoginIdentity | null> {
   const normalized = normalizeEmail(email);
   const user = await getUserByEmailHash(await hashUserEmail(normalized));
@@ -496,12 +516,17 @@ export async function completeOAuthSignIn(input: {
   if (!profile) return null;
   const normalized = normalizeEmail(profile.email);
 
-  // Founders (root-organization members) never get a session through
-  // OAuth, same as the email magic-link path — a provider click can't be
-  // allowed to skip the MFA gate for a founder's known email.
+  // Members of MFA-enforcing organizations never get a session through
+  // OAuth — a provider click can't be allowed to skip the TOTP gate.
+  // The decision is organization.mfa_enabled (the root organization has
+  // it set true); is_root only picks which front door they're sent to.
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
-  if (existingUser && await rootOrganizationMembershipIdentity(existingUser)) {
+  const enforced = existingUser ? await mfaEnforcedMembershipIdentity(existingUser) : null;
+  if (enforced?.organizationIsRoot) {
     return { status: 'founders_gate_required' as const };
+  }
+  if (enforced) {
+    return { status: 'mfa_required' as const };
   }
 
   const user = await upsertUserByEmail(normalized, {
@@ -627,6 +652,9 @@ export async function requestSignInEmail(email: string) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
   if (identity) {
+    // Routing only: root members sign in through the founders gate. The
+    // MFA *requirement* itself is organization.mfa_enabled (true on the
+    // root organization), checked below for every other organization.
     if (identity.organizationIsRoot) {
       trackPlatformEvent({
         slug: 'platform.sign_in_link_requested',

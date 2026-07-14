@@ -146,6 +146,11 @@ export function registerRoutes(app: Hono) {
     if (result.status === 'founders_gate_required') {
       return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
     }
+    if (result.status === 'mfa_required') {
+      // The organization enforces MFA — OAuth can't skip the TOTP flow;
+      // the client sends the member through the email sign-in path.
+      return c.json({ error: 'mfa required', action: 'mfa', mfa_required: true }, 403);
+    }
     setSessionTokenHeaders(c, result);
     setSessionCookies(c, result);
     return c.json({
