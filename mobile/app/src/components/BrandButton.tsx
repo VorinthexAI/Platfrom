@@ -13,7 +13,7 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from "react-native-reanimated";
-import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
+import { LinearGradient } from "expo-linear-gradient";
 
 import {
   PressableScale,
@@ -165,10 +165,22 @@ export function BrandButton({
   );
 }
 
+/** --vui-gradient-chrome stops, verbatim from the web theme. */
+const CHROME_COLORS = [
+  "#FFFFFF",
+  "#AEB6BC",
+  "#3C434A",
+  "#F5F7F8",
+  "#7B858C",
+  "#FFFFFF",
+] as const;
+const CHROME_LOCATIONS = [0, 0.18, 0.38, 0.55, 0.76, 1] as const;
+
 /**
  * The web chrome sheet: --vui-gradient-chrome at background-size 200% 200%,
  * resting at position 0% 0% (light half of the sweep) and sliding to
- * 100% 100% while pressed. A 2x panel translates inside the clipped pill.
+ * 100% 100% while pressed. A 2x expo-linear-gradient panel translates
+ * inside the clipped pill — native gradient rendering, no SVG banding.
  */
 function ChromeFill({
   height,
@@ -191,36 +203,37 @@ function ChromeFill({
   }
 
   // CSS `linear-gradient(135deg, ...)` runs at a fixed 45° regardless of
-  // aspect ratio. Reproduce its gradient line over the 2x panel:
-  // centered, length |W·sin| + |H·cos| with W = 2·width, H = 2·height.
-  const x1 = (width - height) / 2;
-  const y1 = (height - width) / 2;
-  const x2 = width + (width + height) / 2;
-  const y2 = height + (width + height) / 2;
+  // aspect ratio, with gradient-line length |W·sin45| + |H·cos45| over the
+  // 2x sheet. Reproduce it with primitives that behave identically on
+  // native and web: a square of side √2·(w+h) centered on the sheet,
+  // rotated 45°, carrying a plain horizontal gradient (start/end fixed in
+  // range). The square covers the whole sheet, so every window position
+  // the press slide can reach shows the exact CSS projection.
+  const side = Math.SQRT2 * (width + height);
 
   return (
     <View pointerEvents="none" style={styles.chromeClip}>
-      <Animated.View style={[{ width: width * 2, height: height * 2 }, slideStyle]}>
-        <Svg width={width * 2} height={height * 2}>
-          <Defs>
-            <LinearGradient
-              id="buttonChrome"
-              gradientUnits="userSpaceOnUse"
-              x1={x1}
-              y1={y1}
-              x2={x2}
-              y2={y2}
-            >
-              <Stop offset="0" stopColor="#FFFFFF" />
-              <Stop offset="0.18" stopColor="#AEB6BC" />
-              <Stop offset="0.38" stopColor="#3C434A" />
-              <Stop offset="0.55" stopColor="#F5F7F8" />
-              <Stop offset="0.76" stopColor="#7B858C" />
-              <Stop offset="1" stopColor="#FFFFFF" />
-            </LinearGradient>
-          </Defs>
-          <Rect width={width * 2} height={height * 2} fill="url(#buttonChrome)" />
-        </Svg>
+      <Animated.View
+        style={[
+          styles.chromeSheet,
+          { width: width * 2, height: height * 2 },
+          slideStyle,
+        ]}
+      >
+        <LinearGradient
+          colors={CHROME_COLORS}
+          locations={CHROME_LOCATIONS}
+          start={{ x: 0, y: 0.5 }}
+          end={{ x: 1, y: 0.5 }}
+          style={{
+            position: "absolute",
+            width: side,
+            height: side,
+            left: width - side / 2,
+            top: height - side / 2,
+            transform: [{ rotate: "45deg" }],
+          }}
+        />
       </Animated.View>
     </View>
   );
@@ -266,6 +279,10 @@ const styles = StyleSheet.create({
   },
   chromeFallback: {
     backgroundColor: palette.silver300,
+  },
+  chromeSheet: {
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
   },
   flatFill: {
     position: "absolute",

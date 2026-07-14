@@ -32,11 +32,11 @@
     "@radix-ui/react-tooltip": "^1.2.11",
     "axios": "^1.18.1",
     "date-fns": "^4.4.0",
-    "react-native-svg": "^15.15.5",
+    "react-native-svg": "15.15.4",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
-    "react": ">=19",
+    "react": "19.2.3",
     "react-native": ">=0.86"
   },
   "devDependencies": {
