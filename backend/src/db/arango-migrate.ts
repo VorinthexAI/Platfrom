@@ -4,6 +4,8 @@ import { embed } from '../lib/embed';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
+import { ensureOrganizationScopesCollection } from '../lib/ai/organization-scopes/indexes';
+import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -337,10 +339,12 @@ async function main() {
     await backfillCollectionEmbeddings(targetDb, spec);
   }
 
-  // AI execution layer allow-list: intentionally minimal documents (no
-  // embedding field), so it lives outside the node `collections` list and
-  // owns its idempotent setup (unique index on organizationId+providerId).
+  // AI execution layer collections: intentionally minimal documents (no
+  // embedding field), so they live outside the node `collections` list and
+  // own their idempotent setup (unique/read-path indexes).
   await ensureOrganizationProvidersCollection(targetDb);
+  await ensureOrganizationScopesCollection(targetDb);
+  await ensureAgentRunsCollection(targetDb);
 
   // Legacy scratch collection the org-migration steps below write into
   // before the final user_organization -> userOrganizations copy. Not part

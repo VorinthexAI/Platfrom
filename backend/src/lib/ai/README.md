@@ -1,15 +1,17 @@
-# AI Execution Layer
+# AI Execution Layer & Agent Framework
 
 Modular execution layer for every AI call the backend makes.
 
 ```text
-Agent → Tool → Action → Router → Model → Provider
+Agent → Tool → Action → Router → Model → Provider → Response → Validation → agent_runs
 ```
 
 A tool never hardcodes a provider endpoint. It references an **action**
 (what must be done), and the **router** picks the best executable
 model/provider route — restricted to the providers enabled for the calling
-organization.
+organization. Agents compose tools, guardrails allow-list the organization
+scopes an agent may operate in, and every execution lands as metadata in
+the `agent_runs` ledger.
 
 ## Modules (dependency order, bottom-up)
 
@@ -21,6 +23,12 @@ organization.
 | `models/` | `MODEL_IDS` (stable internal ids), `MODEL_REGISTRY` — per-model actions, per-ACTION routing profiles (quality/speed/costEfficiency/reliability ∈ [0,1]), and routes (one model × one provider each, with the provider-specific external model id) |
 | `organization-providers/` | the `organization_providers` ArangoDB allow-list: document existence = enabled, no `enabled` boolean, unique persistent index on `(organizationId, providerId)` |
 | `router/` | request schemas (`auto` / `model` / `fixed`), candidate generation, centralized strategy weights + deterministic scoring/tie-breaking, `selectRoute`, `executeAction` with organization-safe fallbacks |
+| `organization-scopes/` | the `organization_scopes` collection: minimal `{key (CUID2), name}` nodes with a unique name index — the unit guardrails point at |
+| `guardrails/` | `{scopeId}`-only guardrail schema + allow-list evaluation: no guardrails → unrestricted; guardrails present → only tools whose scope is listed |
+| `tools/` | `TOOL_REGISTRY` — tools reference **actions only** (never providers/endpoints), optionally carry routing *preferences* (router stays authoritative) and a `scopeId` |
+| `agents/` | `AgentDefinition` (skill + toolIds + guardrails), SKILL.md compile/parse, deterministic prompt compilation, built-in + runtime agent registry |
+| `agent-runs/` | the `agent_runs` ledger: status, route ids (never registry data), normalized usage, timing, steps, output *metadata* (never content) |
+| `pipeline/` | `runAgentTool` — grant + guardrail checks, prompt injection for chat actions, route + execute, response validation, run recording |
 
 Modules only import downward (providers never import models; models never
 import the router; actions import nothing but shared).
