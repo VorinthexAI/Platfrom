@@ -59,5 +59,6 @@ export * from "./icons/unlock/unlock.mobile";
 export * from "./icons/upload/upload.mobile";
 export * from "./icons/user/user.mobile";
 export * from "./icons/users/users.mobile";
+export * from "./icons/volume/volume.mobile";
 export * from "./icons/warning/warning.mobile";
 export * from "./icons/x-circle/x-circle.mobile";

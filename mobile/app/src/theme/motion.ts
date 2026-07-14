@@ -8,6 +8,7 @@ export const durations = {
   reveal: 900,
   splashHold: 2200,
   cardExit: 280,
+  dustBurst: 620,
   buildTotal: 4200,
   buildExitDelay: 4800,
 } as const;
