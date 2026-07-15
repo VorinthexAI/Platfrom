@@ -43,7 +43,7 @@ function PlanetLogo({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const scratchQuaternion = useRef(new THREE.Quaternion());
-  const texture = useCapabilityLogoTexture(
+  const { texture, ready } = useCapabilityLogoTexture(
     capabilityIconSource[slug] as number,
   );
 
@@ -55,6 +55,10 @@ function PlanetLogo({
       .copy(scratchQuaternion.current.invert())
       .multiply(camera.quaternion);
   });
+
+  // Never draw the plane before the texture has pixels: an incomplete
+  // texture samples opaque black on GLES — a black box, not a logo.
+  if (!ready) return null;
 
   return (
     <group ref={groupRef}>
