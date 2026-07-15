@@ -72,4 +72,6 @@ jobs:
           EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           EXPO_APPLE_TEAM_ID: ${{ secrets.EXPO_APPLE_TEAM_ID }}
           EXPO_APPLE_TEAM_TYPE: ${{ secrets.EXPO_APPLE_TEAM_TYPE }}
-        run: eas build --platform ios --profile production --non-interactive --no-wait
+        # Use the npm package because the standalone EAS 21 binary currently
+        # crashes inside its bundled apple-utils during ASC authentication.
+        run: npx --yes eas-cli@21.0.1 build --platform ios --profile production --non-interactive --no-wait
