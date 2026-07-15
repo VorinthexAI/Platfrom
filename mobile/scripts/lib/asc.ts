@@ -36,6 +36,44 @@ function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
 
+export function buildAppAvailabilityPayload(
+  appId: string,
+  configuredTerritoryIds: readonly string[],
+  appleTerritoryIds: readonly string[],
+): Record<string, unknown> {
+  const configured = new Set(configuredTerritoryIds);
+  const desiredTerritories = [...new Set(appleTerritoryIds)].filter((id) => configured.has(id));
+  const missingTerritories = [...configured].filter((id) => !desiredTerritories.includes(id));
+  if (missingTerritories.length > 0) {
+    throw new Error(
+      `Configured Apple territories are unavailable: ${missingTerritories.sort().join(", ")}`,
+    );
+  }
+
+  const included = desiredTerritories.map((territory) => ({
+    type: "territoryAvailabilities",
+    id: `\${${territory}}`,
+    attributes: { available: true },
+    relationships: {
+      territory: { data: { type: "territories", id: territory } },
+    },
+  }));
+
+  return {
+    data: {
+      type: "appAvailabilities",
+      attributes: { availableInNewTerritories: false },
+      relationships: {
+        app: { data: { type: "apps", id: appId } },
+        territoryAvailabilities: {
+          data: included.map(({ type, id }) => ({ type, id })),
+        },
+      },
+    },
+    included,
+  };
+}
+
 /**
  * Thin App Store Connect API client. Auth is an ES256 JWT signed with the
  * .p8 API key (aud appstoreconnect-v1, max 20 minute lifetime).
@@ -345,31 +383,20 @@ export class AscClient {
 
   /**
    * Declare the exact territory list (v2 appAvailabilities). Uses JSON:API
-   * temp ids in `included`, the shape fastlane/Apple forums converged on.
+   * local ids in `included`, as required for inline resource creation.
    * availableInNewTerritories=false keeps future countries opt-in only.
    */
   async setTerritoryAvailability(appId: string, territoryIds: string[]): Promise<void> {
-    const included = territoryIds.map((territory) => ({
-      type: "territoryAvailabilities",
-      id: `\${ta-${territory}}`,
-      attributes: { available: true },
-      relationships: {
-        territory: { data: { type: "territories", id: territory } },
-      },
-    }));
-    await this.request("POST", "/v2/appAvailabilities", {
-      data: {
-        type: "appAvailabilities",
-        attributes: { availableInNewTerritories: false },
-        relationships: {
-          app: { data: { type: "apps", id: appId } },
-          territoryAvailabilities: {
-            data: included.map(({ type, id }) => ({ type, id })),
-          },
-        },
-      },
-      included,
-    });
+    const territories = await this.request<{ data: Resource[] }>(
+      "GET",
+      "/v1/territories?limit=200",
+    );
+    const payload = buildAppAvailabilityPayload(
+      appId,
+      territoryIds,
+      territories.data.map((territory) => territory.id),
+    );
+    await this.request("POST", "/v2/appAvailabilities", payload);
   }
 
   /** Current territory ids, for the post-run report. */
