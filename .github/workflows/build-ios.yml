@@ -1,0 +1,57 @@
+name: EAS Build iOS
+
+# Production iOS App Store build (.ipa). Manual dispatch only.
+# Use this to queue a standalone iOS store build without touching Android.
+# Distribution credentials must already be configured on EAS for headless use.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eas-build-ios
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: "1.2.19"
+
+jobs:
+  build:
+    name: Build iOS app (.ipa) on EAS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Setup Expo and EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: TypeScript check
+        run: bun run mobile:typecheck
+
+      # The marketing version is committed in app.json. EAS manages the store
+      # build number remotely through autoIncrement and appVersionSource.
+      # Running from the app directory lets EAS include the complete monorepo.
+      - name: Build iOS app (.ipa) on EAS
+        working-directory: mobile/app
+        run: eas build --platform ios --profile production --non-interactive --no-wait
