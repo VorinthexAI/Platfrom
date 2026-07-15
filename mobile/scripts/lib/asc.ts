@@ -22,6 +22,16 @@ type Resource = {
   relationships?: Record<string, unknown>;
 };
 
+class AscApiError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "AscApiError";
+  }
+}
+
 function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
@@ -74,7 +84,17 @@ export class AscClient {
     if (response.status === 204) return undefined as T;
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`ASC ${method} ${path} -> ${response.status}: ${text.slice(0, 800)}`);
+      let code: string | undefined;
+      try {
+        const payload = JSON.parse(text) as { errors?: Array<{ code?: string }> };
+        code = payload.errors?.find((error) => error.code)?.code;
+      } catch {
+        // Preserve the raw response below when App Store Connect returns non-JSON.
+      }
+      throw new AscApiError(
+        `ASC ${method} ${path} -> ${response.status}: ${text.slice(0, 800)}`,
+        code,
+      );
     }
     return text ? (JSON.parse(text) as T) : (undefined as T);
   }
@@ -179,12 +199,18 @@ export class AscClient {
     );
     const ids = new Map<string, string>();
     for (const [locale, attributes] of Object.entries(localizations)) {
+      const { whatsNew, ...editableAttributes } = attributes;
       const current = existing.data.find((loc) => loc.attributes?.locale === locale);
+      let localizationId: string;
       if (current) {
         await this.request("PATCH", `/v1/appStoreVersionLocalizations/${current.id}`, {
-          data: { type: "appStoreVersionLocalizations", id: current.id, attributes },
+          data: {
+            type: "appStoreVersionLocalizations",
+            id: current.id,
+            attributes: editableAttributes,
+          },
         });
-        ids.set(locale, current.id);
+        localizationId = current.id;
       } else {
         const created = await this.request<{ data: Resource }>(
           "POST",
@@ -192,15 +218,36 @@ export class AscClient {
           {
             data: {
               type: "appStoreVersionLocalizations",
-              attributes: { locale, ...attributes },
+              attributes: { locale, ...editableAttributes },
               relationships: {
                 appStoreVersion: { data: { type: "appStoreVersions", id: versionId } },
               },
             },
           },
         );
-        ids.set(locale, created.data.id);
+        localizationId = created.data.id;
       }
+
+      if (typeof whatsNew === "string") {
+        try {
+          await this.request("PATCH", `/v1/appStoreVersionLocalizations/${localizationId}`, {
+            data: {
+              type: "appStoreVersionLocalizations",
+              id: localizationId,
+              attributes: { whatsNew },
+            },
+          });
+        } catch (error) {
+          if (error instanceof AscApiError && error.code === "STATE_ERROR") {
+            console.warn(
+              `  ${locale}: skipping whatsNew because the current App Store Connect state does not allow editing it.`,
+            );
+          } else {
+            throw error;
+          }
+        }
+      }
+      ids.set(locale, localizationId);
     }
     return ids;
   }
