@@ -67,6 +67,6 @@
       "featureGraphic": "assets/store/feature-graphic-1024x500.jpg",
       "phoneScreenshots": "assets/screenshots/google/phone"
     },
-    "availabilityCheckTrack": "production"
+    "availabilityCheckTrack": "internal"
   }
 }
