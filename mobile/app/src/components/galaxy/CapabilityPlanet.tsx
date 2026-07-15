@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
@@ -9,7 +9,7 @@ import {
 } from "@/components/galaxy/galaxy-refs";
 import { OrbitRing } from "@/components/galaxy/OrbitRing";
 import { PlanetSurface } from "@/components/galaxy/PlanetSurface";
-import { getCapabilityLogoTexture } from "@/components/three/entity-texture";
+import { useCapabilityLogoTexture } from "@/components/three/entity-texture";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { CapabilitySlug } from "@/data/registry";
 
@@ -43,9 +43,8 @@ function PlanetLogo({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const scratchQuaternion = useRef(new THREE.Quaternion());
-  const texture = useMemo(
-    () => getCapabilityLogoTexture(capabilityIconSource[slug] as number),
-    [slug],
+  const texture = useCapabilityLogoTexture(
+    capabilityIconSource[slug] as number,
   );
 
   useFrame(({ camera }) => {

@@ -3,7 +3,12 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 
 import { CHAMBER_POSITION } from "@/components/galaxy/chamber-config";
-import { capabilityPositions, galaxyCamera } from "@/components/galaxy/galaxy-refs";
+import {
+  capabilityPositions,
+  galaxyCamera,
+  systemPinching,
+  systemZoom,
+} from "@/components/galaxy/galaxy-refs";
 import { useGalaxyStore, type GalaxyPhase } from "@/state/galaxy";
 
 export const OVERVIEW_POSITION = new THREE.Vector3(0, 2.1, 9.4);
@@ -61,12 +66,25 @@ export function CameraRig() {
       if (phase === "overview" && lastPhaseRef.current === "exit") {
         camera.position.copy(OVERVIEW_POSITION);
         lookTarget.copy(OVERVIEW_TARGET);
+        // Returning from a biome re-frames the canonical overview.
+        systemZoom.value = 1;
       }
       lastPhaseRef.current = phase;
     }
 
     if (phase === "overview") {
-      dampVector(camera.position, OVERVIEW_POSITION, 2.2, delta);
+      // Pinch zoom scales the standoff along the same viewing ray. While
+      // the fingers are on the glass the camera chases hard (near-glued);
+      // released, it eases like the rest of the rig.
+      const framed = scratchTarget.current
+        .copy(OVERVIEW_POSITION)
+        .multiplyScalar(systemZoom.value);
+      dampVector(
+        camera.position,
+        framed,
+        systemPinching.value ? 22 : 2.6,
+        delta,
+      );
       dampVector(lookTarget, OVERVIEW_TARGET, 2.6, delta);
     } else if ((phase === "fly" || phase === "enter") && targetSlug) {
       const planet = capabilityPositions.get(targetSlug);

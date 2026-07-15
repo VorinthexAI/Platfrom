@@ -71,6 +71,14 @@ export function CapabilityArcCarousel({
   onSelect,
 }: CapabilityArcCarouselProps) {
   const count = capabilities.length;
+  // The ring math needs enough slots that the wrap seam sits past
+  // MAX_VISIBLE (where faces are already faded out). With only 2-3 real
+  // capabilities the seam lands in plain sight, and the far face teleports
+  // left↔right while swiping — the flicker. So the ring renders the list
+  // repeated until it has ≥6 virtual slots; every slot maps back to its
+  // capability via modulo.
+  const copies = count > 0 ? Math.max(1, Math.ceil(6 / count)) : 1;
+  const virtualCount = count * copies;
   const compact = width < 350;
   const faceWidth = compact ? 118 : 132;
   const faceHeight = compact ? 128 : 136;
@@ -79,15 +87,19 @@ export function CapabilityArcCarousel({
   const offset = useSharedValue(selectedIndex);
   const panStart = useSharedValue(0);
   const committedRef = useRef(selectedIndex);
+  // The ring slot the carousel last settled on — drives static stacking.
+  const committedSlotRef = useRef(selectedIndex);
 
   // Stable across renders so the memoized gesture never goes stale.
-  const stateRef = useRef({ count, onSelect, selectedIndex });
-  stateRef.current = { count, onSelect, selectedIndex };
+  const stateRef = useRef({ count, onSelect, selectedIndex, virtualCount });
+  stateRef.current = { count, onSelect, selectedIndex, virtualCount };
 
   const commit = useCallback((target: number) => {
     const state = stateRef.current;
     if (state.count < 1) return;
-    const index = wrap(Math.round(target), state.count);
+    const slot = wrap(Math.round(target), state.virtualCount);
+    committedSlotRef.current = slot;
+    const index = slot % state.count;
     committedRef.current = index;
     if (index !== state.selectedIndex) state.onSelect(index);
   }, []);
@@ -96,9 +108,22 @@ export function CapabilityArcCarousel({
     if (committedRef.current === selectedIndex || count < 1) return;
     committedRef.current = selectedIndex;
     const current = offset.value;
-    const rel = wrapSigned(selectedIndex - current, count);
-    offset.value = withSpring(current + rel, springs.carousel);
-  }, [count, offset, selectedIndex]);
+    // Roll to the NEAREST slot showing the selected capability.
+    let bestRel = 0;
+    let bestAbs = Infinity;
+    for (let copy = 0; copy < copies; copy++) {
+      const rel = wrapSigned(
+        selectedIndex + copy * count - current,
+        virtualCount,
+      );
+      if (Math.abs(rel) < bestAbs) {
+        bestAbs = Math.abs(rel);
+        bestRel = rel;
+      }
+    }
+    committedSlotRef.current = wrap(Math.round(current + bestRel), virtualCount);
+    offset.value = withSpring(current + bestRel, springs.carousel);
+  }, [copies, count, offset, selectedIndex, virtualCount]);
 
   const pan = useMemo(
     () =>
@@ -128,10 +153,10 @@ export function CapabilityArcCarousel({
 
   if (count === 0) return null;
 
-  const pressFace = (index: number) => {
-    const rel = wrapSigned(index - offset.value, count);
+  const pressFace = (slot: number) => {
+    const rel = wrapSigned(slot - offset.value, virtualCount);
     if (Math.abs(rel) < 0.5) {
-      const capability = capabilities[wrap(index, count)];
+      const capability = capabilities[slot % count];
       if (capability) onOpen(capability);
       return;
     }
@@ -180,23 +205,31 @@ export function CapabilityArcCarousel({
           />
         </Svg>
 
-        {capabilities.map((capability, index) => (
-          <CubeFace
-            key={capability.slug}
-            capability={capability}
-            count={count}
-            faceHeight={faceHeight}
-            faceWidth={faceWidth}
-            index={index}
-            offset={offset}
-            spacing={spacing}
-            stackOrder={
-              100 - Math.round(Math.abs(wrapSigned(index - selectedIndex, count)) * 10)
-            }
-            stageWidth={width}
-            onPress={() => pressFace(index)}
-          />
-        ))}
+        {Array.from({ length: virtualCount }, (_, slot) => {
+          const capability = capabilities[slot % count]!;
+          return (
+            <CubeFace
+              key={`${capability.slug}-${Math.floor(slot / count)}`}
+              capability={capability}
+              count={virtualCount}
+              faceHeight={faceHeight}
+              faceWidth={faceWidth}
+              index={slot}
+              offset={offset}
+              spacing={spacing}
+              stackOrder={
+                100 -
+                Math.round(
+                  Math.abs(
+                    wrapSigned(slot - committedSlotRef.current, virtualCount),
+                  ) * 10,
+                )
+              }
+              stageWidth={width}
+              onPress={() => pressFace(slot)}
+            />
+          );
+        })}
       </View>
     </GestureDetector>
   );
