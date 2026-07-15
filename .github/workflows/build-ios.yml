@@ -49,9 +49,22 @@ jobs:
       - name: TypeScript check
         run: bun run mobile:typecheck
 
+      - name: Prepare App Store Connect API key
+        env:
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          printf '%s' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/asc-api-key.p8"
+          chmod 600 "$RUNNER_TEMP/asc-api-key.p8"
+
       # The marketing version is committed in app.json. EAS manages the store
       # build number remotely through autoIncrement and appVersionSource.
       # Running from the app directory lets EAS include the complete monorepo.
       - name: Build iOS app (.ipa) on EAS
         working-directory: mobile/app
+        env:
+          EXPO_ASC_API_KEY_PATH: ${{ runner.temp }}/asc-api-key.p8
+          EXPO_ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          EXPO_APPLE_TEAM_ID: ${{ secrets.EXPO_APPLE_TEAM_ID }}
+          EXPO_APPLE_TEAM_TYPE: ${{ secrets.EXPO_APPLE_TEAM_TYPE }}
         run: eas build --platform ios --profile production --non-interactive --no-wait
