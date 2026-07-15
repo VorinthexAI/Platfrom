@@ -11,7 +11,7 @@ import { useSharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as THREE from "three";
-import { ChevronLeftIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { ChevronLeftIcon, VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import {
   CAPABILITY_CAROUSEL_HEIGHT,
@@ -22,6 +22,7 @@ import {
   capabilityPositions,
   galaxyCamera,
   SYSTEM_PITCH_LIMIT,
+  systemDragging,
   systemPitch,
   systemPitchLive,
   systemYaw,
@@ -43,7 +44,7 @@ const YAW_PER_WIDTH = Math.PI * 1.35;
 /** Full-height vertical swipe covers the whole tilt range. */
 const PITCH_PER_HEIGHT = 2.6;
 /** How much of the release velocity carries on as momentum. */
-const FLING_CARRY = 0.14;
+const FLING_CARRY = 0.18;
 /** Screen-space radius (dp) a tap may land from a planet's center. */
 const PLANET_TAP_RADIUS = 44;
 
@@ -212,14 +213,18 @@ export function HomeConstellation({
     const pan = Gesture.Pan()
       .minDistance(6)
       .onStart(() => {
+        if (!panEnabled.value) return;
         // GRAB the rendered orientation and kill leftover momentum — a
         // finger on the glass stops the globe instantly; without this a
         // re-swipe fights the previous fling's still-gliding target and
-        // feels stuck for seconds.
+        // feels stuck for seconds. While dragging the rig applies the
+        // targets verbatim (no damping), so the field is glued to the
+        // finger.
         panStartYaw.value = systemYawLive.value;
         panStartPitch.value = systemPitchLive.value;
         systemYaw.value = systemYawLive.value;
         systemPitch.value = systemPitchLive.value;
+        systemDragging.value = 1;
       })
       .onChange((event) => {
         if (!panEnabled.value) return;
@@ -247,6 +252,10 @@ export function HomeConstellation({
           -SYSTEM_PITCH_LIMIT,
           Math.min(SYSTEM_PITCH_LIMIT, pitch),
         );
+      })
+      .onFinalize(() => {
+        // Covers end AND cancellation — the rig must never stay glued.
+        systemDragging.value = 0;
       });
 
     // The hit test needs the JS world (store, camera, THREE math), so the
@@ -283,6 +292,31 @@ export function HomeConstellation({
                 style={styles.backPress}
               >
                 <ChevronLeftIcon size="md" variant="accent" />
+              </PressableScale>
+            </View>
+          ) : null}
+          {phase === "inside" && targetCapability ? (
+            // The biome's voice control — the round header sibling of the
+            // back chevron. Icon only; arrival auto-plays the briefing, so
+            // this mostly reads as "mute".
+            <View style={[styles.voiceButton, { top: insets.top + 8 }]}>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={
+                  audio.playingBriefing === targetCapability.slug
+                    ? `Stop ${targetCapability.name} briefing`
+                    : `Play ${targetCapability.name} briefing`
+                }
+                hitSlop={12}
+                onPress={() => audio.toggleBriefing(targetCapability.slug)}
+                style={[
+                  styles.backPress,
+                  audio.playingBriefing === targetCapability.slug
+                    ? styles.voicePressLive
+                    : null,
+                ]}
+              >
+                <VolumeIcon size="md" variant="accent" />
               </PressableScale>
             </View>
           ) : null}
@@ -338,6 +372,15 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 10,
     zIndex: 30,
+  },
+  voiceButton: {
+    position: "absolute",
+    right: 10,
+    zIndex: 30,
+  },
+  voicePressLive: {
+    borderColor: "rgba(221, 226, 229, 0.42)",
+    backgroundColor: "rgba(12, 16, 19, 0.7)",
   },
   backPress: {
     width: 40,

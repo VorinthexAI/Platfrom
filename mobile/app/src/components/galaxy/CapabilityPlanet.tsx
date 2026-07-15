@@ -22,12 +22,13 @@ type CapabilityPlanetProps = {
 /**
  * The capability's LOGO is what orbits: the chrome ring emblem rides the
  * orbit, billboarded to the screen, with the planet baked into its center
- * — same composition as the web PlanetLogoRing. The plane sits slightly
- * BEHIND the sphere's center along the view axis, so the opaque planet
- * always occludes the mark's inner glyph and only the ring frames it.
- * Billboarding is done against the full parent chain (orbit plane +
- * SystemRig rotation), so it stays screen-aligned however the system is
- * swiped around.
+ * — same composition as the web PlanetLogoRing. The plane passes almost
+ * through the sphere's center, so the front hemisphere pokes through and
+ * occludes the mark's inner glyph while the ring's inner edge hugs the
+ * planet's silhouette — the emblem WRAPS the world instead of floating
+ * behind it. Billboarding is done against the full parent chain (orbit
+ * plane + SystemRig rotation), so it stays screen-aligned however the
+ * system is swiped around.
  */
 function PlanetLogo({
   slug,
@@ -58,9 +59,10 @@ function PlanetLogo({
 
   return (
     <group ref={groupRef}>
-      {/* -z in billboard space = away from the camera: the glyph hides
-          behind the planet, the ring stays visible around it. */}
-      <mesh position={[0, 0, -planetRadius * 0.55]}>
+      {/* A whisker behind center (-z = away from the camera): the glyph
+          stays safely occluded by the sphere without the plane z-fighting
+          the crust, and the ring reads as wrapped around the planet. */}
+      <mesh position={[0, 0, -planetRadius * 0.2]}>
         <planeGeometry args={[size, size]} />
         <meshBasicMaterial
           map={texture}
@@ -120,9 +122,12 @@ export function CapabilityPlanet({
           paused={paused}
           focused={focused}
         />
+        {/* 2.9× radius puts the ring's inner edge (≈39% of the texture
+            width from center) just outside the sphere silhouette — the
+            chrome ring hugs the planet like on the web landing. */}
         <PlanetLogo
           slug={orbit.slug}
-          size={orbit.size * 3.4}
+          size={orbit.size * 2.9}
           planetRadius={orbit.size}
           focused={focused}
         />

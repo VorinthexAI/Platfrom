@@ -218,7 +218,7 @@ export function PlanetSurface({
   entityId,
   biome,
   radius = 0.42,
-  segments = 64,
+  segments = 48,
   paused,
   focused,
 }: PlanetSurfaceProps) {
@@ -334,7 +334,7 @@ export function PlanetSurface({
       {/* drifting cloud shell (gas, ocean, lush, ice worlds) */}
       {style.clouds > 0 ? (
         <mesh scale={1.045}>
-          <sphereGeometry args={[radius, 40, 40]} />
+          <sphereGeometry args={[radius, 28, 28]} />
           <shaderMaterial
             ref={cloudRef}
             vertexShader={cloudVertexShader}
@@ -347,7 +347,7 @@ export function PlanetSurface({
       ) : null}
       {/* thin atmosphere shell */}
       <mesh scale={1.12}>
-        <sphereGeometry args={[radius, 32, 32]} />
+        <sphereGeometry args={[radius, 24, 24]} />
         <shaderMaterial
           ref={atmosphereRef}
           vertexShader={atmosphereVertexShader}

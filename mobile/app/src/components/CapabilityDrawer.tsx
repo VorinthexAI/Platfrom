@@ -11,7 +11,6 @@ import Animated, {
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { BrandButton } from "@/components/BrandButton";
 import { ChromeIcon } from "@/components/ChromeIcon";
@@ -19,7 +18,6 @@ import { ChromePanel } from "@/components/ChromePanel";
 import { PressableScale } from "@/components/PressableScale";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { Capability } from "@/data/registry";
-import { useAppAudio } from "@/lib/app-audio";
 import { useGalaxyStore } from "@/state/galaxy";
 import { easings, springs } from "@/theme/motion";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
@@ -47,7 +45,6 @@ export function CapabilityDrawer({ capability, onOpen }: CapabilityDrawerProps) 
   const phase = useGalaxyStore((state) => state.phase);
   const exit = useGalaxyStore((state) => state.exit);
   const insets = useSafeAreaInsets();
-  const { playingBriefing, toggleBriefing } = useAppAudio();
 
   const open = phase === "inside" && capability !== null;
   const [rendered, setRendered] = useState(open);
@@ -106,8 +103,6 @@ export function CapabilityDrawer({ capability, onOpen }: CapabilityDrawerProps) 
 
   if (!rendered || !capability) return null;
 
-  const briefingPlaying = playingBriefing === capability.slug;
-
   return (
     <Animated.View
       accessibilityViewIsModal
@@ -145,6 +140,8 @@ export function CapabilityDrawer({ capability, onOpen }: CapabilityDrawerProps) 
           </Text>
           <Text style={styles.body}>{capability.onboardingDescription}</Text>
 
+          {/* Voice control lives in the biome header now — the drawer
+              keeps a single primary CTA. */}
           <View style={styles.actions}>
             <BrandButton
               accessibilityLabel={`Open ${capability.name}`}
@@ -152,14 +149,6 @@ export function CapabilityDrawer({ capability, onOpen }: CapabilityDrawerProps) 
               onPress={() => onOpen(capability)}
               style={styles.action}
               variant="primary"
-            />
-            <BrandButton
-              accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${capability.name} briefing`}
-              icon={<VolumeIcon size="sm" variant="accent" />}
-              label={briefingPlaying ? "Stop Briefing" : "Play Briefing"}
-              onPress={() => toggleBriefing(capability.slug)}
-              style={styles.action}
-              variant="secondary"
             />
           </View>
         </ChromePanel>
