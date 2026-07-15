@@ -145,7 +145,12 @@ const planetFragmentShader = /* glsl */ `
     color = mix(color, vec3(luma) * vec3(0.9, 0.96, 1.05), uDesat);
     color *= 1.0 - uDim;
 
-    gl_FragColor = vec4(color, 1.0);
+    // Gaseous translucency: thin at the disc center (the emblem inside
+    // shows through), denser toward the limb where the eye grazes more
+    // gas — plus solid specular so the orb still reads as a body.
+    float alpha = clamp(0.32 + fresnel * 0.62 + spec * 0.35, 0.0, 0.92);
+
+    gl_FragColor = vec4(color, alpha);
   }
 `;
 
@@ -337,12 +342,16 @@ export function PlanetSurface({
   return (
     <group rotation={[tilt.x, tilt.y0, tilt.z]}>
       <group ref={spinRef}>
+        {/* Translucent gas shell: no depth write, so the opaque emblem
+            at the planet's center stays visible through the sphere. */}
         <mesh geometry={geometry}>
           <shaderMaterial
             ref={materialRef}
             vertexShader={planetVertexShader}
             fragmentShader={planetFragmentShader}
             uniforms={uniforms}
+            transparent
+            depthWrite={false}
           />
         </mesh>
       </group>

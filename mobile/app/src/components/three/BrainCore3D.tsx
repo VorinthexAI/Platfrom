@@ -14,30 +14,11 @@ const OBSIDIAN = "#030507";
 const TOTAL_POINTS = 720;
 const NEIGHBOR_LINKS = 3;
 const EDGE_CAP = 0.34;
-const HEMISPHERE_GAP = 0.07;
+const GLOBE_RADIUS = 1.12;
 
 /** Same curve the progress line uses (Reanimated Easing.inOut(cubic)). */
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-const CEREBRUM_CENTER = new THREE.Vector3(0, 0.28, 0);
-const CEREBRUM_RADII = new THREE.Vector3(1.15, 0.95, 0.8);
-const CEREBELLUM_CENTER = new THREE.Vector3(0.58, -0.52, 0);
-const CEREBELLUM_RADII = new THREE.Vector3(0.42, 0.4, 0.34);
-
-function insideEllipsoid(
-  p: THREE.Vector3,
-  center: THREE.Vector3,
-  radii: THREE.Vector3,
-  shrink = 0.96,
-): boolean {
-  return (
-    ((p.x - center.x) / (radii.x * shrink)) ** 2 +
-      ((p.y - center.y) / (radii.y * shrink)) ** 2 +
-      ((p.z - center.z) / (radii.z * shrink)) ** 2 <=
-    1
-  );
 }
 
 type BrainGeometry = {
@@ -47,14 +28,13 @@ type BrainGeometry = {
 };
 
 /**
- * Surface-sampled brain shell: unlike the old volume cloud, every node sits
- * ON the cortex so nearest-neighbor filaments triangulate into a readable
- * anatomical silhouette — cerebrum with folded cortex and a sagittal
- * hemisphere fissure, finer-grained cerebellum, tapering stem.
+ * The mind as a PERFECT GLOBE: every node sits on one spherical shell
+ * (barely-there radial shimmer keeps it alive), and nearest-neighbor
+ * filaments triangulate the surface into a clean neural sphere — the
+ * same wireframe language as before, minus the anatomical lumps.
  */
 function buildBrainCore(seed: number): BrainGeometry {
   const random = createRandom(seed);
-  const phase = Array.from({ length: 6 }, () => random() * Math.PI * 2);
   const points: THREE.Vector3[] = [];
 
   const unitDirection = () => {
@@ -73,62 +53,15 @@ function buildBrainCore(seed: number): BrainGeometry {
     return new THREE.Vector3(x * inv, y * inv, z * inv);
   };
 
-  const cerebrumCount = Math.floor(TOTAL_POINTS * 0.78);
-  const cerebellumCount = Math.floor(TOTAL_POINTS * 0.16);
-  const stemCount = TOTAL_POINTS - cerebrumCount - cerebellumCount;
-
-  let guard = 0;
-  while (points.length < cerebrumCount && guard < 20000) {
-    guard += 1;
-    const dir = unitDirection();
-    const raw = dir.clone().multiply(CEREBRUM_RADII);
-    // Cortical folds: low-frequency radial swell/dip over the shell.
-    const fold =
-      1 +
-      0.055 * Math.sin(raw.x * 6.8 + phase[0]!) * Math.sin(raw.y * 5.9 + phase[1]!) +
-      0.035 * Math.sin((raw.x + raw.z) * 8.4 + phase[2]!);
-    const offset = raw.multiplyScalar(fold);
-    // Sagittal fissure: keep both hemispheres clear of the midline plane.
-    if (Math.abs(offset.z) < HEMISPHERE_GAP) {
-      offset.z = Math.sign(offset.z || 1) * HEMISPHERE_GAP;
-      offset.multiplyScalar(0.97);
-    }
-    const p = offset.add(CEREBRUM_CENTER);
-    if (insideEllipsoid(p, CEREBELLUM_CENTER, CEREBELLUM_RADII)) continue;
-    points.push(p);
+  for (let i = 0; i < TOTAL_POINTS; i += 1) {
+    const radius = GLOBE_RADIUS * (1 + (random() - 0.5) * 0.03);
+    points.push(unitDirection().multiplyScalar(radius));
   }
 
-  guard = 0;
-  while (points.length < cerebrumCount + cerebellumCount && guard < 8000) {
-    guard += 1;
-    const dir = unitDirection();
-    const raw = dir.clone().multiply(CEREBELLUM_RADII);
-    // Finer folia texture than the cortex above it.
-    const fold =
-      1 + 0.04 * Math.sin(raw.x * 12.4 + phase[3]!) * Math.sin(raw.y * 11.2 + phase[4]!);
-    const p = raw.multiplyScalar(fold).add(CEREBELLUM_CENTER);
-    if (insideEllipsoid(p, CEREBRUM_CENTER, CEREBRUM_RADII)) continue;
-    points.push(p);
-  }
-
-  for (let i = 0; i < stemCount; i += 1) {
-    const t = random();
-    const y = -0.5 - 0.7 * t;
-    const radius = Math.max(0.05, 0.16 - (-0.55 - y) * 0.08);
-    const angle = random() * Math.PI * 2;
-    const centerX = 0.42 + (y + 0.5) * 0.2;
-    points.push(
-      new THREE.Vector3(
-        centerX + Math.cos(angle) * radius,
-        y,
-        Math.sin(angle) * radius,
-      ),
-    );
-  }
-
-  // Center-out reveal order: drawRange walks this sorted list.
-  const core = new THREE.Vector3(0, 0.1, 0);
-  points.sort((a, b) => a.distanceTo(core) - b.distanceTo(core));
+  // Reveal order: the assembly blooms from the north pole down across
+  // the shell — drawRange walks this sorted list.
+  const pole = new THREE.Vector3(0, GLOBE_RADIUS, 0);
+  points.sort((a, b) => a.distanceTo(pole) - b.distanceTo(pole));
 
   const positions = new Float32Array(points.length * 3);
   points.forEach((p, i) => p.toArray(positions, i * 3));
@@ -263,8 +196,8 @@ export type BrainCore3DProps = BrainCoreObjectProps & {
 };
 
 /**
- * Monochrome wireframe brain rendered with three.js: a dense surface shell
- * of nodes and filaments assembling center-out into the cortex.
+ * Monochrome wireframe mind-globe rendered with three.js: a spherical
+ * shell of nodes and filaments assembling pole-down into a perfect orb.
  */
 export function BrainCore3D({ style, ...props }: BrainCore3DProps) {
   return (
