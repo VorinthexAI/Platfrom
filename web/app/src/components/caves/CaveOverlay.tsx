@@ -742,6 +742,16 @@ function VaultReaderFlow({ copy }: { copy: VaultCopy }) {
         {copy.paragraphs.map((paragraph) => (
           <p key={paragraph.slice(0, 24)}>{paragraph}</p>
         ))}
+        {copy.sections?.map((section) => (
+          <section key={section.title} className="space-y-2">
+            <h3 className="font-display text-base tracking-[0.06em] text-silver-100">
+              {section.title}
+            </h3>
+            {section.paragraphs.map((paragraph) => (
+              <p key={paragraph.slice(0, 24)}>{paragraph}</p>
+            ))}
+          </section>
+        ))}
         <p className="text-[0.7rem] text-silver-700">{copy.footnote}</p>
       </div>
     </div>
