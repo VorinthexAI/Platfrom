@@ -7,10 +7,8 @@ import {
   capabilityPositions,
   trackedVector,
 } from "@/components/galaxy/galaxy-refs";
-import { OrbitRing } from "@/components/galaxy/OrbitRing";
 import { PlanetSurface } from "@/components/galaxy/PlanetSurface";
 import { useCapabilityLogoTexture } from "@/components/three/entity-texture";
-import { capabilityIconSource } from "@/data/capability-icons";
 import type { CapabilitySlug } from "@/data/registry";
 
 type CapabilityPlanetProps = {
@@ -39,9 +37,7 @@ function PlanetLogo({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const scratchQuaternion = useRef(new THREE.Quaternion());
-  const { texture, ready } = useCapabilityLogoTexture(
-    capabilityIconSource[slug] as number,
-  );
+  const { texture, ready } = useCapabilityLogoTexture(slug);
 
   useFrame(({ camera }) => {
     const group = groupRef.current;
@@ -107,7 +103,8 @@ export function CapabilityPlanet({
 
   return (
     <group rotation={orbit.plane}>
-      <OrbitRing radius={orbit.orbitRadius} opacity={0.12} />
+      {/* No orbit path line: the gas shells don't write depth, so a ring
+          would slice visibly straight through its own planet. */}
       <group ref={bodyRef}>
         <PlanetSurface
           entityId={`capability.${orbit.slug}`}

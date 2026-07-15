@@ -15,6 +15,7 @@
     "validate": "bun src/validate.ts",
     "backup": "bun src/backup.ts",
     "backfill:svgs": "bun src/backfill-svgs.ts",
+    "logo:rgba": "bun src/logo-rgba.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
