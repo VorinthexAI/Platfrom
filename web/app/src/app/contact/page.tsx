@@ -5,7 +5,7 @@ import { CONTACT_COPY } from "@/lib/legal-copy";
 export const metadata: Metadata = {
   title: "Contact",
   description:
-    "Reach the Vorinthex AI team at contact@vorinthex.com — questions, access, press, and partnerships.",
+    "Reach the Vorinthex AI team at contact@vorinthex.com for questions, access, press, and partnerships.",
   alternates: { canonical: "/contact" },
 };
 
