@@ -69,22 +69,8 @@ export function AppAudioProvider({ children }: PropsWithChildren) {
       })
       .catch(() => {});
 
-    // Leaving the app silences it immediately; coming back to the
-    // foreground nudges the ambient loop — play() is a no-op while
-    // already playing.
-    const appStateSubscription = AppState.addEventListener("change", (state) => {
-      try {
-        if (state === "active") {
-          ambientPlayer.play();
-        } else {
-          ambientPlayer.pause();
-        }
-      } catch {}
-    });
-
     return () => {
       active = false;
-      appStateSubscription.remove();
     };
   }, [ambientPlayer]);
 
@@ -95,6 +81,24 @@ export function AppAudioProvider({ children }: PropsWithChildren) {
     ambientPlayer.play();
     setPlayingBriefing(null);
   }, [ambientPlayer, briefingPlayer]);
+
+  // Leaving the foreground — backgrounded, task-switched, screen off —
+  // silences EVERYTHING immediately: the briefing is stopped outright
+  // (not resumed mid-sentence later) and the soundtrack pauses. Coming
+  // back restarts only the soundtrack; play() is a no-op while playing.
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      try {
+        if (state === "active") {
+          ambientPlayer.play();
+        } else {
+          stopBriefing();
+          ambientPlayer.pause();
+        }
+      } catch {}
+    });
+    return () => subscription.remove();
+  }, [ambientPlayer, stopBriefing]);
 
   const startBriefing = useCallback(
     (slug: CapabilitySlug) => {
