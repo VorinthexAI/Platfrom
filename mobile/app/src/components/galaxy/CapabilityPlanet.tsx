@@ -7,6 +7,7 @@ import {
   capabilityPositions,
   trackedVector,
 } from "@/components/galaxy/galaxy-refs";
+import { OrbitRing } from "@/components/galaxy/OrbitRing";
 import { PlanetSurface } from "@/components/galaxy/PlanetSurface";
 import { useCapabilityLogoTexture } from "@/components/three/entity-texture";
 import type { CapabilitySlug } from "@/data/registry";
@@ -103,13 +104,24 @@ export function CapabilityPlanet({
 
   return (
     <group rotation={orbit.plane}>
-      {/* No orbit path line: the gas shells don't write depth, so a ring
-          would slice visibly straight through its own planet. */}
+      {/* The path line dissolves around the planet's live angle — the gas
+          shells don't write depth, so a full circle would slice straight
+          through its own translucent world. */}
+      <OrbitRing
+        radius={orbit.orbitRadius}
+        planetAngleRef={angleRef}
+        gapHalfWidth={(orbit.size * 2.6) / orbit.orbitRadius}
+        opacity={0.14}
+      />
       <group ref={bodyRef}>
+        {/* Spin axis = this orbit's own axis (the plane group's local Y):
+            an equatorial world turns like the system, a polar one rolls
+            with its polar orbit — and fast enough to actually read. */}
         <PlanetSurface
           entityId={`capability.${orbit.slug}`}
           biome={orbit.biome}
           radius={orbit.size}
+          spinSpeed={0.3 + orbit.orbitSpeed}
           paused={paused}
           focused={focused}
         />
