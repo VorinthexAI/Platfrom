@@ -85,6 +85,14 @@ const storesSchema = z.strictObject({
   availability: z.strictObject({
     note: z.string().optional(),
     regions: z.record(z.string(), z.array(z.string().regex(/^[A-Z]{2}$/))),
+    platformOverrides: z.strictObject({
+      apple: z.strictObject({
+        exclude: z.array(z.string().regex(/^[A-Z]{2}$/)),
+      }),
+      google: z.strictObject({
+        exclude: z.array(z.string().regex(/^[A-Z]{2}$/)),
+      }),
+    }),
   }),
   apple: appleSchema,
   google: googleSchema,
@@ -95,7 +103,7 @@ export type StoresConfig = z.infer<typeof storesSchema>;
 export function loadStores(): StoresConfig {
   const path = resolve(SCRIPTS_DIR, "stores.json");
   const parsed = storesSchema.parse(JSON.parse(readFileSync(path, "utf8")));
-  const countries = allCountries(parsed);
+  const countries = countriesForPlatform(parsed, "apple");
   for (const code of countries) {
     if (!(code in ALPHA2_TO_APPLE_TERRITORY)) {
       throw new Error(`No Apple territory mapping for country ${code} — extend ALPHA2_TO_APPLE_TERRITORY.`);
@@ -109,9 +117,21 @@ export function allCountries(config: StoresConfig): string[] {
   return [...new Set(Object.values(config.availability.regions).flat())].sort();
 }
 
+function countriesForPlatform(config: StoresConfig, platform: "apple" | "google"): string[] {
+  const excluded = new Set(config.availability.platformOverrides[platform].exclude);
+  return allCountries(config).filter((code) => !excluded.has(code));
+}
+
 /** Apple's App Store Connect territory ids for the allowed countries. */
 export function appleTerritories(config: StoresConfig): string[] {
-  return allCountries(config).map((code) => ALPHA2_TO_APPLE_TERRITORY[code]!);
+  return countriesForPlatform(config, "apple").map(
+    (code) => ALPHA2_TO_APPLE_TERRITORY[code]!,
+  );
+}
+
+/** Google Play country ids after applying platform-specific exclusions. */
+export function googleCountries(config: StoresConfig): string[] {
+  return countriesForPlatform(config, "google");
 }
 
 /**

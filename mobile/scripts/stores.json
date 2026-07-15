@@ -11,13 +11,58 @@
     "note": "Whole EU + rest of EFTA Europe + Great Britain, then USA, Canada and Australia. No other countries. Codes are ISO 3166-1 alpha-2; the submit script maps them to Apple's alpha-3 territory ids.",
     "regions": {
       "europeanUnion": [
-        "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
-        "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
-        "PL", "PT", "RO", "SK", "SI", "ES", "SE"
+        "AT",
+        "BE",
+        "BG",
+        "HR",
+        "CY",
+        "CZ",
+        "DK",
+        "EE",
+        "FI",
+        "FR",
+        "DE",
+        "GR",
+        "HU",
+        "IE",
+        "IT",
+        "LV",
+        "LT",
+        "LU",
+        "MT",
+        "NL",
+        "PL",
+        "PT",
+        "RO",
+        "SK",
+        "SI",
+        "ES",
+        "SE"
       ],
-      "europeExtra": ["GB", "IS", "LI", "NO", "CH"],
-      "northAmerica": ["US", "CA"],
-      "oceania": ["AU"]
+      "europeExtra": [
+        "GB",
+        "IS",
+        "LI",
+        "NO",
+        "CH"
+      ],
+      "northAmerica": [
+        "US",
+        "CA"
+      ],
+      "oceania": [
+        "AU"
+      ]
+    },
+    "platformOverrides": {
+      "apple": {
+        "exclude": [
+          "LI"
+        ]
+      },
+      "google": {
+        "exclude": []
+      }
     }
   },
   "apple": {
@@ -27,7 +72,7 @@
       "localizations": {
         "en-US": {
           "name": "Vorinthex AI",
-          "subtitle": "Your AI Brain",
+          "subtitle": "AI That Grows With You",
           "privacyPolicyUrl": "https://vorinthex.com/privacy"
         }
       }
@@ -36,9 +81,9 @@
       "releaseType": "AFTER_APPROVAL",
       "localizations": {
         "en-US": {
-          "description": "Vorinthex AI is your personal AI Brain, a central intelligence that learns, remembers, and evolves with you.\n\nExpand your Brain with five powerful Capabilities:\n\nARCHIVE. Store, organize and retrieve everything that matters. Notes, ideas and research connected into a living knowledge graph.\n\nGALLERY. Generate, collect and curate images and visual inspiration, organized into living albums.\n\nSIGNAL. Stay updated with real time insights and important signals. Only what matters reaches you.\n\nCOMPASS. Navigate decisions with clarity and directional guidance. Your places, memories and journeys, mapped.\n\nASCEND. Evolve continuously and unlock your highest potential. Goals, habits and growth with a personal AI coach.\n\nBuilt in an obsidian black, chrome and silver design. One Brain. Five Capabilities. The Nexus of Intelligence.",
-          "keywords": "ai,second brain,notes,memory,assistant,goals,habits,gallery,knowledge,inbox",
-          "promotionalText": "One Brain. Five Capabilities. Archive, Gallery, Signal, Compass and Ascend, a personal intelligence that grows with you.",
+          "description": "Meet Vorinthex AI.\n\nYour personal AI Brain.\n\nVorinthex AI is a next-generation AI platform designed to help you think, create, organize, and grow.\n\nInstead of switching between dozens of disconnected apps and AI tools, Vorinthex brings everything together into one intelligent experience that learns, remembers, and evolves with you over time.\n\nBuilt around a modern AI-native architecture, Vorinthex combines memory, productivity, creativity, communication, and personal growth into a single platform. Whether you're capturing ideas, organizing knowledge, managing information, or exploring new possibilities, your AI adapts to the way you work and helps you stay focused on what matters most.\n\nDesigned with a premium obsidian black, chrome, and silver aesthetic, Vorinthex delivers a fast, intuitive, and distraction-free experience built for the next generation of AI.\n\nThis is only the beginning. Vorinthex is continuously evolving with new intelligence, capabilities, and experiences that expand what your personal AI Brain can do over time.\n\nOne Brain.\nInfinite Possibilities.",
+          "keywords": "ai,assistant,second brain,notes,memory,knowledge,productivity,journal,organizer,habits",
+          "promotionalText": "Your personal AI Brain that learns, remembers, and evolves with you.",
           "whatsNew": "Initial release of Vorinthex AI.",
           "supportUrl": "https://vorinthex.com/contact",
           "marketingUrl": "https://vorinthex.com/core"
@@ -57,8 +102,8 @@
       "localizations": {
         "en-US": {
           "title": "Vorinthex AI",
-          "shortDescription": "Your personal AI Brain for memory, images, signals, journeys and growth.",
-          "fullDescription": "Vorinthex AI is your personal AI Brain, a central intelligence that learns, remembers, and evolves with you.\n\nExpand your Brain with five powerful Capabilities:\n\nARCHIVE. Store, organize and retrieve everything that matters. Notes, ideas and research connected into a living knowledge graph.\n\nGALLERY. Generate, collect and curate images and visual inspiration, organized into living albums.\n\nSIGNAL. Stay updated with real time insights and important signals. Only what matters reaches you.\n\nCOMPASS. Navigate decisions with clarity and directional guidance. Your places, memories and journeys, mapped.\n\nASCEND. Evolve continuously and unlock your highest potential. Goals, habits and growth with a personal AI coach.\n\nBuilt in an obsidian black, chrome and silver design. One Brain. Five Capabilities. The Nexus of Intelligence."
+          "shortDescription": "Your personal AI Brain that learns, remembers, and evolves with you.",
+          "fullDescription": "Meet Vorinthex AI.\n\nYour personal AI Brain.\n\nVorinthex AI is a next-generation AI platform designed to help you think, create, organize, and grow.\n\nInstead of switching between dozens of disconnected apps and AI tools, Vorinthex brings everything together into one intelligent experience that learns, remembers, and evolves with you over time.\n\nBuilt around a modern AI-native architecture, Vorinthex combines memory, productivity, creativity, communication, and personal growth into a single platform. Whether you're capturing ideas, organizing knowledge, managing information, or exploring new possibilities, your AI adapts to the way you work and helps you stay focused on what matters most.\n\nDesigned with a premium obsidian black, chrome, and silver aesthetic, Vorinthex delivers a fast, intuitive, and distraction-free experience built for the next generation of AI.\n\nThis is only the beginning. Vorinthex is continuously evolving with new intelligence, capabilities, and experiences that expand what your personal AI Brain can do over time.\n\nOne Brain.\nInfinite Possibilities."
         }
       }
     },

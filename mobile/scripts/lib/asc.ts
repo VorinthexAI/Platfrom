@@ -45,9 +45,12 @@ export function buildAppAvailabilityPayload(
   const desiredTerritories = [...new Set(appleTerritoryIds)].filter((id) => configured.has(id));
   const missingTerritories = [...configured].filter((id) => !desiredTerritories.includes(id));
   if (missingTerritories.length > 0) {
-    throw new Error(
-      `Configured Apple territories are unavailable: ${missingTerritories.sort().join(", ")}`,
+    console.warn(
+      `Skipping unavailable Apple territories: ${missingTerritories.sort().join(", ")}`,
     );
+  }
+  if (desiredTerritories.length === 0) {
+    throw new Error("None of the configured Apple territories are currently available.");
   }
 
   const included = desiredTerritories.map((territory) => ({
