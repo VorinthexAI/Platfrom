@@ -21,25 +21,21 @@ type CapabilityPlanetProps = {
 
 /**
  * The capability's LOGO is what orbits: the chrome ring emblem rides the
- * orbit, billboarded to the screen, with the planet baked into its center
- * — same composition as the web PlanetLogoRing. The plane passes almost
- * through the sphere's center, so the front hemisphere pokes through and
- * occludes the mark's inner glyph while the ring's inner edge hugs the
- * planet's silhouette — the emblem WRAPS the world instead of floating
- * behind it. Billboarding is done against the full parent chain (orbit
- * plane + SystemRig rotation), so it stays screen-aligned however the
- * system is swiped around.
+ * orbit, billboarded to the screen, at the very center of its gaseous
+ * world — the ring's inner edge hugs the sphere's silhouette and the
+ * glyph glows INSIDE the translucent planet (web PlanetLogoRing
+ * composition, "the planet sits within its logo"). The plane draws in the
+ * opaque pass via alphaTest and writes depth, so the gas shell (drawn
+ * after, in the transparent pass) veils it naturally. Billboarding is
+ * done against the full parent chain (orbit plane + SystemRig rotation),
+ * so it stays screen-aligned however the system is swiped around.
  */
 function PlanetLogo({
   slug,
   size,
-  planetRadius,
-  focused,
 }: {
   slug: CapabilitySlug;
   size: number;
-  planetRadius: number;
-  focused: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const scratchQuaternion = useRef(new THREE.Quaternion());
@@ -62,17 +58,12 @@ function PlanetLogo({
 
   return (
     <group ref={groupRef}>
-      {/* A whisker behind center (-z = away from the camera): the glyph
-          stays safely occluded by the sphere without the plane z-fighting
-          the crust, and the ring reads as wrapped around the planet. */}
-      <mesh position={[0, 0, -planetRadius * 0.2]}>
+      <mesh>
         <planeGeometry args={[size, size]} />
-        <meshBasicMaterial
-          map={texture}
-          transparent
-          opacity={focused ? 0.92 : 0.72}
-          depthWrite={false}
-        />
+        {/* alphaTest keeps the emblem in the opaque pass (no transparent-
+            sort battles with the shells) and cuts the PNG's clear pixels
+            so only the chrome mark itself exists in the depth buffer. */}
+        <meshBasicMaterial map={texture} alphaTest={0.28} />
       </mesh>
     </group>
   );
@@ -128,12 +119,7 @@ export function CapabilityPlanet({
         {/* 2.9× radius puts the ring's inner edge (≈39% of the texture
             width from center) just outside the sphere silhouette — the
             chrome ring hugs the planet like on the web landing. */}
-        <PlanetLogo
-          slug={orbit.slug}
-          size={orbit.size * 2.9}
-          planetRadius={orbit.size}
-          focused={focused}
-        />
+        <PlanetLogo slug={orbit.slug} size={orbit.size * 2.9} />
       </group>
     </group>
   );
