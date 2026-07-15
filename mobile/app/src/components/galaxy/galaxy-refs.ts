@@ -53,15 +53,18 @@ export const systemDragging = makeMutable(0);
 /** Tilt limit so the system can lean steeply but never flips over. */
 export const SYSTEM_PITCH_LIMIT = 1.15;
 
+export const SYSTEM_ZOOM_MIN = 0.32;
+export const SYSTEM_ZOOM_MAX = 2.8;
+
 /**
  * Two-finger zoom: a scale on the overview camera's distance from the
  * brain. Written by the pinch worklet on the UI thread; the CameraRig
- * reads it each frame. 1 = the framed overview; smaller = closer.
+ * reads it each frame. 1 = the framed overview; smaller = closer. The
+ * app OPENS fully zoomed out — the whole system in view — and pinching
+ * in is the invitation.
  */
-export const systemZoom = makeMutable(1);
+export const systemZoom = makeMutable(SYSTEM_ZOOM_MAX);
 export const systemPinching = makeMutable(0);
-export const SYSTEM_ZOOM_MIN = 0.32;
-export const SYSTEM_ZOOM_MAX = 2.8;
 
 /** The live scene camera, published by the CameraRig for screen-space hit tests. */
 export const galaxyCamera: { current: THREE.Camera | null } = {

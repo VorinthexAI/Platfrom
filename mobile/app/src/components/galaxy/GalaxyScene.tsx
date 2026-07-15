@@ -6,6 +6,7 @@ import { CameraRig, OVERVIEW_POSITION } from "@/components/galaxy/CameraRig";
 import { CapabilityPlanet } from "@/components/galaxy/CapabilityPlanet";
 import { chamberStyleForSlug } from "@/components/galaxy/chamber-config";
 import { CAPABILITY_ORBITS } from "@/components/galaxy/galaxy-config";
+import { SYSTEM_ZOOM_MAX } from "@/components/galaxy/galaxy-refs";
 import { Starfield } from "@/components/galaxy/Starfield";
 import { SystemRig } from "@/components/galaxy/SystemRig";
 import { Canvas } from "@/components/three/Canvas";
@@ -80,8 +81,14 @@ export function GalaxyScene({
     <SceneBoundary style={style}>
       <Canvas
       style={style}
+      // The app opens at the fully-zoomed-out framing — the camera starts
+      // exactly where the rig's zoomed-out target is, no arrival drift.
       camera={{
-        position: [OVERVIEW_POSITION.x, OVERVIEW_POSITION.y, OVERVIEW_POSITION.z],
+        position: [
+          OVERVIEW_POSITION.x * SYSTEM_ZOOM_MAX,
+          OVERVIEW_POSITION.y * SYSTEM_ZOOM_MAX,
+          OVERVIEW_POSITION.z * SYSTEM_ZOOM_MAX,
+        ],
         fov: 48,
         near: 0.1,
         far: 160,
@@ -93,7 +100,9 @@ export function GalaxyScene({
       dpr={[1, 1.5]}
     >
       <color attach="background" args={[OBSIDIAN]} />
-      <fog attach="fog" args={[OBSIDIAN, 18, 60]} />
+      {/* Fog band sits beyond the zoomed-out framing so the default view
+          stays crisp; it still swallows the far side when zoomed in. */}
+      <fog attach="fog" args={[OBSIDIAN, 24, 80]} />
       <CameraRig />
       <Starfield paused={paused} />
       {/* Swipe-steered system mount: everything that should rotate under

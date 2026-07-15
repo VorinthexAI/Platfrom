@@ -6,6 +6,7 @@ import { CHAMBER_POSITION } from "@/components/galaxy/chamber-config";
 import {
   capabilityPositions,
   galaxyCamera,
+  SYSTEM_ZOOM_MAX,
   systemPinching,
   systemZoom,
 } from "@/components/galaxy/galaxy-refs";
@@ -64,10 +65,13 @@ export function CameraRig() {
         );
       }
       if (phase === "overview" && lastPhaseRef.current === "exit") {
-        camera.position.copy(OVERVIEW_POSITION);
+        // Returning from a biome re-frames the canonical fully-zoomed-out
+        // overview (the same framing the app opens with).
+        systemZoom.value = SYSTEM_ZOOM_MAX;
+        camera.position
+          .copy(OVERVIEW_POSITION)
+          .multiplyScalar(SYSTEM_ZOOM_MAX);
         lookTarget.copy(OVERVIEW_TARGET);
-        // Returning from a biome re-frames the canonical overview.
-        systemZoom.value = 1;
       }
       lastPhaseRef.current = phase;
     }
