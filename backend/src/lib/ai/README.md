@@ -27,7 +27,7 @@ the `agentRuns` ledger.
 | `guardrails/` | `{scopeId}`-only guardrail schema + allow-list evaluation: no guardrails → unrestricted; guardrails present → only tools whose scope is listed |
 | `tools/` | `TOOL_REGISTRY` — tools reference **actions only** (never providers/endpoints), optionally carry routing *preferences* (router stays authoritative) and a `scopeId` |
 | `agents/` | `AgentDefinition` (skill + toolIds + guardrails), SKILL.md compile/parse, deterministic prompt compilation, built-in + runtime agent registry |
-| `agent-runs/` | the `agentRuns` ledger: status, route ids (never registry data), normalized usage, timing, steps, output *metadata* (never content) |
+| `agent-runs/` | the DB-keyed `agentRuns` ledger: agent decision metadata plus runtime-derived steps, one call per real provider invocation, exact token usage, and timing; never generated content |
 | `pipeline/` | `runAgentTool` — grant + guardrail checks, prompt injection for ask-shaped actions, route + execute, response validation, run recording |
 
 **Agents don't chat — agents answer.** The conversational capability is

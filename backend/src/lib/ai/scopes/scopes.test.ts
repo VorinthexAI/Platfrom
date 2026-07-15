@@ -1,22 +1,19 @@
 import { describe, expect, test } from 'bun:test';
+import { newId } from '@/lib/ids';
 import { createScopeRepository } from './repository';
-import { ensureScopeChildrenCollection, ensureScopesCollection, ensureScopeUsersCollection } from './indexes';
-import { SCOPE_CHILDREN_COLLECTION, SCOPE_USERS_COLLECTION, SCOPES_COLLECTION, scopeSchema } from './schema';
+import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';
+import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, scopeSchema, scopeScopeSchema } from './schema';
 import {
-  DuplicateScopeChildError,
-  DuplicateScopeError,
-  DuplicateScopeUserError,
-  InvalidScopeDescriptionError,
-  InvalidScopeNameError,
-  ScopeNotFoundError,
+  DuplicateScopeSlugError,
+  ScopeAlreadyHasParentError,
+  ScopeCycleError,
   ScopeOrganizationMismatchError,
-  ScopeUserNotFoundError,
-  SelfScopeChildError,
+  ScopePositionConflictError,
+  ScopeRelationNotFoundError,
   type ScopesDatabase,
   type ScopesSetupDatabase,
 } from './types';
 
-/** In-memory stand-in mirroring Arango semantics (1210 unique violation, 1202 missing document). */
 function createFakeDb() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const store = (name: string) => {
@@ -28,65 +25,61 @@ function createFakeDb() {
     return docs;
   };
 
-  const uniquePairs: Record<string, [string, string]> = {
-    [SCOPES_COLLECTION]: ['organizationId', 'name'],
-    [SCOPE_CHILDREN_COLLECTION]: ['parentScopeId', 'childScopeId'],
-    [SCOPE_USERS_COLLECTION]: ['scopeId', 'userId'],
-  };
-
   const fake: ScopesDatabase = {
     async query(query: string, bindVars: Record<string, unknown> = {}) {
-      const collectionName = String(bindVars['@collection']);
-      const docs = store(collectionName);
+      const docs = store(String(bindVars['@collection']));
       if (query.includes('REMOVE')) {
         for (const [key, doc] of [...docs.entries()]) {
-          const matches = query.includes('parentScopeId == @scopeId')
-            ? doc.parentScopeId === bindVars.scopeId || doc.childScopeId === bindVars.scopeId
-            : doc.scopeId === bindVars.scopeId;
-          if (matches) docs.delete(key);
+          if (
+            doc.parentScopeKey === bindVars.scopeKey
+            || doc.childScopeKey === bindVars.scopeKey
+            || doc.scopeKey === bindVars.scopeKey
+          ) docs.delete(key);
         }
         return { all: async () => [], next: async () => undefined };
       }
+
       let rows = [...docs.values()];
-      if (query.includes('doc.organizationId == @organizationId')) {
-        rows = rows.filter((doc) => doc.organizationId === bindVars.organizationId);
+      if (query.includes('scope.organizationKey == @organizationKey')) {
+        rows = rows.filter((doc) => doc.organizationKey === bindVars.organizationKey);
+        rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
       }
-      if (query.includes('doc.parentScopeId == @parentScopeId')) {
-        rows = rows
-          .filter((doc) => doc.parentScopeId === bindVars.parentScopeId)
-          .sort((a, b) => String(a.childScopeId).localeCompare(String(b.childScopeId)));
-        const ids = rows.map((doc) => doc.childScopeId);
-        return { all: async () => ids, next: async () => ids[0] };
+      if (query.includes('relation.parentScopeKey == @parentScopeKey')) {
+        rows = rows.filter((doc) => doc.parentScopeKey === bindVars.parentScopeKey);
       }
-      if (query.includes('doc.scopeId == @scopeId')) {
-        rows = rows
-          .filter((doc) => doc.scopeId === bindVars.scopeId)
-          .sort((a, b) => String(a.userId).localeCompare(String(b.userId)));
-        const ids = rows.map((doc) => doc.userId);
-        return { all: async () => ids, next: async () => ids[0] };
+      if (query.includes('relation.childScopeKey == @childScopeKey')) {
+        rows = rows.filter((doc) => doc.childScopeKey === bindVars.childScopeKey);
       }
-      rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      if (query.includes('relation.position == @position')) {
+        rows = rows.filter((doc) => doc.position === bindVars.position);
+      }
+      if (query.includes('SORT relation.position')) {
+        rows.sort((a, b) => Number(a.position) - Number(b.position));
+      }
       return { all: async () => rows, next: async () => rows[0] };
     },
     collection(name: string) {
       const docs = store(name);
-      const unique = uniquePairs[name];
       return {
         async save(doc: Record<string, unknown>) {
-          const duplicatePair = unique
-            ? [...docs.values()].some(
-                (existing) => existing[unique[0]] === doc[unique[0]] && existing[unique[1]] === doc[unique[1]],
-              )
-            : false;
-          if (docs.has(String(doc._key)) || duplicatePair) {
+          const duplicate = [...docs.values()].some((existing) => {
+            if (name === SCOPES_COLLECTION) {
+              return existing.organizationKey === doc.organizationKey && existing.slug === doc.slug;
+            }
+            if (name === SCOPE_SCOPES_COLLECTION) {
+              return existing.childScopeKey === doc.childScopeKey
+                || (existing.parentScopeKey === doc.parentScopeKey && existing.position === doc.position);
+            }
+            return false;
+          });
+          if (docs.has(String(doc._key)) || duplicate) {
             throw Object.assign(new Error('unique constraint violated'), { errorNum: 1210 });
           }
           docs.set(String(doc._key), doc);
           return { new: doc };
         },
         async remove(key: string) {
-          if (!docs.has(key)) throw Object.assign(new Error('document not found'), { errorNum: 1202 });
-          docs.delete(key);
+          if (!docs.delete(key)) throw Object.assign(new Error('document not found'), { errorNum: 1202 });
           return {};
         },
         async document(key: string) {
@@ -101,163 +94,128 @@ function createFakeDb() {
   return { fake, stores };
 }
 
-describe('scope schema', () => {
-  test('carries organization, name, description, timestamps, embedding; system fields strip on read', () => {
-    const parsed = scopeSchema.parse({
-      key: 'scope1',
-      _key: 'scope1',
-      _rev: 'x',
-      organizationId: 'org1',
-      name: 'support',
-      description: 'Handles customer support conversations.',
-      createdAt: '2026-07-15T00:00:00.000Z',
-      updatedAt: '2026-07-15T00:00:00.000Z',
+describe('scope schemas', () => {
+  test('scope carries organization ownership and semantic embedding fields', () => {
+    const scope = scopeSchema.parse({
+      key: newId(),
+      organizationKey: newId(),
+      slug: 'core',
+      name: 'Core',
+      description: 'The conversational intelligence scope.',
     });
-    expect(parsed).toEqual({
-      key: 'scope1',
-      organizationId: 'org1',
-      name: 'support',
-      description: 'Handles customer support conversations.',
-      createdAt: '2026-07-15T00:00:00.000Z',
-      updatedAt: '2026-07-15T00:00:00.000Z',
+    expect(scope).toEqual({
+      key: scope.key,
+      organizationKey: scope.organizationKey,
+      slug: 'core',
+      name: 'Core',
+      description: 'The conversational intelligence scope.',
       embedding: [],
     });
+    expect(() => scopeSchema.parse({ ...scope, slug: 'Not Valid' })).toThrow();
+  });
+
+  test('scope relation rejects self-parenting', () => {
+    const key = newId();
+    expect(() => scopeScopeSchema.parse({ key: newId(), parentScopeKey: key, childScopeKey: key, position: 1 })).toThrow();
   });
 });
 
 describe('scope repository', () => {
-  const input = (overrides: Partial<{ organizationId: string; name: string; description: string }> = {}) => ({
-    organizationId: 'org1',
-    name: 'support',
-    description: 'Handles customer support conversations.',
+  const organizationKey = newId();
+  const input = (overrides: Partial<{ organizationKey: string; slug: string; name: string; description: string }> = {}) => ({
+    organizationKey,
+    slug: 'core',
+    name: 'Core',
+    description: 'The conversational intelligence scope.',
     ...overrides,
   });
 
-  test('creates, gets, lists per organization, and removes scopes', async () => {
+  test('creates and lists scopes per organization with unique slugs', async () => {
     const { fake } = createFakeDb();
     const repository = createScopeRepository(fake);
+    const core = await repository.createScope(input());
+    expect(core.embedding).toHaveLength(1536);
+    await repository.createScope(input({ slug: 'command', name: 'Command' }));
+    await repository.createScope(input({ organizationKey: newId() }));
 
-    const scope = await repository.createScope(input());
-    expect(scope.organizationId).toBe('org1');
-    expect(scope.description).toBe('Handles customer support conversations.');
-    expect(scope.createdAt).toBe(scope.updatedAt);
-
-    await repository.createScope(input({ name: 'billing', description: 'Billing questions.' }));
-    await repository.createScope(input({ organizationId: 'org2', name: 'support', description: 'Other org.' }));
-
-    expect((await repository.listScopes('org1')).map((s) => s.name)).toEqual(['billing', 'support']);
-    expect((await repository.listScopes('org2')).map((s) => s.name)).toEqual(['support']);
-    expect(await repository.getScopeById(scope.key)).toEqual(scope);
-
-    await repository.removeScope(scope.key);
-    expect(await repository.getScopeById(scope.key)).toBeNull();
-    await expect(repository.removeScope(scope.key)).rejects.toBeInstanceOf(ScopeNotFoundError);
+    expect((await repository.listScopes(organizationKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
+    expect(await repository.getScopeByKey(core.key)).toEqual(core);
+    await expect(repository.createScope(input())).rejects.toBeInstanceOf(DuplicateScopeSlugError);
   });
 
-  test('scope names are unique per organization, not globally', async () => {
+  test('enforces organization boundaries, strict parents, sibling positions, and cycles', async () => {
     const { fake } = createFakeDb();
     const repository = createScopeRepository(fake);
-    await repository.createScope(input());
-    await expect(repository.createScope(input({ description: 'again' }))).rejects.toBeInstanceOf(DuplicateScopeError);
-    // Same name in another organization is fine.
-    await repository.createScope(input({ organizationId: 'org2' }));
+    const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
+    const core = await repository.createScope(input());
+    const command = await repository.createScope(input({ slug: 'command', name: 'Command' }));
+    const nested = await repository.createScope(input({ slug: 'nested', name: 'Nested' }));
+    const foreign = await repository.createScope(input({ organizationKey: newId(), slug: 'foreign', name: 'Foreign' }));
+
+    await repository.addScopeRelation(root.key, core.key, 1);
+    await repository.addScopeRelation(root.key, command.key, 2);
+    await repository.addScopeRelation(core.key, nested.key, 1);
+    expect((await repository.listChildRelations(root.key)).map((relation) => relation.childScopeKey)).toEqual([
+      core.key,
+      command.key,
+    ]);
+
+    await expect(repository.addScopeRelation(command.key, core.key, 1)).rejects.toBeInstanceOf(ScopeAlreadyHasParentError);
+    await expect(repository.addScopeRelation(root.key, foreign.key, 3)).rejects.toBeInstanceOf(ScopeOrganizationMismatchError);
+    await expect(repository.addScopeRelation(root.key, newId(), 3)).rejects.toThrow();
+    await expect(repository.addScopeRelation(command.key, root.key, 1)).rejects.toBeInstanceOf(ScopeCycleError);
+
+    const extra = await repository.createScope(input({ slug: 'extra', name: 'Extra' }));
+    await expect(repository.addScopeRelation(root.key, extra.key, 2)).rejects.toBeInstanceOf(ScopePositionConflictError);
   });
 
-  test('rejects empty name and description', async () => {
-    const { fake } = createFakeDb();
-    const repository = createScopeRepository(fake);
-    await expect(repository.createScope(input({ name: '  ' }))).rejects.toBeInstanceOf(InvalidScopeNameError);
-    await expect(repository.createScope(input({ description: '' }))).rejects.toBeInstanceOf(
-      InvalidScopeDescriptionError,
-    );
-  });
-
-  test('links children within one organization and refuses cross-organization or self links', async () => {
-    const { fake } = createFakeDb();
-    const repository = createScopeRepository(fake);
-    const parent = await repository.createScope(input({ name: 'root', description: 'Root scope.' }));
-    const child = await repository.createScope(input({ name: 'support', description: 'Support scope.' }));
-    const foreign = await repository.createScope(
-      input({ organizationId: 'org2', name: 'other', description: 'Foreign scope.' }),
-    );
-
-    await repository.addChild(parent.key, child.key);
-    expect(await repository.listChildScopeIds(parent.key)).toEqual([child.key]);
-
-    await expect(repository.addChild(parent.key, child.key)).rejects.toBeInstanceOf(DuplicateScopeChildError);
-    await expect(repository.addChild(parent.key, parent.key)).rejects.toBeInstanceOf(SelfScopeChildError);
-    await expect(repository.addChild(parent.key, foreign.key)).rejects.toBeInstanceOf(ScopeOrganizationMismatchError);
-    await expect(repository.addChild(parent.key, 'missing')).rejects.toBeInstanceOf(ScopeNotFoundError);
-
-    await repository.removeChild(parent.key, child.key);
-    expect(await repository.listChildScopeIds(parent.key)).toEqual([]);
-  });
-
-  test('adds and removes scope users, one membership per (scope, user)', async () => {
-    const { fake } = createFakeDb();
-    const repository = createScopeRepository(fake);
-    const scope = await repository.createScope(input());
-
-    await repository.addUser(scope.key, 'user1');
-    await repository.addUser(scope.key, 'user2');
-    expect(await repository.listUserIds(scope.key)).toEqual(['user1', 'user2']);
-
-    await expect(repository.addUser(scope.key, 'user1')).rejects.toBeInstanceOf(DuplicateScopeUserError);
-    await expect(repository.addUser('missing', 'user1')).rejects.toBeInstanceOf(ScopeNotFoundError);
-
-    await repository.removeUser(scope.key, 'user1');
-    expect(await repository.listUserIds(scope.key)).toEqual(['user2']);
-    await expect(repository.removeUser(scope.key, 'user1')).rejects.toBeInstanceOf(ScopeUserNotFoundError);
-  });
-
-  test('removing a scope removes its child links and memberships', async () => {
+  test('removes relations and cascades them when a scope is deleted', async () => {
     const { fake, stores } = createFakeDb();
     const repository = createScopeRepository(fake);
-    const parent = await repository.createScope(input({ name: 'root', description: 'Root scope.' }));
-    const child = await repository.createScope(input({ name: 'support', description: 'Support scope.' }));
-    await repository.addChild(parent.key, child.key);
-    await repository.addUser(child.key, 'user1');
+    const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
+    const core = await repository.createScope(input());
+    await repository.addScopeRelation(root.key, core.key, 1);
 
-    await repository.removeScope(child.key);
-
-    expect(stores.get(SCOPE_CHILDREN_COLLECTION)?.size ?? 0).toBe(0);
-    expect(stores.get(SCOPE_USERS_COLLECTION)?.size ?? 0).toBe(0);
-    expect(await repository.listChildScopeIds(parent.key)).toEqual([]);
+    await repository.removeScopeRelation(root.key, core.key);
+    await expect(repository.removeScopeRelation(root.key, core.key)).rejects.toBeInstanceOf(ScopeRelationNotFoundError);
+    await repository.addScopeRelation(root.key, core.key, 1);
+    stores.set(SCOPE_MEMBERS_COLLECTION, new Map([[newId(), {
+      _key: newId(),
+      scopeKey: core.key,
+      userOrganizationKey: newId(),
+      role: 'owner',
+    }]]));
+    await repository.removeScope(core.key);
+    expect(stores.get(SCOPE_SCOPES_COLLECTION)?.size).toBe(0);
+    expect(stores.get(SCOPE_MEMBERS_COLLECTION)?.size).toBe(0);
   });
 });
 
 describe('scope index setup', () => {
-  test('ensures the three collections with the right unique pairs', async () => {
+  test('ensures normalized ownership and strict-tree indexes', async () => {
     const created: string[] = [];
     const ensured: Array<{ collection: string; fields: string[]; unique: boolean }> = [];
     const fake: ScopesSetupDatabase = {
-      collection(name: string) {
+      collection(name) {
         return {
-          async exists() {
-            return false;
-          },
-          async create() {
-            created.push(name);
-            return {};
-          },
-          async ensureIndex(index: { type: 'persistent'; fields: string[]; unique: boolean }) {
-            ensured.push({ collection: name, fields: index.fields, unique: index.unique });
-            return {};
-          },
+          async exists() { return false; },
+          async create() { created.push(name); return {}; },
+          async ensureIndex(index) { ensured.push({ collection: name, fields: index.fields, unique: index.unique }); return {}; },
         };
       },
     };
 
     await ensureScopesCollection(fake);
-    await ensureScopeChildrenCollection(fake);
-    await ensureScopeUsersCollection(fake);
+    await ensureScopeScopesCollection(fake);
+    await ensureScopeMembersCollection(fake);
 
-    expect(created).toEqual([SCOPES_COLLECTION, SCOPE_CHILDREN_COLLECTION, SCOPE_USERS_COLLECTION]);
-    const uniques = ensured.filter((index) => index.unique).map((index) => `${index.collection}:${index.fields.join('+')}`);
-    expect(uniques).toEqual([
-      `${SCOPES_COLLECTION}:organizationId+name`,
-      `${SCOPE_CHILDREN_COLLECTION}:parentScopeId+childScopeId`,
-      `${SCOPE_USERS_COLLECTION}:scopeId+userId`,
+    expect(created).toEqual([SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, SCOPE_MEMBERS_COLLECTION]);
+    expect(ensured.filter((index) => index.unique).map((index) => `${index.collection}:${index.fields.join('+')}`)).toEqual([
+      `${SCOPES_COLLECTION}:organizationKey+slug`,
+      `${SCOPE_SCOPES_COLLECTION}:parentScopeKey+childScopeKey`,
+      `${SCOPE_SCOPES_COLLECTION}:childScopeKey`,
+      `${SCOPE_SCOPES_COLLECTION}:parentScopeKey+position`,
+      `${SCOPE_MEMBERS_COLLECTION}:scopeKey+userOrganizationKey`,
     ]);
   });
 });

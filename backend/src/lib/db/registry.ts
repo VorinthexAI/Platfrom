@@ -6,7 +6,6 @@ import { getAllModelActionsChunked, listModelActionsPage, upsertModelActionByKey
 import { getAllModelProvidersChunked, listModelProvidersPage, upsertModelProviderByKey } from './model-providers.node';
 import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSessionByKey } from './visitor-sessions.node';
 import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
-import { getAllAgentsChunked, listAgentsPage, upsertAgentByKey } from './agents.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChallengeByKey } from './auth-challenges.node';
 import { getAllCapabilitiesChunked, listCapabilitiesPage, upsertCapabilityByKey } from './capabilities.node';
 import { getAllEventsChunked, listEventsPage, upsertEventByKey } from './events.node';
@@ -49,7 +48,6 @@ export interface NodeAccessors {
  */
 export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   actions: { listPage: listActionsPage, getAllChunked: getAllActionsChunked, upsertByKey: upsertActionByKey },
-  agents: { listPage: listAgentsPage, getAllChunked: getAllAgentsChunked, upsertByKey: upsertAgentByKey },
   authChallenges: { listPage: listAuthChallengesPage, getAllChunked: getAllAuthChallengesChunked, upsertByKey: upsertAuthChallengeByKey },
   capabilities: { listPage: listCapabilitiesPage, getAllChunked: getAllCapabilitiesChunked, upsertByKey: upsertCapabilityByKey },
   events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked, upsertByKey: upsertEventByKey },

@@ -1,43 +1,32 @@
 import { z } from 'zod';
-import { aql } from 'arangojs';
-import { db } from './client';
-import { createNodeHelpers, withArangoKey } from './base';
+import { newId } from '@/lib/ids';
+import { createNodeHelpers } from './base';
 
 export const AGENTS_COLLECTION = 'agents';
 
 export const agentSchema = z.object({
-  key: z.string(),
-  orchestratorId: z.string(),
+  key: z.string().cuid2(),
+  slug: z.string(),
   name: z.string(),
-  role: z.string(),
-  model: z.string(),
-  storagePath: z.string(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
+  title: z.string(),
+  scopeKey: z.string().cuid2(),
   embedding: z.array(z.number()).default([]),
 });
 
 export type Agent = z.infer<typeof agentSchema>;
+export type AgentInsert = Omit<z.input<typeof agentSchema>, 'key' | 'embedding'> & { key?: string };
 
-export const agentsEmbedKeys = z.enum(['name', 'role', 'model']);
+export const agentsEmbedKeys = z.enum(['name', 'title']);
 
 const helpers = createNodeHelpers(AGENTS_COLLECTION, agentSchema, agentsEmbedKeys.options);
 
-export const insertAgent = helpers.insert;
+export function insertAgent(input: AgentInsert) {
+  return helpers.insert({ ...input, key: input.key ?? newId() });
+}
+
 export const getAgentById = helpers.getById;
 export const updateAgent = helpers.updateById;
 export const deleteAgent = helpers.deleteById;
 export const upsertAgentByKey = helpers.upsertByKey;
 export const getAllAgentsChunked = helpers.getAllChunked;
 export const listAgentsPage = helpers.listPage;
-
-export async function listAgentsByOrchestratorId(orchestratorId: string): Promise<Agent[]> {
-  const cursor = await db.query(aql`
-    FOR agent IN ${db.collection(AGENTS_COLLECTION)}
-      FILTER agent.orchestratorId == ${orchestratorId}
-      SORT agent.name ASC, agent._key ASC
-      RETURN agent
-  `);
-  const docs = await cursor.all();
-  return docs.map((doc) => agentSchema.parse(withArangoKey(doc)));
-}

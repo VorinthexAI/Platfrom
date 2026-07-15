@@ -4,7 +4,7 @@ import { embed } from '../lib/embed';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
-import { ensureScopeChildrenCollection, ensureScopesCollection, ensureScopeUsersCollection } from '../lib/ai/scopes/indexes';
+import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 import { PROVIDER_NAMES } from '../lib/ai/providers/types';
 
@@ -30,6 +30,9 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   users: [['platformId'], ['platform_role'], ['organization_role']],
   visitorSessions: [['platformId', 'connectedAt']],
   userSessions: [['platformId', 'connectedAt']],
+  agents: [['orchestratorId'], ['orchestratorId', 'name'], ['enabled']],
+  skills: [['enabled']],
+  scopes: [['organizationId', 'name'], ['organizationId']],
 };
 
 function buildNodeEmbedText(collectionName: string, key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
@@ -204,10 +207,17 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'agents',
-    embedKeys: ['name', 'role', 'model'],
+    embedKeys: ['name', 'title'],
     indexes: [
-      { fields: ['orchestratorId'] },
-      { fields: ['orchestratorId', 'name'], unique: true },
+      { fields: ['slug'], unique: true },
+      { fields: ['scopeKey'] },
+    ],
+  },
+  {
+    name: 'skills',
+    embedKeys: ['title', 'definition'],
+    indexes: [
+      { fields: ['slug'], unique: true },
     ],
   },
   { name: 'capabilities', embedKeys: ['name'], indexes: [{ fields: ['name'] }] },
@@ -318,14 +328,7 @@ const collections: CollectionSpec[] = [
   // timestamps are queryable with plain filters and are never embed text.
   { name: 'scopes', embedKeys: ['name', 'description'] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
-  // nothing to embed.
-  { name: 'scopeChildren' },
-  { name: 'scopeUsers' },
   { name: 'organizationProviders', embedKeys: ['name'] },
-  // Every top-level agentRuns field is an id/enum/timestamp, so no
-  // embedKeys: the ledger keeps a normalized empty embedding until a
-  // prose field (e.g. a run summary) exists to embed.
-  { name: 'agentRuns' },
 ];
 
 const droppedCollections = [
@@ -353,6 +356,7 @@ const droppedCollections = [
   // predecessor) before any API could write to them — nothing to copy.
   'organizationScopes',
   'organization_scopes',
+  'scopeUsers',
 ];
 
 async function main() {
@@ -372,15 +376,126 @@ async function main() {
     }
   }
 
+  // Preserve documents from the temporary templates collection, then retire it.
+  const skillsCollection = targetDb.collection('skills');
+  if (!(await skillsCollection.exists())) {
+    await skillsCollection.create();
+  }
+  for (const legacyName of ['templates']) {
+    const legacyCollection = targetDb.collection(legacyName);
+    if (!(await legacyCollection.exists())) continue;
+    await targetDb.query(
+      `
+        FOR doc IN @@legacy
+          INSERT doc INTO skills OPTIONS { overwriteMode: "ignore" }
+      `,
+      { '@legacy': legacyName },
+    );
+    await legacyCollection.drop();
+    console.log(`Copied ${legacyName} -> skills and dropped ${legacyName}`);
+  }
+
+  // agentSkills is a pure relation collection. It deliberately has no
+  // embedding field, so it is created outside the generic node backfill.
+  const agentSkillsCollection = targetDb.collection('agentSkills');
+  if (!(await agentSkillsCollection.exists())) {
+    await agentSkillsCollection.create();
+  }
+  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'skillKey'], unique: true });
+  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey'], unique: false });
+  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['skillKey'], unique: false });
+  await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'priority'], unique: false });
+
   // AI framework collections: creation + read-path indexes are owned by
   // their ensure* modules. Runs BEFORE the `collections` loop so the
   // generic embedding backfill below sees them fully set up.
   await ensureOrganizationProvidersCollection(targetDb);
+  // Normalize the previous scope shape before creating unique indexes.
+  const scopesCollection = targetDb.collection('scopes');
+  if (!(await scopesCollection.exists())) {
+    await scopesCollection.create();
+  }
+  await targetDb.query(`
+    FOR scope IN scopes
+      UPDATE scope WITH {
+        organizationKey: scope.organizationKey != null ? scope.organizationKey : scope.organizationId,
+        slug: scope.slug != null && scope.slug != "" ? scope.slug : scope._key,
+        organizationId: null,
+        createdAt: null,
+        updatedAt: null
+      } IN scopes OPTIONS { keepNull: false }
+  `);
   await ensureScopesCollection(targetDb);
-  await ensureScopeChildrenCollection(targetDb);
-  await ensureScopeUsersCollection(targetDb);
-  await ensureAgentRunsCollection(targetDb);
+  await ensureScopeScopesCollection(targetDb);
+  await ensureScopeMembersCollection(targetDb);
 
+  // Migrate the former DAG links into a strict tree. Legacy keys were not
+  // CUID2s, so each copied relation receives a fresh key and sibling position.
+  const legacyScopeChildren = targetDb.collection('scopeChildren');
+  if (await legacyScopeChildren.exists()) {
+    const cursor = await targetDb.query<Record<string, unknown>>(`
+      FOR relation IN scopeChildren
+        SORT relation.parentScopeId ASC, relation.childScopeId ASC
+        RETURN relation
+    `);
+    const relations = await cursor.all();
+    const existingCursor = await targetDb.query<Record<string, unknown>>(`
+      FOR relation IN scopeScopes
+        RETURN relation
+    `);
+    const existingRelations = await existingCursor.all();
+    const seenChildren = new Set<string>();
+    const nextPosition = new Map<string, number>();
+    const childrenByParent = new Map<string, Set<string>>();
+    for (const relation of existingRelations) {
+      const parentScopeKey = nonEmptyString(relation.parentScopeKey);
+      const childScopeKey = nonEmptyString(relation.childScopeKey);
+      const position = typeof relation.position === 'number' ? relation.position : 0;
+      if (!parentScopeKey || !childScopeKey) continue;
+      seenChildren.add(childScopeKey);
+      nextPosition.set(parentScopeKey, Math.max(nextPosition.get(parentScopeKey) ?? 0, position));
+      const children = childrenByParent.get(parentScopeKey) ?? new Set<string>();
+      children.add(childScopeKey);
+      childrenByParent.set(parentScopeKey, children);
+    }
+    const createsCycle = (parentScopeKey: string, childScopeKey: string) => {
+      const pending = [childScopeKey];
+      const visited = new Set<string>();
+      while (pending.length > 0) {
+        const current = pending.shift()!;
+        if (current === parentScopeKey) return true;
+        if (visited.has(current)) continue;
+        visited.add(current);
+        pending.push(...(childrenByParent.get(current) ?? []));
+      }
+      return false;
+    };
+    for (const relation of relations) {
+      const parentScopeKey = nonEmptyString(relation.parentScopeKey) ?? nonEmptyString(relation.parentScopeId);
+      const childScopeKey = nonEmptyString(relation.childScopeKey) ?? nonEmptyString(relation.childScopeId);
+      if (
+        !parentScopeKey
+        || !childScopeKey
+        || parentScopeKey === childScopeKey
+        || seenChildren.has(childScopeKey)
+        || createsCycle(parentScopeKey, childScopeKey)
+      ) continue;
+      const position = (nextPosition.get(parentScopeKey) ?? 0) + 1;
+      await targetDb.collection('scopeScopes').save({
+        _key: newId(),
+        parentScopeKey,
+        childScopeKey,
+        position,
+      });
+      seenChildren.add(childScopeKey);
+      nextPosition.set(parentScopeKey, position);
+      const children = childrenByParent.get(parentScopeKey) ?? new Set<string>();
+      children.add(childScopeKey);
+      childrenByParent.set(parentScopeKey, children);
+    }
+    await legacyScopeChildren.drop();
+    console.log(`Copied ${seenChildren.size} scopeChildren relations -> scopeScopes and dropped scopeChildren`);
+  }
   // Providers written before the display-name field existed: stamp the
   // static PROVIDER_NAMES text (the embedded field — ids are never embed
   // text) so the embedding backfill below has something to embed.
@@ -399,6 +514,47 @@ async function main() {
     if (!exists) {
       await collection.create();
       console.log(`Created collection ${spec.name}`);
+    }
+    if (spec.name === 'skills') {
+      // Normalize the retired orchestrator-owned shape before the new
+      // indexes and embeddings are created. The key is a stable slug fallback
+      // for any legacy document that predates the slug field.
+      await targetDb.query(`
+        FOR doc IN skills
+          UPDATE doc WITH {
+            slug: doc.slug != null && doc.slug != "" ? doc.slug : doc._key,
+            name: doc.name != null && doc.name != "" ? doc.name : doc._key,
+            title: doc.title != null && doc.title != "" ? doc.title : (doc.role != null ? doc.role : doc._key),
+            definition: doc.definition != null ? doc.definition : (doc.skill != null ? doc.skill : (doc.role != null ? doc.role : "")),
+            name: null,
+            skill: null,
+            enabled: null,
+            orchestratorId: null,
+            role: null,
+            model: null,
+            storagePath: null,
+            createdAt: null,
+            updatedAt: null
+          } IN skills OPTIONS { keepNull: false }
+      `);
+    }
+    if (spec.name === 'agents') {
+      await targetDb.query(`
+        FOR doc IN agents
+          UPDATE doc WITH {
+            slug: doc.slug != null && doc.slug != "" ? doc.slug : doc._key,
+            name: doc.name != null && doc.name != "" ? doc.name : doc._key,
+            title: doc.title != null && doc.title != "" ? doc.title : (doc.role != null ? doc.role : doc._key),
+            scopeKey: doc.scopeKey != null && doc.scopeKey != "" ? doc.scopeKey : (doc.orchestratorId != null ? doc.orchestratorId : doc._key),
+            enabled: null,
+            orchestratorId: null,
+            role: null,
+            model: null,
+            storagePath: null,
+            createdAt: null,
+            updatedAt: null
+          } IN agents OPTIONS { keepNull: false }
+      `);
     }
     const legacyIndexes = legacyIndexesToDrop[spec.name] ?? [];
     if (legacyIndexes.length > 0) {
@@ -449,6 +605,28 @@ async function main() {
     await legacyCollection.drop();
     console.log(`Copied ${legacy} -> ${current} and dropped ${legacy}`);
   }
+
+  // The call-level ledger cannot safely infer DB keys or provider-reported
+  // usage for runs written with the retired slug-based shape. Preserve
+  // those documents verbatim for audit/history, but keep the live
+  // collection strict so every current run satisfies agentRunSchema.
+  const agentRuns = targetDb.collection('agentRuns');
+  if (await agentRuns.exists()) {
+    const legacyAgentRuns = targetDb.collection('agentRunsLegacy');
+    if (!(await legacyAgentRuns.exists())) await legacyAgentRuns.create();
+    const legacyFilter = 'doc.organizationKey == null || doc.scopeKey == null || doc.agentKey == null || doc.calls == null';
+    await targetDb.query(`
+      FOR doc IN agentRuns
+        FILTER ${legacyFilter}
+        INSERT doc INTO agentRunsLegacy OPTIONS { overwriteMode: "ignore" }
+    `);
+    await targetDb.query(`
+      FOR doc IN agentRuns
+        FILTER ${legacyFilter}
+        REMOVE doc IN agentRuns
+    `);
+  }
+  await ensureAgentRunsCollection(targetDb);
 
 
   // Legacy scratch collection the org-migration steps below write into
@@ -556,29 +734,28 @@ async function main() {
   `);
 
   // Seed the one platform wide scope: the root of the scope tree for the
-  // root organization. Idempotent by (organizationId, name).
+  // root organization. Idempotent by (organizationKey, slug).
   const rootScopeName = 'Vorinthex AI';
+  const rootScopeSlug = 'vorinthex-ai';
   const rootScopeCursor = await targetDb.query<{ _key: string }>(
     `
       FOR scope IN scopes
-        FILTER scope.organizationId == @organizationId && scope.name == @name
+        FILTER scope.organizationKey == @organizationKey && scope.slug == @slug
         LIMIT 1
         RETURN { _key: scope._key }
     `,
-    { organizationId: rootOrganizationId, name: rootScopeName },
+    { organizationKey: rootOrganizationId, slug: rootScopeSlug },
   );
   if (!(await rootScopeCursor.next())) {
     const rootScopeKey = newId();
     const rootScopeDescription =
       'The root scope of Vorinthex AI. It spans every capability, tool, and agent on the platform and is the parent under which all narrower scopes and their members are organized.';
-    const nowIso = new Date().toISOString();
     await targetDb.collection('scopes').save({
       _key: rootScopeKey,
-      organizationId: rootOrganizationId,
+      organizationKey: rootOrganizationId,
+      slug: rootScopeSlug,
       name: rootScopeName,
       description: rootScopeDescription,
-      createdAt: nowIso,
-      updatedAt: nowIso,
       embedding: await embed({
         text: ['_scopes', rootScopeKey, rootScopeName, rootScopeDescription].join(':'),
       }),

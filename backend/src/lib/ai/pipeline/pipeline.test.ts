@@ -1,50 +1,38 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { registerAgent, resetAgentRegistry } from '@/lib/ai/agents/registry';
+import type { AgentRun } from '@/lib/ai/agent-runs/schema';
+import { agentRunSchema } from '@/lib/ai/agent-runs/schema';
+import type { AgentRunRepository } from '@/lib/ai/agent-runs/types';
 import { GuardrailViolationError } from '@/lib/ai/guardrails';
+import type { ModelDefinition } from '@/lib/ai/models/types';
 import { ProviderError } from '@/lib/ai/providers/errors';
 import type { ProviderAdapter, ProviderExecuteRequest, ProviderId } from '@/lib/ai/providers/types';
-import type { ModelDefinition } from '@/lib/ai/models/types';
 import { tokenUsage } from '@/lib/ai/shared/usage';
-import { agentRunSchema, type AgentRun } from '@/lib/ai/agent-runs/schema';
-import { AgentRunNotFoundError, type AgentRunRepository } from '@/lib/ai/agent-runs/types';
-import { InvalidRunRequestError, runAgentTool, ToolNotGrantedError, type RunAgentToolOptions } from './run-agent-tool';
-import { buildOutputMetadata } from './validation';
+import { newId } from '@/lib/ids';
+import { InvalidRunRequestError, runAgentTool, ToolNotGrantedError, type RunAgentToolOptions, type RunAgentToolParams } from './run-agent-tool';
 
-const ORG = 'org_test';
+const keys = {
+  organization: newId(), scope: newId(), agent: newId(), skill: newId(), tool: newId(),
+  action: newId(), model: newId(), anthropic: newId(), openrouter: newId(),
+};
 
 afterEach(() => resetAgentRegistry());
 
 function memoryRuns(): { repository: AgentRunRepository; store: Map<string, AgentRun> } {
   const store = new Map<string, AgentRun>();
-  let sequence = 0;
   const repository: AgentRunRepository = {
     async insertRun(input) {
-      const now = new Date().toISOString();
-      sequence += 1;
-      const run = agentRunSchema.parse({ ...input, key: `run_${sequence}`, createdAt: now, updatedAt: now });
+      const run = agentRunSchema.parse({ ...input, key: newId(), createdAt: new Date().toISOString() });
       store.set(run.key, run);
       return run;
     },
-    async updateRun(key, patch) {
-      const current = store.get(key);
-      if (!current) throw new AgentRunNotFoundError(key);
-      const next = agentRunSchema.parse({ ...current, ...patch, updatedAt: new Date().toISOString() });
-      store.set(key, next);
-      return next;
-    },
-    async getRunById(key) {
-      return store.get(key) ?? null;
-    },
-    async listRunsForOrganization(organizationId) {
-      return [...store.values()].filter((run) => run.organizationId === organizationId);
-    },
+    async getRunById(key) { return store.get(key) ?? null; },
+    async listRunsForOrganization(organizationKey) { return [...store.values()].filter((run) => run.organizationKey === organizationKey); },
   };
   return { repository, store };
 }
 
-interface MockAdapter extends ProviderAdapter {
-  calls: ProviderExecuteRequest[];
-}
+interface MockAdapter extends ProviderAdapter { calls: ProviderExecuteRequest[] }
 
 function mockAdapter(id: ProviderId, behavior: (request: ProviderExecuteRequest) => unknown): MockAdapter {
   const calls: ProviderExecuteRequest[] = [];
@@ -55,13 +43,7 @@ function mockAdapter(id: ProviderId, behavior: (request: ProviderExecuteRequest)
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) {
       calls.push(request as ProviderExecuteRequest);
       const output = behavior(request as ProviderExecuteRequest);
-      return {
-        output: output as TOutput,
-        usage: tokenUsage(12, 34),
-        providerId: id,
-        modelId: request.modelId,
-        externalModelId: request.externalModelId,
-      };
+      return { output: output as TOutput, usage: tokenUsage(12, 34), providerId: id, modelId: request.modelId, externalModelId: request.externalModelId };
     },
   };
 }
@@ -85,12 +67,13 @@ function optionsWith(overrides: Partial<RunAgentToolOptions> = {}): RunAgentTool
   const { repository, store } = memoryRuns();
   return {
     models: [chatModel],
-    organizationProviders: {
-      async listProviderIds() {
-        return ['anthropic', 'openrouter'];
-      },
-    },
+    organizationProviders: { async listProviderIds() { return ['anthropic', 'openrouter']; } },
     runs: repository,
+    runKeys: {
+      async resolveActionKey() { return keys.action; },
+      async resolveModelKey() { return keys.model; },
+      async resolveProviderKey(providerId) { return providerId === 'anthropic' ? keys.anthropic : keys.openrouter; },
+    },
     store,
     ...overrides,
   };
@@ -98,148 +81,80 @@ function optionsWith(overrides: Partial<RunAgentToolOptions> = {}): RunAgentTool
 
 const chatInput = { messages: [{ role: 'user' as const, content: 'hello' }] };
 
-describe('runAgentTool — the execution pipeline', () => {
-  test('runs Agent → Tool → Action → Router → Provider and records the run ledger', async () => {
-    const anthropic = mockAdapter('anthropic', () => ({ text: 'hi there', toolCalls: [], stopReason: 'end_turn' }));
+function params(overrides: Partial<RunAgentToolParams> = {}): RunAgentToolParams {
+  return {
+    agentId: 'vorinthex.assistant', toolId: 'ask.answer',
+    organizationKey: keys.organization, scopeKey: keys.scope, agentKey: keys.agent,
+    skillKey: keys.skill, toolKey: keys.tool, stepId: 'answer-request',
+    status: 'accepted', reason: 'Request matches engineering scope', score: 0.94, input: chatInput,
+    ...overrides,
+  };
+}
+
+describe('runAgentTool — call-level usage ledger', () => {
+  test('records provider usage as one exact model call', async () => {
+    const anthropic = mockAdapter('anthropic', () => ({ text: 'hi', toolCalls: [], stopReason: 'end_turn' }));
     const options = optionsWith({ adapters: { anthropic } });
+    const { response, run } = await runAgentTool<{ text: string }>(params(), options);
 
-    const { response, run } = await runAgentTool<{ text: string }>(
-      { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput },
-      options,
-    );
-
-    expect(response.output.text).toBe('hi there');
-    expect(response.providerId).toBe('anthropic');
-
-    // The run records metadata, tokens, timing, steps, and output metadata.
-    expect(run.status).toBe('succeeded');
-    expect(run.agentId).toBe('vorinthex.assistant');
-    expect(run.toolId).toBe('ask.answer');
-    expect(run.actionId).toBe('core.ask');
-    expect(run.modelId).toBe('anthropic.claude-sonnet');
-    expect(run.providerId).toBe('anthropic');
-    expect(run.usage).toEqual({ inputTokens: 12, outputTokens: 34, totalTokens: 46 });
-    expect(run.steps.map((step) => step.type)).toEqual(['route-selected', 'provider-executed']);
-    expect(run.output).toEqual({ type: 'core.ask', stopReason: 'end_turn', itemCount: null });
-    expect(run.finishedAt).not.toBeNull();
-    expect(run.durationMs).not.toBeNull();
+    expect(response.output.text).toBe('hi');
+    expect(run.status).toBe('accepted');
+    expect(run.organizationKey).toBe(keys.organization);
+    expect(run.callsCount).toBe(1);
+    expect(run.calls[0]).toMatchObject({ skillKey: keys.skill, toolKey: keys.tool, actionKey: keys.action, modelKey: keys.model, providerKey: keys.anthropic, inputTokens: 12, outputTokens: 34, totalTokens: 46 });
+    expect(run.steps[0]).toMatchObject({ stepId: 'answer-request', status: 'completed', inputTokens: 12, outputTokens: 34, totalTokens: 46 });
+    expect(run.totalTokens).toBe(46);
     expect(options.store.get(run.key)).toEqual(run);
-
-    // Prompt compilation: the agent's compiled system prompt reaches the provider.
-    const sent = anthropic.calls[0]?.input as { system?: string };
-    expect(sent.system).toContain('# Vorinthex Assistant');
-    expect(sent.system).toContain('## Available tools');
+    expect((anthropic.calls[0]?.input as { system?: string }).system).toContain('# Vorinthex Assistant');
   });
 
-  test('records the fallback provider that actually executed', async () => {
-    const anthropic = mockAdapter('anthropic', () => {
-      throw new ProviderError('anthropic', 'provider_unavailable', 'down');
-    });
-    const openrouter = mockAdapter('openrouter', () => ({ text: 'via fallback', toolCalls: [], stopReason: 'stop' }));
-    const options = optionsWith({ adapters: { anthropic, openrouter } });
+  test('records every real fallback attempt separately', async () => {
+    const anthropic = mockAdapter('anthropic', () => { throw new ProviderError('anthropic', 'provider_unavailable', 'down'); });
+    const openrouter = mockAdapter('openrouter', () => ({ text: 'fallback' }));
+    const { run } = await runAgentTool(params(), optionsWith({ adapters: { anthropic, openrouter } }));
 
-    const { run } = await runAgentTool(
-      { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput },
-      options,
-    );
-    expect(run.status).toBe('succeeded');
-    expect(run.providerId).toBe('openrouter');
-    expect(run.externalModelId).toBe('anthropic/claude-sonnet-test');
+    expect(run.callsCount).toBe(2);
+    expect(run.calls.map((call) => call.providerKey)).toEqual([keys.anthropic, keys.openrouter]);
+    expect(run.calls.map((call) => call.totalTokens)).toEqual([0, 46]);
+    expect(run.totalTokens).toBe(46);
+    expect(run.providerKeys).toEqual([keys.anthropic, keys.openrouter]);
   });
 
-  test('records a failed run and rethrows when every route fails', async () => {
-    const anthropic = mockAdapter('anthropic', () => {
-      throw new ProviderError('anthropic', 'invalid_input', 'bad request');
-    });
+  test('persists a failed step with the attempted call and rethrows', async () => {
+    const anthropic = mockAdapter('anthropic', () => { throw new ProviderError('anthropic', 'invalid_input', 'bad'); });
     const options = optionsWith({ adapters: { anthropic } });
-
-    await expect(
-      runAgentTool({ agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput }, options),
-    ).rejects.toThrow();
+    await expect(runAgentTool(params(), options)).rejects.toThrow();
 
     const [run] = [...options.store.values()];
-    expect(run?.status).toBe('failed');
-    expect(run?.error?.code).toBe('provider_execution_failed');
-    expect(run?.steps.at(-1)?.type).toBe('provider-failed');
-    expect(run?.finishedAt).not.toBeNull();
+    expect(run?.status).toBe('accepted');
+    expect(run?.steps[0]?.status).toBe('failed');
+    expect(run?.calls).toHaveLength(1);
+    expect(run?.totalTokens).toBe(0);
   });
 
-  test('guardrailed agents are blocked before any run or provider call', async () => {
-    registerAgent({
-      id: 'org.guardrailed',
-      name: 'Guardrailed',
-      description: 'Scoped to scope_support only',
-      skill: 'Support only.',
-      toolIds: ['ask.answer'],
-      guardrails: [{ scopeId: 'scope_support' }],
-    });
+  test('blocks guardrails and ungranted tools before creating a run', async () => {
+    registerAgent({ id: 'org.guardrailed', name: 'Guardrailed', description: 'Scoped', skill: 'Support only.', toolIds: ['ask.answer'], guardrails: [{ scopeId: 'scope_support' }] });
     const anthropic = mockAdapter('anthropic', () => ({ text: 'never' }));
-    const options = optionsWith({ adapters: { anthropic } });
+    const guarded = optionsWith({ adapters: { anthropic } });
+    await expect(runAgentTool(params({ agentId: 'org.guardrailed' }), guarded)).rejects.toBeInstanceOf(GuardrailViolationError);
+    expect(guarded.store.size).toBe(0);
 
-    // ask.answer is unscoped — denied for a guardrailed agent.
-    await expect(
-      runAgentTool({ agentId: 'org.guardrailed', toolId: 'ask.answer', organizationId: ORG, input: chatInput }, options),
-    ).rejects.toBeInstanceOf(GuardrailViolationError);
-    expect(options.store.size).toBe(0);
-    expect(anthropic.calls).toHaveLength(0);
+    const ungranted = optionsWith({ adapters: {} });
+    await expect(runAgentTool(params({ toolId: 'image.create', input: {} }), ungranted)).rejects.toBeInstanceOf(ToolNotGrantedError);
+    expect(ungranted.store.size).toBe(0);
   });
 
-  test('tools not granted to the agent are rejected before any run', async () => {
-    const options = optionsWith({ adapters: {} });
-    await expect(
-      runAgentTool({ agentId: 'vorinthex.assistant', toolId: 'image.create', organizationId: ORG, input: {} }, options),
-    ).rejects.toBeInstanceOf(ToolNotGrantedError);
-    expect(options.store.size).toBe(0);
-  });
-
-  test('the organization allow-list constrains the pipeline end to end', async () => {
+  test('uses the organization allow-list and rejects malformed metadata', async () => {
     const anthropic = mockAdapter('anthropic', () => ({ text: 'never' }));
-    const openrouter = mockAdapter('openrouter', () => ({ text: 'allowed', toolCalls: [], stopReason: 'stop' }));
+    const openrouter = mockAdapter('openrouter', () => ({ text: 'allowed' }));
     const options = optionsWith({
       adapters: { anthropic, openrouter },
-      organizationProviders: {
-        async listProviderIds() {
-          return ['openrouter'];
-        },
-      },
+      organizationProviders: { async listProviderIds() { return ['openrouter']; } },
     });
-
-    const { run } = await runAgentTool(
-      { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: chatInput },
-      options,
-    );
-    expect(run.providerId).toBe('openrouter');
+    const { run } = await runAgentTool(params(), options);
+    expect(run.providerKeys).toEqual([keys.openrouter]);
     expect(anthropic.calls).toHaveLength(0);
-  });
 
-  test('rejects malformed run requests with a typed error', async () => {
-    const options = optionsWith({});
-    await expect(
-      runAgentTool({ agentId: '', toolId: 'ask.answer', organizationId: ORG, input: {} }, options),
-    ).rejects.toBeInstanceOf(InvalidRunRequestError);
-    await expect(
-      runAgentTool(
-        { agentId: 'vorinthex.assistant', toolId: 'ask.answer', organizationId: ORG, input: {}, extra: true } as never,
-        options,
-      ),
-    ).rejects.toBeInstanceOf(InvalidRunRequestError);
-    expect(options.store.size).toBe(0);
-  });
-});
-
-describe('output metadata', () => {
-  test('derives shape facts only — never content', () => {
-    expect(buildOutputMetadata('core.ask', { text: 'secret content', toolCalls: [], stopReason: 'end_turn' })).toEqual({
-      type: 'core.ask',
-      stopReason: 'end_turn',
-      itemCount: null,
-    });
-    expect(buildOutputMetadata('image.generate', { images: [{ base64: 'aa', mimeType: 'image/png' }] })).toEqual({
-      type: 'image.generate',
-      stopReason: null,
-      itemCount: 1,
-    });
-    const metadata = buildOutputMetadata('core.ask', { text: 'secret content' });
-    expect(JSON.stringify(metadata)).not.toContain('secret content');
+    await expect(runAgentTool(params({ reason: 'one two three four five six seven eight nine ten eleven' }), options)).rejects.toBeInstanceOf(InvalidRunRequestError);
   });
 });
