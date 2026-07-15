@@ -33,7 +33,7 @@
       [
         "expo-audio",
         {
-          "enableBackgroundPlayback": true,
+          "enableBackgroundPlayback": false,
           "recordAudioAndroid": false,
           "microphonePermission": false
         }

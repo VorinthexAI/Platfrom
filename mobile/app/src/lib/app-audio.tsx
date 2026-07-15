@@ -52,43 +52,39 @@ export function AppAudioProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     let active = true;
 
+    // The soundtrack lives and dies WITH the app: no background playback,
+    // no lock-screen session, no Android playback service. The service
+    // (and its teardown while the OS kills the app) was the prime suspect
+    // for the crash-on-close, and in Expo Go it could never bind anyway.
     setAudioModeAsync({
       playsInSilentMode: true,
-      shouldPlayInBackground: true,
+      shouldPlayInBackground: false,
       interruptionMode: "doNotMix",
     })
       .then(() => {
         if (!active) return;
         ambientPlayer.loop = true;
         ambientPlayer.volume = AMBIENT_VOLUME;
-        ambientPlayer.setActiveForLockScreen(
-          true,
-          {
-            title: "Vorinthex AI",
-            artist: "The Nexus of Intelligence",
-            albumTitle: "Core",
-          },
-          { showSeekBackward: false, showSeekForward: false },
-        );
         ambientPlayer.play();
       })
       .catch(() => {});
 
-    // The soundtrack must survive interruptions (calls, other apps,
-    // backgrounding): whenever the app comes back to the foreground,
-    // nudge the ambient loop — play() is a no-op while already playing.
+    // Leaving the app silences it immediately; coming back to the
+    // foreground nudges the ambient loop — play() is a no-op while
+    // already playing.
     const appStateSubscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
-        try {
+      try {
+        if (state === "active") {
           ambientPlayer.play();
-        } catch {}
-      }
+        } else {
+          ambientPlayer.pause();
+        }
+      } catch {}
     });
 
     return () => {
       active = false;
       appStateSubscription.remove();
-      ambientPlayer.setActiveForLockScreen(false);
     };
   }, [ambientPlayer]);
 
