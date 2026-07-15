@@ -22,8 +22,56 @@ type Resource = {
   relationships?: Record<string, unknown>;
 };
 
+class AscApiError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+    this.name = "AscApiError";
+  }
+}
+
 function base64url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
+}
+
+export function buildAppAvailabilityPayload(
+  appId: string,
+  configuredTerritoryIds: readonly string[],
+  appleTerritoryIds: readonly string[],
+): Record<string, unknown> {
+  const configured = new Set(configuredTerritoryIds);
+  const desiredTerritories = [...new Set(appleTerritoryIds)].filter((id) => configured.has(id));
+  const missingTerritories = [...configured].filter((id) => !desiredTerritories.includes(id));
+  if (missingTerritories.length > 0) {
+    throw new Error(
+      `Configured Apple territories are unavailable: ${missingTerritories.sort().join(", ")}`,
+    );
+  }
+
+  const included = desiredTerritories.map((territory) => ({
+    type: "territoryAvailabilities",
+    id: `\${${territory}}`,
+    attributes: { available: true },
+    relationships: {
+      territory: { data: { type: "territories", id: territory } },
+    },
+  }));
+
+  return {
+    data: {
+      type: "appAvailabilities",
+      attributes: { availableInNewTerritories: false },
+      relationships: {
+        app: { data: { type: "apps", id: appId } },
+        territoryAvailabilities: {
+          data: included.map(({ type, id }) => ({ type, id })),
+        },
+      },
+    },
+    included,
+  };
 }
 
 /**
@@ -74,7 +122,17 @@ export class AscClient {
     if (response.status === 204) return undefined as T;
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`ASC ${method} ${path} -> ${response.status}: ${text.slice(0, 800)}`);
+      let code: string | undefined;
+      try {
+        const payload = JSON.parse(text) as { errors?: Array<{ code?: string }> };
+        code = payload.errors?.find((error) => error.code)?.code;
+      } catch {
+        // Preserve the raw response below when App Store Connect returns non-JSON.
+      }
+      throw new AscApiError(
+        `ASC ${method} ${path} -> ${response.status}: ${text.slice(0, 800)}`,
+        code,
+      );
     }
     return text ? (JSON.parse(text) as T) : (undefined as T);
   }
@@ -179,12 +237,18 @@ export class AscClient {
     );
     const ids = new Map<string, string>();
     for (const [locale, attributes] of Object.entries(localizations)) {
+      const { whatsNew, ...editableAttributes } = attributes;
       const current = existing.data.find((loc) => loc.attributes?.locale === locale);
+      let localizationId: string;
       if (current) {
         await this.request("PATCH", `/v1/appStoreVersionLocalizations/${current.id}`, {
-          data: { type: "appStoreVersionLocalizations", id: current.id, attributes },
+          data: {
+            type: "appStoreVersionLocalizations",
+            id: current.id,
+            attributes: editableAttributes,
+          },
         });
-        ids.set(locale, current.id);
+        localizationId = current.id;
       } else {
         const created = await this.request<{ data: Resource }>(
           "POST",
@@ -192,15 +256,36 @@ export class AscClient {
           {
             data: {
               type: "appStoreVersionLocalizations",
-              attributes: { locale, ...attributes },
+              attributes: { locale, ...editableAttributes },
               relationships: {
                 appStoreVersion: { data: { type: "appStoreVersions", id: versionId } },
               },
             },
           },
         );
-        ids.set(locale, created.data.id);
+        localizationId = created.data.id;
       }
+
+      if (typeof whatsNew === "string") {
+        try {
+          await this.request("PATCH", `/v1/appStoreVersionLocalizations/${localizationId}`, {
+            data: {
+              type: "appStoreVersionLocalizations",
+              id: localizationId,
+              attributes: { whatsNew },
+            },
+          });
+        } catch (error) {
+          if (error instanceof AscApiError && error.code === "STATE_ERROR") {
+            console.warn(
+              `  ${locale}: skipping whatsNew because the current App Store Connect state does not allow editing it.`,
+            );
+          } else {
+            throw error;
+          }
+        }
+      }
+      ids.set(locale, localizationId);
     }
     return ids;
   }
@@ -298,31 +383,20 @@ export class AscClient {
 
   /**
    * Declare the exact territory list (v2 appAvailabilities). Uses JSON:API
-   * temp ids in `included`, the shape fastlane/Apple forums converged on.
+   * local ids in `included`, as required for inline resource creation.
    * availableInNewTerritories=false keeps future countries opt-in only.
    */
   async setTerritoryAvailability(appId: string, territoryIds: string[]): Promise<void> {
-    const included = territoryIds.map((territory) => ({
-      type: "territoryAvailabilities",
-      id: `\${ta-${territory}}`,
-      attributes: { available: true },
-      relationships: {
-        territory: { data: { type: "territories", id: territory } },
-      },
-    }));
-    await this.request("POST", "/v2/appAvailabilities", {
-      data: {
-        type: "appAvailabilities",
-        attributes: { availableInNewTerritories: false },
-        relationships: {
-          app: { data: { type: "apps", id: appId } },
-          territoryAvailabilities: {
-            data: included.map(({ type, id }) => ({ type, id })),
-          },
-        },
-      },
-      included,
-    });
+    const territories = await this.request<{ data: Resource[] }>(
+      "GET",
+      "/v1/territories?limit=200",
+    );
+    const payload = buildAppAvailabilityPayload(
+      appId,
+      territoryIds,
+      territories.data.map((territory) => territory.id),
+    );
+    await this.request("POST", "/v2/appAvailabilities", payload);
   }
 
   /** Current territory ids, for the post-run report. */
