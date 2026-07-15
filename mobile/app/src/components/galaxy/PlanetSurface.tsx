@@ -226,6 +226,8 @@ interface PlanetSurfaceProps {
   biome: PlanetBiome;
   radius?: number;
   segments?: number;
+  /** Self-rotation rate (rad/s) around the local Y axis. */
+  spinSpeed?: number;
   paused: boolean;
   focused: boolean;
 }
@@ -235,6 +237,7 @@ export function PlanetSurface({
   biome,
   radius = 0.42,
   segments = 48,
+  spinSpeed = 0.35,
   paused,
   focused,
 }: PlanetSurfaceProps) {
@@ -316,7 +319,7 @@ export function PlanetSurface({
     if (!paused) {
       if (time) time.value += delta;
       if (spinRef.current) {
-        spinRef.current.rotation.y += delta * 0.1;
+        spinRef.current.rotation.y += delta * spinSpeed;
       }
       const cloudTime = cloudRef.current?.uniforms.uTime;
       if (cloudTime) cloudTime.value += delta;
@@ -331,18 +334,17 @@ export function PlanetSurface({
     }
   });
 
-  // Seeded axial tilt + starting rotation: no two worlds hang alike.
-  const tilt = useMemo(() => {
+  // Seeded starting rotation only — NO axial tilt: the spin axis must be
+  // exactly this orbit's own axis (the parent plane group's local Y), so
+  // an equatorial world turns with the system and a polar world rolls
+  // with its polar orbit.
+  const initialSpin = useMemo(() => {
     const random = mulberry32(hashString(entityId) ^ 0x711f);
-    return {
-      x: (random() - 0.5) * 0.5,
-      z: (random() - 0.5) * 0.5,
-      y0: random() * Math.PI * 2,
-    };
+    return random() * Math.PI * 2;
   }, [entityId]);
 
   return (
-    <group rotation={[tilt.x, tilt.y0, tilt.z]}>
+    <group rotation={[0, initialSpin, 0]}>
       <group ref={spinRef}>
         {/* Translucent gas shell: no depth write, so the opaque emblem
             at the planet's center stays visible through the sphere. */}
