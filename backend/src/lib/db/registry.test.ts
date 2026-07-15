@@ -21,6 +21,9 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).not.toContain('teamMemberInvites');
     expect(NODE_NAMES).not.toContain('members');
     expect(NODE_NAMES).not.toContain('superAdmins');
+    expect(NODE_NAMES).not.toContain('agents');
+    expect(NODE_NAMES).not.toContain('skills');
+    expect(NODE_NAMES).not.toContain('templates');
   });
 
   test('new and changed node schemas carry embedding fields', () => {

@@ -36,16 +36,13 @@ import { listNodes } from './nodes';
 import { orchestratorChatSocket, postOrchestratorChat } from './orchestrators';
 import {
   attachCurrentMindCapability,
-  createSystemAgent,
   createSystemCapability,
   createSystemOrchestrator,
   detachCurrentMindCapability,
   getCurrentMind,
   listCurrentMindCapabilities,
-  listSystemAgents,
   listSystemCapabilities,
   listSystemOrchestrators,
-  updateSystemAgent,
   updateSystemCapability,
   updateSystemOrchestrator,
   upsertCurrentMind,
@@ -431,9 +428,6 @@ export function registerRoutes(app: Hono) {
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);
   app.patch('/system/orchestrators/:orchestratorId', updateSystemOrchestrator);
-  app.get('/system/agents', listSystemAgents);
-  app.post('/system/orchestrators/:orchestratorId/agents', createSystemAgent);
-  app.patch('/system/agents/:agentId', updateSystemAgent);
   app.get('/system/capabilities', listSystemCapabilities);
   app.post('/system/capabilities', createSystemCapability);
   app.patch('/system/capabilities/:capabilityId', updateSystemCapability);

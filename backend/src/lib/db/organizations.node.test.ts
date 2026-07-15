@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import type { z } from 'zod';
 import { actionSchema } from './actions.node';
 import { organizationSchema } from './organizations.node';
+import { skillSchema } from './skills.node';
 import { agentSchema } from './agents.node';
+import { agentSkillSchema } from './agent-skills.node';
 import { authChallengeSchema } from './auth-challenges.node';
 import { capabilitySchema } from './capabilities.node';
 import { eventSchema } from './events.node';
@@ -108,6 +110,7 @@ describe('no node field mentions the retired platform or team nodes', () => {
   const nodeSchemas: Record<string, z.ZodObject<z.ZodRawShape>> = {
     actions: actionSchema,
     agents: agentSchema,
+    agentSkills: agentSkillSchema,
     authChallenges: authChallengeSchema,
     capabilities: capabilitySchema,
     events: eventSchema,
@@ -125,6 +128,7 @@ describe('no node field mentions the retired platform or team nodes', () => {
     providers: providerObjectSchema,
     products: productSchema,
     subscriptions: subscriptionSchema,
+    skills: skillSchema,
     userEntitlements: userEntitlementSchema,
     userOrganizations: userOrganizationSchema,
     userSessions: userSessionSchema,

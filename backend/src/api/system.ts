@@ -1,13 +1,6 @@
 import type { Context } from 'hono';
 import { z } from 'zod';
 import {
-  getAgentById,
-  insertAgent,
-  listAgentsByOrchestratorId,
-  listAgentsPage,
-  updateAgent,
-} from '@/lib/db/agents.node';
-import {
   getCapabilityById,
   insertCapability,
   listCapabilitiesPage,
@@ -44,7 +37,6 @@ const pageQuerySchema = strictObject({
 
 const storagePathSchema = z.string().trim().min(1).max(500);
 const nameSchema = z.string().trim().min(1).max(200);
-const modelSchema = z.string().trim().min(1).max(200);
 const roleSchema = z.string().trim().min(1).max(2000);
 const voiceIdSchema = z.string().trim().min(1).max(200);
 const skillSchema = z.string().trim().min(1);
@@ -67,21 +59,6 @@ const orchestratorPatchSchema = strictObject({
   role: roleSchema.optional(),
   voice_id: voiceIdSchema.optional(),
   skill: skillSchema.optional(),
-});
-
-const agentBodySchema = strictObject({
-  key: z.string().trim().min(1).max(200).optional(),
-  name: nameSchema,
-  role: roleSchema,
-  model: modelSchema,
-  storage_path: storagePathSchema,
-});
-
-const agentPatchSchema = strictObject({
-  name: nameSchema.optional(),
-  role: roleSchema.optional(),
-  model: modelSchema.optional(),
-  storage_path: storagePathSchema.optional(),
 });
 
 const capabilityBodySchema = strictObject({
@@ -167,19 +144,6 @@ function orchestratorResponse(orchestrator: Awaited<ReturnType<typeof getOrchest
     skill: orchestrator.skill,
     created_at: orchestrator.createdAt,
     updated_at: orchestrator.updatedAt,
-  };
-}
-
-function agentResponse(agent: Awaited<ReturnType<typeof getAgentById>> extends infer T ? NonNullable<T> : never) {
-  return {
-    id: agent.key,
-    orchestrator_id: agent.orchestratorId,
-    name: agent.name,
-    role: agent.role,
-    model: agent.model,
-    storage_path: agent.storagePath,
-    created_at: agent.createdAt,
-    updated_at: agent.updatedAt,
   };
 }
 
@@ -323,12 +287,8 @@ export async function listSystemOrchestrators(c: Context) {
 
   const query = parseQuery(c, pageQuerySchema);
   const { items, nextCursor } = await listOrchestratorsPage(query.after, query.limit);
-  const agents = await Promise.all(items.map((orchestrator) => listAgentsByOrchestratorId(orchestrator.key)));
   return c.json({
-    items: items.map((orchestrator, index) => ({
-      ...orchestratorResponse(orchestrator),
-      agents: agents[index].map(agentResponse),
-    })),
+    items: items.map(orchestratorResponse),
     next_cursor: nextCursor,
   });
 }
@@ -384,74 +344,6 @@ export async function updateSystemOrchestrator(c: Context) {
     updatedAt: nowIso(),
   });
   return c.json(orchestratorResponse(updated));
-}
-
-export async function listSystemAgents(c: Context) {
-  const admin = await requireSuperAdmin(c);
-  if ('error' in admin) return admin.error;
-
-  const query = parseQuery(c, pageQuerySchema.extend({
-    orchestrator_id: z.string().trim().min(1).optional(),
-  }));
-
-  if (query.orchestrator_id) {
-    const orchestrator = await getOrchestratorById(query.orchestrator_id);
-    if (!orchestrator) return c.json({ error: 'orchestrator not found' }, 404);
-    return c.json({ items: (await listAgentsByOrchestratorId(orchestrator.key)).map(agentResponse), next_cursor: null });
-  }
-
-  const { items, nextCursor } = await listAgentsPage(query.after, query.limit);
-  return c.json({ items: items.map(agentResponse), next_cursor: nextCursor });
-}
-
-export async function createSystemAgent(c: Context) {
-  const admin = await requireSuperAdmin(c);
-  if ('error' in admin) return admin.error;
-
-  const orchestratorParam = requiredParam(c, 'orchestratorId');
-  if ('error' in orchestratorParam) return orchestratorParam.error;
-
-  const orchestrator = await getOrchestratorById(orchestratorParam.value);
-  if (!orchestrator) return c.json({ error: 'orchestrator not found' }, 404);
-
-  const body = await parseJson(c, agentBodySchema);
-  const timestamp = nowIso();
-  try {
-    const agent = await insertAgent({
-      key: body.key ?? newId(),
-      orchestratorId: orchestrator.key,
-      name: body.name,
-      role: body.role,
-      model: body.model,
-      storagePath: body.storage_path,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    });
-    return c.json(agentResponse(agent), 201);
-  } catch (err) {
-    return uniqueConflict(c, err, 'agent key or orchestrator/name pair already exists');
-  }
-}
-
-export async function updateSystemAgent(c: Context) {
-  const admin = await requireSuperAdmin(c);
-  if ('error' in admin) return admin.error;
-
-  const agentParam = requiredParam(c, 'agentId');
-  if ('error' in agentParam) return agentParam.error;
-
-  const agent = await getAgentById(agentParam.value);
-  if (!agent) return c.json({ error: 'agent not found' }, 404);
-
-  const body = await parseJson(c, agentPatchSchema);
-  const updated = await updateAgent(agent.key, {
-    ...(body.name === undefined ? {} : { name: body.name }),
-    ...(body.role === undefined ? {} : { role: body.role }),
-    ...(body.model === undefined ? {} : { model: body.model }),
-    ...(body.storage_path === undefined ? {} : { storagePath: body.storage_path }),
-    updatedAt: nowIso(),
-  });
-  return c.json(agentResponse(updated));
 }
 
 export async function listSystemCapabilities(c: Context) {

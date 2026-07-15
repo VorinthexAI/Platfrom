@@ -1,234 +1,192 @@
 import { db } from '@/lib/db/client';
 import { isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
+import { embed } from '@/lib/embed';
 import {
-  SCOPE_CHILDREN_COLLECTION,
-  SCOPE_USERS_COLLECTION,
+  SCOPE_SCOPES_COLLECTION,
+  SCOPE_MEMBERS_COLLECTION,
   SCOPES_COLLECTION,
-  scopeChildKey,
-  scopeChildSchema,
   scopeSchema,
-  scopeUserKey,
-  scopeUserSchema,
+  scopeScopeSchema,
   type Scope,
-  type ScopeChild,
-  type ScopeUser,
+  type ScopeScope,
 } from './schema';
 import {
-  DuplicateScopeChildError,
-  DuplicateScopeError,
-  DuplicateScopeUserError,
-  InvalidScopeDescriptionError,
-  InvalidScopeNameError,
-  InvalidScopeOrganizationError,
-  InvalidScopeUserError,
-  ScopeChildNotFoundError,
+  DuplicateScopeRelationError,
+  DuplicateScopeSlugError,
+  ScopeAlreadyHasParentError,
+  ScopeCycleError,
   ScopeNotFoundError,
   ScopeOrganizationMismatchError,
-  ScopeUserNotFoundError,
-  SelfScopeChildError,
+  ScopePositionConflictError,
+  ScopeRelationNotFoundError,
   type ScopeRepository,
   type ScopesDatabase,
 } from './types';
 
-function requireTrimmed(value: unknown, error: () => Error): string {
-  const trimmed = typeof value === 'string' ? value.trim() : '';
-  if (trimmed.length === 0) throw error();
-  return trimmed;
-}
-
-/**
- * Data access for the scope tree (`scopes`, `scopeChildren`, `scopeUsers`).
- * Application code only ever handles `key`; the `_key` rename happens
- * exclusively through the shared base.ts translators. All queries are
- * parameterized — untrusted strings are never interpolated into AQL.
- */
 export function createScopeRepository(database: ScopesDatabase = db): ScopeRepository {
-  async function requireScope(scopeId: string): Promise<Scope> {
+  async function requireScope(scopeKey: string): Promise<Scope> {
     try {
-      const doc = await database.collection(SCOPES_COLLECTION).document(scopeId);
+      const doc = await database.collection(SCOPES_COLLECTION).document(scopeKey);
       return scopeSchema.parse(withArangoKey(doc as Record<string, unknown>));
-    } catch (err) {
-      if (isArangoNotFoundError(err)) throw new ScopeNotFoundError(scopeId);
-      throw err;
+    } catch (error) {
+      if (isArangoNotFoundError(error)) throw new ScopeNotFoundError(scopeKey);
+      throw error;
     }
+  }
+
+  async function listRelations(parentScopeKey: string): Promise<ScopeScope[]> {
+    const cursor = await database.query(
+      `
+        FOR relation IN @@collection
+          FILTER relation.parentScopeKey == @parentScopeKey
+          SORT relation.position ASC, relation._key ASC
+          RETURN relation
+      `,
+      { '@collection': SCOPE_SCOPES_COLLECTION, parentScopeKey },
+    );
+    const docs = await cursor.all();
+    return (docs as Record<string, unknown>[]).map((doc) => scopeScopeSchema.parse(withArangoKey(doc)));
+  }
+
+  async function wouldCreateCycle(parentScopeKey: string, childScopeKey: string): Promise<boolean> {
+    const pending = [childScopeKey];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.shift()!;
+      if (current === parentScopeKey) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const children = await listRelations(current);
+      pending.push(...children.map((relation) => relation.childScopeKey));
+    }
+    return false;
   }
 
   return {
     async createScope(input) {
-      const organizationId = requireTrimmed(input.organizationId, () => new InvalidScopeOrganizationError());
-      const name = requireTrimmed(input.name, () => new InvalidScopeNameError());
-      const description = requireTrimmed(input.description, () => new InvalidScopeDescriptionError());
-      const now = new Date().toISOString();
-      const scope = scopeSchema.parse({
-        key: newId(),
-        organizationId,
-        name,
-        description,
-        createdAt: now,
-        updatedAt: now,
-      });
+      const parsed = scopeSchema.parse({ ...input, key: newId() });
+      const scope = {
+        ...parsed,
+        embedding: await embed({
+          text: ['_scopes', parsed.key, parsed.name, parsed.description].join(':'),
+        }),
+      } satisfies Scope;
       try {
-        const result = await database
-          .collection(SCOPES_COLLECTION)
-          .save(toArangoDoc({ ...scope }), { returnNew: true });
+        const result = await database.collection(SCOPES_COLLECTION).save(toArangoDoc(scope), { returnNew: true });
         const saved = (result as { new?: Record<string, unknown> }).new;
         return (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
-      } catch (err) {
-        if (isArangoUniqueConstraintError(err)) throw new DuplicateScopeError(organizationId, name);
-        throw err;
+      } catch (error) {
+        if (isArangoUniqueConstraintError(error)) {
+          throw new DuplicateScopeSlugError(scope.organizationKey, scope.slug);
+        }
+        throw error;
       }
     },
 
-    async getScopeById(scopeId) {
+    async getScopeByKey(scopeKey) {
       try {
-        const doc = await database.collection(SCOPES_COLLECTION).document(scopeId);
+        const doc = await database.collection(SCOPES_COLLECTION).document(scopeKey);
         return scopeSchema.parse(withArangoKey(doc as Record<string, unknown>));
-      } catch (err) {
-        if (isArangoNotFoundError(err)) return null;
-        throw err;
+      } catch (error) {
+        if (isArangoNotFoundError(error)) return null;
+        throw error;
       }
     },
 
-    async listScopes(organizationId) {
-      const validOrganizationId = requireTrimmed(organizationId, () => new InvalidScopeOrganizationError());
+    async listScopes(organizationKey) {
+      const validOrganizationKey = zCuid(organizationKey);
       const cursor = await database.query(
         `
-          FOR doc IN @@collection
-            FILTER doc.organizationId == @organizationId
-            SORT doc.name ASC
-            RETURN doc
+          FOR scope IN @@collection
+            FILTER scope.organizationKey == @organizationKey
+            SORT scope.name ASC, scope._key ASC
+            RETURN scope
         `,
-        { '@collection': SCOPES_COLLECTION, organizationId: validOrganizationId },
+        { '@collection': SCOPES_COLLECTION, organizationKey: validOrganizationKey },
       );
       const docs = await cursor.all();
       return (docs as Record<string, unknown>[]).map((doc) => scopeSchema.parse(withArangoKey(doc)));
     },
 
-    async removeScope(scopeId) {
-      try {
-        await database.collection(SCOPES_COLLECTION).remove(scopeId);
-      } catch (err) {
-        if (isArangoNotFoundError(err)) throw new ScopeNotFoundError(scopeId);
-        throw err;
-      }
-      // A deleted scope leaves no dangling links: its tree edges (either
-      // direction) and its memberships go with it.
+    async removeScope(scopeKey) {
+      await requireScope(scopeKey);
       await database.query(
         `
-          FOR doc IN @@collection
-            FILTER doc.parentScopeId == @scopeId || doc.childScopeId == @scopeId
-            REMOVE doc IN @@collection
+          FOR relation IN @@collection
+            FILTER relation.parentScopeKey == @scopeKey || relation.childScopeKey == @scopeKey
+            REMOVE relation IN @@collection
         `,
-        { '@collection': SCOPE_CHILDREN_COLLECTION, scopeId },
+        { '@collection': SCOPE_SCOPES_COLLECTION, scopeKey },
       );
       await database.query(
         `
-          FOR doc IN @@collection
-            FILTER doc.scopeId == @scopeId
-            REMOVE doc IN @@collection
+          FOR member IN @@collection
+            FILTER member.scopeKey == @scopeKey
+            REMOVE member IN @@collection
         `,
-        { '@collection': SCOPE_USERS_COLLECTION, scopeId },
+        { '@collection': SCOPE_MEMBERS_COLLECTION, scopeKey },
       );
+      await database.collection(SCOPES_COLLECTION).remove(scopeKey);
     },
 
-    async addChild(parentScopeId, childScopeId) {
-      if (parentScopeId === childScopeId) throw new SelfScopeChildError(parentScopeId);
-      const parent = await requireScope(parentScopeId);
-      const child = await requireScope(childScopeId);
-      // The tree never crosses tenants: both ends must belong to the same
-      // organization.
-      if (parent.organizationId !== child.organizationId) {
-        throw new ScopeOrganizationMismatchError(parentScopeId, childScopeId);
+    async addScopeRelation(parentScopeKey, childScopeKey, position) {
+      const relation = scopeScopeSchema.parse({ key: newId(), parentScopeKey, childScopeKey, position });
+      const [parent, child] = await Promise.all([requireScope(parentScopeKey), requireScope(childScopeKey)]);
+      if (parent.organizationKey !== child.organizationKey) {
+        throw new ScopeOrganizationMismatchError(parentScopeKey, childScopeKey);
       }
-      const link = scopeChildSchema.parse({
-        key: scopeChildKey(parentScopeId, childScopeId),
-        parentScopeId,
-        childScopeId,
-      });
+
+      const existingParentCursor = await database.query(
+        'FOR relation IN @@collection FILTER relation.childScopeKey == @childScopeKey LIMIT 1 RETURN relation',
+        { '@collection': SCOPE_SCOPES_COLLECTION, childScopeKey },
+      );
+      if (await existingParentCursor.next()) throw new ScopeAlreadyHasParentError(childScopeKey);
+
+      const positionCursor = await database.query(
+        'FOR relation IN @@collection FILTER relation.parentScopeKey == @parentScopeKey && relation.position == @position LIMIT 1 RETURN relation',
+        { '@collection': SCOPE_SCOPES_COLLECTION, parentScopeKey, position },
+      );
+      if (await positionCursor.next()) throw new ScopePositionConflictError(parentScopeKey, position);
+      if (await wouldCreateCycle(parentScopeKey, childScopeKey)) {
+        throw new ScopeCycleError(parentScopeKey, childScopeKey);
+      }
+
       try {
-        const result = await database
-          .collection(SCOPE_CHILDREN_COLLECTION)
-          .save(toArangoDoc({ ...link }), { returnNew: true });
+        const result = await database.collection(SCOPE_SCOPES_COLLECTION).save(toArangoDoc(relation), { returnNew: true });
         const saved = (result as { new?: Record<string, unknown> }).new;
-        return (saved ? scopeChildSchema.parse(withArangoKey(saved)) : link) satisfies ScopeChild;
-      } catch (err) {
-        if (isArangoUniqueConstraintError(err)) throw new DuplicateScopeChildError(parentScopeId, childScopeId);
-        throw err;
+        return (saved ? scopeScopeSchema.parse(withArangoKey(saved)) : relation) satisfies ScopeScope;
+      } catch (error) {
+        if (isArangoUniqueConstraintError(error)) {
+          throw new DuplicateScopeRelationError(parentScopeKey, childScopeKey);
+        }
+        throw error;
       }
     },
 
-    async removeChild(parentScopeId, childScopeId) {
-      try {
-        await database.collection(SCOPE_CHILDREN_COLLECTION).remove(scopeChildKey(parentScopeId, childScopeId));
-      } catch (err) {
-        if (isArangoNotFoundError(err)) throw new ScopeChildNotFoundError(parentScopeId, childScopeId);
-        throw err;
-      }
-    },
-
-    async listChildScopeIds(parentScopeId) {
+    async removeScopeRelation(parentScopeKey, childScopeKey) {
       const cursor = await database.query(
-        `
-          FOR doc IN @@collection
-            FILTER doc.parentScopeId == @parentScopeId
-            SORT doc.childScopeId ASC
-            RETURN doc.childScopeId
-        `,
-        { '@collection': SCOPE_CHILDREN_COLLECTION, parentScopeId },
+        'FOR relation IN @@collection FILTER relation.parentScopeKey == @parentScopeKey && relation.childScopeKey == @childScopeKey LIMIT 1 RETURN relation',
+        { '@collection': SCOPE_SCOPES_COLLECTION, parentScopeKey, childScopeKey },
       );
-      const raw = await cursor.all();
-      return (raw as unknown[]).filter((value): value is string => typeof value === 'string' && value.length > 0);
+      const raw = await cursor.next();
+      if (!raw) throw new ScopeRelationNotFoundError(parentScopeKey, childScopeKey);
+      const relation = scopeScopeSchema.parse(withArangoKey(raw as Record<string, unknown>));
+      await database.collection(SCOPE_SCOPES_COLLECTION).remove(relation.key);
     },
 
-    async addUser(scopeId, userId) {
-      const validUserId = requireTrimmed(userId, () => new InvalidScopeUserError());
-      await requireScope(scopeId);
-      const link = scopeUserSchema.parse({
-        key: scopeUserKey(scopeId, validUserId),
-        scopeId,
-        userId: validUserId,
-      });
-      try {
-        const result = await database
-          .collection(SCOPE_USERS_COLLECTION)
-          .save(toArangoDoc({ ...link }), { returnNew: true });
-        const saved = (result as { new?: Record<string, unknown> }).new;
-        return (saved ? scopeUserSchema.parse(withArangoKey(saved)) : link) satisfies ScopeUser;
-      } catch (err) {
-        if (isArangoUniqueConstraintError(err)) throw new DuplicateScopeUserError(scopeId, validUserId);
-        throw err;
-      }
-    },
-
-    async removeUser(scopeId, userId) {
-      try {
-        await database.collection(SCOPE_USERS_COLLECTION).remove(scopeUserKey(scopeId, userId));
-      } catch (err) {
-        if (isArangoNotFoundError(err)) throw new ScopeUserNotFoundError(scopeId, userId);
-        throw err;
-      }
-    },
-
-    async listUserIds(scopeId) {
-      const cursor = await database.query(
-        `
-          FOR doc IN @@collection
-            FILTER doc.scopeId == @scopeId
-            SORT doc.userId ASC
-            RETURN doc.userId
-        `,
-        { '@collection': SCOPE_USERS_COLLECTION, scopeId },
-      );
-      const raw = await cursor.all();
-      return (raw as unknown[]).filter((value): value is string => typeof value === 'string' && value.length > 0);
+    listChildRelations(parentScopeKey) {
+      return listRelations(parentScopeKey);
     },
   };
 }
 
+function zCuid(value: string): string {
+  return scopeSchema.shape.organizationKey.parse(value);
+}
+
 let cachedDefaultRepository: ScopeRepository | null = null;
 
-/** Process-wide repository bound to the shared ArangoDB client. */
 export function getDefaultScopeRepository(): ScopeRepository {
   cachedDefaultRepository ??= createScopeRepository();
   return cachedDefaultRepository;

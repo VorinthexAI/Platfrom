@@ -2,6 +2,7 @@ import { ACTION_REGISTRY } from '@/lib/ai/actions';
 import { getDefaultProviderAdapters } from '@/lib/ai/providers';
 import { normalizeProviderError, PRE_EXECUTION_ERROR_CODES, type ProviderError } from '@/lib/ai/providers/errors';
 import type { ProviderAdapter, ProviderExecuteResponse, ProviderId } from '@/lib/ai/providers/types';
+import { ZERO_TOKEN_USAGE, type TokenUsage } from '@/lib/ai/shared/usage';
 import { ProviderExecutionError, type RouteAttemptFailure } from './errors';
 import { selectRoute } from './select-route';
 import type { RouteRequestInput } from './route-request';
@@ -19,6 +20,16 @@ export interface ExecuteRouteOptions<TInput> {
   adapters?: Partial<Record<ProviderId, ProviderAdapter>>;
   timeoutMs?: number;
   signal?: AbortSignal;
+  onAttempt?: (attempt: RouteAttemptTelemetry) => void;
+}
+
+export interface RouteAttemptTelemetry extends ExecutableRoute {
+  status: 'completed' | 'failed';
+  usage: TokenUsage;
+  startedAt: string;
+  endedAt: string;
+  elapsedMs: number;
+  errorCode?: string;
 }
 
 /**
@@ -76,15 +87,42 @@ export async function executeRouteWithFallbacks<TInput, TOutput>(
     }
 
     try {
-      return await adapter.execute<TInput, TOutput>({
-        actionId: decision.actionId,
-        modelId: route.modelId,
-        externalModelId: route.externalModelId,
-        input,
-        organizationId: decision.organizationId,
-        timeoutMs: options.timeoutMs,
-        signal: options.signal,
-      });
+      const startedAtMs = Date.now();
+      const startedAt = new Date(startedAtMs).toISOString();
+      try {
+        const response = await adapter.execute<TInput, TOutput>({
+          actionId: decision.actionId,
+          modelId: route.modelId,
+          externalModelId: route.externalModelId,
+          input,
+          organizationId: decision.organizationId,
+          timeoutMs: options.timeoutMs,
+          signal: options.signal,
+        });
+        const endedAtMs = Date.now();
+        options.onAttempt?.({
+          ...route,
+          status: 'completed',
+          usage: response.usage,
+          startedAt,
+          endedAt: new Date(endedAtMs).toISOString(),
+          elapsedMs: endedAtMs - startedAtMs,
+        });
+        return response;
+      } catch (err) {
+        const endedAtMs = Date.now();
+        const providerError = normalizeProviderError(route.providerId, err);
+        options.onAttempt?.({
+          ...route,
+          status: 'failed',
+          usage: ZERO_TOKEN_USAGE,
+          startedAt,
+          endedAt: new Date(endedAtMs).toISOString(),
+          elapsedMs: endedAtMs - startedAtMs,
+          errorCode: providerError.code,
+        });
+        throw providerError;
+      }
     } catch (err) {
       const providerError = normalizeProviderError(route.providerId, err);
       lastError = providerError;
