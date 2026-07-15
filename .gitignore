@@ -37,3 +37,6 @@ Thumbs.db
 
 # Transient asset/gallery dev-server logs (lock git checkout on Windows)
 scripts/image/assets-server.*.log
+
+# expo CLI run at the repo root regenerates a stub app.json — never track it
+/app.json
