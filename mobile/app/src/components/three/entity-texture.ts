@@ -1,32 +1,32 @@
 import { Asset } from "expo-asset";
-import { useThree } from "@react-three/fiber";
+import { File } from "expo-file-system";
 import { useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
 import * as THREE from "three";
 
+import {
+  capabilityIconSource,
+  capabilityLogoDataSource,
+} from "@/data/capability-icons";
+import type { CapabilitySlug } from "@/data/registry";
+
 /**
  * Shared texture cache for the transparent capability logos (mobile port
  * of the web entity-logo.ts cache). One texture per logo, reused by every
- * orbit ring and emblem.
+ * emblem in the galaxy.
  *
  * Web resolves like the web app does — TextureLoader-style image load.
  *
- * Native is the hard part. three r180 uploads through
- * texStorage2D/texSubImage2D, which only accept typed-array pixels, so
- * the old expo-three "Asset as isDataTexture image" trick yields an empty
- * texture. And an empty/incomplete texture samples OPAQUE BLACK on GLES —
- * that is the "black square around the planet". Injecting a hand-uploaded
- * GL texture into renderer.properties is no better: the injection lives
- * in one renderer's cache, so any GL context recreation or canvas remount
- * (routine on real phones) leaves the material bound to nothing — black
- * squares again.
- *
- * So expo-gl is used ONLY as a PNG decoder: upload the Asset once to a
- * scratch texture (texImage2D(..., asset) is the one upload expo-gl
- * documents), read the pixels back through a framebuffer, throw the
- * scratch away, and turn the shared texture into an honest DataTexture
- * with real bytes. From then on three owns the uploads — it re-uploads
- * after any context loss, on any renderer, with no private-cache hacks.
+ * Native does NO image decoding at all. Every decode path on the device
+ * has burned us: three r180 only uploads typed arrays (the expo-three
+ * "Asset as image" trick yields an empty texture, which samples OPAQUE
+ * BLACK on GLES — the "black square" bug), and expo-gl's own
+ * texImage2D(asset) upload produced empty textures on real hardware while
+ * working in the emulator. So the emblems ship as pre-baked raw RGBA
+ * assets (scripts/image `logo:rgba`): uint32 LE width + height, then
+ * pixel rows. The app reads the bytes with expo-file-system and hands
+ * three a plain typed array — the one upload path that is identical on
+ * every device, and that three re-uploads itself after any context loss.
  */
 
 type Entry = {
@@ -35,10 +35,10 @@ type Entry = {
   listeners: Set<() => void>;
 };
 
-const cache = new Map<number, Entry>();
+const cache = new Map<CapabilitySlug, Entry>();
 
-function entryFor(source: number): Entry {
-  let entry = cache.get(source);
+function entryFor(slug: CapabilitySlug): Entry {
+  let entry = cache.get(slug);
   if (!entry) {
     const texture = new THREE.Texture();
     // NPOT-safe sampling — no mipmap generation on GLES.
@@ -46,7 +46,7 @@ function entryFor(source: number): Entry {
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
     entry = { texture, state: "idle", listeners: new Set() };
-    cache.set(source, entry);
+    cache.set(slug, entry);
   }
   return entry;
 }
@@ -56,8 +56,8 @@ function markReady(entry: Entry): void {
   for (const listener of entry.listeners) listener();
 }
 
-async function loadWeb(entry: Entry, source: number): Promise<void> {
-  const asset = Asset.fromModule(source);
+async function loadWeb(entry: Entry, slug: CapabilitySlug): Promise<void> {
+  const asset = Asset.fromModule(capabilityIconSource[slug] as number);
   await asset.downloadAsync();
   entry.texture.colorSpace = THREE.SRGBColorSpace;
   new THREE.ImageLoader().load(asset.uri, (image) => {
@@ -67,67 +67,32 @@ async function loadWeb(entry: Entry, source: number): Promise<void> {
   });
 }
 
-async function loadNative(
-  entry: Entry,
-  source: number,
-  renderer: THREE.WebGLRenderer,
-): Promise<void> {
-  const asset = Asset.fromModule(source);
+async function loadNative(entry: Entry, slug: CapabilitySlug): Promise<void> {
+  const asset = Asset.fromModule(capabilityLogoDataSource[slug]);
   await asset.downloadAsync();
-  const width = asset.width ?? 0;
-  const height = asset.height ?? 0;
-  if (!width || !height) throw new Error("asset has no dimensions");
+  if (!asset.localUri) throw new Error("logo data asset has no localUri");
 
-  const gl = renderer.getContext();
-
-  // Decode: park the PNG in a scratch GL texture... (bind through three's
-  // state tracker so its binding cache stays truthful; state.reset() is
-  // NOT an option — it reads gl.canvas.width, which doesn't exist on an
-  // expo-gl context and throws.)
-  const scratch = gl.createTexture();
-  renderer.state.bindTexture(gl.TEXTURE_2D, scratch);
-  gl.texImage2D(
-    gl.TEXTURE_2D,
-    0,
-    gl.RGBA,
-    gl.RGBA,
-    gl.UNSIGNED_BYTE,
-    asset as unknown as TexImageSource,
-  );
-
-  // ...and read the raw pixels back out through a framebuffer.
-  const framebuffer = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-  gl.framebufferTexture2D(
-    gl.FRAMEBUFFER,
-    gl.COLOR_ATTACHMENT0,
-    gl.TEXTURE_2D,
-    scratch,
-    0,
-  );
-  const complete =
-    gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
-  const pixels = new Uint8Array(width * height * 4);
-  if (complete) {
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+  const bytes = await new File(asset.localUri).bytes();
+  if (bytes.byteLength < 8) throw new Error("logo data truncated");
+  const header = new DataView(bytes.buffer, bytes.byteOffset, 8);
+  const width = header.getUint32(0, true);
+  const height = header.getUint32(4, true);
+  if (bytes.byteLength !== 8 + width * height * 4) {
+    throw new Error(`logo data size mismatch (${width}x${height})`);
   }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.deleteFramebuffer(framebuffer);
-  gl.deleteTexture(scratch);
-  renderer.state.bindTexture(gl.TEXTURE_2D, null);
-
-  if (!complete) throw new Error("decode framebuffer incomplete");
-  if (!pixels.some((value) => value !== 0)) {
-    throw new Error("decoded logo is empty");
-  }
+  const pixels = new Uint8Array(
+    bytes.buffer,
+    bytes.byteOffset + 8,
+    width * height * 4,
+  );
 
   // Honest DataTexture: three's typed-array upload path works everywhere
   // and re-runs by itself whenever a context or renderer is recreated.
   const texture = entry.texture as THREE.Texture & { isDataTexture: boolean };
   texture.image = { data: pixels, width, height };
   texture.isDataTexture = true;
-  // EXGL ignores UNPACK_FLIP_Y_WEBGL, so the rows land in GL order —
-  // flip through the texture transform instead of the upload path.
+  // Rows are stored top-first while GL expects bottom-first (and EXGL
+  // ignores UNPACK_FLIP_Y_WEBGL) — flip through the texture transform.
   texture.repeat.y = -1;
   texture.offset.y = 1;
   texture.needsUpdate = true;
@@ -140,12 +105,11 @@ async function loadNative(
  * before that: an incomplete texture samples opaque black on GLES, which
  * paints a black box instead of a logo.
  */
-export function useCapabilityLogoTexture(source: number): {
+export function useCapabilityLogoTexture(slug: CapabilitySlug): {
   texture: THREE.Texture;
   ready: boolean;
 } {
-  const renderer = useThree((state) => state.gl);
-  const entry = useMemo(() => entryFor(source), [source]);
+  const entry = useMemo(() => entryFor(slug), [slug]);
   const [ready, setReady] = useState(entry.state === "ready");
 
   useEffect(() => {
@@ -161,14 +125,12 @@ export function useCapabilityLogoTexture(source: number): {
     if (entry.state !== "idle") return;
     entry.state = "loading";
     const load =
-      Platform.OS === "web"
-        ? loadWeb(entry, source)
-        : loadNative(entry, source, renderer);
+      Platform.OS === "web" ? loadWeb(entry, slug) : loadNative(entry, slug);
     load.catch((error) => {
       entry.state = "idle";
       console.warn("[entity-texture] logo load failed:", error);
     });
-  }, [entry, renderer, source]);
+  }, [entry, slug]);
 
   return { texture: entry.texture, ready };
 }

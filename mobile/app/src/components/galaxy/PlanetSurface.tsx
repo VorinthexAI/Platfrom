@@ -148,7 +148,7 @@ const planetFragmentShader = /* glsl */ `
     // Gaseous translucency: thin at the disc center (the emblem inside
     // shows through), denser toward the limb where the eye grazes more
     // gas — plus solid specular so the orb still reads as a body.
-    float alpha = clamp(0.32 + fresnel * 0.62 + spec * 0.35, 0.0, 0.92);
+    float alpha = clamp(0.42 + fresnel * 0.52 + spec * 0.35, 0.0, 0.92);
 
     gl_FragColor = vec4(color, alpha);
   }
@@ -290,8 +290,10 @@ export function PlanetSurface({
   const atmosphereUniforms = useMemo(
     () => ({
       // Additive shells bypass the planet shader's desat — tone them here.
+      // Intensity kept low: the halo stacks with whatever glows BEHIND a
+      // translucent planet (the brain core blazed white through one).
       uColor: { value: silverToned(style.atmosphere) },
-      uIntensity: { value: 0.7 },
+      uIntensity: { value: 0.5 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [entityId, biome],

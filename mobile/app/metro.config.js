@@ -5,6 +5,9 @@ const path = require("path");
 
 const config = getDefaultConfig(__dirname);
 
+// Raw RGBA pixel assets (pre-baked capability emblems for the galaxy).
+config.resolver.assetExts.push("rgba");
+
 // Force every importer to the same three.js build. With package exports
 // enabled, Metro resolves `import`-sites to three.module.js and
 // `require`-sites to three.cjs — two module instances in one bundle
