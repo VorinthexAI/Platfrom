@@ -53,6 +53,16 @@
       "oceania": [
         "AU"
       ]
+    },
+    "platformOverrides": {
+      "apple": {
+        "exclude": [
+          "LI"
+        ]
+      },
+      "google": {
+        "exclude": []
+      }
     }
   },
   "apple": {

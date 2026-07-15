@@ -26,6 +26,7 @@ import {
   appleCredentials,
   appleTerritories,
   googleCredentials,
+  googleCountries,
   loadStores,
   resolveScriptPath,
   type StoresConfig,
@@ -213,7 +214,7 @@ async function submitGoogle(config: StoresConfig): Promise<void> {
   }
 
   step("Country availability check (Play has no write API for this)");
-  const desired = allCountries(config);
+  const desired = googleCountries(config);
   const track = config.google.availabilityCheckTrack;
   try {
     const availability = await play.getCountryAvailability(pkg, editId, track);
