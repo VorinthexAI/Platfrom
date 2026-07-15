@@ -204,6 +204,17 @@ const atmosphereFragmentShader = /* glsl */ `
   }
 `;
 
+/**
+ * The mobile brand is strictly monochrome: biome hues collapse onto the
+ * cool silver ramp (same tint family the shader's desat path uses), so
+ * worlds keep their identity through structure and tone, never color.
+ */
+function silverToned(hex: string): THREE.Color {
+  const color = new THREE.Color(hex);
+  const luma = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+  return new THREE.Color(luma * 0.9, luma * 0.96, Math.min(1, luma * 1.05));
+}
+
 interface PlanetSurfaceProps {
   /** Stable entity id — seeds the geometry and palette jitter. */
   entityId: string;
@@ -260,7 +271,10 @@ export function PlanetSurface({
       uRimStrength: { value: 0.5 },
       uFlow: { value: style.flow },
       uTime: { value: 0 },
-      uDesat: { value: 0 },
+      // Full desat, permanently: it runs LAST in the fragment shader, so
+      // bands/cracks/glow all land on the silver ramp — no accent colors
+      // anywhere in the system (Oscar's rule), structure stays per-biome.
+      uDesat: { value: 1 },
       uDim: { value: 0 },
     }),
     // Style is deterministic per entity; recreate only when the world changes.
@@ -270,7 +284,8 @@ export function PlanetSurface({
 
   const atmosphereUniforms = useMemo(
     () => ({
-      uColor: { value: new THREE.Color(style.atmosphere) },
+      // Additive shells bypass the planet shader's desat — tone them here.
+      uColor: { value: silverToned(style.atmosphere) },
       uIntensity: { value: 0.7 },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -281,7 +296,7 @@ export function PlanetSurface({
     () => ({
       uTime: { value: 0 },
       uCoverage: { value: style.clouds },
-      uCloudColor: { value: new THREE.Color(style.atmosphere) },
+      uCloudColor: { value: silverToned(style.atmosphere) },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [entityId, biome],

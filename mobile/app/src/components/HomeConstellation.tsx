@@ -22,11 +22,15 @@ import {
   capabilityPositions,
   galaxyCamera,
   SYSTEM_PITCH_LIMIT,
+  SYSTEM_ZOOM_MAX,
+  SYSTEM_ZOOM_MIN,
   systemDragging,
+  systemPinching,
   systemPitch,
   systemPitchLive,
   systemYaw,
   systemYawLive,
+  systemZoom,
 } from "@/components/galaxy/galaxy-refs";
 import { GalaxyScene } from "@/components/galaxy/GalaxyScene";
 import { InteriorEmblem } from "@/components/InteriorEmblem";
@@ -47,6 +51,8 @@ const PITCH_PER_HEIGHT = 2.6;
 const FLING_CARRY = 0.18;
 /** Screen-space radius (dp) a tap may land from a planet's center. */
 const PLANET_TAP_RADIUS = 44;
+/** A touch that travelled less than this on release is a tap, not a pan. */
+const TAP_TRAVEL = 9;
 
 const scratchProjection = new THREE.Vector3();
 
@@ -169,6 +175,7 @@ export function HomeConstellation({
   const fieldSize = useSharedValue({ width: screenWidth, height: screenHeight });
   const panStartYaw = useSharedValue(0);
   const panStartPitch = useSharedValue(0);
+  const pinchStartZoom = useSharedValue(1);
   useEffect(() => {
     panEnabled.value = phase === "overview" ? 1 : 0;
   }, [panEnabled, phase]);
@@ -209,11 +216,20 @@ export function HomeConstellation({
   const fieldGesture = useMemo(() => {
     // Pure worklet pan: every event lands on the UI thread and writes the
     // rotation targets directly — any direction, any speed, no waiting on
-    // the JS thread.
+    // the JS thread. Manual activation grabs the globe the instant the
+    // finger touches the glass (no minDistance dead zone — that dead zone
+    // was why starting a rotation felt sticky); in a biome the gesture
+    // fails immediately so the chrome buttons keep their touches.
     const pan = Gesture.Pan()
-      .minDistance(6)
+      .manualActivation(true)
+      .onTouchesDown((_event, manager) => {
+        if (!panEnabled.value) {
+          manager.fail();
+          return;
+        }
+        manager.activate();
+      })
       .onStart(() => {
-        if (!panEnabled.value) return;
         // GRAB the rendered orientation and kill leftover momentum — a
         // finger on the glass stops the globe instantly; without this a
         // re-swipe fights the previous fling's still-gliding target and
@@ -241,6 +257,15 @@ export function HomeConstellation({
       })
       .onEnd((event) => {
         if (!panEnabled.value) return;
+        // The pan owns every touch now, so a touch that never travelled
+        // is a tap — hit-test it against the planets on the JS thread
+        // (scheduleOnRN is the react-native-worklets successor to
+        // Reanimated's deprecated JS-scheduling API).
+        const travel = Math.hypot(event.translationX, event.translationY);
+        if (travel < TAP_TRAVEL) {
+          scheduleOnRN(handleFieldTap, event.x, event.y);
+          return;
+        }
         const size = fieldSize.value;
         // Momentum: the fling keeps carrying, the rig damps it out.
         systemYaw.value +=
@@ -258,16 +283,26 @@ export function HomeConstellation({
         systemDragging.value = 0;
       });
 
-    // The hit test needs the JS world (store, camera, THREE math), so the
-    // worklet schedules it across with scheduleOnRN (the react-native-
-    // worklets successor to Reanimated's deprecated JS-scheduling API).
-    const tap = Gesture.Tap()
-      .maxDuration(320)
-      .onEnd((event) => {
-        scheduleOnRN(handleFieldTap, event.x, event.y);
+    // Two-finger zoom: scales the overview camera's standoff. Runs
+    // simultaneously with the pan, so rotating while zooming just works.
+    const pinch = Gesture.Pinch()
+      .onStart(() => {
+        pinchStartZoom.value = systemZoom.value;
+        systemPinching.value = 1;
+      })
+      .onUpdate((event) => {
+        if (!panEnabled.value) return;
+        const scale = Math.max(0.05, event.scale);
+        systemZoom.value = Math.min(
+          SYSTEM_ZOOM_MAX,
+          Math.max(SYSTEM_ZOOM_MIN, pinchStartZoom.value / scale),
+        );
+      })
+      .onFinalize(() => {
+        systemPinching.value = 0;
       });
 
-    return Gesture.Race(pan, tap);
+    return Gesture.Simultaneous(pan, pinch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
