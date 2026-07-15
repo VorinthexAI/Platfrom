@@ -43,6 +43,13 @@ export const systemPitch = makeMutable(0);
 export const systemYawLive = makeMutable(0);
 export const systemPitchLive = makeMutable(0);
 
+/**
+ * 1 while a pan is actively steering the system. The rig renders the
+ * targets VERBATIM during the drag — rotation glued to the finger, zero
+ * damping latency — and only damps the glide after release.
+ */
+export const systemDragging = makeMutable(0);
+
 /** Tilt limit so the system can lean steeply but never flips over. */
 export const SYSTEM_PITCH_LIMIT = 1.15;
 

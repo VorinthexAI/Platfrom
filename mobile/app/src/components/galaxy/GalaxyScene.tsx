@@ -86,8 +86,11 @@ export function GalaxyScene({
         near: 0.1,
         far: 160,
       }}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
-      dpr={[1, 1.75]}
+      // MSAA off + capped dpr: on mobile GPUs the multisample buffers and
+      // extra fragments were costing whole frames — the swipe must never
+      // wait on the renderer.
+      gl={{ antialias: false, powerPreference: "high-performance" }}
+      dpr={[1, 1.5]}
     >
       <color attach="background" args={[OBSIDIAN]} />
       <fog attach="fog" args={[OBSIDIAN, 18, 60]} />
