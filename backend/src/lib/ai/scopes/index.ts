@@ -7,6 +7,7 @@ export {
   scopeMemberSchema,
   scopeMemberRoleSchema,
   scopeSlugSchema,
+  scopesEmbedKeys,
   SCOPE_MEMBER_ROLES,
   type Scope,
   type ScopeMember,

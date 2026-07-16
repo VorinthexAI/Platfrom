@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DOT_NOTATION_PATTERN, isDotNotationId } from '@/lib/ai/shared/ids';
 
-export const TOOL_IDS = ['ask.answer', 'reason.solve', 'agent.create', 'image.create', 'audio.transcribe-file', 'speech.narrate'] as const;
+export const TOOL_IDS = ['ask.answer', 'reason.solve', 'agent.create', 'artifact.read', 'image.create', 'audio.transcribe-file', 'speech.narrate'] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 export const toolIdSchema = z.enum(TOOL_IDS);
 

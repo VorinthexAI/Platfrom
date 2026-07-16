@@ -13,6 +13,7 @@ export const ACTION_SLUGS = [
   'core.reason',
 
   'agent.create',
+  'artifact.read',
 
   'web.search',
   'web.deep-research',

@@ -14,6 +14,8 @@ describe('Genesis context compilation', () => {
     expect(context.guardrails).toMatchObject({ allowedToolSlugs: ['agent.create'], allowedActionSlugs: ['agent.create'], canCreateAgents: true, canCreateTools: false, canWriteArbitraryNodes: false });
     expect(context.sourcePolicy).toEqual({ requestedExplorationRate: 0.2, effectiveExplorationRate: 1, sourceCount: 0 });
     expect(renderGenesisContext(context)).not.toContain('embedding');
+    expect(renderGenesisContext(context)).not.toContain('existingSkills');
+    expect(context.knowledgePack.blocks.length).toBeGreaterThan(0);
   });
   test('resolves explicit sources and preserves requested exploration', async () => {
     const f = buildGenesisFixture();

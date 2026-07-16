@@ -13,6 +13,7 @@ import { organizationSchema } from '@/lib/db/organizations.node';
 import { runtimeVariableSchema } from '@/lib/ai/runtime-variables';
 import { agentMemorySchema } from '@/lib/ai/agent-memories';
 import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentRuntimeDataSource } from './runtime';
+import { createNodeResolver, NodeResolverRegistry, ReverseContextCompiler, type SearchableDocument } from '@/lib/ai/reverse-context';
 
 const keys = { organization: newId(), scope: newId(), agent: newId(), backend: newId(), devops: newId(), tool: newId(), action: newId(), backendLink: newId(), devopsLink: newId(), agentTool: newId(), toolAction: newId() };
 const agent = agentSchema.parse({ key: keys.agent, slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: keys.scope });
@@ -59,5 +60,17 @@ describe('persisted agent runtime', () => {
     const mismatched = source();
     mismatched.getTool = async () => toolSchema.parse({ ...tool, scopeKey: newId() });
     await expect(loadAgentRuntime(agent.key, mismatched)).rejects.toBeInstanceOf(GuardrailViolationError);
+  });
+  test('injects only a bounded normalized knowledge pack into provider context', async () => {
+    const runtime = await loadAgentRuntime(agent.key, source());
+    const document: SearchableDocument = { key: newId(), organizationKey: organization.key, scopeKey: scope.key, embedding: [1, 0], name: 'Deployment Guide', content: 'Use a reversible rollout.', _key: 'hidden-storage-key' };
+    const resolver = createNodeResolver({ nodeType: 'document', embeddingFields: ['name', 'content'], data: { async get(key) { return key === document.key ? document : null; }, async list() { return [document]; } }, titleField: 'name', summaryFields: ['name', 'content'] });
+    const compiler = new ReverseContextCompiler({ registry: new NodeResolverRegistry().register(resolver), generateEmbedding: async () => [1, 0] });
+    const context = await compileAgentContext(runtime, { currentTask: 'Plan the deployment.', reverseContextCompiler: compiler, knowledgeNodeTypes: ['document'], variables: { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } }, memories: { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } } });
+    const rendered = compileAgentRuntimeContext(context);
+    expect(context.knowledgePack.blocks[0]).toMatchObject({ nodeType: 'document', title: 'Deployment Guide', content: null });
+    expect(rendered).toContain('Deployment Guide');
+    expect(rendered).not.toContain('hidden-storage-key');
+    expect(rendered).not.toContain('embeddingFields');
   });
 });

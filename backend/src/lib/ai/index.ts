@@ -22,6 +22,7 @@ export * from './agent-artifacts';
 export * from './agent-run-sources';
 export * from './agent-artifact-checks';
 export * from './artifact-resolvers';
+export * from './reverse-context';
 export * from './runtime-variables';
 export * from './agent-memories';
 export * from './pipeline';

@@ -14,6 +14,7 @@ import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/ind
 import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
 import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
+import { buildEmbeddingText } from '../lib/db/base';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -43,15 +44,8 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   scopes: [['organizationId', 'name'], ['organizationId']],
 };
 
-function buildNodeEmbedText(collectionName: string, key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
-  if (embedKeys.length === 0) return null;
-  const parts = [`_${collectionName}`, key];
-  for (const field of embedKeys) {
-    const value = doc[field];
-    if (value === null || value === undefined || value === '') continue;
-    parts.push(String(value));
-  }
-  return parts.join(':');
+function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
+  return buildEmbeddingText(embedKeys, doc);
 }
 
 function nonEmptyString(value: unknown): string | null {

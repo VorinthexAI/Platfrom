@@ -25,6 +25,7 @@ export const scopeSchema = z.object({
 });
 
 export type Scope = z.infer<typeof scopeSchema>;
+export const scopesEmbedKeys = z.enum(['name', 'description']);
 
 export const scopeScopeSchema = z
   .object({

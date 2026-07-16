@@ -1,5 +1,5 @@
 import { db } from '@/lib/db/client';
-import { isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
+import { buildEmbeddingText, isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { embed } from '@/lib/embed';
 import {
@@ -7,6 +7,7 @@ import {
   SCOPE_MEMBERS_COLLECTION,
   SCOPES_COLLECTION,
   scopeSchema,
+  scopesEmbedKeys,
   scopeScopeSchema,
   type Scope,
   type ScopeScope,
@@ -69,7 +70,7 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
       const scope = {
         ...parsed,
         embedding: await embed({
-          text: ['_scopes', parsed.key, parsed.name, parsed.description].join(':'),
+          text: buildEmbeddingText(scopesEmbedKeys.options, parsed)!,
         }),
       } satisfies Scope;
       try {

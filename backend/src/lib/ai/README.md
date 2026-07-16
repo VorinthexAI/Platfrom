@@ -12,6 +12,7 @@ Agent -> agentSkills -> Skills
                                              -> organizationProviders
                                              -> agentRuns / steps / calls
                                              -> run sources / artifact provenance / novelty checks / memories
+                                             -> reverse context compiler / knowledge packs
 ```
 
 All domain documents expose `key`; only the shared database boundary maps it
@@ -40,6 +41,27 @@ Agents persist only `explorationRate` (`0` through `1`). Context exposes the
 requested rate, effective rate, and source count. With no sources, exploitation
 is impossible and the effective rate is always `1`; otherwise it equals the
 requested rate. There is no `selfSustaining` flag.
+
+## Reverse context compilation
+
+Searchable storage nodes cross the runtime boundary only through a registered
+`NodeResolver`. Its normalized node contract contains ownership, scope,
+embedding, and the ordered `embeddingFields`; the corresponding `fields` map
+is forbidden from containing anything else. Resolvers authorize `exists`,
+`load`, vector `findSimilar`, and `extractContext` operations before returning
+data.
+
+`ReverseContextCompiler` embeds the current task, takes the best 20 vector
+matches by default, merges explicit run sources, and emits normalized
+`KnowledgeBlock` values. Manual sources always rank above automatic matches;
+automatic ranking combines similarity, manual priority, and freshness. The
+knowledge-pack builder then deduplicates, trims, optionally summarizes, and
+drops the lowest-ranked blocks until its runtime-owned token budget is met.
+Summary packs always contain references and compact summaries with
+`content: null`; complete safe content is lazy-loaded through the separately
+granted `artifact.read` tool, which repeats agent grant, organization, scope,
+and resolver permission checks. Raw rows, Arango metadata, embeddings, and
+undeclared fields never enter provider context.
 
 ## Artifact sources, provenance, and novelty
 
