@@ -5,6 +5,8 @@ import { agentRunStepSchema } from '@/lib/ai/agent-run-steps';
 import { agentRunCallSchema } from '@/lib/ai/agent-run-calls';
 import { agentArtifactSchema } from '@/lib/ai/agent-artifacts';
 import { agentMemorySchema, createAgentMemoryService, type AgentMemory, type AgentMemoryRepository } from '@/lib/ai/agent-memories';
+import { agentRunSourceSchema } from '@/lib/ai/agent-run-sources';
+import { agentArtifactCheckSchema } from '@/lib/ai/agent-artifact-checks';
 
 const now = '2026-07-16T00:00:00.000Z';
 const keys = Array.from({ length: 12 }, () => newId());
@@ -32,7 +34,7 @@ describe('split agent execution storage', () => {
   });
 
   test('artifacts link to runs and only explicitly selected knowledge becomes memory', async () => {
-    expect(agentArtifactSchema.parse({ key: keys[4], agentRunKey: keys[0], artifactKey: keys[11], relation: 'result' }).relation).toBe('result');
+    expect(agentArtifactSchema.parse({ key: keys[4], agentRunKey: keys[0], nodeType: 'image', nodeKey: keys[11], relation: 'result' }).relation).toBe('result');
     const stored: AgentMemory[] = [];
     const repository: AgentMemoryRepository = {
       async insertMemory(input) { const memory = agentMemorySchema.parse({ ...input, key: input.key ?? newId(), embedding: [], createdAt: now }); stored.push(memory); return memory; },
@@ -44,5 +46,12 @@ describe('split agent execution storage', () => {
     expect(stored).toHaveLength(0);
     expect((await service.persistSelection({ ...base, selected: true }))?.content).toBe(base.content);
     expect(stored).toHaveLength(1);
+  });
+
+  test('source selections and novelty decisions use domain node references', () => {
+    const source = agentRunSourceSchema.parse({ key: newId(), agentRunKey: keys[0], nodeType: 'blog-post', nodeKey: keys[11], priority: 100 });
+    expect(Object.keys(source)).toEqual(['key', 'agentRunKey', 'nodeType', 'nodeKey', 'priority']);
+    const check = agentArtifactCheckSchema.parse({ key: newId(), agentRunKey: keys[0], candidateNodeType: 'blog-post', candidateNodeKey: newId(), comparedNodeType: 'blog-post', comparedNodeKey: keys[11], similarity: 0.95, decision: 'rejected', reason: 'Too similar', createdAt: now });
+    expect(check.decision).toBe('rejected');
   });
 });

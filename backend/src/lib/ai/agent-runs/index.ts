@@ -11,6 +11,7 @@ export {
 export {
   AgentRunNotFoundError,
   type AgentRunInsert,
+  type AgentRunUpdate,
   type AgentRunRepository,
   type AgentRunsDatabase,
   type AgentRunsSetupDatabase,

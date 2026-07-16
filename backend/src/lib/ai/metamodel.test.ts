@@ -27,6 +27,9 @@ import { AGENT_RUN_STEPS_COLLECTION } from './agent-run-steps';
 import { AGENT_RUN_CALLS_COLLECTION } from './agent-run-calls';
 import { AGENT_ARTIFACTS_COLLECTION } from './agent-artifacts';
 import { AGENT_MEMORIES_COLLECTION } from './agent-memories';
+import { AGENT_RUN_SOURCES_COLLECTION } from './agent-run-sources';
+import { AGENT_ARTIFACT_CHECKS_COLLECTION } from './agent-artifact-checks';
+import { RUNTIME_VARIABLES_COLLECTION } from './runtime-variables';
 
 describe('AI metadata model contract', () => {
   test('uses the canonical collection names', () => {
@@ -38,7 +41,9 @@ describe('AI metadata model contract', () => {
       MODEL_ACTIONS_COLLECTION, MODEL_PROVIDERS_COLLECTION, ORGANIZATION_PROVIDERS_COLLECTION,
       TOOLS_COLLECTION, TOOL_ACTIONS_COLLECTION, AGENT_RUNS_COLLECTION,
       AGENT_RUN_STEPS_COLLECTION, AGENT_RUN_CALLS_COLLECTION,
-      AGENT_ARTIFACTS_COLLECTION, AGENT_MEMORIES_COLLECTION,
+      AGENT_ARTIFACTS_COLLECTION, AGENT_RUN_SOURCES_COLLECTION,
+      AGENT_ARTIFACT_CHECKS_COLLECTION, AGENT_MEMORIES_COLLECTION,
+      RUNTIME_VARIABLES_COLLECTION,
     ]).toEqual([
       'users', 'organizations', 'userOrganizations',
       'scopes', 'scopeScopes', 'scopeMembers',
@@ -46,7 +51,8 @@ describe('AI metadata model contract', () => {
       'actions', 'providers', 'models',
       'modelActions', 'modelProviders', 'organizationProviders',
       'tools', 'toolActions', 'agentRuns',
-      'agentRunSteps', 'agentRunCalls', 'agentArtifacts', 'agentMemories',
+      'agentRunSteps', 'agentRunCalls', 'agentArtifacts', 'agentRunSources',
+      'agentArtifactChecks', 'agentMemories', 'runtimeVariables',
     ]);
   });
 

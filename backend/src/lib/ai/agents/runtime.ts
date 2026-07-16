@@ -7,18 +7,20 @@ import { listAgentToolsByAgentKey, type AgentTool } from '@/lib/db/agent-tools.n
 import { getSkillById, type Skill } from '@/lib/db/skills.node';
 import { listToolActionsByToolKey, type ToolAction } from '@/lib/db/tool-actions.node';
 import { getToolById, type Tool } from '@/lib/db/tools.node';
-import { assertToolAllowedByGuardrails } from '@/lib/ai/guardrails';
+import { getOrganizationById, type Organization } from '@/lib/db/organizations.node';
+import { assertToolAllowedByGuardrails, type Guardrail } from '@/lib/ai/guardrails';
+import { getDefaultRuntimeVariableRepository, type RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
+import { getDefaultAgentMemoryRepository, type AgentMemory, type AgentMemoryRepository } from '@/lib/ai/agent-memories';
+import { defaultArtifactResolverRegistry, resolveArtifactSources, type ArtifactReference, type ArtifactResolverRegistry, type SourcePermissionResolver } from '@/lib/ai/artifact-resolvers';
+import type { SourceSelection } from '@/lib/ai/agent-run-sources';
 
 export class AgentRuntimeNotFoundError extends AiError {
   constructor(entity: string, key: string) {
     super('agent_runtime_not_found', `${entity} not found while compiling agent runtime: ${key}`);
   }
 }
-
 export class AgentRuntimeInvalidError extends AiError {
-  constructor(detail: string) {
-    super('agent_runtime_invalid', `Invalid persisted agent runtime: ${detail}`);
-  }
+  constructor(detail: string) { super('agent_runtime_invalid', `Invalid persisted agent runtime: ${detail}`); }
 }
 
 export interface LoadedAgentSkill { relation: AgentSkill; skill: Skill }
@@ -28,15 +30,16 @@ export interface LoadedAgentTool {
   actions: Array<{ relation: ToolAction; action: Action }>;
 }
 export interface AgentRuntimeContext {
+  organization: Organization;
   agent: Agent;
   scope: Scope;
   skills: LoadedAgentSkill[];
   tools: LoadedAgentTool[];
 }
-
 export interface AgentRuntimeDataSource {
   getAgent(key: string): Promise<Agent | null>;
   getScope(key: string): Promise<Scope | null>;
+  getOrganization(key: string): Promise<Organization | null>;
   listAgentSkills(agentKey: string): Promise<AgentSkill[]>;
   getSkill(key: string): Promise<Skill | null>;
   listAgentTools(agentKey: string): Promise<AgentTool[]>;
@@ -44,10 +47,10 @@ export interface AgentRuntimeDataSource {
   listToolActions(toolKey: string): Promise<ToolAction[]>;
   getAction(key: string): Promise<Action | null>;
 }
-
 const defaultDataSource: AgentRuntimeDataSource = {
   getAgent: getAgentById,
   getScope: (key) => getDefaultScopeRepository().getScopeByKey(key),
+  getOrganization: getOrganizationById,
   listAgentSkills: listAgentSkillsByAgentKey,
   getSkill: getSkillById,
   listAgentTools: listAgentToolsByAgentKey,
@@ -63,6 +66,8 @@ export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDat
   if (!agent) throw new AgentRuntimeNotFoundError('Agent', validAgentKey);
   const scope = await source.getScope(agent.scopeKey);
   if (!scope) throw new AgentRuntimeNotFoundError('Scope', agent.scopeKey);
+  const organization = await source.getOrganization(scope.organizationKey);
+  if (!organization) throw new AgentRuntimeNotFoundError('Organization', scope.organizationKey);
 
   const skillRelations = await source.listAgentSkills(agent.key);
   const skills = await Promise.all(skillRelations.map(async (relation) => {
@@ -79,7 +84,8 @@ export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDat
     if (!tool) throw new AgentRuntimeNotFoundError('Tool', relation.toolKey);
     if (!tool.enabled) throw new AgentRuntimeInvalidError(`agent ${agent.key} is linked to disabled tool ${tool.key}`);
     assertToolAllowedByGuardrails(agent.key, [{ scopeId: agent.scopeKey }], { id: tool.slug, scopeId: tool.scopeKey });
-    const actionRelations = await source.listToolActions(tool.key);
+    const actionRelations = (await source.listToolActions(tool.key)).filter((link) => link.enabled);
+    actionRelations.sort((left, right) => right.priority - left.priority || left.key.localeCompare(right.key));
     const actions = await Promise.all(actionRelations.map(async (actionRelation) => {
       const action = await source.getAction(actionRelation.actionKey);
       if (!action) throw new AgentRuntimeNotFoundError('Action', actionRelation.actionKey);
@@ -89,31 +95,75 @@ export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDat
     if (actions.length === 0) throw new AgentRuntimeInvalidError(`tool ${tool.key} has no enabled actions`);
     return { relation, tool, actions };
   }));
-
-  return { agent, scope, skills, tools };
+  return { organization, agent, scope, skills, tools };
 }
 
-export interface CompileAgentRuntimeOptions { currentTask?: string; outputSchema?: string }
+export interface AgentPermission {
+  toolKey: string;
+  toolSlug: string;
+  actionKeys: readonly string[];
+  actionSlugs: readonly string[];
+}
+export interface AgentSourcePolicy {
+  requestedExplorationRate: number;
+  effectiveExplorationRate: number;
+  sourceCount: number;
+}
+export interface AgentContext extends AgentRuntimeContext {
+  variables: Readonly<Record<string, unknown>>;
+  memories: readonly AgentMemory[];
+  artifacts: readonly ArtifactReference[];
+  permissions: readonly AgentPermission[];
+  guardrails: readonly Guardrail[];
+  sourcePolicy: AgentSourcePolicy;
+  currentTask: string;
+}
+export interface CompileAgentContextOptions {
+  currentTask: string;
+  sources?: readonly SourceSelection[];
+  variables?: RuntimeVariableRepository;
+  memories?: AgentMemoryRepository;
+  artifactResolvers?: ArtifactResolverRegistry;
+  canUseSource?: SourcePermissionResolver;
+}
 
-/** Deterministically compiles identity + scope + ordered skills + permissions. */
-export function compileAgentRuntimeContext(runtime: AgentRuntimeContext, options: CompileAgentRuntimeOptions = {}): string {
-  const skillSections = runtime.skills.flatMap(({ relation, skill }) => [
-    `### ${skill.title} (${skill.name}, priority ${relation.priority})`,
-    skill.definition.trim(),
+/** Compiles a fresh context. Agents receive this value and never query storage. */
+export async function compileAgentContext(runtime: AgentRuntimeContext, options: CompileAgentContextOptions): Promise<AgentContext> {
+  const currentTask = options.currentTask.trim();
+  if (!currentTask) throw new AgentRuntimeInvalidError('current task is empty');
+  const [loadedVariables, loadedMemories, artifacts] = await Promise.all([
+    (options.variables ?? getDefaultRuntimeVariableRepository()).listVariablesForContext(runtime.organization.key, runtime.scope.key, runtime.agent.key),
+    (options.memories ?? getDefaultAgentMemoryRepository()).listMemoriesForAgent(runtime.agent.key),
+    resolveArtifactSources({ organizationKey: runtime.organization.key, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, selections: options.sources ?? [], registry: options.artifactResolvers ?? defaultArtifactResolverRegistry, canUseSource: options.canUseSource }),
   ]);
-  const toolLines = runtime.tools.map(({ tool, actions }) =>
-    `- ${tool.slug} — ${tool.name}: ${tool.description} [${actions.map(({ action }) => action.slug).join(', ')}]`,
-  );
+  const variables: Record<string, unknown> = {};
+  for (const variable of loadedVariables) variables[variable.name] = variable.value;
+  const memories = loadedMemories.filter((memory) => memory.organizationKey === runtime.organization.key && memory.scopeKey === runtime.scope.key);
+  const permissions = runtime.tools.map(({ tool, actions }) => ({ toolKey: tool.key, toolSlug: tool.slug, actionKeys: actions.map(({ action }) => action.key), actionSlugs: actions.map(({ action }) => action.slug) }));
+  const guardrails = [{ scopeId: runtime.scope.key }];
+  const sourceCount = artifacts.length;
+  return { ...runtime, variables, memories, artifacts, permissions, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
+}
 
+export interface CompileAgentRuntimeOptions { outputSchema?: string }
+/** Renders the structured context into the provider's system instructions. */
+export function compileAgentRuntimeContext(context: AgentContext, options: CompileAgentRuntimeOptions = {}): string {
+  const skillSections = context.skills.flatMap(({ relation, skill }) => [`### ${skill.title} (${skill.name}, priority ${relation.priority})`, skill.definition.trim()]);
+  const toolLines = context.tools.map(({ tool, actions }) => `- ${tool.slug} — ${tool.name}: ${tool.description} [${actions.map(({ action }) => action.slug).join(', ')}]`);
   return [
-    `# ${runtime.agent.name} — ${runtime.agent.title}`,
-    '', '## Scope context', `${runtime.scope.name}: ${runtime.scope.description}`,
-    '', '## Guardrails', JSON.stringify({ scopeId: runtime.agent.scopeKey }),
+    `# ${context.agent.name} — ${context.agent.title}`,
+    '', '## Organization', `${context.organization.name} (${context.organization.key})`,
+    '', '## Scope context', `${context.scope.name}: ${context.scope.description}`,
     '', '## Skills', ...skillSections,
-    '', '## Available tools and permissions', ...toolLines,
-    '', '## Output schema',
-    'Every output must include metadata: { "status": "accepted" | "rejected", "reason": "at most ten words", "score": 0..1 }.',
+    '', '## Available tools', ...toolLines,
+    '', '## Variables', JSON.stringify(context.variables),
+    '', '## Memories', JSON.stringify(context.memories.map(({ content, memoryType, importance }) => ({ content, memoryType, importance }))),
+    '', '## Artifact sources', JSON.stringify(context.artifacts),
+    '', '## Permissions', JSON.stringify(context.permissions),
+    '', '## Guardrails', JSON.stringify(context.guardrails),
+    '', '## Source policy', JSON.stringify(context.sourcePolicy),
+    '', '## Output schema', 'Every output must include metadata: { "status": "accepted" | "rejected", "reason": "at most ten words", "score": 0..1 }.',
     options.outputSchema?.trim() || 'Return the remaining schema required by the selected action.',
-    '', '## Current task', options.currentTask?.trim() || 'Complete the current request.',
+    '', '## Current task', context.currentTask,
   ].join('\n');
 }

@@ -10,6 +10,9 @@ import { ensureAgentRunStepsCollection } from '../lib/ai/agent-run-steps/indexes
 import { ensureAgentRunCallsCollection } from '../lib/ai/agent-run-calls/indexes';
 import { ensureAgentArtifactsCollection } from '../lib/ai/agent-artifacts/indexes';
 import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes';
+import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
+import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
+import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
@@ -581,6 +584,7 @@ async function main() {
             name: doc.name != null && doc.name != "" ? doc.name : doc._key,
             title: doc.title != null && doc.title != "" ? doc.title : (doc.role != null ? doc.role : doc._key),
             scopeKey: doc.scopeKey != null && doc.scopeKey != "" ? doc.scopeKey : (doc.orchestratorId != null ? doc.orchestratorId : doc._key),
+            explorationRate: HAS(doc, "explorationRate") && doc.explorationRate >= 0 && doc.explorationRate <= 1 ? doc.explorationRate : 0.5,
             enabled: null,
             orchestratorId: null,
             role: null,
@@ -712,7 +716,36 @@ async function main() {
   await ensureAgentRunsCollection(targetDb);
   await ensureAgentRunStepsCollection(targetDb);
   await ensureAgentRunCallsCollection(targetDb);
+  const agentArtifacts = targetDb.collection('agentArtifacts');
+  if (await agentArtifacts.exists()) {
+    const legacyAgentArtifacts = targetDb.collection('agentArtifactsLegacy');
+    if (!(await legacyAgentArtifacts.exists())) await legacyAgentArtifacts.create();
+    await targetDb.query(`
+      FOR doc IN agentArtifacts
+        FILTER HAS(doc, "artifactKey") || !HAS(doc, "nodeType") || !HAS(doc, "nodeKey")
+        INSERT doc INTO agentArtifactsLegacy OPTIONS { overwriteMode: "ignore" }
+    `);
+    await targetDb.query(`
+      FOR doc IN agentArtifacts
+        FILTER HAS(doc, "artifactKey") || !HAS(doc, "nodeType") || !HAS(doc, "nodeKey")
+        REMOVE doc IN agentArtifacts
+    `);
+    await targetDb.query(`
+      FOR doc IN agentArtifacts
+        UPDATE doc WITH {
+          groupKey: HAS(doc, "groupKey") ? doc.groupKey : null,
+          position: HAS(doc, "position") ? doc.position : 0
+        } IN agentArtifacts
+    `);
+    for (const index of await agentArtifacts.indexes()) {
+      const fields: string[] = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+      if (fields.includes('artifactKey')) await agentArtifacts.dropIndex(index.id);
+    }
+  }
   await ensureAgentArtifactsCollection(targetDb);
+  await ensureAgentRunSourcesCollection(targetDb);
+  await ensureAgentArtifactChecksCollection(targetDb);
+  await ensureRuntimeVariablesCollection(targetDb);
   await ensureAgentMemoriesCollection(targetDb);
 
 
