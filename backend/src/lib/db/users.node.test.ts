@@ -14,6 +14,8 @@ describe('user node schema', () => {
   test('keeps organization role and MFA fields off ordinary users', () => {
     const user = userSchema.parse(baseUser);
 
+    expect(user.refreshTokenExpiresAt).toBeNull();
+
     expect('organization_role' in user).toBe(false);
     expect('organization_title' in user).toBe(false);
     expect('isMfaEnabled' in user).toBe(false);

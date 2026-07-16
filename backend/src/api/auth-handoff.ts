@@ -11,7 +11,7 @@ import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { redisConnection } from '@/lib/redis';
 import { trackPlatformEvent } from '@/platform/events';
-import { createTotpChallengeForIdentity, issueUserTokens, type LoginIdentityType } from './auth';
+import { createTotpChallengeForIdentity, issueUserTokens, type LoginIdentityType, type SessionTokens } from './auth';
 
 /**
  * Cross-device sign-in handoff.
@@ -93,15 +93,13 @@ export function isHandoffClaimable(
 export type HandoffStatus = 'pending' | 'approved' | 'gone';
 
 type HandoffClaimResult =
-  | {
+  | ({
     status: 'authenticated';
-    accessToken: string;
-    refreshToken: string;
     alias: string;
     aliasSlug: string | null;
     waitlistNumber: number | null;
     welcomeLine: string;
-  }
+  } & SessionTokens)
   | {
     status: 'totp_setup_required' | 'totp_required';
     totpChallengeToken: string;

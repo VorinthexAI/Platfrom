@@ -25,10 +25,17 @@ const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const TOTP_PERIOD_SECONDS = 30;
 const ISSUER = 'Vorinthex';
+export const STANDARD_ACCESS_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+export const STANDARD_REFRESH_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+export const FOUNDER_ACCESS_MAX_AGE_SECONDS = 60 * 15;
+export const FOUNDER_REFRESH_MAX_AGE_SECONDS = 60 * 60 * 24;
 
 export interface SessionTokens {
   accessToken: string;
   refreshToken: string;
+  accessTokenMaxAgeSeconds: number;
+  refreshTokenMaxAgeSeconds: number;
+  sessionExpiresAt: string;
 }
 
 export type AuthIdentityType = 'user' | 'member' | 'superAdmin';
@@ -65,16 +72,14 @@ export type TotpChallengeValidationResult =
 
 export type MagicLinkValidationResult =
   | TotpChallengeValidationResult
-  | {
+  | ({
     status: 'authenticated';
     identity: AuthIdentity;
-    accessToken: string;
-    refreshToken: string;
     alias: string;
     aliasSlug: string | null;
     waitlistNumber: number | null;
     welcomeLine: string;
-  };
+  } & SessionTokens);
 
 export function hasUsableMfaResetRequest() {
   return false;
@@ -129,7 +134,7 @@ async function membershipIdentity(
   const organization = await getOrganizationById(membership.organizationId);
   if (!organization?.isActive) return null;
   return {
-    type: membership.orgRole === 'owner' ? 'superAdmin' : 'member',
+    type: loginIdentityTypeForMembership(membership.orgRole, organization.is_root),
     key: user.key,
     linkKey: membership.key,
     organizationId: membership.organizationId,
@@ -146,17 +151,22 @@ async function membershipIdentity(
   };
 }
 
+export function loginIdentityTypeForMembership(orgRole: UserOrganization['orgRole'], organizationIsRoot: boolean): LoginIdentityType {
+  return orgRole === 'owner' && organizationIsRoot ? 'superAdmin' : 'member';
+}
+
+const membershipRoleRank: Record<UserOrganization['orgRole'], number> = {
+  owner: 4,
+  admin: 3,
+  member: 2,
+  viewer: 1,
+};
+
 function strongestMembership(
   memberships: UserOrganization[],
 ): UserOrganization | null {
-  const rank: Record<UserOrganization['orgRole'], number> = {
-    owner: 4,
-    admin: 3,
-    member: 2,
-    viewer: 1,
-  };
   return memberships.reduce<UserOrganization | null>((best, membership) => {
-    if (!best || rank[membership.orgRole] > rank[best.orgRole]) return membership;
+    if (!best || membershipRoleRank[membership.orgRole] > membershipRoleRank[best.orgRole]) return membership;
     return best;
   }, null);
 }
@@ -206,12 +216,10 @@ async function getLoginIdentity(type: LoginIdentityType, key: string): Promise<L
   const user = await getUserById(key);
   if (!user) return null;
   const memberships = await listActiveUserOrganizationsByUser(user.key);
-  const matching = memberships.filter((membership) => {
-    const membershipType: LoginIdentityType = membership.orgRole === 'owner' ? 'superAdmin' : 'member';
-    return membershipType === type;
-  });
-  const strongest = strongestMembership(matching);
-  return strongest ? membershipIdentity(user, strongest) : null;
+  const identities = (await Promise.all(memberships.map((membership) => membershipIdentity(user, membership))))
+    .filter((identity): identity is LoginIdentity => identity?.type === type)
+    .sort((left, right) => membershipRoleRank[right.orgRole] - membershipRoleRank[left.orgRole]);
+  return identities[0] ?? null;
 }
 
 async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: Record<string, unknown>) {
@@ -220,23 +228,24 @@ async function updateLoginIdentity(type: LoginIdentityType, key: string, patch: 
   return updateUserOrganization(identity.linkKey, patch as Partial<UserOrganization>);
 }
 
-async function getLoginIdentityByRefreshTokenHash(refreshTokenHash: string): Promise<LoginIdentity | null> {
-  const user = await getUserByRefreshTokenHash(refreshTokenHash);
-  if (!user) return null;
-  return organizationMembershipIdentity(user);
+export function getAuthSessionPolicy(identityType: AuthIdentityType) {
+  return identityType === 'superAdmin'
+    ? { accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS }
+    : { accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS };
 }
 
-export async function createAccessToken(identity: AuthIdentity | string) {
+export async function createAccessToken(identity: AuthIdentity | string, sessionExpiresAt?: Date) {
   const normalized = typeof identity === 'string'
     ? { key: identity, identityType: 'user' as const }
     : identity;
   const now = Math.floor(Date.now() / 1000);
-  const ttlSeconds = normalized.identityType === 'user' ? 60 * 60 : 60 * 60 * 24;
+  const ttlSeconds = getAuthSessionPolicy(normalized.identityType).accessMaxAgeSeconds;
+  const sessionExpiry = sessionExpiresAt ? Math.floor(sessionExpiresAt.getTime() / 1000) : now + ttlSeconds;
   const payload = base64UrlEncode(JSON.stringify({
     sub: normalized.key,
     identityType: normalized.identityType,
     iat: now,
-    exp: now + ttlSeconds,
+    exp: Math.min(now + ttlSeconds, sessionExpiry),
   }));
   const signature = await signAccessTokenPayload(payload);
   return `vrtx_access_${payload}.${signature}`;
@@ -251,42 +260,63 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
   if (!timingSafeEqual(signature, expected)) return null;
   try {
     const parsed = JSON.parse(base64UrlDecode(payload)) as { sub?: string; identityType?: AuthIdentityType; exp?: number };
-    if (!parsed.sub || !parsed.exp || parsed.exp < Math.floor(Date.now() / 1000)) return null;
+    if (!parsed.sub || !parsed.exp || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
     return { key: parsed.sub, identityType: parsed.identityType ?? 'user' };
   } catch {
     return null;
   }
 }
 
-export async function issueTokens(identity: LoginIdentity): Promise<SessionTokens> {
-  const accessToken = await createAccessToken({ key: identity.key, identityType: identity.type });
+export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Date): Promise<SessionTokens> {
+  const policy = getAuthSessionPolicy(identity.type);
+  const issuedAt = Date.now();
+  sessionExpiresAt ??= new Date(issuedAt + policy.refreshMaxAgeSeconds * 1000);
+  const remainingSeconds = Math.max(0, Math.floor((sessionExpiresAt.getTime() - issuedAt) / 1000));
+  const accessToken = await createAccessToken({ key: identity.key, identityType: identity.type }, sessionExpiresAt);
   const refreshToken = randomToken('vrtx_refresh_');
   const refreshTokenHash = await sha256(refreshToken);
   await updateUser(identity.key, {
     refreshTokenHash,
+    refreshTokenExpiresAt: sessionExpiresAt.toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds), refreshTokenMaxAgeSeconds: remainingSeconds, sessionExpiresAt: sessionExpiresAt.toISOString() };
 }
 
-export async function issueUserTokens(user: Pick<User, 'key'>): Promise<SessionTokens> {
-  const accessToken = await createAccessToken({ key: user.key, identityType: 'user' });
+export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?: Date): Promise<SessionTokens> {
+  const policy = getAuthSessionPolicy('user');
+  const issuedAt = Date.now();
+  sessionExpiresAt ??= new Date(issuedAt + policy.refreshMaxAgeSeconds * 1000);
+  const remainingSeconds = Math.max(0, Math.floor((sessionExpiresAt.getTime() - issuedAt) / 1000));
+  const accessToken = await createAccessToken({ key: user.key, identityType: 'user' }, sessionExpiresAt);
   const refreshToken = randomToken('vrtx_refresh_');
   const refreshTokenHash = await sha256(refreshToken);
   await updateUser(user.key, {
     refreshTokenHash,
+    refreshTokenExpiresAt: sessionExpiresAt.toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds), refreshTokenMaxAgeSeconds: remainingSeconds, sessionExpiresAt: sessionExpiresAt.toISOString() };
 }
 
 export async function rotateRefreshToken(refreshToken: string): Promise<SessionTokens | null> {
   const tokenHash = await sha256(refreshToken);
-  const identity = await getLoginIdentityByRefreshTokenHash(tokenHash);
-  if (identity) return issueTokens(identity);
   const user = await getUserByRefreshTokenHash(tokenHash);
-  if (user) return issueUserTokens(user);
-  return null;
+  if (!user || !isRefreshTokenActive(user.refreshTokenExpiresAt)) return null;
+  const identity = await organizationMembershipIdentity(user);
+  const identityType = identity?.type ?? 'user';
+  const policy = getAuthSessionPolicy(identityType);
+  const sessionExpiresAt = new Date(Math.min(
+    Date.parse(user.refreshTokenExpiresAt!),
+    Date.now() + policy.refreshMaxAgeSeconds * 1000,
+  ));
+  return identity ? issueTokens(identity, sessionExpiresAt) : issueUserTokens(user, sessionExpiresAt);
+}
+
+export function isRefreshTokenActive(expiresAt: string | null, now = Date.now()): boolean {
+  if (!expiresAt) return false;
+  const expiry = Date.parse(expiresAt);
+  return Number.isFinite(expiry) && expiry > now;
 }
 
 export async function createChallengeTokenHash(rawToken: string) {

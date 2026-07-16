@@ -40,6 +40,7 @@
     "web:build": "bun run --cwd web/app build",
     "web:lint": "bun run --cwd web/app lint",
     "web:typecheck": "bun run --cwd web/app typecheck",
+    "web:test": "bun run --cwd web/app test",
     "mobile:start": "bun run --cwd mobile/app start",
     "submit": "bun run mobile/scripts/submit.ts",
     "mobile:typecheck": "bun run --cwd mobile/app typecheck",

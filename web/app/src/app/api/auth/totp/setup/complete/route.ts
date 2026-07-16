@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
+import { setAuthSessionCookies } from "@/lib/auth/session-cookies";
 
 const bodySchema = z.strictObject({
   challenge_token_hash: z.string().min(8).max(128),
@@ -9,8 +10,6 @@ const bodySchema = z.strictObject({
     z.string().regex(/^\d{6}$/),
   ]),
 });
-const ACCESS_COOKIE = "vorinthex_access";
-const REFRESH_COOKIE = "vorinthex_refresh";
 
 /** Completes TOTP setup: two successive codes prove the authenticator. */
 export async function POST(request: Request) {
@@ -37,6 +36,8 @@ export async function POST(request: Request) {
       organization_title?: string | null;
       accessToken?: string;
       refreshToken?: string;
+      accessTokenMaxAgeSeconds?: number;
+      refreshTokenMaxAgeSeconds?: number;
     }>("/auth/totp/setup/complete", {
       method: "POST",
       body: JSON.stringify(parsed.data),
@@ -58,25 +59,7 @@ export async function POST(request: Request) {
       name: result.data.name ?? null,
       title: result.data.organization_title ?? null,
     });
-    const secure = process.env.NODE_ENV === "production";
-    if (result.data.accessToken) {
-      response.cookies.set(ACCESS_COOKIE, result.data.accessToken, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure,
-        path: "/",
-        maxAge: 60 * 60 * 24,
-      });
-    }
-    if (result.data.refreshToken) {
-      response.cookies.set(REFRESH_COOKIE, result.data.refreshToken, {
-        httpOnly: true,
-        sameSite: "lax",
-        secure,
-        path: "/",
-        maxAge: 60 * 60 * 24 * 365,
-      });
-    }
+    setAuthSessionCookies(response, result.data);
     return response;
   }
 
