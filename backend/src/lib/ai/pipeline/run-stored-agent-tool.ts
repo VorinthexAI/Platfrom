@@ -4,6 +4,7 @@ import { getDefaultAgentRunRepository, type AgentRunRepository } from '@/lib/ai/
 import { getDefaultAgentRunStepRepository, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import { getDefaultAgentRunCallRepository, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
 import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentContext, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
+import { authorizeAgentExecution, type ExecutionAccessDataSource, type ExecutionPrincipal } from '@/lib/ai/agents/access';
 import { sourceSelectionSchema, getDefaultAgentRunSourceRepository, type AgentRunSourceRepository } from '@/lib/ai/agent-run-sources';
 import { getDefaultAgentArtifactRepository, type AgentArtifactRepository } from '@/lib/ai/agent-artifacts';
 import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
@@ -43,6 +44,9 @@ export const runStoredAgentToolParamsSchema = z.object({
 });
 export type RunStoredAgentToolParams = z.input<typeof runStoredAgentToolParamsSchema>;
 export interface RunStoredAgentToolOptions extends RouterDependencies {
+  /** Trusted caller identity. System execution is available only through this server-side option. */
+  principal?: ExecutionPrincipal;
+  accessData?: ExecutionAccessDataSource;
   runtimeData?: AgentRuntimeDataSource;
   runs?: AgentRunRepository;
   steps?: AgentRunStepRepository;
@@ -84,6 +88,8 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   const request = parsed.data;
   const runtime = await loadAgentRuntime(request.agentKey, options.runtimeData);
   if (runtime.scope.organizationKey !== request.organizationKey) throw new InvalidRunRequestError('agent scope does not belong to the requested organization');
+  if (!options.principal) throw new InvalidRunRequestError('execution principal is required');
+  const principal = await authorizeAgentExecution(runtime, options.principal, options.accessData);
   const runs = options.runs ?? getDefaultAgentRunRepository();
   const steps = options.steps ?? getDefaultAgentRunStepRepository();
   const calls = options.calls ?? getDefaultAgentRunCallRepository();
@@ -94,7 +100,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
 
   if (request.metadata.status === 'rejected') {
     const endedAtMs = Date.now();
-    const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, status: 'rejected', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
+    const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, status: 'rejected', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     return { executed: false, run, step: null, calls: [], response: null };
   }
 
@@ -114,7 +120,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       ? { mode: 'model' as const, organizationKey: request.organizationKey, actionSlug: routeActionSlug, modelSlug: request.modelSlug }
       : { mode: 'auto' as const, organizationKey: request.organizationKey, actionSlug: routeActionSlug };
   const attempts: RouteAttemptTelemetry[] = [];
-  const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, status: 'accepted', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: startedAt, elapsedMs: 0 });
+  const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, status: 'accepted', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: startedAt, elapsedMs: 0 });
   try {
     await persistSources(run.key, request.sources, sources, artifacts);
   } catch (error) {

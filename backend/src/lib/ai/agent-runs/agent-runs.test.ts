@@ -14,8 +14,10 @@ const keys = Array.from({ length: 12 }, () => newId());
 describe('split agent execution storage', () => {
   test('agentRuns contains summary fields only', () => {
     const run = agentRunSchema.parse({ key: keys[0], organizationKey: keys[1], scopeKey: keys[2], agentKey: keys[3], status: 'completed', reason: 'Task completed successfully', score: 0.9, startedAt: now, endedAt: now, elapsedMs: 0, createdAt: now });
-    expect(Object.keys(run)).toEqual(['key', 'organizationKey', 'scopeKey', 'agentKey', 'status', 'reason', 'score', 'startedAt', 'endedAt', 'elapsedMs', 'createdAt']);
+    expect(Object.keys(run)).toEqual(['key', 'organizationKey', 'scopeKey', 'agentKey', 'principalType', 'userOrganizationKey', 'status', 'reason', 'score', 'startedAt', 'endedAt', 'elapsedMs', 'createdAt']);
+    expect(run).toMatchObject({ principalType: 'system', userOrganizationKey: null });
     expect(() => agentRunSchema.parse({ ...run, steps: [] })).toThrow();
+    expect(() => agentRunSchema.parse({ ...run, principalType: 'member', userOrganizationKey: null })).toThrow();
   });
 
   test('output metadata enforces rejection status, word limit and score range', () => {

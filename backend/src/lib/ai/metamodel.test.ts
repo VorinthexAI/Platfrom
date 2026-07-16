@@ -30,6 +30,7 @@ import { AGENT_MEMORIES_COLLECTION } from './agent-memories';
 import { AGENT_RUN_SOURCES_COLLECTION } from './agent-run-sources';
 import { AGENT_ARTIFACT_CHECKS_COLLECTION } from './agent-artifact-checks';
 import { RUNTIME_VARIABLES_COLLECTION } from './runtime-variables';
+import { AGENT_ARCHITECTURE, AGENT_EXECUTION_SEQUENCE } from './architecture';
 
 describe('AI metadata model contract', () => {
   test('uses the canonical collection names', () => {
@@ -72,5 +73,16 @@ describe('AI metadata model contract', () => {
 
   test('scope membership uses the agreed roles', () => {
     expect(SCOPE_MEMBER_ROLES).toEqual(['owner', 'admin', 'moderator', 'viewer']);
+  });
+
+  test('locks the complete organization, registry, runtime, execution, and history layers', () => {
+    expect(AGENT_ARCHITECTURE.organization).toEqual({ users: 'users', scopes: 'scopes', enabledProviders: 'organizationProviders', agentRuns: 'agentRuns' });
+    expect(AGENT_ARCHITECTURE.registries).toEqual({ agents: 'agents', skills: 'skills', tools: 'tools', actions: 'actions', models: 'models', providers: 'providers' });
+    expect(AGENT_ARCHITECTURE.linkingNodes).toEqual({ userOrganizations: 'userOrganizations', scopeScopes: 'scopeScopes', scopeMembers: 'scopeMembers', agentSkills: 'agentSkills', agentTools: 'agentTools', toolActions: 'toolActions', modelActions: 'modelActions', modelProviders: 'modelProviders', agentRunSources: 'agentRunSources' });
+    expect(AGENT_ARCHITECTURE.runtime.agentContext).toEqual(['organization', 'scope', 'agent', 'skills', 'tools', 'knowledge', 'permissions', 'guardrails', 'currentTask']);
+    expect(AGENT_ARCHITECTURE.execution).toEqual(['tool', 'action', 'router', 'model', 'provider']);
+    expect(AGENT_ARCHITECTURE.response).toBe('response');
+    expect(AGENT_ARCHITECTURE.executionHistory).toEqual({ agentRun: 'agentRuns', agentRunSteps: 'agentRunSteps', agentRunCalls: 'agentRunCalls', agentArtifacts: 'agentArtifacts', agentArtifactChecks: 'agentArtifactChecks', agentMemories: 'agentMemories' });
+    expect(AGENT_EXECUTION_SEQUENCE).toEqual(['agentContext', 'tool', 'action', 'router', 'model', 'provider', 'response', 'agentRun', 'agentRunSteps', 'agentRunCalls']);
   });
 });

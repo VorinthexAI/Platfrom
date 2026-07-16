@@ -13,6 +13,9 @@ import { modelProviderSchema } from '@/lib/db/model-providers.node';
 import { providerSchema } from '@/lib/db/providers.node';
 import { scopeSchema } from '@/lib/ai/scopes';
 import { organizationSchema } from '@/lib/db/organizations.node';
+import { userSchema } from '@/lib/db/users.node';
+import { userOrganizationSchema } from '@/lib/db/user-organization.node';
+import { scopeMemberSchema } from '@/lib/ai/scopes';
 import { agentRunSchema, type AgentRun, type AgentRunRepository } from '@/lib/ai/agent-runs';
 import { agentRunStepSchema, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import { agentRunCallSchema, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
@@ -31,6 +34,9 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const organizationKey = newId();
   const organization = organizationSchema.parse({ key: organizationKey, name: 'Vorinthex', createdAt: now, updatedAt: now });
   const scope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'core', name: 'Core', description: 'Core product scope' });
+  const user = userSchema.parse({ key: newId(), organizationId: organizationKey, email: 'member@example.com', emailHash: 'member-hash', createdAt: now, updatedAt: now });
+  const userOrganization = userOrganizationSchema.parse({ key: newId(), organizationId: organizationKey, userId: user.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
+  const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: userOrganization.key, role: 'moderator' });
   const agent = agentSchema.parse({ key: newId(), slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: scope.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend systems.' });
   const action = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer with metadata', handlerKey: 'core.ask', enabled: true });
@@ -70,9 +76,10 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const adapters = { openai: { id: 'openai' as const, name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { adapterCalls.push(request as ProviderExecuteRequest); executionSnapshots.push({ runStatus: runStore[0]?.status, sourceCount: sourceStore.length }); return { output: output as TOutput, usage: tokenUsage(8, 5), providerId: 'openai' as const, modelId: request.modelId, externalModelId: request.externalModelId }; } } };
   const variables = { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } };
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
-  const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts };
+  const accessData = { async getUserOrganization(key: string) { return key === userOrganization.key ? userOrganization : null; }, async getUser(key: string) { return key === user.key ? user : null; }, async listScopeMembers() { return [scopeMember]; } };
+  const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts, accessData, principal: { kind: 'member' as const, userOrganizationKey: userOrganization.key } };
   const params = { organizationKey, agentKey: agent.key, toolKey: tool.key, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: 'Hello' }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
-  return { options, params, adapterCalls, executionSnapshots, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope };
+  return { options, params, adapterCalls, executionSnapshots, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope, user, userOrganization, scopeMember, accessData };
 }
 
 describe('persisted agent pipeline', () => {
@@ -81,6 +88,7 @@ describe('persisted agent pipeline', () => {
     const result = await runStoredAgentTool<{ metadata: unknown; text: string }>(f.params, f.options);
     expect(result.executed).toBe(true);
     expect(f.runStore[0]?.status).toBe('completed');
+    expect(f.runStore[0]).toMatchObject({ principalType: 'member', userOrganizationKey: f.userOrganization.key });
     expect(f.stepStore[0]).toMatchObject({ stepSlug: 'answer-request', status: 'completed', agentRunKey: f.runStore[0]?.key });
     expect(f.callStore[0]).toMatchObject({ skillKey: f.skill.key, toolKey: f.tool.key, actionKey: f.action.key, modelKey: f.model.key, providerKey: f.provider.key, totalTokens: 13 });
     expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain(JSON.stringify({ scopeId: f.agent.scopeKey }));
@@ -100,6 +108,17 @@ describe('persisted agent pipeline', () => {
     const f = fixture();
     await expect(runStoredAgentTool({ ...f.params, toolKey: newId() }, f.options)).rejects.toBeInstanceOf(InvalidRunRequestError);
     expect(f.adapterCalls).toHaveLength(0);
+  });
+
+  test('requires active organization and scope membership before execution', async () => {
+    const missingPrincipal = fixture();
+    await expect(runStoredAgentTool(missingPrincipal.params, { ...missingPrincipal.options, principal: undefined })).rejects.toBeInstanceOf(InvalidRunRequestError);
+    expect(missingPrincipal.runStore).toHaveLength(0);
+
+    const outsideScope = fixture();
+    await expect(runStoredAgentTool(outsideScope.params, { ...outsideScope.options, accessData: { ...outsideScope.accessData, async listScopeMembers() { return []; } } })).rejects.toThrow('is not assigned to scope');
+    expect(outsideScope.adapterCalls).toHaveLength(0);
+    expect(outsideScope.runStore).toHaveLength(0);
   });
 
   test('rejects duplicate source selections before creating a run', async () => {

@@ -8,5 +8,6 @@ export async function ensureAgentRunsCollection(database: AgentRunsSetupDatabase
   await collection.ensureIndex({ type: 'persistent', fields: ['organizationKey', 'createdAt'], unique: false });
   await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey', 'createdAt'], unique: false });
   await collection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'createdAt'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['userOrganizationKey', 'createdAt'], unique: false });
   await collection.ensureIndex({ type: 'persistent', fields: ['status', 'createdAt'], unique: false });
 }

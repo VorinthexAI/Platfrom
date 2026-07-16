@@ -112,11 +112,16 @@ export interface AgentSourcePolicy {
   effectiveExplorationRate: number;
   sourceCount: number;
 }
+export interface AgentKnowledge {
+  pack: KnowledgePack;
+  sources: readonly ArtifactReference[];
+  memories: readonly AgentMemory[];
+}
 export interface AgentContext extends AgentRuntimeContext {
   variables: Readonly<Record<string, unknown>>;
   memories: readonly AgentMemory[];
   artifacts: readonly ArtifactReference[];
-  knowledgePack: KnowledgePack;
+  knowledge: AgentKnowledge;
   permissions: readonly AgentPermission[];
   guardrails: readonly Guardrail[];
   sourcePolicy: AgentSourcePolicy;
@@ -152,7 +157,8 @@ export async function compileAgentContext(runtime: AgentRuntimeContext, options:
   const permissions = runtime.tools.map(({ tool, actions }) => ({ toolKey: tool.key, toolSlug: tool.slug, actionKeys: actions.map(({ action }) => action.key), actionSlugs: actions.map(({ action }) => action.slug) }));
   const guardrails = [{ scopeId: runtime.scope.key }];
   const sourceCount = artifacts.length;
-  return { ...runtime, variables, memories, artifacts, knowledgePack, permissions, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
+  const knowledge = { pack: knowledgePack, sources: artifacts, memories };
+  return { ...runtime, variables, memories, artifacts, knowledge, permissions, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
 }
 
 export interface CompileAgentRuntimeOptions { outputSchema?: string }
@@ -169,7 +175,7 @@ export function compileAgentRuntimeContext(context: AgentContext, options: Compi
     '', '## Variables', JSON.stringify(context.variables),
     '', '## Memories', JSON.stringify(context.memories.map(({ content, memoryType, importance }) => ({ content, memoryType, importance }))),
     '', '## Artifact sources', JSON.stringify(context.artifacts),
-    '', '## Knowledge pack', JSON.stringify(context.knowledgePack),
+    '', '## Knowledge', JSON.stringify(context.knowledge),
     '', '## Permissions', JSON.stringify(context.permissions),
     '', '## Guardrails', JSON.stringify(context.guardrails),
     '', '## Source policy', JSON.stringify(context.sourcePolicy),

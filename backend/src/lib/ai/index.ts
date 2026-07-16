@@ -6,6 +6,7 @@
  * See ./README.md for the architecture overview.
  */
 export * from './shared';
+export * from './architecture';
 export * from './actions';
 export * from './providers';
 export * from './models';

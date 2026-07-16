@@ -47,8 +47,17 @@ export {
   type CompileAgentContextOptions,
   type AgentContext,
   type AgentPermission,
+  type AgentKnowledge,
   type AgentSourcePolicy,
 } from './runtime';
+export {
+  AgentExecutionAccessError,
+  authorizeAgentExecution,
+  executionPrincipalSchema,
+  type ExecutionAccessDataSource,
+  type ExecutionPrincipal,
+  type ResolvedExecutionPrincipal,
+} from './access';
 export {
   createAgentService,
   createAgentInputSchema,

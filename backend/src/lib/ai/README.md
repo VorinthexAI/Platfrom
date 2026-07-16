@@ -28,6 +28,13 @@ context compiler then resolves runtime variables, reusable memories, explicit
 artifact sources, permissions, guardrails, and exploration policy. Agents only
 receive this value; they never receive repositories or query storage.
 
+Before context compilation, the execution entry point requires a trusted
+server-side principal. Member execution resolves an active `userOrganizations`
+document, its user, and the matching `scopeMembers` document. All three must
+belong to the agent's organization and scope. This identity is never accepted
+inside the client request body. Trusted internal workflows such as Genesis use
+an explicit system principal instead.
+
 `AgentContext` contains:
 
 1. organization, scope, and agent identity;
@@ -138,6 +145,10 @@ Execution storage is deliberately split:
 - `agentRunSources`: explicit ordered inputs;
 - `agentArtifactChecks`: duplicate and novelty decisions;
 - `agentMemories`: explicitly selected reusable knowledge only.
+
+Every new run also records `principalType` and, for member executions,
+`userOrganizationKey`, making the organization and scope authorization path
+auditable without placing user profile data in model context.
 
 Legacy run documents that cannot supply trustworthy foreign keys or token
 usage are retained in `agentRunsLegacy`; they are never fabricated into the
