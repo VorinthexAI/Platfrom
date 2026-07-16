@@ -115,6 +115,15 @@ describe('persisted agent pipeline', () => {
     expect(f.callStore[0]?.totalTokens).toBe(13);
   });
 
+  test('supports validated rejected outputs and stable multi-step workflows', async () => {
+    const f = fixture({ metadata: { status: 'rejected', reason: 'Required tool is unavailable', score: 0.9 }, validation: { readyToPersist: false } });
+    let finalized = false;
+    const result = await runStoredAgentTool(f.params, { ...f.options, allowRejectedOutput: true, stepSlugs: ['understand-request', 'answer-request'], beforeFinalize: async () => { finalized = true; } });
+    expect(result.executed).toBe(true); expect(result.run.status).toBe('rejected'); expect(finalized).toBe(true);
+    expect(f.stepStore.map((step) => step.stepSlug)).toEqual(['understand-request', 'answer-request']);
+    expect(f.stepStore.every((step) => step.status === 'completed')).toBe(true);
+  });
+
   test('resolves explicit sources into context and persists source provenance', async () => {
     const f = fixture(); const nodeKey = newId();
     const artifactResolvers = new ArtifactResolverRegistry().register('blog-post', {

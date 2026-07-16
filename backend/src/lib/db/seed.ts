@@ -12,6 +12,9 @@ import { getRootOrganization, insertOrganization, updateOrganization, type Organ
 import { getProductByProductId, insertProduct, updateProduct, type Product } from './products.node';
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
+import { getDefaultScopeRepository } from '@/lib/ai/scopes';
+import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers';
+import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/genesis/seed';
 
 export type SeedResult = {
   collection: string;
@@ -706,6 +709,35 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const results = await seedAiRuntimeNodes();
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
+  const rootOrganization = await getRootOrganization();
+  if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'Genesis');
+  const scopes = getDefaultScopeRepository();
+  const organizationScopes = await scopes.listScopes(rootOrganization.key);
+  let genesisScope = organizationScopes.find((scope) => scope.slug === GENESIS_SCOPE_SLUG);
+  if (!genesisScope) {
+    genesisScope = await scopes.createScope({ organizationKey: rootOrganization.key, slug: GENESIS_SCOPE_SLUG, name: 'Agent Builder', description: 'Scope for Genesis and the creation of validated Vorinthex agents.' });
+    const rootScope = organizationScopes.find((scope) => scope.slug === 'vorinthex-ai');
+    if (rootScope) {
+      const children = await scopes.listChildRelations(rootScope.key);
+      const nextPosition = children.reduce((maximum, relation) => Math.max(maximum, relation.position), 0) + 1;
+      await scopes.addScopeRelation(rootScope.key, genesisScope.key, nextPosition);
+    }
+    results.push({ collection: 'scopes', key: genesisScope.key, status: 'created' });
+  }
+  const openAi = await getProviderBySlug('openai');
+  if (!openAi) throw new SeedReferenceError('provider', 'openai', 'Genesis');
+  const organizationProviders = getDefaultOrganizationProviderRepository();
+  if (!await organizationProviders.hasProvider(rootOrganization.key, openAi.key)) {
+    const relation = await organizationProviders.addProvider(rootOrganization.key, openAi.key);
+    results.push({ collection: 'organizationProviders', key: relation.key, status: 'created' });
+  }
+  const genesis = await seedGenesis(rootOrganization.key);
+  results.push(
+    { collection: 'skills', key: genesis.skill.key, status: 'updated' },
+    { collection: 'agents', key: genesis.agent.key, status: 'updated' },
+    { collection: 'agentSkills', key: genesis.agentSkill.key, status: 'updated' },
+    { collection: 'agentTools', key: genesis.agentTool.key, status: 'updated' },
+  );
 
   for (const product of SEEDED_PRODUCTS) {
     results.push(await upsertSeedProduct(product));
