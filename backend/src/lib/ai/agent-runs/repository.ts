@@ -2,7 +2,7 @@ import { db } from '@/lib/db/client';
 import { z } from 'zod';
 import { isArangoNotFoundError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
-import { AGENT_RUNS_COLLECTION, agentRunSchema, type AgentRun } from './schema';
+import { AGENT_RUNS_COLLECTION, agentRunObjectSchema, agentRunSchema, type AgentRun } from './schema';
 import { AgentRunNotFoundError, type AgentRunRepository, type AgentRunsDatabase } from './types';
 
 export function createAgentRunRepository(database: AgentRunsDatabase = db): AgentRunRepository {
@@ -15,7 +15,7 @@ export function createAgentRunRepository(database: AgentRunsDatabase = db): Agen
     },
 
     async getRunById(key) {
-      const validKey = agentRunSchema.shape.key.parse(key);
+      const validKey = agentRunObjectSchema.shape.key.parse(key);
       try {
         const doc = await database.collection(AGENT_RUNS_COLLECTION).document(validKey);
         return agentRunSchema.parse(withArangoKey(doc as Record<string, unknown>));
@@ -26,8 +26,8 @@ export function createAgentRunRepository(database: AgentRunsDatabase = db): Agen
     },
 
     async updateRun(key, input) {
-      const validKey = agentRunSchema.shape.key.parse(key);
-      const patch = agentRunSchema.pick({ status: true, reason: true, score: true, endedAt: true, elapsedMs: true }).parse(input);
+      const validKey = agentRunObjectSchema.shape.key.parse(key);
+      const patch = agentRunObjectSchema.pick({ status: true, reason: true, score: true, endedAt: true, elapsedMs: true }).parse(input);
       try {
         const result = await database.collection(AGENT_RUNS_COLLECTION).update(validKey, patch, { returnNew: true });
         return agentRunSchema.parse(withArangoKey((result as { new: Record<string, unknown> }).new));
@@ -38,7 +38,7 @@ export function createAgentRunRepository(database: AgentRunsDatabase = db): Agen
     },
 
     async listRunsForOrganization(organizationKey, limit = 50) {
-      const validOrganizationKey = agentRunSchema.shape.organizationKey.parse(organizationKey);
+      const validOrganizationKey = agentRunObjectSchema.shape.organizationKey.parse(organizationKey);
       const validLimit = z.number().int().min(1).max(500).parse(limit);
       const cursor = await database.query(
         `

@@ -14,11 +14,13 @@ export const agentOutputMetadataSchema = z.object({
   score: z.number().min(0).max(1),
 }).strict();
 
-export const agentRunSchema = z.object({
+export const agentRunObjectSchema = z.object({
   key: z.string().cuid(),
   organizationKey: z.string().cuid(),
   scopeKey: z.string().cuid(),
   agentKey: z.string().cuid(),
+  principalType: z.enum(['member', 'system']).default('system'),
+  userOrganizationKey: z.string().cuid().nullable().default(null),
   status: z.enum(AGENT_RUN_STATUSES),
   reason: maxTenWordsSchema,
   score: z.number().min(0).max(1),
@@ -27,6 +29,15 @@ export const agentRunSchema = z.object({
   elapsedMs: z.number().int().nonnegative(),
   createdAt: z.string().datetime(),
 }).strict();
+
+export const agentRunSchema = agentRunObjectSchema.superRefine((run, ctx) => {
+  if (run.principalType === 'member' && run.userOrganizationKey === null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['userOrganizationKey'], message: 'Member runs require userOrganizationKey' });
+  }
+  if (run.principalType === 'system' && run.userOrganizationKey !== null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['userOrganizationKey'], message: 'System runs cannot reference userOrganizationKey' });
+  }
+});
 
 export type AgentOutputMetadata = z.infer<typeof agentOutputMetadataSchema>;
 export type AgentRun = z.infer<typeof agentRunSchema>;

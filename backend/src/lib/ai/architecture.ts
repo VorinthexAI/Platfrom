@@ -1,0 +1,64 @@
+/** Canonical, runtime-inspectable contract for the complete agent architecture. */
+export const AGENT_ARCHITECTURE = {
+  organization: {
+    users: 'users',
+    scopes: 'scopes',
+    enabledProviders: 'organizationProviders',
+    agentRuns: 'agentRuns',
+  },
+  registries: {
+    agents: 'agents',
+    skills: 'skills',
+    tools: 'tools',
+    actions: 'actions',
+    models: 'models',
+    providers: 'providers',
+  },
+  linkingNodes: {
+    userOrganizations: 'userOrganizations',
+    scopeScopes: 'scopeScopes',
+    scopeMembers: 'scopeMembers',
+    agentSkills: 'agentSkills',
+    agentTools: 'agentTools',
+    toolActions: 'toolActions',
+    modelActions: 'modelActions',
+    modelProviders: 'modelProviders',
+    agentRunSources: 'agentRunSources',
+  },
+  runtime: {
+    agentContext: [
+      'organization',
+      'scope',
+      'agent',
+      'skills',
+      'tools',
+      'knowledge',
+      'permissions',
+      'guardrails',
+      'currentTask',
+    ],
+  },
+  execution: ['tool', 'action', 'router', 'model', 'provider'],
+  response: 'response',
+  executionHistory: {
+    agentRun: 'agentRuns',
+    agentRunSteps: 'agentRunSteps',
+    agentRunCalls: 'agentRunCalls',
+    agentArtifacts: 'agentArtifacts',
+    agentArtifactChecks: 'agentArtifactChecks',
+    agentMemories: 'agentMemories',
+  },
+} as const;
+
+export const AGENT_EXECUTION_SEQUENCE = [
+  'agentContext',
+  'tool',
+  'action',
+  'router',
+  'model',
+  'provider',
+  'response',
+  'agentRun',
+  'agentRunSteps',
+  'agentRunCalls',
+] as const;

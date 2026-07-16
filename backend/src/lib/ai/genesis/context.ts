@@ -21,12 +21,13 @@ export class GenesisOrganizationMismatchError extends AiError {
 }
 
 export interface GenesisKnowledge {
+  pack: AgentContext['knowledge']['pack'];
   existingAgents: readonly Agent[];
   existingSkills: readonly Skill[];
   existingTools: readonly Tool[];
   sources: AgentContext['artifacts'];
 }
-export interface GenesisContext extends Omit<AgentContext, 'guardrails'> {
+export interface GenesisContext extends Omit<AgentContext, 'guardrails' | 'knowledge'> {
   guardrails: GenesisGuardrails;
   knowledge: GenesisKnowledge;
 }
@@ -176,7 +177,7 @@ export async function compileGenesisContext(input: GenesisRunInput, options: Com
     ...base,
     guardrails,
     sourcePolicy,
-    knowledge: { existingAgents: agents, existingSkills: skills, existingTools: tools, sources: base.artifacts },
+    knowledge: { pack: base.knowledge.pack, existingAgents: agents, existingSkills: skills, existingTools: tools, sources: base.artifacts },
   };
 }
 
@@ -191,7 +192,7 @@ export function renderGenesisContext(context: GenesisContext): string {
     variables: context.variables,
     memories: context.memories.map(({ content, memoryType, importance }) => ({ content, memoryType, importance })),
     knowledge: {
-      pack: context.knowledgePack,
+      pack: context.knowledge.pack,
       sources: context.knowledge.sources,
     },
     permissions: context.permissions,

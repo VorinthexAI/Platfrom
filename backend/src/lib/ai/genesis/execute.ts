@@ -60,6 +60,7 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
     sources: parsed.sourceRefs,
   }, {
     ...options,
+    principal: options.principal ?? { kind: 'system' },
     artifactResolvers,
     allowRejectedOutput: true,
     reasoningActionSlug: 'core.reason',

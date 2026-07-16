@@ -68,7 +68,7 @@ describe('persisted agent runtime', () => {
     const compiler = new ReverseContextCompiler({ registry: new NodeResolverRegistry().register(resolver), generateEmbedding: async () => [1, 0] });
     const context = await compileAgentContext(runtime, { currentTask: 'Plan the deployment.', reverseContextCompiler: compiler, knowledgeNodeTypes: ['document'], variables: { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } }, memories: { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } } });
     const rendered = compileAgentRuntimeContext(context);
-    expect(context.knowledgePack.blocks[0]).toMatchObject({ nodeType: 'document', title: 'Deployment Guide', content: null });
+    expect(context.knowledge.pack.blocks[0]).toMatchObject({ nodeType: 'document', title: 'Deployment Guide', content: null });
     expect(rendered).toContain('Deployment Guide');
     expect(rendered).not.toContain('hidden-storage-key');
     expect(rendered).not.toContain('embeddingFields');

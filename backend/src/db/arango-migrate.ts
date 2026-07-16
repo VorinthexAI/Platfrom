@@ -708,6 +708,14 @@ async function main() {
     `);
   }
   await ensureAgentRunsCollection(targetDb);
+  await targetDb.query(`
+    FOR run IN agentRuns
+      FILTER !HAS(run, "principalType") || !HAS(run, "userOrganizationKey")
+      UPDATE run WITH {
+        principalType: HAS(run, "principalType") ? run.principalType : "system",
+        userOrganizationKey: HAS(run, "userOrganizationKey") ? run.userOrganizationKey : null
+      } IN agentRuns
+  `);
   await ensureAgentRunStepsCollection(targetDb);
   await ensureAgentRunCallsCollection(targetDb);
   const agentArtifacts = targetDb.collection('agentArtifacts');
