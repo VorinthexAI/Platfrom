@@ -32,9 +32,9 @@
     ],
     "agentTools": [
       {
-        "key": "cmgenesisagenttool00000001",
+        "key": "cmgenesisagenttoolcreate00001",
         "agentSlug": "genesis",
-        "toolSlug": "reason.solve"
+        "toolSlug": "agent.create"
       }
     ]
   }

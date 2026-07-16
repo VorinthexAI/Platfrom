@@ -16,6 +16,8 @@ export interface ExecuteRouteOptions<TInput> {
   onAttempt?: (attempt: RouteAttemptTelemetry) => void;
 }
 export interface RouteAttemptTelemetry {
+  actionKey: string;
+  actionSlug: string;
   modelKey: string;
   providerKey: string;
   status: 'completed' | 'failed';
@@ -44,12 +46,12 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
       signal: options.signal,
     });
     const endedAtMs = Date.now();
-    options.onAttempt?.({ modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'completed', usage: response.usage, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
+    options.onAttempt?.({ actionKey: decision.actionKey, actionSlug: decision.actionSlug, modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'completed', usage: response.usage, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     return response;
   } catch (error) {
     const endedAtMs = Date.now();
     const normalized = normalizeProviderError(decision.providerSlug, error);
-    options.onAttempt?.({ modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'failed', usage: ZERO_TOKEN_USAGE, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs, errorCode: normalized.code });
+    options.onAttempt?.({ actionKey: decision.actionKey, actionSlug: decision.actionSlug, modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'failed', usage: ZERO_TOKEN_USAGE, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs, errorCode: normalized.code });
     throw new ProviderExecutionError(decision.actionSlug, [{ modelId: decision.modelSlug, providerId: decision.providerSlug, externalModelId: decision.providerModelId, code: normalized.code, message: normalized.message }], { cause: normalized });
   }
 }

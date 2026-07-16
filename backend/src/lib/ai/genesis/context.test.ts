@@ -9,7 +9,9 @@ describe('Genesis context compilation', () => {
     const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a backend agent.' }, f);
     expect(context.knowledge.existingAgents.map((agent) => agent.slug)).toEqual(['genesis']);
     expect(context.knowledge.existingSkills.map((skill) => skill.slug)).toEqual(['agent-architect', 'backend-developer']);
-    expect(context.knowledge.existingTools.map((tool) => tool.slug)).toEqual(['reason.solve']);
+    expect(context.knowledge.existingTools.map((tool) => tool.slug)).toEqual(['agent.create', 'reason.solve']);
+    expect(context.tools.map(({ tool }) => tool.slug)).toEqual(['agent.create']);
+    expect(context.guardrails).toMatchObject({ allowedToolSlugs: ['agent.create'], allowedActionSlugs: ['agent.create'], canCreateAgents: true, canCreateTools: false, canWriteArbitraryNodes: false });
     expect(context.sourcePolicy).toEqual({ requestedExplorationRate: 0.2, effectiveExplorationRate: 1, sourceCount: 0 });
     expect(renderGenesisContext(context)).not.toContain('embedding');
   });

@@ -65,6 +65,17 @@ export const SEEDED_ACTIONS = [
     enabled: true,
   },
   {
+    key: 'cmgenesisactioncreateagent001',
+    slug: 'agent.create',
+    name: 'Create Agent',
+    description: 'Validates and transactionally creates or reuses an agent, its required skills, skill relations, and allowed tool relations.',
+    objective: 'Persist a complete validated agent architecture from a Genesis creation manifest.',
+    inputDescription: 'A validated Genesis agent creation manifest containing an agent operation, skill operations, agent skill relations, and existing tools to attach.',
+    outputDescription: 'The persisted or reused agent, created skills, linking nodes, provenance artifacts, and validation result.',
+    handlerKey: 'agent.create',
+    enabled: true,
+  },
+  {
     key: 'cm9action03vorinthexseed',
     slug: 'web.search',
     name: 'Web Search',
@@ -303,6 +314,14 @@ export const SEEDED_TOOLS = [
     enabled: true,
   },
   {
+    key: 'cmgenesistoolcreateagent0001',
+    slug: 'agent.create',
+    name: 'Create Agent',
+    description: 'Creates or reuses a complete agent architecture from a validated Genesis manifest.',
+    scopeKey: null,
+    enabled: true,
+  },
+  {
     key: 'cmrnc3nfh00023o7kg2pr2xns',
     slug: 'image.create',
     name: 'Create Image',
@@ -331,6 +350,7 @@ export const SEEDED_TOOLS = [
 export const SEEDED_TOOL_ACTIONS = [
   { key: 'cmrnc3nfh00053o7k3hfm3a82', toolSlug: 'ask.answer', actionSlug: 'core.ask', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00063o7keg8h70ut', toolSlug: 'reason.solve', actionSlug: 'core.reason', priority: 100, enabled: true },
+  { key: 'cmgenesistoolactioncreate001', toolSlug: 'agent.create', actionSlug: 'agent.create', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00073o7kdi1aee17', toolSlug: 'image.create', actionSlug: 'image.generate', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00083o7k3rz39zwp', toolSlug: 'audio.transcribe-file', actionSlug: 'audio.transcribe', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00093o7kfijm2vjk', toolSlug: 'speech.narrate', actionSlug: 'audio.generate-speech', priority: 100, enabled: true },

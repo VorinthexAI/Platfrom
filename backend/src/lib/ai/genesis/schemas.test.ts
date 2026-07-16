@@ -5,6 +5,7 @@ import {
   genesisAgentCreateSchema,
   genesisAgentReuseSchema,
   genesisCreationManifestSchema,
+  genesisGuardrailsSchema,
   genesisSourcePolicySchema,
 } from './schemas';
 
@@ -42,5 +43,14 @@ describe('Genesis manifest schemas', () => {
     expect(genesisSourcePolicySchema.parse({ requestedExplorationRate: 0.2, effectiveExplorationRate: 1, sourceCount: 0 }).effectiveExplorationRate).toBe(1);
     expect(genesisSourcePolicySchema.parse({ requestedExplorationRate: 0.2, effectiveExplorationRate: 0.2, sourceCount: 1 }).effectiveExplorationRate).toBe(0.2);
     expect(() => genesisSourcePolicySchema.parse({ requestedExplorationRate: 0.2, effectiveExplorationRate: 0.2, sourceCount: 0 })).toThrow();
+  });
+  test('permits only the exact agent.create capability boundary', () => {
+    const value = { organizationKey: newId(), scopeKey: newId(), allowedToolSlugs: ['agent.create'], allowedActionSlugs: ['agent.create'], canCreateAgents: true, canCreateSkills: true, canCreateAgentSkills: true, canCreateAgentTools: true, canCreateTools: false, canCreateActions: false, canCreateModels: false, canCreateProviders: false, canEnableProviders: false, canWriteArbitraryNodes: false, requireExistingTools: true, requireNoveltyValidation: true, requireTransactionalWrite: true, requireSameOrganization: true, requireScopePermission: true };
+    const parsed = genesisGuardrailsSchema.parse(value);
+    expect(parsed.allowedToolSlugs).toEqual(['agent.create']);
+    expect(parsed.canCreateTools).toBe(false);
+    expect(() => genesisGuardrailsSchema.parse({ ...value, canCreateTools: true })).toThrow();
+    expect(() => genesisGuardrailsSchema.parse({ ...value, allowedToolSlugs: ['reason.solve'] })).toThrow();
+    expect(() => genesisGuardrailsSchema.parse({ ...value, canWriteArbitraryNodes: true })).toThrow();
   });
 });

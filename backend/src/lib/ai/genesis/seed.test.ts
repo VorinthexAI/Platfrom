@@ -13,14 +13,15 @@ function fixture(routeValid = true) {
   const now = '2026-07-16T00:00:00.000Z';
   const organization = organizationSchema.parse({ key: newId(), name: 'Vorinthex', createdAt: now, updatedAt: now });
   const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build agents.' });
-  const reason = toolSchema.parse({ key: newId(), slug: 'reason.solve', name: 'Reason', description: 'Reason', scopeKey: null, enabled: true });
+  const create = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create agent', scopeKey: null, enabled: true });
   const calls: string[] = [];
   const source: GenesisSeedDataSource = {
-    async requireOrganization() { calls.push('organization'); return organization; }, async findScope() { calls.push('scope'); return scope; }, async requireReasonTool() { calls.push('tool'); return reason; }, async verifyReasonRoute() { calls.push('route'); return routeValid; },
+    async requireOrganization() { calls.push('organization'); return organization; }, async findScope() { calls.push('scope'); return scope; }, async requireCreateTool() { calls.push('tool'); return create; }, async removeOtherCreateToolActions() { calls.push('removeOtherActions'); }, async verifyExecutionChain() { calls.push('route'); return routeValid; },
     async upsertSkill(seed, definition) { calls.push('skill'); return skillSchema.parse({ ...seed, definition }); },
     async upsertAgent(seed, scopeKey) { calls.push('agent'); return agentSchema.parse({ ...seed, scopeKey }); },
     async upsertAgentSkill(seed, agentKey, skillKey) { calls.push('agentSkill'); return agentSkillSchema.parse({ ...seed, agentKey, skillKey }); },
     async upsertAgentTool(seed, agentKey, toolKey) { calls.push(`agentTool:${seed.toolSlug}`); return agentToolSchema.parse({ ...seed, agentKey, toolKey }); },
+    async removeOtherAgentTools() { calls.push('removeOtherTools'); },
     async verifyRuntime() { calls.push('runtime'); },
   };
   return { organization, source, calls };
@@ -33,15 +34,15 @@ describe('Genesis canonical seed', () => {
     expect(seed.seed.skills[0]?.key).toBe(AGENT_ARCHITECT_SKILL_KEY);
     expect(seed.seed.agents[0]?.key).toBe(GENESIS_AGENT_KEY);
     expect(seed.seed.agentSkills[0]).toMatchObject({ key: GENESIS_AGENT_SKILL_KEY, priority: 100 });
-    expect(seed.seed.agentTools[0]).toMatchObject({ key: GENESIS_AGENT_TOOL_KEY, toolSlug: 'reason.solve' });
+    expect(seed.seed.agentTools[0]).toMatchObject({ key: GENESIS_AGENT_TOOL_KEY, toolSlug: 'agent.create' });
     expect(definition).toContain('Reuse\n→ Extend\n→ Create');
     expect(definition).toContain('Never invent tools.');
   });
-  test('seeds exactly Agent Architect and Reason Tool in dependency order', async () => {
+  test('seeds exactly Agent Architect and agent.create in dependency order', async () => {
     const f = fixture(); const result = await seedGenesis(f.organization.key, f.source);
     expect(result.agent).toMatchObject({ slug: 'genesis', name: 'Genesis', title: 'Agent Architect', explorationRate: 0.2 });
     expect(result.skill).toMatchObject({ slug: 'agent-architect', name: 'Agent Architecture', title: 'Agent Architect' });
-    expect(f.calls).toEqual(['organization', 'scope', 'tool', 'route', 'skill', 'agent', 'agentSkill', 'agentTool:reason.solve', 'runtime']);
+    expect(f.calls).toEqual(['organization', 'scope', 'tool', 'removeOtherActions', 'route', 'skill', 'agent', 'agentSkill', 'agentTool:agent.create', 'removeOtherTools', 'runtime']);
     expect(f.calls.some((call) => call.includes('ask'))).toBe(false);
   });
   test('refuses to seed without the persisted Mini/OpenAI reason route', async () => {

@@ -7,7 +7,7 @@ import { getAllToolsChunked, type Tool } from '@/lib/db/tools.node';
 import { ArtifactResolverRegistry, type ArtifactResolver, type OwnedArtifactReference, type SourcePermissionResolver } from '@/lib/ai/artifact-resolvers';
 import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
 import type { AgentMemoryRepository } from '@/lib/ai/agent-memories';
-import { genesisRunInputSchema, genesisSourcePolicySchema, type GenesisRunInput } from './schemas';
+import { genesisGuardrailsSchema, genesisRunInputSchema, genesisSourcePolicySchema, type GenesisGuardrails, type GenesisRunInput } from './schemas';
 
 export class GenesisIdentityError extends AiError {
   constructor(detail: string) { super('genesis_identity_invalid', `Invalid Genesis identity: ${detail}`); }
@@ -25,7 +25,10 @@ export interface GenesisKnowledge {
   existingTools: readonly Tool[];
   sources: AgentContext['artifacts'];
 }
-export interface GenesisContext extends AgentContext { knowledge: GenesisKnowledge }
+export interface GenesisContext extends Omit<AgentContext, 'guardrails'> {
+  guardrails: GenesisGuardrails;
+  knowledge: GenesisKnowledge;
+}
 
 export interface GenesisCatalogDataSource {
   listOrganizationScopes(organizationKey: string): Promise<readonly Scope[]>;
@@ -120,8 +123,30 @@ export async function compileGenesisContext(input: GenesisRunInput, options: Com
     effectiveExplorationRate: base.artifacts.length === 0 ? 1 : requestedExplorationRate,
     sourceCount: base.artifacts.length,
   });
+  const guardrails = genesisGuardrailsSchema.parse({
+    organizationKey: parsed.organizationKey,
+    scopeKey: parsed.scopeKey,
+    allowedToolSlugs: ['agent.create'],
+    allowedActionSlugs: ['agent.create'],
+    canCreateAgents: true,
+    canCreateSkills: true,
+    canCreateAgentSkills: true,
+    canCreateAgentTools: true,
+    canCreateTools: false,
+    canCreateActions: false,
+    canCreateModels: false,
+    canCreateProviders: false,
+    canEnableProviders: false,
+    canWriteArbitraryNodes: false,
+    requireExistingTools: true,
+    requireNoveltyValidation: true,
+    requireTransactionalWrite: true,
+    requireSameOrganization: true,
+    requireScopePermission: true,
+  });
   return {
     ...base,
+    guardrails,
     sourcePolicy,
     knowledge: { existingAgents: agents, existingSkills: skills, existingTools: tools, sources: base.artifacts },
   };

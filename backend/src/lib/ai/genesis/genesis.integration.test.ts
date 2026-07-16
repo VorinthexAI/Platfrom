@@ -52,9 +52,11 @@ describe('Genesis end-to-end runtime', () => {
 
     const result = await createAgentFromGenesis({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a Backend Developer agent.', sourceRefs: [{ nodeType: 'skill', nodeKey: f.backend.key, priority: 100 }] }, { ...f, data: routerData, adapters, runs, steps, calls, sources, artifacts, checks, transaction, generateEmbedding: async () => [1, 0] });
     expect(result.persisted).toBe(true); expect(result.manifest.agent).toMatchObject({ operation: 'create', slug: 'forge' });
+    expect(result.context.tools.map(({ tool }) => tool.slug)).toEqual(['agent.create']);
+    expect(result.toolOutput).toMatchObject({ status: 'created', agentKey: result.created?.agent.key, reusedSkillKeys: [f.backend.key] });
     expect(adapterRequests[0]).toMatchObject({ modelId: model.slug, externalModelId: 'gpt-5.4-mini', actionId: 'core.reason' });
     expect(runsStore[0]?.status).toBe('completed'); expect(stepsStore.map((step) => step.stepSlug)).toEqual([...GENESIS_STEP_SLUGS]);
-    expect(callsStore[0]).toMatchObject({ modelKey: model.key, providerKey: provider.key, totalTokens: 30 });
+    expect(callsStore[0]).toMatchObject({ toolKey: f.createTool.key, actionKey: f.reasonAction.key, modelKey: model.key, providerKey: provider.key, totalTokens: 30 });
     expect(sourcesStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key });
     expect(artifactsStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key, relation: 'source' });
     expect(checksStore[0]?.candidateNodeType).toBe('agent');

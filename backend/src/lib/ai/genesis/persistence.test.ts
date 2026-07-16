@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { AgentArtifactCheckRepository } from '@/lib/ai/agent-artifact-checks';
 import type { GenesisTransactionGateway, GenesisTransactionWriter } from './persistence';
-import { persistGenesisManifest } from './persistence';
+import { GENESIS_TRANSACTION_COLLECTIONS, persistGenesisManifest } from './persistence';
 import { compileGenesisContext } from './context';
 import { GENESIS_STEP_SLUGS } from './schemas';
 import { validateGenesisManifest } from './validation';
@@ -55,12 +55,18 @@ describe('Genesis transactional persistence', () => {
     expect(transaction.rows('agentTools')).toHaveLength(1);
     expect(result.agent.key).toBe(validated.plan.agentKey!);
     expect(result.artifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ nodeType: 'scope', nodeKey: f.scope.key, relation: 'source' }),
       expect.objectContaining({ nodeType: 'agent', relation: 'result' }),
       expect.objectContaining({ nodeType: 'skill', nodeKey: f.backend.key, relation: 'source' }),
       expect.objectContaining({ nodeType: 'tool', nodeKey: f.reasonTool.key, relation: 'source' }),
       expect.objectContaining({ nodeType: 'agent-skill', relation: 'result' }),
       expect.objectContaining({ nodeType: 'agent-tool', relation: 'result' }),
     ]));
+  });
+  test('declares the exact restricted read and write transaction boundary', () => {
+    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String).sort()).toEqual(['agentArtifactChecks', 'agentArtifacts', 'agentSkills', 'agentTools', 'agents', 'skills'].sort());
+    expect(GENESIS_TRANSACTION_COLLECTIONS.read.map(String).sort()).toEqual(['actions', 'agentRunSources', 'agents', 'organizations', 'scopeMembers', 'scopes', 'skills', 'toolActions', 'tools'].sort());
+    for (const forbidden of ['tools', 'actions', 'models', 'providers', 'modelActions', 'modelProviders', 'organizationProviders']) expect(GENESIS_TRANSACTION_COLLECTIONS.write).not.toContain(forbidden);
   });
   test('rolls back every staged write when agentSkill creation fails', async () => {
     const { context, validated } = await setup(); const transaction = new MemoryTransaction('agentSkills');

@@ -125,15 +125,19 @@ new call ledger.
 
 Genesis is the only manually seeded agent. It lives in the `agent-builder`
 scope, has the single `Agent Architect` skill at priority 100, and is granted
-Reason Tool (`reason.solve`) only. Its persisted `core.reason` route is GPT-5.4
-Mini through an OpenAI provider enabled for the organization. The canonical,
+only the local `agent.create` tool mapped only to the `agent.create` action.
+Reasoning still uses the persisted `core.reason` route to GPT-5.4 Mini through
+an OpenAI provider enabled for the organization, but Reason Tool is not granted
+to Genesis. The canonical,
 version-controlled seed inputs are `genesis/seed/genesis.seed.json` and
 `genesis/seed/agent-architect.skill.md`.
 
 `createAgentFromGenesis` compiles a fresh `AgentContext`, presents the complete
 organization-owned agent/skill/tool catalog plus explicit sources, and requires
 a strict creation manifest. Genesis proposes only; the backend reparses the
-manifest, resolves references, enforces scope and tool permissions, applies
+manifest, then invokes the local `agent.create` handler. That handler reparses
+the complete input, verifies the exact Genesis capability guardrails, resolves
+references, enforces scope and tool permissions, applies
 Reuse -> Extend -> Create, embeds candidates, and runs novelty checks before
 any domain write. Agent similarity uses review/reject thresholds 0.85/0.95;
 skills use 0.80/0.90, with at most five comparisons for each.
@@ -146,6 +150,11 @@ whole creation transaction. Rejected manifests remain auditable runs but do not
 create configuration. The run ledger uses twelve stable Genesis step slugs and
 records explicit sources, reused dependencies, and created results as artifact
 provenance.
+
+The handler's write allow-list is exactly `agents`, `skills`, `agentSkills`,
+`agentTools`, `agentArtifacts`, and `agentArtifactChecks`. It cannot create
+tools, actions, models, providers, provider grants, or arbitrary documents.
+Seed reconciliation removes every other persisted Genesis tool grant.
 
 ## Provider configuration
 
