@@ -22,7 +22,8 @@ lower-camel-case collection names.
 ## Runtime compilation
 
 Every execution calls `loadAgentRuntime` and `compileAgentContext` afresh. The
-loader resolves the organization and scope, orders linked skills by descending
+loader resolves the agent's effective scope through `scopeAgents`, resolves its
+organization, orders linked skills by descending
 `priority`, and loads explicitly granted tools and their enabled actions. The
 context compiler then resolves runtime variables, reusable memories, explicit
 artifact sources, permissions, guardrails, and exploration policy. Agents only
@@ -41,7 +42,7 @@ an explicit system principal instead.
 2. ordered skills and explicitly granted tools;
 3. precedence-resolved runtime variables and scoped memories;
 4. compact artifact references, never full documents by default;
-5. derived permissions and `{ "scopeId": agent.scopeKey }` guardrails;
+5. derived permissions and `{ "scopeId": scopeAgents.scopeKey }` guardrails;
 6. source policy and the current task.
 
 Agents persist only `explorationRate` (`0` through `1`). Context exposes the
@@ -149,6 +150,13 @@ Execution storage is deliberately split:
 Every new run also records `principalType` and, for member executions,
 `userOrganizationKey`, making the organization and scope authorization path
 auditable without placing user profile data in model context.
+
+The generic `events` timeline records only stable lifecycle slugs:
+`agent.*`, `step.*`, `tool.*`, `model.*`, `artifact.created`,
+`artifact.used`, and `guardrail.blocked`. Payloads contain relation keys,
+status, timing, and token counts only. Full inputs, outputs, and artifacts stay
+in the run, call, and domain collections. Every runtime event takes `scopeId`
+from the loaded `scopeAgents` relation, never from a client request.
 
 Legacy run documents that cannot supply trustworthy foreign keys or token
 usage are retained in `agentRunsLegacy`; they are never fabricated into the

@@ -4,9 +4,10 @@ import { insertEvent } from '@/lib/db/events.node';
 import { newId } from '@/lib/ids';
 import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { strictObject } from './validation';
+import { userEventSlugs } from '@/platform/event-catalog';
 
 const emailHashSchema = z.string().regex(/^[a-f0-9]{64}$/);
-export const userEventSlugSchema = z.string().min(1).max(200);
+export const userEventSlugSchema = z.enum(userEventSlugs);
 
 export const userEventSchema = strictObject({
   distinctId: z.string().min(1).optional(),

@@ -8,6 +8,7 @@ import { getSkillById, type Skill } from '@/lib/db/skills.node';
 import { listToolActionsByToolKey, type ToolAction } from '@/lib/db/tool-actions.node';
 import { getToolById, type Tool } from '@/lib/db/tools.node';
 import { getOrganizationById, type Organization } from '@/lib/db/organizations.node';
+import { getScopeAgentByAgentKey, type ScopeAgent } from '@/lib/db/scope-agents.node';
 import { assertToolAllowedByGuardrails, type Guardrail } from '@/lib/ai/guardrails';
 import { getDefaultRuntimeVariableRepository, type RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
 import { getDefaultAgentMemoryRepository, type AgentMemory, type AgentMemoryRepository } from '@/lib/ai/agent-memories';
@@ -41,6 +42,7 @@ export interface AgentRuntimeContext {
 }
 export interface AgentRuntimeDataSource {
   getAgent(key: string): Promise<Agent | null>;
+  getScopeAgent(agentKey: string): Promise<ScopeAgent | null>;
   getScope(key: string): Promise<Scope | null>;
   getOrganization(key: string): Promise<Organization | null>;
   listAgentSkills(agentKey: string): Promise<AgentSkill[]>;
@@ -52,6 +54,7 @@ export interface AgentRuntimeDataSource {
 }
 const defaultDataSource: AgentRuntimeDataSource = {
   getAgent: getAgentById,
+  getScopeAgent: getScopeAgentByAgentKey,
   getScope: (key) => getDefaultScopeRepository().getScopeByKey(key),
   getOrganization: getOrganizationById,
   listAgentSkills: listAgentSkillsByAgentKey,
@@ -62,13 +65,19 @@ const defaultDataSource: AgentRuntimeDataSource = {
   getAction: getActionById,
 };
 
+export interface LoadAgentRuntimeOptions {
+  onGuardrailBlocked?: (input: { scopeId: string; agentKey: string; toolKey: string; reason: string }) => void | Promise<void>;
+}
+
 /** Loads the complete persisted authorization and competence graph for one agent. */
-export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDataSource = defaultDataSource): Promise<AgentRuntimeContext> {
+export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDataSource = defaultDataSource, options: LoadAgentRuntimeOptions = {}): Promise<AgentRuntimeContext> {
   const validAgentKey = agentSchema.shape.key.parse(agentKey);
   const agent = await source.getAgent(validAgentKey);
   if (!agent) throw new AgentRuntimeNotFoundError('Agent', validAgentKey);
-  const scope = await source.getScope(agent.scopeKey);
-  if (!scope) throw new AgentRuntimeNotFoundError('Scope', agent.scopeKey);
+  const scopeAgent = await source.getScopeAgent(agent.key);
+  if (!scopeAgent) throw new AgentRuntimeNotFoundError('ScopeAgent', agent.key);
+  const scope = await source.getScope(scopeAgent.scopeKey);
+  if (!scope) throw new AgentRuntimeNotFoundError('Scope', scopeAgent.scopeKey);
   const organization = await source.getOrganization(scope.organizationKey);
   if (!organization) throw new AgentRuntimeNotFoundError('Organization', scope.organizationKey);
 
@@ -86,7 +95,12 @@ export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDat
     const tool = await source.getTool(relation.toolKey);
     if (!tool) throw new AgentRuntimeNotFoundError('Tool', relation.toolKey);
     if (!tool.enabled) throw new AgentRuntimeInvalidError(`agent ${agent.key} is linked to disabled tool ${tool.key}`);
-    assertToolAllowedByGuardrails(agent.key, [{ scopeId: agent.scopeKey }], { id: tool.slug, scopeId: tool.scopeKey });
+    try {
+      assertToolAllowedByGuardrails(agent.key, [{ scopeId: scope.key }], { id: tool.slug, scopeId: tool.scopeKey });
+    } catch (error) {
+      await options.onGuardrailBlocked?.({ scopeId: scope.key, agentKey: agent.key, toolKey: tool.key, reason: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500) });
+      throw error;
+    }
     const actionRelations = (await source.listToolActions(tool.key)).filter((link) => link.enabled);
     actionRelations.sort((left, right) => right.priority - left.priority || left.key.localeCompare(right.key));
     const actions = await Promise.all(actionRelations.map(async (actionRelation) => {

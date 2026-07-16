@@ -50,10 +50,12 @@ describe('Genesis transactional persistence', () => {
     const { context, validated, f } = await setup(); const transaction = new MemoryTransaction(); const runKey = newId();
     const result = await persistGenesisManifest({ runKey, context, validated }, transaction);
     expect(transaction.rows('agents')).toHaveLength(1);
+    expect(transaction.rows('scopeAgents')).toHaveLength(1);
     expect(transaction.rows('skills')).toHaveLength(1);
     expect(transaction.rows('agentSkills')).toHaveLength(2);
     expect(transaction.rows('agentTools')).toHaveLength(1);
     expect(result.agent.key).toBe(validated.plan.agentKey!);
+    expect(result.scopeAgent).toMatchObject({ scopeKey: f.scope.key, agentKey: result.agent.key });
     expect(result.artifacts).toEqual(expect.arrayContaining([
       expect.objectContaining({ nodeType: 'scope', nodeKey: f.scope.key, relation: 'source' }),
       expect.objectContaining({ nodeType: 'agent', relation: 'result' }),
@@ -64,7 +66,7 @@ describe('Genesis transactional persistence', () => {
     ]));
   });
   test('declares the exact restricted read and write transaction boundary', () => {
-    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String).sort()).toEqual(['agentArtifactChecks', 'agentArtifacts', 'agentSkills', 'agentTools', 'agents', 'skills'].sort());
+    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String).sort()).toEqual(['agentArtifactChecks', 'agentArtifacts', 'agentSkills', 'agentTools', 'agents', 'scopeAgents', 'skills'].sort());
     expect(GENESIS_TRANSACTION_COLLECTIONS.read.map(String).sort()).toEqual(['actions', 'agentRunSources', 'agents', 'organizations', 'scopeMembers', 'scopes', 'skills', 'toolActions', 'tools'].sort());
     for (const forbidden of ['tools', 'actions', 'models', 'providers', 'modelActions', 'modelProviders', 'organizationProviders']) expect(GENESIS_TRANSACTION_COLLECTIONS.write).not.toContain(forbidden);
   });

@@ -7,6 +7,7 @@ import { toolSchema } from '@/lib/db/tools.node';
 import { actionSchema } from '@/lib/db/actions.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { agentToolSchema } from '@/lib/db/agent-tools.node';
+import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import type { AgentRuntimeDataSource } from '@/lib/ai/agents';
 import type { GenesisCatalogDataSource } from './context';
@@ -16,6 +17,7 @@ export function buildGenesisFixture() {
   const organization = organizationSchema.parse({ key: newId(), name: 'Vorinthex', createdAt: now, updatedAt: now });
   const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build validated agents.', position: 2, embedding: [0, 1] });
   const genesis = agentSchema.parse({ key: newId(), slug: 'genesis', name: 'Genesis', title: 'Agent Architect', scopeKey: scope.key, explorationRate: 0.2, embedding: [0, 1] });
+  const scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: scope.key, agentKey: genesis.key });
   const architect = skillSchema.parse({ key: newId(), slug: 'agent-architect', name: 'Agent Architecture', title: 'Agent Architect', definition: '# Agent Architect', embedding: [0, 1] });
   const backend = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: '# Backend Developer', embedding: [0, 1] });
   const reasonTool = toolSchema.parse({ key: newId(), slug: 'reason.solve', name: 'Reason', description: 'Reason through agent architecture.', scopeKey: null, enabled: true, embedding: [0, 1] });
@@ -26,7 +28,7 @@ export function buildGenesisFixture() {
   const toolLink = agentToolSchema.parse({ key: newId(), agentKey: genesis.key, toolKey: createTool.key });
   const actionLink = toolActionSchema.parse({ key: newId(), toolKey: createTool.key, actionKey: createAction.key, priority: 100, enabled: true });
   const runtimeData: AgentRuntimeDataSource = {
-    async getAgent(key) { return key === genesis.key ? genesis : null; }, async getScope(key) { return key === scope.key ? scope : null; }, async getOrganization(key) { return key === organization.key ? organization : null; },
+    async getAgent(key) { return key === genesis.key ? genesis : null; }, async getScopeAgent(key) { return key === genesis.key ? scopeAgent : null; }, async getScope(key) { return key === scope.key ? scope : null; }, async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [skillLink]; }, async getSkill(key) { return key === architect.key ? architect : null; },
     async listAgentTools() { return [toolLink]; }, async getTool(key) { return key === createTool.key ? createTool : null; },
     async listToolActions() { return [actionLink]; }, async getAction(key) { return key === createAction.key ? createAction : null; },

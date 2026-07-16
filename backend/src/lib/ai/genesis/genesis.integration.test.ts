@@ -18,6 +18,7 @@ import type { GenesisTransactionGateway } from './persistence';
 import { createAgentFromGenesis } from './execute';
 import { GENESIS_STEP_SLUGS } from './schemas';
 import { buildGenesisFixture } from './test-fixtures';
+import type { RuntimeEventInput } from '@/platform/events';
 
 describe('Genesis end-to-end runtime', () => {
   test('routes through Mini/OpenAI, validates, persists atomically, and exposes the complete ledger', async () => {
@@ -48,9 +49,10 @@ describe('Genesis end-to-end runtime', () => {
     const artifacts: AgentArtifactRepository = { async insertArtifact(input) { const value = agentArtifactSchema.parse({ ...input, key: input.key ?? newId() }); artifactsStore.push(value); return value; }, async listArtifactsForRun(key) { return artifactsStore.filter((item) => item.agentRunKey === key); } };
     const checks: AgentArtifactCheckRepository = { async insertCheck(input) { const value = agentArtifactCheckSchema.parse({ ...input, key: input.key ?? newId(), createdAt: input.createdAt ?? now }); checksStore.push(value); return value; }, async listChecksForRun(key) { return checksStore.filter((item) => item.agentRunKey === key); } };
     const transactionRows = new Map<string, Record<string, unknown>[]>();
+    const runtimeEvents: RuntimeEventInput[] = [];
     const transaction: GenesisTransactionGateway = { async execute(callback) { const staged = new Map<string, Record<string, unknown>[]>(); const result = await callback({ async save(collection, document) { const rows = staged.get(collection) ?? []; rows.push(document); staged.set(collection, rows); } }); for (const [key, rows] of staged) transactionRows.set(key, rows); return result; } };
 
-    const result = await createAgentFromGenesis({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a Backend Developer agent.', sourceRefs: [{ nodeType: 'skill', nodeKey: f.backend.key, priority: 100 }] }, { ...f, data: routerData, adapters, runs, steps, calls, sources, artifacts, checks, transaction, generateEmbedding: async () => [1, 0] });
+    const result = await createAgentFromGenesis({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a Backend Developer agent.', sourceRefs: [{ nodeType: 'skill', nodeKey: f.backend.key, priority: 100 }] }, { ...f, data: routerData, adapters, runs, steps, calls, sources, artifacts, checks, events: async (event) => { runtimeEvents.push(event); }, transaction, generateEmbedding: async () => [1, 0] });
     expect(result.persisted).toBe(true); expect(result.manifest.agent).toMatchObject({ operation: 'create', slug: 'forge' });
     expect(result.context.tools.map(({ tool }) => tool.slug)).toEqual(['agent.create']);
     expect(result.toolOutput).toMatchObject({ status: 'created', agentKey: result.created?.agent.key, reusedSkillKeys: [f.backend.key] });
@@ -60,7 +62,9 @@ describe('Genesis end-to-end runtime', () => {
     expect(sourcesStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key });
     expect(artifactsStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key, relation: 'source' });
     expect(checksStore[0]?.candidateNodeType).toBe('agent');
-    expect(transactionRows.get('agents')).toHaveLength(1); expect(transactionRows.get('agentSkills')).toHaveLength(1); expect(transactionRows.get('agentTools')).toHaveLength(1);
+    expect(transactionRows.get('agents')).toHaveLength(1); expect(transactionRows.get('scopeAgents')).toHaveLength(1); expect(transactionRows.get('agentSkills')).toHaveLength(1); expect(transactionRows.get('agentTools')).toHaveLength(1);
     expect(result.created?.artifacts.some((artifact) => artifact.relation === 'result')).toBe(true);
+    expect(runtimeEvents.filter(({ slug }) => slug === 'artifact.created')).toHaveLength(result.created?.artifacts.filter(({ relation }) => relation === 'result').length ?? 0);
+    expect(runtimeEvents.every(({ scopeId }) => scopeId === f.scope.key)).toBe(true);
   });
 });
