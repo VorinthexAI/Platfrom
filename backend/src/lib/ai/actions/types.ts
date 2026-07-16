@@ -12,6 +12,8 @@ export const ACTION_SLUGS = [
   'core.ask',
   'core.reason',
 
+  'agent.create',
+
   'web.search',
   'web.deep-research',
 

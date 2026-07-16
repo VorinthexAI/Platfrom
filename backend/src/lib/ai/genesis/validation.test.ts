@@ -4,7 +4,7 @@ import { agentArtifactCheckSchema, type AgentArtifactCheck, type AgentArtifactCh
 import { toolSchema } from '@/lib/db/tools.node';
 import { compileGenesisContext } from './context';
 import { GENESIS_STEP_SLUGS } from './schemas';
-import { GenesisManifestReferenceError, validateGenesisManifest } from './validation';
+import { GenesisManifestConsistencyError, GenesisManifestReferenceError, validateGenesisManifest } from './validation';
 import { buildGenesisFixture } from './test-fixtures';
 
 function acceptedManifest(f: ReturnType<typeof buildGenesisFixture>, overrides: Record<string, unknown> = {}) {
@@ -66,5 +66,11 @@ describe('Genesis manifest validation', () => {
     const texts: string[] = [];
     await validateGenesisManifest(acceptedManifest(f, { skills: [skill], agentSkills: [{ skillRef: { type: 'created', skillSlug: skill.slug }, priority: 100 }] }), context, newId(), { checks: checkStore().repository, generateEmbedding: async (text) => { texts.push(text); return [1, 0]; } });
     expect(texts).toContain('Data Engineering\n\nData Engineer\n\n# Data Engineer\n\nBuild pipelines.');
+  });
+  test('rejects unlinked or mismatched skill operations', async () => {
+    const f = buildGenesisFixture(); const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
+    await expect(validateGenesisManifest(acceptedManifest(f, { agentSkills: [] }), context, newId(), { checks: checkStore().repository, generateEmbedding: async () => [1, 0] })).rejects.toThrow();
+    const architectRelation = [{ skillRef: { type: 'existing', skillKey: f.architect.key }, priority: 100 }];
+    await expect(validateGenesisManifest(acceptedManifest(f, { agentSkills: architectRelation }), context, newId(), { checks: checkStore().repository, generateEmbedding: async () => [1, 0] })).rejects.toBeInstanceOf(GenesisManifestConsistencyError);
   });
 });

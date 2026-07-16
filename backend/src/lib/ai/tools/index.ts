@@ -22,6 +22,7 @@ export class UnknownToolError extends AiError { constructor(toolId: string) { su
 export const TOOL_REGISTRY = {
   'ask.answer': { id: 'ask.answer', name: 'Ask', description: 'Answer the user over the current message history. Granting this tool is what gives an agent a conversational surface at all.', scopeId: null },
   'reason.solve': { id: 'reason.solve', name: 'Solve', description: 'Work through a hard problem step by step before answering.', scopeId: null },
+  'agent.create': { id: 'agent.create', name: 'Create Agent', description: 'Creates or reuses a complete agent architecture from a validated Genesis manifest.', scopeId: null },
   'image.create': { id: 'image.create', name: 'Create Image', description: 'Generate a new image from a text prompt.', scopeId: null },
   'audio.transcribe-file': { id: 'audio.transcribe-file', name: 'Transcribe Audio', description: 'Convert speech in an uploaded audio file into text.', scopeId: null },
   'speech.narrate': { id: 'speech.narrate', name: 'Narrate', description: 'Synthesize spoken audio from text.', scopeId: null },

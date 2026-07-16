@@ -114,6 +114,29 @@ export const genesisCreationManifestSchema = z.object({
 
 export type GenesisCreationManifest = z.infer<typeof genesisCreationManifestSchema>;
 
+export const genesisGuardrailsSchema = z.object({
+  organizationKey: cuidSchema,
+  scopeKey: cuidSchema,
+  allowedToolSlugs: z.tuple([z.literal('agent.create')]),
+  allowedActionSlugs: z.tuple([z.literal('agent.create')]),
+  canCreateAgents: z.literal(true),
+  canCreateSkills: z.literal(true),
+  canCreateAgentSkills: z.literal(true),
+  canCreateAgentTools: z.literal(true),
+  canCreateTools: z.literal(false),
+  canCreateActions: z.literal(false),
+  canCreateModels: z.literal(false),
+  canCreateProviders: z.literal(false),
+  canEnableProviders: z.literal(false),
+  canWriteArbitraryNodes: z.literal(false),
+  requireExistingTools: z.literal(true),
+  requireNoveltyValidation: z.literal(true),
+  requireTransactionalWrite: z.literal(true),
+  requireSameOrganization: z.literal(true),
+  requireScopePermission: z.literal(true),
+}).strict();
+export type GenesisGuardrails = z.infer<typeof genesisGuardrailsSchema>;
+
 export const genesisSourcePolicySchema = z.object({
   requestedExplorationRate: z.number().min(0).max(1),
   effectiveExplorationRate: z.number().min(0).max(1),

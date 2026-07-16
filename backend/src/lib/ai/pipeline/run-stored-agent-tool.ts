@@ -14,6 +14,7 @@ import { executeRoute, selectRoute, ProviderExecutionError, type RouteAttemptTel
 import type { ProviderExecuteResponse } from '@/lib/ai/providers';
 import { modelSlugSchema } from '@/lib/db/models.node';
 import { providerSlugSchema } from '@/lib/db/providers.node';
+import type { Action } from '@/lib/db/actions.node';
 import { InvalidRunRequestError } from './validation';
 import { validateAgentOutput, validateProviderResponse } from './validation';
 
@@ -54,6 +55,8 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
   allowRejectedOutput?: boolean;
   beforeFinalize?: (input: { run: AgentRun; response: ProviderExecuteResponse<unknown>; agentContext: AgentContext }) => Promise<void>;
   stepSlugs?: readonly string[];
+  /** Internal model route used before a local tool action finalizes. Never accepted from clients. */
+  reasoningActionSlug?: Action['slug'];
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -100,11 +103,12 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   const agentContext = await compileAgentContext(runtime, { currentTask: request.currentTask, sources: request.sources, variables: options.variables, memories: options.memories, artifactResolvers: options.artifactResolvers, canUseSource: options.canUseSource });
   const systemPrompt = compileAgentRuntimeContext(agentContext, { outputSchema: request.outputSchema });
   const input = injectSystemPrompt(request.input, systemPrompt);
+  const routeActionSlug = options.reasoningActionSlug ?? selected.action.slug;
   const routeInput = request.providerSlug
-    ? { mode: 'fixed' as const, organizationKey: request.organizationKey, actionSlug: selected.action.slug, modelSlug: request.modelSlug!, providerSlug: request.providerSlug }
+    ? { mode: 'fixed' as const, organizationKey: request.organizationKey, actionSlug: routeActionSlug, modelSlug: request.modelSlug!, providerSlug: request.providerSlug }
     : request.modelSlug
-      ? { mode: 'model' as const, organizationKey: request.organizationKey, actionSlug: selected.action.slug, modelSlug: request.modelSlug }
-      : { mode: 'auto' as const, organizationKey: request.organizationKey, actionSlug: selected.action.slug };
+      ? { mode: 'model' as const, organizationKey: request.organizationKey, actionSlug: routeActionSlug, modelSlug: request.modelSlug }
+      : { mode: 'auto' as const, organizationKey: request.organizationKey, actionSlug: routeActionSlug };
   const attempts: RouteAttemptTelemetry[] = [];
   const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, status: 'accepted', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: startedAt, elapsedMs: 0 });
   try {
@@ -152,7 +156,7 @@ async function persistExecution(input: {
     persistedSteps.push(await input.steps.insertStep({ agentRunKey: input.run.key, stepSlug, status: input.status === 'completed' || input.status === 'rejected' ? 'completed' : 'failed', startedAt: new Date(stepStartedAtMs).toISOString(), endedAt, elapsedMs: endedAtMs - stepStartedAtMs }));
   }
   const step = persistedSteps.at(-1)!;
-  const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, toolKey: input.request.toolKey, actionKey: input.request.actionKey ?? input.runtime.tools.find(({ tool }) => tool.key === input.request.toolKey)!.actions[0]!.action.key, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
+  const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, toolKey: input.request.toolKey, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
   const run = await input.runs.updateRun(input.run.key, { status: input.status, reason: input.reason, score: input.score, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
   return { run, step, calls: persistedCalls };
 }

@@ -7,9 +7,14 @@ import { SKILLS_COLLECTION, skillSchema, type Skill } from '@/lib/db/skills.node
 import { AGENT_SKILLS_COLLECTION, agentSkillSchema, type AgentSkill } from '@/lib/db/agent-skills.node';
 import { AGENT_TOOLS_COLLECTION, agentToolSchema, type AgentTool } from '@/lib/db/agent-tools.node';
 import { TOOLS_COLLECTION } from '@/lib/db/tools.node';
+import { ACTIONS_COLLECTION } from '@/lib/db/actions.node';
+import { TOOL_ACTIONS_COLLECTION } from '@/lib/db/tool-actions.node';
+import { ORGANIZATIONS_COLLECTION } from '@/lib/db/organizations.node';
 import { SCOPES_COLLECTION } from '@/lib/ai/scopes';
+import { SCOPE_MEMBERS_COLLECTION } from '@/lib/ai/scopes/schema';
 import { AGENT_ARTIFACTS_COLLECTION, agentArtifactSchema, type AgentArtifact } from '@/lib/ai/agent-artifacts';
 import { AGENT_ARTIFACT_CHECKS_COLLECTION } from '@/lib/ai/agent-artifact-checks';
+import { AGENT_RUN_SOURCES_COLLECTION } from '@/lib/ai/agent-run-sources';
 import type { GenesisContext } from './context';
 import type { ValidatedGenesisManifest } from './validation';
 
@@ -17,17 +22,18 @@ export class GenesisPersistenceError extends AiError {
   constructor(detail: string) { super('genesis_persistence_invalid', `Cannot persist Genesis manifest: ${detail}`); }
 }
 
+export const GENESIS_TRANSACTION_COLLECTIONS = {
+  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
+  read: [ORGANIZATIONS_COLLECTION, SCOPES_COLLECTION, AGENTS_COLLECTION, SKILLS_COLLECTION, TOOLS_COLLECTION, ACTIONS_COLLECTION, TOOL_ACTIONS_COLLECTION, SCOPE_MEMBERS_COLLECTION, AGENT_RUN_SOURCES_COLLECTION],
+} as const;
+export type GenesisWriteCollection = typeof GENESIS_TRANSACTION_COLLECTIONS.write[number];
+
 export interface GenesisTransactionWriter {
-  save(collection: string, document: Record<string, unknown> & { key: string }): Promise<void>;
+  save(collection: GenesisWriteCollection, document: Record<string, unknown> & { key: string }): Promise<void>;
 }
 export interface GenesisTransactionGateway {
   execute<T>(callback: (writer: GenesisTransactionWriter) => Promise<T>): Promise<T>;
 }
-
-export const GENESIS_TRANSACTION_COLLECTIONS = {
-  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
-  read: [SCOPES_COLLECTION, TOOLS_COLLECTION, AGENTS_COLLECTION, SKILLS_COLLECTION],
-} as const;
 
 export const arangoGenesisTransactionGateway: GenesisTransactionGateway = {
   async execute(callback) {
@@ -83,6 +89,8 @@ export async function persistGenesisManifest(
       await writer.save(AGENT_ARTIFACTS_COLLECTION, value);
       artifacts.push(value);
     }
+
+    await artifact('scope', input.context.scope.key, 'source', null);
 
     for (const operation of manifest.skills) {
       if (operation.operation === 'reuse') continue;

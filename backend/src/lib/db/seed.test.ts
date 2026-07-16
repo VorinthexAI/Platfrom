@@ -29,6 +29,17 @@ describe('action seeds', () => {
       expect(parsed.embedding).toEqual([]);
     }
   });
+
+  test('seed agent.create as a local architecture action with all embedding source fields', () => {
+    expect(SEEDED_ACTIONS.find(({ slug }) => slug === 'agent.create')).toEqual({
+      key: 'cmgenesisactioncreateagent001', slug: 'agent.create', name: 'Create Agent',
+      description: 'Validates and transactionally creates or reuses an agent, its required skills, skill relations, and allowed tool relations.',
+      objective: 'Persist a complete validated agent architecture from a Genesis creation manifest.',
+      inputDescription: 'A validated Genesis agent creation manifest containing an agent operation, skill operations, agent skill relations, and existing tools to attach.',
+      outputDescription: 'The persisted or reused agent, created skills, linking nodes, provenance artifacts, and validation result.',
+      handlerKey: 'agent.create', enabled: true,
+    });
+  });
 });
 
 describe('provider seeds', () => {
@@ -101,6 +112,7 @@ describe('tool and tool-action seeds', () => {
     const parsed = SEEDED_TOOL_ACTIONS.map((seed) => toolActionSeedSchema.parse(seed));
     expect(new Set(parsed.map((relation) => relation.key)).size).toBe(parsed.length);
     expect(parsed.map(({ toolSlug, actionSlug }) => `${toolSlug}:${actionSlug}`).sort()).toEqual([
+      'agent.create:agent.create',
       'ask.answer:core.ask',
       'audio.transcribe-file:audio.transcribe',
       'image.create:image.generate',

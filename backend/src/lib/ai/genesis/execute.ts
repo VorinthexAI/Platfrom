@@ -4,8 +4,9 @@ import type { ProviderExecuteResponse } from '@/lib/ai/providers';
 import { ArtifactResolverRegistry } from '@/lib/ai/artifact-resolvers';
 import { compileGenesisContext, renderGenesisContext, type CompileGenesisContextOptions, type GenesisContext } from './context';
 import { GENESIS_STEP_SLUGS, genesisCreationManifestSchema, genesisRunInputSchema, type GenesisCreationManifest, type GenesisRunInput } from './schemas';
-import { validateGenesisManifest, type ValidateGenesisManifestOptions, type ValidatedGenesisManifest } from './validation';
-import { persistGenesisManifest, type GenesisTransactionGateway, type PersistGenesisManifestResult } from './persistence';
+import type { ValidateGenesisManifestOptions, ValidatedGenesisManifest } from './validation';
+import type { GenesisTransactionGateway, PersistGenesisManifestResult } from './persistence';
+import { CREATE_AGENT_ACTION_SLUG, CREATE_AGENT_TOOL_SLUG, createAgentToolInputSchema, executeCreateAgentTool, type CreateAgentToolOutput } from './tool';
 
 export class GenesisRuntimeConfigurationError extends AiError {
   constructor(detail: string) { super('genesis_runtime_invalid', `Genesis runtime is invalid: ${detail}`); }
@@ -20,6 +21,7 @@ export interface GenesisCreationResult {
   manifest: GenesisCreationManifest;
   persisted: boolean;
   created?: PersistGenesisManifestResult;
+  toolOutput: CreateAgentToolOutput;
   response: ProviderExecuteResponse<unknown>;
 }
 
@@ -30,21 +32,23 @@ export const GENESIS_OUTPUT_SCHEMA_DESCRIPTION = JSON.stringify({
   note: 'Must satisfy the strict Genesis creation manifest schema exported by the backend.',
 });
 
-/** Executes Genesis only through its persisted Reason Tool → core.reason route. */
+/** Reasons through core.reason, then invokes Genesis's sole agent.create capability. */
 export async function createAgentFromGenesis(input: GenesisRunInput, options: ExecuteGenesisOptions = {}): Promise<GenesisCreationResult> {
   const parsed = genesisRunInputSchema.parse(input);
   const artifactResolvers = options.artifactResolvers ?? new ArtifactResolverRegistry();
   const context = await compileGenesisContext(parsed, { ...options, artifactResolvers });
-  const reasonGrant = context.tools.find(({ tool }) => tool.slug === 'reason.solve');
-  const reasonAction = reasonGrant?.actions.find(({ action }) => action.slug === 'core.reason');
-  if (!reasonGrant || !reasonAction) throw new GenesisRuntimeConfigurationError('Reason Tool must expose core.reason');
+  const createGrant = context.tools.find(({ tool }) => tool.slug === CREATE_AGENT_TOOL_SLUG);
+  const createAction = createGrant?.actions.find(({ action }) => action.slug === CREATE_AGENT_ACTION_SLUG);
+  if (context.tools.length !== 1 || !createGrant || createGrant.actions.length !== 1 || !createAction) {
+    throw new GenesisRuntimeConfigurationError('Genesis must expose only agent.create mapped only to agent.create');
+  }
 
-  const outcome: { validated?: ValidatedGenesisManifest; created?: PersistGenesisManifestResult } = {};
+  const outcome: { validated?: ValidatedGenesisManifest; created?: PersistGenesisManifestResult; toolOutput?: CreateAgentToolOutput } = {};
   const result = await runStoredAgentTool({
     organizationKey: parsed.organizationKey,
     agentKey: parsed.genesisAgentKey,
-    toolKey: reasonGrant.tool.key,
-    actionKey: reasonAction.action.key,
+    toolKey: createGrant.tool.key,
+    actionKey: createAction.action.key,
     stepSlug: 'produce-agent-manifest',
     metadata: { status: 'accepted', reason: 'Genesis request validated', score: 1 },
     input: {
@@ -58,15 +62,17 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
     ...options,
     artifactResolvers,
     allowRejectedOutput: true,
+    reasoningActionSlug: 'core.reason',
     stepSlugs: GENESIS_STEP_SLUGS,
     beforeFinalize: async ({ run, response }) => {
-      outcome.validated = await validateGenesisManifest(response.output, context, run.key, options);
-      if (outcome.validated.manifest.metadata.status === 'accepted') {
-        outcome.created = await persistGenesisManifest({ runKey: run.key, context, validated: outcome.validated }, options.transaction);
-      }
+      const toolInput = createAgentToolInputSchema.parse({ organizationKey: parsed.organizationKey, scopeKey: parsed.scopeKey, agentRunKey: run.key, manifest: genesisCreationManifestSchema.parse(response.output) });
+      const handled = await executeCreateAgentTool(toolInput, context, options);
+      outcome.validated = handled.validated;
+      outcome.created = handled.persisted;
+      outcome.toolOutput = handled.output;
     },
   });
-  if (!result.executed || !outcome.validated) throw new GenesisRuntimeConfigurationError('Reason Tool did not produce a validated manifest');
+  if (!result.executed || !outcome.validated || !outcome.toolOutput) throw new GenesisRuntimeConfigurationError('Genesis did not produce and execute a validated manifest');
   const manifest = genesisCreationManifestSchema.parse(outcome.validated.manifest);
-  return { runKey: result.run.key, context, manifest, persisted: manifest.metadata.status === 'accepted', created: outcome.created, response: result.response as ProviderExecuteResponse<unknown> };
+  return { runKey: result.run.key, context, manifest, persisted: outcome.toolOutput.status !== 'rejected', created: outcome.created, toolOutput: outcome.toolOutput, response: result.response as ProviderExecuteResponse<unknown> };
 }

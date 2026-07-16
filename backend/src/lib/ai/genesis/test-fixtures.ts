@@ -20,19 +20,21 @@ export function buildGenesisFixture() {
   const backend = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: '# Backend Developer', embedding: [0, 1] });
   const reasonTool = toolSchema.parse({ key: newId(), slug: 'reason.solve', name: 'Reason', description: 'Reason through agent architecture.', scopeKey: null, enabled: true });
   const reasonAction = actionSchema.parse({ key: newId(), slug: 'core.reason', name: 'Reason', description: 'Reason', objective: 'Design', inputDescription: 'Request', outputDescription: 'Manifest', handlerKey: 'core.reason', enabled: true });
+  const createTool = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create a validated agent architecture.', scopeKey: null, enabled: true });
+  const createAction = actionSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create agent', objective: 'Persist architecture', inputDescription: 'Manifest', outputDescription: 'Creation result', handlerKey: 'agent.create', enabled: true });
   const skillLink = agentSkillSchema.parse({ key: newId(), agentKey: genesis.key, skillKey: architect.key, priority: 100 });
-  const toolLink = agentToolSchema.parse({ key: newId(), agentKey: genesis.key, toolKey: reasonTool.key });
-  const actionLink = toolActionSchema.parse({ key: newId(), toolKey: reasonTool.key, actionKey: reasonAction.key, priority: 100, enabled: true });
+  const toolLink = agentToolSchema.parse({ key: newId(), agentKey: genesis.key, toolKey: createTool.key });
+  const actionLink = toolActionSchema.parse({ key: newId(), toolKey: createTool.key, actionKey: createAction.key, priority: 100, enabled: true });
   const runtimeData: AgentRuntimeDataSource = {
     async getAgent(key) { return key === genesis.key ? genesis : null; }, async getScope(key) { return key === scope.key ? scope : null; }, async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [skillLink]; }, async getSkill(key) { return key === architect.key ? architect : null; },
-    async listAgentTools() { return [toolLink]; }, async getTool(key) { return key === reasonTool.key ? reasonTool : null; },
-    async listToolActions() { return [actionLink]; }, async getAction(key) { return key === reasonAction.key ? reasonAction : null; },
+    async listAgentTools() { return [toolLink]; }, async getTool(key) { return key === createTool.key ? createTool : null; },
+    async listToolActions() { return [actionLink]; }, async getAction(key) { return key === createAction.key ? createAction : null; },
   };
   const catalog: GenesisCatalogDataSource = {
-    async listOrganizationScopes() { return [scope]; }, async listAgents() { return [genesis]; }, async listSkills() { return [architect, backend]; }, async listTools() { return [reasonTool]; },
+    async listOrganizationScopes() { return [scope]; }, async listAgents() { return [genesis]; }, async listSkills() { return [architect, backend]; }, async listTools() { return [createTool, reasonTool]; },
   };
   const variables = { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } };
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
-  return { now, organization, scope, genesis, architect, backend, reasonTool, reasonAction, runtimeData, catalog, variables, memories };
+  return { now, organization, scope, genesis, architect, backend, reasonTool, reasonAction, createTool, createAction, runtimeData, catalog, variables, memories };
 }

@@ -185,8 +185,13 @@ export async function validateGenesisManifest(
     if (!createdPlans[relation.skillRef.skillSlug]) throw new GenesisManifestReferenceError('created skill', relation.skillRef.skillSlug);
     return relation;
   });
-  assertUnique(validatedSkills.map((operation) => operation.operation === 'reuse' ? `key:${operation.skillKey}` : `slug:${operation.slug}`), 'validated skills');
-  assertUnique(validatedAgentSkills.map((relation) => relation.skillRef.type === 'existing' ? `key:${relation.skillRef.skillKey}` : `slug:${relation.skillRef.skillSlug}`), 'agentSkills');
+  const skillIdentities = validatedSkills.map((operation) => operation.operation === 'reuse' ? `key:${operation.skillKey}` : `slug:${operation.slug}`);
+  const relationIdentities = validatedAgentSkills.map((relation) => relation.skillRef.type === 'existing' ? `key:${relation.skillRef.skillKey}` : `slug:${relation.skillRef.skillSlug}`);
+  assertUnique(skillIdentities, 'validated skills');
+  assertUnique(relationIdentities, 'agentSkills');
+  if (skillIdentities.length !== relationIdentities.length || skillIdentities.some((identity) => !relationIdentities.includes(identity))) {
+    throw new GenesisManifestConsistencyError('every skill operation must have exactly one agentSkills relation');
+  }
 
   assertUnique(parsed.agentTools.map((operation) => operation.toolKey), 'agentTools');
   for (const operation of parsed.agentTools) {
