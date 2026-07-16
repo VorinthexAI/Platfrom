@@ -37,12 +37,17 @@ export {
 } from '@/lib/db/agent-tools.node';
 export {
   loadAgentRuntime,
+  compileAgentContext,
   compileAgentRuntimeContext,
   AgentRuntimeNotFoundError,
   AgentRuntimeInvalidError,
   type AgentRuntimeContext,
   type AgentRuntimeDataSource,
   type CompileAgentRuntimeOptions,
+  type CompileAgentContextOptions,
+  type AgentContext,
+  type AgentPermission,
+  type AgentSourcePolicy,
 } from './runtime';
 export {
   createAgentService,

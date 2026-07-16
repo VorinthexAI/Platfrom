@@ -12,12 +12,16 @@ import { modelActionSchema } from '@/lib/db/model-actions.node';
 import { modelProviderSchema } from '@/lib/db/model-providers.node';
 import { providerSchema } from '@/lib/db/providers.node';
 import { scopeSchema } from '@/lib/ai/scopes';
+import { organizationSchema } from '@/lib/db/organizations.node';
 import { agentRunSchema, type AgentRun, type AgentRunRepository } from '@/lib/ai/agent-runs';
 import { agentRunStepSchema, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import { agentRunCallSchema, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
 import type { AgentRuntimeDataSource } from '@/lib/ai/agents';
 import type { RouterDataSource } from '@/lib/ai/router';
 import type { ProviderExecuteRequest } from '@/lib/ai/providers';
+import { agentRunSourceSchema, type AgentRunSource } from '@/lib/ai/agent-run-sources';
+import { agentArtifactSchema, type AgentArtifact } from '@/lib/ai/agent-artifacts';
+import { ArtifactResolverRegistry } from '@/lib/ai/artifact-resolvers';
 import { tokenUsage } from '@/lib/ai/shared';
 import { runStoredAgentTool } from './run-stored-agent-tool';
 import { InvalidRunRequestError, ResponseValidationError } from './validation';
@@ -25,6 +29,7 @@ import { InvalidRunRequestError, ResponseValidationError } from './validation';
 const now = '2026-07-16T00:00:00.000Z';
 function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Task completed', score: 0.95 }, text: 'done' }) {
   const organizationKey = newId();
+  const organization = organizationSchema.parse({ key: organizationKey, name: 'Vorinthex', createdAt: now, updatedAt: now });
   const scope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'core', name: 'Core', description: 'Core product scope' });
   const agent = agentSchema.parse({ key: newId(), slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: scope.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend systems.' });
@@ -39,6 +44,7 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-nano', enabled: true });
   const runtimeData: AgentRuntimeDataSource = {
     async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
+    async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkill]; }, async getSkill(key) { return key === skill.key ? skill : null; },
     async listAgentTools() { return [agentTool]; }, async getTool(key) { return key === tool.key ? tool : null; },
     async listToolActions() { return [toolAction]; }, async getAction(key) { return key === action.key ? action : null; },
@@ -49,14 +55,24 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
     async listModelActions() { return [modelAction]; }, async listModelProviders() { return [modelProvider]; }, async listOrganizationProviderKeys() { return [provider.key]; },
   };
   const runStore: AgentRun[] = []; const stepStore: AgentRunStep[] = []; const callStore: AgentRunCall[] = [];
-  const runs: AgentRunRepository = { async insertRun(input) { const value = agentRunSchema.parse({ ...input, key: newId(), createdAt: now }); runStore.push(value); return value; }, async getRunById(key) { return runStore.find((value) => value.key === key) ?? null; }, async listRunsForOrganization() { return runStore; } };
+  const sourceStore: AgentRunSource[] = []; const artifactStore: AgentArtifact[] = [];
+  const runs: AgentRunRepository = {
+    async insertRun(input) { const value = agentRunSchema.parse({ ...input, key: newId(), createdAt: now }); runStore.push(value); return value; },
+    async updateRun(key, input) { const index = runStore.findIndex((value) => value.key === key); if (index < 0) throw new Error('missing run'); const value = agentRunSchema.parse({ ...runStore[index]!, ...input }); runStore[index] = value; return value; },
+    async getRunById(key) { return runStore.find((value) => value.key === key) ?? null; }, async listRunsForOrganization() { return runStore; },
+  };
   const steps: AgentRunStepRepository = { async insertStep(input) { const value = agentRunStepSchema.parse({ ...input, key: input.key ?? newId() }); stepStore.push(value); return value; }, async listStepsForRun(key) { return stepStore.filter((value) => value.agentRunKey === key); } };
   const calls: AgentRunCallRepository = { async insertCall(input) { const value = agentRunCallSchema.parse({ ...input, key: input.key ?? newId() }); callStore.push(value); return value; }, async listCallsForRun(key) { return callStore.filter((value) => value.agentRunKey === key); } };
+  const sources = { async insertSource(input: Parameters<import('@/lib/ai/agent-run-sources').AgentRunSourceRepository['insertSource']>[0]) { const value = agentRunSourceSchema.parse({ ...input, key: input.key ?? newId() }); sourceStore.push(value); return value; }, async listSourcesForRun(key: string) { return sourceStore.filter((value) => value.agentRunKey === key); } };
+  const artifacts = { async insertArtifact(input: Parameters<import('@/lib/ai/agent-artifacts').AgentArtifactRepository['insertArtifact']>[0]) { const value = agentArtifactSchema.parse({ ...input, key: input.key ?? newId() }); artifactStore.push(value); return value; }, async listArtifactsForRun(key: string) { return artifactStore.filter((value) => value.agentRunKey === key); } };
   const adapterCalls: ProviderExecuteRequest[] = [];
-  const adapters = { openai: { id: 'openai' as const, name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { adapterCalls.push(request as ProviderExecuteRequest); return { output: output as TOutput, usage: tokenUsage(8, 5), providerId: 'openai' as const, modelId: request.modelId, externalModelId: request.externalModelId }; } } };
-  const options = { runtimeData, data: routerData, adapters, runs, steps, calls };
+  const executionSnapshots: Array<{ runStatus: string | undefined; sourceCount: number }> = [];
+  const adapters = { openai: { id: 'openai' as const, name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { adapterCalls.push(request as ProviderExecuteRequest); executionSnapshots.push({ runStatus: runStore[0]?.status, sourceCount: sourceStore.length }); return { output: output as TOutput, usage: tokenUsage(8, 5), providerId: 'openai' as const, modelId: request.modelId, externalModelId: request.externalModelId }; } } };
+  const variables = { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } };
+  const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
+  const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts };
   const params = { organizationKey, agentKey: agent.key, toolKey: tool.key, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: 'Hello' }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
-  return { options, params, adapterCalls, runStore, stepStore, callStore, agent, skill, tool, action, model, provider };
+  return { options, params, adapterCalls, executionSnapshots, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope };
 }
 
 describe('persisted agent pipeline', () => {
@@ -86,10 +102,33 @@ describe('persisted agent pipeline', () => {
     expect(f.adapterCalls).toHaveLength(0);
   });
 
+  test('rejects duplicate source selections before creating a run', async () => {
+    const f = fixture(); const nodeKey = newId(); const source = { nodeType: 'image', nodeKey, priority: 1 };
+    await expect(runStoredAgentTool({ ...f.params, sources: [source, source] }, f.options)).rejects.toBeInstanceOf(InvalidRunRequestError);
+    expect(f.runStore).toHaveLength(0);
+  });
+
   test('invalid provider output metadata fails and records the actual call', async () => {
     const f = fixture({ text: 'missing metadata' });
     await expect(runStoredAgentTool(f.params, f.options)).rejects.toBeInstanceOf(ResponseValidationError);
     expect(f.runStore[0]?.status).toBe('failed');
     expect(f.callStore[0]?.totalTokens).toBe(13);
+  });
+
+  test('resolves explicit sources into context and persists source provenance', async () => {
+    const f = fixture(); const nodeKey = newId();
+    const artifactResolvers = new ArtifactResolverRegistry().register('blog-post', {
+      async exists(key) { return key === nodeKey; },
+      async getReference(key) { return key === nodeKey ? { nodeType: 'blog-post', nodeKey, organizationKey: f.organizationKey, scopeKey: f.scope.key, name: 'Launch post', summary: 'A compact source summary.' } : null; },
+      async getContent() { throw new Error('full content must not be injected'); }, async findSimilar() { return []; },
+    });
+    const result = await runStoredAgentTool({ ...f.params, sources: [{ nodeType: 'blog-post', nodeKey, priority: 100 }] }, { ...f.options, artifactResolvers });
+    expect(result.executed).toBe(true);
+    expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain('A compact source summary.');
+    expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain('"effectiveExplorationRate":0.5');
+    expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain('"sourceCount":1');
+    expect(f.sourceStore[0]).toMatchObject({ agentRunKey: f.runStore[0]?.key, nodeType: 'blog-post', nodeKey, priority: 100 });
+    expect(f.artifactStore[0]).toMatchObject({ agentRunKey: f.runStore[0]?.key, nodeType: 'blog-post', nodeKey, relation: 'source', position: 0 });
+    expect(f.executionSnapshots[0]).toEqual({ runStatus: 'accepted', sourceCount: 1 });
   });
 });

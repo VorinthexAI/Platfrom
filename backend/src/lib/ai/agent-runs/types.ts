@@ -3,9 +3,11 @@ import type { z } from 'zod';
 import type { agentRunSchema, AgentRun } from './schema';
 
 export type AgentRunInsert = Omit<z.input<typeof agentRunSchema>, 'key' | 'createdAt'>;
+export type AgentRunUpdate = Pick<AgentRun, 'status' | 'reason' | 'score' | 'endedAt' | 'elapsedMs'>;
 
 export interface AgentRunRepository {
   insertRun(input: AgentRunInsert): Promise<AgentRun>;
+  updateRun(key: string, input: AgentRunUpdate): Promise<AgentRun>;
   getRunById(key: string): Promise<AgentRun | null>;
   listRunsForOrganization(organizationKey: string, limit?: number): Promise<readonly AgentRun[]>;
 }
@@ -21,6 +23,7 @@ export interface AgentRunsDatabase {
   collection(name: string): {
     save(doc: Record<string, unknown>, options?: { returnNew?: boolean }): Promise<unknown>;
     document(selector: string): Promise<unknown>;
+    update(selector: string, doc: Record<string, unknown>, options?: { returnNew?: boolean }): Promise<unknown>;
   };
 }
 

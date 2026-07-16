@@ -12,6 +12,7 @@ export const agentSchema = z.object({
   name: z.string().trim().min(1).max(120),
   title: z.string().trim().min(1).max(160),
   scopeKey: z.string().cuid(),
+  explorationRate: z.number().min(0).max(1).default(0.5),
   embedding: z.array(z.number().finite()).default([]),
 });
 

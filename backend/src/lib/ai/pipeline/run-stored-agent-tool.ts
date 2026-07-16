@@ -3,7 +3,12 @@ import { agentOutputMetadataSchema, type AgentRun } from '@/lib/ai/agent-runs';
 import { getDefaultAgentRunRepository, type AgentRunRepository } from '@/lib/ai/agent-runs';
 import { getDefaultAgentRunStepRepository, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import { getDefaultAgentRunCallRepository, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
-import { compileAgentRuntimeContext, loadAgentRuntime, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
+import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
+import { sourceSelectionSchema, getDefaultAgentRunSourceRepository, type AgentRunSourceRepository } from '@/lib/ai/agent-run-sources';
+import { getDefaultAgentArtifactRepository, type AgentArtifactRepository } from '@/lib/ai/agent-artifacts';
+import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
+import type { AgentMemoryRepository } from '@/lib/ai/agent-memories';
+import type { ArtifactResolverRegistry, SourcePermissionResolver } from '@/lib/ai/artifact-resolvers';
 import { getTool as getToolHandler } from '@/lib/ai/tools';
 import { executeRoute, selectRoute, ProviderExecutionError, type RouteAttemptTelemetry, type RouterDependencies } from '@/lib/ai/router';
 import type { ProviderExecuteResponse } from '@/lib/ai/providers';
@@ -22,10 +27,17 @@ export const runStoredAgentToolParamsSchema = z.object({
   input: z.unknown(),
   currentTask: z.string().trim().min(1),
   outputSchema: z.string().trim().min(1),
+  sources: z.array(sourceSelectionSchema).max(100).default([]),
   modelSlug: modelSlugSchema.optional(),
   providerSlug: providerSlugSchema.optional(),
 }).strict().superRefine((value, ctx) => {
   if (value.providerSlug && !value.modelSlug) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['providerSlug'], message: 'providerSlug requires modelSlug' });
+  const seenSources = new Set<string>();
+  value.sources.forEach((source, index) => {
+    const identity = `${source.nodeType}/${source.nodeKey}`;
+    if (seenSources.has(identity)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['sources', index], message: 'source selections must be unique' });
+    seenSources.add(identity);
+  });
 });
 export type RunStoredAgentToolParams = z.input<typeof runStoredAgentToolParamsSchema>;
 export interface RunStoredAgentToolOptions extends RouterDependencies {
@@ -33,6 +45,12 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
   runs?: AgentRunRepository;
   steps?: AgentRunStepRepository;
   calls?: AgentRunCallRepository;
+  sources?: AgentRunSourceRepository;
+  artifacts?: AgentArtifactRepository;
+  variables?: RuntimeVariableRepository;
+  memories?: AgentMemoryRepository;
+  artifactResolvers?: ArtifactResolverRegistry;
+  canUseSource?: SourcePermissionResolver;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -59,6 +77,8 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   const runs = options.runs ?? getDefaultAgentRunRepository();
   const steps = options.steps ?? getDefaultAgentRunStepRepository();
   const calls = options.calls ?? getDefaultAgentRunCallRepository();
+  const sources = options.sources ?? getDefaultAgentRunSourceRepository();
+  const artifacts = options.artifacts ?? getDefaultAgentArtifactRepository();
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
 
@@ -74,7 +94,8 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   const selected = request.actionKey ? granted.actions.find(({ action }) => action.key === request.actionKey) : granted.actions[0];
   if (!selected) throw new InvalidRunRequestError(`action is not enabled for tool ${request.toolKey}`);
   const primarySkill = runtime.skills[0]!;
-  const systemPrompt = compileAgentRuntimeContext(runtime, { currentTask: request.currentTask, outputSchema: request.outputSchema });
+  const agentContext = await compileAgentContext(runtime, { currentTask: request.currentTask, sources: request.sources, variables: options.variables, memories: options.memories, artifactResolvers: options.artifactResolvers, canUseSource: options.canUseSource });
+  const systemPrompt = compileAgentRuntimeContext(agentContext, { outputSchema: request.outputSchema });
   const input = injectSystemPrompt(request.input, systemPrompt);
   const routeInput = request.providerSlug
     ? { mode: 'fixed' as const, organizationKey: request.organizationKey, actionSlug: selected.action.slug, modelSlug: request.modelSlug!, providerSlug: request.providerSlug }
@@ -82,18 +103,28 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       ? { mode: 'model' as const, organizationKey: request.organizationKey, actionSlug: selected.action.slug, modelSlug: request.modelSlug }
       : { mode: 'auto' as const, organizationKey: request.organizationKey, actionSlug: selected.action.slug };
   const attempts: RouteAttemptTelemetry[] = [];
-
+  const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, status: 'accepted', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: startedAt, elapsedMs: 0 });
   try {
-    const decision = await selectRoute(routeInput, options);
-    const response = validateProviderResponse(await executeRoute<unknown, TOutput>({ decision, input, adapters: options.adapters, timeoutMs: options.timeoutMs, signal: options.signal, onAttempt: (attempt) => attempts.push(attempt) }));
-    const metadata = validateAgentOutput(response.output);
-    if (metadata.status !== 'accepted') throw new InvalidRunRequestError('an executed tool response cannot be rejected after execution');
-    const persisted = await persistExecution({ runs, steps, calls, runtime, request, attempts, primarySkillKey: primarySkill.skill.key, status: 'completed', reason: metadata.reason, score: metadata.score, startedAt, startedAtMs });
-    return { executed: true, ...persisted, response };
+    await persistSources(run.key, request.sources, sources, artifacts);
   } catch (error) {
-    await persistExecution({ runs, steps, calls, runtime, request, attempts, primarySkillKey: primarySkill.skill.key, status: finalStatus(error), reason: request.metadata.reason, score: request.metadata.score, startedAt, startedAtMs });
+    const endedAtMs = Date.now();
+    await runs.updateRun(run.key, { status: 'failed', reason: request.metadata.reason, score: request.metadata.score, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     throw error;
   }
+
+  let response: ProviderExecuteResponse<TOutput>;
+  let responseMetadata: ReturnType<typeof validateAgentOutput>;
+  try {
+    const decision = await selectRoute(routeInput, options);
+    response = validateProviderResponse(await executeRoute<unknown, TOutput>({ decision, input, adapters: options.adapters, timeoutMs: options.timeoutMs, signal: options.signal, onAttempt: (attempt) => attempts.push(attempt) }));
+    responseMetadata = validateAgentOutput(response.output);
+    if (responseMetadata.status !== 'accepted') throw new InvalidRunRequestError('an executed tool response cannot be rejected after execution');
+  } catch (error) {
+    await persistExecution({ run, runs, steps, calls, runtime, request, attempts, primarySkillKey: primarySkill.skill.key, status: finalStatus(error), reason: request.metadata.reason, score: request.metadata.score, startedAt, startedAtMs });
+    throw error;
+  }
+  const persisted = await persistExecution({ run, runs, steps, calls, runtime, request, attempts, primarySkillKey: primarySkill.skill.key, status: 'completed', reason: responseMetadata.reason, score: responseMetadata.score, startedAt, startedAtMs });
+  return { executed: true, ...persisted, response };
 }
 
 function injectSystemPrompt(input: unknown, systemPrompt: string): unknown {
@@ -103,15 +134,23 @@ function injectSystemPrompt(input: unknown, systemPrompt: string): unknown {
 }
 
 async function persistExecution(input: {
-  runs: AgentRunRepository; steps: AgentRunStepRepository; calls: AgentRunCallRepository;
+  run: AgentRun; runs: AgentRunRepository; steps: AgentRunStepRepository; calls: AgentRunCallRepository;
   runtime: Awaited<ReturnType<typeof loadAgentRuntime>>; request: z.infer<typeof runStoredAgentToolParamsSchema>;
   attempts: readonly RouteAttemptTelemetry[]; primarySkillKey: string; status: 'completed' | 'failed' | 'cancelled' | 'timeout';
   reason: string; score: number; startedAt: string; startedAtMs: number;
 }) {
   const endedAtMs = Date.now();
   const endedAt = new Date(endedAtMs).toISOString();
-  const run = await input.runs.insertRun({ organizationKey: input.request.organizationKey, scopeKey: input.runtime.scope.key, agentKey: input.runtime.agent.key, status: input.status, reason: input.reason, score: input.score, startedAt: input.startedAt, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
-  const step = await input.steps.insertStep({ agentRunKey: run.key, stepSlug: input.request.stepSlug, status: input.status === 'completed' ? 'completed' : 'failed', startedAt: input.startedAt, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
-  const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ agentRunKey: run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, toolKey: input.request.toolKey, actionKey: input.request.actionKey ?? input.runtime.tools.find(({ tool }) => tool.key === input.request.toolKey)!.actions[0]!.action.key, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
+  const step = await input.steps.insertStep({ agentRunKey: input.run.key, stepSlug: input.request.stepSlug, status: input.status === 'completed' ? 'completed' : 'failed', startedAt: input.startedAt, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
+  const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, toolKey: input.request.toolKey, actionKey: input.request.actionKey ?? input.runtime.tools.find(({ tool }) => tool.key === input.request.toolKey)!.actions[0]!.action.key, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
+  const run = await input.runs.updateRun(input.run.key, { status: input.status, reason: input.reason, score: input.score, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
   return { run, step, calls: persistedCalls };
+}
+
+async function persistSources(runKey: string, selections: z.infer<typeof sourceSelectionSchema>[], sources: AgentRunSourceRepository, artifacts: AgentArtifactRepository) {
+  const ordered = [...selections].sort((left, right) => right.priority - left.priority || left.nodeType.localeCompare(right.nodeType) || left.nodeKey.localeCompare(right.nodeKey));
+  for (const [position, source] of ordered.entries()) {
+    await sources.insertSource({ agentRunKey: runKey, ...source });
+    await artifacts.insertArtifact({ agentRunKey: runKey, nodeType: source.nodeType, nodeKey: source.nodeKey, relation: 'source', groupKey: null, position });
+  }
 }

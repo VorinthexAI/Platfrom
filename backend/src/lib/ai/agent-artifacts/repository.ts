@@ -9,8 +9,8 @@ import { AGENT_ARTIFACTS_COLLECTION, agentArtifactSchema, type AgentArtifact } f
 export type AgentArtifactInsert = Omit<z.input<typeof agentArtifactSchema>, 'key'> & { key?: string };
 
 export class DuplicateAgentArtifactError extends AiError {
-  constructor(agentRunKey: string, artifactKey: string, relation: string) {
-    super('duplicate_agent_artifact', `Artifact ${artifactKey} already has relation ${relation} to run ${agentRunKey}`);
+  constructor(agentRunKey: string, nodeType: string, nodeKey: string, relation: string) {
+    super('duplicate_agent_artifact', `${nodeType}/${nodeKey} already has relation ${relation} to run ${agentRunKey}`);
   }
 }
 
@@ -27,14 +27,14 @@ export function createAgentArtifactRepository(database = db): AgentArtifactRepos
         return agentArtifactSchema.parse(withArangoKey(result.new as Record<string, unknown>));
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) {
-          throw new DuplicateAgentArtifactError(link.agentRunKey, link.artifactKey, link.relation);
+          throw new DuplicateAgentArtifactError(link.agentRunKey, link.nodeType, link.nodeKey, link.relation);
         }
         throw error;
       }
     },
     async listArtifactsForRun(agentRunKey) {
       const validKey = agentArtifactSchema.shape.agentRunKey.parse(agentRunKey);
-      const cursor = await database.query(aql`FOR link IN ${database.collection(AGENT_ARTIFACTS_COLLECTION)} FILTER link.agentRunKey == ${validKey} SORT link._key ASC RETURN link`);
+      const cursor = await database.query(aql`FOR link IN ${database.collection(AGENT_ARTIFACTS_COLLECTION)} FILTER link.agentRunKey == ${validKey} SORT link.groupKey ASC, link.position ASC, link._key ASC RETURN link`);
       return (await cursor.all()).map((doc) => agentArtifactSchema.parse(withArangoKey(doc)));
     },
   };

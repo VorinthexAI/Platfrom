@@ -10,7 +10,8 @@ Agent -> agentSkills -> Skills
                                              -> modelActions -> Models
                                              -> modelProviders -> Providers
                                              -> organizationProviders
-                                             -> agentRuns / steps / calls / artifacts / memories
+                                             -> agentRuns / steps / calls
+                                             -> run sources / artifact provenance / novelty checks / memories
 ```
 
 All domain documents expose `key`; only the shared database boundary maps it
@@ -19,16 +20,48 @@ lower-camel-case collection names.
 
 ## Runtime compilation
 
-`loadAgentRuntime` loads the agent and its scope, orders linked skills by
-descending `priority`, resolves explicitly granted `agentTools`, then loads
-the tools and their enabled action links. `compileAgentRuntimeContext` builds:
+Every execution calls `loadAgentRuntime` and `compileAgentContext` afresh. The
+loader resolves the organization and scope, orders linked skills by descending
+`priority`, and loads explicitly granted tools and their enabled actions. The
+context compiler then resolves runtime variables, reusable memories, explicit
+artifact sources, permissions, guardrails, and exploration policy. Agents only
+receive this value; they never receive repositories or query storage.
 
-1. agent identity;
-2. scope context and `{ "scopeId": agent.scopeKey }` guardrail;
-3. ordered skill definitions;
-4. available tools, actions, and permissions;
-5. output schema;
-6. current task.
+`AgentContext` contains:
+
+1. organization, scope, and agent identity;
+2. ordered skills and explicitly granted tools;
+3. precedence-resolved runtime variables and scoped memories;
+4. compact artifact references, never full documents by default;
+5. derived permissions and `{ "scopeId": agent.scopeKey }` guardrails;
+6. source policy and the current task.
+
+Agents persist only `explorationRate` (`0` through `1`). Context exposes the
+requested rate, effective rate, and source count. With no sources, exploitation
+is impossible and the effective rate is always `1`; otherwise it equals the
+requested rate. There is no `selfSustaining` flag.
+
+## Artifact sources, provenance, and novelty
+
+Business artifacts remain domain objects in their own collections. There is no
+generic artifacts collection. `agentRunSources` records the explicit, ordered
+source selection for a run. A node-type resolver validates existence,
+organization ownership, and scope/custom permissions, then returns only
+`nodeType`, `nodeKey`, `name`, and `summary` to the context. Full content stays
+behind the resolver's `getContent` capability for runtime tools.
+
+`agentArtifacts` is a provenance link with `nodeType`, `nodeKey`, `relation`,
+`groupKey`, and `position`. The execution pipeline records every selected source
+both as an `agentRunSources` row and as an `agentArtifacts` `source` relation.
+Results, attachments, and intermediates use the same relation repository.
+
+Before a domain service persists a candidate artifact,
+`checkArtifactNovelty` embeds its semantic text and asks that node type's
+resolver for nearest neighbors. Per-type review/reject thresholds decide
+whether it is accepted, requires revision or optional validation, or is
+rejected. Review/reject outcomes are auditable in `agentArtifactChecks`.
+Built-in policies match the architecture specification for hooks, images, and
+blog posts; new artifact types must register both a resolver and a policy.
 
 Tools contain no provider or model selection. A UI can derive surfaces from
 the grants: `ask.answer` exposes chat, `image.create` exposes image generation,
@@ -69,7 +102,10 @@ has strict metadata:
 
 A rejected preflight is written as a rejected run and executes no tool or
 model call. Accepted executions validate the provider response and record real
-provider token usage. Each invocation creates one `agentRunCall`.
+provider token usage. The accepted run and its source provenance are persisted
+before the provider is invoked, so artifact-producing tools have a stable run
+key throughout execution; completion then updates that same summary row. Each
+invocation creates one `agentRunCall`.
 
 Execution storage is deliberately split:
 
@@ -77,6 +113,8 @@ Execution storage is deliberately split:
 - `agentRunSteps`: stable logical step occurrences;
 - `agentRunCalls`: authoritative model/provider/token ledger;
 - `agentArtifacts`: run-to-artifact links;
+- `agentRunSources`: explicit ordered inputs;
+- `agentArtifactChecks`: duplicate and novelty decisions;
 - `agentMemories`: explicitly selected reusable knowledge only.
 
 Legacy run documents that cannot supply trustworthy foreign keys or token

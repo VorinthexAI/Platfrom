@@ -9,11 +9,15 @@ import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { toolSchema } from '@/lib/db/tools.node';
 import { scopeSchema } from '@/lib/ai/scopes';
 import { GuardrailViolationError } from '@/lib/ai/guardrails';
-import { compileAgentRuntimeContext, loadAgentRuntime, type AgentRuntimeDataSource } from './runtime';
+import { organizationSchema } from '@/lib/db/organizations.node';
+import { runtimeVariableSchema } from '@/lib/ai/runtime-variables';
+import { agentMemorySchema } from '@/lib/ai/agent-memories';
+import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentRuntimeDataSource } from './runtime';
 
 const keys = { organization: newId(), scope: newId(), agent: newId(), backend: newId(), devops: newId(), tool: newId(), action: newId(), backendLink: newId(), devopsLink: newId(), agentTool: newId(), toolAction: newId() };
 const agent = agentSchema.parse({ key: keys.agent, slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: keys.scope });
 const scope = scopeSchema.parse({ key: keys.scope, organizationKey: keys.organization, slug: 'platform', name: 'Platform', description: 'Backend platform workspace.' });
+const organization = organizationSchema.parse({ key: keys.organization, name: 'Vorinthex', createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' });
 const backend = skillSchema.parse({ key: keys.backend, slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend services.' });
 const devops = skillSchema.parse({ key: keys.devops, slug: 'devops-engineer', name: 'DevOps', title: 'DevOps Engineer', definition: 'Operate reliable infrastructure.' });
 const tool = toolSchema.parse({ key: keys.tool, slug: 'reason.solve', name: 'Reason', description: 'Solve hard engineering problems.' });
@@ -21,6 +25,7 @@ const action = actionSchema.parse({ key: keys.action, slug: 'core.reason', name:
 function source(): AgentRuntimeDataSource {
   return {
     async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
+    async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkillSchema.parse({ key: keys.devopsLink, agentKey: agent.key, skillKey: devops.key, priority: 90 }), agentSkillSchema.parse({ key: keys.backendLink, agentKey: agent.key, skillKey: backend.key, priority: 100 })]; },
     async getSkill(key) { return key === backend.key ? backend : key === devops.key ? devops : null; },
     async listAgentTools() { return [agentToolSchema.parse({ key: keys.agentTool, agentKey: agent.key, toolKey: tool.key })]; }, async getTool(key) { return key === tool.key ? tool : null; },
@@ -34,13 +39,20 @@ describe('persisted agent runtime', () => {
     expect(runtime.tools[0]?.actions[0]?.action.slug).toBe('core.reason');
   });
   test('compiles identity, effective scope guardrail, skills, permissions, schema and task', async () => {
-    const compiled = compileAgentRuntimeContext(await loadAgentRuntime(agent.key, source()), { currentTask: 'Diagnose the production API.', outputSchema: '{ "status": "string" }' });
+    const runtime = await loadAgentRuntime(agent.key, source());
+    const variable = runtimeVariableSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, name: 'release.channel', value: 'stable' });
+    const memory = agentMemorySchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, skillKey: backend.key, sourceRunKey: null, content: 'Prefer reversible migrations.', memoryType: 'instruction', importance: 0.9, createdAt: '2026-07-16T00:00:00.000Z' });
+    const context = await compileAgentContext(runtime, { currentTask: 'Diagnose the production API.', variables: { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return [variable]; } }, memories: { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return [memory]; } } });
+    const compiled = compileAgentRuntimeContext(context, { outputSchema: '{ "status": "string" }' });
     expect(compiled.indexOf('priority 100')).toBeLessThan(compiled.indexOf('priority 90'));
     expect(compiled).toContain('# Forge — Backend Developer');
     expect(compiled).toContain(JSON.stringify({ scopeId: scope.key }));
     expect(compiled).toContain('reason.solve');
     expect(compiled).toContain('core.reason');
     expect(compiled).toContain('at most ten words');
+    expect(compiled).toContain('release.channel');
+    expect(compiled).toContain('Prefer reversible migrations.');
+    expect(context.sourcePolicy).toEqual({ requestedExplorationRate: 0.5, effectiveExplorationRate: 1, sourceCount: 0 });
   });
   test('rejects agents without skills', async () => { const empty = source(); empty.listAgentSkills = async () => []; await expect(loadAgentRuntime(agent.key, empty)).rejects.toThrow('has no skills'); });
   test('rejects a granted tool scoped outside the agent scope', async () => {

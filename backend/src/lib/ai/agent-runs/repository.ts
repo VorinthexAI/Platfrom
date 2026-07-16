@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isArangoNotFoundError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { AGENT_RUNS_COLLECTION, agentRunSchema, type AgentRun } from './schema';
-import type { AgentRunRepository, AgentRunsDatabase } from './types';
+import { AgentRunNotFoundError, type AgentRunRepository, type AgentRunsDatabase } from './types';
 
 export function createAgentRunRepository(database: AgentRunsDatabase = db): AgentRunRepository {
   return {
@@ -21,6 +21,18 @@ export function createAgentRunRepository(database: AgentRunsDatabase = db): Agen
         return agentRunSchema.parse(withArangoKey(doc as Record<string, unknown>));
       } catch (error) {
         if (isArangoNotFoundError(error)) return null;
+        throw error;
+      }
+    },
+
+    async updateRun(key, input) {
+      const validKey = agentRunSchema.shape.key.parse(key);
+      const patch = agentRunSchema.pick({ status: true, reason: true, score: true, endedAt: true, elapsedMs: true }).parse(input);
+      try {
+        const result = await database.collection(AGENT_RUNS_COLLECTION).update(validKey, patch, { returnNew: true });
+        return agentRunSchema.parse(withArangoKey((result as { new: Record<string, unknown> }).new));
+      } catch (error) {
+        if (isArangoNotFoundError(error)) throw new AgentRunNotFoundError(validKey);
         throw error;
       }
     },
