@@ -3,6 +3,7 @@ import { MODEL_SLUGS } from '@/lib/ai/models';
 import { modelSchema, modelSlugSchema, modelsEmbedKeys } from './models.node';
 import { modelActionSchema } from './model-actions.node';
 import { modelProviderSchema } from './model-providers.node';
+import { newId } from '@/lib/ids';
 
 describe('model graph node schemas', () => {
   test('accepts registered model slugs and rejects invalid notation', () => {
@@ -13,7 +14,7 @@ describe('model graph node schemas', () => {
   test('embeds only semantic model text', () => {
     expect(modelsEmbedKeys.options).toEqual(['name', 'description', 'supportedUseCases']);
     const model = modelSchema.parse({
-      key: 'model_1',
+      key: newId(),
       slug: 'openai.gpt-5.4-nano',
       name: 'GPT-5.4 Nano',
       description: 'Fast model.',
@@ -24,15 +25,18 @@ describe('model graph node schemas', () => {
   });
 
   test('relation nodes store keys and never semantic embeddings', () => {
-    const modelAction = modelActionSchema.parse({ key: 'ma_1', modelKey: 'model_1', actionKey: 'action_1' });
+    const modelKey = newId();
+    const modelAction = modelActionSchema.parse({ key: newId(), modelKey, actionKey: newId() });
     const modelProvider = modelProviderSchema.parse({
-      key: 'mp_1',
-      modelKey: 'model_1',
-      providerKey: 'provider_1',
+      key: newId(),
+      modelKey,
+      providerKey: newId(),
       providerModelId: 'gpt-5.4-nano',
     });
 
-    expect(modelAction).toMatchObject({ priority: 100, enabled: true, embedding: [] });
-    expect(modelProvider).toMatchObject({ enabled: true, embedding: [] });
+    expect(modelAction).toMatchObject({ priority: 100, enabled: true });
+    expect(modelProvider).toMatchObject({ enabled: true });
+    expect(modelAction).not.toHaveProperty('embedding');
+    expect(modelProvider).not.toHaveProperty('embedding');
   });
 });

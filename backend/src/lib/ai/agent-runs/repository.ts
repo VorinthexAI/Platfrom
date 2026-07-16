@@ -1,4 +1,5 @@
 import { db } from '@/lib/db/client';
+import { z } from 'zod';
 import { isArangoNotFoundError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { AGENT_RUNS_COLLECTION, agentRunSchema, type AgentRun } from './schema';
@@ -14,8 +15,9 @@ export function createAgentRunRepository(database: AgentRunsDatabase = db): Agen
     },
 
     async getRunById(key) {
+      const validKey = agentRunSchema.shape.key.parse(key);
       try {
-        const doc = await database.collection(AGENT_RUNS_COLLECTION).document(key);
+        const doc = await database.collection(AGENT_RUNS_COLLECTION).document(validKey);
         return agentRunSchema.parse(withArangoKey(doc as Record<string, unknown>));
       } catch (error) {
         if (isArangoNotFoundError(error)) return null;
@@ -24,6 +26,8 @@ export function createAgentRunRepository(database: AgentRunsDatabase = db): Agen
     },
 
     async listRunsForOrganization(organizationKey, limit = 50) {
+      const validOrganizationKey = agentRunSchema.shape.organizationKey.parse(organizationKey);
+      const validLimit = z.number().int().min(1).max(500).parse(limit);
       const cursor = await database.query(
         `
           FOR run IN @@collection
@@ -32,7 +36,7 @@ export function createAgentRunRepository(database: AgentRunsDatabase = db): Agen
             LIMIT @limit
             RETURN run
         `,
-        { '@collection': AGENT_RUNS_COLLECTION, organizationKey, limit },
+        { '@collection': AGENT_RUNS_COLLECTION, organizationKey: validOrganizationKey, limit: validLimit },
       );
       const docs = await cursor.all();
       return (docs as Record<string, unknown>[]).map((doc) => agentRunSchema.parse(withArangoKey(doc)));

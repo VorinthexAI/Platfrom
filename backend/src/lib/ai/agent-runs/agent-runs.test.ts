@@ -1,102 +1,48 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { aggregateAgentRun } from './aggregation';
-import { ensureAgentRunsCollection } from './indexes';
-import { createAgentRunRepository } from './repository';
-import { agentRunSchema } from './schema';
-import type { AgentRunsDatabase, AgentRunsSetupDatabase } from './types';
+import { agentRunSchema, agentOutputMetadataSchema } from './schema';
+import { agentRunStepSchema } from '@/lib/ai/agent-run-steps';
+import { agentRunCallSchema } from '@/lib/ai/agent-run-calls';
+import { agentArtifactSchema } from '@/lib/ai/agent-artifacts';
+import { agentMemorySchema, createAgentMemoryService, type AgentMemory, type AgentMemoryRepository } from '@/lib/ai/agent-memories';
 
-const keys = { organization: newId(), scope: newId(), agent: newId(), skill: newId(), action: newId(), model: newId(), provider: newId() };
-const startedAt = '2026-07-16T20:10:00.000Z';
-const endedAt = '2026-07-16T20:10:04.000Z';
+const now = '2026-07-16T00:00:00.000Z';
+const keys = Array.from({ length: 12 }, () => newId());
 
-function validInsert() {
-  return aggregateAgentRun({
-    organizationKey: keys.organization,
-    scopeKey: keys.scope,
-    agentKey: keys.agent,
-    status: 'accepted',
-    reason: 'Request matches engineering scope',
-    score: 0.94,
-    startedAt,
-    endedAt,
-    elapsedMs: 4000,
-    steps: [{ stepId: 'analyze', status: 'completed', skillKeys: [keys.skill], startedAt, endedAt, elapsedMs: 4000 }],
-    calls: [{ callId: newId(), stepId: 'analyze', skillKey: keys.skill, toolKey: null, actionKey: keys.action, modelKey: keys.model, providerKey: keys.provider, inputTokens: 12, outputTokens: 34, totalTokens: 46, startedAt, endedAt, elapsedMs: 4000 }],
-  });
-}
-
-function createFakeDb() {
-  const docs = new Map<string, Record<string, unknown>>();
-  const fake: AgentRunsDatabase = {
-    async query(_query, bindVars = {}) {
-      const rows = [...docs.values()].filter((doc) => doc.organizationKey === bindVars.organizationKey);
-      return { all: async () => rows, next: async () => rows[0] };
-    },
-    collection() {
-      return {
-        async save(doc) { docs.set(String(doc._key), doc); return { new: doc }; },
-        async document(key) {
-          const doc = docs.get(key);
-          if (!doc) throw Object.assign(new Error('not found'), { errorNum: 1202 });
-          return doc;
-        },
-      };
-    },
-  };
-  return fake;
-}
-
-describe('agent run schema', () => {
-  test('validates call, step, and run aggregates', () => {
-    const run = agentRunSchema.parse({ ...validInsert(), key: newId(), createdAt: endedAt, _key: 'ignored' });
-    expect(run.totalTokens).toBe(46);
-    expect(run.steps[0]?.callIds).toEqual([run.calls[0]?.callId]);
-    expect(run.skillKeys).toEqual([keys.skill]);
-    expect((run as Record<string, unknown>)._key).toBeUndefined();
+describe('split agent execution storage', () => {
+  test('agentRuns contains summary fields only', () => {
+    const run = agentRunSchema.parse({ key: keys[0], organizationKey: keys[1], scopeKey: keys[2], agentKey: keys[3], status: 'completed', reason: 'Task completed successfully', score: 0.9, startedAt: now, endedAt: now, elapsedMs: 0, createdAt: now });
+    expect(Object.keys(run)).toEqual(['key', 'organizationKey', 'scopeKey', 'agentKey', 'status', 'reason', 'score', 'startedAt', 'endedAt', 'elapsedMs', 'createdAt']);
+    expect(() => agentRunSchema.parse({ ...run, steps: [] })).toThrow();
   });
 
-  test('rejects caller-reported totals and reasons over ten words', () => {
-    const base = { ...validInsert(), key: newId(), createdAt: endedAt };
-    expect(() => agentRunSchema.parse({ ...base, totalTokens: 47 })).toThrow('sum of all calls');
-    expect(() => agentRunSchema.parse({ ...base, reason: 'one two three four five six seven eight nine ten eleven' })).toThrow('ten words');
-    expect(() => agentRunSchema.parse({ ...base, callsCount: 2 })).toThrow('calls length');
+  test('output metadata enforces rejection status, word limit and score range', () => {
+    expect(agentOutputMetadataSchema.parse({ status: 'rejected', reason: 'Outside assigned scope', score: 0.1 }).status).toBe('rejected');
+    expect(() => agentOutputMetadataSchema.parse({ status: 'accepted', reason: 'one two three four five six seven eight nine ten eleven', score: 1 })).toThrow();
+    expect(() => agentOutputMetadataSchema.parse({ status: 'accepted', reason: 'ok', score: 1.1 })).toThrow();
   });
-});
 
-describe('agent run repository', () => {
-  test('inserts final runs and lists them by organization key', async () => {
-    const repository = createAgentRunRepository(createFakeDb());
-    const run = await repository.insertRun(validInsert());
-    expect(run.status).toBe('accepted');
-    expect(run.key).toBeTruthy();
-    expect(await repository.getRunById(run.key)).toEqual(run);
-    expect(await repository.getRunById(newId())).toBeNull();
-    expect(await repository.listRunsForOrganization(keys.organization)).toEqual([run]);
+  test('steps have stable kebab-case slugs and calls validate provider token totals', () => {
+    const step = agentRunStepSchema.parse({ key: keys[4], agentRunKey: keys[0], stepSlug: 'reason-about-architecture', status: 'completed', startedAt: now, endedAt: now, elapsedMs: 0 });
+    expect(step.stepSlug).toBe('reason-about-architecture');
+    expect(() => agentRunStepSchema.parse({ ...step, stepSlug: 'reason.about' })).toThrow();
+    const call = { key: keys[5], agentRunKey: keys[0], agentRunStepKey: step.key, skillKey: keys[6], toolKey: keys[7], actionKey: keys[8], modelKey: keys[9], providerKey: keys[10], inputTokens: 4, outputTokens: 6, totalTokens: 10, startedAt: now, endedAt: now, elapsedMs: 0 };
+    expect(agentRunCallSchema.parse(call).totalTokens).toBe(10);
+    expect(() => agentRunCallSchema.parse({ ...call, totalTokens: 11 })).toThrow();
   });
-});
 
-describe('agent runs index setup', () => {
-  test('is idempotent and indexes every analytics dimension', async () => {
-    let exists = false;
-    let creates = 0;
-    const fields: string[] = [];
-    const fake: AgentRunsSetupDatabase = {
-      collection() {
-        return {
-          async exists() { return exists; },
-          async create() { exists = true; creates += 1; return {}; },
-          async ensureIndex(index) { fields.push(index.fields.join('+')); return {}; },
-        };
-      },
+  test('artifacts link to runs and only explicitly selected knowledge becomes memory', async () => {
+    expect(agentArtifactSchema.parse({ key: keys[4], agentRunKey: keys[0], artifactKey: keys[11], relation: 'result' }).relation).toBe('result');
+    const stored: AgentMemory[] = [];
+    const repository: AgentMemoryRepository = {
+      async insertMemory(input) { const memory = agentMemorySchema.parse({ ...input, key: input.key ?? newId(), embedding: [], createdAt: now }); stored.push(memory); return memory; },
+      async listMemoriesForAgent() { return stored; },
     };
-    await ensureAgentRunsCollection(fake);
-    await ensureAgentRunsCollection(fake);
-    expect(creates).toBe(1);
-    expect(fields.slice(0, 8)).toEqual([
-      'organizationKey+createdAt', 'scopeKey+createdAt', 'agentKey+createdAt', 'status+createdAt',
-      'skillKeys[*]', 'actionKeys[*]', 'modelKeys[*]', 'providerKeys[*]',
-    ]);
-    expect(fields.slice(8)).toEqual(fields.slice(0, 8));
+    const service = createAgentMemoryService(repository);
+    const base = { organizationKey: keys[1], scopeKey: keys[2], agentKey: keys[3], skillKey: keys[6], sourceRunKey: keys[0], content: 'Backend uses ArangoDB and Zod.', memoryType: 'fact' as const, importance: 0.8 };
+    expect(await service.persistSelection({ ...base, selected: false })).toBeNull();
+    expect(stored).toHaveLength(0);
+    expect((await service.persistSelection({ ...base, selected: true }))?.content).toBe(base.content);
+    expect(stored).toHaveLength(1);
   });
 });

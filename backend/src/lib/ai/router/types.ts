@@ -1,53 +1,31 @@
-import { z } from 'zod';
-import type { ActionId } from '@/lib/ai/actions/types';
-import type { ModelActionProfile, ModelDefinition, ModelId, ModelRoute } from '@/lib/ai/models/types';
 import type { ProviderAdapter, ProviderId } from '@/lib/ai/providers/types';
-import type { OrganizationProviderRepository } from '@/lib/ai/organization-providers/types';
-
-export const ROUTING_STRATEGIES = ['balanced', 'quality', 'speed', 'cost'] as const;
-
-export type RoutingStrategy = (typeof ROUTING_STRATEGIES)[number];
-
-export const routingStrategySchema = z.enum(ROUTING_STRATEGIES);
-
-/** One executable model/provider pair that survived every eligibility filter. */
-export interface RouteCandidate {
-  actionId: ActionId;
-  model: ModelDefinition;
-  route: ModelRoute;
-  profile: ModelActionProfile;
-}
-
-/** Just enough to execute an alternative route — never secrets or config. */
-export interface RouteFallback {
-  modelId: ModelId;
-  providerId: ProviderId;
-  externalModelId: string;
-  score: number;
-}
+import type { Action } from '@/lib/db/actions.node';
+import type { Model } from '@/lib/db/models.node';
+import type { ModelAction } from '@/lib/db/model-actions.node';
+import type { ModelProvider } from '@/lib/db/model-providers.node';
+import type { Provider } from '@/lib/db/providers.node';
 
 export interface RouteDecision {
-  actionId: ActionId;
-  organizationId: string;
-
-  modelId: ModelId;
-  providerId: ProviderId;
-  externalModelId: string;
-
-  score: number;
-
-  fallbacks: readonly RouteFallback[];
+  organizationKey: string;
+  actionKey: string;
+  actionSlug: Action['slug'];
+  modelKey: string;
+  modelSlug: Model['slug'];
+  providerKey: string;
+  providerSlug: Provider['slug'];
+  providerModelId: string;
 }
-
-/**
- * Injection points for tests and alternative wiring. Defaults: the static
- * MODEL_REGISTRY, adapters built from `process.env`, and the repository
- * bound to the shared ArangoDB client. The organization allow-list is
- * ALWAYS loaded server-side through the repository — there is deliberately
- * no way to pass a client-supplied list of enabled providers.
- */
+export interface RouterDataSource {
+  getActionBySlug(slug: Action['slug']): Promise<Action | null>;
+  getModelBySlug(slug: Model['slug']): Promise<Model | null>;
+  getModelByKey(key: string): Promise<Model | null>;
+  getProviderBySlug(slug: Provider['slug']): Promise<Provider | null>;
+  getProviderByKey(key: string): Promise<Provider | null>;
+  listModelActions(actionKey: string): Promise<readonly ModelAction[]>;
+  listModelProviders(modelKey: string): Promise<readonly ModelProvider[]>;
+  listOrganizationProviderKeys(organizationKey: string): Promise<readonly string[]>;
+}
 export interface RouterDependencies {
-  models?: readonly ModelDefinition[];
+  data?: RouterDataSource;
   adapters?: Partial<Record<ProviderId, ProviderAdapter>>;
-  organizationProviders?: Pick<OrganizationProviderRepository, 'listProviderIds'>;
 }

@@ -65,6 +65,15 @@ export {
 } from './azure-ai-foundry';
 export { createAwsBedrockProvider, awsBedrockProviderConfigSchema, awsBedrockProviderFactory, type AwsBedrockProviderConfig } from './aws-bedrock';
 export { createOpenRouterProvider, openRouterProviderConfigSchema, openRouterProviderFactory, type OpenRouterProviderConfig } from './openrouter';
+export {
+  providerSchema,
+  getProviderById,
+  getProviderBySlug,
+  insertProvider,
+  updateProvider,
+  deleteProvider,
+  type Provider,
+} from '@/lib/db/providers.node';
 
 /**
  * Adapter factories for every provider. Factories (not initialized

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { providerSlugSchema } from '@/lib/ai/providers';
+import { providerSlugSchema } from '@/lib/ai/providers/types';
 import { db } from './client';
 import { createNodeHelpers, withArangoKey } from './base';
 
@@ -10,7 +10,7 @@ export { providerSlugSchema };
 export type ProviderSlug = z.infer<typeof providerSlugSchema>;
 
 export const providerObjectSchema = z.object({
-  key: z.string(),
+  key: z.string().cuid(),
   slug: providerSlugSchema,
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(4000),

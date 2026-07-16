@@ -3,10 +3,11 @@ import { newId } from '@/lib/ids';
 import { skillSchema, skillsEmbedKeys } from './skills.node';
 
 describe('skill node schema', () => {
-  test('contains the canonical skill fields with a CUID2 key', () => {
+  test('contains the canonical skill fields with a CUID key', () => {
     const skill = skillSchema.parse({
       key: newId(),
       slug: 'backend-developer',
+      name: 'Backend Engineering',
       title: 'Backend Developer',
       definition: 'Build and maintain reliable backend systems.',
     });
@@ -14,6 +15,7 @@ describe('skill node schema', () => {
     expect(skill).toEqual({
       key: skill.key,
       slug: 'backend-developer',
+      name: 'Backend Engineering',
       title: 'Backend Developer',
       definition: 'Build and maintain reliable backend systems.',
       embedding: [],
@@ -21,7 +23,7 @@ describe('skill node schema', () => {
     expect(() => skillSchema.parse({ ...skill, key: 'not-a-cuid' })).toThrow();
   });
 
-  test('embeds title and definition', () => {
-    expect(skillsEmbedKeys.options).toEqual(['title', 'definition']);
+  test('embeds name, title and definition', () => {
+    expect(skillsEmbedKeys.options).toEqual(['name', 'title', 'definition']);
   });
 });

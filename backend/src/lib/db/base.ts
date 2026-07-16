@@ -28,7 +28,12 @@ export function toArangoDoc(doc: Record<string, unknown> & { key: string }): Rec
 }
 
 export function withArangoKey<T extends Record<string, unknown>>(raw: T): T & { key: string } {
-  return { ...raw, key: (raw as unknown as { _key: string })._key };
+  const document: Record<string, unknown> = { ...raw };
+  const key = String(document._key);
+  delete document._key;
+  delete document._id;
+  delete document._rev;
+  return { ...document, key } as T & { key: string };
 }
 
 /**
@@ -114,12 +119,12 @@ function unwrapObjectSchema(schema: z.ZodTypeAny): z.AnyZodObject {
   return current;
 }
 
-function assertNodeSchemaShape(schema: z.ZodTypeAny, embedKeys: readonly string[]) {
+function assertNodeSchemaShape(schema: z.ZodTypeAny, embedKeys: readonly string[], requireEmbedding = true) {
   const shapeKeys = Object.keys(unwrapObjectSchema(schema).shape);
   if (!shapeKeys.includes('key')) {
     throw new Error('Every node schema must declare a "key" field (z.string()) as its primary key — not Arango\'s own "_key".');
   }
-  if (!shapeKeys.includes('embedding')) {
+  if (requireEmbedding && !shapeKeys.includes('embedding')) {
     throw new Error('Every node schema must declare an "embedding" field (z.array(z.number()).default([])).');
   }
   for (const field of embedKeys) {
@@ -196,7 +201,7 @@ export function createEdgeHelpers<
   Keys extends readonly Extract<keyof z.infer<Schema>, string>[] = [],
 >(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys) {
   type T = z.infer<Schema>;
-  assertNodeSchemaShape(schema, embedKeys);
+  assertNodeSchemaShape(schema, embedKeys, false);
   const collection = () => db.collection(collectionName);
 
   return {
@@ -232,6 +237,15 @@ export function createEdgeHelpers<
     },
     async deleteById(id: string): Promise<void> {
       await collection().remove(id);
+    },
+    /** Insert-or-replace a relation by its public key. */
+    async upsertByKey(input: z.input<Schema>): Promise<T> {
+      const doc = schema.parse(input);
+      const result = await collection().save(
+        toArangoDoc(doc as unknown as Record<string, unknown> & { key: string }),
+        { returnNew: true, overwriteMode: 'replace' },
+      );
+      return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     /** Streams the entire collection in chunks of `chunkSize` (default 500) instead of loading it all into memory at once. */
     getAllChunked: createChunkedScanner<T>(collectionName, schema),

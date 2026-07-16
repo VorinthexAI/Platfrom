@@ -16,4 +16,8 @@ export * from './guardrails';
 export * from './tools';
 export * from './agents';
 export * from './agent-runs';
+export * from './agent-run-steps';
+export * from './agent-run-calls';
+export * from './agent-artifacts';
+export * from './agent-memories';
 export * from './pipeline';

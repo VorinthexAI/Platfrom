@@ -1,17 +1,10 @@
 import { z } from 'zod';
 import { AiError } from '@/lib/ai/shared/result';
 
-/**
- * A guardrail contains ONLY a scopeId — nothing else, by spec. An agent's
- * guardrails form a strict allow-list over scopes: a
- * guardrailed agent may only invoke tools whose `scopeId` appears in its
- * guardrail list. An agent with no guardrails is unrestricted.
- */
-export const guardrailSchema = z
-  .object({
-    scopeId: z.string().min(1),
-  })
-  .strict();
+/** V1 guardrails carry only the effective persisted scope key. */
+export const guardrailSchema = z.object({
+  scopeId: z.string().cuid(),
+}).strict();
 
 export type Guardrail = z.infer<typeof guardrailSchema>;
 
@@ -26,15 +19,9 @@ interface ScopedTool {
   scopeId: string | null;
 }
 
-/**
- * Allow-list semantics mirroring organizationProviders: presence of
- * guardrails RESTRICTS. No guardrails → every tool allowed. With
- * guardrails → only tools scoped to one of the allowed scopeIds; an
- * unscoped tool is denied for a guardrailed agent.
- */
+/** Scoped tools must match the allow-list; globally unscoped tools stay reusable. */
 export function isToolAllowedByGuardrails(guardrails: readonly Guardrail[], tool: ScopedTool): boolean {
-  if (guardrails.length === 0) return true;
-  if (!tool.scopeId) return false;
+  if (guardrails.length === 0 || !tool.scopeId) return true;
   return guardrails.some((guardrail) => guardrail.scopeId === tool.scopeId);
 }
 
@@ -43,8 +30,6 @@ export function assertToolAllowedByGuardrails(agentId: string, guardrails: reado
   throw new GuardrailViolationError(
     agentId,
     tool.id,
-    tool.scopeId
-      ? `scope ${tool.scopeId} is not in the agent's guardrail allow-list`
-      : 'the tool has no scope and the agent is guardrailed',
+    `scope ${tool.scopeId} is not in the agent's guardrail allow-list`,
   );
 }

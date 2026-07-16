@@ -1,16 +1,18 @@
 import { z } from 'zod';
+import { aql } from 'arangojs';
 import { newId } from '@/lib/ids';
-import { createNodeHelpers } from './base';
+import { createNodeHelpers, withArangoKey } from './base';
+import { db } from './client';
 
 export const AGENTS_COLLECTION = 'agents';
 
 export const agentSchema = z.object({
-  key: z.string().cuid2(),
-  slug: z.string(),
-  name: z.string(),
-  title: z.string(),
-  scopeKey: z.string().cuid2(),
-  embedding: z.array(z.number()).default([]),
+  key: z.string().cuid(),
+  slug: z.string().trim().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Agent slug must use lowercase kebab-case'),
+  name: z.string().trim().min(1).max(120),
+  title: z.string().trim().min(1).max(160),
+  scopeKey: z.string().cuid(),
+  embedding: z.array(z.number().finite()).default([]),
 });
 
 export type Agent = z.infer<typeof agentSchema>;
@@ -25,6 +27,18 @@ export function insertAgent(input: AgentInsert) {
 }
 
 export const getAgentById = helpers.getById;
+
+export async function getAgentBySlug(slug: string): Promise<Agent | null> {
+  const validSlug = agentSchema.shape.slug.parse(slug);
+  const cursor = await db.query(aql`
+    FOR agent IN ${db.collection(AGENTS_COLLECTION)}
+      FILTER agent.slug == ${validSlug}
+      LIMIT 1
+      RETURN agent
+  `);
+  const document = await cursor.next();
+  return document ? agentSchema.parse(withArangoKey(document)) : null;
+}
 export const updateAgent = helpers.updateById;
 export const deleteAgent = helpers.deleteById;
 export const upsertAgentByKey = helpers.upsertByKey;

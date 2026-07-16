@@ -1,101 +1,92 @@
-# AI Execution Layer & Agent Framework
+# AI metadata model and runtime
 
-Modular execution layer for every AI call the backend makes.
+The backend stores identity, permissions, routing, and execution history as
+separate ArangoDB nodes:
 
 ```text
-Agent → Tool → Action → Router → Model → Provider → Response → Validation → agentRuns
+Agent -> agentSkills -> Skills
+      -> agentTools  -> Tools -> toolActions -> Actions
+                                             -> Router
+                                             -> modelActions -> Models
+                                             -> modelProviders -> Providers
+                                             -> organizationProviders
+                                             -> agentRuns / steps / calls / artifacts / memories
 ```
 
-A tool never hardcodes a provider endpoint. It references an **action**
-(what must be done), and the **router** picks the best executable
-model/provider route — restricted to the providers enabled for the calling
-organization. Agents compose tools, guardrails allow-list the organization
-scopes an agent may operate in, and every execution lands as metadata in
-the `agentRuns` ledger.
+All domain documents expose `key`; only the shared database boundary maps it
+to ArangoDB `_key`. Registry relationships use persisted CUID keys and
+lower-camel-case collection names.
 
-## Modules (dependency order, bottom-up)
+## Runtime compilation
 
-| Module | Owns |
-| --- | --- |
-| `shared/` | id/dot-notation helpers, normalized token usage, `AiError` base + `Result` |
-| `actions/` | `ACTION_SLUGS` (`<domain>.<action>`), `ACTION_REGISTRY`, per-action `safeToRetry` |
-| `providers/` | `PROVIDER_SLUGS`, the `ProviderAdapter` contract, one module per provider (auth config, client construction, request transform, response + error + usage normalization, streaming where available), `PROVIDER_REGISTRY` |
-| `models/` | `MODEL_SLUGS` (stable internal slugs), `MODEL_REGISTRY` — runtime definitions mirrored by the persisted models, modelActions, and modelProviders collections |
-| `organization-providers/` | the `organizationProviders` ArangoDB allow-list: document existence = enabled, no `enabled` boolean, unique persistent index on `(organizationId, providerId)` |
-| `router/` | request schemas (`auto` / `model` / `fixed`), candidate generation, centralized strategy weights + deterministic scoring/tie-breaking, `selectRoute`, `executeAction` with organization-safe fallbacks |
-| `organization-scopes/` | the `organizationScopes` collection: minimal `{key (CUID2), name}` nodes with a unique name index — the unit guardrails point at |
-| `guardrails/` | `{scopeId}`-only guardrail schema + allow-list evaluation: no guardrails → unrestricted; guardrails present → only tools whose scope is listed |
-| `tools/` | `TOOL_REGISTRY` — tools reference **actions only** (never providers/endpoints), optionally carry routing *preferences* (router stays authoritative) and a `scopeId` |
-| `agents/` | `AgentDefinition` (skill + toolIds + guardrails), SKILL.md compile/parse, deterministic prompt compilation, built-in + runtime agent registry |
-| `agent-runs/` | the DB-keyed `agentRuns` ledger: agent decision metadata plus runtime-derived steps, one call per real provider invocation, exact token usage, and timing; never generated content |
-| `pipeline/` | `runAgentTool` — grant + guardrail checks, prompt injection for ask-shaped actions, route + execute, response validation, run recording |
+`loadAgentRuntime` loads the agent and its scope, orders linked skills by
+descending `priority`, resolves explicitly granted `agentTools`, then loads
+the tools and their enabled action links. `compileAgentRuntimeContext` builds:
 
-**Agents don't chat — agents answer.** The conversational capability is
-`core.ask` (via the `ask.answer` tool). An agent's tool grants are its
-interaction contract: no `ask.answer` → no conversational surface exists
-for that agent, and a UI should render each agent from its tools
-(`ask.answer` → message box, `image.create` → prompt-and-image,
-`audio.transcribe-file` → audio upload) instead of hardcoding per-agent
-screens.
+1. agent identity;
+2. scope context and `{ "scopeId": agent.scopeKey }` guardrail;
+3. ordered skill definitions;
+4. available tools, actions, and permissions;
+5. output schema;
+6. current task.
 
-Modules only import downward (providers never import models; models never
-import the router; actions import nothing but shared).
+Tools contain no provider or model selection. A UI can derive surfaces from
+the grants: `ask.answer` exposes chat, `image.create` exposes image generation,
+and `audio.transcribe-file` exposes audio upload. Without Ask Tool, direct chat
+must not be shown and the persisted pipeline rejects that execution.
 
 ## Routing
 
-Modes: `auto` (router picks model + provider), `model` (model fixed,
-provider picked), `fixed` (both fixed; **no fallback** unless
-`allowFallback: true` — a fixed route is never silently changed).
+`selectRoute` accepts `auto`, `model`, or `fixed` mode. It resolves persisted
+relations and selects deterministically using `modelActions.priority` only:
 
-Strategies: `balanced` (default), `quality`, `speed`, `cost` — weights live
-ONLY in `router/scoring.ts`. Ties break deterministically: score →
-reliability → quality → model id → provider id. Routing is never random.
+1. require an enabled action;
+2. load enabled `modelActions`, highest priority first;
+3. apply an optional requested model;
+4. require an enabled model;
+5. load enabled `modelProviders`;
+6. apply an optional fixed provider;
+7. require an `organizationProviders` allow-list document;
+8. require an enabled provider and configured adapter;
+9. return the first valid route.
 
-Candidate filter chain: action registered → models claiming the action →
-mode filters → expand routes → drop disabled models/routes → drop providers
-not in `organizationProviders` for the org (loaded server-side, never
-client-supplied) → drop providers without a configured adapter → drop
-routes lacking an action profile → typed `NoEligibleRouteError` when empty.
+There is no random choice, quality/cost/speed scoring, or execution fallback.
+A fixed route never bypasses organization provider permissions.
 
-Fallbacks only run when the failure allows it: the error must be retryable
-AND either the action is `safeToRetry` (text-shaped) or the failure
-provably happened before execution (auth / rate-limit / provider down) —
-so a retry can never mint a second billable image/video/music output.
+## Execution and validation
 
-## Usage
-
-```ts
-import { executeAction } from '@/lib/ai';
-
-const response = await executeAction(
-  { mode: 'auto', organizationId, actionId: 'core.ask', strategy: 'quality' },
-  { messages: [{ role: 'user', content: 'Hello' }] },
-);
-// response.output, response.usage {inputTokens, outputTokens, totalTokens}
-```
-
-Enable a provider for an organization (existence = enabled; disabling
-deletes the document):
+`runStoredAgentTool` is the secure public execution entry point. It resolves
+agent, skill, tool, action, model, and provider keys server-side. Every output
+has strict metadata:
 
 ```ts
-import { createOrganizationProviderService } from '@/lib/ai';
-
-const service = createOrganizationProviderService();
-await service.enableProvider(organizationId, 'anthropic');
+{
+  status: 'accepted' | 'rejected';
+  reason: string; // at most ten words
+  score: number;  // 0 through 1
+}
 ```
 
-## Provider configuration (env)
+A rejected preflight is written as a rejected run and executes no tool or
+model call. Accepted executions validate the provider response and record real
+provider token usage. Each invocation creates one `agentRunCall`.
 
-| Provider | Env |
-| --- | --- |
-| openai | `OPENAI_API_KEY` |
-| anthropic | `ANTHROPIC_API_KEY` |
-| xai | `GROK_API_KEY` (or `XAI_API_KEY`) |
-| google-vertex | `GOOGLE_API_KEY` (express mode) |
-| azure-ai-foundry | `AZURE_AI_FOUNDRY_API_KEY` + `AZURE_AI_FOUNDRY_ENDPOINT` |
-| aws-bedrock | `AWS_BEDROCK_REGION` (explicit opt-in) + `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` |
-| openrouter | `OPENROUTER_API_KEY` |
+Execution storage is deliberately split:
 
-A provider without configuration simply never becomes an eligible route.
-Secrets stay inside adapters — registry objects, route decisions, and
-errors never carry them.
+- `agentRuns`: small status, reason, score, and timing summary;
+- `agentRunSteps`: stable logical step occurrences;
+- `agentRunCalls`: authoritative model/provider/token ledger;
+- `agentArtifacts`: run-to-artifact links;
+- `agentMemories`: explicitly selected reusable knowledge only.
+
+Legacy run documents that cannot supply trustworthy foreign keys or token
+usage are retained in `agentRunsLegacy`; they are never fabricated into the
+new call ledger.
+
+## Provider configuration
+
+Adapters read credentials from environment configuration. Credentials are
+never stored in ArangoDB. Supported adapter identifiers are OpenAI,
+Anthropic, xAI, Google Vertex, Azure AI Foundry, AWS Bedrock, and OpenRouter;
+v1 persists only the OpenAI provider and routes GPT-5.4 Nano to Ask and
+GPT-5.4 Mini to Reason.

@@ -6,16 +6,35 @@ import { getProviderBySlug, insertProvider, updateProvider, type Provider } from
 import { getModelBySlug, insertModel, updateModel, type Model } from './models.node';
 import { getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider } from './model-providers.node';
+import { getToolBySlug, insertTool, updateTool, type Tool } from './tools.node';
+import { getToolActionByPair, insertToolAction, toolActionSeedSchema, updateToolAction } from './tool-actions.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getProductByProductId, insertProduct, updateProduct, type Product } from './products.node';
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 
-type SeedResult = {
+export type SeedResult = {
   collection: string;
   key: string;
   status: 'created' | 'updated';
 };
+
+export class SeedReferenceError extends Error {
+  constructor(public readonly entity: string, public readonly reference: string, public readonly relation: string) {
+    super(`Seed ${entity} not found for ${relation}: ${reference}`);
+    this.name = 'SeedReferenceError';
+  }
+}
+
+export interface AiRuntimeSeedUpserters {
+  action(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult>;
+  provider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult>;
+  model(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult>;
+  modelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult>;
+  modelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult>;
+  tool(seed: (typeof SEEDED_TOOLS)[number]): Promise<SeedResult>;
+  toolAction(seed: (typeof SEEDED_TOOL_ACTIONS)[number]): Promise<SeedResult>;
+}
 
 const now = () => new Date().toISOString();
 
@@ -263,6 +282,57 @@ export const SEEDED_MODEL_PROVIDERS = [
   },
 ] as const;
 
+export const SEEDED_TOOLS = [
+  {
+    key: 'cmrnc3nfh00003o7k20dedfh7',
+    slug: 'ask.answer',
+    name: 'Ask',
+    description: 'Answer the user over the current message history. Granting this tool is what gives an agent a conversational surface at all.',
+    scopeKey: null,
+    enabled: true,
+  },
+  {
+    key: 'cmrnc3nfh00013o7kgv66e9mv',
+    slug: 'reason.solve',
+    name: 'Solve',
+    description: 'Work through a hard problem step by step before answering.',
+    scopeKey: null,
+    enabled: true,
+  },
+  {
+    key: 'cmrnc3nfh00023o7kg2pr2xns',
+    slug: 'image.create',
+    name: 'Create Image',
+    description: 'Generate a new image from a text prompt.',
+    scopeKey: null,
+    enabled: true,
+  },
+  {
+    key: 'cmrnc3nfh00033o7k5rq7ams2',
+    slug: 'audio.transcribe-file',
+    name: 'Transcribe Audio',
+    description: 'Convert speech in an uploaded audio file into text.',
+    scopeKey: null,
+    enabled: true,
+  },
+  {
+    key: 'cmrnc3nfh00043o7k17vy6jtg',
+    slug: 'speech.narrate',
+    name: 'Narrate',
+    description: 'Synthesize spoken audio from text.',
+    scopeKey: null,
+    enabled: true,
+  },
+] as const;
+
+export const SEEDED_TOOL_ACTIONS = [
+  { key: 'cmrnc3nfh00053o7k3hfm3a82', toolSlug: 'ask.answer', actionSlug: 'core.ask', priority: 100, enabled: true },
+  { key: 'cmrnc3nfh00063o7keg8h70ut', toolSlug: 'reason.solve', actionSlug: 'core.reason', priority: 100, enabled: true },
+  { key: 'cmrnc3nfh00073o7kdi1aee17', toolSlug: 'image.create', actionSlug: 'image.generate', priority: 100, enabled: true },
+  { key: 'cmrnc3nfh00083o7k3rz39zwp', toolSlug: 'audio.transcribe-file', actionSlug: 'audio.transcribe', priority: 100, enabled: true },
+  { key: 'cmrnc3nfh00093o7kfijm2vjk', toolSlug: 'speech.narrate', actionSlug: 'audio.generate-speech', priority: 100, enabled: true },
+] as const;
+
 export const SEEDED_PRODUCTS = [
   {
     productId: 'private.beta.access',
@@ -362,15 +432,11 @@ function loadOrchestratorSkill(dir: string): Promise<string> {
 async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
   const existing = await getActionById(seed.key);
   if (!existing) {
-    await insertAction({
-      ...seed,
-      createdAt: now(),
-      updatedAt: now(),
-    });
+    await insertAction(seed);
     return { collection: 'actions', key: seed.key, status: 'created' };
   }
 
-  const patch: Partial<Omit<Action, 'key' | 'embedding' | 'createdAt'>> = {
+  const patch: Partial<Omit<Action, 'key' | 'embedding'>> = {
     slug: seed.slug,
     name: seed.name,
     description: seed.description,
@@ -379,7 +445,6 @@ async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<
     outputDescription: seed.outputDescription,
     handlerKey: seed.handlerKey,
     enabled: seed.enabled,
-    updatedAt: now(),
   };
   await updateAction(existing.key, patch);
   return { collection: 'actions', key: existing.key, status: 'updated' };
@@ -423,9 +488,9 @@ async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<Se
 async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult> {
   const parsed = modelActionSeedSchema.parse(seed);
   const model = await getModelBySlug(parsed.modelSlug);
-  if (!model) throw new Error(`Seed model not found for modelAction: ${parsed.modelSlug}`);
+  if (!model) throw new SeedReferenceError('model', parsed.modelSlug, 'modelAction');
   const action = await getActionBySlug(parsed.actionSlug);
-  if (!action) throw new Error(`Seed action not found for modelAction: ${parsed.actionSlug}`);
+  if (!action) throw new SeedReferenceError('action', parsed.actionSlug, 'modelAction');
 
   const existing = await getModelActionByPair(model.key, action.key);
   if (!existing) {
@@ -446,9 +511,9 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
 async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult> {
   const parsed = modelProviderSeedSchema.parse(seed);
   const model = await getModelBySlug(parsed.modelSlug);
-  if (!model) throw new Error(`Seed model not found for modelProvider: ${parsed.modelSlug}`);
+  if (!model) throw new SeedReferenceError('model', parsed.modelSlug, 'modelProvider');
   const provider = await getProviderBySlug(parsed.providerSlug);
-  if (!provider) throw new Error(`Seed provider not found for modelProvider: ${parsed.providerSlug}`);
+  if (!provider) throw new SeedReferenceError('provider', parsed.providerSlug, 'modelProvider');
 
   const existing = await getModelProviderByPair(model.key, provider.key);
   if (!existing) {
@@ -467,6 +532,46 @@ async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[num
     enabled: parsed.enabled,
   });
   return { collection: 'modelProviders', key: existing.key, status: 'updated' };
+}
+
+async function upsertSeedTool(seed: (typeof SEEDED_TOOLS)[number]): Promise<SeedResult> {
+  const existing = await getToolBySlug(seed.slug);
+  if (!existing) {
+    await insertTool(seed);
+    return { collection: 'tools', key: seed.key, status: 'created' };
+  }
+
+  const patch: Partial<Omit<Tool, 'key' | 'embedding'>> = {
+    name: seed.name,
+    description: seed.description,
+    scopeKey: seed.scopeKey,
+    enabled: seed.enabled,
+  };
+  await updateTool(existing.key, patch);
+  return { collection: 'tools', key: existing.key, status: 'updated' };
+}
+
+async function upsertSeedToolAction(seed: (typeof SEEDED_TOOL_ACTIONS)[number]): Promise<SeedResult> {
+  const parsed = toolActionSeedSchema.parse(seed);
+  const tool = await getToolBySlug(parsed.toolSlug);
+  if (!tool) throw new SeedReferenceError('tool', parsed.toolSlug, 'toolAction');
+  const action = await getActionBySlug(parsed.actionSlug);
+  if (!action) throw new SeedReferenceError('action', parsed.actionSlug, 'toolAction');
+
+  const existing = await getToolActionByPair(tool.key, action.key);
+  if (!existing) {
+    await insertToolAction({
+      key: parsed.key,
+      toolKey: tool.key,
+      actionKey: action.key,
+      priority: parsed.priority,
+      enabled: parsed.enabled,
+    });
+    return { collection: 'toolActions', key: parsed.key, status: 'created' };
+  }
+
+  await updateToolAction(existing.key, { priority: parsed.priority, enabled: parsed.enabled });
+  return { collection: 'toolActions', key: existing.key, status: 'updated' };
 }
 
 async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise<SeedResult> {
@@ -577,28 +682,28 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
   return { collection: 'orchestrators', key: existing.key, status: 'updated' };
 }
 
-export async function seedCoreDbNodes(): Promise<SeedResult[]> {
+export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
+  action: upsertSeedAction,
+  provider: upsertSeedProvider,
+  model: upsertSeedModel,
+  modelAction: upsertSeedModelAction,
+  modelProvider: upsertSeedModelProvider,
+  tool: upsertSeedTool,
+  toolAction: upsertSeedToolAction,
+}): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
+  for (const seed of SEEDED_ACTIONS) results.push(await upserters.action(seed));
+  for (const seed of SEEDED_PROVIDERS) results.push(await upserters.provider(seed));
+  for (const seed of SEEDED_MODELS) results.push(await upserters.model(seed));
+  for (const seed of SEEDED_MODEL_ACTIONS) results.push(await upserters.modelAction(seed));
+  for (const seed of SEEDED_MODEL_PROVIDERS) results.push(await upserters.modelProvider(seed));
+  for (const seed of SEEDED_TOOLS) results.push(await upserters.tool(seed));
+  for (const seed of SEEDED_TOOL_ACTIONS) results.push(await upserters.toolAction(seed));
+  return results;
+}
 
-  for (const action of SEEDED_ACTIONS) {
-    results.push(await upsertSeedAction(action));
-  }
-
-  for (const provider of SEEDED_PROVIDERS) {
-    results.push(await upsertSeedProvider(provider));
-  }
-
-  for (const model of SEEDED_MODELS) {
-    results.push(await upsertSeedModel(model));
-  }
-
-  for (const modelAction of SEEDED_MODEL_ACTIONS) {
-    results.push(await upsertSeedModelAction(modelAction));
-  }
-
-  for (const modelProvider of SEEDED_MODEL_PROVIDERS) {
-    results.push(await upsertSeedModelProvider(modelProvider));
-  }
+export async function seedCoreDbNodes(): Promise<SeedResult[]> {
+  const results = await seedAiRuntimeNodes();
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { actionIdSchema, type ActionId } from '@/lib/ai/actions/types';
-import { organizationIdSchema } from '@/lib/ai/shared/ids';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 import type { TokenUsage } from '@/lib/ai/shared/usage';
 
 /**
@@ -50,7 +50,7 @@ export interface ProviderExecuteRequest<TInput = unknown> {
   modelId: string;
   externalModelId: string;
   input: TInput;
-  organizationId: string;
+  organizationKey: string;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -60,7 +60,7 @@ export const providerExecuteRequestSchema = z.object({
   modelId: z.string().min(1),
   externalModelId: z.string().min(1),
   input: z.unknown(),
-  organizationId: organizationIdSchema,
+  organizationKey: organizationKeySchema,
   timeoutMs: z.number().int().positive().optional(),
   signal: z.instanceof(AbortSignal).optional(),
 });

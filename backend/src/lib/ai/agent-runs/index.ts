@@ -1,18 +1,13 @@
 export {
   AGENT_RUNS_COLLECTION,
   AGENT_RUN_STATUSES,
-  AGENT_RUN_STEP_STATUSES,
-  agentRunCallSchema,
+  agentOutputMetadataSchema,
   agentRunSchema,
-  agentRunStepSchema,
   maxTenWordsSchema,
+  type AgentOutputMetadata,
   type AgentRun,
-  type AgentRunCall,
   type AgentRunStatus,
-  type AgentRunStep,
-  type AgentRunStepStatus,
 } from './schema';
-export { aggregateAgentRun, type AgentRunStepInput } from './aggregation';
 export {
   AgentRunNotFoundError,
   type AgentRunInsert,

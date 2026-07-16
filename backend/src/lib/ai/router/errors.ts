@@ -31,10 +31,10 @@ export class UnknownProviderError extends AiError {
 }
 
 export class ProviderNotEnabledForOrganizationError extends AiError {
-  constructor(organizationId: string, providerId: string) {
+  constructor(organizationKey: string, providerId: string) {
     super(
       ROUTER_ERROR_CODES.providerNotEnabledForOrganization,
-      `Provider ${providerId} is not enabled for organization ${organizationId}`,
+      `Provider ${providerId} is not enabled for organization ${organizationKey}`,
     );
   }
 }

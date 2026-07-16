@@ -5,7 +5,7 @@ import type { OrganizationProvidersSetupDatabase } from './types';
 /**
  * Idempotent setup for the `organizationProviders` collection: creates
  * the collection when missing and ensures the unique persistent compound
- * index over (organizationId, providerId). `ensureIndex` is a no-op when
+ * index over (organizationKey, providerKey). `ensureIndex` is a no-op when
  * an identical index already exists, so this is safe to run on every
  * deploy — it is called from `src/db/arango-migrate.ts`.
  */
@@ -18,7 +18,7 @@ export async function ensureOrganizationProvidersCollection(
   }
   await collection.ensureIndex({
     type: 'persistent',
-    fields: ['organizationId', 'providerId'],
+    fields: ['organizationKey', 'providerKey'],
     unique: true,
   });
 }

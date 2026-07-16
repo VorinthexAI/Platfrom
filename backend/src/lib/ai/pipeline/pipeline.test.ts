@@ -1,160 +1,95 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { registerAgent, resetAgentRegistry } from '@/lib/ai/agents/registry';
-import type { AgentRun } from '@/lib/ai/agent-runs/schema';
-import { agentRunSchema } from '@/lib/ai/agent-runs/schema';
-import type { AgentRunRepository } from '@/lib/ai/agent-runs/types';
-import { GuardrailViolationError } from '@/lib/ai/guardrails';
-import type { ModelDefinition } from '@/lib/ai/models/types';
-import { ProviderError } from '@/lib/ai/providers/errors';
-import type { ProviderAdapter, ProviderExecuteRequest, ProviderId } from '@/lib/ai/providers/types';
-import { tokenUsage } from '@/lib/ai/shared/usage';
+import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { InvalidRunRequestError, runAgentTool, ToolNotGrantedError, type RunAgentToolOptions, type RunAgentToolParams } from './run-agent-tool';
+import { agentSchema } from '@/lib/db/agents.node';
+import { skillSchema } from '@/lib/db/skills.node';
+import { agentSkillSchema } from '@/lib/db/agent-skills.node';
+import { agentToolSchema } from '@/lib/db/agent-tools.node';
+import { toolSchema } from '@/lib/db/tools.node';
+import { toolActionSchema } from '@/lib/db/tool-actions.node';
+import { actionSchema } from '@/lib/db/actions.node';
+import { modelSchema } from '@/lib/db/models.node';
+import { modelActionSchema } from '@/lib/db/model-actions.node';
+import { modelProviderSchema } from '@/lib/db/model-providers.node';
+import { providerSchema } from '@/lib/db/providers.node';
+import { scopeSchema } from '@/lib/ai/scopes';
+import { agentRunSchema, type AgentRun, type AgentRunRepository } from '@/lib/ai/agent-runs';
+import { agentRunStepSchema, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
+import { agentRunCallSchema, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
+import type { AgentRuntimeDataSource } from '@/lib/ai/agents';
+import type { RouterDataSource } from '@/lib/ai/router';
+import type { ProviderExecuteRequest } from '@/lib/ai/providers';
+import { tokenUsage } from '@/lib/ai/shared';
+import { runStoredAgentTool } from './run-stored-agent-tool';
+import { InvalidRunRequestError, ResponseValidationError } from './validation';
 
-const keys = {
-  organization: newId(), scope: newId(), agent: newId(), skill: newId(), tool: newId(),
-  action: newId(), model: newId(), anthropic: newId(), openrouter: newId(),
-};
-
-afterEach(() => resetAgentRegistry());
-
-function memoryRuns(): { repository: AgentRunRepository; store: Map<string, AgentRun> } {
-  const store = new Map<string, AgentRun>();
-  const repository: AgentRunRepository = {
-    async insertRun(input) {
-      const run = agentRunSchema.parse({ ...input, key: newId(), createdAt: new Date().toISOString() });
-      store.set(run.key, run);
-      return run;
-    },
-    async getRunById(key) { return store.get(key) ?? null; },
-    async listRunsForOrganization(organizationKey) { return [...store.values()].filter((run) => run.organizationKey === organizationKey); },
+const now = '2026-07-16T00:00:00.000Z';
+function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Task completed', score: 0.95 }, text: 'done' }) {
+  const organizationKey = newId();
+  const scope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'core', name: 'Core', description: 'Core product scope' });
+  const agent = agentSchema.parse({ key: newId(), slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: scope.key });
+  const skill = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend systems.' });
+  const action = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer with metadata', handlerKey: 'core.ask', enabled: true });
+  const tool = toolSchema.parse({ key: newId(), slug: 'ask.answer', name: 'Ask', description: 'Answer the user', scopeKey: null, enabled: true });
+  const model = modelSchema.parse({ key: newId(), slug: 'openai.gpt-5.4-nano', name: 'Nano', description: 'Fast model', supportedUseCases: 'Ask', enabled: true });
+  const provider = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
+  const agentSkill = agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 });
+  const agentTool = agentToolSchema.parse({ key: newId(), agentKey: agent.key, toolKey: tool.key });
+  const toolAction = toolActionSchema.parse({ key: newId(), toolKey: tool.key, actionKey: action.key, priority: 100, enabled: true });
+  const modelAction = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: action.key, priority: 100, enabled: true });
+  const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-nano', enabled: true });
+  const runtimeData: AgentRuntimeDataSource = {
+    async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
+    async listAgentSkills() { return [agentSkill]; }, async getSkill(key) { return key === skill.key ? skill : null; },
+    async listAgentTools() { return [agentTool]; }, async getTool(key) { return key === tool.key ? tool : null; },
+    async listToolActions() { return [toolAction]; }, async getAction(key) { return key === action.key ? action : null; },
   };
-  return { repository, store };
+  const routerData: RouterDataSource = {
+    async getActionBySlug(slug) { return slug === action.slug ? action : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey(key) { return key === model.key ? model : null; },
+    async getProviderBySlug(slug) { return slug === provider.slug ? provider : null; }, async getProviderByKey(key) { return key === provider.key ? provider : null; },
+    async listModelActions() { return [modelAction]; }, async listModelProviders() { return [modelProvider]; }, async listOrganizationProviderKeys() { return [provider.key]; },
+  };
+  const runStore: AgentRun[] = []; const stepStore: AgentRunStep[] = []; const callStore: AgentRunCall[] = [];
+  const runs: AgentRunRepository = { async insertRun(input) { const value = agentRunSchema.parse({ ...input, key: newId(), createdAt: now }); runStore.push(value); return value; }, async getRunById(key) { return runStore.find((value) => value.key === key) ?? null; }, async listRunsForOrganization() { return runStore; } };
+  const steps: AgentRunStepRepository = { async insertStep(input) { const value = agentRunStepSchema.parse({ ...input, key: input.key ?? newId() }); stepStore.push(value); return value; }, async listStepsForRun(key) { return stepStore.filter((value) => value.agentRunKey === key); } };
+  const calls: AgentRunCallRepository = { async insertCall(input) { const value = agentRunCallSchema.parse({ ...input, key: input.key ?? newId() }); callStore.push(value); return value; }, async listCallsForRun(key) { return callStore.filter((value) => value.agentRunKey === key); } };
+  const adapterCalls: ProviderExecuteRequest[] = [];
+  const adapters = { openai: { id: 'openai' as const, name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { adapterCalls.push(request as ProviderExecuteRequest); return { output: output as TOutput, usage: tokenUsage(8, 5), providerId: 'openai' as const, modelId: request.modelId, externalModelId: request.externalModelId }; } } };
+  const options = { runtimeData, data: routerData, adapters, runs, steps, calls };
+  const params = { organizationKey, agentKey: agent.key, toolKey: tool.key, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: 'Hello' }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
+  return { options, params, adapterCalls, runStore, stepStore, callStore, agent, skill, tool, action, model, provider };
 }
 
-interface MockAdapter extends ProviderAdapter { calls: ProviderExecuteRequest[] }
-
-function mockAdapter(id: ProviderId, behavior: (request: ProviderExecuteRequest) => unknown): MockAdapter {
-  const calls: ProviderExecuteRequest[] = [];
-  return {
-    id,
-    name: id,
-    calls,
-    async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) {
-      calls.push(request as ProviderExecuteRequest);
-      const output = behavior(request as ProviderExecuteRequest);
-      return { output: output as TOutput, usage: tokenUsage(12, 34), providerId: id, modelId: request.modelId, externalModelId: request.externalModelId };
-    },
-  };
-}
-
-const chatModel: ModelDefinition = {
-  id: 'anthropic.claude-sonnet',
-  name: 'Claude Sonnet',
-  actions: ['core.ask', 'core.reason'],
-  actionProfiles: {
-    'core.ask': { quality: 0.9, speed: 0.5, costEfficiency: 0.5, reliability: 0.95 },
-    'core.reason': { quality: 0.95, speed: 0.4, costEfficiency: 0.4, reliability: 0.95 },
-  },
-  routes: [
-    { providerId: 'anthropic', externalModelId: 'claude-sonnet-test', enabled: true },
-    { providerId: 'openrouter', externalModelId: 'anthropic/claude-sonnet-test', enabled: true },
-  ],
-  enabled: true,
-};
-
-function optionsWith(overrides: Partial<RunAgentToolOptions> = {}): RunAgentToolOptions & { store: Map<string, AgentRun> } {
-  const { repository, store } = memoryRuns();
-  return {
-    models: [chatModel],
-    organizationProviders: { async listProviderIds() { return ['anthropic', 'openrouter']; } },
-    runs: repository,
-    runKeys: {
-      async resolveActionKey() { return keys.action; },
-      async resolveModelKey() { return keys.model; },
-      async resolveProviderKey(providerId) { return providerId === 'anthropic' ? keys.anthropic : keys.openrouter; },
-    },
-    store,
-    ...overrides,
-  };
-}
-
-const chatInput = { messages: [{ role: 'user' as const, content: 'hello' }] };
-
-function params(overrides: Partial<RunAgentToolParams> = {}): RunAgentToolParams {
-  return {
-    agentId: 'vorinthex.assistant', toolId: 'ask.answer',
-    organizationKey: keys.organization, scopeKey: keys.scope, agentKey: keys.agent,
-    skillKey: keys.skill, toolKey: keys.tool, stepId: 'answer-request',
-    status: 'accepted', reason: 'Request matches engineering scope', score: 0.94, input: chatInput,
-    ...overrides,
-  };
-}
-
-describe('runAgentTool — call-level usage ledger', () => {
-  test('records provider usage as one exact model call', async () => {
-    const anthropic = mockAdapter('anthropic', () => ({ text: 'hi', toolCalls: [], stopReason: 'end_turn' }));
-    const options = optionsWith({ adapters: { anthropic } });
-    const { response, run } = await runAgentTool<{ text: string }>(params(), options);
-
-    expect(response.output.text).toBe('hi');
-    expect(run.status).toBe('accepted');
-    expect(run.organizationKey).toBe(keys.organization);
-    expect(run.callsCount).toBe(1);
-    expect(run.calls[0]).toMatchObject({ skillKey: keys.skill, toolKey: keys.tool, actionKey: keys.action, modelKey: keys.model, providerKey: keys.anthropic, inputTokens: 12, outputTokens: 34, totalTokens: 46 });
-    expect(run.steps[0]).toMatchObject({ stepId: 'answer-request', status: 'completed', inputTokens: 12, outputTokens: 34, totalTokens: 46 });
-    expect(run.totalTokens).toBe(46);
-    expect(options.store.get(run.key)).toEqual(run);
-    expect((anthropic.calls[0]?.input as { system?: string }).system).toContain('# Vorinthex Assistant');
+describe('persisted agent pipeline', () => {
+  test('compiles, routes, executes and persists separate run, step and call documents', async () => {
+    const f = fixture();
+    const result = await runStoredAgentTool<{ metadata: unknown; text: string }>(f.params, f.options);
+    expect(result.executed).toBe(true);
+    expect(f.runStore[0]?.status).toBe('completed');
+    expect(f.stepStore[0]).toMatchObject({ stepSlug: 'answer-request', status: 'completed', agentRunKey: f.runStore[0]?.key });
+    expect(f.callStore[0]).toMatchObject({ skillKey: f.skill.key, toolKey: f.tool.key, actionKey: f.action.key, modelKey: f.model.key, providerKey: f.provider.key, totalTokens: 13 });
+    expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain(JSON.stringify({ scopeId: f.agent.scopeKey }));
   });
 
-  test('records every real fallback attempt separately', async () => {
-    const anthropic = mockAdapter('anthropic', () => { throw new ProviderError('anthropic', 'provider_unavailable', 'down'); });
-    const openrouter = mockAdapter('openrouter', () => ({ text: 'fallback' }));
-    const { run } = await runAgentTool(params(), optionsWith({ adapters: { anthropic, openrouter } }));
-
-    expect(run.callsCount).toBe(2);
-    expect(run.calls.map((call) => call.providerKey)).toEqual([keys.anthropic, keys.openrouter]);
-    expect(run.calls.map((call) => call.totalTokens)).toEqual([0, 46]);
-    expect(run.totalTokens).toBe(46);
-    expect(run.providerKeys).toEqual([keys.anthropic, keys.openrouter]);
+  test('rejected metadata stores a summary and never executes tools or creates steps/calls', async () => {
+    const f = fixture();
+    const result = await runStoredAgentTool({ ...f.params, metadata: { status: 'rejected', reason: 'Outside assigned scope', score: 0.1 } }, f.options);
+    expect(result.executed).toBe(false);
+    expect(f.adapterCalls).toHaveLength(0);
+    expect(f.runStore[0]?.status).toBe('rejected');
+    expect(f.stepStore).toHaveLength(0);
+    expect(f.callStore).toHaveLength(0);
   });
 
-  test('persists a failed step with the attempted call and rethrows', async () => {
-    const anthropic = mockAdapter('anthropic', () => { throw new ProviderError('anthropic', 'invalid_input', 'bad'); });
-    const options = optionsWith({ adapters: { anthropic } });
-    await expect(runAgentTool(params(), options)).rejects.toThrow();
-
-    const [run] = [...options.store.values()];
-    expect(run?.status).toBe('accepted');
-    expect(run?.steps[0]?.status).toBe('failed');
-    expect(run?.calls).toHaveLength(1);
-    expect(run?.totalTokens).toBe(0);
+  test('an ungranted Ask Tool cannot expose direct chat', async () => {
+    const f = fixture();
+    await expect(runStoredAgentTool({ ...f.params, toolKey: newId() }, f.options)).rejects.toBeInstanceOf(InvalidRunRequestError);
+    expect(f.adapterCalls).toHaveLength(0);
   });
 
-  test('blocks guardrails and ungranted tools before creating a run', async () => {
-    registerAgent({ id: 'org.guardrailed', name: 'Guardrailed', description: 'Scoped', skill: 'Support only.', toolIds: ['ask.answer'], guardrails: [{ scopeId: 'scope_support' }] });
-    const anthropic = mockAdapter('anthropic', () => ({ text: 'never' }));
-    const guarded = optionsWith({ adapters: { anthropic } });
-    await expect(runAgentTool(params({ agentId: 'org.guardrailed' }), guarded)).rejects.toBeInstanceOf(GuardrailViolationError);
-    expect(guarded.store.size).toBe(0);
-
-    const ungranted = optionsWith({ adapters: {} });
-    await expect(runAgentTool(params({ toolId: 'image.create', input: {} }), ungranted)).rejects.toBeInstanceOf(ToolNotGrantedError);
-    expect(ungranted.store.size).toBe(0);
-  });
-
-  test('uses the organization allow-list and rejects malformed metadata', async () => {
-    const anthropic = mockAdapter('anthropic', () => ({ text: 'never' }));
-    const openrouter = mockAdapter('openrouter', () => ({ text: 'allowed' }));
-    const options = optionsWith({
-      adapters: { anthropic, openrouter },
-      organizationProviders: { async listProviderIds() { return ['openrouter']; } },
-    });
-    const { run } = await runAgentTool(params(), options);
-    expect(run.providerKeys).toEqual([keys.openrouter]);
-    expect(anthropic.calls).toHaveLength(0);
-
-    await expect(runAgentTool(params({ reason: 'one two three four five six seven eight nine ten eleven' }), options)).rejects.toBeInstanceOf(InvalidRunRequestError);
+  test('invalid provider output metadata fails and records the actual call', async () => {
+    const f = fixture({ text: 'missing metadata' });
+    await expect(runStoredAgentTool(f.params, f.options)).rejects.toBeInstanceOf(ResponseValidationError);
+    expect(f.runStore[0]?.status).toBe('failed');
+    expect(f.callStore[0]?.totalTokens).toBe(13);
   });
 });

@@ -1,62 +1,25 @@
 import { AiError } from '@/lib/ai/shared/result';
-import type { ProviderId } from '@/lib/ai/providers/types';
 import type { OrganizationProvider } from './schema';
 
 export interface OrganizationProviderRepository {
-  listProviderIds(organizationId: string): Promise<readonly ProviderId[]>;
-
-  hasProvider(organizationId: string, providerId: ProviderId): Promise<boolean>;
-
-  addProvider(organizationId: string, providerId: ProviderId): Promise<OrganizationProvider>;
-
-  removeProvider(organizationId: string, providerId: ProviderId): Promise<void>;
+  listProviderKeys(organizationKey: string): Promise<readonly string[]>;
+  hasProvider(organizationKey: string, providerKey: string): Promise<boolean>;
+  addProvider(organizationKey: string, providerKey: string): Promise<OrganizationProvider>;
+  removeProvider(organizationKey: string, providerKey: string): Promise<void>;
 }
-
-export class InvalidOrganizationIdError extends AiError {
-  constructor() {
-    super('invalid_organization_id', 'organizationId must be a non-empty string');
-  }
-}
-
-export class UnknownProviderIdError extends AiError {
-  constructor(providerId: string) {
-    super('unknown_provider_id', `Unknown provider id: ${providerId}`);
-  }
-}
-
 export class DuplicateOrganizationProviderError extends AiError {
-  constructor(organizationId: string, providerId: string) {
-    super('duplicate_organization_provider', `Provider ${providerId} is already enabled for organization ${organizationId}`);
-  }
+  constructor(organizationKey: string, providerKey: string) { super('duplicate_organization_provider', `Provider ${providerKey} is already enabled for organization ${organizationKey}`); }
 }
-
 export class OrganizationProviderNotFoundError extends AiError {
-  constructor(organizationId: string, providerId: string) {
-    super('organization_provider_not_found', `Provider ${providerId} is not enabled for organization ${organizationId}`);
-  }
+  constructor(organizationKey: string, providerKey: string) { super('organization_provider_not_found', `Provider ${providerKey} is not enabled for organization ${organizationKey}`); }
 }
-
-/**
- * The narrow slice of an arangojs `Database` the repository uses — kept
- * structural so tests can substitute an in-memory fake without a live
- * ArangoDB.
- */
+export class OrganizationProviderReferenceError extends AiError {
+  constructor(entity: 'organization' | 'provider', value: string) { super('organization_provider_reference_not_found', `${entity} not found: ${value}`); }
+}
 export interface OrganizationProvidersDatabase {
-  query(
-    query: string,
-    bindVars?: Record<string, unknown>,
-  ): Promise<{ all(): Promise<unknown[]>; next(): Promise<unknown> }>;
-  collection(name: string): {
-    save(doc: Record<string, unknown>, options?: { returnNew?: boolean }): Promise<unknown>;
-    remove(selector: string): Promise<unknown>;
-  };
+  query(query: string, bindVars?: Record<string, unknown>): Promise<{ all(): Promise<unknown[]>; next(): Promise<unknown> }>;
+  collection(name: string): { save(doc: Record<string, unknown>, options?: { returnNew?: boolean }): Promise<unknown>; remove(selector: string): Promise<unknown> };
 }
-
-/** The slice used by idempotent collection/index setup. */
 export interface OrganizationProvidersSetupDatabase {
-  collection(name: string): {
-    exists(): Promise<boolean>;
-    create(): Promise<unknown>;
-    ensureIndex(index: { type: 'persistent'; fields: string[]; unique: boolean }): Promise<unknown>;
-  };
+  collection(name: string): { exists(): Promise<boolean>; create(): Promise<unknown>; ensureIndex(index: { type: 'persistent'; fields: string[]; unique: boolean }): Promise<unknown> };
 }
