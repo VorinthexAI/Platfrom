@@ -12,7 +12,7 @@ import { getRootOrganization, insertOrganization, updateOrganization, type Organ
 import { getProductByProductId, insertProduct, updateProduct, type Product } from './products.node';
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
-import { getDefaultScopeRepository } from '@/lib/ai/scopes';
+import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers';
 import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/genesis/seed';
 
@@ -417,6 +417,75 @@ export const SEEDED_ORGANIZATION = {
   metadata: {},
 };
 
+export { NEXUS_SCOPE_KEY };
+
+export const SEEDED_SCOPES = [
+  {
+    key: NEXUS_SCOPE_KEY,
+    slug: 'nexus',
+    name: 'Nexus',
+    description: 'The complete Vorinthex ecosystem, connecting every product, capability, workspace, and intelligence into one unified AI platform.',
+    position: 1,
+    parentKey: null,
+  },
+  {
+    key: 'cmrnlzf640001qc7kazsr96k5',
+    slug: 'core',
+    name: 'Core',
+    description: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
+    position: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640002qc7kfp2qelhq',
+    slug: 'launch',
+    name: 'Launch',
+    description: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
+    position: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640003qc7k4n8zesyz',
+    slug: 'studio',
+    name: 'Studio',
+    description: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
+    position: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640004qc7kdvj99uva',
+    slug: 'command',
+    name: 'Command',
+    description: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
+    position: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640005qc7kefvra0bn',
+    slug: 'head-quarters',
+    name: 'Head Quarters',
+    description: 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
+    position: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640006qc7kfjl23jc3',
+    slug: 'replica',
+    name: 'Replica',
+    description: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
+    position: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640007qc7kd6a2g0o8',
+    slug: 'pilot',
+    name: 'Pilot',
+    description: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
+    position: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+] as const;
+
 // The Command orchestrator roster: one per scripts/orchestrators/<slug>-<role>
 // directory. `voice` here must match a (provider, model, voice) already in
 // SEEDED_VOICES below (derived from this list), and `dir` locates that
@@ -752,15 +821,65 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const rootOrganization = await getRootOrganization();
   if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'Genesis');
   const scopes = getDefaultScopeRepository();
-  const organizationScopes = await scopes.listScopes(rootOrganization.key);
+  const organizationScopes = [...await scopes.listScopes(rootOrganization.key)];
+  const scopesBySlug = new Map(organizationScopes.map((scope) => [scope.slug, scope]));
+  const actualKeysBySeedKey = new Map<string, string>();
+  for (const seed of SEEDED_SCOPES) {
+    let existing = scopesBySlug.get(seed.slug);
+    if (existing) {
+      if (existing.name !== seed.name || existing.description !== seed.description || existing.position !== seed.position) {
+        existing = await scopes.updateScope(existing.key, { name: seed.name, description: seed.description, position: seed.position });
+        scopesBySlug.set(existing.slug, existing);
+        const index = organizationScopes.findIndex((scope) => scope.key === existing!.key);
+        if (index >= 0) organizationScopes[index] = existing;
+        results.push({ collection: 'scopes', key: existing.key, status: 'updated' });
+      }
+      actualKeysBySeedKey.set(seed.key, existing.key);
+      continue;
+    }
+    const scope = await scopes.createScope({
+      key: seed.key,
+      organizationKey: rootOrganization.key,
+      slug: seed.slug,
+      name: seed.name,
+      description: seed.description,
+      position: seed.position,
+    });
+    organizationScopes.push(scope);
+    scopesBySlug.set(scope.slug, scope);
+    actualKeysBySeedKey.set(seed.key, scope.key);
+    results.push({ collection: 'scopes', key: scope.key, status: 'created' });
+  }
+
+  const nexusScope = await scopes.getScopeByKey(actualKeysBySeedKey.get(NEXUS_SCOPE_KEY) ?? NEXUS_SCOPE_KEY);
+  if (!nexusScope) throw new SeedReferenceError('scope', 'nexus', 'scopeScopes');
+  const relationsByChild = new Map<string, { parentKey: string; childKey: string }>();
+  for (const scope of organizationScopes) {
+    for (const relation of await scopes.listChildRelations(scope.key)) {
+      relationsByChild.set(relation.childKey, relation);
+    }
+  }
+  const nexusChildren = SEEDED_SCOPES.filter((scope) => scope.parentKey === NEXUS_SCOPE_KEY);
+  for (const seed of nexusChildren) {
+    const childKey = actualKeysBySeedKey.get(seed.key) ?? seed.key;
+    const child = await scopes.getScopeByKey(childKey);
+    if (!child) throw new SeedReferenceError('scope', seed.slug, 'scopeScopes');
+    const existingRelation = relationsByChild.get(child.key);
+    if (existingRelation?.parentKey === nexusScope.key) continue;
+    if (existingRelation) {
+      await scopes.removeScopeRelation(existingRelation.parentKey, child.key);
+    }
+    const relation = await scopes.addScopeRelation(nexusScope.key, child.key);
+    relationsByChild.set(child.key, relation);
+    results.push({ collection: 'scopeScopes', key: relation.key, status: 'created' });
+  }
+
   let genesisScope = organizationScopes.find((scope) => scope.slug === GENESIS_SCOPE_SLUG);
   if (!genesisScope) {
-    genesisScope = await scopes.createScope({ organizationKey: rootOrganization.key, slug: GENESIS_SCOPE_SLUG, name: 'Agent Builder', description: 'Scope for Genesis and the creation of validated Vorinthex agents.' });
+    genesisScope = await scopes.createScope({ organizationKey: rootOrganization.key, slug: GENESIS_SCOPE_SLUG, name: 'Agent Builder', description: 'Scope for Genesis and the creation of validated Vorinthex agents.', position: 2 });
     const rootScope = organizationScopes.find((scope) => scope.slug === 'vorinthex-ai');
     if (rootScope) {
-      const children = await scopes.listChildRelations(rootScope.key);
-      const nextPosition = children.reduce((maximum, relation) => Math.max(maximum, relation.position), 0) + 1;
-      await scopes.addScopeRelation(rootScope.key, genesisScope.key, nextPosition);
+      await scopes.addScopeRelation(rootScope.key, genesisScope.key);
     }
     results.push({ collection: 'scopes', key: genesisScope.key, status: 'created' });
   }

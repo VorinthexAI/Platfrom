@@ -2,13 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { createScopeRepository } from './repository';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';
-import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, scopeSchema, scopeScopeSchema } from './schema';
+import { SCOPE_MEMBERS_COLLECTION, SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, scopeSchema, scopesEmbedKeys, scopeScopeSchema } from './schema';
 import {
   DuplicateScopeSlugError,
   ScopeAlreadyHasParentError,
   ScopeCycleError,
   ScopeOrganizationMismatchError,
-  ScopePositionConflictError,
   ScopeRelationNotFoundError,
   type ScopesDatabase,
   type ScopesSetupDatabase,
@@ -31,8 +30,8 @@ function createFakeDb() {
       if (query.includes('REMOVE')) {
         for (const [key, doc] of [...docs.entries()]) {
           if (
-            doc.parentScopeKey === bindVars.scopeKey
-            || doc.childScopeKey === bindVars.scopeKey
+            doc.parentKey === bindVars.scopeKey
+            || doc.childKey === bindVars.scopeKey
             || doc.scopeKey === bindVars.scopeKey
           ) docs.delete(key);
         }
@@ -44,17 +43,11 @@ function createFakeDb() {
         rows = rows.filter((doc) => doc.organizationKey === bindVars.organizationKey);
         rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
       }
-      if (query.includes('relation.parentScopeKey == @parentScopeKey')) {
-        rows = rows.filter((doc) => doc.parentScopeKey === bindVars.parentScopeKey);
+      if (query.includes('relation.parentKey == @parentKey')) {
+        rows = rows.filter((doc) => doc.parentKey === bindVars.parentKey);
       }
-      if (query.includes('relation.childScopeKey == @childScopeKey')) {
-        rows = rows.filter((doc) => doc.childScopeKey === bindVars.childScopeKey);
-      }
-      if (query.includes('relation.position == @position')) {
-        rows = rows.filter((doc) => doc.position === bindVars.position);
-      }
-      if (query.includes('SORT relation.position')) {
-        rows.sort((a, b) => Number(a.position) - Number(b.position));
+      if (query.includes('relation.childKey == @childKey')) {
+        rows = rows.filter((doc) => doc.childKey === bindVars.childKey);
       }
       return { all: async () => rows, next: async () => rows[0] };
     },
@@ -67,8 +60,7 @@ function createFakeDb() {
               return existing.organizationKey === doc.organizationKey && existing.slug === doc.slug;
             }
             if (name === SCOPE_SCOPES_COLLECTION) {
-              return existing.childScopeKey === doc.childScopeKey
-                || (existing.parentScopeKey === doc.parentScopeKey && existing.position === doc.position);
+              return existing.childKey === doc.childKey;
             }
             return false;
           });
@@ -77,6 +69,13 @@ function createFakeDb() {
           }
           docs.set(String(doc._key), doc);
           return { new: doc };
+        },
+        async update(key: string, patch: Record<string, unknown>) {
+          const current = docs.get(key);
+          if (!current) throw Object.assign(new Error('document not found'), { errorNum: 1202 });
+          const updated = { ...current, ...patch };
+          docs.set(key, updated);
+          return { new: updated };
         },
         async remove(key: string) {
           if (!docs.delete(key)) throw Object.assign(new Error('document not found'), { errorNum: 1202 });
@@ -102,6 +101,7 @@ describe('scope schemas', () => {
       slug: 'core',
       name: 'Core',
       description: 'The conversational intelligence scope.',
+      position: 2,
     });
     expect(scope).toEqual({
       key: scope.key,
@@ -109,24 +109,34 @@ describe('scope schemas', () => {
       slug: 'core',
       name: 'Core',
       description: 'The conversational intelligence scope.',
+      position: 2,
       embedding: [],
     });
+    expect(scopesEmbedKeys.options).toEqual(['name', 'slug', 'description']);
     expect(() => scopeSchema.parse({ ...scope, slug: 'Not Valid' })).toThrow();
+    expect(scopeSchema.parse({ ...scope, organizationKey: 'legacy-root-key' }).organizationKey).toBe('legacy-root-key');
   });
 
   test('scope relation rejects self-parenting', () => {
-    const key = newId();
-    expect(() => scopeScopeSchema.parse({ key: newId(), parentScopeKey: key, childScopeKey: key, position: 1 })).toThrow();
+    const parentKey = newId();
+    const childKey = newId();
+    expect(scopeScopeSchema.parse({ key: newId(), parentKey, childKey, position: 1 })).toEqual({
+      key: expect.any(String),
+      parentKey,
+      childKey,
+    });
+    expect(() => scopeScopeSchema.parse({ key: newId(), parentKey, childKey: parentKey })).toThrow();
   });
 });
 
 describe('scope repository', () => {
   const organizationKey = newId();
-  const input = (overrides: Partial<{ organizationKey: string; slug: string; name: string; description: string }> = {}) => ({
+  const input = (overrides: Partial<{ organizationKey: string; slug: string; name: string; description: string; position: number }> = {}) => ({
     organizationKey,
     slug: 'core',
     name: 'Core',
     description: 'The conversational intelligence scope.',
+    position: 2,
     ...overrides,
   });
 
@@ -135,15 +145,17 @@ describe('scope repository', () => {
     const repository = createScopeRepository(fake);
     const core = await repository.createScope(input());
     expect(core.embedding).toHaveLength(1536);
+    const updated = await repository.updateScope(core.key, { name: 'Core Intelligence', description: 'Updated scope description.' });
+    expect(updated).toMatchObject({ key: core.key, name: 'Core Intelligence', description: 'Updated scope description.' });
     await repository.createScope(input({ slug: 'command', name: 'Command' }));
     await repository.createScope(input({ organizationKey: newId() }));
 
     expect((await repository.listScopes(organizationKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
-    expect(await repository.getScopeByKey(core.key)).toEqual(core);
+    expect(await repository.getScopeByKey(core.key)).toEqual(updated);
     await expect(repository.createScope(input())).rejects.toBeInstanceOf(DuplicateScopeSlugError);
   });
 
-  test('enforces organization boundaries, strict parents, sibling positions, and cycles', async () => {
+  test('enforces organization boundaries, strict parents, and cycles', async () => {
     const { fake } = createFakeDb();
     const repository = createScopeRepository(fake);
     const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
@@ -152,21 +164,18 @@ describe('scope repository', () => {
     const nested = await repository.createScope(input({ slug: 'nested', name: 'Nested' }));
     const foreign = await repository.createScope(input({ organizationKey: newId(), slug: 'foreign', name: 'Foreign' }));
 
-    await repository.addScopeRelation(root.key, core.key, 1);
-    await repository.addScopeRelation(root.key, command.key, 2);
-    await repository.addScopeRelation(core.key, nested.key, 1);
-    expect((await repository.listChildRelations(root.key)).map((relation) => relation.childScopeKey)).toEqual([
+    await repository.addScopeRelation(root.key, core.key);
+    await repository.addScopeRelation(root.key, command.key);
+    await repository.addScopeRelation(core.key, nested.key);
+    expect((await repository.listChildRelations(root.key)).map((relation) => relation.childKey)).toEqual([
       core.key,
       command.key,
     ]);
 
-    await expect(repository.addScopeRelation(command.key, core.key, 1)).rejects.toBeInstanceOf(ScopeAlreadyHasParentError);
-    await expect(repository.addScopeRelation(root.key, foreign.key, 3)).rejects.toBeInstanceOf(ScopeOrganizationMismatchError);
-    await expect(repository.addScopeRelation(root.key, newId(), 3)).rejects.toThrow();
-    await expect(repository.addScopeRelation(command.key, root.key, 1)).rejects.toBeInstanceOf(ScopeCycleError);
-
-    const extra = await repository.createScope(input({ slug: 'extra', name: 'Extra' }));
-    await expect(repository.addScopeRelation(root.key, extra.key, 2)).rejects.toBeInstanceOf(ScopePositionConflictError);
+    await expect(repository.addScopeRelation(command.key, core.key)).rejects.toBeInstanceOf(ScopeAlreadyHasParentError);
+    await expect(repository.addScopeRelation(root.key, foreign.key)).rejects.toBeInstanceOf(ScopeOrganizationMismatchError);
+    await expect(repository.addScopeRelation(root.key, newId())).rejects.toThrow();
+    await expect(repository.addScopeRelation(command.key, root.key)).rejects.toBeInstanceOf(ScopeCycleError);
   });
 
   test('removes relations and cascades them when a scope is deleted', async () => {
@@ -174,11 +183,11 @@ describe('scope repository', () => {
     const repository = createScopeRepository(fake);
     const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
     const core = await repository.createScope(input());
-    await repository.addScopeRelation(root.key, core.key, 1);
+    await repository.addScopeRelation(root.key, core.key);
 
     await repository.removeScopeRelation(root.key, core.key);
     await expect(repository.removeScopeRelation(root.key, core.key)).rejects.toBeInstanceOf(ScopeRelationNotFoundError);
-    await repository.addScopeRelation(root.key, core.key, 1);
+    await repository.addScopeRelation(root.key, core.key);
     stores.set(SCOPE_MEMBERS_COLLECTION, new Map([[newId(), {
       _key: newId(),
       scopeKey: core.key,
@@ -212,10 +221,14 @@ describe('scope index setup', () => {
     expect(created).toEqual([SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, SCOPE_MEMBERS_COLLECTION]);
     expect(ensured.filter((index) => index.unique).map((index) => `${index.collection}:${index.fields.join('+')}`)).toEqual([
       `${SCOPES_COLLECTION}:organizationKey+slug`,
-      `${SCOPE_SCOPES_COLLECTION}:parentScopeKey+childScopeKey`,
-      `${SCOPE_SCOPES_COLLECTION}:childScopeKey`,
-      `${SCOPE_SCOPES_COLLECTION}:parentScopeKey+position`,
+      `${SCOPE_SCOPES_COLLECTION}:parentKey+childKey`,
+      `${SCOPE_SCOPES_COLLECTION}:childKey`,
       `${SCOPE_MEMBERS_COLLECTION}:scopeKey+userOrganizationKey`,
     ]);
+    expect(ensured).toContainEqual({
+      collection: SCOPES_COLLECTION,
+      fields: ['organizationKey', 'position'],
+      unique: false,
+    });
   });
 });

@@ -43,6 +43,13 @@ function createFakeDb() {
           docs.set(String(doc._key), doc);
           return { new: doc };
         },
+        async update(key, patch) {
+          const current = docs.get(key);
+          if (!current) throw Object.assign(new Error('document not found'), { errorNum: 1202 });
+          const updated = { ...current, ...patch };
+          docs.set(key, updated);
+          return { new: updated };
+        },
         async remove(key) {
           if (!docs.delete(key)) throw Object.assign(new Error('document not found'), { errorNum: 1202 });
           return {};
@@ -135,6 +142,7 @@ describe('scope member repository', () => {
       slug: 'command',
       name: 'Command',
       description: 'Command scope.',
+      position: 2,
       embedding: [],
     }]]));
     stores.set('userOrganizations', new Map([[membershipKey, userOrganizationDoc(membershipKey, organizationKey, userKey)]]));

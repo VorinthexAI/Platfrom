@@ -1,11 +1,11 @@
 import type { Context } from 'hono';
 import { Webhook } from 'svix';
 import { z } from 'zod';
+import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { insertEvent } from '@/lib/db/events.node';
 import { claimWebhookEvent, deleteProcessedWebhookEventByProviderAndEventId, updateProcessedWebhookEventByProviderAndEventId } from '@/lib/db/processed-webhook-events.node';
 import { deleteUser, getUserByEmailHash } from '@/lib/db/users.node';
 import { newId } from '@/lib/ids';
-import { getRootOrganizationId } from '@/platform/events';
 import { hashUserEmail } from './users';
 
 export const RESEND_WEBHOOK_V1_PATH = '/api/v1/webhooks/resend';
@@ -55,7 +55,6 @@ export interface ResendWebhookDeps {
   getUserByEmailHash: typeof getUserByEmailHash;
   insertEvent: typeof insertEvent;
   deleteUser: typeof deleteUser;
-  getRootOrganizationId: typeof getRootOrganizationId;
   hashUserEmail: typeof hashUserEmail;
   newId: typeof newId;
 }
@@ -64,7 +63,6 @@ const defaultDeps: ResendWebhookDeps = {
   getUserByEmailHash,
   insertEvent,
   deleteUser,
-  getRootOrganizationId,
   hashUserEmail,
   newId,
 };
@@ -94,8 +92,7 @@ export async function recordResendEmailEvent(
   const bounce = event.type === 'email.bounced' ? event.data.bounce : undefined;
   await deps.insertEvent({
     key: deps.newId(),
-    sourceId: await deps.getRootOrganizationId(),
-    belongsTo: 'organization',
+    scopeId: NEXUS_SCOPE_KEY,
     userId: user.key,
     slug: event.type,
     data: {

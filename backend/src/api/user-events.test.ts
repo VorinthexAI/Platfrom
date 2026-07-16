@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { appendUserEvents, postUserEventsBodySchema } from './user-events';
 
 const validEvent = {
@@ -65,6 +66,12 @@ describe('user event schemas', () => {
       email_hash: 'a'.repeat(64),
       events: [{ ...validEvent, extra: true }],
     })).toThrow();
+
+    expect(() => postUserEventsBodySchema.parse({
+      email_hash: 'a'.repeat(64),
+      source_id: 'legacy-source',
+      events: [validEvent],
+    })).toThrow();
   });
 
   test('rejects empty slugs', () => {
@@ -97,9 +104,6 @@ describe('appendUserEvents', () => {
       newId() {
         return 'evt_test';
       },
-      async resolveEventSource() {
-        return { belongsTo: 'organization' as const, sourceId: 'org_root' };
-      },
       async updateUser(key: string, patch: Record<string, unknown>) {
         updates.push({ key, patch });
         return { key, ...patch } as any;
@@ -109,8 +113,7 @@ describe('appendUserEvents', () => {
     expect(result).toEqual({ id: 'usr_test', insertedCount: 1 });
     expect(events[0]).toEqual({
       key: 'evt_test',
-      sourceId: 'org_root',
-      belongsTo: 'organization',
+      scopeId: NEXUS_SCOPE_KEY,
       userId: 'usr_test',
       slug: 'waitlist:question',
       data: {

@@ -7,15 +7,15 @@ export async function ensureScopesCollection(database: ScopesSetupDatabase = db)
   if (!(await collection.exists())) await collection.create();
   await collection.ensureIndex({ type: 'persistent', fields: ['organizationKey', 'slug'], unique: true });
   await collection.ensureIndex({ type: 'persistent', fields: ['organizationKey'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['organizationKey', 'position'], unique: false });
 }
 
 export async function ensureScopeScopesCollection(database: ScopesSetupDatabase = db): Promise<void> {
   const collection = database.collection(SCOPE_SCOPES_COLLECTION);
   if (!(await collection.exists())) await collection.create();
-  await collection.ensureIndex({ type: 'persistent', fields: ['parentScopeKey', 'childScopeKey'], unique: true });
-  await collection.ensureIndex({ type: 'persistent', fields: ['childScopeKey'], unique: true });
-  await collection.ensureIndex({ type: 'persistent', fields: ['parentScopeKey', 'position'], unique: true });
-  await collection.ensureIndex({ type: 'persistent', fields: ['parentScopeKey'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['parentKey', 'childKey'], unique: true });
+  await collection.ensureIndex({ type: 'persistent', fields: ['childKey'], unique: true });
+  await collection.ensureIndex({ type: 'persistent', fields: ['parentKey'], unique: false });
 }
 
 export async function ensureScopeMembersCollection(database: ScopesSetupDatabase = db): Promise<void> {

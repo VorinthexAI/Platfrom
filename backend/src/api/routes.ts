@@ -411,8 +411,6 @@ export function registerRoutes(app: Hono) {
     const result = await appendUserEvents({
       userId: userId ?? undefined,
       emailHash,
-      appId: body.app_id,
-      sourceId: body.source_id,
       events: body.events,
     });
     if (!result) return c.json({ error: 'user not found' }, 404);

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { eventSchema } from '@/lib/db/events.node';
+import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
+import { eventSchema, eventsEmbedKeys } from '@/lib/db/events.node';
 import { clientEventSlugSchema, eventSlugSchema, landingEventSlugs } from './events';
 
 describe('event catalog', () => {
@@ -54,23 +55,25 @@ describe('event catalog', () => {
     expect(() => eventSlugSchema.parse('')).toThrow();
   });
 
-  test('event records separate source ownership from optional user ownership', () => {
+  test('event records belong to a scope with optional user ownership', () => {
     expect(eventSchema.parse({
       key: 'evt_test',
-      sourceId: 'org_root',
+      scopeId: NEXUS_SCOPE_KEY,
+      sourceId: 'legacy-source',
       belongsTo: 'organization',
       slug: 'waitlist.visited',
       createdAt: '2026-07-04T10:00:00.000Z',
     })).toEqual({
       key: 'evt_test',
-      sourceId: 'org_root',
-      belongsTo: 'organization',
+      scopeId: NEXUS_SCOPE_KEY,
       userId: null,
       slug: 'waitlist.visited',
       data: null,
       embedding: [],
       createdAt: '2026-07-04T10:00:00.000Z',
     });
+    expect(() => eventSchema.parse({ key: 'evt_test', scopeId: 'not-a-cuid', slug: 'x', createdAt: '2026-07-04T10:00:00.000Z' })).toThrow();
+    expect(eventsEmbedKeys.options).toEqual(['slug']);
   });
 
 });

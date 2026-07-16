@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
+import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { actionSchema } from './actions.node';
 import { organizationSchema } from './organizations.node';
 import { skillSchema } from './skills.node';
@@ -86,25 +87,18 @@ describe('organization node schema', () => {
     expect(linked.visitor.organizationId).toBe('org_root');
   });
 
-  test('events belong to an organization or an app, never a platform', () => {
-    expect(() =>
-      eventSchema.parse({
-        key: 'evt_1',
-        sourceId: 'org_root',
-        belongsTo: 'platform',
-        slug: 'landing.page_viewed',
-        createdAt: baseOrganization.createdAt,
-      }),
-    ).toThrow();
-
+  test('events belong directly to a scope', () => {
     const event = eventSchema.parse({
       key: 'evt_1',
-      sourceId: 'org_root',
-      belongsTo: 'organization',
+      scopeId: NEXUS_SCOPE_KEY,
+      sourceId: 'legacy-source',
+      belongsTo: 'platform',
       slug: 'landing.page_viewed',
       createdAt: baseOrganization.createdAt,
     });
-    expect(event.belongsTo).toBe('organization');
+    expect(event.scopeId).toBe(NEXUS_SCOPE_KEY);
+    expect('sourceId' in event).toBe(false);
+    expect('belongsTo' in event).toBe(false);
   });
 });
 

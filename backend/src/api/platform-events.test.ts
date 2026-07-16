@@ -46,5 +46,11 @@ describe('platform event schemas', () => {
       slug: 'landing.page_viewed',
       extra: true,
     })).toThrow();
+
+    expect(() => platformEventsBodySchema.parse({
+      distinctId: 'visitor',
+      slug: 'landing.page_viewed',
+      source_id: 'legacy-source',
+    })).toThrow();
   });
 });

@@ -15,6 +15,7 @@ import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-ch
 import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
+import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -43,6 +44,7 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   skills: [['enabled']],
   scopes: [['organizationId', 'name'], ['organizationId']],
   organizations: [['ownerId']],
+  events: [['belongsTo', 'sourceId', 'createdAt']],
 };
 
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
@@ -282,8 +284,9 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'events',
-    embedKeys: ['belongsTo', 'slug'],
-    indexes: [{ fields: ['slug', 'createdAt'] }, { fields: ['belongsTo', 'sourceId', 'createdAt'] }, { fields: ['userId', 'createdAt'] }],
+    embedKeys: ['slug'],
+    skipEmbedding: true,
+    indexes: [{ fields: ['slug', 'createdAt'] }, { fields: ['scopeId', 'createdAt'] }, { fields: ['userId', 'createdAt'] }],
   },
   {
     name: 'organizations',
@@ -347,7 +350,7 @@ const collections: CollectionSpec[] = [
   // these entries exist so the generic embedding backfill covers them.
   // Embedding policy: only human text is embedded — ids, enums, and
   // timestamps are queryable with plain filters and are never embed text.
-  { name: 'scopes', embedKeys: ['name', 'description'] },
+  { name: 'scopes', embedKeys: ['name', 'slug', 'description'] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
 ];
 
@@ -455,17 +458,43 @@ async function main() {
       UPDATE scope WITH {
         organizationKey: scope.organizationKey != null ? scope.organizationKey : scope.organizationId,
         slug: scope.slug != null && scope.slug != "" ? scope.slug : scope._key,
+        position: HAS(scope, "position") && IS_NUMBER(scope.position) && scope.position > 0 ? scope.position : 1,
         organizationId: null,
         createdAt: null,
         updatedAt: null
       } IN scopes OPTIONS { keepNull: false }
   `);
   await ensureScopesCollection(targetDb);
+  const scopeScopesCollection = targetDb.collection('scopeScopes');
+  if (!(await scopeScopesCollection.exists())) await scopeScopesCollection.create();
+  for (const index of await scopeScopesCollection.indexes()) {
+    const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+    if (fields.includes('parentScopeKey') || fields.includes('childScopeKey') || fields.includes('position')) {
+      await scopeScopesCollection.dropIndex(index.id);
+      console.log(`Dropped legacy scopeScopes index ${index.id}(${fields.join(', ')})`);
+    }
+  }
+  await targetDb.query(`
+    FOR relation IN scopeScopes
+      UPDATE relation WITH {
+        parentKey: HAS(relation, "parentKey") && relation.parentKey != null ? relation.parentKey : relation.parentScopeKey,
+        childKey: HAS(relation, "childKey") && relation.childKey != null ? relation.childKey : relation.childScopeKey,
+        parentScopeKey: null,
+        childScopeKey: null,
+        position: null
+      } IN scopeScopes OPTIONS { keepNull: false }
+  `);
+  await targetDb.query(`
+    FOR relation IN scopeScopes
+      FILTER !HAS(relation, "parentKey") || relation.parentKey == null
+        || !HAS(relation, "childKey") || relation.childKey == null
+      REMOVE relation IN scopeScopes
+  `);
   await ensureScopeScopesCollection(targetDb);
   await ensureScopeMembersCollection(targetDb);
 
   // Migrate the former DAG links into a strict tree. Legacy keys were not
-  // domain CUIDs, so each copied relation receives a fresh key and sibling position.
+  // domain CUIDs, so each copied relation receives a fresh key.
   const legacyScopeChildren = targetDb.collection('scopeChildren');
   if (await legacyScopeChildren.exists()) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
@@ -480,25 +509,22 @@ async function main() {
     `);
     const existingRelations = await existingCursor.all();
     const seenChildren = new Set<string>();
-    const nextPosition = new Map<string, number>();
     const childrenByParent = new Map<string, Set<string>>();
     for (const relation of existingRelations) {
-      const parentScopeKey = nonEmptyString(relation.parentScopeKey);
-      const childScopeKey = nonEmptyString(relation.childScopeKey);
-      const position = typeof relation.position === 'number' ? relation.position : 0;
-      if (!parentScopeKey || !childScopeKey) continue;
-      seenChildren.add(childScopeKey);
-      nextPosition.set(parentScopeKey, Math.max(nextPosition.get(parentScopeKey) ?? 0, position));
-      const children = childrenByParent.get(parentScopeKey) ?? new Set<string>();
-      children.add(childScopeKey);
-      childrenByParent.set(parentScopeKey, children);
+      const parentKey = nonEmptyString(relation.parentKey);
+      const childKey = nonEmptyString(relation.childKey);
+      if (!parentKey || !childKey) continue;
+      seenChildren.add(childKey);
+      const children = childrenByParent.get(parentKey) ?? new Set<string>();
+      children.add(childKey);
+      childrenByParent.set(parentKey, children);
     }
-    const createsCycle = (parentScopeKey: string, childScopeKey: string) => {
-      const pending = [childScopeKey];
+    const createsCycle = (parentKey: string, childKey: string) => {
+      const pending = [childKey];
       const visited = new Set<string>();
       while (pending.length > 0) {
         const current = pending.shift()!;
-        if (current === parentScopeKey) return true;
+        if (current === parentKey) return true;
         if (visited.has(current)) continue;
         visited.add(current);
         pending.push(...(childrenByParent.get(current) ?? []));
@@ -506,27 +532,24 @@ async function main() {
       return false;
     };
     for (const relation of relations) {
-      const parentScopeKey = nonEmptyString(relation.parentScopeKey) ?? nonEmptyString(relation.parentScopeId);
-      const childScopeKey = nonEmptyString(relation.childScopeKey) ?? nonEmptyString(relation.childScopeId);
+      const parentKey = nonEmptyString(relation.parentKey) ?? nonEmptyString(relation.parentScopeKey) ?? nonEmptyString(relation.parentScopeId);
+      const childKey = nonEmptyString(relation.childKey) ?? nonEmptyString(relation.childScopeKey) ?? nonEmptyString(relation.childScopeId);
       if (
-        !parentScopeKey
-        || !childScopeKey
-        || parentScopeKey === childScopeKey
-        || seenChildren.has(childScopeKey)
-        || createsCycle(parentScopeKey, childScopeKey)
+        !parentKey
+        || !childKey
+        || parentKey === childKey
+        || seenChildren.has(childKey)
+        || createsCycle(parentKey, childKey)
       ) continue;
-      const position = (nextPosition.get(parentScopeKey) ?? 0) + 1;
       await targetDb.collection('scopeScopes').save({
         _key: newId(),
-        parentScopeKey,
-        childScopeKey,
-        position,
+        parentKey,
+        childKey,
       });
-      seenChildren.add(childScopeKey);
-      nextPosition.set(parentScopeKey, position);
-      const children = childrenByParent.get(parentScopeKey) ?? new Set<string>();
-      children.add(childScopeKey);
-      childrenByParent.set(parentScopeKey, children);
+      seenChildren.add(childKey);
+      const children = childrenByParent.get(parentKey) ?? new Set<string>();
+      children.add(childKey);
+      childrenByParent.set(parentKey, children);
     }
     await legacyScopeChildren.drop();
     console.log(`Copied ${seenChildren.size} scopeChildren relations -> scopeScopes and dropped scopeChildren`);
@@ -853,35 +876,69 @@ async function main() {
       UPDATE organization WITH { mfa_enabled: true } IN organizations
   `);
 
-  // Seed the one platform wide scope: the root of the scope tree for the
-  // root organization. Idempotent by (organizationKey, slug).
-  const rootScopeName = 'Vorinthex AI';
-  const rootScopeSlug = 'vorinthex-ai';
-  const rootScopeCursor = await targetDb.query<{ _key: string }>(
-    `
-      FOR scope IN scopes
-        FILTER scope.organizationKey == @organizationKey && scope.slug == @slug
-        LIMIT 1
-        RETURN { _key: scope._key }
-    `,
-    { organizationKey: rootOrganizationId, slug: rootScopeSlug },
-  );
-  if (!(await rootScopeCursor.next())) {
-    const rootScopeKey = newId();
-    const rootScopeDescription =
-      'The root scope of Vorinthex AI. It spans every capability, tool, and agent on the platform and is the parent under which all narrower scopes and their members are organized.';
-    await targetDb.collection('scopes').save({
-      _key: rootScopeKey,
-      organizationKey: rootOrganizationId,
-      slug: rootScopeSlug,
-      name: rootScopeName,
-      description: rootScopeDescription,
-      embedding: await embed({
-        text: ['_scopes', rootScopeKey, rootScopeName, rootScopeDescription].join(':'),
-      }),
-    });
-    console.log('Seeded root scope Vorinthex AI');
+  // Production deploys run this migration rather than db:seed. Apply the
+  // canonical scope seed here as well so Nexus and every direct child exist
+  // with the same fixed CUID references and exact descriptions.
+  const actualScopeKeys = new Map<string, string>();
+  for (const seed of SEEDED_SCOPES) {
+    const existingCursor = await targetDb.query<{ _key: string }>(
+      `
+        FOR scope IN scopes
+          FILTER scope.organizationKey == @organizationKey && scope.slug == @slug
+          LIMIT 1
+          RETURN { _key: scope._key }
+      `,
+      { organizationKey: rootOrganizationId, slug: seed.slug },
+    );
+    const existing = await existingCursor.next();
+    const scopeKey = existing?._key ?? seed.key;
+    const embedding = await embed({ text: buildEmbeddingText(['name', 'slug', 'description'], seed)! });
+    if (existing) {
+      await targetDb.collection('scopes').update(scopeKey, {
+        name: seed.name,
+        description: seed.description,
+        position: seed.position,
+        embedding,
+      });
+    } else {
+      await targetDb.collection('scopes').save({
+        _key: scopeKey,
+        organizationKey: rootOrganizationId,
+        slug: seed.slug,
+        name: seed.name,
+        description: seed.description,
+        position: seed.position,
+        embedding,
+      });
+    }
+    actualScopeKeys.set(seed.key, scopeKey);
   }
+  const nexusScopeId = actualScopeKeys.get(NEXUS_SCOPE_KEY);
+  if (!nexusScopeId) throw new Error('Cannot resolve canonical Nexus scope');
+
+  for (const seed of SEEDED_SCOPES.filter((scope) => scope.parentKey !== null)) {
+    const parentKey = actualScopeKeys.get(seed.parentKey!);
+    const childKey = actualScopeKeys.get(seed.key);
+    if (!parentKey || !childKey) throw new Error(`Cannot resolve seeded scope relation for ${seed.slug}`);
+    const relationCursor = await targetDb.query<{ _key: string; parentKey: string }>(
+      `
+        FOR relation IN scopeScopes
+          FILTER relation.childKey == @childKey
+          LIMIT 1
+          RETURN { _key: relation._key, parentKey: relation.parentKey }
+      `,
+      { childKey },
+    );
+    const relation = await relationCursor.next();
+    if (relation?.parentKey === parentKey) continue;
+    if (relation) await targetDb.collection('scopeScopes').remove(relation._key);
+    await targetDb.collection('scopeScopes').save({
+      _key: newId(),
+      parentKey,
+      childKey,
+    });
+  }
+  console.log('Seeded canonical Nexus scope hierarchy');
 
   // Teams collapse into organizations: a team becomes an ordinary
   // (non-root) organization under the same _key, and each teamMembers row
@@ -1267,11 +1324,10 @@ async function main() {
         : typeof event.created_at === 'string'
           ? event.created_at
           : new Date().toISOString();
-      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'organization', slug });
+      const eventEmbedText = buildNodeEmbedText('events', key, ['slug'], { slug });
       await eventsCollection.save({
         _key: key,
-        sourceId: rootOrganizationId,
-        belongsTo: 'organization',
+        scopeId: nexusScopeId,
         userId: user._key,
         slug,
         data: {
@@ -1311,12 +1367,11 @@ async function main() {
 
       const slug = typeof event.slug === 'string' && event.slug.length > 0 ? event.slug : 'unknown';
       const key = `user_event_${event._key}`;
-      const eventEmbedText = buildNodeEmbedText('events', key, ['belongsTo', 'slug'], { belongsTo: 'organization', slug });
+      const eventEmbedText = buildNodeEmbedText('events', key, ['slug'], { slug });
       await eventsCollection.save(
         {
           _key: key,
-          sourceId: rootOrganizationId,
-          belongsTo: 'organization',
+          scopeId: nexusScopeId,
           userId: event.userId,
           slug,
           data: event.data && typeof event.data === 'object' ? event.data : {},
@@ -1347,7 +1402,6 @@ async function main() {
   const eventsCursor = await targetDb.query<{
     _key: string;
     slug?: string;
-    sourceId?: string;
     userId?: string;
     entityId?: string;
     belongsTo?: string;
@@ -1356,12 +1410,9 @@ async function main() {
     FOR event IN events
       FILTER HAS(event, "entityId")
         || HAS(event, "entityType")
-        || !HAS(event, "sourceId") || event.sourceId == null
-        || !HAS(event, "belongsTo") || event.belongsTo == null
       RETURN {
         _key: event._key,
         slug: event.slug,
-        sourceId: event.sourceId,
         userId: event.userId,
         entityId: event.entityId,
         belongsTo: event.belongsTo,
@@ -1380,22 +1431,14 @@ async function main() {
       legacyBelongsTo: event.belongsTo,
       data: event.data,
     });
-    const legacyAppSourceId = event.belongsTo === 'app' ? nonEmptyString(event.sourceId) ?? nonEmptyString(event.entityId) : null;
-    const belongsTo = legacyAppSourceId ? 'app' : 'organization';
-    const legacyPlatformSourceId = event.belongsTo === 'platform' && event.entityId !== userId
-      ? nonEmptyString(event.entityId)
-      : null;
-    const sourceId = legacyAppSourceId
-      ?? nonEmptyString(event.sourceId)
-      ?? legacyPlatformSourceId
-      ?? rootOrganizationId;
     const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
-      ? buildNodeEmbedText('events', event._key, ['belongsTo', 'slug'], { belongsTo, slug: event.slug })
+      ? buildNodeEmbedText('events', event._key, ['slug'], { slug: event.slug })
       : null;
     const embedding = eventEmbedText ? await embed({ text: eventEmbedText }) : [];
     await eventsCollection.update(event._key, {
-      sourceId,
-      belongsTo,
+      scopeId: nexusScopeId,
+      sourceId: null,
+      belongsTo: null,
       userId,
       entityId: null,
       entityType: null,
@@ -1608,27 +1651,34 @@ async function main() {
     );
   }
 
-  // Events flip their ownership label: belongsTo "platform" becomes
-  // "organization" (sourceId already points at the copied node). The
-  // embedding text includes belongsTo, so re-embed the flipped rows —
-  // drained fully before the per-row work, like the legacy passes above.
-  const platformEventsCursor = await targetDb.query<{ _key: string; slug?: string }>(`
+  // Every historical event now belongs directly to Nexus. Drain the cursor
+  // before per-row embedding work, and only touch legacy rows on reruns.
+  const scopeEventsCursor = await targetDb.query<{ _key: string; slug?: string }>(`
     FOR event IN events
-      FILTER event.belongsTo == "platform"
+      FILTER !HAS(event, "scopeId")
+        || event.scopeId != @nexusScopeId
+        || HAS(event, "sourceId")
+        || HAS(event, "belongsTo")
+        || HAS(event, "entityId")
+        || HAS(event, "entityType")
       RETURN { _key: event._key, slug: event.slug }
-  `);
-  const platformEvents = await platformEventsCursor.all();
-  if (platformEvents.length > 0) {
-    console.log(`Flipping ${platformEvents.length} events belongsTo platform -> organization`);
+  `, { nexusScopeId });
+  const scopeEvents = await scopeEventsCursor.all();
+  if (scopeEvents.length > 0) {
+    console.log(`Migrating ${scopeEvents.length} events to Nexus scope ${nexusScopeId}`);
   }
-  for (const event of platformEvents) {
+  for (const event of scopeEvents) {
     const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
-      ? buildNodeEmbedText('events', event._key, ['belongsTo', 'slug'], { belongsTo: 'organization', slug: event.slug })
+      ? buildNodeEmbedText('events', event._key, ['slug'], { slug: event.slug })
       : null;
     await eventsCollection.update(event._key, {
-      belongsTo: 'organization',
+      scopeId: nexusScopeId,
+      sourceId: null,
+      belongsTo: null,
+      entityId: null,
+      entityType: null,
       embedding: eventEmbedText ? await embed({ text: eventEmbedText }) : [],
-    });
+    }, { keepNull: false });
   }
 
   // user_organization -> userOrganizations rename: copy every row across
