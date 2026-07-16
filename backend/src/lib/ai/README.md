@@ -121,6 +121,32 @@ Legacy run documents that cannot supply trustworthy foreign keys or token
 usage are retained in `agentRunsLegacy`; they are never fabricated into the
 new call ledger.
 
+## Genesis agent creation
+
+Genesis is the only manually seeded agent. It lives in the `agent-builder`
+scope, has the single `Agent Architect` skill at priority 100, and is granted
+Reason Tool (`reason.solve`) only. Its persisted `core.reason` route is GPT-5.4
+Mini through an OpenAI provider enabled for the organization. The canonical,
+version-controlled seed inputs are `genesis/seed/genesis.seed.json` and
+`genesis/seed/agent-architect.skill.md`.
+
+`createAgentFromGenesis` compiles a fresh `AgentContext`, presents the complete
+organization-owned agent/skill/tool catalog plus explicit sources, and requires
+a strict creation manifest. Genesis proposes only; the backend reparses the
+manifest, resolves references, enforces scope and tool permissions, applies
+Reuse -> Extend -> Create, embeds candidates, and runs novelty checks before
+any domain write. Agent similarity uses review/reject thresholds 0.85/0.95;
+skills use 0.80/0.90, with at most five comparisons for each.
+
+Accepted manifests are written through one Arango stream transaction covering
+`agents`, `skills`, `agentSkills`, `agentTools`, `agentArtifacts`, and the
+declared novelty-check collection. Skill documents are created before their
+links, all keys and embeddings are backend-owned, and a failed link aborts the
+whole creation transaction. Rejected manifests remain auditable runs but do not
+create configuration. The run ledger uses twelve stable Genesis step slugs and
+records explicit sources, reused dependencies, and created results as artifact
+provenance.
+
 ## Provider configuration
 
 Adapters read credentials from environment configuration. Credentials are

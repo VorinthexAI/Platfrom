@@ -3,7 +3,7 @@ import { agentOutputMetadataSchema, type AgentRun } from '@/lib/ai/agent-runs';
 import { getDefaultAgentRunRepository, type AgentRunRepository } from '@/lib/ai/agent-runs';
 import { getDefaultAgentRunStepRepository, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import { getDefaultAgentRunCallRepository, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
-import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
+import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentContext, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
 import { sourceSelectionSchema, getDefaultAgentRunSourceRepository, type AgentRunSourceRepository } from '@/lib/ai/agent-run-sources';
 import { getDefaultAgentArtifactRepository, type AgentArtifactRepository } from '@/lib/ai/agent-artifacts';
 import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
@@ -51,6 +51,9 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
   memories?: AgentMemoryRepository;
   artifactResolvers?: ArtifactResolverRegistry;
   canUseSource?: SourcePermissionResolver;
+  allowRejectedOutput?: boolean;
+  beforeFinalize?: (input: { run: AgentRun; response: ProviderExecuteResponse<unknown>; agentContext: AgentContext }) => Promise<void>;
+  stepSlugs?: readonly string[];
   timeoutMs?: number;
   signal?: AbortSignal;
 }
@@ -118,12 +121,13 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
     const decision = await selectRoute(routeInput, options);
     response = validateProviderResponse(await executeRoute<unknown, TOutput>({ decision, input, adapters: options.adapters, timeoutMs: options.timeoutMs, signal: options.signal, onAttempt: (attempt) => attempts.push(attempt) }));
     responseMetadata = validateAgentOutput(response.output);
-    if (responseMetadata.status !== 'accepted') throw new InvalidRunRequestError('an executed tool response cannot be rejected after execution');
+    if (responseMetadata.status !== 'accepted' && !options.allowRejectedOutput) throw new InvalidRunRequestError('an executed tool response cannot be rejected after execution');
+    await options.beforeFinalize?.({ run, response: response as ProviderExecuteResponse<unknown>, agentContext });
   } catch (error) {
-    await persistExecution({ run, runs, steps, calls, runtime, request, attempts, primarySkillKey: primarySkill.skill.key, status: finalStatus(error), reason: request.metadata.reason, score: request.metadata.score, startedAt, startedAtMs });
+    await persistExecution({ run, runs, steps, calls, runtime, request, attempts, stepSlugs: options.stepSlugs ?? [request.stepSlug], primarySkillKey: primarySkill.skill.key, status: finalStatus(error), reason: request.metadata.reason, score: request.metadata.score, startedAt, startedAtMs });
     throw error;
   }
-  const persisted = await persistExecution({ run, runs, steps, calls, runtime, request, attempts, primarySkillKey: primarySkill.skill.key, status: 'completed', reason: responseMetadata.reason, score: responseMetadata.score, startedAt, startedAtMs });
+  const persisted = await persistExecution({ run, runs, steps, calls, runtime, request, attempts, stepSlugs: options.stepSlugs ?? [request.stepSlug], primarySkillKey: primarySkill.skill.key, status: responseMetadata.status === 'accepted' ? 'completed' : 'rejected', reason: responseMetadata.reason, score: responseMetadata.score, startedAt, startedAtMs });
   return { executed: true, ...persisted, response };
 }
 
@@ -136,12 +140,18 @@ function injectSystemPrompt(input: unknown, systemPrompt: string): unknown {
 async function persistExecution(input: {
   run: AgentRun; runs: AgentRunRepository; steps: AgentRunStepRepository; calls: AgentRunCallRepository;
   runtime: Awaited<ReturnType<typeof loadAgentRuntime>>; request: z.infer<typeof runStoredAgentToolParamsSchema>;
-  attempts: readonly RouteAttemptTelemetry[]; primarySkillKey: string; status: 'completed' | 'failed' | 'cancelled' | 'timeout';
+  attempts: readonly RouteAttemptTelemetry[]; stepSlugs: readonly string[]; primarySkillKey: string; status: 'completed' | 'rejected' | 'failed' | 'cancelled' | 'timeout';
   reason: string; score: number; startedAt: string; startedAtMs: number;
 }) {
-  const endedAtMs = Date.now();
+  const endedAtMs = Math.max(Date.now(), input.startedAtMs + input.stepSlugs.length - 1);
   const endedAt = new Date(endedAtMs).toISOString();
-  const step = await input.steps.insertStep({ agentRunKey: input.run.key, stepSlug: input.request.stepSlug, status: input.status === 'completed' ? 'completed' : 'failed', startedAt: input.startedAt, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
+  if (input.stepSlugs.length === 0 || input.stepSlugs.at(-1) !== input.request.stepSlug) throw new InvalidRunRequestError('stepSlugs must end with the executed stepSlug');
+  const persistedSteps = [] as AgentRunStep[];
+  for (const [index, stepSlug] of input.stepSlugs.entries()) {
+    const stepStartedAtMs = input.startedAtMs + index;
+    persistedSteps.push(await input.steps.insertStep({ agentRunKey: input.run.key, stepSlug, status: input.status === 'completed' || input.status === 'rejected' ? 'completed' : 'failed', startedAt: new Date(stepStartedAtMs).toISOString(), endedAt, elapsedMs: endedAtMs - stepStartedAtMs }));
+  }
+  const step = persistedSteps.at(-1)!;
   const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, toolKey: input.request.toolKey, actionKey: input.request.actionKey ?? input.runtime.tools.find(({ tool }) => tool.key === input.request.toolKey)!.actions[0]!.action.key, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
   const run = await input.runs.updateRun(input.run.key, { status: input.status, reason: input.reason, score: input.score, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
   return { run, step, calls: persistedCalls };

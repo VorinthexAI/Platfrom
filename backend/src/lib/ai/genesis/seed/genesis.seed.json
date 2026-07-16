@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "seed": {
+    "skills": [
+      {
+        "key": "cmskillarchitect00000000001",
+        "slug": "agent-architect",
+        "name": "Agent Architecture",
+        "title": "Agent Architect",
+        "definitionFile": "./agent-architect.skill.md",
+        "embedding": []
+      }
+    ],
+    "agents": [
+      {
+        "key": "cmgenesis00000000000000001",
+        "slug": "genesis",
+        "name": "Genesis",
+        "title": "Agent Architect",
+        "scopeSlug": "agent-builder",
+        "explorationRate": 0.2,
+        "embedding": []
+      }
+    ],
+    "agentSkills": [
+      {
+        "key": "cmgenesisagentskill0000001",
+        "agentSlug": "genesis",
+        "skillSlug": "agent-architect",
+        "priority": 100
+      }
+    ],
+    "agentTools": [
+      {
+        "key": "cmgenesisagenttool00000001",
+        "agentSlug": "genesis",
+        "toolSlug": "reason.solve"
+      }
+    ]
+  }
+}
