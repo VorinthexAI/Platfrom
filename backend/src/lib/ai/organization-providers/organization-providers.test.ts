@@ -31,9 +31,12 @@ function memoryDatabase(): OrganizationProvidersDatabase & { docs: Map<string, R
 }
 
 describe('organizationProviders key allow-list', () => {
-  test('schema stores only CUID foreign keys', () => {
-    const link = organizationProviderSchema.parse({ key: newId(), organizationKey: newId(), providerKey: newId() });
+  test('schema accepts the preserved root organization key and CUID provider key', () => {
+    const link = organizationProviderSchema.parse({ key: newId(), organizationKey: 'legacy-root-key', providerKey: newId() });
     expect(Object.keys(link)).toEqual(['key', 'organizationKey', 'providerKey']);
+    expect(link.organizationKey).toBe('legacy-root-key');
+    expect(() => organizationProviderSchema.parse({ ...link, organizationKey: '' })).toThrow();
+    expect(() => organizationProviderSchema.parse({ ...link, providerKey: 'legacy-provider-key' })).toThrow();
     expect(() => organizationProviderSchema.parse({ ...link, enabled: true })).toThrow();
   });
 
