@@ -4,7 +4,7 @@ import { appendUserEvents, postUserEventsBodySchema } from './user-events';
 
 const validEvent = {
   distinctId: 'question-1',
-  slug: 'waitlist:question',
+  slug: 'waitlist:question' as const,
   payload: {
     step: 1,
     question: 'What are you building?',
@@ -14,7 +14,7 @@ const validEvent = {
 
 const founderNoteViewedEvent = {
   distinctId: 'a'.repeat(64),
-  slug: 'waitlist:founder_note_viewed',
+  slug: 'waitlist:founder_note_viewed' as const,
   payload: {
     step: 0,
   },
@@ -22,7 +22,7 @@ const founderNoteViewedEvent = {
 
 const ticketViewedEvent = {
   distinctId: 'a'.repeat(64),
-  slug: 'waitlist:ticket_viewed',
+  slug: 'waitlist:ticket_viewed' as const,
   payload: {
     step: 6,
   },
@@ -52,13 +52,11 @@ describe('user event schemas', () => {
     expect(ticketBody.events[0]?.slug).toBe('waitlist:ticket_viewed');
   });
 
-  test('accepts dynamic user event slugs', () => {
-    const body = postUserEventsBodySchema.parse({
+  test('rejects unregistered user event slugs', () => {
+    expect(() => postUserEventsBodySchema.parse({
       email_hash: 'a'.repeat(64),
       events: [{ distinctId: 'dynamic-1', slug: 'anything:custom', payload: { extra: true } }],
-    });
-
-    expect(body.events[0]?.slug).toBe('anything:custom');
+    })).toThrow();
   });
 
   test('rejects unknown event fields', () => {

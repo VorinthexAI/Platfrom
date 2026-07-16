@@ -13,9 +13,18 @@ export interface ExecuteRouteOptions<TInput> {
   adapters?: Partial<Record<ProviderId, ProviderAdapter>>;
   timeoutMs?: number;
   signal?: AbortSignal;
-  onAttempt?: (attempt: RouteAttemptTelemetry) => void;
+  onAttemptStart?: (attempt: RouteAttemptStartTelemetry) => string | undefined | Promise<string | undefined>;
+  onAttempt?: (attempt: RouteAttemptTelemetry) => void | Promise<void>;
+}
+export interface RouteAttemptStartTelemetry {
+  actionKey: string;
+  actionSlug: string;
+  modelKey: string;
+  providerKey: string;
+  startedAt: string;
 }
 export interface RouteAttemptTelemetry {
+  callKey?: string;
   actionKey: string;
   actionSlug: string;
   modelKey: string;
@@ -35,6 +44,8 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
   if (!adapter) throw new ProviderExecutionError(decision.actionSlug, [{ modelId: decision.modelSlug, providerId: decision.providerSlug, externalModelId: decision.providerModelId, code: 'adapter_unavailable', message: 'provider adapter is unavailable' }]);
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
+  const attemptBase = { actionKey: decision.actionKey, actionSlug: decision.actionSlug, modelKey: decision.modelKey, providerKey: decision.providerKey, startedAt };
+  const callKey = await options.onAttemptStart?.(attemptBase);
   try {
     const response = await adapter.execute<TInput, TOutput>({
       actionId: decision.actionSlug,
@@ -46,12 +57,12 @@ export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions
       signal: options.signal,
     });
     const endedAtMs = Date.now();
-    options.onAttempt?.({ actionKey: decision.actionKey, actionSlug: decision.actionSlug, modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'completed', usage: response.usage, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
+    await options.onAttempt?.({ ...attemptBase, callKey, status: 'completed', usage: response.usage, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     return response;
   } catch (error) {
     const endedAtMs = Date.now();
     const normalized = normalizeProviderError(decision.providerSlug, error);
-    options.onAttempt?.({ actionKey: decision.actionKey, actionSlug: decision.actionSlug, modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'failed', usage: ZERO_TOKEN_USAGE, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs, errorCode: normalized.code });
+    await options.onAttempt?.({ ...attemptBase, callKey, status: 'failed', usage: ZERO_TOKEN_USAGE, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs, errorCode: normalized.code });
     throw new ProviderExecutionError(decision.actionSlug, [{ modelId: decision.modelSlug, providerId: decision.providerSlug, externalModelId: decision.providerModelId, code: normalized.code, message: normalized.message }], { cause: normalized });
   }
 }

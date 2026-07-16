@@ -20,6 +20,7 @@ import { getSkillById, type Skill } from '@/lib/db/skills.node';
 import { getToolById, type Tool } from '@/lib/db/tools.node';
 import { getDefaultScopeRepository, type Scope } from '@/lib/ai/scopes';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
+import { insertScopeAgent, type ScopeAgent } from '@/lib/db/scope-agents.node';
 
 export const createAgentInputSchema = agentSchema
   .omit({ key: true, embedding: true })
@@ -49,6 +50,7 @@ export interface AgentServiceDataSource {
   findAgentSkill(agentKey: string, skillKey: string): Promise<AgentSkill | null>;
   findAgentTool(agentKey: string, toolKey: string): Promise<AgentTool | null>;
   saveAgent(input: CreateAgentInput): Promise<Agent>;
+  saveScopeAgent(input: { scopeKey: string; agentKey: string }): Promise<ScopeAgent>;
   saveAgentSkill(input: AttachAgentSkillInput): Promise<AgentSkill>;
   saveAgentTool(input: GrantAgentToolInput): Promise<AgentTool>;
 }
@@ -91,7 +93,9 @@ export function createAgentService(source: AgentServiceDataSource = createDefaul
         throw new DuplicateAgentSlugError(valid.slug);
       }
       try {
-        return await source.saveAgent(valid);
+        const agent = await source.saveAgent(valid);
+        await source.saveScopeAgent({ scopeKey: valid.scopeKey, agentKey: agent.key });
+        return agent;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) throw new DuplicateAgentSlugError(valid.slug);
         throw error;
@@ -145,6 +149,7 @@ function createDefaultAgentServiceDataSource(): AgentServiceDataSource {
     findAgentSkill: getAgentSkillByPair,
     findAgentTool: getAgentToolByPair,
     saveAgent: insertAgent,
+    saveScopeAgent: insertScopeAgent,
     saveAgentSkill: insertAgentSkill,
     saveAgentTool: insertAgentTool,
   };

@@ -7,6 +7,7 @@ import { agentSchema } from '@/lib/db/agents.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { agentToolSchema } from '@/lib/db/agent-tools.node';
 import { toolSchema } from '@/lib/db/tools.node';
+import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { AGENT_ARCHITECT_SKILL_KEY, GENESIS_AGENT_KEY, GENESIS_AGENT_SKILL_KEY, GENESIS_AGENT_TOOL_KEY, GenesisSeedPrerequisiteError, loadGenesisSeedFiles, seedGenesis, type GenesisSeedDataSource } from './seed';
 
 function fixture(routeValid = true, organizationKey = newId()) {
@@ -19,6 +20,7 @@ function fixture(routeValid = true, organizationKey = newId()) {
     async requireOrganization() { calls.push('organization'); return organization; }, async findScope() { calls.push('scope'); return scope; }, async requireCreateTool() { calls.push('tool'); return create; }, async removeOtherCreateToolActions() { calls.push('removeOtherActions'); }, async verifyExecutionChain() { calls.push('route'); return routeValid; },
     async upsertSkill(seed, definition) { calls.push('skill'); return skillSchema.parse({ ...seed, definition }); },
     async upsertAgent(seed, scopeKey) { calls.push('agent'); return agentSchema.parse({ ...seed, scopeKey }); },
+    async upsertScopeAgent(agentKey, scopeKey) { calls.push('scopeAgent'); return scopeAgentSchema.parse({ key: newId(), agentKey, scopeKey }); },
     async upsertAgentSkill(seed, agentKey, skillKey) { calls.push('agentSkill'); return agentSkillSchema.parse({ ...seed, agentKey, skillKey }); },
     async upsertAgentTool(seed, agentKey, toolKey) { calls.push(`agentTool:${seed.toolSlug}`); return agentToolSchema.parse({ ...seed, agentKey, toolKey }); },
     async removeOtherAgentTools() { calls.push('removeOtherTools'); },
@@ -41,8 +43,9 @@ describe('Genesis canonical seed', () => {
   test('seeds exactly Agent Architect and agent.create in dependency order', async () => {
     const f = fixture(); const result = await seedGenesis(f.organization.key, f.source);
     expect(result.agent).toMatchObject({ slug: 'genesis', name: 'Genesis', title: 'Agent Architect', explorationRate: 0.2 });
+    expect(result.scopeAgent).toMatchObject({ agentKey: result.agent.key, scopeKey: result.scope.key });
     expect(result.skill).toMatchObject({ slug: 'agent-architect', name: 'Agent Architecture', title: 'Agent Architect' });
-    expect(f.calls).toEqual(['organization', 'scope', 'tool', 'removeOtherActions', 'route', 'skill', 'agent', 'agentSkill', 'agentTool:agent.create', 'removeOtherTools', 'runtime']);
+    expect(f.calls).toEqual(['organization', 'scope', 'tool', 'removeOtherActions', 'route', 'skill', 'agent', 'scopeAgent', 'agentSkill', 'agentTool:agent.create', 'removeOtherTools', 'runtime']);
     expect(f.calls.some((call) => call.includes('ask'))).toBe(false);
   });
   test('accepts the preserved pre-CUID root organization key', async () => {

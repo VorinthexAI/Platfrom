@@ -3,51 +3,25 @@ import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { insertEvent } from '@/lib/db/events.node';
 import { getRootOrganization, insertOrganization } from '@/lib/db/organizations.node';
 import { newId } from '@/lib/ids';
+import {
+  runtimeEventDataSchema,
+  runtimeEventSlugSchema,
+  type EventSlug,
+  type RuntimeEventRecorder,
+} from './event-catalog';
 
-export const eventSlugSchema = z.string().min(1).max(200);
+export * from './event-catalog';
 
-export type EventSlug = z.infer<typeof eventSlugSchema>;
-
-export const landingEventSlugs = [
-  'landing.page_viewed',
-  'landing.product_entered',
-  'landing.orchestrator_entered',
-  'landing.capability_entered',
-  'landing.rock_entered',
-  'landing.cta_clicked',
-  'landing.cave_opened',
-  'landing.cave_closed',
-  'landing.audio_played',
-  'landing.ambient_audio_started',
-  'landing.mission_voice_played',
-  'landing.mission_voice_cancelled',
-  'landing.biome_fragment_collected',
-  'landing.crystal_collected',
-  'landing.crystal_room_filled',
-  'landing.fragment_discovered',
-  'landing.fragment_collect_clicked',
-  'landing.fragment_join_to_collect_clicked',
-  'landing.collect_gate_shown',
-  'waitlist.form_started',
-  'waitlist.submit_clicked',
-  'waitlist.signup_submitted',
-  'waitlist.email_verified',
-  'auth.signin_opened',
-  'auth.signin_email_sent',
-  'auth.magic_link_authenticated',
-  'auth.signin_authed_jump',
-  'auth.member_gate_opened',
-  'waitlist.verify_jump_started',
-  'leaderboard.daily_digest_sent',
-  'legal.opened',
-  'fragments.collected',
-] as const;
-
-export const landingEventSlugSchema = z.enum(landingEventSlugs);
-
-export const clientEventSlugSchema = eventSlugSchema;
-
-export type ClientEventSlug = z.infer<typeof clientEventSlugSchema>;
+/** Awaitable trusted runtime event writer; callers decide whether telemetry failure is fatal. */
+export const recordRuntimeEvent: RuntimeEventRecorder = async (input) => {
+  const event = z.object({
+    scopeId: z.string().cuid(),
+    userId: z.string().nullable().default(null),
+    slug: runtimeEventSlugSchema,
+    data: runtimeEventDataSchema,
+  }).strict().parse({ ...input, userId: input.userId ?? null });
+  await insertEvent({ key: newId(), ...event, createdAt: new Date().toISOString() });
+};
 
 export function trackPlatformEvent(input: {
   slug: EventSlug;

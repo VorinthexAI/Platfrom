@@ -6,6 +6,7 @@ import { insertEvent } from '@/lib/db/events.node';
 import { claimWebhookEvent, deleteProcessedWebhookEventByProviderAndEventId, updateProcessedWebhookEventByProviderAndEventId } from '@/lib/db/processed-webhook-events.node';
 import { deleteUser, getUserByEmailHash } from '@/lib/db/users.node';
 import { newId } from '@/lib/ids';
+import { providerEventSlugs } from '@/platform/event-catalog';
 import { hashUserEmail } from './users';
 
 export const RESEND_WEBHOOK_V1_PATH = '/api/v1/webhooks/resend';
@@ -30,7 +31,8 @@ const resendEventSchema = z.object({
 }).passthrough();
 
 type ResendEvent = z.infer<typeof resendEventSchema>;
-type ResendEmailEventType = 'email.opened' | 'email.delivered' | 'email.bounced' | 'email.complained';
+type ResendEmailEventType = typeof providerEventSlugs[number];
+const providerEventSlugSet = new Set<string>(providerEventSlugs);
 
 export function isResendWebhookPath(path: string) {
   const normalized = path.length > 1 ? path.replace(/\/+$/, '') : path;
@@ -68,10 +70,7 @@ const defaultDeps: ResendWebhookDeps = {
 };
 
 function isTrackedResendEmailEvent(type: string): type is ResendEmailEventType {
-  return type === 'email.opened'
-    || type === 'email.delivered'
-    || type === 'email.bounced'
-    || type === 'email.complained';
+  return providerEventSlugSet.has(type);
 }
 
 export async function recordResendEmailEvent(

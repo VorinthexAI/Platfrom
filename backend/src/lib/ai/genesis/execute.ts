@@ -65,12 +65,15 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
     allowRejectedOutput: true,
     reasoningActionSlug: 'core.reason',
     stepSlugs: GENESIS_STEP_SLUGS,
-    beforeFinalize: async ({ run, response }) => {
+    beforeFinalize: async ({ run, response, recordArtifactCreated }) => {
       const toolInput = createAgentToolInputSchema.parse({ organizationKey: parsed.organizationKey, scopeKey: parsed.scopeKey, agentRunKey: run.key, manifest: genesisCreationManifestSchema.parse(response.output) });
       const handled = await executeCreateAgentTool(toolInput, context, options);
       outcome.validated = handled.validated;
       outcome.created = handled.persisted;
       outcome.toolOutput = handled.output;
+      for (const artifact of handled.persisted?.artifacts ?? []) {
+        if (artifact.relation === 'result') await recordArtifactCreated({ nodeType: artifact.nodeType, nodeKey: artifact.nodeKey });
+      }
     },
   });
   if (!result.executed || !outcome.validated || !outcome.toolOutput) throw new GenesisRuntimeConfigurationError('Genesis did not produce and execute a validated manifest');

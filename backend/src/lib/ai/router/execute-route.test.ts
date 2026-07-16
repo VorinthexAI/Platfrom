@@ -10,7 +10,7 @@ describe('route execution', () => {
   test('executes exactly one route and reports provider token usage', async () => {
     const calls: ProviderExecuteRequest[] = [];
     const telemetry: RouteAttemptTelemetry[] = [];
-    const response = await executeRoute({ decision, input: { prompt: 'hello' }, adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { calls.push(request as ProviderExecuteRequest); return { output: { metadata: { status: 'accepted', reason: 'Request completed', score: 1 } } as TOutput, usage: tokenUsage(3, 2), providerId: 'openai', modelId: request.modelId, externalModelId: request.externalModelId }; } } }, onAttempt: (attempt) => telemetry.push(attempt) });
+    const response = await executeRoute({ decision, input: { prompt: 'hello' }, adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { calls.push(request as ProviderExecuteRequest); return { output: { metadata: { status: 'accepted', reason: 'Request completed', score: 1 } } as TOutput, usage: tokenUsage(3, 2), providerId: 'openai', modelId: request.modelId, externalModelId: request.externalModelId }; } } }, onAttempt: (attempt) => { telemetry.push(attempt); } });
     expect(calls).toHaveLength(1);
     expect(response.usage.totalTokens).toBe(5);
     expect(telemetry[0]).toMatchObject({ modelKey: decision.modelKey, providerKey: decision.providerKey, status: 'completed', usage: { totalTokens: 5 } });

@@ -1,17 +1,46 @@
 import { describe, expect, test } from 'bun:test';
 import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { eventSchema, eventsEmbedKeys } from '@/lib/db/events.node';
-import { clientEventSlugSchema, eventSlugSchema, landingEventSlugs } from './events';
+import { clientEventSlugSchema, eventSlugSchema, landingEventSlugs, providerEventSlugs, registeredEventSlugs, runtimeEventDataSchema, runtimeEventSlugs, userEventSlugs } from './events';
 
 describe('event catalog', () => {
-  test('accepts dynamic event slugs', () => {
-    expect(eventSlugSchema.parse('waitlist.visited')).toBe('waitlist.visited');
-    expect(eventSlugSchema.parse('anything.custom')).toBe('anything.custom');
+  test('accepts only registered event slugs', () => {
+    expect(new Set(registeredEventSlugs).size).toBe(registeredEventSlugs.length);
+    expect(eventSlugSchema.parse('landing.page_viewed')).toBe('landing.page_viewed');
+    expect(eventSlugSchema.parse('agent.started')).toBe('agent.started');
+    expect(eventSlugSchema.parse('payment.ticket_purchased')).toBe('payment.ticket_purchased');
+    expect(eventSlugSchema.parse('waitlist:question')).toBe('waitlist:question');
+    expect(eventSlugSchema.parse('email.bounced')).toBe('email.bounced');
+    expect(() => eventSlugSchema.parse('anything.custom')).toThrow();
   });
 
-  test('uses the same dynamic schema for client-postable events', () => {
-    expect(clientEventSlugSchema.parse('waitlist.visited')).toBe('waitlist.visited');
-    expect(clientEventSlugSchema.parse('payment.ticket_purchased')).toBe('payment.ticket_purchased');
+  test('registers user-ingestion and provider webhook slugs', () => {
+    expect(userEventSlugs).toEqual(['waitlist:question', 'waitlist:founder_note_viewed', 'waitlist:ticket_viewed']);
+    expect(providerEventSlugs).toEqual(['email.opened', 'email.delivered', 'email.bounced', 'email.complained']);
+  });
+
+  test('allows only browser-safe catalog events from clients', () => {
+    expect(clientEventSlugSchema.parse('landing.page_viewed')).toBe('landing.page_viewed');
+    expect(() => clientEventSlugSchema.parse('payment.ticket_purchased')).toThrow();
+    expect(() => clientEventSlugSchema.parse('agent.started')).toThrow();
+  });
+
+  test('registers the complete generic runtime lifecycle catalog', () => {
+    expect(runtimeEventSlugs).toEqual([
+      'agent.started', 'agent.completed', 'agent.failed',
+      'step.started', 'step.completed', 'step.failed',
+      'tool.called', 'tool.completed', 'tool.failed',
+      'model.called', 'model.completed', 'model.failed',
+      'artifact.created', 'artifact.used', 'guardrail.blocked',
+    ]);
+    expect(registeredEventSlugs).toEqual(expect.arrayContaining(runtimeEventSlugs));
+  });
+
+  test('keeps runtime payloads small, typed and free of full input/output', () => {
+    const data = runtimeEventDataSchema.parse({ runKey: NEXUS_SCOPE_KEY, agentKey: NEXUS_SCOPE_KEY, status: 'completed', inputTokens: 10, outputTokens: 4, elapsedMs: 25 });
+    expect(data).toMatchObject({ inputTokens: 10, outputTokens: 4, elapsedMs: 25 });
+    expect(() => runtimeEventDataSchema.parse({ input: { secret: true } })).toThrow();
+    expect(() => runtimeEventDataSchema.parse({ output: 'full result' })).toThrow();
   });
 
   test('defines the complete landing event catalog', () => {

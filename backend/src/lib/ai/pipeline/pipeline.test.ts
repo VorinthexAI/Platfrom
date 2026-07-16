@@ -4,6 +4,7 @@ import { agentSchema } from '@/lib/db/agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { agentToolSchema } from '@/lib/db/agent-tools.node';
+import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { toolSchema } from '@/lib/db/tools.node';
 import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { actionSchema } from '@/lib/db/actions.node';
@@ -28,6 +29,7 @@ import { ArtifactResolverRegistry } from '@/lib/ai/artifact-resolvers';
 import { tokenUsage } from '@/lib/ai/shared';
 import { runStoredAgentTool } from './run-stored-agent-tool';
 import { InvalidRunRequestError, ResponseValidationError } from './validation';
+import type { RuntimeEventInput } from '@/platform/events';
 
 const now = '2026-07-16T00:00:00.000Z';
 function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Task completed', score: 0.95 }, text: 'done' }) {
@@ -38,6 +40,7 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const userOrganization = userOrganizationSchema.parse({ key: newId(), organizationId: organizationKey, userId: user.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: userOrganization.key, role: 'moderator' });
   const agent = agentSchema.parse({ key: newId(), slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: scope.key });
+  const scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: scope.key, agentKey: agent.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend systems.' });
   const action = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer with metadata', handlerKey: 'core.ask', enabled: true });
   const tool = toolSchema.parse({ key: newId(), slug: 'ask.answer', name: 'Ask', description: 'Answer the user', scopeKey: null, enabled: true });
@@ -49,7 +52,7 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const modelAction = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: action.key, priority: 100, enabled: true });
   const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-nano', enabled: true });
   const runtimeData: AgentRuntimeDataSource = {
-    async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
+    async getAgent(key) { return key === agent.key ? agent : null; }, async getScopeAgent(key) { return key === agent.key ? scopeAgent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
     async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkill]; }, async getSkill(key) { return key === skill.key ? skill : null; },
     async listAgentTools() { return [agentTool]; }, async getTool(key) { return key === tool.key ? tool : null; },
@@ -73,13 +76,14 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const artifacts = { async insertArtifact(input: Parameters<import('@/lib/ai/agent-artifacts').AgentArtifactRepository['insertArtifact']>[0]) { const value = agentArtifactSchema.parse({ ...input, key: input.key ?? newId() }); artifactStore.push(value); return value; }, async listArtifactsForRun(key: string) { return artifactStore.filter((value) => value.agentRunKey === key); } };
   const adapterCalls: ProviderExecuteRequest[] = [];
   const executionSnapshots: Array<{ runStatus: string | undefined; sourceCount: number }> = [];
+  const eventStore: RuntimeEventInput[] = [];
   const adapters = { openai: { id: 'openai' as const, name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { adapterCalls.push(request as ProviderExecuteRequest); executionSnapshots.push({ runStatus: runStore[0]?.status, sourceCount: sourceStore.length }); return { output: output as TOutput, usage: tokenUsage(8, 5), providerId: 'openai' as const, modelId: request.modelId, externalModelId: request.externalModelId }; } } };
   const variables = { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } };
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
   const accessData = { async getUserOrganization(key: string) { return key === userOrganization.key ? userOrganization : null; }, async getUser(key: string) { return key === user.key ? user : null; }, async listScopeMembers() { return [scopeMember]; } };
-  const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts, accessData, principal: { kind: 'member' as const, userOrganizationKey: userOrganization.key } };
+  const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts, events: async (event: RuntimeEventInput) => { eventStore.push(event); }, accessData, principal: { kind: 'member' as const, userOrganizationKey: userOrganization.key } };
   const params = { organizationKey, agentKey: agent.key, toolKey: tool.key, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: 'Hello' }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
-  return { options, params, adapterCalls, executionSnapshots, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope, user, userOrganization, scopeMember, accessData };
+  return { options, params, adapterCalls, executionSnapshots, eventStore, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope, user, userOrganization, scopeMember, accessData };
 }
 
 describe('persisted agent pipeline', () => {
@@ -92,6 +96,12 @@ describe('persisted agent pipeline', () => {
     expect(f.stepStore[0]).toMatchObject({ stepSlug: 'answer-request', status: 'completed', agentRunKey: f.runStore[0]?.key });
     expect(f.callStore[0]).toMatchObject({ skillKey: f.skill.key, toolKey: f.tool.key, actionKey: f.action.key, modelKey: f.model.key, providerKey: f.provider.key, totalTokens: 13 });
     expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain(JSON.stringify({ scopeId: f.agent.scopeKey }));
+    expect(f.eventStore.map(({ slug }) => slug)).toEqual([
+      'agent.started', 'step.started', 'tool.called', 'model.called', 'model.completed',
+      'step.completed', 'tool.completed', 'agent.completed',
+    ]);
+    expect(f.eventStore.every(({ scopeId, userId }) => scopeId === f.scope.key && userId === f.user.key)).toBe(true);
+    expect(f.eventStore.find(({ slug }) => slug === 'model.completed')?.data).toMatchObject({ callKey: f.callStore[0]?.key, inputTokens: 8, outputTokens: 5 });
   });
 
   test('rejected metadata stores a summary and never executes tools or creates steps/calls', async () => {
@@ -102,12 +112,14 @@ describe('persisted agent pipeline', () => {
     expect(f.runStore[0]?.status).toBe('rejected');
     expect(f.stepStore).toHaveLength(0);
     expect(f.callStore).toHaveLength(0);
+    expect(f.eventStore.map(({ slug }) => slug)).toEqual(['agent.started', 'agent.failed']);
   });
 
   test('an ungranted Ask Tool cannot expose direct chat', async () => {
     const f = fixture();
     await expect(runStoredAgentTool({ ...f.params, toolKey: newId() }, f.options)).rejects.toBeInstanceOf(InvalidRunRequestError);
     expect(f.adapterCalls).toHaveLength(0);
+    expect(f.eventStore.map(({ slug }) => slug)).toEqual(['guardrail.blocked']);
   });
 
   test('requires active organization and scope membership before execution', async () => {
@@ -134,6 +146,18 @@ describe('persisted agent pipeline', () => {
     expect(f.callStore[0]?.totalTokens).toBe(13);
   });
 
+  test('records failed model, step, tool and agent lifecycle events', async () => {
+    const f = fixture();
+    f.options.adapters.openai!.execute = async () => { throw new Error('Provider unavailable'); };
+    await expect(runStoredAgentTool(f.params, f.options)).rejects.toThrow();
+    expect(f.eventStore.map(({ slug }) => slug)).toEqual([
+      'agent.started', 'step.started', 'tool.called', 'model.called', 'model.failed',
+      'step.failed', 'tool.failed', 'agent.failed',
+    ]);
+    expect(f.eventStore.find(({ slug }) => slug === 'model.failed')?.data).toMatchObject({ callKey: f.callStore[0]?.key, inputTokens: 0, outputTokens: 0 });
+    expect(f.eventStore.find(({ slug }) => slug === 'agent.failed')?.data.reason).toContain('Every route for action core.ask failed');
+  });
+
   test('supports validated rejected outputs and stable multi-step workflows', async () => {
     const f = fixture({ metadata: { status: 'rejected', reason: 'Required tool is unavailable', score: 0.9 }, validation: { readyToPersist: false } });
     let finalized = false;
@@ -157,6 +181,7 @@ describe('persisted agent pipeline', () => {
     expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain('"sourceCount":1');
     expect(f.sourceStore[0]).toMatchObject({ agentRunKey: f.runStore[0]?.key, nodeType: 'blog-post', nodeKey, priority: 100 });
     expect(f.artifactStore[0]).toMatchObject({ agentRunKey: f.runStore[0]?.key, nodeType: 'blog-post', nodeKey, relation: 'source', position: 0 });
+    expect(f.eventStore.find(({ slug }) => slug === 'artifact.used')?.data).toMatchObject({ runKey: f.runStore[0]?.key, agentKey: f.agent.key, nodeType: 'blog-post', nodeKey });
     expect(f.executionSnapshots[0]).toEqual({ runStatus: 'accepted', sourceCount: 1 });
   });
 });

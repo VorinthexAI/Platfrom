@@ -16,6 +16,7 @@ import { getAgentBySlug, insertAgent, updateAgent, type Agent } from '@/lib/db/a
 import { getAgentSkillByPair, insertAgentSkill, updateAgentSkillPriority, type AgentSkill } from '@/lib/db/agent-skills.node';
 import { deleteAgentTool, getAgentToolByPair, insertAgentTool, listAgentToolsByAgentKey, type AgentTool } from '@/lib/db/agent-tools.node';
 import { loadAgentRuntime } from '@/lib/ai/agents';
+import { getScopeAgentByAgentKey, insertScopeAgent, updateScopeAgent, type ScopeAgent } from '@/lib/db/scope-agents.node';
 import { cuidSchema, kebabSlugSchema } from './schemas';
 
 export const GENESIS_AGENT_KEY = cuidSchema.parse('cmgenesis00000000000000001');
@@ -49,6 +50,7 @@ export interface GenesisSeedDataSource {
   verifyExecutionChain(organizationKey: string, toolKey: string): Promise<boolean>;
   upsertSkill(seed: GenesisSeed['seed']['skills'][number], definition: string): Promise<Skill>;
   upsertAgent(seed: GenesisSeed['seed']['agents'][number], scopeKey: string): Promise<Agent>;
+  upsertScopeAgent(agentKey: string, scopeKey: string): Promise<ScopeAgent>;
   upsertAgentSkill(seed: GenesisSeed['seed']['agentSkills'][number], agentKey: string, skillKey: string): Promise<AgentSkill>;
   upsertAgentTool(seed: GenesisSeed['seed']['agentTools'][number], agentKey: string, toolKey: string): Promise<AgentTool>;
   removeOtherAgentTools(agentKey: string, allowedToolKey: string): Promise<void>;
@@ -97,6 +99,11 @@ const defaultSeedDataSource: GenesisSeedDataSource = {
     if (!existing) return insertAgent({ key: seed.key, slug: seed.slug, name: seed.name, title: seed.title, scopeKey, explorationRate: seed.explorationRate });
     return updateAgent(existing.key, { name: seed.name, title: seed.title, scopeKey, explorationRate: seed.explorationRate });
   },
+  async upsertScopeAgent(agentKey, scopeKey) {
+    const existing = await getScopeAgentByAgentKey(agentKey);
+    if (!existing) return insertScopeAgent({ agentKey, scopeKey });
+    return existing.scopeKey === scopeKey ? existing : updateScopeAgent(existing.key, { scopeKey });
+  },
   async upsertAgentSkill(seed, agentKey, skillKey) {
     const existing = await getAgentSkillByPair(agentKey, skillKey);
     if (!existing) return insertAgentSkill({ key: seed.key, agentKey, skillKey, priority: seed.priority });
@@ -125,6 +132,7 @@ export interface SeedGenesisResult {
   scope: Scope;
   skill: Skill;
   agent: Agent;
+  scopeAgent: ScopeAgent;
   agentSkill: AgentSkill;
   agentTool: AgentTool;
   createTool: Tool;
@@ -145,9 +153,10 @@ export async function seedGenesis(organizationKey: string, source: GenesisSeedDa
   if (!await source.verifyExecutionChain(validOrganizationKey, createTool.key)) throw new GenesisSeedPrerequisiteError('agent.create grant and core.reason → GPT-5.4 Mini → OpenAI route');
   const skill = await source.upsertSkill(skillSeed, definition);
   const agent = await source.upsertAgent(agentSeed, scope.key);
+  const scopeAgent = await source.upsertScopeAgent(agent.key, scope.key);
   const agentSkill = await source.upsertAgentSkill(relationSeed, agent.key, skill.key);
   const agentTool = await source.upsertAgentTool(toolSeed, agent.key, createTool.key);
   await source.removeOtherAgentTools(agent.key, createTool.key);
   await source.verifyRuntime(agent.key);
-  return { organizationKey: validOrganizationKey, scope, skill, agent, agentSkill, agentTool, createTool };
+  return { organizationKey: validOrganizationKey, scope, skill, agent, scopeAgent, agentSkill, agentTool, createTool };
 }
