@@ -42,6 +42,7 @@ const legacyIndexesToDrop: Record<string, string[][]> = {
   agents: [['orchestratorId'], ['orchestratorId', 'name'], ['enabled']],
   skills: [['enabled']],
   scopes: [['organizationId', 'name'], ['organizationId']],
+  organizations: [['ownerId']],
 };
 
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
@@ -289,7 +290,6 @@ const collections: CollectionSpec[] = [
     embedKeys: ['name', 'slug', 'description'],
     indexes: [
       { fields: ['is_root'] },
-      { fields: ['ownerId'] },
       { fields: ['slug'], unique: true, sparse: true },
     ],
   },
@@ -798,7 +798,6 @@ async function main() {
           _key: key,
           name,
           is_root: isRoot,
-          ownerId: null,
           slug: null,
           description: null,
           isActive: true,
@@ -826,7 +825,6 @@ async function main() {
       _key: rootOrganizationId,
       name: 'Vorinthex AI',
       is_root: true,
-      ownerId: null,
       slug: null,
       description: null,
       isActive: true,
@@ -908,7 +906,6 @@ async function main() {
           _key: key,
           name,
           is_root: false,
-          ownerId: nonEmptyString(team.ownerId),
           slug: nonEmptyString(team.slug),
           description: nonEmptyString(team.description),
           isActive: team.isActive !== false,
@@ -925,6 +922,15 @@ async function main() {
       console.log(`Copied ${legacyTeams.length} teams -> organizations`);
     }
   }
+
+  // Organization ownership is represented exclusively by userOrganizations
+  // with orgRole "owner". Remove the denormalized legacy field from every
+  // existing organization, including production documents from older seeds.
+  await targetDb.query(`
+    FOR organization IN organizations
+      FILTER HAS(organization, "ownerId")
+      UPDATE organization WITH { ownerId: null } IN organizations OPTIONS { keepNull: false }
+  `);
 
   const legacyTeamMembersCollection = targetDb.collection('teamMembers');
   if (await legacyTeamMembersCollection.exists()) {

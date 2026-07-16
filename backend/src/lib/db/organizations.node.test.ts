@@ -42,12 +42,13 @@ const baseOrganization = {
 
 describe('organization node schema', () => {
   test('defaults to a non-root organization with empty metadata', () => {
-    const organization = organizationSchema.parse(baseOrganization);
+    const organization = organizationSchema.parse({ ...baseOrganization, ownerId: 'legacy-owner' });
 
     expect(organization.is_root).toBe(false);
     expect(organization.mfa_enabled).toBe(false);
     expect(organization.metadata).toEqual({});
     expect(organization.embedding).toEqual([]);
+    expect('ownerId' in organization).toBe(false);
   });
 
   test('accepts the root flag for Vorinthex AI itself', () => {
