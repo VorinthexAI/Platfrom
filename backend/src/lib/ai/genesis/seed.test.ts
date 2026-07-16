@@ -12,7 +12,7 @@ import { AGENT_ARCHITECT_SKILL_KEY, GENESIS_AGENT_KEY, GENESIS_AGENT_SKILL_KEY, 
 function fixture(routeValid = true) {
   const now = '2026-07-16T00:00:00.000Z';
   const organization = organizationSchema.parse({ key: newId(), name: 'Vorinthex', createdAt: now, updatedAt: now });
-  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build agents.' });
+  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build agents.', position: 2 });
   const create = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create agent', scopeKey: null, enabled: true });
   const calls: string[] = [];
   const source: GenesisSeedDataSource = {

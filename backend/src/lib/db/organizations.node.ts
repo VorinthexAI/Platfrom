@@ -12,8 +12,6 @@ export const organizationSchema = z.object({
   /** Exactly one organization is the root — Vorinthex AI itself. Every
    * user, visitor, session, and event hangs off it via organizationId. */
   is_root: z.boolean().default(false),
-  /** Owning user for customer organizations — the root has no owner. */
-  ownerId: z.string().nullable().default(null),
   slug: z.string().nullable().default(null),
   description: z.string().nullable().default(null),
   isActive: z.boolean().default(true),

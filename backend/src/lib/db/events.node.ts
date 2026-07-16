@@ -5,8 +5,7 @@ export const EVENTS_COLLECTION = 'events';
 
 export const eventSchema = z.object({
   key: z.string(),
-  sourceId: z.string(),
-  belongsTo: z.enum(['organization', 'app']),
+  scopeId: z.string().cuid(),
   userId: z.string().nullable().default(null),
   slug: z.string(),
   data: z.record(z.unknown()).nullable().default(null),
@@ -16,9 +15,9 @@ export const eventSchema = z.object({
 
 export type Event = z.infer<typeof eventSchema>;
 
-// Ownership ids, arbitrary payload data, and createdAt belong in AQL filters,
+// Scope/user ids, arbitrary payload data, and createdAt belong in AQL filters,
 // not semantic search text.
-export const eventsEmbedKeys = z.enum(['belongsTo', 'slug']);
+export const eventsEmbedKeys = z.enum(['slug']);
 
 const helpers = createNodeHelpers(EVENTS_COLLECTION, eventSchema, eventsEmbedKeys.options);
 

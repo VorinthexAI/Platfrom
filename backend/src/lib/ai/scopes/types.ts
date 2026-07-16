@@ -2,21 +2,24 @@ import { AiError } from '@/lib/ai/shared/result';
 import type { Scope, ScopeScope } from './schema';
 
 export interface CreateScopeInput {
+  key?: string;
   organizationKey: string;
   slug: string;
   name: string;
   description: string;
+  position: number;
 }
 
 export interface ScopeRepository {
   createScope(input: CreateScopeInput): Promise<Scope>;
+  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'name' | 'description' | 'position'>>): Promise<Scope>;
   getScopeByKey(scopeKey: string): Promise<Scope | null>;
   listScopes(organizationKey: string): Promise<readonly Scope[]>;
   removeScope(scopeKey: string): Promise<void>;
 
-  addScopeRelation(parentScopeKey: string, childScopeKey: string, position: number): Promise<ScopeScope>;
-  removeScopeRelation(parentScopeKey: string, childScopeKey: string): Promise<void>;
-  listChildRelations(parentScopeKey: string): Promise<readonly ScopeScope[]>;
+  addScopeRelation(parentKey: string, childKey: string): Promise<ScopeScope>;
+  removeScopeRelation(parentKey: string, childKey: string): Promise<void>;
+  listChildRelations(parentKey: string): Promise<readonly ScopeScope[]>;
 }
 
 export class DuplicateScopeSlugError extends AiError {
@@ -32,41 +35,35 @@ export class ScopeNotFoundError extends AiError {
 }
 
 export class ScopeOrganizationMismatchError extends AiError {
-  constructor(parentScopeKey: string, childScopeKey: string) {
+  constructor(parentKey: string, childKey: string) {
     super(
       'scope_organization_mismatch',
-      `Scopes ${parentScopeKey} and ${childScopeKey} belong to different organizations`,
+      `Scopes ${parentKey} and ${childKey} belong to different organizations`,
     );
   }
 }
 
 export class DuplicateScopeRelationError extends AiError {
-  constructor(parentScopeKey: string, childScopeKey: string) {
-    super('duplicate_scope_relation', `Scope ${childScopeKey} is already linked under ${parentScopeKey}`);
+  constructor(parentKey: string, childKey: string) {
+    super('duplicate_scope_relation', `Scope ${childKey} is already linked under ${parentKey}`);
   }
 }
 
 export class ScopeAlreadyHasParentError extends AiError {
-  constructor(childScopeKey: string) {
-    super('scope_already_has_parent', `Scope ${childScopeKey} already has a parent`);
-  }
-}
-
-export class ScopePositionConflictError extends AiError {
-  constructor(parentScopeKey: string, position: number) {
-    super('scope_position_conflict', `Position ${position} is already used under scope ${parentScopeKey}`);
+  constructor(childKey: string) {
+    super('scope_already_has_parent', `Scope ${childKey} already has a parent`);
   }
 }
 
 export class ScopeCycleError extends AiError {
-  constructor(parentScopeKey: string, childScopeKey: string) {
-    super('scope_cycle', `Linking ${childScopeKey} under ${parentScopeKey} would create a cycle`);
+  constructor(parentKey: string, childKey: string) {
+    super('scope_cycle', `Linking ${childKey} under ${parentKey} would create a cycle`);
   }
 }
 
 export class ScopeRelationNotFoundError extends AiError {
-  constructor(parentScopeKey: string, childScopeKey: string) {
-    super('scope_relation_not_found', `Scope relation ${parentScopeKey} -> ${childScopeKey} was not found`);
+  constructor(parentKey: string, childKey: string) {
+    super('scope_relation_not_found', `Scope relation ${parentKey} -> ${childKey} was not found`);
   }
 }
 
@@ -77,6 +74,7 @@ export interface ScopesDatabase {
   ): Promise<{ all(): Promise<unknown[]>; next(): Promise<unknown> }>;
   collection(name: string): {
     save(doc: Record<string, unknown>, options?: { returnNew?: boolean }): Promise<unknown>;
+    update(selector: string, patch: Record<string, unknown>, options?: { returnNew?: boolean }): Promise<unknown>;
     remove(selector: string): Promise<unknown>;
     document(selector: string): Promise<unknown>;
   };

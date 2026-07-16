@@ -59,7 +59,7 @@ describe('AI metadata model contract', () => {
 
   test('relations point at the intended metadata entities', () => {
     expect(Object.keys(userOrganizationSchema.shape)).toEqual(expect.arrayContaining(['organizationId', 'userId']));
-    expect(Object.keys(scopeScopeSchema.innerType().shape)).toEqual(expect.arrayContaining(['parentScopeKey', 'childScopeKey']));
+    expect(Object.keys(scopeScopeSchema.innerType().shape)).toEqual(expect.arrayContaining(['parentKey', 'childKey']));
     expect(Object.keys(scopeMemberSchema.shape)).toEqual(expect.arrayContaining(['scopeKey', 'userOrganizationKey', 'role']));
     expect(agentSchema.shape).toHaveProperty('scopeKey');
     expect(Object.keys(agentSkillSchema.shape)).toEqual(expect.arrayContaining(['agentKey', 'skillKey', 'priority']));

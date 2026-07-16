@@ -14,7 +14,7 @@ import type { GenesisCatalogDataSource } from './context';
 export function buildGenesisFixture() {
   const now = '2026-07-16T00:00:00.000Z';
   const organization = organizationSchema.parse({ key: newId(), name: 'Vorinthex', createdAt: now, updatedAt: now });
-  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build validated agents.', embedding: [0, 1] });
+  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build validated agents.', position: 2, embedding: [0, 1] });
   const genesis = agentSchema.parse({ key: newId(), slug: 'genesis', name: 'Genesis', title: 'Agent Architect', scopeKey: scope.key, explorationRate: 0.2, embedding: [0, 1] });
   const architect = skillSchema.parse({ key: newId(), slug: 'agent-architect', name: 'Agent Architecture', title: 'Agent Architect', definition: '# Agent Architect', embedding: [0, 1] });
   const backend = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: '# Backend Developer', embedding: [0, 1] });

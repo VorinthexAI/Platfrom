@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { insertEvent } from '@/lib/db/events.node';
 import { getRootOrganization, insertOrganization } from '@/lib/db/organizations.node';
 import { newId } from '@/lib/ids';
@@ -48,34 +49,15 @@ export const clientEventSlugSchema = eventSlugSchema;
 
 export type ClientEventSlug = z.infer<typeof clientEventSlugSchema>;
 
-type EventSourceInput = {
-  appId?: string;
-  sourceId?: string;
-};
-
-export async function resolveEventSource(input: EventSourceInput = {}) {
-  if (input.appId) {
-    return { belongsTo: 'app' as const, sourceId: input.appId };
-  }
-
-  return {
-    belongsTo: 'organization' as const,
-    sourceId: input.sourceId ?? await getRootOrganizationId(),
-  };
-}
-
 export function trackPlatformEvent(input: {
   slug: EventSlug;
   data?: Record<string, unknown>;
-  sourceId?: string;
-  appId?: string;
   userId?: string | null;
 }) {
   void (async () => {
-    const source = await resolveEventSource({ appId: input.appId, sourceId: input.sourceId });
     await insertEvent({
       key: newId(),
-      ...source,
+      scopeId: NEXUS_SCOPE_KEY,
       userId: input.userId ?? null,
       slug: input.slug,
       data: input.data ?? {},

@@ -19,7 +19,6 @@ import {
   ScopeCycleError,
   ScopeNotFoundError,
   ScopeOrganizationMismatchError,
-  ScopePositionConflictError,
   ScopeRelationNotFoundError,
   type ScopeRepository,
   type ScopesDatabase,
@@ -36,37 +35,37 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
     }
   }
 
-  async function listRelations(parentScopeKey: string): Promise<ScopeScope[]> {
+  async function listRelations(parentKey: string): Promise<ScopeScope[]> {
     const cursor = await database.query(
       `
         FOR relation IN @@collection
-          FILTER relation.parentScopeKey == @parentScopeKey
-          SORT relation.position ASC, relation._key ASC
+          FILTER relation.parentKey == @parentKey
+          SORT relation._key ASC
           RETURN relation
       `,
-      { '@collection': SCOPE_SCOPES_COLLECTION, parentScopeKey },
+      { '@collection': SCOPE_SCOPES_COLLECTION, parentKey },
     );
     const docs = await cursor.all();
     return (docs as Record<string, unknown>[]).map((doc) => scopeScopeSchema.parse(withArangoKey(doc)));
   }
 
-  async function wouldCreateCycle(parentScopeKey: string, childScopeKey: string): Promise<boolean> {
-    const pending = [childScopeKey];
+  async function wouldCreateCycle(parentKey: string, childKey: string): Promise<boolean> {
+    const pending = [childKey];
     const visited = new Set<string>();
     while (pending.length > 0) {
       const current = pending.shift()!;
-      if (current === parentScopeKey) return true;
+      if (current === parentKey) return true;
       if (visited.has(current)) continue;
       visited.add(current);
       const children = await listRelations(current);
-      pending.push(...children.map((relation) => relation.childScopeKey));
+      pending.push(...children.map((relation) => relation.childKey));
     }
     return false;
   }
 
   return {
     async createScope(input) {
-      const parsed = scopeSchema.parse({ ...input, key: newId() });
+      const parsed = scopeSchema.parse({ ...input, key: input.key ?? newId() });
       const scope = {
         ...parsed,
         embedding: await embed({
@@ -85,6 +84,15 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
       }
     },
 
+    async updateScope(scopeKey, input) {
+      const current = await requireScope(scopeKey);
+      const parsed = scopeSchema.parse({ ...current, ...input });
+      const embedding = await embed({ text: buildEmbeddingText(scopesEmbedKeys.options, parsed)! });
+      const result = await database.collection(SCOPES_COLLECTION).update(scopeKey, { ...input, embedding }, { returnNew: true });
+      const saved = (result as { new?: Record<string, unknown> }).new;
+      return saved ? scopeSchema.parse(withArangoKey(saved)) : { ...parsed, embedding };
+    },
+
     async getScopeByKey(scopeKey) {
       try {
         const doc = await database.collection(SCOPES_COLLECTION).document(scopeKey);
@@ -96,7 +104,7 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
     },
 
     async listScopes(organizationKey) {
-      const validOrganizationKey = zCuid(organizationKey);
+      const validOrganizationKey = parseOrganizationKey(organizationKey);
       const cursor = await database.query(
         `
           FOR scope IN @@collection
@@ -115,7 +123,7 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
       await database.query(
         `
           FOR relation IN @@collection
-            FILTER relation.parentScopeKey == @scopeKey || relation.childScopeKey == @scopeKey
+            FILTER relation.parentKey == @scopeKey || relation.childKey == @scopeKey
             REMOVE relation IN @@collection
         `,
         { '@collection': SCOPE_SCOPES_COLLECTION, scopeKey },
@@ -131,26 +139,21 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
       await database.collection(SCOPES_COLLECTION).remove(scopeKey);
     },
 
-    async addScopeRelation(parentScopeKey, childScopeKey, position) {
-      const relation = scopeScopeSchema.parse({ key: newId(), parentScopeKey, childScopeKey, position });
-      const [parent, child] = await Promise.all([requireScope(parentScopeKey), requireScope(childScopeKey)]);
+    async addScopeRelation(parentKey, childKey) {
+      const relation = scopeScopeSchema.parse({ key: newId(), parentKey, childKey });
+      const [parent, child] = await Promise.all([requireScope(parentKey), requireScope(childKey)]);
       if (parent.organizationKey !== child.organizationKey) {
-        throw new ScopeOrganizationMismatchError(parentScopeKey, childScopeKey);
+        throw new ScopeOrganizationMismatchError(parentKey, childKey);
       }
 
       const existingParentCursor = await database.query(
-        'FOR relation IN @@collection FILTER relation.childScopeKey == @childScopeKey LIMIT 1 RETURN relation',
-        { '@collection': SCOPE_SCOPES_COLLECTION, childScopeKey },
+        'FOR relation IN @@collection FILTER relation.childKey == @childKey LIMIT 1 RETURN relation',
+        { '@collection': SCOPE_SCOPES_COLLECTION, childKey },
       );
-      if (await existingParentCursor.next()) throw new ScopeAlreadyHasParentError(childScopeKey);
+      if (await existingParentCursor.next()) throw new ScopeAlreadyHasParentError(childKey);
 
-      const positionCursor = await database.query(
-        'FOR relation IN @@collection FILTER relation.parentScopeKey == @parentScopeKey && relation.position == @position LIMIT 1 RETURN relation',
-        { '@collection': SCOPE_SCOPES_COLLECTION, parentScopeKey, position },
-      );
-      if (await positionCursor.next()) throw new ScopePositionConflictError(parentScopeKey, position);
-      if (await wouldCreateCycle(parentScopeKey, childScopeKey)) {
-        throw new ScopeCycleError(parentScopeKey, childScopeKey);
+      if (await wouldCreateCycle(parentKey, childKey)) {
+        throw new ScopeCycleError(parentKey, childKey);
       }
 
       try {
@@ -159,30 +162,30 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
         return (saved ? scopeScopeSchema.parse(withArangoKey(saved)) : relation) satisfies ScopeScope;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) {
-          throw new DuplicateScopeRelationError(parentScopeKey, childScopeKey);
+          throw new DuplicateScopeRelationError(parentKey, childKey);
         }
         throw error;
       }
     },
 
-    async removeScopeRelation(parentScopeKey, childScopeKey) {
+    async removeScopeRelation(parentKey, childKey) {
       const cursor = await database.query(
-        'FOR relation IN @@collection FILTER relation.parentScopeKey == @parentScopeKey && relation.childScopeKey == @childScopeKey LIMIT 1 RETURN relation',
-        { '@collection': SCOPE_SCOPES_COLLECTION, parentScopeKey, childScopeKey },
+        'FOR relation IN @@collection FILTER relation.parentKey == @parentKey && relation.childKey == @childKey LIMIT 1 RETURN relation',
+        { '@collection': SCOPE_SCOPES_COLLECTION, parentKey, childKey },
       );
       const raw = await cursor.next();
-      if (!raw) throw new ScopeRelationNotFoundError(parentScopeKey, childScopeKey);
+      if (!raw) throw new ScopeRelationNotFoundError(parentKey, childKey);
       const relation = scopeScopeSchema.parse(withArangoKey(raw as Record<string, unknown>));
       await database.collection(SCOPE_SCOPES_COLLECTION).remove(relation.key);
     },
 
-    listChildRelations(parentScopeKey) {
-      return listRelations(parentScopeKey);
+    listChildRelations(parentKey) {
+      return listRelations(parentKey);
     },
   };
 }
 
-function zCuid(value: string): string {
+function parseOrganizationKey(value: string): string {
   return scopeSchema.shape.organizationKey.parse(value);
 }
 

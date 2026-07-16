@@ -10,8 +10,6 @@ const tempEmailHash = z.string().regex(/^[a-f0-9]{64}$/);
 export const platformEventsBodySchema = strictObject({
   distinctId: z.string().min(1).max(200),
   slug: clientEventSlugSchema,
-  app_id: z.string().min(1).optional(),
-  source_id: z.string().min(1).optional(),
   temp_email_hash: tempEmailHash.optional(),
   metadata: jsonObject.optional(),
 });
@@ -21,8 +19,6 @@ export async function recordPlatformClientEvent(c: Context) {
   const userId = await getUserId(c);
   trackPlatformEvent({
     slug: body.slug,
-    appId: body.app_id,
-    sourceId: body.source_id,
     userId,
     data: {
       ...body.metadata,

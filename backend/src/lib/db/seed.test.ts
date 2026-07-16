@@ -10,7 +10,46 @@ import { modelProviderSeedSchema } from './model-providers.node';
 import { toolSchema } from './tools.node';
 import { toolActionSeedSchema } from './tool-actions.node';
 import { TOOL_REGISTRY } from '@/lib/ai/tools';
-import { SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
+import { newId } from '@/lib/ids';
+import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+
+describe('scope seeds', () => {
+  test('place the seven product scopes as siblings directly below Nexus', () => {
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === null).map(({ slug }) => slug)).toEqual(['nexus']);
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).map(({ slug }) => slug)).toEqual([
+      'core',
+      'launch',
+      'studio',
+      'command',
+      'head-quarters',
+      'replica',
+      'pilot',
+    ]);
+    expect(SEEDED_SCOPES[0]?.key).toBe(NEXUS_SCOPE_KEY);
+    expect(new Set(SEEDED_SCOPES.map(({ key }) => key)).size).toBe(SEEDED_SCOPES.length);
+    const seededKeys = new Set(SEEDED_SCOPES.map(({ key }) => key));
+    for (const scope of SEEDED_SCOPES) {
+      scopeSchema.parse({ ...scope, organizationKey: newId() });
+      if (scope.parentKey) {
+        expect(seededKeys.has(scope.parentKey)).toBe(true);
+        scopeScopeSchema.parse({ key: newId(), parentKey: scope.parentKey, childKey: scope.key });
+      }
+    }
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.position).toBe(1);
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ position }) => position === 2)).toBe(true);
+    expect(Object.fromEntries(SEEDED_SCOPES.map(({ slug, description }) => [slug, description]))).toEqual({
+      nexus: 'The complete Vorinthex ecosystem, connecting every product, capability, workspace, and intelligence into one unified AI platform.',
+      core: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
+      launch: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
+      studio: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
+      command: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
+      'head-quarters': 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
+      replica: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
+      pilot: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
+    });
+  });
+});
 
 describe('action seeds', () => {
   test('seed every registered action exactly once', () => {
