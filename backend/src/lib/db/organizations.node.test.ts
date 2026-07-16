@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { actionSchema } from './actions.node';
 import { organizationSchema } from './organizations.node';
 import { skillSchema } from './skills.node';
 import { agentSchema } from './agents.node';
 import { agentSkillSchema } from './agent-skills.node';
+import { agentToolSchema } from './agent-tools.node';
 import { authChallengeSchema } from './auth-challenges.node';
 import { capabilitySchema } from './capabilities.node';
 import { eventSchema } from './events.node';
@@ -29,6 +30,8 @@ import { userWaitlistLeaderboardChangeSchema } from './user-waitlist-leaderboard
 import { visitorSchema } from './visitors.node';
 import { visitorSessionSchema } from './visitor-sessions.node';
 import { voiceSchema } from './voices.node';
+import { toolSchema } from './tools.node';
+import { toolActionSchema } from './tool-actions.node';
 
 const baseOrganization = {
   key: 'org_root',
@@ -107,10 +110,11 @@ describe('organization node schema', () => {
 /** The platform and team nodes are gone: no node schema may keep a
  * platform- or team-era field. */
 describe('no node field mentions the retired platform or team nodes', () => {
-  const nodeSchemas: Record<string, z.ZodObject<z.ZodRawShape>> = {
+  const nodeSchemas: Record<string, z.ZodTypeAny> = {
     actions: actionSchema,
     agents: agentSchema,
     agentSkills: agentSkillSchema,
+    agentTools: agentToolSchema,
     authChallenges: authChallengeSchema,
     capabilities: capabilitySchema,
     events: eventSchema,
@@ -128,6 +132,8 @@ describe('no node field mentions the retired platform or team nodes', () => {
     providers: providerObjectSchema,
     products: productSchema,
     subscriptions: subscriptionSchema,
+    toolActions: toolActionSchema,
+    tools: toolSchema,
     skills: skillSchema,
     userEntitlements: userEntitlementSchema,
     userOrganizations: userOrganizationSchema,
@@ -139,9 +145,23 @@ describe('no node field mentions the retired platform or team nodes', () => {
     voices: voiceSchema,
   };
 
+  function getObjectShape(schema: z.ZodTypeAny): z.ZodRawShape {
+    let current = schema;
+
+    while (current instanceof z.ZodEffects) {
+      current = current.innerType();
+    }
+
+    if (!(current instanceof z.ZodObject)) {
+      throw new Error('Expected node schema to resolve to a Zod object');
+    }
+
+    return current.shape;
+  }
+
   for (const [name, schema] of Object.entries(nodeSchemas)) {
     test(`${name} has no platform- or team-named fields`, () => {
-      const offenders = Object.keys(schema.shape).filter((field) => {
+      const offenders = Object.keys(getObjectShape(schema)).filter((field) => {
         const lower = field.toLowerCase();
         return lower.includes('platform') || lower.includes('team');
       });

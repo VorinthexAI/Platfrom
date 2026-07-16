@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
+import { newId } from '@/lib/ids';
 import { providerSchema, providerSlugSchema, providersEmbedKeys } from './providers.node';
 
 describe('provider node schema', () => {
@@ -9,7 +10,7 @@ describe('provider node schema', () => {
 
   test('parses a provider and applies node defaults', () => {
     const provider = providerSchema.parse({
-      key: 'provider_openai',
+      key: newId(),
       slug: 'openai',
       name: 'OpenAI',
       description: 'Provides multimodal AI models.',
@@ -27,7 +28,7 @@ describe('provider node schema', () => {
 
   test('requires handlerKey to match slug', () => {
     expect(() => providerSchema.parse({
-      key: 'provider_openai',
+      key: newId(),
       slug: 'openai',
       name: 'OpenAI',
       description: 'Provides multimodal AI models.',

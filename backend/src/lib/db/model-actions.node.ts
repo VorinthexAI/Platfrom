@@ -3,23 +3,22 @@ import { aql } from 'arangojs';
 import { actionSlugSchema } from './actions.node';
 import { modelSlugSchema } from './models.node';
 import { db } from './client';
-import { createNodeHelpers, withArangoKey } from './base';
+import { createEdgeHelpers, withArangoKey } from './base';
 
 export const MODEL_ACTIONS_COLLECTION = 'modelActions';
 
 export const modelActionSchema = z.object({
-  key: z.string(),
-  modelKey: z.string(),
-  actionKey: z.string(),
+  key: z.string().cuid(),
+  modelKey: z.string().cuid(),
+  actionKey: z.string().cuid(),
   priority: z.number().int().nonnegative().default(100),
   enabled: z.boolean().default(true),
-  embedding: z.array(z.number().finite()).default([]),
 });
 
 export type ModelAction = z.infer<typeof modelActionSchema>;
 
 export const modelActionSeedSchema = z.object({
-  key: z.string(),
+  key: z.string().cuid(),
   modelSlug: modelSlugSchema,
   actionSlug: actionSlugSchema,
   priority: z.number().int().nonnegative(),
@@ -28,7 +27,7 @@ export const modelActionSeedSchema = z.object({
 
 export type ModelActionSeed = z.infer<typeof modelActionSeedSchema>;
 
-const helpers = createNodeHelpers(MODEL_ACTIONS_COLLECTION, modelActionSchema);
+const helpers = createEdgeHelpers(MODEL_ACTIONS_COLLECTION, modelActionSchema);
 
 export const insertModelAction = helpers.insert;
 export const getModelActionById = helpers.getById;
@@ -47,4 +46,15 @@ export async function getModelActionByPair(modelKey: string, actionKey: string):
   `);
   const doc = await cursor.next();
   return doc ? modelActionSchema.parse(withArangoKey(doc)) : null;
+}
+
+export async function listEnabledModelActionsByActionKey(actionKey: string): Promise<ModelAction[]> {
+  const validActionKey = modelActionSchema.shape.actionKey.parse(actionKey);
+  const cursor = await db.query(aql`
+    FOR link IN ${db.collection(MODEL_ACTIONS_COLLECTION)}
+      FILTER link.actionKey == ${validActionKey} && link.enabled == true
+      SORT link.priority DESC, link._key ASC
+      RETURN link
+  `);
+  return (await cursor.all()).map((doc) => modelActionSchema.parse(withArangoKey(doc)));
 }

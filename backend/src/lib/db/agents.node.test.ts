@@ -3,7 +3,7 @@ import { newId } from '@/lib/ids';
 import { agentSchema, agentsEmbedKeys } from './agents.node';
 
 describe('agent node schema', () => {
-  test('stores identity and scope with a CUID2 key', () => {
+  test('stores identity and scope with a CUID key', () => {
     const agent = agentSchema.parse({
       key: newId(),
       slug: 'forge',

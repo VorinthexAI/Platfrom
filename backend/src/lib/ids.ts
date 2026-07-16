@@ -1,6 +1,5 @@
-import { createId } from '@paralleldrive/cuid2';
+import cuid from 'cuid';
 
-export function newId(_prefix?: string) {
-  return createId();
+export function newId() {
+  return cuid();
 }
-

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { actionIdSchema } from '@/lib/ai/actions';
+import { actionIdSchema } from '@/lib/ai/actions/types';
 import { db } from './client';
 import { createNodeHelpers, withArangoKey } from './base';
 
@@ -9,7 +9,7 @@ export const ACTIONS_COLLECTION = 'actions';
 export const actionSlugSchema = actionIdSchema;
 
 export const actionSchema = z.object({
-  key: z.string(),
+  key: z.string().cuid(),
   slug: actionSlugSchema,
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(4000),
@@ -18,9 +18,11 @@ export const actionSchema = z.object({
   outputDescription: z.string().trim().min(1).max(4000),
   handlerKey: actionSlugSchema,
   enabled: z.boolean().default(true),
-  embedding: z.array(z.number()).default([]),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
+  embedding: z.array(z.number().finite()).default([]),
+}).superRefine((action, ctx) => {
+  if (action.slug !== action.handlerKey) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['handlerKey'], message: 'handlerKey must match slug' });
+  }
 });
 
 export type Action = z.infer<typeof actionSchema>;

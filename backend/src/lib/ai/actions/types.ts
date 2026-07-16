@@ -35,30 +35,6 @@ export type ActionId = (typeof ACTION_SLUGS)[number];
 
 export const actionIdSchema = z.enum(ACTION_SLUGS);
 
-export interface ActionDefinition {
-  id: ActionId;
-  name: string;
-  description: string;
-  /**
-   * Whether a failed provider call may be retried on another route after an
-   * AMBIGUOUS failure (one where the provider might already have produced a
-   * billable output). Generation actions (image/video/music/speech) are
-   * false so a fallback can never create duplicate billable artifacts;
-   * text-in/text-out actions are true. Failures that provably happen before
-   * execution (auth, rate limit, provider down) may fall back regardless.
-   */
-  safeToRetry: boolean;
-}
-
-export const actionDefinitionSchema = z
-  .object({
-    id: actionIdSchema,
-    name: z.string().min(1),
-    description: z.string().min(1),
-    safeToRetry: z.boolean(),
-  })
-  .strict();
-
 export function isValidActionIdFormat(id: string): boolean {
   return DOT_NOTATION_PATTERN.test(id);
 }

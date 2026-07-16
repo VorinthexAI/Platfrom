@@ -16,8 +16,8 @@ export const scopeSlugSchema = z
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
 export const scopeSchema = z.object({
-  key: z.string().cuid2(),
-  organizationKey: z.string().cuid2(),
+  key: z.string().cuid(),
+  organizationKey: z.string().cuid(),
   slug: scopeSlugSchema,
   name: z.string().trim().min(1).max(160),
   description: z.string().trim().min(1).max(4_000),
@@ -28,9 +28,9 @@ export type Scope = z.infer<typeof scopeSchema>;
 
 export const scopeScopeSchema = z
   .object({
-    key: z.string().cuid2(),
-    parentScopeKey: z.string().cuid2(),
-    childScopeKey: z.string().cuid2(),
+    key: z.string().cuid(),
+    parentScopeKey: z.string().cuid(),
+    childScopeKey: z.string().cuid(),
     position: z.number().int().positive(),
   })
   .superRefine((relation, ctx) => {
@@ -46,9 +46,9 @@ export const scopeScopeSchema = z
 export type ScopeScope = z.infer<typeof scopeScopeSchema>;
 
 export const scopeMemberSchema = z.object({
-  key: z.string().cuid2(),
-  scopeKey: z.string().cuid2(),
-  userOrganizationKey: z.string().cuid2(),
+  key: z.string().cuid(),
+  scopeKey: z.string().cuid(),
+  userOrganizationKey: z.string().cuid(),
   role: scopeMemberRoleSchema,
 });
 

@@ -1,18 +1,16 @@
 export {
   ORGANIZATION_PROVIDERS_COLLECTION,
   organizationProviderSchema,
-  organizationProviderKey,
   type OrganizationProvider,
 } from './schema';
 export {
-  InvalidOrganizationIdError,
-  UnknownProviderIdError,
   DuplicateOrganizationProviderError,
   OrganizationProviderNotFoundError,
+  OrganizationProviderReferenceError,
   type OrganizationProviderRepository,
   type OrganizationProvidersDatabase,
   type OrganizationProvidersSetupDatabase,
 } from './types';
 export { createOrganizationProviderRepository, getDefaultOrganizationProviderRepository } from './repository';
-export { createOrganizationProviderService, type OrganizationProviderService } from './service';
+export { createOrganizationProviderService, type OrganizationProviderService, type OrganizationProviderReferenceResolver } from './service';
 export { ensureOrganizationProvidersCollection } from './indexes';

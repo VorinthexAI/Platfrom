@@ -20,7 +20,7 @@ export function isAiError(err: unknown): err is AiError {
   return err instanceof AiError;
 }
 
-/** Minimal discriminated result, used for fallback-attempt bookkeeping. */
+/** Minimal discriminated result for explicit success/error boundaries. */
 export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 export function ok<T>(value: T): { ok: true; value: T } {

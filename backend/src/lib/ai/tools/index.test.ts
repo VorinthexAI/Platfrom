@@ -1,41 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import { ACTION_REGISTRY } from '@/lib/ai/actions';
 import { assertToolRegistryIntegrity, getTool, listTools, TOOL_REGISTRY, UnknownToolError } from './index';
 import { isValidToolIdFormat, TOOL_IDS, toolDefinitionSchema } from './types';
-
-describe('tool registry', () => {
-  test('passes the full integrity check', () => {
+describe('tool handler registry', () => {
+  test('is complete and contains no duplicated relation data', () => {
     expect(() => assertToolRegistryIntegrity()).not.toThrow();
-  });
-
-  test('contains every TOOL_IDS entry and nothing else', () => {
     expect(Object.keys(TOOL_REGISTRY).sort()).toEqual([...TOOL_IDS].sort());
-  });
-
-  test('every tool references a registered action — and actions only', () => {
     for (const tool of listTools()) {
-      expect(tool.actionId in ACTION_REGISTRY).toBe(true);
-      // The strict schema is the structural guarantee: any provider or
-      // endpoint field on a tool definition is a validation error.
-      expect(() => toolDefinitionSchema.parse({ ...tool, providerId: 'openai' })).toThrow();
-      expect(() => toolDefinitionSchema.parse({ ...tool, endpoint: 'https://api.example.com' })).toThrow();
+      expect(tool).not.toHaveProperty('actionId');
+      expect(tool).not.toHaveProperty('modelId');
+      expect(tool).not.toHaveProperty('providerId');
+      expect(() => toolDefinitionSchema.parse({ ...tool, actionId: 'core.ask' })).toThrow();
     }
   });
-
-  test('tool ids follow dot notation', () => {
+  test('uses dot notation and resolves known handlers', () => {
     for (const id of TOOL_IDS) expect(isValidToolIdFormat(id)).toBe(true);
-    expect(isValidToolIdFormat('NotATool')).toBe(false);
-  });
-
-  test('routing preferences are optional hints with validated shapes', () => {
-    expect(TOOL_REGISTRY['reason.solve'].routing?.strategy).toBe('quality');
-    expect(() =>
-      toolDefinitionSchema.parse({ ...TOOL_REGISTRY['ask.answer'], routing: { providerId: 'openai' } }),
-    ).toThrow();
-  });
-
-  test('getTool resolves known tools and rejects unknown ids', () => {
-    expect(getTool('ask.answer').actionId).toBe('core.ask');
+    expect(getTool('ask.answer').name).toBe('Ask');
     expect(() => getTool('nope.missing')).toThrow(UnknownToolError);
   });
 });

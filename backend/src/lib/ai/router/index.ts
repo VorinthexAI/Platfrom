@@ -1,12 +1,4 @@
-export {
-  ROUTING_STRATEGIES,
-  routingStrategySchema,
-  type RoutingStrategy,
-  type RouteCandidate,
-  type RouteFallback,
-  type RouteDecision,
-  type RouterDependencies,
-} from './types';
+export { type RouteDecision, type RouterDataSource, type RouterDependencies } from './types';
 export {
   routeRequestSchema,
   autoRouteRequestSchema,
@@ -29,7 +21,5 @@ export {
   RouteValidationError,
   type RouteAttemptFailure,
 } from './errors';
-export { generateCandidates, type CandidateGenerationContext } from './candidates';
-export { STRATEGY_WEIGHTS, scoreCandidate, compareCandidates, rankCandidates, type StrategyWeights } from './scoring';
 export { selectRoute } from './select-route';
-export { executeRouteWithFallbacks, executeAction, type ExecuteRouteOptions, type ExecuteActionOptions } from './execute-route';
+export { executeRoute, executeAction, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';

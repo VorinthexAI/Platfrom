@@ -1,54 +1,39 @@
-import type { ProviderId } from '@/lib/ai/providers/types';
-import { organizationIdSchema } from '@/lib/ai/shared/ids';
-import { providerIdSchema } from '@/lib/ai/providers/types';
+import { getProviderBySlug, providerSlugSchema, type ProviderSlug } from '@/lib/db/providers.node';
+import { getOrganizationById } from '@/lib/db/organizations.node';
+import { organizationProviderSchema, type OrganizationProvider } from './schema';
 import { getDefaultOrganizationProviderRepository } from './repository';
-import type { OrganizationProvider } from './schema';
-import { InvalidOrganizationIdError, UnknownProviderIdError, type OrganizationProviderRepository } from './types';
+import { OrganizationProviderReferenceError, type OrganizationProviderRepository } from './types';
 
+export interface OrganizationProviderReferenceResolver {
+  organizationExists(key: string): Promise<boolean>;
+  providerKeyForSlug(slug: ProviderSlug): Promise<string | null>;
+}
+const defaultResolver: OrganizationProviderReferenceResolver = {
+  async organizationExists(key) { return (await getOrganizationById(key)) !== null; },
+  async providerKeyForSlug(slug) { return (await getProviderBySlug(slug))?.key ?? null; },
+};
 export interface OrganizationProviderService {
-  /** Enables a provider for the organization. Throws `DuplicateOrganizationProviderError` when already enabled. */
-  enableProvider(organizationId: string, providerId: string): Promise<OrganizationProvider>;
-  /** Disables a provider by deleting its allow-list document. Throws `OrganizationProviderNotFoundError` when not enabled. */
-  disableProvider(organizationId: string, providerId: string): Promise<void>;
-  listEnabledProviderIds(organizationId: string): Promise<readonly ProviderId[]>;
-  isProviderEnabled(organizationId: string, providerId: string): Promise<boolean>;
+  enableProvider(organizationKey: string, providerSlug: ProviderSlug): Promise<OrganizationProvider>;
+  disableProvider(organizationKey: string, providerSlug: ProviderSlug): Promise<void>;
+  listEnabledProviderKeys(organizationKey: string): Promise<readonly string[]>;
+  isProviderEnabled(organizationKey: string, providerSlug: ProviderSlug): Promise<boolean>;
 }
-
-function validateOrganizationId(organizationId: string): string {
-  const parsed = organizationIdSchema.safeParse(organizationId);
-  if (!parsed.success) throw new InvalidOrganizationIdError();
-  return parsed.data;
-}
-
-/**
- * Provider ids arrive from clients here — they are ALWAYS validated
- * against `PROVIDER_SLUGS` before touching the database; a client can never
- * enable (or query) a provider the platform does not know.
- */
-function validateProviderId(providerId: string): ProviderId {
-  const parsed = providerIdSchema.safeParse(providerId);
-  if (!parsed.success) throw new UnknownProviderIdError(providerId);
-  return parsed.data;
-}
-
 export function createOrganizationProviderService(
   repository: OrganizationProviderRepository = getDefaultOrganizationProviderRepository(),
+  resolver: OrganizationProviderReferenceResolver = defaultResolver,
 ): OrganizationProviderService {
+  async function resolve(organizationKey: string, providerSlug: ProviderSlug) {
+    const validOrganizationKey = organizationProviderSchema.shape.organizationKey.parse(organizationKey);
+    const validProviderSlug = providerSlugSchema.parse(providerSlug);
+    if (!(await resolver.organizationExists(validOrganizationKey))) throw new OrganizationProviderReferenceError('organization', validOrganizationKey);
+    const providerKey = await resolver.providerKeyForSlug(validProviderSlug);
+    if (!providerKey) throw new OrganizationProviderReferenceError('provider', validProviderSlug);
+    return { organizationKey: validOrganizationKey, providerKey: organizationProviderSchema.shape.providerKey.parse(providerKey) };
+  }
   return {
-    async enableProvider(organizationId, providerId) {
-      return repository.addProvider(validateOrganizationId(organizationId), validateProviderId(providerId));
-    },
-
-    async disableProvider(organizationId, providerId) {
-      await repository.removeProvider(validateOrganizationId(organizationId), validateProviderId(providerId));
-    },
-
-    async listEnabledProviderIds(organizationId) {
-      return repository.listProviderIds(validateOrganizationId(organizationId));
-    },
-
-    async isProviderEnabled(organizationId, providerId) {
-      return repository.hasProvider(validateOrganizationId(organizationId), validateProviderId(providerId));
-    },
+    async enableProvider(organizationKey, providerSlug) { const keys = await resolve(organizationKey, providerSlug); return repository.addProvider(keys.organizationKey, keys.providerKey); },
+    async disableProvider(organizationKey, providerSlug) { const keys = await resolve(organizationKey, providerSlug); return repository.removeProvider(keys.organizationKey, keys.providerKey); },
+    async listEnabledProviderKeys(organizationKey) { return repository.listProviderKeys(organizationProviderSchema.shape.organizationKey.parse(organizationKey)); },
+    async isProviderEnabled(organizationKey, providerSlug) { const keys = await resolve(organizationKey, providerSlug); return repository.hasProvider(keys.organizationKey, keys.providerKey); },
   };
 }

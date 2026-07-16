@@ -2,35 +2,27 @@ import { aql } from 'arangojs';
 import { z } from 'zod';
 import { newId } from '@/lib/ids';
 import { db } from './client';
-import { isArangoNotFoundError, toArangoDoc, withArangoKey } from './base';
+import { createEdgeHelpers, withArangoKey } from './base';
 
 export const AGENT_SKILLS_COLLECTION = 'agentSkills';
 
 export const agentSkillSchema = z.object({
-  key: z.string().cuid2(),
-  agentKey: z.string().cuid2(),
-  skillKey: z.string().cuid2(),
-  priority: z.number().int().nonnegative(),
+  key: z.string().cuid(),
+  agentKey: z.string().cuid(),
+  skillKey: z.string().cuid(),
+  priority: z.number().int().nonnegative().default(100),
 });
 
 export type AgentSkill = z.infer<typeof agentSkillSchema>;
 export type AgentSkillInsert = Omit<z.input<typeof agentSkillSchema>, 'key'> & { key?: string };
 
+const helpers = createEdgeHelpers(AGENT_SKILLS_COLLECTION, agentSkillSchema);
+
 export async function insertAgentSkill(input: AgentSkillInsert): Promise<AgentSkill> {
-  const link = agentSkillSchema.parse({ ...input, key: input.key ?? newId() });
-  const result = await db.collection(AGENT_SKILLS_COLLECTION).save(toArangoDoc(link), { returnNew: true });
-  return agentSkillSchema.parse(withArangoKey(result.new as Record<string, unknown>));
+  return helpers.insert({ ...input, key: input.key ?? newId() });
 }
 
-export async function getAgentSkillById(key: string): Promise<AgentSkill | null> {
-  try {
-    const doc = await db.collection(AGENT_SKILLS_COLLECTION).document(key);
-    return agentSkillSchema.parse(withArangoKey(doc as Record<string, unknown>));
-  } catch (error) {
-    if (isArangoNotFoundError(error)) return null;
-    throw error;
-  }
-}
+export const getAgentSkillById = helpers.getById;
 
 export async function getAgentSkillByPair(agentKey: string, skillKey: string): Promise<AgentSkill | null> {
   const cursor = await db.query(aql`
@@ -71,6 +63,7 @@ export async function updateAgentSkillPriority(key: string, priority: number): P
   return agentSkillSchema.parse(withArangoKey(result.new as Record<string, unknown>));
 }
 
-export async function deleteAgentSkill(key: string): Promise<void> {
-  await db.collection(AGENT_SKILLS_COLLECTION).remove(key);
-}
+export const deleteAgentSkill = helpers.deleteById;
+export const upsertAgentSkillByKey = helpers.upsertByKey;
+export const getAllAgentSkillsChunked = helpers.getAllChunked;
+export const listAgentSkillsPage = helpers.listPage;

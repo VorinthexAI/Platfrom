@@ -6,7 +6,11 @@ import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
-import { PROVIDER_NAMES } from '../lib/ai/providers/types';
+import { ensureAgentRunStepsCollection } from '../lib/ai/agent-run-steps/indexes';
+import { ensureAgentRunCallsCollection } from '../lib/ai/agent-run-calls/indexes';
+import { ensureAgentArtifactsCollection } from '../lib/ai/agent-artifacts/indexes';
+import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes';
+import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -17,6 +21,7 @@ interface CollectionSpec {
   name: string;
   indexes?: Array<{ fields: string[]; unique?: boolean; sparse?: boolean }>;
   embedKeys?: string[];
+  skipEmbedding?: boolean;
 }
 
 const legacyIndexesToDrop: Record<string, string[][]> = {
@@ -159,6 +164,7 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'modelActions',
+    skipEmbedding: true,
     indexes: [
       { fields: ['modelKey', 'actionKey'], unique: true },
       { fields: ['actionKey', 'enabled', 'priority'] },
@@ -166,9 +172,27 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'modelProviders',
+    skipEmbedding: true,
     indexes: [
       { fields: ['modelKey', 'providerKey'], unique: true },
       { fields: ['providerKey', 'enabled'] },
+    ],
+  },
+  {
+    name: 'tools',
+    embedKeys: ['name', 'description'],
+    indexes: [
+      { fields: ['slug'], unique: true },
+      { fields: ['scopeKey'] },
+      { fields: ['enabled'] },
+    ],
+  },
+  {
+    name: 'toolActions',
+    skipEmbedding: true,
+    indexes: [
+      { fields: ['toolKey', 'actionKey'], unique: true },
+      { fields: ['actionKey', 'enabled', 'priority'] },
     ],
   },
   {
@@ -215,7 +239,7 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'skills',
-    embedKeys: ['title', 'definition'],
+    embedKeys: ['name', 'title', 'definition'],
     indexes: [
       { fields: ['slug'], unique: true },
     ],
@@ -328,7 +352,6 @@ const collections: CollectionSpec[] = [
   // timestamps are queryable with plain filters and are never embed text.
   { name: 'scopes', embedKeys: ['name', 'description'] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
-  { name: 'organizationProviders', embedKeys: ['name'] },
 ];
 
 const droppedCollections = [
@@ -406,10 +429,25 @@ async function main() {
   await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['skillKey'], unique: false });
   await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'priority'], unique: false });
 
+  const agentToolsCollection = targetDb.collection('agentTools');
+  if (!(await agentToolsCollection.exists())) {
+    await agentToolsCollection.create();
+  }
+  await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'toolKey'], unique: true });
+  await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey'], unique: false });
+  await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['toolKey'], unique: false });
+
+  // Existing skills predate the separate competence-area name. Preserve
+  // their title as the initial name before the stricter schema is read.
+  await targetDb.query(`
+    FOR skill IN skills
+      FILTER !HAS(skill, "name") || skill.name == null || skill.name == ""
+      UPDATE skill WITH { name: skill.title } IN skills
+  `);
+
   // AI framework collections: creation + read-path indexes are owned by
   // their ensure* modules. Runs BEFORE the `collections` loop so the
   // generic embedding backfill below sees them fully set up.
-  await ensureOrganizationProvidersCollection(targetDb);
   // Normalize the previous scope shape before creating unique indexes.
   const scopesCollection = targetDb.collection('scopes');
   if (!(await scopesCollection.exists())) {
@@ -430,7 +468,7 @@ async function main() {
   await ensureScopeMembersCollection(targetDb);
 
   // Migrate the former DAG links into a strict tree. Legacy keys were not
-  // CUID2s, so each copied relation receives a fresh key and sibling position.
+  // domain CUIDs, so each copied relation receives a fresh key and sibling position.
   const legacyScopeChildren = targetDb.collection('scopeChildren');
   if (await legacyScopeChildren.exists()) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
@@ -499,21 +537,19 @@ async function main() {
   // Providers written before the display-name field existed: stamp the
   // static PROVIDER_NAMES text (the embedded field — ids are never embed
   // text) so the embedding backfill below has something to embed.
-  await targetDb.query(
-    `
-      FOR doc IN organizationProviders
-        FILTER doc.name == null
-        UPDATE doc WITH { name: @names[doc.providerId] || doc.providerId } IN organizationProviders
-    `,
-    { names: PROVIDER_NAMES },
-  );
-
   for (const spec of collections) {
     const collection = targetDb.collection(spec.name);
     const exists = await collection.exists();
     if (!exists) {
       await collection.create();
       console.log(`Created collection ${spec.name}`);
+    }
+    if (spec.name === 'actions') {
+      await targetDb.query(`
+        FOR doc IN actions
+          UPDATE doc WITH { createdAt: null, updatedAt: null }
+          IN actions OPTIONS { keepNull: false }
+      `);
     }
     if (spec.name === 'skills') {
       // Normalize the retired orchestrator-owned shape before the new
@@ -526,7 +562,6 @@ async function main() {
             name: doc.name != null && doc.name != "" ? doc.name : doc._key,
             title: doc.title != null && doc.title != "" ? doc.title : (doc.role != null ? doc.role : doc._key),
             definition: doc.definition != null ? doc.definition : (doc.skill != null ? doc.skill : (doc.role != null ? doc.role : "")),
-            name: null,
             skill: null,
             enabled: null,
             orchestratorId: null,
@@ -575,7 +610,7 @@ async function main() {
         sparse: index.sparse ?? false,
       });
     }
-    await backfillCollectionEmbeddings(targetDb, spec);
+    if (!spec.skipEmbedding) await backfillCollectionEmbeddings(targetDb, spec);
   }
 
   // AI-layer collections rename: the first cut shipped snake_case names;
@@ -606,6 +641,54 @@ async function main() {
     console.log(`Copied ${legacy} -> ${current} and dropped ${legacy}`);
   }
 
+  // organizationProviders is now an existence-only allow-list. Resolve the
+  // old provider slug to its persisted key and remove retired presentation
+  // and enabled fields. Invalid legacy references abort the migration.
+  const organizationProviders = targetDb.collection('organizationProviders');
+  if (!(await organizationProviders.exists())) await organizationProviders.create();
+  const organizationProviderCursor = await targetDb.query<Record<string, unknown>>(`
+    FOR link IN organizationProviders
+      RETURN link
+  `);
+  for (const legacyLink of await organizationProviderCursor.all()) {
+    const legacyKey = nonEmptyString(legacyLink._key);
+    const organizationKey = nonEmptyString(legacyLink.organizationKey)
+      ?? nonEmptyString(legacyLink.organizationId);
+    let providerKey = nonEmptyString(legacyLink.providerKey);
+    if (!providerKey) {
+      const providerSlug = nonEmptyString(legacyLink.providerId);
+      if (providerSlug) {
+        const providerCursor = await targetDb.query<{ _key: string }>(`
+          FOR provider IN providers
+            FILTER provider.slug == @providerSlug
+            LIMIT 1
+            RETURN { _key: provider._key }
+        `, { providerSlug });
+        providerKey = (await providerCursor.next())?._key ?? null;
+      }
+    }
+    if (!legacyKey || !organizationKey || !providerKey) {
+      throw new Error(`Cannot migrate organizationProviders/${legacyKey ?? 'unknown'}: unresolved organization or provider reference`);
+    }
+    const key = organizationProviderSchema.shape.key.safeParse(legacyKey).success ? legacyKey : newId();
+    organizationProviderSchema.parse({ key, organizationKey, providerKey });
+    if (key === legacyKey) {
+      await organizationProviders.replace(legacyKey, { _key: key, organizationKey, providerKey });
+    } else {
+      await organizationProviders.save({ _key: key, organizationKey, providerKey });
+      await organizationProviders.remove(legacyKey);
+    }
+  }
+  for (const index of await organizationProviders.indexes()) {
+    const fields: string[] = 'fields' in index && Array.isArray(index.fields)
+      ? index.fields.map(String)
+      : [];
+    if (fields.includes('organizationId') || fields.includes('providerId')) {
+      await organizationProviders.dropIndex(index.id);
+    }
+  }
+  await ensureOrganizationProvidersCollection(targetDb);
+
   // The call-level ledger cannot safely infer DB keys or provider-reported
   // usage for runs written with the retired slug-based shape. Preserve
   // those documents verbatim for audit/history, but keep the live
@@ -614,7 +697,7 @@ async function main() {
   if (await agentRuns.exists()) {
     const legacyAgentRuns = targetDb.collection('agentRunsLegacy');
     if (!(await legacyAgentRuns.exists())) await legacyAgentRuns.create();
-    const legacyFilter = 'doc.organizationKey == null || doc.scopeKey == null || doc.agentKey == null || doc.calls == null';
+    const legacyFilter = 'doc.organizationKey == null || doc.scopeKey == null || doc.agentKey == null || HAS(doc, "steps") || HAS(doc, "calls") || doc.reason == null || doc.score == null || doc.startedAt == null || doc.endedAt == null || doc.elapsedMs == null';
     await targetDb.query(`
       FOR doc IN agentRuns
         FILTER ${legacyFilter}
@@ -627,6 +710,10 @@ async function main() {
     `);
   }
   await ensureAgentRunsCollection(targetDb);
+  await ensureAgentRunStepsCollection(targetDb);
+  await ensureAgentRunCallsCollection(targetDb);
+  await ensureAgentArtifactsCollection(targetDb);
+  await ensureAgentMemoriesCollection(targetDb);
 
 
   // Legacy scratch collection the org-migration steps below write into

@@ -11,6 +11,12 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).toContain('models');
     expect(NODE_NAMES).toContain('modelActions');
     expect(NODE_NAMES).toContain('modelProviders');
+    expect(NODE_NAMES).toContain('agents');
+    expect(NODE_NAMES).toContain('agentSkills');
+    expect(NODE_NAMES).toContain('agentTools');
+    expect(NODE_NAMES).toContain('skills');
+    expect(NODE_NAMES).toContain('tools');
+    expect(NODE_NAMES).toContain('toolActions');
     expect(NODE_NAMES).toContain('users');
     expect(NODE_NAMES).toContain('organizations');
     expect(NODE_NAMES).toContain('userOrganizations');
@@ -21,8 +27,6 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).not.toContain('teamMemberInvites');
     expect(NODE_NAMES).not.toContain('members');
     expect(NODE_NAMES).not.toContain('superAdmins');
-    expect(NODE_NAMES).not.toContain('agents');
-    expect(NODE_NAMES).not.toContain('skills');
     expect(NODE_NAMES).not.toContain('templates');
   });
 

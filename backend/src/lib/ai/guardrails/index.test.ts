@@ -1,18 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 import { assertToolAllowedByGuardrails, GuardrailViolationError, guardrailSchema, isToolAllowedByGuardrails } from './index';
+import { newId } from '@/lib/ids';
+
+const scopeOne = newId();
+const scopeTwo = newId();
 
 describe('guardrail schema', () => {
   test('contains ONLY scopeId', () => {
-    expect(guardrailSchema.parse({ scopeId: 'scope1' })).toEqual({ scopeId: 'scope1' });
-    expect(() => guardrailSchema.parse({ scopeId: 'scope1', name: 'x' })).toThrow();
+    expect(guardrailSchema.parse({ scopeId: scopeOne })).toEqual({ scopeId: scopeOne });
+    expect(() => guardrailSchema.parse({ scopeId: scopeOne, name: 'x' })).toThrow();
     expect(() => guardrailSchema.parse({ scopeId: '' })).toThrow();
     expect(() => guardrailSchema.parse({})).toThrow();
   });
 });
 
 describe('guardrail evaluation', () => {
-  const scopedTool = { id: 'ask.answer', scopeId: 'scope1' };
-  const otherScopedTool = { id: 'image.create', scopeId: 'scope2' };
+  const scopedTool = { id: 'ask.answer', scopeId: scopeOne };
+  const otherScopedTool = { id: 'image.create', scopeId: scopeTwo };
   const unscopedTool = { id: 'reason.solve', scopeId: null };
 
   test('an agent with no guardrails may use any tool', () => {
@@ -21,17 +25,17 @@ describe('guardrail evaluation', () => {
   });
 
   test('guardrails allow-list tools by scope', () => {
-    const guardrails = [{ scopeId: 'scope1' }];
+    const guardrails = [{ scopeId: scopeOne }];
     expect(isToolAllowedByGuardrails(guardrails, scopedTool)).toBe(true);
     expect(isToolAllowedByGuardrails(guardrails, otherScopedTool)).toBe(false);
   });
 
-  test('a guardrailed agent may not use unscoped tools', () => {
-    expect(isToolAllowedByGuardrails([{ scopeId: 'scope1' }], unscopedTool)).toBe(false);
+  test('a guardrailed agent may use globally unscoped tools', () => {
+    expect(isToolAllowedByGuardrails([{ scopeId: scopeOne }], unscopedTool)).toBe(true);
   });
 
   test('assert throws a typed violation with the reason', () => {
-    expect(() => assertToolAllowedByGuardrails('agent.x', [{ scopeId: 'scope1' }], otherScopedTool)).toThrow(
+    expect(() => assertToolAllowedByGuardrails('agent.x', [{ scopeId: scopeOne }], otherScopedTool)).toThrow(
       GuardrailViolationError,
     );
     expect(() => assertToolAllowedByGuardrails('agent.x', [], scopedTool)).not.toThrow();

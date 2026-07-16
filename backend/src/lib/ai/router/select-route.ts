@@ -1,84 +1,74 @@
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers/repository';
-import { MODEL_REGISTRY } from '@/lib/ai/models';
 import { getDefaultProviderAdapters } from '@/lib/ai/providers';
-import type { ProviderId } from '@/lib/ai/providers/types';
-import { generateCandidates } from './candidates';
-import { NoEligibleRouteError, RouteValidationError } from './errors';
-import { routeRequestSchema, type RouteRequest, type RouteRequestInput } from './route-request';
-import { rankCandidates, scoreCandidate } from './scoring';
-import type { RouteCandidate, RouteDecision, RouteFallback, RouterDependencies, RoutingStrategy } from './types';
+import { getActionBySlug } from '@/lib/db/actions.node';
+import { getModelById, getModelBySlug } from '@/lib/db/models.node';
+import { listEnabledModelActionsByActionKey } from '@/lib/db/model-actions.node';
+import { listEnabledModelProvidersByModelKey } from '@/lib/db/model-providers.node';
+import { getProviderById, getProviderBySlug } from '@/lib/db/providers.node';
+import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError, RouteValidationError, UnknownModelError, UnknownProviderError } from './errors';
+import { routeRequestSchema, type RouteRequestInput } from './route-request';
+import type { RouteDecision, RouterDataSource, RouterDependencies } from './types';
 
-function toFallback(candidate: RouteCandidate, strategy: RoutingStrategy): RouteFallback {
-  return {
-    modelId: candidate.model.id,
-    providerId: candidate.route.providerId,
-    externalModelId: candidate.route.externalModelId,
-    score: scoreCandidate(candidate, strategy),
-  };
-}
+const defaultDataSource: RouterDataSource = {
+  getActionBySlug,
+  getModelBySlug,
+  getModelByKey: getModelById,
+  getProviderBySlug,
+  getProviderByKey: getProviderById,
+  listModelActions: listEnabledModelActionsByActionKey,
+  listModelProviders: listEnabledModelProvidersByModelKey,
+  listOrganizationProviderKeys: (organizationKey) => getDefaultOrganizationProviderRepository().listProviderKeys(organizationKey),
+};
 
-function buildDecision(
-  request: RouteRequest,
-  primary: RouteCandidate,
-  fallbacks: readonly RouteCandidate[],
-  strategy: RoutingStrategy,
-): RouteDecision {
-  return {
-    actionId: request.actionId,
-    organizationId: request.organizationId,
-    modelId: primary.model.id,
-    providerId: primary.route.providerId,
-    externalModelId: primary.route.externalModelId,
-    score: scoreCandidate(primary, strategy),
-    fallbacks: fallbacks.map((candidate) => toFallback(candidate, strategy)),
-  };
-}
-
-/**
- * Resolves the best executable route for a request. The organization's
- * enabled providers are loaded server-side from `organizationProviders`
- * (never accepted from the client), models come from the registry, and
- * only providers with a constructable adapter are considered.
- */
-export async function selectRoute(request: RouteRequestInput, deps: RouterDependencies = {}): Promise<RouteDecision> {
-  const parsed = routeRequestSchema.safeParse(request);
-  if (!parsed.success) {
-    throw new RouteValidationError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
-  }
-  const validRequest = parsed.data;
-
-  const organizationProviders = deps.organizationProviders ?? getDefaultOrganizationProviderRepository();
-  const enabledProviderIds = await organizationProviders.listProviderIds(validRequest.organizationId);
-
+/** Selects the first valid persisted route using modelAction priority only. */
+export async function selectRoute(input: RouteRequestInput, deps: RouterDependencies = {}): Promise<RouteDecision> {
+  const parsed = routeRequestSchema.safeParse(input);
+  if (!parsed.success) throw new RouteValidationError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
+  const request = parsed.data;
+  const data = deps.data ?? defaultDataSource;
   const adapters = deps.adapters ?? getDefaultProviderAdapters();
-  const availableProviderIds = new Set(Object.keys(adapters) as ProviderId[]);
+  const action = await data.getActionBySlug(request.actionSlug);
+  if (!action || !action.enabled) throw new NoEligibleRouteError(request.actionSlug, 'action is missing or disabled');
 
-  const models = deps.models ?? Object.values(MODEL_REGISTRY);
+  const selectedModel = request.mode === 'model' || request.mode === 'fixed' ? await data.getModelBySlug(request.modelSlug) : null;
+  if ((request.mode === 'model' || request.mode === 'fixed') && !selectedModel) throw new UnknownModelError(request.modelSlug);
+  const selectedProvider = request.mode === 'fixed' ? await data.getProviderBySlug(request.providerSlug) : null;
+  if (request.mode === 'fixed' && !selectedProvider) throw new UnknownProviderError(request.providerSlug);
 
-  const candidates = generateCandidates(validRequest, { enabledProviderIds, availableProviderIds, models });
+  const allowedProviderKeys = new Set(await data.listOrganizationProviderKeys(request.organizationKey));
+  if (selectedProvider && !allowedProviderKeys.has(selectedProvider.key)) {
+    throw new ProviderNotEnabledForOrganizationError(request.organizationKey, selectedProvider.slug);
+  }
 
-  const strategy: RoutingStrategy = validRequest.mode === 'fixed' ? 'balanced' : validRequest.strategy;
-  const ranked = rankCandidates(candidates, strategy);
+  let modelActions = await data.listModelActions(action.key);
+  modelActions = modelActions
+    .filter((link) => link.enabled)
+    .sort((left, right) => right.priority - left.priority || left.key.localeCompare(right.key));
+  if (selectedModel) modelActions = modelActions.filter((link) => link.modelKey === selectedModel.key);
 
-  if (validRequest.mode === 'fixed') {
-    // The fixed pair itself must be executable — a manual override is
-    // never silently replaced, even with allowFallback.
-    const primary = ranked.find(
-      (candidate) => candidate.model.id === validRequest.modelId && candidate.route.providerId === validRequest.providerId,
-    );
-    if (!primary) {
-      throw new NoEligibleRouteError(
-        validRequest.actionId,
-        `fixed route ${validRequest.modelId} via ${validRequest.providerId} is not currently executable`,
-      );
+  for (const modelAction of modelActions) {
+    const model = selectedModel?.key === modelAction.modelKey ? selectedModel : await data.getModelByKey(modelAction.modelKey);
+    if (!model?.enabled) continue;
+    let modelProviders = await data.listModelProviders(model.key);
+    modelProviders = modelProviders
+      .filter((link) => link.enabled)
+      .sort((left, right) => left.providerKey.localeCompare(right.providerKey) || left.key.localeCompare(right.key));
+    if (selectedProvider) modelProviders = modelProviders.filter((link) => link.providerKey === selectedProvider.key);
+    for (const modelProvider of modelProviders) {
+      if (!allowedProviderKeys.has(modelProvider.providerKey)) continue;
+      const provider = selectedProvider?.key === modelProvider.providerKey ? selectedProvider : await data.getProviderByKey(modelProvider.providerKey);
+      if (!provider?.enabled || !adapters[provider.slug]) continue;
+      return {
+        organizationKey: request.organizationKey,
+        actionKey: action.key,
+        actionSlug: action.slug,
+        modelKey: model.key,
+        modelSlug: model.slug,
+        providerKey: provider.key,
+        providerSlug: provider.slug,
+        providerModelId: modelProvider.providerModelId,
+      };
     }
-    const fallbacks = validRequest.allowFallback ? ranked.filter((candidate) => candidate !== primary) : [];
-    return buildDecision(validRequest, primary, fallbacks, strategy);
   }
-
-  const [primary, ...fallbacks] = ranked;
-  if (!primary) {
-    throw new NoEligibleRouteError(validRequest.actionId, 'no candidates after ranking');
-  }
-  return buildDecision(validRequest, primary, fallbacks, strategy);
+  throw new NoEligibleRouteError(request.actionSlug, 'no enabled priority route is allowed and executable');
 }
