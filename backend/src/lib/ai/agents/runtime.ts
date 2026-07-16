@@ -13,6 +13,9 @@ import { getDefaultRuntimeVariableRepository, type RuntimeVariableRepository } f
 import { getDefaultAgentMemoryRepository, type AgentMemory, type AgentMemoryRepository } from '@/lib/ai/agent-memories';
 import { defaultArtifactResolverRegistry, resolveArtifactSources, type ArtifactReference, type ArtifactResolverRegistry, type SourcePermissionResolver } from '@/lib/ai/artifact-resolvers';
 import type { SourceSelection } from '@/lib/ai/agent-run-sources';
+import { emptyKnowledgePack } from '@/lib/ai/reverse-context/knowledge-pack';
+import type { KnowledgePack } from '@/lib/ai/reverse-context/schema';
+import type { ReverseContextCompiler } from '@/lib/ai/reverse-context/compiler';
 
 export class AgentRuntimeNotFoundError extends AiError {
   constructor(entity: string, key: string) {
@@ -113,6 +116,7 @@ export interface AgentContext extends AgentRuntimeContext {
   variables: Readonly<Record<string, unknown>>;
   memories: readonly AgentMemory[];
   artifacts: readonly ArtifactReference[];
+  knowledgePack: KnowledgePack;
   permissions: readonly AgentPermission[];
   guardrails: readonly Guardrail[];
   sourcePolicy: AgentSourcePolicy;
@@ -125,16 +129,22 @@ export interface CompileAgentContextOptions {
   memories?: AgentMemoryRepository;
   artifactResolvers?: ArtifactResolverRegistry;
   canUseSource?: SourcePermissionResolver;
+  reverseContextCompiler?: ReverseContextCompiler;
+  knowledgeNodeTypes?: readonly string[];
+  knowledgeTokenBudget?: number;
 }
 
 /** Compiles a fresh context. Agents receive this value and never query storage. */
 export async function compileAgentContext(runtime: AgentRuntimeContext, options: CompileAgentContextOptions): Promise<AgentContext> {
   const currentTask = options.currentTask.trim();
   if (!currentTask) throw new AgentRuntimeInvalidError('current task is empty');
-  const [loadedVariables, loadedMemories, artifacts] = await Promise.all([
+  const [loadedVariables, loadedMemories, artifacts, knowledgePack] = await Promise.all([
     (options.variables ?? getDefaultRuntimeVariableRepository()).listVariablesForContext(runtime.organization.key, runtime.scope.key, runtime.agent.key),
     (options.memories ?? getDefaultAgentMemoryRepository()).listMemoriesForAgent(runtime.agent.key),
     resolveArtifactSources({ organizationKey: runtime.organization.key, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, selections: options.sources ?? [], registry: options.artifactResolvers ?? defaultArtifactResolverRegistry, canUseSource: options.canUseSource }),
+    options.reverseContextCompiler
+      ? options.reverseContextCompiler.compile({ organizationKey: runtime.organization.key, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, query: currentTask, nodeTypes: options.knowledgeNodeTypes, manualSources: options.sources, tokenBudget: options.knowledgeTokenBudget })
+      : Promise.resolve(emptyKnowledgePack(currentTask, options.knowledgeTokenBudget)),
   ]);
   const variables: Record<string, unknown> = {};
   for (const variable of loadedVariables) variables[variable.name] = variable.value;
@@ -142,7 +152,7 @@ export async function compileAgentContext(runtime: AgentRuntimeContext, options:
   const permissions = runtime.tools.map(({ tool, actions }) => ({ toolKey: tool.key, toolSlug: tool.slug, actionKeys: actions.map(({ action }) => action.key), actionSlugs: actions.map(({ action }) => action.slug) }));
   const guardrails = [{ scopeId: runtime.scope.key }];
   const sourceCount = artifacts.length;
-  return { ...runtime, variables, memories, artifacts, permissions, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
+  return { ...runtime, variables, memories, artifacts, knowledgePack, permissions, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
 }
 
 export interface CompileAgentRuntimeOptions { outputSchema?: string }
@@ -159,6 +169,7 @@ export function compileAgentRuntimeContext(context: AgentContext, options: Compi
     '', '## Variables', JSON.stringify(context.variables),
     '', '## Memories', JSON.stringify(context.memories.map(({ content, memoryType, importance }) => ({ content, memoryType, importance }))),
     '', '## Artifact sources', JSON.stringify(context.artifacts),
+    '', '## Knowledge pack', JSON.stringify(context.knowledgePack),
     '', '## Permissions', JSON.stringify(context.permissions),
     '', '## Guardrails', JSON.stringify(context.guardrails),
     '', '## Source policy', JSON.stringify(context.sourcePolicy),

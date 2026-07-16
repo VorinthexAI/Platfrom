@@ -37,22 +37,26 @@ export function withArangoKey<T extends Record<string, unknown>>(raw: T): T & { 
 }
 
 /**
- * Every node's embedding is built the same way: `_<collection>:<key>:<value>:<value>...`
- * joined from a fixed, per-node ordered list of scalar fields (embedKeys), then run
+ * Every node's embedding is built from one fixed, per-node ordered list of scalar
+ * fields (embedKeys / embeddingFields), then run
  * through embed(). Non-scalar fields (objects/arrays), secrets/hashes, booleans, and
  * timestamps are deliberately never eligible — they add no semantic search value and
  * timestamps/booleans belong in an AQL FILTER, not a vector. Nodes with no meaningful
  * searchable text pass an empty embedKeys list and are simply never embedded.
  */
-function buildEmbedSlug(collectionName: string, embedKeys: readonly string[], key: string, doc: Record<string, unknown>): string | null {
+export function buildEmbeddingText(embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
   if (embedKeys.length === 0) return null;
-  const parts = [`_${collectionName}`, key];
+  const parts: string[] = [];
   for (const field of embedKeys) {
     const value = doc[field];
     if (value === null || value === undefined || value === '') continue;
     parts.push(String(value));
   }
-  return parts.join(':');
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
+function buildEmbedSlug(_collectionName: string, embedKeys: readonly string[], _key: string, doc: Record<string, unknown>): string | null {
+  return buildEmbeddingText(embedKeys, doc);
 }
 
 async function computeEmbedding(

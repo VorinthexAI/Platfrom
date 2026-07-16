@@ -1,344 +1,229 @@
-# Genesis Follow-Up — Required Tool, Action, Permissions and Guardrails
+# Reverse Context Compiler
+## Part 1 — Foundation
 
-Update the Genesis Agent Architect implementation with the minimum executable capability required for Genesis to create agents.
+## Purpose
+The Reverse Context Compiler converts persisted database objects into optimized runtime knowledge for AI agents.
 
-Do not redesign the existing Genesis architecture.
+Pipeline:
 
-Genesis should continue reasoning through:
+Database
+→ Embeddings
+→ Vector Search
+→ Top N Nodes
+→ Reverse Context Compiler
+→ Knowledge Pack
+→ AgentContext
+→ LLM
 
-```text
-core.reason
-→ GPT-5.4 Mini
-→ OpenAI
+## Core Principles
+
+- Never inject raw database rows.
+- Never inject unnecessary metadata.
+- Use `embeddingFields` as the single source of truth.
+- Runtime owns context construction.
+- LLM owns reasoning only.
+
+## Forward Pipeline
+
+Node
+→ embeddingFields
+→ Extract values
+→ Embedding Model
+→ embedding[]
 
-Genesis must have exactly one callable Tool:
+## Reverse Pipeline
 
-agent.create
-1. Required Action
+Query
+→ Query Embedding
+→ Vector Search
+→ Top Results
+→ Read embeddingFields
+→ Extract values
+→ Normalize
+→ Knowledge Blocks
+→ Knowledge Pack
+→ AgentContext
 
-Add and seed this Action:
+## embeddingFields
 
-agent.create
+Examples
 
-Meaning:
+BlogPost
+- title
+- summary
+- content
 
-Validate and transactionally create or reuse an agent architecture.
+Skill
+- name
+- title
+- definition
 
-The Action must support:
+Agent
+- name
+- title
 
-reusing an existing agent,
-creating a new agent,
-reusing existing Skills,
-creating necessary Skills,
-creating agentSkills,
-attaching existing Tools through agentTools,
-recording source and result artifacts,
-running novelty checks,
-rejecting unresolved or forbidden references.
+## Knowledge Block
 
-The Action must not allow Genesis to:
+Every resolver returns:
 
-create Tools,
-create Actions,
-create Models,
-create Providers,
-enable organization Providers,
-write arbitrary database documents.
+- nodeType
+- nodeKey
+- title
+- summary
+- content
+- metadata
 
-Suggested action seed:
+No database object is exposed to the LLM.
 
-{
-  "key": "cmgenesisactioncreateagent001",
-  "slug": "agent.create",
-  "name": "Create Agent",
-  "description": "Validates and transactionally creates or reuses an agent, its required skills, skill relations, and allowed tool relations.",
-  "objective": "Persist a complete validated agent architecture from a Genesis creation manifest.",
-  "inputDescription": "A validated Genesis agent creation manifest containing an agent operation, skill operations, agent skill relations, and existing tools to attach.",
-  "outputDescription": "The persisted or reused agent, created skills, linking nodes, provenance artifacts, and validation result.",
-  "handlerKey": "agent.create",
-  "enabled": true,
-  "embedding": []
-}
+## Runtime Responsibilities
 
-Embed:
+Runtime owns:
+- repositories
+- graph traversal
+- vector search
+- permissions
+- normalization
+- compression
+- context budget
+- AgentContext
 
-name
-description
-objective
-inputDescription
-outputDescription
-2. Required Tool
+LLM owns:
+- reasoning
+- planning
+- generation
 
-Add and seed exactly one Genesis Tool:
 
-agent.create
 
-The Tool maps only to:
+# Reverse Context Compiler
+## Part 2 — Runtime
 
-agent.create
+## Universal Resolver
 
-Flow:
+Every searchable node implements:
 
-Genesis
-→ agent.create Tool
-→ agent.create Action
-→ Genesis creation service
-→ validation
-→ transaction
-→ persisted agent architecture
+- exists()
+- load()
+- findSimilar()
+- extractContext()
 
-Suggested Tool seed:
+## Generic Algorithm
 
-{
-  "key": "cmgenesistoolcreateagent0001",
-  "slug": "agent.create",
-  "name": "Create Agent",
-  "description": "Creates or reuses a complete agent architecture from a validated Genesis manifest.",
-  "embedding": []
-}
+Current Task
+→ Embedding
+→ Vector Search
+→ Top 20
+→ Permission Filter
+→ Resolver
+→ extractContext()
+→ Knowledge Blocks
+→ Rank
+→ Compress
+→ Knowledge Pack
+→ AgentContext
 
-Suggested toolActions seed:
+## Ranking
 
-{
-  "key": "cmgenesistoolactioncreate001",
-  "toolSlug": "agent.create",
-  "actionSlug": "agent.create",
-  "priority": 100
-}
+Score =
+- similarity
+- manual priority
+- freshness
 
-Genesis must not receive separate Tools for:
+Manual sources always rank above automatic search.
 
-skill.search
-skill.create
-agent.search
-agentSkill.create
-agentTool.create
-artifact.create
-database.write
+## Compression Order
 
-Those operations are internal responsibilities of the agent.create backend handler.
+1. Deduplicate
+2. Trim
+3. Summarize
+4. Drop
 
-3. Genesis Allowed Tools
+## Context Budget
 
-Genesis must have exactly this allowed Tool list:
+Runtime owns the token budget.
 
-{
-  "allowedTools": [
-    "agent.create"
-  ]
-}
+If budget exceeded:
+- remove duplicates
+- compress
+- drop lowest ranked blocks
 
-Seed or update agentTools:
+## Lazy Loading
 
-{
-  "key": "cmgenesisagenttoolcreate00001",
-  "agentSlug": "genesis",
-  "toolSlug": "agent.create"
-}
+Knowledge Blocks contain references only.
 
-Remove any direct write Tools accidentally assigned to Genesis.
+If the agent needs the full object:
 
-core.reason is the reasoning Action used by runtime. It is not an unrestricted database Tool.
+Knowledge Block
+→ Artifact Read Tool
+→ Resolver
+→ Full Object
 
-4. Tool Execution Input
+Never inject complete repositories by default.
 
-agent.create must accept only a validated Genesis creation manifest.
+## Security
 
-export const createAgentToolInputSchema = z.object({
-  organizationKey: z.string().cuid(),
+Resolvers verify:
+- organization
+- scope
+- permissions
 
-  scopeKey: z.string().cuid(),
+before returning context.
+# Reverse Context Compiler
+## Part 3 — Implementation
 
-  agentRunKey: z.string().cuid(),
+## Required Components
 
-  manifest: genesisCreationManifestSchema,
-});
+- Resolver Registry
+- Reverse Context Compiler
+- Knowledge Pack Builder
+- Ranking Engine
+- Compression Engine
+- Budget Manager
+- Artifact Read Tool
 
-The handler must parse the input again before performing any writes.
+## Required Node Contract
 
-Never trust model output without backend validation.
+Every searchable node contains:
 
-5. Tool Execution Output
-export const createAgentToolOutputSchema = z.object({
-  status: z.enum([
-    "created",
-    "reused",
-    "rejected",
-  ]),
+- key
+- organizationKey
+- scopeKey
+- embedding
+- embeddingFields
 
-  agentKey: z
-    .string()
-    .cuid()
-    .nullable(),
+## Runtime Flow
 
-  createdSkillKeys: z
-    .array(z.string().cuid()),
+Current Task
+→ Query Embedding
+→ Vector Search
+→ Top N
+→ Resolver
+→ Knowledge Blocks
+→ Ranking
+→ Compression
+→ Knowledge Pack
+→ AgentContext
+→ LLM
 
-  reusedSkillKeys: z
-    .array(z.string().cuid()),
+## Deliverables
 
-  agentSkillKeys: z
-    .array(z.string().cuid()),
+Implement:
 
-  agentToolKeys: z
-    .array(z.string().cuid()),
+- NodeResolver interface
+- KnowledgeBlock interface
+- KnowledgePack builder
+- Resolver Registry
+- Reverse Context Compiler
+- Unit Tests
+- Integration Tests
 
-  artifactKeys: z
-    .array(z.string().cuid()),
+## Golden Rule
 
-  reason: z
-    .string()
-    .trim()
-    .min(1)
-    .max(500),
-});
-6. Genesis Guardrails
-
-Compile these guardrails into Genesis AgentContext:
-
-export const genesisGuardrailsSchema = z.object({
-  organizationKey: z.string().cuid(),
-
-  scopeKey: z.string().cuid(),
-
-  allowedToolSlugs: z.tuple([
-    z.literal("agent.create"),
-  ]),
-
-  allowedActionSlugs: z.tuple([
-    z.literal("agent.create"),
-  ]),
-
-  canCreateAgents: z.literal(true),
-
-  canCreateSkills: z.literal(true),
-
-  canCreateAgentSkills: z.literal(true),
-
-  canCreateAgentTools: z.literal(true),
-
-  canCreateTools: z.literal(false),
-
-  canCreateActions: z.literal(false),
-
-  canCreateModels: z.literal(false),
-
-  canCreateProviders: z.literal(false),
-
-  canEnableProviders: z.literal(false),
-
-  canWriteArbitraryNodes: z.literal(false),
-
-  requireExistingTools: z.literal(true),
-
-  requireNoveltyValidation: z.literal(true),
-
-  requireTransactionalWrite: z.literal(true),
-
-  requireSameOrganization: z.literal(true),
-
-  requireScopePermission: z.literal(true),
-});
-7. Mandatory Runtime Checks
-
-Before executing agent.create, verify:
-
-Genesis owns the agent.create Tool.
-The Tool maps to the agent.create Action.
-The current organization matches the manifest context.
-The target scope belongs to that organization.
-Genesis has permission to create agents in that scope.
-Every reused Skill exists.
-Every attached Tool already exists.
-No requested Tool is outside the allowed registry.
-New Agent and Skill candidates pass embedding similarity checks.
-The manifest is marked readyToPersist.
-The complete write can run transactionally.
-
-Reject the execution if any check fails.
-
-8. Transaction Boundary
-
-The agent.create Action handler may transactionally write only to:
-
-agents
-skills
-agentSkills
-agentTools
-agentArtifacts
-agentArtifactChecks
-
-It may read from:
-
-organizations
-scopes
-agents
-skills
-tools
-actions
-toolActions
-scopeMembers
-agentRunSources
-
-It must not write to:
-
-tools
-actions
-models
-providers
-modelActions
-modelProviders
-organizationProviders
-9. Artifact Rules
-
-For every reused object:
-
-agentArtifacts.relation = source
-
-For every created object:
-
-agentArtifacts.relation = result
-
-Supported Genesis artifact node types:
-
-agent
-skill
-agent-skill
-tool
-agent-tool
-scope
-
-Existing Tools and Skills are sources.
-
-New Agents, Skills, agentSkills, and agentTools are results.
-
-10. Final Genesis Execution Chain
-User requests a new agent
+Storage
 ↓
-Genesis compiles AgentContext
-↓
-Genesis reasons through core.reason
-↓
-Genesis returns a creation manifest
-↓
-Backend validates the manifest
-↓
-Genesis invokes agent.create
-↓
-agent.create validates permissions and references
-↓
-Novelty checks run
-↓
-One transaction persists the architecture
-↓
-Artifacts record sources and results
-↓
-Agent Run completes
 
-Genesis must never receive a generic database Tool.
+Knowledge
+↓
 
-Genesis must never perform arbitrary writes.
+Reasoning
 
-Genesis may only create agent architectures through:
-
-agent.create
+Database objects never reach the LLM directly.

@@ -1,13 +1,14 @@
 import { AiError } from '@/lib/ai/shared/result';
 import { loadAgentRuntime, compileAgentContext, type AgentContext, type AgentRuntimeDataSource } from '@/lib/ai/agents';
-import { getDefaultScopeRepository, type Scope } from '@/lib/ai/scopes';
-import { getAllAgentsChunked, type Agent } from '@/lib/db/agents.node';
-import { getAllSkillsChunked, type Skill } from '@/lib/db/skills.node';
-import { getAllToolsChunked, type Tool } from '@/lib/db/tools.node';
+import { getDefaultScopeRepository, scopesEmbedKeys, type Scope } from '@/lib/ai/scopes';
+import { agentsEmbedKeys, getAllAgentsChunked, type Agent } from '@/lib/db/agents.node';
+import { getAllSkillsChunked, skillsEmbedKeys, type Skill } from '@/lib/db/skills.node';
+import { getAllToolsChunked, toolsEmbedKeys, type Tool } from '@/lib/db/tools.node';
 import { ArtifactResolverRegistry, type ArtifactResolver, type OwnedArtifactReference, type SourcePermissionResolver } from '@/lib/ai/artifact-resolvers';
 import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
 import type { AgentMemoryRepository } from '@/lib/ai/agent-memories';
 import { genesisGuardrailsSchema, genesisRunInputSchema, genesisSourcePolicySchema, type GenesisGuardrails, type GenesisRunInput } from './schemas';
+import { createNodeResolver, NodeResolverRegistry, ReverseContextCompiler, type SearchableDocument } from '@/lib/ai/reverse-context';
 
 export class GenesisIdentityError extends AiError {
   constructor(detail: string) { super('genesis_identity_invalid', `Invalid Genesis identity: ${detail}`); }
@@ -57,6 +58,8 @@ export interface CompileGenesisContextOptions {
   memories?: AgentMemoryRepository;
   artifactResolvers?: ArtifactResolverRegistry;
   canUseSource?: SourcePermissionResolver;
+  generateEmbedding?: (text: string) => Promise<readonly number[]>;
+  knowledgeTokenBudget?: number;
 }
 
 function resolverFor(references: readonly OwnedArtifactReference[]): ArtifactResolver {
@@ -88,6 +91,20 @@ function registerKnownResolvers(
   }
 }
 
+function catalogResolverRegistry(organizationKey: string, scopes: readonly Scope[], agents: readonly Agent[], skills: readonly Skill[], tools: readonly Tool[]) {
+  const registry = new NodeResolverRegistry();
+  const source = (documents: SearchableDocument[]) => {
+    const searchable = documents.filter(({ embedding }) => embedding.length > 0);
+    const byKey = new Map(searchable.map((document) => [document.key, document]));
+    return { async get(key: string) { return byKey.get(key) ?? null; }, async list() { return searchable; } };
+  };
+  registry.register(createNodeResolver({ nodeType: 'scope', embeddingFields: scopesEmbedKeys.options, data: source(scopes.map((scope) => ({ ...scope, scopeKey: scope.key }))), titleField: 'name', summaryFields: scopesEmbedKeys.options, canAccess: () => true }));
+  registry.register(createNodeResolver({ nodeType: 'agent', embeddingFields: agentsEmbedKeys.options, data: source(agents.map((agent) => ({ ...agent, organizationKey }))), titleField: 'name', summaryFields: agentsEmbedKeys.options, canAccess: () => true }));
+  registry.register(createNodeResolver({ nodeType: 'skill', embeddingFields: skillsEmbedKeys.options, data: source(skills.map((skill) => ({ ...skill, organizationKey, scopeKey: null }))), titleField: 'title', summaryFields: skillsEmbedKeys.options, canAccess: () => true }));
+  registry.register(createNodeResolver({ nodeType: 'tool', embeddingFields: toolsEmbedKeys.options, data: source(tools.map((tool) => ({ ...tool, organizationKey }))), titleField: 'name', summaryFields: toolsEmbedKeys.options, canAccess: () => true }));
+  return registry;
+}
+
 /** Compiles Genesis from resolved backend facts; no repository is exposed in the result. */
 export async function compileGenesisContext(input: GenesisRunInput, options: CompileGenesisContextOptions = {}): Promise<GenesisContext> {
   const parsed = genesisRunInputSchema.parse(input);
@@ -109,6 +126,14 @@ export async function compileGenesisContext(input: GenesisRunInput, options: Com
   const tools = allTools.filter((tool) => tool.scopeKey === null || scopeKeys.has(tool.scopeKey));
   const registry = options.artifactResolvers ?? new ArtifactResolverRegistry();
   registerKnownResolvers(registry, parsed.organizationKey, scopes, agents, skills, tools);
+  const nodeResolvers = catalogResolverRegistry(parsed.organizationKey, scopes, agents, skills, tools);
+  const reverseContextCompiler = new ReverseContextCompiler({
+    registry: nodeResolvers,
+    generateEmbedding: options.generateEmbedding,
+    canUseNode: (node) => node.scopeKey === null || scopeKeys.has(node.scopeKey),
+    defaultTopN: 20,
+    defaultTokenBudget: options.knowledgeTokenBudget ?? 6_000,
+  });
   const base = await compileAgentContext(runtime, {
     currentTask: parsed.currentTask,
     sources: parsed.sourceRefs,
@@ -116,6 +141,9 @@ export async function compileGenesisContext(input: GenesisRunInput, options: Com
     memories: options.memories,
     artifactResolvers: registry,
     canUseSource: options.canUseSource,
+    reverseContextCompiler,
+    knowledgeNodeTypes: nodeResolvers.listNodeTypes(),
+    knowledgeTokenBudget: options.knowledgeTokenBudget ?? 6_000,
   });
   const requestedExplorationRate = parsed.requestedExplorationRate ?? runtime.agent.explorationRate ?? 0.2;
   const sourcePolicy = genesisSourcePolicySchema.parse({
@@ -163,9 +191,7 @@ export function renderGenesisContext(context: GenesisContext): string {
     variables: context.variables,
     memories: context.memories.map(({ content, memoryType, importance }) => ({ content, memoryType, importance })),
     knowledge: {
-      existingAgents: context.knowledge.existingAgents.map(({ key, slug, name, title, scopeKey }) => ({ key, slug, name, title, scopeKey })),
-      existingSkills: context.knowledge.existingSkills.map(({ key, slug, name, title, definition }) => ({ key, slug, name, title, definition })),
-      existingTools: context.knowledge.existingTools.map(({ key, slug, name, description, scopeKey }) => ({ key, slug, name, description, scopeKey })),
+      pack: context.knowledgePack,
       sources: context.knowledge.sources,
     },
     permissions: context.permissions,

@@ -14,13 +14,13 @@ import type { GenesisCatalogDataSource } from './context';
 export function buildGenesisFixture() {
   const now = '2026-07-16T00:00:00.000Z';
   const organization = organizationSchema.parse({ key: newId(), name: 'Vorinthex', createdAt: now, updatedAt: now });
-  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build validated agents.' });
+  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build validated agents.', embedding: [0, 1] });
   const genesis = agentSchema.parse({ key: newId(), slug: 'genesis', name: 'Genesis', title: 'Agent Architect', scopeKey: scope.key, explorationRate: 0.2, embedding: [0, 1] });
   const architect = skillSchema.parse({ key: newId(), slug: 'agent-architect', name: 'Agent Architecture', title: 'Agent Architect', definition: '# Agent Architect', embedding: [0, 1] });
   const backend = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: '# Backend Developer', embedding: [0, 1] });
-  const reasonTool = toolSchema.parse({ key: newId(), slug: 'reason.solve', name: 'Reason', description: 'Reason through agent architecture.', scopeKey: null, enabled: true });
+  const reasonTool = toolSchema.parse({ key: newId(), slug: 'reason.solve', name: 'Reason', description: 'Reason through agent architecture.', scopeKey: null, enabled: true, embedding: [0, 1] });
   const reasonAction = actionSchema.parse({ key: newId(), slug: 'core.reason', name: 'Reason', description: 'Reason', objective: 'Design', inputDescription: 'Request', outputDescription: 'Manifest', handlerKey: 'core.reason', enabled: true });
-  const createTool = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create a validated agent architecture.', scopeKey: null, enabled: true });
+  const createTool = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create a validated agent architecture.', scopeKey: null, enabled: true, embedding: [0, 1] });
   const createAction = actionSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create agent', objective: 'Persist architecture', inputDescription: 'Manifest', outputDescription: 'Creation result', handlerKey: 'agent.create', enabled: true });
   const skillLink = agentSkillSchema.parse({ key: newId(), agentKey: genesis.key, skillKey: architect.key, priority: 100 });
   const toolLink = agentToolSchema.parse({ key: newId(), agentKey: genesis.key, toolKey: createTool.key });
@@ -36,5 +36,6 @@ export function buildGenesisFixture() {
   };
   const variables = { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } };
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
-  return { now, organization, scope, genesis, architect, backend, reasonTool, reasonAction, createTool, createAction, runtimeData, catalog, variables, memories };
+  const generateEmbedding = async () => [0, 1] as const;
+  return { now, organization, scope, genesis, architect, backend, reasonTool, reasonAction, createTool, createAction, runtimeData, catalog, variables, memories, generateEmbedding };
 }

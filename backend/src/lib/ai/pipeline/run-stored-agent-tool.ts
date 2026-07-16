@@ -15,6 +15,7 @@ import type { ProviderExecuteResponse } from '@/lib/ai/providers';
 import { modelSlugSchema } from '@/lib/db/models.node';
 import { providerSlugSchema } from '@/lib/db/providers.node';
 import type { Action } from '@/lib/db/actions.node';
+import type { ReverseContextCompiler } from '@/lib/ai/reverse-context/compiler';
 import { InvalidRunRequestError } from './validation';
 import { validateAgentOutput, validateProviderResponse } from './validation';
 
@@ -52,6 +53,9 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
   memories?: AgentMemoryRepository;
   artifactResolvers?: ArtifactResolverRegistry;
   canUseSource?: SourcePermissionResolver;
+  reverseContextCompiler?: ReverseContextCompiler;
+  knowledgeNodeTypes?: readonly string[];
+  knowledgeTokenBudget?: number;
   allowRejectedOutput?: boolean;
   beforeFinalize?: (input: { run: AgentRun; response: ProviderExecuteResponse<unknown>; agentContext: AgentContext }) => Promise<void>;
   stepSlugs?: readonly string[];
@@ -100,7 +104,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   const selected = request.actionKey ? granted.actions.find(({ action }) => action.key === request.actionKey) : granted.actions[0];
   if (!selected) throw new InvalidRunRequestError(`action is not enabled for tool ${request.toolKey}`);
   const primarySkill = runtime.skills[0]!;
-  const agentContext = await compileAgentContext(runtime, { currentTask: request.currentTask, sources: request.sources, variables: options.variables, memories: options.memories, artifactResolvers: options.artifactResolvers, canUseSource: options.canUseSource });
+  const agentContext = await compileAgentContext(runtime, { currentTask: request.currentTask, sources: request.sources, variables: options.variables, memories: options.memories, artifactResolvers: options.artifactResolvers, canUseSource: options.canUseSource, reverseContextCompiler: options.reverseContextCompiler, knowledgeNodeTypes: options.knowledgeNodeTypes, knowledgeTokenBudget: options.knowledgeTokenBudget });
   const systemPrompt = compileAgentRuntimeContext(agentContext, { outputSchema: request.outputSchema });
   const input = injectSystemPrompt(request.input, systemPrompt);
   const routeActionSlug = options.reasoningActionSlug ?? selected.action.slug;
