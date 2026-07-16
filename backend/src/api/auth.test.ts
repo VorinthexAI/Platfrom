@@ -4,8 +4,15 @@ import {
   buildMagicLink,
   buildMfaLink,
   buildOAuthAuthorizationUrl,
+  FOUNDER_ACCESS_MAX_AGE_SECONDS,
+  FOUNDER_REFRESH_MAX_AGE_SECONDS,
+  STANDARD_ACCESS_MAX_AGE_SECONDS,
+  STANDARD_REFRESH_MAX_AGE_SECONDS,
   createAccessToken,
   createChallengeTokenHash,
+  getAuthSessionPolicy,
+  isRefreshTokenActive,
+  loginIdentityTypeForMembership,
   verifyAccessToken,
   verifySuccessiveTotpCodes,
 } from './auth';
@@ -89,6 +96,34 @@ describe('auth helpers', () => {
     expect(await verifyAccessToken(`${token}tampered`)).toBeNull();
     expect(timingSafeEqual('abcdef', 'abcdef')).toBe(true);
     expect(timingSafeEqual('abcdef', 'abcdeg')).toBe(false);
+  });
+
+  test('uses 15-minute access and one-day absolute refresh for founders', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    const sessionExpiresAt = new Date(Date.now() + FOUNDER_REFRESH_MAX_AGE_SECONDS * 1000);
+    const token = await createAccessToken({ key: 'founder_test', identityType: 'superAdmin' }, sessionExpiresAt);
+    const payload = JSON.parse(Buffer.from(token.slice('vrtx_access_'.length).split('.')[0]!, 'base64url').toString('utf8')) as { iat: number; exp: number };
+
+    expect(payload.exp - payload.iat).toBe(FOUNDER_ACCESS_MAX_AGE_SECONDS);
+    expect(payload.exp).toBeLessThanOrEqual(Math.floor(sessionExpiresAt.getTime() / 1000));
+    expect(isRefreshTokenActive(sessionExpiresAt.toISOString(), sessionExpiresAt.getTime() - 1)).toBe(true);
+    expect(isRefreshTokenActive(sessionExpiresAt.toISOString(), sessionExpiresAt.getTime())).toBe(false);
+    expect(isRefreshTokenActive(null)).toBe(false);
+    expect(loginIdentityTypeForMembership('owner', true)).toBe('superAdmin');
+    expect(loginIdentityTypeForMembership('owner', false)).toBe('member');
+  });
+
+  test('uses seven-day access and one-year refresh for ordinary sessions', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    const sessionExpiresAt = new Date(Date.now() + STANDARD_REFRESH_MAX_AGE_SECONDS * 1000);
+    const token = await createAccessToken({ key: 'user_test', identityType: 'user' }, sessionExpiresAt);
+    const payload = JSON.parse(Buffer.from(token.slice('vrtx_access_'.length).split('.')[0]!, 'base64url').toString('utf8')) as { iat: number; exp: number };
+
+    expect(payload.exp - payload.iat).toBe(STANDARD_ACCESS_MAX_AGE_SECONDS);
+    expect(isRefreshTokenActive(sessionExpiresAt.toISOString())).toBe(true);
+    expect(getAuthSessionPolicy('user')).toEqual({ accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS });
+    expect(getAuthSessionPolicy('member')).toEqual({ accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS });
+    expect(getAuthSessionPolicy('superAdmin')).toEqual({ accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS });
   });
 
   test('requires two successive TOTP setup codes', async () => {

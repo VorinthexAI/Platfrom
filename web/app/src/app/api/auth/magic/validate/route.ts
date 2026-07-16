@@ -2,14 +2,13 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { backendConfigured, backendFetch } from "@/lib/backend";
+import { setAuthSessionCookies } from "@/lib/auth/session-cookies";
 
 const bodySchema = z.strictObject({
   token_hash: z.string().regex(/^[a-f0-9]{64}$/),
   flow: z.enum(["member", "user"]).optional(),
 });
 
-const ACCESS_COOKIE = "vorinthex_access";
-const REFRESH_COOKIE = "vorinthex_refresh";
 const EXPLORER_COOKIE = "vx_explorer";
 
 interface MagicValidatePayload {
@@ -18,6 +17,8 @@ interface MagicValidatePayload {
   expires_at?: string;
   access_token?: string;
   refresh_token?: string;
+  access_token_max_age_seconds?: number;
+  refresh_token_max_age_seconds?: number;
   alias?: string;
   alias_slug?: string | null;
   waitlist_number?: number | null;
@@ -60,27 +61,9 @@ export async function POST(request: Request) {
     }
 
     if (result.data.status === "authenticated") {
-      const { access_token, refresh_token, ...publicPayload } = result.data;
+      const { access_token, refresh_token, access_token_max_age_seconds, refresh_token_max_age_seconds, ...publicPayload } = result.data;
       const response = NextResponse.json({ ok: true, ...publicPayload });
-      const secure = process.env.NODE_ENV === "production";
-      if (access_token) {
-        response.cookies.set(ACCESS_COOKIE, access_token, {
-          httpOnly: true,
-          sameSite: "lax",
-          secure,
-          path: "/",
-          maxAge: 60 * 60,
-        });
-      }
-      if (refresh_token) {
-        response.cookies.set(REFRESH_COOKIE, refresh_token, {
-          httpOnly: true,
-          sameSite: "lax",
-          secure,
-          path: "/",
-          maxAge: 60 * 60 * 24 * 365,
-        });
-      }
+      setAuthSessionCookies(response, { accessToken: access_token, refreshToken: refresh_token, accessTokenMaxAgeSeconds: access_token_max_age_seconds, refreshTokenMaxAgeSeconds: refresh_token_max_age_seconds });
       return response;
     }
 

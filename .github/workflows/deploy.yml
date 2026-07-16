@@ -178,6 +178,8 @@ jobs:
         run: bun run web:lint
       - name: Typecheck
         run: bun run web:typecheck
+      - name: Test
+        run: bun run web:test
 
   verify-backend:
     name: Verify backend

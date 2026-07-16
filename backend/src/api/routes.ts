@@ -156,6 +156,9 @@ export function registerRoutes(app: Hono) {
       identity: result.identity,
       access_token: result.accessToken,
       refresh_token: result.refreshToken,
+      access_token_max_age_seconds: result.accessTokenMaxAgeSeconds,
+      refresh_token_max_age_seconds: result.refreshTokenMaxAgeSeconds,
+      session_expires_at: result.sessionExpiresAt,
       alias: result.alias,
       alias_slug: result.aliasSlug,
       waitlist_number: result.waitlistNumber,
@@ -186,6 +189,9 @@ export function registerRoutes(app: Hono) {
         ? {
           access_token: result.accessToken,
           refresh_token: result.refreshToken,
+          access_token_max_age_seconds: result.accessTokenMaxAgeSeconds,
+          refresh_token_max_age_seconds: result.refreshTokenMaxAgeSeconds,
+          session_expires_at: result.sessionExpiresAt,
           alias: result.alias,
           alias_slug: result.aliasSlug,
           waitlist_number: result.waitlistNumber,
@@ -236,6 +242,9 @@ export function registerRoutes(app: Hono) {
         identity: result.identity,
         access_token: result.accessToken,
         refresh_token: result.refreshToken,
+        access_token_max_age_seconds: result.accessTokenMaxAgeSeconds,
+        refresh_token_max_age_seconds: result.refreshTokenMaxAgeSeconds,
+        session_expires_at: result.sessionExpiresAt,
         alias: result.alias,
         alias_slug: result.aliasSlug,
         waitlist_number: result.waitlistNumber,
@@ -291,6 +300,9 @@ export function registerRoutes(app: Hono) {
       organization_title: result.organizationTitle,
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
+      accessTokenMaxAgeSeconds: result.accessTokenMaxAgeSeconds,
+      refreshTokenMaxAgeSeconds: result.refreshTokenMaxAgeSeconds,
+      sessionExpiresAt: result.sessionExpiresAt,
     });
   });
 

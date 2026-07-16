@@ -20,6 +20,7 @@ export const userSchema = z.object({
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),
   refreshTokenHash: z.string().nullable().default(null),
+  refreshTokenExpiresAt: z.string().datetime().nullable().default(null),
   lastLoginAt: z.string().nullable().default(null),
   createdAt: z.string(),
   updatedAt: z.string(),

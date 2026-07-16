@@ -1403,6 +1403,7 @@ async function main() {
         || !HAS(u, "is_subscribed_to_updates_unsubscribe_token_hash")
         || !HAS(u, "is_subscribed_to_updates_unsubscribe_requested_at")
         || !HAS(u, "refreshTokenHash")
+        || !HAS(u, "refreshTokenExpiresAt")
         || !HAS(u, "lastLoginAt")
         || HAS(u, "isOnWaitlist")
         || HAS(u, "isWaitlistApproved")
@@ -1415,6 +1416,7 @@ async function main() {
         is_subscribed_to_updates_unsubscribe_token_hash: HAS(u, "is_subscribed_to_updates_unsubscribe_token_hash") ? u.is_subscribed_to_updates_unsubscribe_token_hash : null,
         is_subscribed_to_updates_unsubscribe_requested_at: HAS(u, "is_subscribed_to_updates_unsubscribe_requested_at") ? u.is_subscribed_to_updates_unsubscribe_requested_at : null,
         refreshTokenHash: HAS(u, "refreshTokenHash") ? u.refreshTokenHash : null,
+        refreshTokenExpiresAt: HAS(u, "refreshTokenExpiresAt") ? u.refreshTokenExpiresAt : null,
         lastLoginAt: HAS(u, "lastLoginAt") ? u.lastLoginAt : null
       } IN users OPTIONS { keepNull: false }
   `);

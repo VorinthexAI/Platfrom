@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { backendConfigured, backendFetch } from "@/lib/backend";
 import { SITE_URL } from "@/lib/site";
+import { setAuthSessionCookies } from "@/lib/auth/session-cookies";
 
-const ACCESS_COOKIE = "vorinthex_access";
-const REFRESH_COOKIE = "vorinthex_refresh";
 const providers = new Set(["google", "apple"]);
 
 export async function GET(
@@ -49,6 +48,8 @@ export async function GET(
   const result = await backendFetch<{
     access_token?: string;
     refresh_token?: string;
+    access_token_max_age_seconds?: number;
+    refresh_token_max_age_seconds?: number;
     alias?: string | null;
     alias_slug?: string | null;
     waitlist_number?: number | null;
@@ -86,24 +87,6 @@ export async function GET(
   if (result.data.welcome_line) doneUrl.searchParams.set("welcome", result.data.welcome_line);
 
   const response = NextResponse.redirect(doneUrl);
-  const secure = process.env.NODE_ENV === "production";
-  if (result.data.access_token) {
-    response.cookies.set(ACCESS_COOKIE, result.data.access_token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure,
-      path: "/",
-      maxAge: 60 * 60,
-    });
-  }
-  if (result.data.refresh_token) {
-    response.cookies.set(REFRESH_COOKIE, result.data.refresh_token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure,
-      path: "/",
-      maxAge: 60 * 60 * 24 * 365,
-    });
-  }
+  setAuthSessionCookies(response, { accessToken: result.data.access_token, refreshToken: result.data.refresh_token, accessTokenMaxAgeSeconds: result.data.access_token_max_age_seconds, refreshTokenMaxAgeSeconds: result.data.refresh_token_max_age_seconds });
   return response;
 }

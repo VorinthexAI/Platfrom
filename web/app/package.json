@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "bun run ../../.github/scripts/write-local-env.ts prod vorinthex web/app/.env.local && next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src/lib/auth/session-cookies.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.18",

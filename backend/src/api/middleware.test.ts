@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { Hono } from 'hono';
+import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
-import { rateLimitByIp, requireEnvApiKey, validateQueryParams } from './middleware';
+import { rateLimitByIp, requireEnvApiKey, setSessionCookies, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
   return {
@@ -124,5 +126,23 @@ describe('validateQueryParams', () => {
       ),
     ).rejects.toThrow();
     expect(nextCalls).toBe(0);
+  });
+});
+
+describe('backend session cookies', () => {
+  test('applies the backend-provided founder cookie lifetimes', async () => {
+    const app = new Hono();
+    app.get('/', (c) => {
+      setSessionCookies(c, { accessToken: 'access-token', refreshToken: 'refresh-token', accessTokenMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshTokenMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS, sessionExpiresAt: new Date(Date.now() + FOUNDER_REFRESH_MAX_AGE_SECONDS * 1000).toISOString() });
+      return c.json({ ok: true });
+    });
+
+    const response = await app.request('/');
+    const cookies = response.headers.get('set-cookie') ?? '';
+    expect(cookies).toContain('vorinthex_access=access-token');
+    expect(cookies).toContain('vorinthex_refresh=refresh-token');
+    expect(cookies).toContain(`vorinthex_access=access-token; Max-Age=${FOUNDER_ACCESS_MAX_AGE_SECONDS}`);
+    expect(cookies).toContain(`vorinthex_refresh=refresh-token; Max-Age=${FOUNDER_REFRESH_MAX_AGE_SECONDS}`);
+    expect(cookies).not.toContain('Max-Age=31536000');
   });
 });

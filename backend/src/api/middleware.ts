@@ -5,12 +5,10 @@ import { timingSafeEqual } from '@/lib/crypto';
 import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
 import { strictObject } from './validation';
-import { rotateRefreshToken, verifyAccessToken, type AuthIdentity } from './auth';
+import { rotateRefreshToken, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
-const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24;
-const REFRESH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 function getClientIp(c: Parameters<MiddlewareHandler>[0]) {
   const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
@@ -50,9 +48,9 @@ function cookieOptions(maxAge: number) {
   } as const;
 }
 
-export function setSessionCookies(c: Context, tokens: { accessToken: string; refreshToken: string }) {
-  setCookie(c, ACCESS_COOKIE, tokens.accessToken, cookieOptions(ACCESS_COOKIE_MAX_AGE_SECONDS));
-  setCookie(c, REFRESH_COOKIE, tokens.refreshToken, cookieOptions(REFRESH_COOKIE_MAX_AGE_SECONDS));
+export function setSessionCookies(c: Context, tokens: SessionTokens) {
+  setCookie(c, ACCESS_COOKIE, tokens.accessToken, cookieOptions(tokens.accessTokenMaxAgeSeconds));
+  setCookie(c, REFRESH_COOKIE, tokens.refreshToken, cookieOptions(tokens.refreshTokenMaxAgeSeconds));
 }
 
 export function setSessionTokenHeaders(c: Context, tokens: { accessToken: string; refreshToken: string }) {
