@@ -41,6 +41,9 @@ function createFakeDb() {
       let rows = [...docs.values()];
       if (query.includes('scope.organizationKey == @organizationKey')) {
         rows = rows.filter((doc) => doc.organizationKey === bindVars.organizationKey);
+        if (query.includes('REGEX_TEST(scope._key')) {
+          rows = rows.filter((doc) => scopeSchema.shape.key.safeParse(doc._key).success);
+        }
         rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
       }
       if (query.includes('relation.parentKey == @parentKey')) {
@@ -141,7 +144,7 @@ describe('scope repository', () => {
   });
 
   test('creates and lists scopes per organization with unique slugs', async () => {
-    const { fake } = createFakeDb();
+    const { fake, stores } = createFakeDb();
     const repository = createScopeRepository(fake);
     const core = await repository.createScope(input());
     expect(core.embedding).toHaveLength(1536);
@@ -149,6 +152,15 @@ describe('scope repository', () => {
     expect(updated).toMatchObject({ key: core.key, name: 'Core Intelligence', description: 'Updated scope description.' });
     await repository.createScope(input({ slug: 'command', name: 'Command' }));
     await repository.createScope(input({ organizationKey: newId() }));
+    stores.get(SCOPES_COLLECTION)?.set('legacy_scope', {
+      _key: 'legacy_scope',
+      organizationKey,
+      slug: 'legacy',
+      name: 'Legacy',
+      description: 'Retired pre-CUID scope.',
+      position: 1,
+      embedding: [],
+    });
 
     expect((await repository.listScopes(organizationKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
     expect(await repository.getScopeByKey(core.key)).toEqual(updated);

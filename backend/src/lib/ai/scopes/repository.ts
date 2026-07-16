@@ -109,6 +109,7 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
         `
           FOR scope IN @@collection
             FILTER scope.organizationKey == @organizationKey
+              && REGEX_TEST(scope._key, "^c[^\\\\s-]{8,}$", true)
             SORT scope.name ASC, scope._key ASC
             RETURN scope
         `,

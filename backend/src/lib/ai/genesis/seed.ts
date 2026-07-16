@@ -132,7 +132,7 @@ export interface SeedGenesisResult {
 
 /** Idempotently seeds Genesis with exactly one skill and exactly one agent.create grant. */
 export async function seedGenesis(organizationKey: string, source: GenesisSeedDataSource = defaultSeedDataSource): Promise<SeedGenesisResult> {
-  const validOrganizationKey = cuidSchema.parse(organizationKey);
+  const validOrganizationKey = z.string().trim().min(1).parse(organizationKey);
   const [{ seed, definition }, organization] = await Promise.all([loadGenesisSeedFiles(), source.requireOrganization(validOrganizationKey)]);
   if (!organization) throw new GenesisSeedPrerequisiteError(`organization ${validOrganizationKey}`);
   const agentSeed = seed.seed.agents[0]!; const skillSeed = seed.seed.skills[0]!;

@@ -9,9 +9,9 @@ import { agentToolSchema } from '@/lib/db/agent-tools.node';
 import { toolSchema } from '@/lib/db/tools.node';
 import { AGENT_ARCHITECT_SKILL_KEY, GENESIS_AGENT_KEY, GENESIS_AGENT_SKILL_KEY, GENESIS_AGENT_TOOL_KEY, GenesisSeedPrerequisiteError, loadGenesisSeedFiles, seedGenesis, type GenesisSeedDataSource } from './seed';
 
-function fixture(routeValid = true) {
+function fixture(routeValid = true, organizationKey = newId()) {
   const now = '2026-07-16T00:00:00.000Z';
-  const organization = organizationSchema.parse({ key: newId(), name: 'Vorinthex', createdAt: now, updatedAt: now });
+  const organization = organizationSchema.parse({ key: organizationKey, name: 'Vorinthex', createdAt: now, updatedAt: now });
   const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', description: 'Build agents.', position: 2 });
   const create = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create agent', scopeKey: null, enabled: true });
   const calls: string[] = [];
@@ -44,6 +44,10 @@ describe('Genesis canonical seed', () => {
     expect(result.skill).toMatchObject({ slug: 'agent-architect', name: 'Agent Architecture', title: 'Agent Architect' });
     expect(f.calls).toEqual(['organization', 'scope', 'tool', 'removeOtherActions', 'route', 'skill', 'agent', 'agentSkill', 'agentTool:agent.create', 'removeOtherTools', 'runtime']);
     expect(f.calls.some((call) => call.includes('ask'))).toBe(false);
+  });
+  test('accepts the preserved pre-CUID root organization key', async () => {
+    const f = fixture(true, 'legacy-root-key');
+    expect((await seedGenesis(f.organization.key, f.source)).organizationKey).toBe('legacy-root-key');
   });
   test('refuses to seed without the persisted Mini/OpenAI reason route', async () => {
     const f = fixture(false);
