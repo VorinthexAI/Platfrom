@@ -239,6 +239,14 @@ export function NexusGate() {
               <p className="mt-5 font-mono text-[0.6rem] tracking-[0.24em] text-silver-500 uppercase">
                 - Your CEO, Oscar
               </p>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => router.push("/founders")}
+                className="mt-7 w-full px-5 py-3.5 text-xs uppercase"
+              >
+                Enter Founders Gate
+              </Button>
             </>
           ) : null}
         </section>

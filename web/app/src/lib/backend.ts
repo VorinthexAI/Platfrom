@@ -49,18 +49,29 @@ export async function backendFetch<T = unknown>(
   }
 }
 
-/** Raw streaming fetch (SSE proxy) — returns the upstream Response or null. */
-export async function backendStream(path: string): Promise<Response | null> {
+/**
+ * Raw streaming fetch (SSE proxy) — returns the upstream Response or null.
+ * By default non-ok responses become null (callers fall back locally); pass
+ * `allowErrorResponse` to receive upstream error statuses for passthrough.
+ */
+export async function backendStream(
+  path: string,
+  init: RequestInit & { allowErrorResponse?: boolean } = {},
+): Promise<Response | null> {
   if (!BASE_URL || !API_KEY) return null;
+  const { allowErrorResponse, ...requestInit } = init;
   try {
     const response = await fetch(`${BASE_URL}/api/v1${path}`, {
+      ...requestInit,
       headers: {
         Accept: "text/event-stream",
         "x-vorinthex-api-key": API_KEY,
+        ...requestInit.headers,
       },
       cache: "no-store",
     });
-    if (!response.ok || !response.body) return null;
+    if (!response.ok && !allowErrorResponse) return null;
+    if (!response.body) return null;
     return response;
   } catch {
     return null;

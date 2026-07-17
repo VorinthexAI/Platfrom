@@ -26,6 +26,12 @@ import { parseJson, parseQuery, strictObject } from './validation';
 import { createPaymentCheckout, handlePolarWebhook, listUserEntitlements, POLAR_WEBHOOK_PATH } from './payments';
 import { requestWaitlistVerification, verifyWaitlistEmail } from './waitlist';
 import { recordPlatformClientEvent } from './platform-events';
+import {
+  askFoundersBeacon,
+  getFoundersAccount,
+  listFoundersOrganizationScopes,
+  listFoundersOrganizations,
+} from './founders';
 import { collectFragment, getFragmentsStanding, getFragmentsSummary } from './fragments';
 import { streamLeaderboard } from './leaderboard';
 import { streamLiveCounters } from './live';
@@ -434,6 +440,11 @@ export function registerRoutes(app: Hono) {
 
   app.post('/orchestrators/chat', postOrchestratorChat);
   app.get('/orchestrators/chat/stream', orchestratorChatSocket);
+
+  app.get('/founders/me', getFoundersAccount);
+  app.get('/founders/organizations', listFoundersOrganizations);
+  app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
+  app.post('/founders/beacon/ask', askFoundersBeacon);
 
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);
