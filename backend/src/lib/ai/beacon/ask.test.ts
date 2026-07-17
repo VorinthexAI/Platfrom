@@ -25,7 +25,7 @@ import type { ProviderAdapter, ProviderExecuteRequest, ProviderStreamChunk } fro
 import { ProviderError } from '@/lib/ai/providers/errors';
 import { tokenUsage } from '@/lib/ai/shared';
 import type { RuntimeEventInput } from '@/platform/events';
-import { BeaconAskRequestError, BeaconUnavailableError, streamFoundersBeaconAsk, type BeaconAskEvent } from './ask';
+import { BeaconAccessDeniedError, BeaconAskRequestError, BeaconUnavailableError, streamFoundersBeaconAsk, type BeaconAskEvent } from './ask';
 
 const now = '2026-07-17T00:00:00.000Z';
 
@@ -112,8 +112,14 @@ function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>) {
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
 
   const params = { organization, scope: selectedScope, membership, user, message: 'What is the Nexus?' };
+  const checkAgentAccess = (async (input: { userKey: string; agentKey: string }) => (
+    input.userKey === user.key && input.agentKey === agent.key
+      ? { allowed: true as const, userOrganizationKey: membership.key, effectiveRole: 'owner' as const, scopeAgentKey: scopeAgent.key, grantSources: ['inherited' as const] }
+      : { allowed: false as const, reason: 'AGENT_ACCESS_DENIED' as const }
+  ));
   const options = {
     getAgent: async (slug: string) => (slug === 'beacon' ? agent : null),
+    checkAgentAccess,
     runtimeData,
     data: routerData,
     adapters: { openai: adapter },
@@ -134,6 +140,14 @@ async function collect(iterable: AsyncGenerator<BeaconAskEvent>) {
 }
 
 describe('streamFoundersBeaconAsk', () => {
+  test('a caller without an effective Beacon grant is denied before any run is created', async () => {
+    const f = fixture();
+    const denyAccess = async () => ({ allowed: false as const, reason: 'AGENT_ACCESS_DENIED' as const });
+    await expect(collect(streamFoundersBeaconAsk(f.params, { ...f.options, checkAgentAccess: denyAccess })))
+      .rejects.toBeInstanceOf(BeaconAccessDeniedError);
+    expect(f.runStore).toHaveLength(0);
+  });
+
   test('streams deltas progressively and persists an isolated completed run in the selected scope', async () => {
     const f = fixture();
     const events = await collect(streamFoundersBeaconAsk(f.params, f.options));

@@ -32,6 +32,15 @@ import {
   listFoundersOrganizationScopes,
   listFoundersOrganizations,
 } from './founders';
+import {
+  createScopedAgent,
+  grantScopedAgentMember,
+  listScopedAgentMembers,
+  listScopedAgents,
+  revokeScopedAgentMember,
+  runScopedAgent,
+  updateScopedAgentAccessThreshold,
+} from './agents';
 import { collectFragment, getFragmentsStanding, getFragmentsSummary } from './fragments';
 import { streamLeaderboard } from './leaderboard';
 import { streamLiveCounters } from './live';
@@ -445,6 +454,15 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations', listFoundersOrganizations);
   app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
   app.post('/founders/beacon/ask', askFoundersBeacon);
+
+  // Agent access: creation, listing, membership management, and execution.
+  app.post('/organizations/:organizationKey/scopes/:scopeKey/agents', createScopedAgent);
+  app.get('/organizations/:organizationKey/scopes/:scopeKey/agents', listScopedAgents);
+  app.get('/organizations/:organizationKey/scopes/:scopeKey/agents/:agentKey/members', listScopedAgentMembers);
+  app.post('/organizations/:organizationKey/scopes/:scopeKey/agents/:agentKey/members', grantScopedAgentMember);
+  app.delete('/organizations/:organizationKey/scopes/:scopeKey/agents/:agentKey/members/:userOrganizationKey', revokeScopedAgentMember);
+  app.patch('/organizations/:organizationKey/scopes/:scopeKey/agents/:agentKey/access-threshold', updateScopedAgentAccessThreshold);
+  app.post('/organizations/:organizationKey/scopes/:scopeKey/agents/:agentKey/run', runScopedAgent);
 
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);

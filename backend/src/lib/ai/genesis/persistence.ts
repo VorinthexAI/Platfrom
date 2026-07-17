@@ -7,6 +7,8 @@ import { SKILLS_COLLECTION, skillSchema, type Skill } from '@/lib/db/skills.node
 import { AGENT_SKILLS_COLLECTION, agentSkillSchema, type AgentSkill } from '@/lib/db/agent-skills.node';
 import { AGENT_TOOLS_COLLECTION, agentToolSchema, type AgentTool } from '@/lib/db/agent-tools.node';
 import { SCOPE_AGENTS_COLLECTION, scopeAgentSchema, type ScopeAgent } from '@/lib/db/scope-agents.node';
+import { AGENT_MEMBERS_COLLECTION, agentMemberSchema, type AgentMember } from '@/lib/db/agent-members.node';
+import type { RankedRole } from '@/lib/ai/agent-access/roles';
 import { TOOLS_COLLECTION } from '@/lib/db/tools.node';
 import { ACTIONS_COLLECTION } from '@/lib/db/actions.node';
 import { TOOL_ACTIONS_COLLECTION } from '@/lib/db/tool-actions.node';
@@ -24,7 +26,7 @@ export class GenesisPersistenceError extends AiError {
 }
 
 export const GENESIS_TRANSACTION_COLLECTIONS = {
-  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, SCOPE_AGENTS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
+  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, SCOPE_AGENTS_COLLECTION, AGENT_MEMBERS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
   read: [ORGANIZATIONS_COLLECTION, SCOPES_COLLECTION, AGENTS_COLLECTION, SKILLS_COLLECTION, TOOLS_COLLECTION, ACTIONS_COLLECTION, TOOL_ACTIONS_COLLECTION, SCOPE_MEMBERS_COLLECTION, AGENT_RUN_SOURCES_COLLECTION],
 } as const;
 export type GenesisWriteCollection = typeof GENESIS_TRANSACTION_COLLECTIONS.write[number];
@@ -56,14 +58,35 @@ export const arangoGenesisTransactionGateway: GenesisTransactionGateway = {
   },
 };
 
+/**
+ * Access plan derived from the INITIATING HUMAN, never from Genesis's own
+ * system authority: the threshold is the human creator's effective role in
+ * the target scope, and inherited grants land for every same-or-higher-role
+ * member. A trusted system creation (no human) uses the conservative
+ * owner-only plan.
+ */
+export interface GenesisAgentAccessPlan {
+  createdByUserOrganizationKey: string | null;
+  minimumAccessRole: RankedRole;
+  inheritedMembershipKeys: readonly string[];
+}
+
+export const SYSTEM_GENESIS_ACCESS_PLAN: GenesisAgentAccessPlan = {
+  createdByUserOrganizationKey: null,
+  minimumAccessRole: 'owner',
+  inheritedMembershipKeys: [],
+};
+
 export interface PersistGenesisManifestInput {
   runKey: string;
   context: GenesisContext;
   validated: ValidatedGenesisManifest;
+  access?: GenesisAgentAccessPlan;
 }
 export interface PersistGenesisManifestResult {
   agent: Agent;
   scopeAgent: ScopeAgent | null;
+  agentMembers: readonly AgentMember[];
   createdSkills: readonly Skill[];
   agentSkills: readonly AgentSkill[];
   agentTools: readonly AgentTool[];
@@ -104,8 +127,10 @@ export async function persistGenesisManifest(
       await artifact('skill', skill.key, 'result', null);
     }
 
+    const access = input.access ?? SYSTEM_GENESIS_ACCESS_PLAN;
     let agent: Agent;
     let scopeAgent: ScopeAgent | null = null;
+    const agentMembers: AgentMember[] = [];
     if (manifest.agent.operation === 'reuse') {
       const existing = existingAgents.get(manifest.agent.agentKey);
       if (!existing) throw new GenesisPersistenceError(`missing reused agent ${manifest.agent.agentKey}`);
@@ -113,10 +138,36 @@ export async function persistGenesisManifest(
       await artifact('agent', agent.key, 'source', agent.key);
     } else {
       if (!plan.agentKey || !plan.agentEmbedding) throw new GenesisPersistenceError('missing new agent plan');
+      if (access.createdByUserOrganizationKey && !access.inheritedMembershipKeys.includes(access.createdByUserOrganizationKey)) {
+        // Never mint an agent its human creator cannot use — abort instead.
+        throw new GenesisPersistenceError('creator membership is missing from the inherited access plan');
+      }
       agent = agentSchema.parse({ key: plan.agentKey, slug: manifest.agent.slug, name: manifest.agent.name, title: manifest.agent.title, scopeKey: manifest.agent.scopeKey, explorationRate: manifest.agent.explorationRate, embedding: plan.agentEmbedding });
       await writer.save(AGENTS_COLLECTION, agent);
-      scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: manifest.agent.scopeKey, agentKey: agent.key });
+      const now = new Date().toISOString();
+      scopeAgent = scopeAgentSchema.parse({
+        key: newId(),
+        scopeKey: manifest.agent.scopeKey,
+        agentKey: agent.key,
+        minimumAccessRole: access.minimumAccessRole,
+        createdByUserOrganizationKey: access.createdByUserOrganizationKey,
+        createdAt: now,
+        updatedAt: now,
+      });
       await writer.save(SCOPE_AGENTS_COLLECTION, scopeAgent);
+      for (const membershipKey of access.inheritedMembershipKeys) {
+        const grant = agentMemberSchema.parse({
+          key: newId(),
+          agentKey: agent.key,
+          userOrganizationKey: membershipKey,
+          source: 'inherited',
+          scopeAgentKey: scopeAgent.key,
+          createdByUserOrganizationKey: null,
+          createdAt: now,
+        });
+        await writer.save(AGENT_MEMBERS_COLLECTION, grant);
+        agentMembers.push(grant);
+      }
       await artifact('agent', agent.key, 'result', agent.key);
     }
 
@@ -152,6 +203,6 @@ export async function persistGenesisManifest(
       await artifact('agent-tool', link.key, 'result', agent.key);
     }
 
-    return { agent, scopeAgent, createdSkills: [...createdSkills.values()], agentSkills: createdAgentSkills, agentTools: createdAgentTools, artifacts };
+    return { agent, scopeAgent, agentMembers, createdSkills: [...createdSkills.values()], agentSkills: createdAgentSkills, agentTools: createdAgentTools, artifacts };
   });
 }

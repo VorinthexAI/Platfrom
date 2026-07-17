@@ -2,10 +2,12 @@ export {
   AGENT_RUNS_COLLECTION,
   AGENT_RUN_STATUSES,
   agentOutputMetadataSchema,
+  agentRunAuthorizationSchema,
   agentRunSchema,
   maxTenWordsSchema,
   type AgentOutputMetadata,
   type AgentRun,
+  type AgentRunAuthorization,
   type AgentRunStatus,
 } from './schema';
 export {

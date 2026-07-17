@@ -29,13 +29,15 @@ export {
   type ScopesSetupDatabase,
 } from './types';
 export { createScopeRepository, getDefaultScopeRepository } from './repository';
-export { createScopeMemberRepository, getDefaultScopeMemberRepository } from './members';
+export { createScopeMemberRepository, getDefaultScopeMemberRepository, listScopeMembersWithActiveMemberships } from './members';
 export {
   DuplicateScopeMemberError,
   ScopeMemberNotFoundError,
   ScopeMemberOrganizationMismatchError,
   ScopeMembershipNotFoundError,
   type ScopeMemberRepository,
+  type ScopeMemberRepositoryHooks,
   type ScopeMemberView,
+  type ScopeMemberWithMembership,
 } from './members';
 export { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from './indexes';

@@ -89,10 +89,18 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
     ? await updateAgent(existingAgent.key, { name: BEACON_AGENT_NAME, title: BEACON_AGENT_TITLE, scopeKey: scope.key, explorationRate: 0.2 })
     : await insertAgent({ key: BEACON_AGENT_KEY, slug: BEACON_AGENT_SLUG, name: BEACON_AGENT_NAME, title: BEACON_AGENT_TITLE, scopeKey: scope.key, explorationRate: 0.2 });
 
+  // Beacon is the broad user-facing agent: viewer threshold, so every member
+  // with effective scope access inherits an agentMembers grant via sync.
   const existingScopeAgent = await getScopeAgentByAgentKey(agent.key);
   const scopeAgent = existingScopeAgent
-    ? (existingScopeAgent.scopeKey === scope.key ? existingScopeAgent : await updateScopeAgent(existingScopeAgent.key, { scopeKey: scope.key }))
-    : await insertScopeAgent({ agentKey: agent.key, scopeKey: scope.key });
+    ? (existingScopeAgent.scopeKey === scope.key && existingScopeAgent.minimumAccessRole === 'viewer'
+      ? existingScopeAgent
+      : await updateScopeAgent(existingScopeAgent.key, { scopeKey: scope.key, minimumAccessRole: 'viewer', updatedAt: new Date().toISOString() }))
+    : await insertScopeAgent({ agentKey: agent.key, scopeKey: scope.key, minimumAccessRole: 'viewer' });
+  const { ensureAgentMembersCollection } = await import('@/lib/db/agent-members.node');
+  await ensureAgentMembersCollection();
+  const { syncInheritedAgentMembersForScopeAgent } = await import('@/lib/ai/agent-access/sync');
+  await syncInheritedAgentMembersForScopeAgent(scopeAgent.key);
 
   const existingAgentSkill = await getAgentSkillByPair(agent.key, skill.key);
   const agentSkill = existingAgentSkill

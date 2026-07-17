@@ -40,12 +40,20 @@ export const runtimeEventSlugs = [
   'artifact.created', 'artifact.used', 'guardrail.blocked',
 ] as const;
 
+export const agentAccessEventSlugs = [
+  'agent.created', 'agent.member.granted', 'agent.member.revoked',
+  'agent.access-threshold.updated', 'agent.access.synchronized',
+  'scope.member.added', 'scope.member.updated', 'scope.member.removed',
+  'organization.member.updated',
+] as const;
+
 export const registeredEventSlugs = [
   ...landingEventSlugs,
   ...serverEventSlugs,
   ...userEventSlugs,
   ...providerEventSlugs,
   ...runtimeEventSlugs,
+  ...agentAccessEventSlugs,
 ] as const;
 
 export const eventSlugSchema = z.enum(registeredEventSlugs);
@@ -73,6 +81,21 @@ export const runtimeEventDataSchema = z.object({
   outputTokens: z.number().int().nonnegative().optional(),
   elapsedMs: z.number().int().nonnegative().optional(),
 }).strict();
+
+export const agentAccessEventSlugSchema = z.enum(agentAccessEventSlugs);
+export type AgentAccessEventSlug = z.infer<typeof agentAccessEventSlugSchema>;
+
+/** Minimal identifiers only — never role objects, prompts, or user records. */
+export const agentAccessEventDataSchema = z.object({
+  agentKey: z.string().cuid().optional(),
+  scopeAgentKey: z.string().cuid().optional(),
+  userOrganizationKey: z.string().cuid().optional(),
+  source: z.enum(['inherited', 'explicit']).optional(),
+  minimumAccessRole: z.string().trim().min(1).max(40).optional(),
+  createdCount: z.number().int().nonnegative().optional(),
+  removedCount: z.number().int().nonnegative().optional(),
+}).strict();
+export type AgentAccessEventData = z.infer<typeof agentAccessEventDataSchema>;
 
 export type RuntimeEventData = z.infer<typeof runtimeEventDataSchema>;
 export interface RuntimeEventInput {

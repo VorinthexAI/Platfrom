@@ -1,6 +1,6 @@
 import { db } from '@/lib/db/client';
 import { isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
-import { userOrganizationSchema } from '@/lib/db/user-organization.node';
+import { userOrganizationSchema, type UserOrganization } from '@/lib/db/user-organization.node';
 import { userSchema } from '@/lib/db/users.node';
 import { newId } from '@/lib/ids';
 import { AiError } from '@/lib/ai/shared/result';
@@ -59,7 +59,25 @@ export class ScopeMemberNotFoundError extends AiError {
   }
 }
 
-export function createScopeMemberRepository(database: ScopesDatabase = db): ScopeMemberRepository {
+export interface ScopeMemberRepositoryHooks {
+  /** Runs after a successful membership mutation (add/remove) for the scope. */
+  onMembershipChanged?: (scopeKey: string) => Promise<void>;
+}
+
+export function createScopeMemberRepository(
+  database: ScopesDatabase = db,
+  hooks: ScopeMemberRepositoryHooks = {},
+): ScopeMemberRepository {
+  const notifyMembershipChanged = async (scopeKey: string) => {
+    try {
+      await hooks.onMembershipChanged?.(scopeKey);
+    } catch (error) {
+      // Synchronization is data hygiene, not the security boundary — runtime
+      // authorization re-checks canonical state on every run regardless.
+      console.warn('scope membership change hook failed', { scopeKey, error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
   return {
     async addMember(scopeKey, userOrganizationKey, role) {
       const member = scopeMemberSchema.parse({
@@ -94,7 +112,9 @@ export function createScopeMemberRepository(database: ScopesDatabase = db): Scop
       try {
         const result = await database.collection(SCOPE_MEMBERS_COLLECTION).save(toArangoDoc(member), { returnNew: true });
         const saved = (result as { new?: Record<string, unknown> }).new;
-        return saved ? scopeMemberSchema.parse(withArangoKey(saved)) : member;
+        const persisted = saved ? scopeMemberSchema.parse(withArangoKey(saved)) : member;
+        await notifyMembershipChanged(scopeKey);
+        return persisted;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) throw new DuplicateScopeMemberError(scopeKey, userOrganizationKey);
         throw error;
@@ -116,6 +136,7 @@ export function createScopeMemberRepository(database: ScopesDatabase = db): Scop
       if (!raw) throw new ScopeMemberNotFoundError(scopeKey, userOrganizationKey);
       const member = scopeMemberSchema.parse(withArangoKey(raw as Record<string, unknown>));
       await database.collection(SCOPE_MEMBERS_COLLECTION).remove(member.key);
+      await notifyMembershipChanged(scopeKey);
     },
 
     async listMembers(scopeKey) {
@@ -166,9 +187,51 @@ export function createScopeMemberRepository(database: ScopesDatabase = db): Scop
   };
 }
 
+export interface ScopeMemberWithMembership {
+  scopeMember: ScopeMember;
+  membership: UserOrganization;
+}
+
+/**
+ * Every scope member joined with its active organization membership in one
+ * query — the inherited-grant synchronizer's input, kept out of the
+ * repository interface so injected fakes stay small.
+ */
+export async function listScopeMembersWithActiveMemberships(
+  scopeKey: string,
+  database: ScopesDatabase = db,
+): Promise<ScopeMemberWithMembership[]> {
+  const validScopeKey = scopeMemberSchema.shape.scopeKey.parse(scopeKey);
+  const cursor = await database.query(
+    `
+      FOR member IN scopeMembers
+        FILTER member.scopeKey == @scopeKey
+        FOR membership IN userOrganizations
+          FILTER membership._key == member.userOrganizationKey
+            && membership.status == "active"
+          RETURN { member, membership }
+    `,
+    { scopeKey: validScopeKey },
+  );
+  const rows = await cursor.all();
+  return (rows as Array<{ member: Record<string, unknown>; membership: Record<string, unknown> }>).map((row) => ({
+    scopeMember: scopeMemberSchema.parse(withArangoKey(row.member)),
+    membership: userOrganizationSchema.parse(withArangoKey(row.membership)),
+  }));
+}
+
 let cachedDefaultRepository: ScopeMemberRepository | null = null;
 
 export function getDefaultScopeMemberRepository(): ScopeMemberRepository {
-  cachedDefaultRepository ??= createScopeMemberRepository();
+  // The default repository keeps inherited agent access converged whenever a
+  // scope membership changes. The dynamic import breaks the module cycle
+  // scopes → agent-access → scopes; injected repositories (tests, seeds with
+  // fakes) receive no hook and stay hermetic.
+  cachedDefaultRepository ??= createScopeMemberRepository(db, {
+    async onMembershipChanged(scopeKey) {
+      const { syncInheritedAgentMembersForScope } = await import('@/lib/ai/agent-access/sync');
+      await syncInheritedAgentMembersForScope(scopeKey);
+    },
+  });
   return cachedDefaultRepository;
 }

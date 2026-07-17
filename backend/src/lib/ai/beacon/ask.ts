@@ -23,6 +23,7 @@ import type { UserOrganization } from '@/lib/db/user-organization.node';
 import type { Scope } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { recordRuntimeEvent, type RuntimeEventData, type RuntimeEventRecorder, type RuntimeEventSlug } from '@/platform/events';
+import { canUserAccessAgent } from '@/lib/ai/agent-access';
 import { BEACON_AGENT_SLUG, BEACON_ASK_TOOL_SLUG } from './seed';
 
 export const BEACON_ASK_STEP_SLUG = 'founders-beacon-ask';
@@ -44,6 +45,12 @@ export class BeaconAskRequestError extends AiError {
   }
 }
 
+export class BeaconAccessDeniedError extends AiError {
+  constructor(detail: string) {
+    super('beacon_access_denied', `Beacon access denied: ${detail}`);
+  }
+}
+
 export interface BeaconAskParams {
   /** Founder-selected organization; membership already proven by the Founders Gate guard. */
   organization: Organization;
@@ -57,6 +64,8 @@ export interface BeaconAskParams {
 
 export interface BeaconAskOptions extends RouterDependencies {
   getAgent?: (slug: string) => Promise<Agent | null>;
+  /** Injectable canonical agent-access check; defaults to canUserAccessAgent. */
+  checkAgentAccess?: typeof canUserAccessAgent;
   runtimeData?: AgentRuntimeDataSource;
   runs?: AgentRunRepository;
   steps?: AgentRunStepRepository;
@@ -131,6 +140,22 @@ export async function* streamFoundersBeaconAsk(
   if (!granted || !selectedAction) throw new BeaconUnavailableError('beacon has no granted ask tool');
   const primarySkill = runtime.skills[0]!;
 
+  // Founders Gate proved organization and scope access for the SELECTED
+  // organization; Beacon itself still requires an effective agentMembers
+  // grant, checked against its canonical home link (root organization /
+  // Nexus scope) through the one canonical access service.
+  const checkAgentAccess = options.checkAgentAccess ?? canUserAccessAgent;
+  const accessDecision = await checkAgentAccess({
+    userKey: user.key,
+    organizationKey: runtime.organization.key,
+    scopeKey: runtime.scope.key,
+    agentKey: agent.key,
+  });
+  if (!accessDecision.allowed) {
+    await emit('guardrail.blocked', { agentKey: agent.key, reason: `Beacon access denied (${accessDecision.reason})` });
+    throw new BeaconAccessDeniedError(accessDecision.reason);
+  }
+
   // Beacon executes inside the founder-selected organization and scope: the
   // context, memories, provider allow-list, and persisted run all use the
   // selection, never Beacon's home scope.
@@ -165,6 +190,18 @@ export async function* streamFoundersBeaconAsk(
     agentKey: agent.key,
     principalType: 'member',
     userOrganizationKey: membership.key,
+    authorization: {
+      actorType: 'user',
+      initiatingUserKey: user.key,
+      initiatingUserOrganizationKey: membership.key,
+      organizationKey: organization.key,
+      scopeKey: scope.key,
+      scopeAgentKey: accessDecision.scopeAgentKey,
+      effectiveRole: accessDecision.effectiveRole,
+      accessSources: accessDecision.grantSources,
+      delegatedViaAgentKey: null,
+      authorizationCheckedAt: new Date().toISOString(),
+    },
     status: 'accepted',
     reason: BEACON_RUN_REASON,
     score: 0,

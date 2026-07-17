@@ -66,9 +66,38 @@ describe('Genesis transactional persistence', () => {
     ]));
   });
   test('declares the exact restricted read and write transaction boundary', () => {
-    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String).sort()).toEqual(['agentArtifactChecks', 'agentArtifacts', 'agentSkills', 'agentTools', 'agents', 'scopeAgents', 'skills'].sort());
+    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String).sort()).toEqual(['agentArtifactChecks', 'agentArtifacts', 'agentMembers', 'agentSkills', 'agentTools', 'agents', 'scopeAgents', 'skills'].sort());
     expect(GENESIS_TRANSACTION_COLLECTIONS.read.map(String).sort()).toEqual(['actions', 'agentRunSources', 'agents', 'organizations', 'scopeMembers', 'scopes', 'skills', 'toolActions', 'tools'].sort());
     for (const forbidden of ['tools', 'actions', 'models', 'providers', 'modelActions', 'modelProviders', 'organizationProviders']) expect(GENESIS_TRANSACTION_COLLECTIONS.write).not.toContain(forbidden);
+  });
+  test('persists the human initiator access plan: threshold, creator, and inherited grants', async () => {
+    const { context, validated } = await setup(); const transaction = new MemoryTransaction(); const runKey = newId();
+    const creatorMembershipKey = newId(); const ownerMembershipKey = newId();
+    const result = await persistGenesisManifest({
+      runKey,
+      context,
+      validated,
+      access: { createdByUserOrganizationKey: creatorMembershipKey, minimumAccessRole: 'moderator', inheritedMembershipKeys: [creatorMembershipKey, ownerMembershipKey] },
+    }, transaction);
+    expect(result.scopeAgent).toMatchObject({ minimumAccessRole: 'moderator', createdByUserOrganizationKey: creatorMembershipKey });
+    expect(transaction.rows('agentMembers').map((row) => row.userOrganizationKey).sort()).toEqual([creatorMembershipKey, ownerMembershipKey].sort());
+    expect(transaction.rows('agentMembers').every((row) => row.source === 'inherited')).toBe(true);
+  });
+  test('aborts creation when the initiating creator is missing from the access plan', async () => {
+    const { context, validated } = await setup(); const transaction = new MemoryTransaction();
+    await expect(persistGenesisManifest({
+      runKey: newId(),
+      context,
+      validated,
+      access: { createdByUserOrganizationKey: newId(), minimumAccessRole: 'moderator', inheritedMembershipKeys: [newId()] },
+    }, transaction)).rejects.toThrow('creator membership is missing');
+    expect(transaction.committed.size).toBe(0);
+  });
+  test('a system creation defaults to the conservative owner-only plan with no grants', async () => {
+    const { context, validated } = await setup(); const transaction = new MemoryTransaction();
+    const result = await persistGenesisManifest({ runKey: newId(), context, validated }, transaction);
+    expect(result.scopeAgent).toMatchObject({ minimumAccessRole: 'owner', createdByUserOrganizationKey: null });
+    expect(transaction.rows('agentMembers')).toHaveLength(0);
   });
   test('rolls back every staged write when agentSkill creation fails', async () => {
     const { context, validated } = await setup(); const transaction = new MemoryTransaction('agentSkills');

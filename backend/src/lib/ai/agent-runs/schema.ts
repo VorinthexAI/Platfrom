@@ -14,6 +14,26 @@ export const agentOutputMetadataSchema = z.object({
   score: z.number().min(0).max(1),
 }).strict();
 
+/**
+ * Immutable authorization snapshot captured when the run was admitted, so
+ * audits stay historically accurate even after roles, grants, or thresholds
+ * change. Identifiers and role tokens only — never secrets.
+ */
+export const agentRunAuthorizationSchema = z.object({
+  actorType: z.enum(['user', 'system']),
+  initiatingUserKey: z.string().cuid().nullable(),
+  initiatingUserOrganizationKey: z.string().cuid().nullable(),
+  organizationKey: z.string().cuid(),
+  scopeKey: z.string().cuid(),
+  scopeAgentKey: z.string().cuid().nullable(),
+  effectiveRole: z.enum(['owner', 'admin', 'moderator', 'viewer']).nullable(),
+  accessSources: z.array(z.enum(['inherited', 'explicit', 'system'])),
+  delegatedViaAgentKey: z.string().cuid().nullable().default(null),
+  authorizationCheckedAt: z.string().datetime(),
+}).strict();
+
+export type AgentRunAuthorization = z.infer<typeof agentRunAuthorizationSchema>;
+
 export const agentRunObjectSchema = z.object({
   key: z.string().cuid(),
   organizationKey: z.string().cuid(),
@@ -21,6 +41,7 @@ export const agentRunObjectSchema = z.object({
   agentKey: z.string().cuid(),
   principalType: z.enum(['member', 'system']).default('system'),
   userOrganizationKey: z.string().cuid().nullable().default(null),
+  authorization: agentRunAuthorizationSchema.nullable().default(null),
   status: z.enum(AGENT_RUN_STATUSES),
   reason: maxTenWordsSchema,
   score: z.number().min(0).max(1),
