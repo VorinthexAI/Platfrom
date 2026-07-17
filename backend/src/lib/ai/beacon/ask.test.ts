@@ -4,7 +4,6 @@ import { agentSchema } from '@/lib/db/agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { agentToolSchema } from '@/lib/db/agent-tools.node';
-import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { toolSchema } from '@/lib/db/tools.node';
 import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { actionSchema } from '@/lib/db/actions.node';
@@ -37,7 +36,6 @@ function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>) {
   const user = userSchema.parse({ key: newId(), organizationId: organizationKey, email: 'founder@example.com', emailHash: 'founder-hash', createdAt: now, updatedAt: now });
   const membership = userOrganizationSchema.parse({ key: newId(), organizationId: organizationKey, userId: user.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const agent = agentSchema.parse({ key: newId(), slug: 'beacon', name: 'Beacon', title: 'AI Coordinator', scopeKey: beaconScope.key });
-  const scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: beaconScope.key, agentKey: agent.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'beacon-coordination', name: 'Beacon', title: 'AI Coordinator', definition: 'Answer founders precisely.' });
   const action = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer', handlerKey: 'core.ask', enabled: true });
   const tool = toolSchema.parse({ key: newId(), slug: 'ask.answer', name: 'Ask', description: 'Answer the user', scopeKey: null, enabled: true });
@@ -51,7 +49,6 @@ function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>) {
 
   const runtimeData: AgentRuntimeDataSource = {
     async getAgent(key) { return key === agent.key ? agent : null; },
-    async getScopeAgent(key) { return key === agent.key ? scopeAgent : null; },
     async getScope(key) { return key === beaconScope.key ? beaconScope : key === selectedScope.key ? selectedScope : null; },
     async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkill]; },

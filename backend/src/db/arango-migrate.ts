@@ -437,26 +437,10 @@ async function main() {
   await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey'], unique: false });
   await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['toolKey'], unique: false });
 
-  // Runtime scope ownership is resolved through this linking node. Reuse the
-  // agent CUID as the relation key so the backfill is deterministic and
-  // idempotent in every environment.
-  const scopeAgentsCollection = targetDb.collection('scopeAgents');
-  if (!(await scopeAgentsCollection.exists())) {
-    await scopeAgentsCollection.create();
-  }
-  if (await targetDb.collection('agents').exists()) {
-    await targetDb.query(`
-      FOR agent IN agents
-        FILTER agent.scopeKey != null && agent.scopeKey != ""
-        UPSERT { agentKey: agent._key }
-          INSERT { _key: agent._key, agentKey: agent._key, scopeKey: agent.scopeKey }
-          UPDATE { scopeKey: agent.scopeKey }
-          IN scopeAgents
-    `);
-  }
-  await scopeAgentsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey'], unique: true });
-  await scopeAgentsCollection.ensureIndex({ type: 'persistent', fields: ['scopeKey', 'agentKey'], unique: true });
-  await scopeAgentsCollection.ensureIndex({ type: 'persistent', fields: ['scopeKey'], unique: false });
+  // Agents are registry-only: the agent document's own scopeKey declares its
+  // home scope and no scope-assignment linking collection is maintained. A
+  // legacy scopeAgents collection may still exist in older databases; it is
+  // deliberately left untouched (never read, never written).
 
   // Existing skills predate the separate competence-area name. Preserve
   // their title as the initial name before the stricter schema is read.
