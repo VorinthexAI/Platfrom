@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Button, TextInput } from "@vorinthex/shared/ui/components";
@@ -13,26 +13,13 @@ const SunSurface = dynamic(() => import("./SunSurface"), { ssr: false });
 type FoundersGatePhase =
   | { kind: "gate" }
   | { kind: "setup"; data: TotpSetupData }
-  | { kind: "verify"; challenge: string }
-  | { kind: "welcome"; name: string | null; title: string | null };
-
-/** A returning, already-verified member — skip straight past the gate. */
-function returningMemberWelcome(): { name: string | null; title: string | null } | null {
-  const storedName = window.localStorage.getItem("vx_member_name")?.trim() || null;
-  const storedTitle = window.localStorage.getItem("vx_member_title")?.trim() || null;
-  if (!storedName && !storedTitle) return null;
-  if (storedName) return { name: storedName.split(/\s+/)[0] ?? null, title: storedTitle };
-  const email = window.localStorage.getItem("vx_member_email");
-  const handle = email?.split("@")[0]?.split(".")[0] ?? "";
-  return { name: handle ? handle.charAt(0).toUpperCase() + handle.slice(1) : null, title: storedTitle };
-}
+  | { kind: "verify"; challenge: string };
 
 /**
  * The Nexus — inside the star. One continuous chamber for the whole
- * founders-gate journey: email gate, MFA setup or verification, then the
- * CEO's welcome, all in one centered card floating over the sun's own
- * burning surface. No emblem, no horizon disc — the surface shader IS
- * the room.
+ * founders-gate journey: email gate followed by MFA setup or verification,
+ * all in one centered card floating over the sun's own burning surface.
+ * Authenticated founders continue directly to the Beacon interface.
  */
 export function NexusGate() {
   const router = useRouter();
@@ -41,24 +28,10 @@ export function NexusGate() {
   const [gateStatus, setGateStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [gateError, setGateError] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      await Promise.resolve();
-      if (cancelled) return;
-      const welcome = returningMemberWelcome();
-      if (welcome) setPhase({ kind: "welcome", ...welcome });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   function onTotpSuccess(name: string | null, title: string | null) {
-    // The sun greets the member by their real name and platform title.
     if (name) window.localStorage.setItem("vx_member_name", name);
     if (title) window.localStorage.setItem("vx_member_title", title);
-    setPhase({ kind: "welcome", name, title });
+    router.replace("/founders");
   }
 
   async function submitFoundersGate(event: FormEvent) {
@@ -217,37 +190,6 @@ export function NexusGate() {
               onSuccess={onTotpSuccess}
               onLostAccess={(data) => setPhase({ kind: "setup", data })}
             />
-          ) : null}
-
-          {phase.kind === "welcome" ? (
-            <>
-              <p className="micro-label">The Nexus</p>
-              <h1 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
-                {phase.name ? `Welcome ${phase.name},` : "Welcome,"}
-              </h1>
-              {phase.title ? (
-                <p className="mt-5 font-mono text-[0.62rem] tracking-[0.26em] text-silver-300 uppercase">
-                  {phase.title} of Vorinthex AI | The Nexus of Intelligence
-                </p>
-              ) : null}
-              <p className="mt-5 text-sm leading-relaxed text-silver-300">
-                Welcome to the Nexus of Vorinthex AI. Looking forward to
-                working together to form this product as the next generation
-                AI-native platform - enabling anyone to use AI in their
-                day-to-day life.
-              </p>
-              <p className="mt-5 font-mono text-[0.6rem] tracking-[0.24em] text-silver-500 uppercase">
-                - Your CEO, Oscar
-              </p>
-              <Button
-                type="button"
-                variant="primary"
-                onClick={() => router.push("/founders")}
-                className="mt-7 w-full px-5 py-3.5 text-xs uppercase"
-              >
-                Enter Founders Gate
-              </Button>
-            </>
           ) : null}
         </section>
       </div>
