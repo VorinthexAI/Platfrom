@@ -28,10 +28,10 @@ import { parseJson, strictObject } from './validation';
  * and permission resolution is exclusively server-side.
  */
 
-const cuidParamSchema = z.string().cuid();
+export const foundersOrganizationKeyParamSchema = z.string().trim().min(1).max(160);
 
 export const foundersBeaconAskSchema = strictObject({
-  organizationKey: z.string().cuid(),
+  organizationKey: foundersOrganizationKeyParamSchema,
   scopeKey: z.string().cuid(),
   message: z.string().trim().min(1).max(BEACON_ASK_MAX_MESSAGE_LENGTH),
 });
@@ -100,7 +100,7 @@ export async function listFoundersOrganizations(c: Context) {
 export async function listFoundersOrganizationScopes(c: Context) {
   const auth = await requireFounder(c);
   if ('error' in auth) return auth.error;
-  const parsedKey = cuidParamSchema.safeParse(c.req.param('organizationKey'));
+  const parsedKey = foundersOrganizationKeyParamSchema.safeParse(c.req.param('organizationKey'));
   if (!parsedKey.success) return c.json({ error: 'invalid organization key' }, 400);
   try {
     const { membership } = await requireOrganizationAccess(auth.founder.user.key, parsedKey.data);

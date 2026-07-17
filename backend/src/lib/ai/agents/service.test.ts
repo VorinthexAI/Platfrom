@@ -16,7 +16,7 @@ import {
 
 function fixture() {
   const scope = scopeSchema.parse({
-    key: newId(), organizationKey: newId(), slug: 'core', name: 'Core', description: 'Core scope.', position: 2,
+    key: newId(), organizationKey: newId(), slug: 'core', name: 'Core', summary: 'Core scope.', description: 'Core scope.', position: 2,
   });
   const skill = skillSchema.parse({
     key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: '# Backend Developer',

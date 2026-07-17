@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { FoundersAccountPage } from "@/components/founders/FoundersAccountPage";
+import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: "Account — Founders Gate",
@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function FoundersAccountRoute() {
-  return <FoundersAccountPage />;
+  redirect("/nexus/account");
 }

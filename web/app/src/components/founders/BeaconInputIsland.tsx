@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { AscendIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
+import { ArrowRightIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import type { BeaconStatus } from "@/lib/founders/types";
 
 export const BEACON_INPUT_LIMIT = 20_000;
@@ -10,7 +10,6 @@ interface BeaconInputIslandProps {
   status: BeaconStatus;
   error: string | null;
   disabled: boolean;
-  disabledReason: string | null;
   onSubmit: (message: string) => void;
   onCancel: () => void;
 }
@@ -21,7 +20,7 @@ interface BeaconInputIslandProps {
  * The island is the only prominent surface on the canvas — a restrained
  * obsidian slab floating clear of the viewport edge.
  */
-export function BeaconInputIsland({ status, error, disabled, disabledReason, onSubmit, onCancel }: BeaconInputIslandProps) {
+export function BeaconInputIsland({ status, error, disabled, onSubmit, onCancel }: BeaconInputIslandProps) {
   const [message, setMessage] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const busy = status === "connecting" || status === "streaming";
@@ -49,7 +48,6 @@ export function BeaconInputIsland({ status, error, disabled, disabledReason, onS
   }
 
   const statusLine = error
-    ?? disabledReason
     ?? (status === "connecting" ? "Reaching Beacon…" : status === "streaming" ? "Beacon is responding…" : "");
 
   return (
@@ -64,7 +62,7 @@ export function BeaconInputIsland({ status, error, disabled, disabledReason, onS
           rows={1}
           maxLength={BEACON_INPUT_LIMIT}
           disabled={disabled}
-          placeholder={disabled ? disabledReason ?? "Beacon is unavailable." : "Ask Beacon"}
+          placeholder="Ask Beacon..."
           aria-label="Ask Beacon"
           className="scrollbar-hide w-full resize-none bg-transparent px-2 py-1.5 text-[0.95rem] leading-relaxed text-silver-50 outline-none placeholder:text-silver-500 disabled:cursor-not-allowed"
         />
@@ -96,7 +94,7 @@ export function BeaconInputIsland({ status, error, disabled, disabledReason, onS
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/20 text-[#10141a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ background: "var(--gradient-chrome)" }}
           >
-            <AscendIcon size="sm" />
+            <ArrowRightIcon size="sm" className="-rotate-90" />
           </button>
         )}
       </div>

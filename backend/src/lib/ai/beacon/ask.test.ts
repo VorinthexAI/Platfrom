@@ -31,8 +31,8 @@ const now = '2026-07-17T00:00:00.000Z';
 function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>) {
   const organizationKey = newId();
   const organization = organizationSchema.parse({ key: organizationKey, name: 'Vorinthex AI', is_root: true, createdAt: now, updatedAt: now });
-  const beaconScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'nexus', name: 'Nexus', description: 'The complete ecosystem.', position: 1 });
-  const selectedScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'core', name: 'Core', description: 'Personal AI brain scope.', position: 2 });
+  const beaconScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'nexus', name: 'Nexus', summary: 'The complete ecosystem.', description: 'The complete ecosystem.', position: 1 });
+  const selectedScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'core', name: 'Core', summary: 'Personal AI brain scope.', description: 'Personal AI brain scope.', position: 2 });
   const user = userSchema.parse({ key: newId(), organizationId: organizationKey, email: 'founder@example.com', emailHash: 'founder-hash', createdAt: now, updatedAt: now });
   const membership = userOrganizationSchema.parse({ key: newId(), organizationId: organizationKey, userId: user.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const agent = agentSchema.parse({ key: newId(), slug: 'beacon', name: 'Beacon', title: 'AI Coordinator', scopeKey: beaconScope.key });
@@ -155,6 +155,22 @@ describe('streamFoundersBeaconAsk', () => {
       'model.completed', 'step.completed', 'tool.completed', 'agent.completed',
     ]);
     expect(f.eventStore.every(({ scopeId, userId }) => scopeId === f.selectedScope.key && userId === f.user.key)).toBe(true);
+  });
+
+  test('streams Beacon end to end when Nexus itself is the selected scope', async () => {
+    const f = fixture();
+    const events = await collect(streamFoundersBeaconAsk({ ...f.params, scope: f.beaconScope }, f.options));
+
+    expect(events.filter((event) => event.type === 'delta').map((event) => (event as { text: string }).text))
+      .toEqual(['Hello ', 'founder.']);
+    expect(f.runStore[0]).toMatchObject({
+      status: 'completed',
+      organizationKey: f.organization.key,
+      scopeKey: f.beaconScope.key,
+      agentKey: f.agent.key,
+    });
+    expect(f.adapterRequests).toHaveLength(1);
+    expect(f.eventStore.every(({ scopeId }) => scopeId === f.beaconScope.key)).toBe(true);
   });
 
   test('compiles the context against the selected scope with a plain user-text output contract', async () => {

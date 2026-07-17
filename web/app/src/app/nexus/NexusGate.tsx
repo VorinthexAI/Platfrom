@@ -31,7 +31,7 @@ export function NexusGate() {
   function onTotpSuccess(name: string | null, title: string | null) {
     if (name) window.localStorage.setItem("vx_member_name", name);
     if (title) window.localStorage.setItem("vx_member_title", title);
-    router.replace("/founders");
+    window.location.replace("/nexus");
   }
 
   async function submitFoundersGate(event: FormEvent) {

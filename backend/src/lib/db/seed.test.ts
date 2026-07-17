@@ -26,7 +26,7 @@ describe('scope seeds', () => {
       'replica',
       'pilot',
     ]);
-    expect(SEEDED_SCOPES[0]?.key).toBe(NEXUS_SCOPE_KEY);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.key).toBe(NEXUS_SCOPE_KEY);
     expect(new Set(SEEDED_SCOPES.map(({ key }) => key)).size).toBe(SEEDED_SCOPES.length);
     const seededKeys = new Set(SEEDED_SCOPES.map(({ key }) => key));
     for (const scope of SEEDED_SCOPES) {
@@ -37,9 +37,9 @@ describe('scope seeds', () => {
       }
     }
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.position).toBe(1);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.summary).toBe('Vorinthex is building an AI-native platform that empowers people and organizations to think, create, automate, and collaborate with intelligent systems, transforming AI from isolated tools into a trusted foundation for future work.');
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ position }) => position === 2)).toBe(true);
-    expect(Object.fromEntries(SEEDED_SCOPES.map(({ slug, description }) => [slug, description]))).toEqual({
-      nexus: 'The complete Vorinthex ecosystem, connecting every product, capability, workspace, and intelligence into one unified AI platform.',
+    expect(Object.fromEntries(SEEDED_SCOPES.filter(({ slug }) => slug !== 'nexus').map(({ slug, description }) => [slug, description]))).toEqual({
       core: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
       launch: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
       studio: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',

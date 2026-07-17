@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOutIcon } from "@vorinthex/shared/ui/icons";
+import { Button } from "@vorinthex/shared/ui/components";
 import {
   FoundersRequestError,
   fetchAccessibleOrganizations,
@@ -19,10 +19,15 @@ type GateState = "checking" | "ready" | "error";
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex flex-col gap-1 py-4 sm:flex-row sm:items-baseline sm:justify-between">
-      <dt className="micro-label text-silver-500">{label}</dt>
+      <dt className="text-sm text-silver-500">{label}</dt>
       <dd className="text-sm text-silver-100 sm:text-right">{value}</dd>
     </div>
   );
+}
+
+function displayRole(title: string | null, role: string): string {
+  const titleRole = title?.trim().split(/\s+/).at(-1);
+  return titleRole || `${role.charAt(0).toUpperCase()}${role.slice(1)}`;
 }
 
 /**
@@ -51,7 +56,7 @@ export function FoundersAccountPage() {
       } catch (error) {
         if (cancelled) return;
         if (error instanceof FoundersRequestError && (error.status === 401 || error.status === 403)) {
-          router.replace("/nexus");
+          window.location.replace("/nexus");
           return;
         }
         setGate("error");
@@ -89,44 +94,30 @@ export function FoundersAccountPage() {
       <FoundersBackdrop />
       <div className="relative z-10 flex min-h-svh justify-center px-4 py-10 sm:py-16">
         <div className="w-full max-w-xl">
-          <Link
-            href="/founders"
-            className="micro-label inline-flex items-center gap-2 text-silver-500 transition-colors hover:text-silver-100"
-          >
-            ← Founders Gate
-          </Link>
-
           {gate !== "ready" ? (
-            <p aria-live="polite" className="micro-label mt-16 text-center text-silver-300">
+            <p aria-live="polite" className="mt-16 text-center text-sm text-silver-300">
               {gate === "checking" ? "Verifying access…" : "The account page could not load. Refresh to retry."}
             </p>
           ) : account ? (
             <>
-              <h1 className="font-display mt-8 text-2xl tracking-[0.1em] text-silver-50">Account</h1>
-              <dl className="mt-6 divide-y divide-white/8 border-y border-white/8">
+              <dl className="divide-y divide-white/8 border-y border-white/8">
                 <Row label="Name" value={account.user.name ?? "—"} />
                 <Row label="Alias" value={account.user.alias ?? "—"} />
                 <Row label="Email" value={account.user.email} />
                 <Row
-                  label="Root organization role"
-                  value={account.rootMembership.title
-                    ? `${account.rootMembership.title} (${account.rootMembership.role})`
-                    : account.rootMembership.role}
+                  label="Role"
+                  value={displayRole(account.rootMembership.title, account.rootMembership.role)}
                 />
-                {account.applicationRole !== account.rootMembership.role ? (
-                  <Row label="Application role" value={account.applicationRole} />
-                ) : null}
                 <Row label="Current organization" value={currentOrganization?.name ?? account.rootOrganization.name} />
               </dl>
-              <button
-                type="button"
-                onClick={signOut}
-                disabled={signingOut}
-                className="mt-8 inline-flex items-center gap-2.5 rounded-xl border border-white/12 px-5 py-3 text-sm text-silver-100 transition-colors hover:border-white/30 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <LogOutIcon size="sm" />
-                {signingOut ? "Signing out…" : "Log out"}
-              </button>
+              <div className="mt-8 flex items-center gap-3">
+                <Button asChild variant="primary">
+                  <Link href="/nexus">Back</Link>
+                </Button>
+                <Button type="button" onClick={signOut} disabled={signingOut} variant="secondary">
+                  {signingOut ? "Signing out…" : "Sign out"}
+                </Button>
+              </div>
             </>
           ) : null}
         </div>

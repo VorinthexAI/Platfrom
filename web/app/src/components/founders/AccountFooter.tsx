@@ -19,7 +19,7 @@ function initialsOf(name: string): string {
 export function AccountFooter({ name, secondary }: AccountFooterProps) {
   return (
     <Link
-      href="/founders/account"
+      href="/nexus/account"
       aria-label="Open account page"
       className="group flex items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-white/10 hover:bg-black/25"
     >

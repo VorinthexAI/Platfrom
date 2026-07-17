@@ -22,13 +22,14 @@ export const scopeSchema = z.object({
   organizationKey: z.string().trim().min(1),
   slug: scopeSlugSchema,
   name: z.string().trim().min(1).max(160),
-  description: z.string().trim().min(1).max(4_000),
+  summary: z.string().trim().min(1),
+  description: z.string().trim().min(1),
   position: z.number().int().positive(),
   embedding: z.array(z.number().finite()).default([]),
 });
 
 export type Scope = z.infer<typeof scopeSchema>;
-export const scopesEmbedKeys = z.enum(['name', 'slug', 'description']);
+export const scopesEmbedKeys = z.enum(['summary']);
 
 export const scopeScopeSchema = z
   .object({

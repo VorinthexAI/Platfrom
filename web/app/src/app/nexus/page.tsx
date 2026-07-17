@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 import { backendFetch } from "@/lib/backend";
 import { foundersAuthHeaders } from "@/lib/founders/server";
+import { FoundersGateApp } from "@/components/founders/FoundersGateApp";
 import { NexusGate } from "./NexusGate";
 
 export const metadata: Metadata = {
@@ -14,7 +14,7 @@ export default async function NexusPage() {
   const session = await backendFetch("/founders/me", {
     headers: await foundersAuthHeaders(),
   });
-  if (session.ok) redirect("/founders");
+  if (session.ok) return <FoundersGateApp />;
 
   return <NexusGate />;
 }
