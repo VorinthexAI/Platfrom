@@ -15,6 +15,7 @@ import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orc
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers';
 import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/genesis/seed';
+import { seedBeacon } from '@/lib/ai/beacon/seed';
 
 export type SeedResult = {
   collection: string;
@@ -896,6 +897,14 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     { collection: 'agents', key: genesis.agent.key, status: 'updated' },
     { collection: 'agentSkills', key: genesis.agentSkill.key, status: 'updated' },
     { collection: 'agentTools', key: genesis.agentTool.key, status: 'updated' },
+  );
+
+  const beacon = await seedBeacon(rootOrganization.key);
+  results.push(
+    { collection: 'skills', key: beacon.skill.key, status: 'updated' },
+    { collection: 'agents', key: beacon.agent.key, status: 'updated' },
+    { collection: 'agentSkills', key: beacon.agentSkill.key, status: 'updated' },
+    ...beacon.agentTools.map((agentTool) => ({ collection: 'agentTools', key: agentTool.key, status: 'updated' as const })),
   );
 
   for (const product of SEEDED_PRODUCTS) {

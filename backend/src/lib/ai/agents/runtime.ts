@@ -175,7 +175,15 @@ export async function compileAgentContext(runtime: AgentRuntimeContext, options:
   return { ...runtime, variables, memories, artifacts, knowledge, permissions, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
 }
 
-export interface CompileAgentRuntimeOptions { outputSchema?: string }
+export interface CompileAgentRuntimeOptions {
+  outputSchema?: string;
+  /**
+   * 'metadata-json' (default) demands the structured output-metadata envelope
+   * used by the persisted pipeline. 'user-text' is for streamed user-facing
+   * answers: plain Markdown, no JSON envelope, nothing internal.
+   */
+  outputFormat?: 'metadata-json' | 'user-text';
+}
 /** Renders the structured context into the provider's system instructions. */
 export function compileAgentRuntimeContext(context: AgentContext, options: CompileAgentRuntimeOptions = {}): string {
   const skillSections = context.skills.flatMap(({ relation, skill }) => [`### ${skill.title} (${skill.name}, priority ${relation.priority})`, skill.definition.trim()]);
@@ -193,8 +201,16 @@ export function compileAgentRuntimeContext(context: AgentContext, options: Compi
     '', '## Permissions', JSON.stringify(context.permissions),
     '', '## Guardrails', JSON.stringify(context.guardrails),
     '', '## Source policy', JSON.stringify(context.sourcePolicy),
-    '', '## Output schema', 'Every output must include metadata: { "status": "accepted" | "rejected", "reason": "at most ten words", "score": 0..1 }.',
-    options.outputSchema?.trim() || 'Return the remaining schema required by the selected action.',
+    '', '## Output schema',
+    ...(options.outputFormat === 'user-text'
+      ? [
+        'Respond with the user-facing answer as plain Markdown text.',
+        'Do not wrap the answer in JSON and do not include output metadata, hidden reasoning, tool payloads, or internal runtime context.',
+      ]
+      : [
+        'Every output must include metadata: { "status": "accepted" | "rejected", "reason": "at most ten words", "score": 0..1 }.',
+        options.outputSchema?.trim() || 'Return the remaining schema required by the selected action.',
+      ]),
     '', '## Current task', context.currentTask,
   ].join('\n');
 }
