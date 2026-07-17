@@ -1,6 +1,7 @@
 import { aql } from 'arangojs';
 import { z } from 'zod';
 import { newId } from '@/lib/ids';
+import { scopeMemberRoleSchema } from '@/lib/ai/scopes/schema';
 import { createEdgeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
@@ -10,6 +11,17 @@ export const scopeAgentSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
   agentKey: z.string().cuid(),
+  /**
+   * The minimum effective scope role that inherits access to this agent.
+   * Derived from the creator's effective role at creation; pre-existing rows
+   * default to owner (the conservative reading) until migration backfills a
+   * deliberate value. Changing it must run the inherited-grant synchronizer.
+   */
+  minimumAccessRole: scopeMemberRoleSchema.default('owner'),
+  /** Organization membership of the human creator; null for system-seeded agents. */
+  createdByUserOrganizationKey: z.string().cuid().nullable().default(null),
+  createdAt: z.string().datetime().nullable().default(null),
+  updatedAt: z.string().datetime().nullable().default(null),
 }).strict();
 
 export type ScopeAgent = z.infer<typeof scopeAgentSchema>;
@@ -18,7 +30,8 @@ export type ScopeAgentInsert = Omit<z.input<typeof scopeAgentSchema>, 'key'> & {
 const helpers = createEdgeHelpers(SCOPE_AGENTS_COLLECTION, scopeAgentSchema);
 
 export function insertScopeAgent(input: ScopeAgentInsert): Promise<ScopeAgent> {
-  return helpers.insert({ ...input, key: input.key ?? newId() });
+  const now = new Date().toISOString();
+  return helpers.insert({ createdAt: now, updatedAt: now, ...input, key: input.key ?? newId() });
 }
 
 export const getScopeAgentById = helpers.getById;
@@ -45,6 +58,18 @@ export async function getScopeAgentByPair(scopeKey: string, agentKey: string): P
   `);
   const document = await cursor.next();
   return document ? scopeAgentSchema.parse(withArangoKey(document)) : null;
+}
+
+export async function listScopeAgentsByScope(scopeKey: string): Promise<ScopeAgent[]> {
+  const validScopeKey = scopeAgentSchema.shape.scopeKey.parse(scopeKey);
+  const cursor = await db.query(aql`
+    FOR link IN ${db.collection(SCOPE_AGENTS_COLLECTION)}
+      FILTER link.scopeKey == ${validScopeKey}
+      SORT link._key ASC
+      RETURN link
+  `);
+  const docs = await cursor.all();
+  return (docs as Record<string, unknown>[]).map((doc) => scopeAgentSchema.parse(withArangoKey(doc)));
 }
 
 export const deleteScopeAgent = helpers.deleteById;

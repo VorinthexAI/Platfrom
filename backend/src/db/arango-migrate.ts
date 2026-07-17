@@ -13,6 +13,7 @@ import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes'
 import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
 import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
 import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
+import { ensureAgentMembersCollection } from '../lib/db/agent-members.node';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
@@ -1755,6 +1756,154 @@ async function main() {
       await retiredCollection.drop();
       console.log(`Dropped collection ${retiredCollectionName}`);
     }
+  }
+
+  // ---- Agent member authorization: scopeAgents thresholds + agentMembers ----
+  // Order matters: userOrganizations copying above must be complete so the
+  // grant backfill sees every membership. All writes here are idempotent
+  // UPSERTs keyed on the same tuple the unique index enforces.
+  await ensureAgentMembersCollection(targetDb);
+
+  // Deliberate threshold backfill (never a blanket viewer default): Beacon is
+  // the broad user-facing agent; Genesis (and a future Steward) are
+  // explicit-grant-only by policy so their thresholds stay owner; every other
+  // pre-existing agent starts owner-gated until an owner deliberately widens it.
+  const agentAccessBackfillNow = new Date().toISOString();
+  await targetDb.query(
+    `
+    FOR link IN scopeAgents
+      FILTER !HAS(link, "minimumAccessRole") || link.minimumAccessRole == null
+      LET agent = DOCUMENT("agents", link.agentKey)
+      LET threshold = agent != null && HAS(@thresholds, agent.slug) ? @thresholds[agent.slug] : "owner"
+      UPDATE link WITH {
+        minimumAccessRole: threshold,
+        createdByUserOrganizationKey: HAS(link, "createdByUserOrganizationKey") ? link.createdByUserOrganizationKey : null,
+        createdAt: HAS(link, "createdAt") && link.createdAt != null ? link.createdAt : @now,
+        updatedAt: @now
+      } IN scopeAgents
+    `,
+    { thresholds: { beacon: 'viewer' }, now: agentAccessBackfillNow },
+  );
+
+  // Inherited-grant backfill mirrors the runtime rule: effective role (the
+  // highest of organization stewardship and direct scope role) must satisfy
+  // the scopeAgent threshold. Explicit-grant-only agents converge to zero
+  // inherited grants.
+  const agentAccessRoleRank: Record<string, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
+  const explicitOnlyAgentSlugs = new Set(['genesis', 'steward']);
+  const scopeAgentRowsCursor = await targetDb.query<{
+    linkKey: string;
+    agentKey: string;
+    agentSlug: string | null;
+    scopeKey: string;
+    organizationKey: string | null;
+    minimumAccessRole: string;
+  }>(`
+    FOR link IN scopeAgents
+      LET agent = DOCUMENT("agents", link.agentKey)
+      LET scope = DOCUMENT("scopes", link.scopeKey)
+      RETURN {
+        linkKey: link._key,
+        agentKey: link.agentKey,
+        agentSlug: agent != null ? agent.slug : null,
+        scopeKey: link.scopeKey,
+        organizationKey: scope != null ? scope.organizationKey : null,
+        minimumAccessRole: link.minimumAccessRole
+      }
+  `);
+  const scopeAgentRows = await scopeAgentRowsCursor.all();
+  let inheritedGrantsBackfilled = 0;
+  for (const row of scopeAgentRows) {
+    if (!row.agentSlug || !row.organizationKey) continue;
+    if (explicitOnlyAgentSlugs.has(row.agentSlug)) continue;
+    const threshold = agentAccessRoleRank[row.minimumAccessRole] ?? agentAccessRoleRank.owner!;
+    const stewardsCursor = await targetDb.query<{ key: string; role: string }>(
+      `
+      FOR membership IN userOrganizations
+        FILTER membership.organizationId == @organizationKey
+          && membership.status == "active"
+          && membership.orgRole IN ["owner", "admin"]
+        RETURN { key: membership._key, role: membership.orgRole }
+      `,
+      { organizationKey: row.organizationKey },
+    );
+    const scopedCursor = await targetDb.query<{ key: string; role: string }>(
+      `
+      FOR member IN scopeMembers
+        FILTER member.scopeKey == @scopeKey
+        FOR membership IN userOrganizations
+          FILTER membership._key == member.userOrganizationKey
+            && membership.status == "active"
+            && membership.organizationId == @organizationKey
+          RETURN { key: membership._key, role: member.role }
+      `,
+      { scopeKey: row.scopeKey, organizationKey: row.organizationKey },
+    );
+    const effectiveRankByMembership = new Map<string, number>();
+    for (const candidate of [...await stewardsCursor.all(), ...await scopedCursor.all()]) {
+      const rank = agentAccessRoleRank[candidate.role] ?? 0;
+      const current = effectiveRankByMembership.get(candidate.key) ?? 0;
+      if (rank > current) effectiveRankByMembership.set(candidate.key, rank);
+    }
+    for (const [membershipKey, rank] of effectiveRankByMembership) {
+      if (rank < threshold) continue;
+      await targetDb.query(
+        `
+        UPSERT { agentKey: @agentKey, userOrganizationKey: @membershipKey, source: "inherited", scopeAgentKey: @scopeAgentKey }
+          INSERT {
+            _key: @key,
+            agentKey: @agentKey,
+            userOrganizationKey: @membershipKey,
+            source: "inherited",
+            scopeAgentKey: @scopeAgentKey,
+            createdByUserOrganizationKey: null,
+            createdAt: @now
+          }
+          UPDATE {}
+          IN agentMembers
+        `,
+        { agentKey: row.agentKey, membershipKey, scopeAgentKey: row.linkKey, key: newId(), now: agentAccessBackfillNow },
+      );
+      inheritedGrantsBackfilled += 1;
+    }
+  }
+  console.log(`Backfilled inherited agentMembers grants for ${scopeAgentRows.length} scope agents (${inheritedGrantsBackfilled} eligible pairs)`);
+
+  // Explicit migration mapping for Genesis: root-organization OWNERS receive
+  // an explicit grant (the policy requires one on top of the owner
+  // threshold). No other membership is granted Genesis access here.
+  const genesisRow = scopeAgentRows.find((row) => row.agentSlug === 'genesis');
+  if (genesisRow) {
+    const rootOwnersCursor = await targetDb.query<string>(
+      `
+      FOR membership IN userOrganizations
+        FILTER membership.organizationId == @rootOrganizationId
+          && membership.status == "active"
+          && membership.orgRole == "owner"
+        RETURN membership._key
+      `,
+      { rootOrganizationId },
+    );
+    for (const membershipKey of await rootOwnersCursor.all()) {
+      await targetDb.query(
+        `
+        UPSERT { agentKey: @agentKey, userOrganizationKey: @membershipKey, source: "explicit", scopeAgentKey: @scopeAgentKey }
+          INSERT {
+            _key: @key,
+            agentKey: @agentKey,
+            userOrganizationKey: @membershipKey,
+            source: "explicit",
+            scopeAgentKey: @scopeAgentKey,
+            createdByUserOrganizationKey: null,
+            createdAt: @now
+          }
+          UPDATE {}
+          IN agentMembers
+        `,
+        { agentKey: genesisRow.agentKey, membershipKey, scopeAgentKey: genesisRow.linkKey, key: newId(), now: agentAccessBackfillNow },
+      );
+    }
+    console.log('Applied explicit Genesis access mapping for root organization owners');
   }
 
   console.log('ArangoDB schema is up to date.');

@@ -12,6 +12,7 @@ import {
 } from '@/lib/founders/access';
 import {
   BEACON_ASK_MAX_MESSAGE_LENGTH,
+  BeaconAccessDeniedError,
   BeaconUnavailableError,
   streamFoundersBeaconAsk,
 } from '@/lib/ai/beacon/ask';
@@ -177,9 +178,11 @@ export async function askFoundersBeacon(c: Context) {
       const unavailable = error instanceof BeaconUnavailableError
         || error instanceof NoEligibleRouteError
         || error instanceof ProviderNotEnabledForOrganizationError;
-      const message = unavailable
-        ? 'Beacon is not available in this scope.'
-        : 'Beacon could not complete the response.';
+      const message = error instanceof BeaconAccessDeniedError
+        ? 'You do not have access to Beacon.'
+        : unavailable
+          ? 'Beacon is not available in this scope.'
+          : 'Beacon could not complete the response.';
       await stream.writeSSE({ event: 'response.failed', data: JSON.stringify({ error: message }) }).catch(() => {});
     }
   });

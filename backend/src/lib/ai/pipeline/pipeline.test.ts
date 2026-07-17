@@ -5,6 +5,7 @@ import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { agentToolSchema } from '@/lib/db/agent-tools.node';
 import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
+import { agentMemberSchema } from '@/lib/db/agent-members.node';
 import { toolSchema } from '@/lib/db/tools.node';
 import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { actionSchema } from '@/lib/db/actions.node';
@@ -40,7 +41,8 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const userOrganization = userOrganizationSchema.parse({ key: newId(), organizationId: organizationKey, userId: user.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: userOrganization.key, role: 'moderator' });
   const agent = agentSchema.parse({ key: newId(), slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: scope.key });
-  const scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: scope.key, agentKey: agent.key });
+  const scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: scope.key, agentKey: agent.key, minimumAccessRole: 'moderator', createdAt: now, updatedAt: now });
+  const agentMemberGrant = agentMemberSchema.parse({ key: newId(), agentKey: agent.key, userOrganizationKey: userOrganization.key, source: 'inherited', scopeAgentKey: scopeAgent.key, createdAt: now });
   const skill = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend systems.' });
   const action = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer with metadata', handlerKey: 'core.ask', enabled: true });
   const tool = toolSchema.parse({ key: newId(), slug: 'ask.answer', name: 'Ask', description: 'Answer the user', scopeKey: null, enabled: true });
@@ -80,7 +82,13 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const adapters = { openai: { id: 'openai' as const, name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { adapterCalls.push(request as ProviderExecuteRequest); executionSnapshots.push({ runStatus: runStore[0]?.status, sourceCount: sourceStore.length }); return { output: output as TOutput, usage: tokenUsage(8, 5), providerId: 'openai' as const, modelId: request.modelId, externalModelId: request.externalModelId }; } } };
   const variables = { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } };
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
-  const accessData = { async getUserOrganization(key: string) { return key === userOrganization.key ? userOrganization : null; }, async getUser(key: string) { return key === user.key ? user : null; }, async listScopeMembers() { return [scopeMember]; } };
+  const accessData = {
+    async getUserOrganization(key: string) { return key === userOrganization.key ? userOrganization : null; },
+    async getUser(key: string) { return key === user.key ? user : null; },
+    async listScopeMembers() { return [scopeMember]; },
+    async getScopeAgent(scopeKey: string, agentKey: string) { return scopeKey === scope.key && agentKey === agent.key ? scopeAgent : null; },
+    async listGrants(agentKey: string, userOrganizationKey: string) { return agentKey === agent.key && userOrganizationKey === userOrganization.key ? [agentMemberGrant] : []; },
+  };
   const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts, events: async (event: RuntimeEventInput) => { eventStore.push(event); }, accessData, principal: { kind: 'member' as const, userOrganizationKey: userOrganization.key } };
   const params = { organizationKey, agentKey: agent.key, toolKey: tool.key, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: 'Hello' }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
   return { options, params, adapterCalls, executionSnapshots, eventStore, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope, user, userOrganization, scopeMember, accessData };
@@ -128,7 +136,7 @@ describe('persisted agent pipeline', () => {
     expect(missingPrincipal.runStore).toHaveLength(0);
 
     const outsideScope = fixture();
-    await expect(runStoredAgentTool(outsideScope.params, { ...outsideScope.options, accessData: { ...outsideScope.accessData, async listScopeMembers() { return []; } } })).rejects.toThrow('is not assigned to scope');
+    await expect(runStoredAgentTool(outsideScope.params, { ...outsideScope.options, accessData: { ...outsideScope.accessData, async listScopeMembers() { return []; } } })).rejects.toThrow('SCOPE_ACCESS_DENIED');
     expect(outsideScope.adapterCalls).toHaveLength(0);
     expect(outsideScope.runStore).toHaveLength(0);
   });

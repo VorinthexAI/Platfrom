@@ -1,0 +1,82 @@
+export {
+  roleRank,
+  roleAtLeast,
+  highestRole,
+  scopeAuthorityForOrgRole,
+  resolveEffectiveScopeRole,
+  type RankedRole,
+  type ResolveEffectiveScopeRoleInput,
+} from './roles';
+export {
+  DEFAULT_AGENT_SECURITY_POLICY,
+  isPolicyRestrictedAgent,
+  resolveAgentSecurityPolicy,
+  type AgentSecurityPolicy,
+} from './policy';
+export {
+  ACCESS_THRESHOLD_POLICY,
+  AGENT_ACCESS_DENIAL_REASONS,
+  AGENT_CREATION_POLICY,
+  AGENT_MEMBER_MANAGEMENT_POLICY,
+  canCreateAgent,
+  canManageAgentMembers,
+  canUpdateAccessThreshold,
+  canUserAccessAgent,
+  createDefaultAgentAccessDataSource,
+  evaluateAgentAccess,
+  type AgentAccessDataSource,
+  type AgentAccessDecision,
+  type AgentAccessDenialReason,
+  type CanUserAccessAgentInput,
+} from './authorization';
+export {
+  AGENT_CREATION_TRANSACTION_COLLECTIONS,
+  AgentCreationConflictError,
+  AgentCreationDeniedError,
+  AgentCreationInvariantError,
+  arangoAgentCreationTransactionGateway,
+  createAgentAsMember,
+  createAgentManifestSchema,
+  type AgentCreationDenialReason,
+  type AgentCreationTransactionGateway,
+  type AgentCreationTransactionWriter,
+  type CreateAgentAsMemberInput,
+  type CreateAgentAsMemberOptions,
+  type CreateAgentAsMemberResult,
+  type CreateAgentManifest,
+} from './creation';
+export {
+  AgentAccessSyncError,
+  createDefaultAgentAccessSyncDataSource,
+  resolveEffectiveScopeMemberships,
+  syncAgentMembersForMembership,
+  syncInheritedAgentMembersForScope,
+  syncInheritedAgentMembersForScopeAgent,
+  type AgentAccessSyncDataSource,
+  type EligibleInheritedMembership,
+  type SyncInheritedAgentMembersResult,
+} from './sync';
+export {
+  AgentManagementDeniedError,
+  createDefaultAgentManagementDataSource,
+  grantExplicitAgentAccess,
+  listAgentMemberAccess,
+  revokeExplicitAgentAccess,
+  updateAgentAccessThreshold,
+  type AgentManagementDataSource,
+  type AgentManagementDenialReason,
+  type AgentManagementRequest,
+  type AgentMemberAccessView,
+  type GrantExplicitAccessInput,
+  type GrantExplicitAccessResult,
+  type RevokeExplicitAccessResult,
+  type UpdateAccessThresholdInput,
+  type UpdateAccessThresholdResult,
+} from './management';
+export {
+  listAccessibleAgents,
+  type AccessibleAgent,
+  type AccessibleAgentsDataSource,
+  type ListAccessibleAgentsInput,
+} from './listing';
+export { emitAgentAccessEvent, type AgentAccessEventEmitter } from './events';

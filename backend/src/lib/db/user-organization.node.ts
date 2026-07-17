@@ -51,6 +51,25 @@ export async function getUserOrganizationByOrganizationAndUser(
   return doc ? userOrganizationSchema.parse(withArangoKey(doc)) : null;
 }
 
+/**
+ * Active owner/admin memberships of one organization — the members whose
+ * organization role alone stewards every scope (and therefore inherits agent
+ * access) without a scopeMembers row.
+ */
+export async function listActiveStewardMembershipsByOrganization(
+  organizationId: string,
+): Promise<UserOrganization[]> {
+  const cursor = await db.query(aql`
+    FOR link IN ${db.collection(USER_ORGANIZATION_COLLECTION)}
+      FILTER link.organizationId == ${organizationId}
+        && link.status == "active"
+        && link.orgRole IN ["owner", "admin"]
+      RETURN link
+  `);
+  const docs = await cursor.all();
+  return docs.map((doc) => userOrganizationSchema.parse(withArangoKey(doc)));
+}
+
 export async function listActiveUserOrganizationsByUser(
   userId: string,
 ): Promise<UserOrganization[]> {

@@ -1,9 +1,30 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
+import { userOrganizationSchema, type UserOrganization } from '@/lib/db/user-organization.node';
+import { scopeMemberSchema, type ScopeMember, type ScopeMemberRole } from '@/lib/ai/scopes';
+import type { AgentAccessSyncDataSource } from '@/lib/ai/agent-access/sync';
 import { compileGenesisContext } from './context';
 import { GENESIS_STEP_SLUGS, genesisCreationManifestSchema } from './schemas';
 import { buildGenesisFixture } from './test-fixtures';
 import { CreateAgentToolGuardrailError, createAgentToolInputSchema, createAgentToolOutputSchema, executeCreateAgentTool } from './tool';
+
+const fixtureNow = '2026-07-16T00:00:00.000Z';
+
+function initiatorFixture(f: ReturnType<typeof buildGenesisFixture>, scopeRole: ScopeMemberRole) {
+  const membership: UserOrganization = userOrganizationSchema.parse({ key: newId(), organizationId: f.organization.key, userId: newId(), orgRole: 'member', status: 'active', joinedAt: fixtureNow, createdAt: fixtureNow, updatedAt: fixtureNow });
+  const scopeMember: ScopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: f.scope.key, userOrganizationKey: membership.key, role: scopeRole });
+  const unused = () => { throw new Error('unused in access-plan resolution'); };
+  const accessSync: AgentAccessSyncDataSource = {
+    getScopeAgent: unused, listScopeAgents: unused, getAgent: unused, getScope: unused,
+    getMembership: async (key) => (key === membership.key ? membership : null),
+    listStewardMemberships: async () => [],
+    listScopeMemberships: async () => [{ scopeMember, membership }],
+    listInheritedGrants: unused, ensureInheritedGrant: unused, deleteGrants: unused,
+    deleteAllGrantsForMembership: unused, listOrganizationScopes: unused,
+    emitEvent: async () => {},
+  };
+  return { membership, scopeMember, accessSync, getMembership: async (key: string) => (key === membership.key ? membership : null) };
+}
 
 function rejectedManifest(f: ReturnType<typeof buildGenesisFixture>) {
   return genesisCreationManifestSchema.parse({
@@ -40,6 +61,31 @@ describe('agent.create local action handler', () => {
     const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
     await expect(executeCreateAgentTool({ organizationKey: newId(), scopeKey: f.scope.key, agentRunKey: newId(), manifest: rejectedManifest(f) }, context)).rejects.toBeInstanceOf(CreateAgentToolGuardrailError);
     await expect(executeCreateAgentTool({ organizationKey: f.organization.key, scopeKey: newId(), agentRunKey: newId(), manifest: rejectedManifest(f) }, context)).rejects.toBeInstanceOf(CreateAgentToolGuardrailError);
+  });
+
+  test('the initiating human is the authorization principal: viewers cannot create through Genesis', async () => {
+    const f = buildGenesisFixture();
+    const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
+    const viewer = initiatorFixture(f, 'viewer');
+    const input = { organizationKey: f.organization.key, scopeKey: f.scope.key, agentRunKey: newId(), manifest: rejectedManifest(f) };
+    await expect(executeCreateAgentTool(input, context, {
+      principal: { kind: 'member', userOrganizationKey: viewer.membership.key },
+      getMembership: viewer.getMembership,
+      accessSync: viewer.accessSync,
+    })).rejects.toThrow('may not create agents');
+  });
+
+  test('a moderator initiator passes the access-plan gate and the manifest outcome decides the rest', async () => {
+    const f = buildGenesisFixture();
+    const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
+    const moderator = initiatorFixture(f, 'moderator');
+    const input = { organizationKey: f.organization.key, scopeKey: f.scope.key, agentRunKey: newId(), manifest: rejectedManifest(f) };
+    const result = await executeCreateAgentTool(input, context, {
+      principal: { kind: 'member', userOrganizationKey: moderator.membership.key },
+      getMembership: moderator.getMembership,
+      accessSync: moderator.accessSync,
+    });
+    expect(result.output.status).toBe('rejected');
   });
 
   test('rejects extra Genesis tools and an invalid agent.create mapping', async () => {

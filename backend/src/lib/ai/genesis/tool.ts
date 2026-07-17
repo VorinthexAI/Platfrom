@@ -1,9 +1,24 @@
 import { z } from 'zod';
 import { AiError } from '@/lib/ai/shared/result';
+import { getUserOrganizationById, type UserOrganization } from '@/lib/db/user-organization.node';
+import type { ExecutionPrincipal } from '@/lib/ai/agents/access';
+import { canCreateAgent } from '@/lib/ai/agent-access/authorization';
+import { resolveEffectiveScopeRole, roleRank } from '@/lib/ai/agent-access/roles';
+import {
+  createDefaultAgentAccessSyncDataSource,
+  resolveEffectiveScopeMemberships,
+  type AgentAccessSyncDataSource,
+} from '@/lib/ai/agent-access/sync';
 import { genesisCreationManifestSchema, genesisGuardrailsSchema } from './schemas';
 import type { GenesisContext } from './context';
 import { validateGenesisManifest, type ValidateGenesisManifestOptions, type ValidatedGenesisManifest } from './validation';
-import { persistGenesisManifest, type GenesisTransactionGateway, type PersistGenesisManifestResult } from './persistence';
+import {
+  persistGenesisManifest,
+  SYSTEM_GENESIS_ACCESS_PLAN,
+  type GenesisAgentAccessPlan,
+  type GenesisTransactionGateway,
+  type PersistGenesisManifestResult,
+} from './persistence';
 
 export const CREATE_AGENT_TOOL_SLUG = 'agent.create' as const;
 export const CREATE_AGENT_ACTION_SLUG = 'agent.create' as const;
@@ -34,6 +49,10 @@ export class CreateAgentToolGuardrailError extends AiError {
 
 export interface ExecuteCreateAgentToolOptions extends ValidateGenesisManifestOptions {
   transaction?: GenesisTransactionGateway;
+  /** The principal that initiated the Genesis run — the authorization principal for the created agent. */
+  principal?: ExecutionPrincipal;
+  accessSync?: AgentAccessSyncDataSource;
+  getMembership?: (key: string) => Promise<UserOrganization | null>;
 }
 export interface ExecuteCreateAgentToolResult {
   output: CreateAgentToolOutput;
@@ -58,6 +77,49 @@ function assertExecutionGuardrails(input: z.infer<typeof createAgentToolInputSch
   }
 }
 
+/**
+ * Derives the created agent's access plan from the INITIATING HUMAN when one
+ * exists. Genesis is the executing agent, not the authorization principal:
+ * a moderator asking Genesis for an agent yields a moderator threshold —
+ * never owner, system, or Genesis's own authority. The human must also hold
+ * creation permission in the target scope, or the whole run is rejected.
+ */
+async function resolveGenesisAccessPlan(
+  context: GenesisContext,
+  options: ExecuteCreateAgentToolOptions,
+): Promise<GenesisAgentAccessPlan> {
+  const principal = options.principal;
+  if (!principal || principal.kind === 'system') return SYSTEM_GENESIS_ACCESS_PLAN;
+  const getMembership = options.getMembership ?? getUserOrganizationById;
+  const sync = options.accessSync ?? createDefaultAgentAccessSyncDataSource();
+  const membership = await getMembership(principal.userOrganizationKey);
+  if (!membership || membership.status !== 'active' || membership.organizationId !== context.organization.key) {
+    throw new CreateAgentToolGuardrailError('initiating membership has no active membership in the target organization');
+  }
+  const scopeMemberships = await resolveEffectiveScopeMemberships(context.scope, sync);
+  const creator = scopeMemberships.find((candidate) => candidate.membership.key === membership.key);
+  const effectiveRole = creator?.effectiveRole
+    ?? resolveEffectiveScopeRole({ userOrganization: membership, scopeMember: null });
+  if (!effectiveRole) {
+    throw new CreateAgentToolGuardrailError('initiating membership has no access to the target scope');
+  }
+  if (!canCreateAgent({ effectiveRole })) {
+    throw new CreateAgentToolGuardrailError(`initiating role ${effectiveRole} may not create agents`);
+  }
+  const creatorRank = roleRank[effectiveRole];
+  const inheritedMembershipKeys = scopeMemberships
+    .filter((candidate) => roleRank[candidate.effectiveRole] >= creatorRank)
+    .map((candidate) => candidate.membership.key);
+  if (!inheritedMembershipKeys.includes(membership.key)) {
+    throw new CreateAgentToolGuardrailError('initiating membership did not resolve as an eligible scope member');
+  }
+  return {
+    createdByUserOrganizationKey: membership.key,
+    minimumAccessRole: effectiveRole,
+    inheritedMembershipKeys,
+  };
+}
+
 /** Local handler for the only write capability granted to Genesis. */
 export async function executeCreateAgentTool(
   rawInput: CreateAgentToolInput,
@@ -67,6 +129,7 @@ export async function executeCreateAgentTool(
   // This parse is intentionally repeated at the local action boundary.
   const input = createAgentToolInputSchema.parse(rawInput);
   assertExecutionGuardrails(input, context);
+  const access = await resolveGenesisAccessPlan(context, options);
   const validated = await validateGenesisManifest(input.manifest, context, input.agentRunKey, options);
   if (validated.manifest.metadata.status === 'rejected') {
     return {
@@ -78,7 +141,7 @@ export async function executeCreateAgentTool(
     };
   }
 
-  const persisted = await persistGenesisManifest({ runKey: input.agentRunKey, context, validated }, options.transaction);
+  const persisted = await persistGenesisManifest({ runKey: input.agentRunKey, context, validated, access }, options.transaction);
   return {
     validated,
     persisted,

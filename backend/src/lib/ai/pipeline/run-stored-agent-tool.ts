@@ -128,6 +128,19 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
     throw error;
   }
   const eventUserId = principal.kind === 'member' ? principal.user.key : null;
+  // Snapshot of the admitting decision — stored on the run for audit accuracy.
+  const authorization = {
+    actorType: principal.kind === 'member' ? 'user' as const : 'system' as const,
+    initiatingUserKey: principal.kind === 'member' ? principal.user.key : null,
+    initiatingUserOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null,
+    organizationKey: request.organizationKey,
+    scopeKey: runtime.scope.key,
+    scopeAgentKey: principal.kind === 'member' ? principal.scopeAgentKey : null,
+    effectiveRole: principal.kind === 'member' ? principal.effectiveRole : null,
+    accessSources: principal.kind === 'member' ? principal.grantSources : ['system' as const],
+    delegatedViaAgentKey: options.principal.kind === 'member' ? options.principal.delegatedViaAgentKey ?? null : null,
+    authorizationCheckedAt: new Date().toISOString(),
+  };
   const runs = options.runs ?? getDefaultAgentRunRepository();
   const steps = options.steps ?? getDefaultAgentRunStepRepository();
   const calls = options.calls ?? getDefaultAgentRunCallRepository();
@@ -138,7 +151,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
 
   if (request.metadata.status === 'rejected') {
     const endedAtMs = Date.now();
-    const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, status: 'rejected', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
+    const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, authorization, status: 'rejected', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
     await emit('agent.started', { runKey: run.key, agentKey: runtime.agent.key, status: 'started' }, eventUserId);
     await emit('agent.failed', { runKey: run.key, agentKey: runtime.agent.key, status: 'rejected', reason: request.metadata.reason, elapsedMs: endedAtMs - startedAtMs }, eventUserId);
     return { executed: false, run, step: null, calls: [], response: null };
@@ -169,7 +182,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   const stepSlugs = options.stepSlugs ?? [request.stepSlug];
   if (stepSlugs.length === 0 || stepSlugs.at(-1) !== request.stepSlug) throw new InvalidRunRequestError('stepSlugs must end with the executed stepSlug');
   const preparedSteps = stepSlugs.map((stepSlug) => ({ key: newId(), stepSlug }));
-  const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, status: 'accepted', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: startedAt, elapsedMs: 0 });
+  const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, authorization, status: 'accepted', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: startedAt, elapsedMs: 0 });
   await emit('agent.started', { runKey: run.key, agentKey: runtime.agent.key, status: 'started' }, eventUserId);
   for (const step of preparedSteps) await emit('step.started', { runKey: run.key, stepKey: step.key, agentKey: runtime.agent.key, status: 'started' }, eventUserId);
   try {
