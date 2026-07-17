@@ -1,4 +1,9 @@
-import { getAuthChallengeByTokenHash, insertAuthChallenge, updateAuthChallenge, type authIdentityTypeSchema } from '@/lib/db/auth-challenges.node';
+import {
+  consumeAuthChallengeByTokenHash,
+  getAuthChallengeByTokenHash,
+  insertAuthChallenge,
+  type authIdentityTypeSchema,
+} from '@/lib/db/auth-challenges.node';
 import { decryptSecret, encryptSecret, randomToken, sha256, timingSafeEqual } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
 import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
@@ -381,7 +386,8 @@ export async function consumeChallenge(tokenHash: string, kind: 'email' | 'totp'
   ) {
     return null;
   }
-  const updated = await updateAuthChallenge(challenge.key, { consumedAt: now.toISOString() });
+  const updated = await consumeAuthChallengeByTokenHash(storedTokenHash, kind, now.toISOString());
+  if (!updated) return null;
   return {
     id: updated.key,
     identityKey: updated.identityKey,
@@ -391,6 +397,16 @@ export async function consumeChallenge(tokenHash: string, kind: 'email' | 'totp'
     consumedAt: updated.consumedAt ? new Date(updated.consumedAt) : null,
     handoffTokenHash: updated.handoffTokenHash,
   };
+}
+
+/** Keeps a challenge retryable until its proof succeeds, then claims it once. */
+export async function acceptVerifiedChallenge<T>(
+  verify: () => Promise<T | null>,
+  consume: () => Promise<boolean>,
+): Promise<T | null> {
+  const verified = await verify();
+  if (verified === null) return null;
+  return await consume() ? verified : null;
 }
 
 export function buildMagicLink(tokenHash: string, flow: 'member' | 'user' = 'member') {
@@ -980,15 +996,31 @@ export async function verifySuccessiveTotpCodes(secret: string, codes: [string, 
 }
 
 export async function completeTotpSetup(challengeToken: string, codes: [string, string]) {
-  const challenge = await consumeChallenge(challengeToken, 'totp');
-  if (!challenge || challenge.identityType === 'user') return { ok: false as const, error: 'invalid challenge' };
+  const storedTokenHash = await sha256(challengeToken);
+  const challenge = await getAuthChallengeByTokenHash(storedTokenHash);
+  if (
+    !challenge ||
+    challenge.kind !== 'totp' ||
+    challenge.identityType === 'user' ||
+    challenge.consumedAt !== null ||
+    new Date(challenge.expiresAt).getTime() <= Date.now()
+  ) {
+    return { ok: false as const, error: 'invalid challenge' };
+  }
   const auth = await getLoginIdentity(challenge.identityType, challenge.identityKey);
   if (!auth?.totpSecret) return { ok: false as const, error: 'setup unavailable' };
   if (auth.isMfaEnabled) {
     return { ok: false as const, error: 'setup unavailable' };
   }
 
-  const lastTimeStep = await verifySuccessiveTotpCodes(await decryptSecret(auth.totpSecret), codes);
+  const lastTimeStep = await acceptVerifiedChallenge(
+    async () => verifySuccessiveTotpCodes(await decryptSecret(auth.totpSecret!), codes),
+    async () => Boolean(await consumeAuthChallengeByTokenHash(
+      storedTokenHash,
+      'totp',
+      new Date().toISOString(),
+    )),
+  );
   if (!lastTimeStep) return { ok: false as const, error: 'invalid totp codes' };
 
   await updateLoginIdentity(auth.type, auth.key, {
@@ -1016,21 +1048,40 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
 }
 
 export async function verifyTotpAndIssueSession(challengeToken: string, code: string) {
-  const challenge = await consumeChallenge(challengeToken, 'totp');
-  if (!challenge || challenge.identityType === 'user') return null;
+  const storedTokenHash = await sha256(challengeToken);
+  const challenge = await getAuthChallengeByTokenHash(storedTokenHash);
+  if (
+    !challenge ||
+    challenge.kind !== 'totp' ||
+    challenge.identityType === 'user' ||
+    challenge.consumedAt !== null ||
+    new Date(challenge.expiresAt).getTime() <= Date.now()
+  ) {
+    return null;
+  }
   const auth = await getLoginIdentity(challenge.identityType, challenge.identityKey);
   if (!auth?.totpSecret || !auth.isMfaEnabled) return null;
 
-  const result = await verifyTotpToken({
-    token: code,
-    secret: await decryptSecret(auth.totpSecret),
-    crypto: otpCrypto,
-    base32,
-    period: TOTP_PERIOD_SECONDS,
-    epochTolerance: TOTP_PERIOD_SECONDS,
-    afterTimeStep: auth.lastTotpTimeStep ?? undefined,
-  });
-  if (!result.valid) return null;
+  const result = await acceptVerifiedChallenge(
+    async () => {
+      const verification = await verifyTotpToken({
+        token: code,
+        secret: await decryptSecret(auth.totpSecret!),
+        crypto: otpCrypto,
+        base32,
+        period: TOTP_PERIOD_SECONDS,
+        epochTolerance: TOTP_PERIOD_SECONDS,
+        afterTimeStep: auth.lastTotpTimeStep ?? undefined,
+      });
+      return verification.valid ? verification : null;
+    },
+    async () => Boolean(await consumeAuthChallengeByTokenHash(
+      storedTokenHash,
+      'totp',
+      new Date().toISOString(),
+    )),
+  );
+  if (!result) return null;
 
   await updateLoginIdentity(auth.type, auth.key, {
     lastTotpTimeStep: result.timeStep,
