@@ -11,7 +11,7 @@ const now = '2026-07-16T00:00:00.000Z';
 
 function fixture() {
   const organization = organizationSchema.parse({ key: newId(), name: 'Vorinthex', createdAt: now, updatedAt: now });
-  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'platform', name: 'Platform', description: 'Platform scope', position: 2 });
+  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'platform', name: 'Platform', summary: 'Platform scope', description: 'Platform scope', position: 2 });
   const user = userSchema.parse({ key: newId(), organizationId: organization.key, email: 'member@example.com', emailHash: 'hash', createdAt: now, updatedAt: now });
   const userOrganization = userOrganizationSchema.parse({ key: newId(), organizationId: organization.key, userId: user.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: userOrganization.key, role: 'moderator' });

@@ -884,6 +884,27 @@ async function main() {
   // Production deploys run this migration rather than db:seed. Apply the
   // canonical scope seed here as well so Nexus and every direct child exist
   // with the same fixed CUID references and exact descriptions.
+  const existingScopesCursor = await targetDb.query<{
+    _key: string;
+    summary?: string;
+    description?: string;
+  }>(`
+    FOR scope IN scopes
+      RETURN {
+        _key: scope._key,
+        summary: scope.summary,
+        description: scope.description
+      }
+  `);
+  for (const scope of await existingScopesCursor.all()) {
+    const summary = scope.summary?.trim() || scope.description?.trim();
+    if (!summary) continue;
+    await targetDb.collection('scopes').update(scope._key, {
+      summary,
+      embedding: await embed({ text: buildEmbeddingText(['summary'], { summary })! }),
+    });
+  }
+
   const actualScopeKeys = new Map<string, string>();
   for (const seed of SEEDED_SCOPES) {
     const existingCursor = await targetDb.query<{ _key: string }>(
@@ -897,10 +918,11 @@ async function main() {
     );
     const existing = await existingCursor.next();
     const scopeKey = existing?._key ?? seed.key;
-    const embedding = await embed({ text: buildEmbeddingText(['name', 'slug', 'description'], seed)! });
+    const embedding = await embed({ text: buildEmbeddingText(['summary'], seed)! });
     if (existing) {
       await targetDb.collection('scopes').update(scopeKey, {
         name: seed.name,
+        summary: seed.summary,
         description: seed.description,
         position: seed.position,
         embedding,
@@ -911,6 +933,7 @@ async function main() {
         organizationKey: rootOrganizationId,
         slug: seed.slug,
         name: seed.name,
+        summary: seed.summary,
         description: seed.description,
         position: seed.position,
         embedding,
@@ -1727,6 +1750,51 @@ async function main() {
     `);
     console.log('Copied user_organization -> userOrganizations');
   }
+
+  // Normalize the public founder aliases and guarantee that every active
+  // root-organization member can enter Nexus. Owners already inherit all
+  // scopes, but an explicit Nexus membership gives non-owner founders the
+  // same reliable starting point and keeps access independent of UI logic.
+  await targetDb.query(`
+    FOR membership IN userOrganizations
+      FILTER membership.organizationId == @rootOrganizationId
+      FILTER !HAS(membership, "status") || membership.status == "active"
+      FOR user IN users
+        FILTER user._key == membership.userId
+        LET email = LOWER(user.email)
+        LET founderAlias =
+          email == "oscar@vorinthex.com" ? "Atlas" :
+          email == "josef@vorinthex.com" ? "Orbit" :
+          email == "frank@vorinthex.com" ? "Mercury" :
+          email == "vincent@vorinthex.com" ? "Iris" :
+          email == "anton@vorinthex.com" ? "Apollo" : null
+        FILTER founderAlias != null
+        UPDATE user WITH { alias: founderAlias, updatedAt: DATE_ISO8601(DATE_NOW()) } IN users
+  `, { rootOrganizationId });
+
+  const rootMembershipCursor = await targetDb.query<{ key: string; orgRole: string }>(`
+    FOR membership IN userOrganizations
+      FILTER membership.organizationId == @rootOrganizationId
+      FILTER !HAS(membership, "status") || membership.status == "active"
+      RETURN { key: membership._key, orgRole: membership.orgRole }
+  `, { rootOrganizationId });
+  for (const membership of await rootMembershipCursor.all()) {
+    const existingCursor = await targetDb.query<{ key: string }>(`
+      FOR scopeMember IN scopeMembers
+        FILTER scopeMember.scopeKey == @scopeKey
+        FILTER scopeMember.userOrganizationKey == @membershipKey
+        LIMIT 1
+        RETURN { key: scopeMember._key }
+    `, { scopeKey: nexusScopeId, membershipKey: membership.key });
+    if (await existingCursor.next()) continue;
+    await targetDb.collection('scopeMembers').save({
+      _key: newId(),
+      scopeKey: nexusScopeId,
+      userOrganizationKey: membership.key,
+      role: membership.orgRole === 'owner' || membership.orgRole === 'admin' ? membership.orgRole : 'viewer',
+    });
+  }
+  console.log('Normalized founder aliases and Nexus access');
 
   // The platforms collection is fully copied into organizations (same keys)
   // and nothing references it anymore — retire it. Teams follow the same

@@ -103,6 +103,7 @@ describe('scope schemas', () => {
       organizationKey: newId(),
       slug: 'core',
       name: 'Core',
+      summary: 'Conversational intelligence.',
       description: 'The conversational intelligence scope.',
       position: 2,
     });
@@ -111,11 +112,13 @@ describe('scope schemas', () => {
       organizationKey: scope.organizationKey,
       slug: 'core',
       name: 'Core',
+      summary: 'Conversational intelligence.',
       description: 'The conversational intelligence scope.',
       position: 2,
       embedding: [],
     });
-    expect(scopesEmbedKeys.options).toEqual(['name', 'slug', 'description']);
+    expect(scopesEmbedKeys.options).toEqual(['summary']);
+    expect(scopeSchema.parse({ ...scope, description: 'x'.repeat(10_000) }).description).toHaveLength(10_000);
     expect(() => scopeSchema.parse({ ...scope, slug: 'Not Valid' })).toThrow();
     expect(scopeSchema.parse({ ...scope, organizationKey: 'legacy-root-key' }).organizationKey).toBe('legacy-root-key');
   });
@@ -134,10 +137,11 @@ describe('scope schemas', () => {
 
 describe('scope repository', () => {
   const organizationKey = newId();
-  const input = (overrides: Partial<{ organizationKey: string; slug: string; name: string; description: string; position: number }> = {}) => ({
+  const input = (overrides: Partial<{ organizationKey: string; slug: string; name: string; summary: string; description: string; position: number }> = {}) => ({
     organizationKey,
     slug: 'core',
     name: 'Core',
+    summary: 'Conversational intelligence.',
     description: 'The conversational intelligence scope.',
     position: 2,
     ...overrides,
@@ -150,6 +154,9 @@ describe('scope repository', () => {
     expect(core.embedding).toHaveLength(1536);
     const updated = await repository.updateScope(core.key, { name: 'Core Intelligence', description: 'Updated scope description.' });
     expect(updated).toMatchObject({ key: core.key, name: 'Core Intelligence', description: 'Updated scope description.' });
+    expect(updated.embedding).toEqual(core.embedding);
+    const resummarized = await repository.updateScope(core.key, { summary: 'A new semantic summary.' });
+    expect(resummarized.embedding).not.toEqual(core.embedding);
     await repository.createScope(input({ slug: 'command', name: 'Command' }));
     await repository.createScope(input({ organizationKey: newId() }));
     stores.get(SCOPES_COLLECTION)?.set('legacy_scope', {
@@ -163,7 +170,7 @@ describe('scope repository', () => {
     });
 
     expect((await repository.listScopes(organizationKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
-    expect(await repository.getScopeByKey(core.key)).toEqual(updated);
+    expect(await repository.getScopeByKey(core.key)).toEqual(resummarized);
     await expect(repository.createScope(input())).rejects.toBeInstanceOf(DuplicateScopeSlugError);
   });
 

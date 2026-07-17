@@ -99,7 +99,7 @@ function catalogResolverRegistry(organizationKey: string, scopes: readonly Scope
     const byKey = new Map(searchable.map((document) => [document.key, document]));
     return { async get(key: string) { return byKey.get(key) ?? null; }, async list() { return searchable; } };
   };
-  registry.register(createNodeResolver({ nodeType: 'scope', embeddingFields: scopesEmbedKeys.options, data: source(scopes.map((scope) => ({ ...scope, scopeKey: scope.key }))), titleField: 'name', summaryFields: scopesEmbedKeys.options, canAccess: () => true }));
+  registry.register(createNodeResolver({ nodeType: 'scope', embeddingFields: scopesEmbedKeys.options, data: source(scopes.map((scope) => ({ ...scope, scopeKey: scope.key }))), titleField: 'summary', summaryFields: scopesEmbedKeys.options, canAccess: () => true }));
   registry.register(createNodeResolver({ nodeType: 'agent', embeddingFields: agentsEmbedKeys.options, data: source(agents.map((agent) => ({ ...agent, organizationKey }))), titleField: 'name', summaryFields: agentsEmbedKeys.options, canAccess: () => true }));
   registry.register(createNodeResolver({ nodeType: 'skill', embeddingFields: skillsEmbedKeys.options, data: source(skills.map((skill) => ({ ...skill, organizationKey, scopeKey: null }))), titleField: 'title', summaryFields: skillsEmbedKeys.options, canAccess: () => true }));
   registry.register(createNodeResolver({ nodeType: 'tool', embeddingFields: toolsEmbedKeys.options, data: source(tools.map((tool) => ({ ...tool, organizationKey }))), titleField: 'name', summaryFields: toolsEmbedKeys.options, canAccess: () => true }));

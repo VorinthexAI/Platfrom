@@ -425,7 +425,24 @@ export const SEEDED_SCOPES = [
     key: NEXUS_SCOPE_KEY,
     slug: 'nexus',
     name: 'Nexus',
-    description: 'The complete Vorinthex ecosystem, connecting every product, capability, workspace, and intelligence into one unified AI platform.',
+    summary: 'Vorinthex is building an AI-native platform that empowers people and organizations to think, create, automate, and collaborate with intelligent systems, transforming AI from isolated tools into a trusted foundation for future work.',
+    description: `Vorinthex is an AI-native technology company building the foundation for the next generation of intelligent work. Our mission is to help individuals, teams, and organizations seamlessly integrate artificial intelligence into their everyday operations, enabling them to work smarter, move faster, and make better decisions in an increasingly complex world.
+
+We believe that AI represents a technological shift comparable to the arrival of the internet, cloud computing, and smartphones. Over the coming decade, every organization will need to become AI-native, embedding intelligence into its workflows, processes, and decision-making rather than treating AI as a standalone tool. Businesses that successfully embrace this transition will gain significant advantages in productivity, innovation, and adaptability, while those that do not risk falling behind.
+
+Vorinthex exists to accelerate this transformation.
+
+Rather than building isolated AI applications, we are creating a unified intelligence platform where people and artificial intelligence work together as one system. Our platform is designed to understand context, retain knowledge, support collaboration, automate repetitive work, and assist with increasingly complex tasks across every part of an organization. The goal is not simply to answer questions, but to help users think, plan, execute, and continuously improve.
+
+At the core of our philosophy is the belief that AI should augment human capability rather than replace it. The most valuable intelligence combines human judgment, creativity, and experience with the speed, scale, and analytical power of modern AI. By keeping humans in control while allowing intelligent systems to handle routine, repetitive, and data-intensive work, organizations can unlock new levels of efficiency without sacrificing oversight or accountability.
+
+As AI capabilities continue to evolve, flexibility becomes increasingly important. The technology landscape changes rapidly, with new models, providers, and innovations emerging every year. Vorinthex is therefore designed as a future-ready platform capable of adapting alongside the broader AI ecosystem, allowing organizations to benefit from new advances without constantly rebuilding their infrastructure.
+
+Trust is equally fundamental. Organizations require confidence that their AI systems operate securely, respect permissions, and protect sensitive information. Vorinthex is built with governance, transparency, and controlled access as foundational principles, ensuring that intelligent systems can operate responsibly within real organizational structures while remaining aligned with business objectives.
+
+Our long-term vision extends beyond individual productivity. We believe every organization will eventually operate with an intelligent digital layer capable of understanding its knowledge, supporting its people, coordinating work, and continuously improving how the business functions. As AI becomes an essential part of everyday work, the distinction between traditional software and intelligent systems will gradually disappear.
+
+Vorinthex is building the infrastructure for that future: a platform where intelligence becomes a natural extension of every person, every team, and every organization, helping them become truly AI-native and prepared for the next era of technology.`,
     position: 1,
     parentKey: null,
   },
@@ -433,6 +450,7 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640001qc7kazsr96k5',
     slug: 'core',
     name: 'Core',
+    summary: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
     description: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
     position: 2,
     parentKey: NEXUS_SCOPE_KEY,
@@ -441,6 +459,7 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640002qc7kfp2qelhq',
     slug: 'launch',
     name: 'Launch',
+    summary: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
     description: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
     position: 2,
     parentKey: NEXUS_SCOPE_KEY,
@@ -449,6 +468,7 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640003qc7k4n8zesyz',
     slug: 'studio',
     name: 'Studio',
+    summary: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
     description: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
     position: 2,
     parentKey: NEXUS_SCOPE_KEY,
@@ -457,6 +477,7 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640004qc7kdvj99uva',
     slug: 'command',
     name: 'Command',
+    summary: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
     description: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
     position: 2,
     parentKey: NEXUS_SCOPE_KEY,
@@ -465,6 +486,7 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640005qc7kefvra0bn',
     slug: 'head-quarters',
     name: 'Head Quarters',
+    summary: 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
     description: 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
     position: 2,
     parentKey: NEXUS_SCOPE_KEY,
@@ -473,6 +495,7 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640006qc7kfjl23jc3',
     slug: 'replica',
     name: 'Replica',
+    summary: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
     description: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
     position: 2,
     parentKey: NEXUS_SCOPE_KEY,
@@ -481,6 +504,7 @@ export const SEEDED_SCOPES = [
     key: 'cmrnlzf640007qc7kd6a2g0o8',
     slug: 'pilot',
     name: 'Pilot',
+    summary: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
     description: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
     position: 2,
     parentKey: NEXUS_SCOPE_KEY,
@@ -828,8 +852,8 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   for (const seed of SEEDED_SCOPES) {
     let existing = scopesBySlug.get(seed.slug);
     if (existing) {
-      if (existing.name !== seed.name || existing.description !== seed.description || existing.position !== seed.position) {
-        existing = await scopes.updateScope(existing.key, { name: seed.name, description: seed.description, position: seed.position });
+      if (existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position) {
+        existing = await scopes.updateScope(existing.key, { name: seed.name, summary: seed.summary, description: seed.description, position: seed.position });
         scopesBySlug.set(existing.slug, existing);
         const index = organizationScopes.findIndex((scope) => scope.key === existing!.key);
         if (index >= 0) organizationScopes[index] = existing;
@@ -843,6 +867,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
       organizationKey: rootOrganization.key,
       slug: seed.slug,
       name: seed.name,
+      summary: seed.summary,
       description: seed.description,
       position: seed.position,
     });
@@ -877,8 +902,8 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
 
   let genesisScope = organizationScopes.find((scope) => scope.slug === GENESIS_SCOPE_SLUG);
   if (!genesisScope) {
-    genesisScope = await scopes.createScope({ organizationKey: rootOrganization.key, slug: GENESIS_SCOPE_SLUG, name: 'Agent Builder', description: 'Scope for Genesis and the creation of validated Vorinthex agents.', position: 2 });
-    const rootScope = organizationScopes.find((scope) => scope.slug === 'vorinthex-ai');
+    genesisScope = await scopes.createScope({ organizationKey: rootOrganization.key, slug: GENESIS_SCOPE_SLUG, name: 'Agent Builder', summary: 'Genesis creates validated Vorinthex agents from governed manifests.', description: 'Scope for Genesis and the creation of validated Vorinthex agents.', position: 2 });
+    const rootScope = organizationScopes.find((scope) => scope.slug === 'nexus');
     if (rootScope) {
       await scopes.addScopeRelation(rootScope.key, genesisScope.key);
     }

@@ -17,7 +17,7 @@ import { createNodeResolver, NodeResolverRegistry, ReverseContextCompiler, type 
 
 const keys = { organization: newId(), scope: newId(), agent: newId(), backend: newId(), devops: newId(), tool: newId(), action: newId(), backendLink: newId(), devopsLink: newId(), agentTool: newId(), toolAction: newId() };
 const agent = agentSchema.parse({ key: keys.agent, slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: keys.scope });
-const scope = scopeSchema.parse({ key: keys.scope, organizationKey: keys.organization, slug: 'platform', name: 'Platform', description: 'Backend platform workspace.', position: 2 });
+const scope = scopeSchema.parse({ key: keys.scope, organizationKey: keys.organization, slug: 'platform', name: 'Platform', summary: 'Backend platform workspace.', description: 'Backend platform workspace.', position: 2 });
 const organization = organizationSchema.parse({ key: keys.organization, name: 'Vorinthex', createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' });
 const backend = skillSchema.parse({ key: keys.backend, slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend services.' });
 const devops = skillSchema.parse({ key: keys.devops, slug: 'devops-engineer', name: 'DevOps', title: 'DevOps Engineer', definition: 'Operate reliable infrastructure.' });

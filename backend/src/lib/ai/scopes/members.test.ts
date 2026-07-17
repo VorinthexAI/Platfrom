@@ -141,6 +141,7 @@ describe('scope member repository', () => {
       organizationKey,
       slug: 'command',
       name: 'Command',
+      summary: 'Command scope.',
       description: 'Command scope.',
       position: 2,
       embedding: [],

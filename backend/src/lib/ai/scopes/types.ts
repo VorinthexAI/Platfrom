@@ -6,13 +6,14 @@ export interface CreateScopeInput {
   organizationKey: string;
   slug: string;
   name: string;
+  summary: string;
   description: string;
   position: number;
 }
 
 export interface ScopeRepository {
   createScope(input: CreateScopeInput): Promise<Scope>;
-  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'name' | 'description' | 'position'>>): Promise<Scope>;
+  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'name' | 'summary' | 'description' | 'position'>>): Promise<Scope>;
   getScopeByKey(scopeKey: string): Promise<Scope | null>;
   listScopes(organizationKey: string): Promise<readonly Scope[]>;
   removeScope(scopeKey: string): Promise<void>;

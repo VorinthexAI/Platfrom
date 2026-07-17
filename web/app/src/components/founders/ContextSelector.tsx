@@ -35,7 +35,7 @@ interface ContextSelectorProps {
 export function ContextSelector({ label, placeholder, value, options, onChange, disabled }: ContextSelectorProps) {
   return (
     <label className="block">
-      <span className="micro-label block text-silver-500">{label}</span>
+      <span className="block text-xs text-silver-500">{label}</span>
       <Select value={value ?? undefined} onValueChange={onChange} disabled={disabled || options.length === 0}>
         <SelectTrigger
           aria-label={label}

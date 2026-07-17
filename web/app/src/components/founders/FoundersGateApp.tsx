@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { CloseIcon, MenuIcon } from "@vorinthex/shared/ui/icons";
 import {
   FoundersRequestError,
@@ -31,7 +30,6 @@ type GateState = "checking" | "ready" | "error";
  * enforces every access rule; this guard is presentation only.
  */
 export function FoundersGateApp() {
-  const router = useRouter();
   const [gate, setGate] = useState<GateState>("checking");
   const [account, setAccount] = useState<FoundersAccount | null>(null);
   const [organizations, setOrganizations] = useState<AccessibleOrganizationOption[]>([]);
@@ -88,7 +86,7 @@ export function FoundersGateApp() {
         if (cancelled) return;
         if (error instanceof FoundersRequestError && (error.status === 401 || error.status === 403)) {
           // Not an authenticated root member — back to the gate itself.
-          router.replace("/nexus");
+          window.location.replace("/nexus");
           return;
         }
         setGate("error");
@@ -97,7 +95,7 @@ export function FoundersGateApp() {
     return () => {
       cancelled = true;
     };
-  }, [router, loadScopes]);
+  }, [loadScopes]);
 
   const changeOrganization = useCallback((nextKey: string) => {
     cancelBeacon();
@@ -125,13 +123,6 @@ export function FoundersGateApp() {
     hint: organization.alias,
   })), [organizations]);
 
-  const disabledReason = organizations.length === 0
-    ? "No accessible organizations."
-    : !scopesLoading && scopes.length === 0
-      ? "No accessible scopes in this organization."
-      : scopesLoading
-        ? "Loading scopes…"
-        : null;
   const beaconDisabled = !organizationKey || !scopeKey;
 
   const submit = useCallback((message: string) => {
@@ -145,7 +136,7 @@ export function FoundersGateApp() {
         <FoundersBackdrop />
         <div className="relative z-10 flex min-h-svh items-center justify-center">
           <p aria-live="polite" className="micro-label text-silver-300">
-            {gate === "checking" ? "Verifying access…" : "Founders Gate could not load. Refresh to retry."}
+            {gate === "checking" ? "Verifying access…" : "Nexus could not load. Refresh to retry."}
           </p>
         </div>
       </main>
@@ -157,14 +148,14 @@ export function FoundersGateApp() {
       <div className="space-y-5">
         <ContextSelector
           label="Organization"
-          placeholder={organizations.length === 0 ? "No accessible organizations." : "Select organization"}
+          placeholder="Select organization"
           value={organizationKey}
           options={organizationOptions}
           onChange={changeOrganization}
         />
         <ContextSelector
           label="Scope"
-          placeholder={scopesLoading ? "Loading scopes…" : scopes.length === 0 ? "No accessible scopes in this organization." : "Select scope"}
+          placeholder={scopesLoading ? "Loading scopes…" : "Select scope"}
           value={scopeKey}
           options={scopeOptions}
           onChange={changeScope}
@@ -208,10 +199,10 @@ export function FoundersGateApp() {
               className="founders-surface min-w-0 flex-1 rounded-xl px-4 py-2 text-left"
             >
               <span className="block truncate text-xs text-silver-100">
-                {organizations.find((organization) => organization.key === organizationKey)?.name ?? "No organization"}
+                {organizations.find((organization) => organization.key === organizationKey)?.name ?? ""}
               </span>
               <span className="block truncate font-mono text-[0.58rem] tracking-[0.18em] text-silver-500 uppercase">
-                {scopes.find((scope) => scope.key === scopeKey)?.name ?? "No scope"}
+                {scopes.find((scope) => scope.key === scopeKey)?.name ?? ""}
               </span>
             </button>
           </div>
@@ -228,7 +219,7 @@ export function FoundersGateApp() {
                 </article>
               ) : (
                 <div className="flex min-h-[40svh] flex-col items-center justify-center text-center">
-                  <h1 className="font-display text-2xl tracking-[0.12em] text-silver-50">Ask Beacon</h1>
+                  <h1 className="font-display text-2xl tracking-[0.12em] text-silver-50">Beacon</h1>
                   <p className="mt-3 text-sm text-silver-300">Your gateway to the right intelligence.</p>
                 </div>
               )}
@@ -242,7 +233,6 @@ export function FoundersGateApp() {
                 status={beacon.status}
                 error={beacon.error}
                 disabled={beaconDisabled}
-                disabledReason={disabledReason}
                 onSubmit={submit}
                 onCancel={cancelBeacon}
               />

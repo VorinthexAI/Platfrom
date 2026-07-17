@@ -90,7 +90,7 @@ describe('reverse context compiler', () => {
   test('requires the persisted artifact.read tool/action grant at the callable boundary', async () => {
     const f = setup(); const now = '2026-07-16T00:00:00.000Z';
     const organization = organizationSchema.parse({ key: f.organizationKey, name: 'Vorinthex', createdAt: now, updatedAt: now });
-    const scope = scopeSchema.parse({ key: f.scopeKey, organizationKey: f.organizationKey, slug: 'platform', name: 'Platform', description: 'Platform scope', position: 2 });
+    const scope = scopeSchema.parse({ key: f.scopeKey, organizationKey: f.organizationKey, slug: 'platform', name: 'Platform', summary: 'Platform scope', description: 'Platform scope', position: 2 });
     const agent = agentSchema.parse({ key: f.agentKey, slug: 'reader', name: 'Reader', title: 'Researcher', scopeKey: f.scopeKey });
     const skill = skillSchema.parse({ key: newId(), slug: 'researcher', name: 'Research', title: 'Researcher', definition: 'Read sources.' });
     const tool = toolSchema.parse({ key: newId(), slug: 'artifact.read', name: 'Read Artifact', description: 'Read authorized artifacts.' });

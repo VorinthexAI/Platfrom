@@ -55,10 +55,10 @@ function fixture() {
   const founderRootMembership = userOrganizationSchema.parse({ key: newId(), organizationId: rootOrganization.key, userId: founder.key, orgRole: 'owner', orgTitle: 'CEO', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const outsiderMembership = userOrganizationSchema.parse({ key: newId(), organizationId: otherOrganization.key, userId: outsider.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
 
-  const nexus = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'nexus', name: 'Nexus', description: 'Root scope', position: 1 });
-  const core = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'core', name: 'Core', description: 'Core scope', position: 2 });
-  const launch = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'launch', name: 'Launch', description: 'Launch scope', position: 3 });
-  const foreignScope = scopeSchema.parse({ key: newId(), organizationKey: otherOrganization.key, slug: 'ops', name: 'Ops', description: 'Foreign scope', position: 1 });
+  const nexus = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'nexus', name: 'Nexus', summary: 'Root scope', description: 'Root scope', position: 1 });
+  const core = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'core', name: 'Core', summary: 'Core scope', description: 'Core scope', position: 2 });
+  const launch = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'launch', name: 'Launch', summary: 'Launch scope', description: 'Launch scope', position: 3 });
+  const foreignScope = scopeSchema.parse({ key: newId(), organizationKey: otherOrganization.key, slug: 'ops', name: 'Ops', summary: 'Foreign scope', description: 'Foreign scope', position: 1 });
   const relations = [
     scopeScopeSchema.parse({ key: newId(), parentKey: nexus.key, childKey: core.key }),
     scopeScopeSchema.parse({ key: newId(), parentKey: nexus.key, childKey: launch.key }),
