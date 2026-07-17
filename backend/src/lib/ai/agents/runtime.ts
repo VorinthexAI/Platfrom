@@ -8,7 +8,6 @@ import { getSkillById, type Skill } from '@/lib/db/skills.node';
 import { listToolActionsByToolKey, type ToolAction } from '@/lib/db/tool-actions.node';
 import { getToolById, type Tool } from '@/lib/db/tools.node';
 import { getOrganizationById, type Organization } from '@/lib/db/organizations.node';
-import { getScopeAgentByAgentKey, type ScopeAgent } from '@/lib/db/scope-agents.node';
 import { assertToolAllowedByGuardrails, type Guardrail } from '@/lib/ai/guardrails';
 import { getDefaultRuntimeVariableRepository, type RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
 import { getDefaultAgentMemoryRepository, type AgentMemory, type AgentMemoryRepository } from '@/lib/ai/agent-memories';
@@ -42,7 +41,6 @@ export interface AgentRuntimeContext {
 }
 export interface AgentRuntimeDataSource {
   getAgent(key: string): Promise<Agent | null>;
-  getScopeAgent(agentKey: string): Promise<ScopeAgent | null>;
   getScope(key: string): Promise<Scope | null>;
   getOrganization(key: string): Promise<Organization | null>;
   listAgentSkills(agentKey: string): Promise<AgentSkill[]>;
@@ -54,7 +52,6 @@ export interface AgentRuntimeDataSource {
 }
 const defaultDataSource: AgentRuntimeDataSource = {
   getAgent: getAgentById,
-  getScopeAgent: getScopeAgentByAgentKey,
   getScope: (key) => getDefaultScopeRepository().getScopeByKey(key),
   getOrganization: getOrganizationById,
   listAgentSkills: listAgentSkillsByAgentKey,
@@ -74,10 +71,10 @@ export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDat
   const validAgentKey = agentSchema.shape.key.parse(agentKey);
   const agent = await source.getAgent(validAgentKey);
   if (!agent) throw new AgentRuntimeNotFoundError('Agent', validAgentKey);
-  const scopeAgent = await source.getScopeAgent(agent.key);
-  if (!scopeAgent) throw new AgentRuntimeNotFoundError('ScopeAgent', agent.key);
-  const scope = await source.getScope(scopeAgent.scopeKey);
-  if (!scope) throw new AgentRuntimeNotFoundError('Scope', scopeAgent.scopeKey);
+  // The agent registry record itself declares the home scope. Agents are
+  // never assigned to scopes through a linking collection.
+  const scope = await source.getScope(agent.scopeKey);
+  if (!scope) throw new AgentRuntimeNotFoundError('Scope', agent.scopeKey);
   const organization = await source.getOrganization(scope.organizationKey);
   if (!organization) throw new AgentRuntimeNotFoundError('Organization', scope.organizationKey);
 

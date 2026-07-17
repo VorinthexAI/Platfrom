@@ -4,7 +4,6 @@ import { agentSchema } from '@/lib/db/agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { agentToolSchema } from '@/lib/db/agent-tools.node';
-import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { toolSchema } from '@/lib/db/tools.node';
 import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { actionSchema } from '@/lib/db/actions.node';
@@ -40,7 +39,6 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const userOrganization = userOrganizationSchema.parse({ key: newId(), organizationId: organizationKey, userId: user.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: userOrganization.key, role: 'moderator' });
   const agent = agentSchema.parse({ key: newId(), slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: scope.key });
-  const scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: scope.key, agentKey: agent.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend systems.' });
   const action = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer with metadata', handlerKey: 'core.ask', enabled: true });
   const tool = toolSchema.parse({ key: newId(), slug: 'ask.answer', name: 'Ask', description: 'Answer the user', scopeKey: null, enabled: true });
@@ -52,7 +50,7 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const modelAction = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: action.key, priority: 100, enabled: true });
   const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-nano', enabled: true });
   const runtimeData: AgentRuntimeDataSource = {
-    async getAgent(key) { return key === agent.key ? agent : null; }, async getScopeAgent(key) { return key === agent.key ? scopeAgent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
+    async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
     async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkill]; }, async getSkill(key) { return key === skill.key ? skill : null; },
     async listAgentTools() { return [agentTool]; }, async getTool(key) { return key === tool.key ? tool : null; },

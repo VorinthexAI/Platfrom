@@ -8,7 +8,6 @@ import { getSkillBySlug, insertSkill, updateSkill, type Skill } from '@/lib/db/s
 import { getAgentBySlug, insertAgent, updateAgent, type Agent } from '@/lib/db/agents.node';
 import { getAgentSkillByPair, insertAgentSkill, updateAgentSkillPriority, type AgentSkill } from '@/lib/db/agent-skills.node';
 import { getAgentToolByPair, insertAgentTool, type AgentTool } from '@/lib/db/agent-tools.node';
-import { getScopeAgentByAgentKey, insertScopeAgent, updateScopeAgent, type ScopeAgent } from '@/lib/db/scope-agents.node';
 import { loadAgentRuntime } from '@/lib/ai/agents';
 import { cuidSchema } from '@/lib/ai/genesis/schemas';
 
@@ -43,7 +42,6 @@ export interface SeedBeaconResult {
   scope: Scope;
   skill: Skill;
   agent: Agent;
-  scopeAgent: ScopeAgent;
   agentSkill: AgentSkill;
   agentTools: AgentTool[];
   tools: Tool[];
@@ -89,11 +87,6 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
     ? await updateAgent(existingAgent.key, { name: BEACON_AGENT_NAME, title: BEACON_AGENT_TITLE, scopeKey: scope.key, explorationRate: 0.2 })
     : await insertAgent({ key: BEACON_AGENT_KEY, slug: BEACON_AGENT_SLUG, name: BEACON_AGENT_NAME, title: BEACON_AGENT_TITLE, scopeKey: scope.key, explorationRate: 0.2 });
 
-  const existingScopeAgent = await getScopeAgentByAgentKey(agent.key);
-  const scopeAgent = existingScopeAgent
-    ? (existingScopeAgent.scopeKey === scope.key ? existingScopeAgent : await updateScopeAgent(existingScopeAgent.key, { scopeKey: scope.key }))
-    : await insertScopeAgent({ agentKey: agent.key, scopeKey: scope.key });
-
   const existingAgentSkill = await getAgentSkillByPair(agent.key, skill.key);
   const agentSkill = existingAgentSkill
     ? (existingAgentSkill.priority === 100 ? existingAgentSkill : await updateAgentSkillPriority(existingAgentSkill.key, 100))
@@ -112,5 +105,5 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
     throw new BeaconSeedPrerequisiteError('Beacon must expose ask.answer mapped to core.ask');
   }
 
-  return { organizationKey: validOrganizationKey, scope, skill, agent, scopeAgent, agentSkill, agentTools, tools };
+  return { organizationKey: validOrganizationKey, scope, skill, agent, agentSkill, agentTools, tools };
 }

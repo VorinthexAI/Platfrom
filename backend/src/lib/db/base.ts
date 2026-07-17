@@ -207,15 +207,20 @@ export function createEdgeHelpers<
   type T = z.infer<Schema>;
   assertNodeSchemaShape(schema, embedKeys, false);
   const collection = () => db.collection(collectionName);
+  // Relations may omit the embedding field entirely; a strict schema without
+  // it must never have one injected (parse would reject the unknown key).
+  const hasEmbeddingField = Object.keys(unwrapObjectSchema(schema).shape).includes('embedding');
 
   return {
     collectionName,
     schema,
     embedKeys,
     async insert(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
-      const doc = schema.parse({ ...input, embedding: [] });
-      const embedding = await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>);
-      const result = await collection().save(toArangoDoc({ ...doc, embedding } as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
+      const doc = schema.parse(hasEmbeddingField ? { ...input, embedding: [] } : input);
+      const saved = hasEmbeddingField
+        ? { ...doc, embedding: await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>) }
+        : doc;
+      const result = await collection().save(toArangoDoc(saved as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     async getById(id: string): Promise<T | null> {

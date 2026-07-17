@@ -10,7 +10,6 @@ import { searchableNodeSchema, type KnowledgeBlock } from './schema';
 import { organizationSchema } from '@/lib/db/organizations.node';
 import { scopeSchema } from '@/lib/ai/scopes';
 import { agentSchema } from '@/lib/db/agents.node';
-import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { toolSchema } from '@/lib/db/tools.node';
@@ -97,7 +96,7 @@ describe('reverse context compiler', () => {
     const tool = toolSchema.parse({ key: newId(), slug: 'artifact.read', name: 'Read Artifact', description: 'Read authorized artifacts.' });
     const action = actionSchema.parse({ key: newId(), slug: 'artifact.read', name: 'Read Artifact', description: 'Read one artifact.', objective: 'Read safely.', inputDescription: 'Reference.', outputDescription: 'Knowledge block.', handlerKey: 'artifact.read' });
     const runtimeData = (granted: boolean): AgentRuntimeDataSource => ({
-      async getAgent(key) { return key === agent.key ? agent : null; }, async getScopeAgent(key) { return key === agent.key ? scopeAgentSchema.parse({ key: newId(), scopeKey: scope.key, agentKey: agent.key }) : null; }, async getScope(key) { return key === scope.key ? scope : null; }, async getOrganization(key) { return key === organization.key ? organization : null; },
+      async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; }, async getOrganization(key) { return key === organization.key ? organization : null; },
       async listAgentSkills() { return [agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 })]; }, async getSkill(key) { return key === skill.key ? skill : null; },
       async listAgentTools() { return granted ? [agentToolSchema.parse({ key: newId(), agentKey: agent.key, toolKey: tool.key })] : []; }, async getTool(key) { return key === tool.key ? tool : null; },
       async listToolActions() { return [toolActionSchema.parse({ key: newId(), toolKey: tool.key, actionKey: action.key, priority: 100, enabled: true })]; }, async getAction(key) { return key === action.key ? action : null; },

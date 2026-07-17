@@ -18,7 +18,6 @@ export const AGENT_ARCHITECTURE = {
     userOrganizations: 'userOrganizations',
     scopeScopes: 'scopeScopes',
     scopeMembers: 'scopeMembers',
-    scopeAgents: 'scopeAgents',
     agentSkills: 'agentSkills',
     agentTools: 'agentTools',
     toolActions: 'toolActions',

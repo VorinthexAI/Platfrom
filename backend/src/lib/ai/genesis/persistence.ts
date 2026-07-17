@@ -6,7 +6,6 @@ import { AGENTS_COLLECTION, agentSchema, type Agent } from '@/lib/db/agents.node
 import { SKILLS_COLLECTION, skillSchema, type Skill } from '@/lib/db/skills.node';
 import { AGENT_SKILLS_COLLECTION, agentSkillSchema, type AgentSkill } from '@/lib/db/agent-skills.node';
 import { AGENT_TOOLS_COLLECTION, agentToolSchema, type AgentTool } from '@/lib/db/agent-tools.node';
-import { SCOPE_AGENTS_COLLECTION, scopeAgentSchema, type ScopeAgent } from '@/lib/db/scope-agents.node';
 import { TOOLS_COLLECTION } from '@/lib/db/tools.node';
 import { ACTIONS_COLLECTION } from '@/lib/db/actions.node';
 import { TOOL_ACTIONS_COLLECTION } from '@/lib/db/tool-actions.node';
@@ -23,8 +22,11 @@ export class GenesisPersistenceError extends AiError {
   constructor(detail: string) { super('genesis_persistence_invalid', `Cannot persist Genesis manifest: ${detail}`); }
 }
 
+// Genesis writes agents into the REGISTRY only. It never assigns an agent to
+// a scope: no scope-assignment collection appears in the write boundary, so a
+// scope link cannot even be staged inside the transaction.
 export const GENESIS_TRANSACTION_COLLECTIONS = {
-  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, SCOPE_AGENTS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
+  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
   read: [ORGANIZATIONS_COLLECTION, SCOPES_COLLECTION, AGENTS_COLLECTION, SKILLS_COLLECTION, TOOLS_COLLECTION, ACTIONS_COLLECTION, TOOL_ACTIONS_COLLECTION, SCOPE_MEMBERS_COLLECTION, AGENT_RUN_SOURCES_COLLECTION],
 } as const;
 export type GenesisWriteCollection = typeof GENESIS_TRANSACTION_COLLECTIONS.write[number];
@@ -63,7 +65,6 @@ export interface PersistGenesisManifestInput {
 }
 export interface PersistGenesisManifestResult {
   agent: Agent;
-  scopeAgent: ScopeAgent | null;
   createdSkills: readonly Skill[];
   agentSkills: readonly AgentSkill[];
   agentTools: readonly AgentTool[];
@@ -105,7 +106,6 @@ export async function persistGenesisManifest(
     }
 
     let agent: Agent;
-    let scopeAgent: ScopeAgent | null = null;
     if (manifest.agent.operation === 'reuse') {
       const existing = existingAgents.get(manifest.agent.agentKey);
       if (!existing) throw new GenesisPersistenceError(`missing reused agent ${manifest.agent.agentKey}`);
@@ -113,10 +113,9 @@ export async function persistGenesisManifest(
       await artifact('agent', agent.key, 'source', agent.key);
     } else {
       if (!plan.agentKey || !plan.agentEmbedding) throw new GenesisPersistenceError('missing new agent plan');
+      // The registry document alone declares the home scope via scopeKey.
       agent = agentSchema.parse({ key: plan.agentKey, slug: manifest.agent.slug, name: manifest.agent.name, title: manifest.agent.title, scopeKey: manifest.agent.scopeKey, explorationRate: manifest.agent.explorationRate, embedding: plan.agentEmbedding });
       await writer.save(AGENTS_COLLECTION, agent);
-      scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: manifest.agent.scopeKey, agentKey: agent.key });
-      await writer.save(SCOPE_AGENTS_COLLECTION, scopeAgent);
       await artifact('agent', agent.key, 'result', agent.key);
     }
 
@@ -152,6 +151,6 @@ export async function persistGenesisManifest(
       await artifact('agent-tool', link.key, 'result', agent.key);
     }
 
-    return { agent, scopeAgent, createdSkills: [...createdSkills.values()], agentSkills: createdAgentSkills, agentTools: createdAgentTools, artifacts };
+    return { agent, createdSkills: [...createdSkills.values()], agentSkills: createdAgentSkills, agentTools: createdAgentTools, artifacts };
   });
 }

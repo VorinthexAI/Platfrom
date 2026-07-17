@@ -4,7 +4,6 @@ import { actionSchema } from '@/lib/db/actions.node';
 import { agentSchema } from '@/lib/db/agents.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { agentToolSchema } from '@/lib/db/agent-tools.node';
-import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { toolSchema } from '@/lib/db/tools.node';
@@ -18,7 +17,6 @@ import { createNodeResolver, NodeResolverRegistry, ReverseContextCompiler, type 
 
 const keys = { organization: newId(), scope: newId(), agent: newId(), backend: newId(), devops: newId(), tool: newId(), action: newId(), backendLink: newId(), devopsLink: newId(), agentTool: newId(), toolAction: newId() };
 const agent = agentSchema.parse({ key: keys.agent, slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: keys.scope });
-const scopeAgent = scopeAgentSchema.parse({ key: newId(), scopeKey: keys.scope, agentKey: keys.agent });
 const scope = scopeSchema.parse({ key: keys.scope, organizationKey: keys.organization, slug: 'platform', name: 'Platform', description: 'Backend platform workspace.', position: 2 });
 const organization = organizationSchema.parse({ key: keys.organization, name: 'Vorinthex', createdAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:00.000Z' });
 const backend = skillSchema.parse({ key: keys.backend, slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend services.' });
@@ -27,7 +25,7 @@ const tool = toolSchema.parse({ key: keys.tool, slug: 'reason.solve', name: 'Rea
 const action = actionSchema.parse({ key: keys.action, slug: 'core.reason', name: 'Reason', description: 'Reason through a problem.', objective: 'Solve it.', inputDescription: 'A problem.', outputDescription: 'A solution.', handlerKey: 'core.reason' });
 function source(): AgentRuntimeDataSource {
   return {
-    async getAgent(key) { return key === agent.key ? agent : null; }, async getScopeAgent(key) { return key === agent.key ? scopeAgent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
+    async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
     async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkillSchema.parse({ key: keys.devopsLink, agentKey: agent.key, skillKey: devops.key, priority: 90 }), agentSkillSchema.parse({ key: keys.backendLink, agentKey: agent.key, skillKey: backend.key, priority: 100 })]; },
     async getSkill(key) { return key === backend.key ? backend : key === devops.key ? devops : null; },
@@ -58,11 +56,9 @@ describe('persisted agent runtime', () => {
     expect(context.sourcePolicy).toEqual({ requestedExplorationRate: 0.5, effectiveExplorationRate: 1, sourceCount: 0 });
   });
   test('rejects agents without skills', async () => { const empty = source(); empty.listAgentSkills = async () => []; await expect(loadAgentRuntime(agent.key, empty)).rejects.toThrow('has no skills'); });
-  test('requires the persisted scopeAgents relation', async () => { const missing = source(); missing.getScopeAgent = async () => null; await expect(loadAgentRuntime(agent.key, missing)).rejects.toThrow('ScopeAgent'); });
-  test('takes the effective scope from scopeAgents rather than the legacy agent field', async () => {
-    const linked = source();
-    linked.getAgent = async () => agentSchema.parse({ ...agent, scopeKey: newId() });
-    expect((await loadAgentRuntime(agent.key, linked)).scope.key).toBe(scopeAgent.scopeKey);
+  test('requires the registry-declared home scope to exist', async () => { const missing = source(); missing.getScope = async () => null; await expect(loadAgentRuntime(agent.key, missing)).rejects.toThrow('Scope'); });
+  test('takes the effective scope from the agent registry record itself', async () => {
+    expect((await loadAgentRuntime(agent.key, source())).scope.key).toBe(agent.scopeKey);
   });
   test('rejects a granted tool scoped outside the agent scope', async () => {
     const mismatched = source();

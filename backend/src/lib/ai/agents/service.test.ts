@@ -3,7 +3,6 @@ import { newId } from '@/lib/ids';
 import { agentSchema, type Agent } from '@/lib/db/agents.node';
 import { agentSkillSchema, type AgentSkill } from '@/lib/db/agent-skills.node';
 import { agentToolSchema, type AgentTool } from '@/lib/db/agent-tools.node';
-import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { skillSchema, type Skill } from '@/lib/db/skills.node';
 import { toolSchema, type Tool } from '@/lib/db/tools.node';
 import { scopeSchema } from '@/lib/ai/scopes';
@@ -44,7 +43,6 @@ function fixture() {
       agents.set(agent.key, agent);
       return agent;
     },
-    async saveScopeAgent(input) { return scopeAgentSchema.parse({ ...input, key: newId() }); },
     async saveAgentSkill(input) {
       const link = agentSkillSchema.parse({ ...input, key: newId() });
       agentSkills.set(`${link.agentKey}:${link.skillKey}`, link);
