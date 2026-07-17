@@ -95,6 +95,27 @@ export async function getAuthChallengeByTokenHash(tokenHash: string): Promise<Au
   return doc ? parseAuthChallenge(withArangoKey(doc)) : null;
 }
 
+/** Atomically claims an unexpired challenge so concurrent requests cannot replay it. */
+export async function consumeAuthChallengeByTokenHash(
+  tokenHash: string,
+  kind: string,
+  consumedAt: string,
+): Promise<AuthChallenge | null> {
+  const cursor = await db.query(aql`
+    FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      FILTER challenge.tokenHash == ${tokenHash}
+        && challenge.kind == ${kind}
+        && (!HAS(challenge, "consumedAt") || challenge.consumedAt == null)
+        && DATE_TIMESTAMP(challenge.expiresAt) > DATE_TIMESTAMP(${consumedAt})
+      LIMIT 1
+      UPDATE challenge WITH { consumedAt: ${consumedAt} }
+        IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      RETURN NEW
+  `);
+  const doc = await cursor.next();
+  return doc ? parseAuthChallenge(withArangoKey(doc)) : null;
+}
+
 export async function getAuthChallengeByHandoffTokenHash(handoffTokenHash: string): Promise<AuthChallenge | null> {
   const cursor = await db.query(aql`
     FOR c IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { generate, generateSecret } from 'otplib';
 import {
+  acceptVerifiedChallenge,
   buildMagicLink,
   buildMfaLink,
   buildOAuthAuthorizationUrl,
@@ -134,5 +135,32 @@ describe('auth helpers', () => {
 
     expect(await verifySuccessiveTotpCodes(secret, [first, second], submittedAtEpoch)).toBeGreaterThan(0);
     expect(await verifySuccessiveTotpCodes(secret, [first, first], submittedAtEpoch)).toBeNull();
+  });
+
+  test('keeps a challenge available when its proof fails', async () => {
+    let consumeCalls = 0;
+
+    const result = await acceptVerifiedChallenge(
+      async () => null,
+      async () => {
+        consumeCalls += 1;
+        return true;
+      },
+    );
+
+    expect(result).toBeNull();
+    expect(consumeCalls).toBe(0);
+  });
+
+  test('returns a verified result only when the challenge is claimed', async () => {
+    let available = true;
+    const consume = async () => {
+      if (!available) return false;
+      available = false;
+      return true;
+    };
+
+    expect(await acceptVerifiedChallenge(async () => 42, consume)).toBe(42);
+    expect(await acceptVerifiedChallenge(async () => 42, consume)).toBeNull();
   });
 });
