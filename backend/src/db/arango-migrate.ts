@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { embed } from '../lib/embed';
+import { embed, embeddingMetadata } from '../lib/embed';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -117,12 +117,15 @@ async function backfillCollectionEmbeddings(targetDb: Database, spec: Collection
     return;
   }
 
+  const metadata = embeddingMetadata();
+
   const cursor = await targetDb.query<Record<string, unknown>>(
     `
       FOR doc IN @@collection
+        FILTER doc.embeddingProvider != @embeddingProvider || doc.embeddingModel != @embeddingModel
         RETURN doc
     `,
-    { '@collection': spec.name },
+    { '@collection': spec.name, ...metadata },
   );
   const collection = targetDb.collection(spec.name);
   const docs = await cursor.all();
@@ -131,7 +134,7 @@ async function backfillCollectionEmbeddings(targetDb: Database, spec: Collection
     if (!key) continue;
     const text = buildNodeEmbedText(spec.name, key, embedKeys, doc);
     const embedding = text ? await embed({ text }) : [];
-    await collection.update(key, { embedding });
+    await collection.update(key, { embedding, ...metadata });
   }
   if (docs.length > 0) {
     console.log(`Normalized embeddings for ${docs.length} ${spec.name} documents`);

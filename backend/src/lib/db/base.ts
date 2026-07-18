@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
-import { embed } from '@/lib/embed';
+import { embed, embeddingMetadata } from '@/lib/embed';
 
 const DEFAULT_CHUNK_SIZE = 500;
 const DEFAULT_PAGE_SIZE = 50;
@@ -153,7 +153,7 @@ export function createNodeHelpers<
     async insert(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
       const doc = schema.parse({ ...input, embedding: [] });
       const embedding = await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>);
-      const result = await collection().save(toArangoDoc({ ...doc, embedding } as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
+      const result = await collection().save(toArangoDoc({ ...doc, embedding, ...embeddingMetadata() } as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     async getById(id: string): Promise<T | null> {
@@ -178,7 +178,7 @@ export function createNodeHelpers<
         const current = withArangoKey(await collection().document(id) as Record<string, unknown>);
         const merged = { ...current, ...patch };
         const embedding = await computeEmbedding(collectionName, embedKeys, id, merged);
-        finalPatch = { ...patch, embedding };
+        finalPatch = { ...patch, embedding, ...embeddingMetadata() };
       }
       const result = await collection().update(id, finalPatch, { returnNew: true, mergeObjects: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
@@ -190,7 +190,7 @@ export function createNodeHelpers<
     async upsertByKey(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
       const doc = schema.parse({ ...input, embedding: [] });
       const embedding = await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>);
-      const result = await collection().save(toArangoDoc({ ...doc, embedding } as unknown as Record<string, unknown> & { key: string }), { returnNew: true, overwriteMode: 'replace' });
+      const result = await collection().save(toArangoDoc({ ...doc, embedding, ...embeddingMetadata() } as unknown as Record<string, unknown> & { key: string }), { returnNew: true, overwriteMode: 'replace' });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     /** Streams the entire collection in chunks of `chunkSize` (default 500) instead of loading it all into memory at once. */
@@ -218,7 +218,7 @@ export function createEdgeHelpers<
     async insert(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
       const doc = schema.parse(hasEmbeddingField ? { ...input, embedding: [] } : input);
       const saved = hasEmbeddingField
-        ? { ...doc, embedding: await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>) }
+        ? { ...doc, embedding: await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>), ...embeddingMetadata() }
         : doc;
       const result = await collection().save(toArangoDoc(saved as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
@@ -239,7 +239,7 @@ export function createEdgeHelpers<
         const current = withArangoKey(await collection().document(id) as Record<string, unknown>);
         const merged = { ...current, ...patch };
         const embedding = await computeEmbedding(collectionName, embedKeys, id, merged);
-        finalPatch = { ...patch, embedding };
+        finalPatch = { ...patch, embedding, ...embeddingMetadata() };
       }
       const result = await collection().update(id, finalPatch, { returnNew: true, mergeObjects: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
