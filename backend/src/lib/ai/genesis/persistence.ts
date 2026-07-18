@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { AiError } from '@/lib/ai/shared/result';
 import { db } from '@/lib/db/client';
 import { toArangoDoc } from '@/lib/db/base';
@@ -12,6 +13,8 @@ import { TOOL_ACTIONS_COLLECTION } from '@/lib/db/tool-actions.node';
 import { ORGANIZATIONS_COLLECTION } from '@/lib/db/organizations.node';
 import { SCOPES_COLLECTION } from '@/lib/ai/scopes';
 import { SCOPE_MEMBERS_COLLECTION } from '@/lib/ai/scopes/schema';
+import { SCOPE_AGENTS_COLLECTION, accessRoleSchema, scopeAgentSchema, type ScopeAgent } from '@/lib/db/scope-agents.node';
+import { AGENT_MEMBERS_COLLECTION, agentMemberSchema, type AgentMember } from '@/lib/db/agent-members.node';
 import { AGENT_ARTIFACTS_COLLECTION, agentArtifactSchema, type AgentArtifact } from '@/lib/ai/agent-artifacts';
 import { AGENT_ARTIFACT_CHECKS_COLLECTION } from '@/lib/ai/agent-artifact-checks';
 import { AGENT_RUN_SOURCES_COLLECTION } from '@/lib/ai/agent-run-sources';
@@ -22,11 +25,8 @@ export class GenesisPersistenceError extends AiError {
   constructor(detail: string) { super('genesis_persistence_invalid', `Cannot persist Genesis manifest: ${detail}`); }
 }
 
-// Agent definition creation and scope assignment are deliberately separate:
-// Genesis writes the registry definition; scope.agent.add creates scopeAgents
-// and inherited grants through the dedicated RBAC boundary.
 export const GENESIS_TRANSACTION_COLLECTIONS = {
-  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
+  write: [AGENTS_COLLECTION, SKILLS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION, SCOPE_AGENTS_COLLECTION, AGENT_MEMBERS_COLLECTION, AGENT_ARTIFACTS_COLLECTION, AGENT_ARTIFACT_CHECKS_COLLECTION],
   read: [ORGANIZATIONS_COLLECTION, SCOPES_COLLECTION, AGENTS_COLLECTION, SKILLS_COLLECTION, TOOLS_COLLECTION, ACTIONS_COLLECTION, TOOL_ACTIONS_COLLECTION, SCOPE_MEMBERS_COLLECTION, AGENT_RUN_SOURCES_COLLECTION],
 } as const;
 export type GenesisWriteCollection = typeof GENESIS_TRANSACTION_COLLECTIONS.write[number];
@@ -62,12 +62,21 @@ export interface PersistGenesisManifestInput {
   runKey: string;
   context: GenesisContext;
   validated: ValidatedGenesisManifest;
+  /** Trusted placement calculated from persisted RBAC state, never from the manifest. */
+  placement?: {
+    minimumAccessRole: z.infer<typeof accessRoleSchema>;
+    position: number;
+    createdByUserOrganizationKey: string | null;
+    inheritedUserOrganizationKeys: readonly string[];
+  };
 }
 export interface PersistGenesisManifestResult {
   agent: Agent;
   createdSkills: readonly Skill[];
   agentSkills: readonly AgentSkill[];
   agentTools: readonly AgentTool[];
+  scopeAgent: ScopeAgent | null;
+  agentMembers: readonly AgentMember[];
   artifacts: readonly AgentArtifact[];
 }
 
@@ -78,6 +87,7 @@ export async function persistGenesisManifest(
 ): Promise<PersistGenesisManifestResult> {
   const { manifest, plan } = input.validated;
   if (manifest.metadata.status !== 'accepted' || !manifest.validation.readyToPersist) throw new GenesisPersistenceError('manifest is not accepted and ready');
+  if (manifest.agent.operation === 'create' && !input.placement) throw new GenesisPersistenceError('new agents require a trusted initial scope placement');
   const existingAgents = new Map(input.context.knowledge.existingAgents.map((agent) => [agent.key, agent]));
   const existingSkills = new Map(input.context.knowledge.existingSkills.map((skill) => [skill.key, skill]));
   const existingTools = new Map(input.context.knowledge.existingTools.map((tool) => [tool.key, tool]));
@@ -118,6 +128,31 @@ export async function persistGenesisManifest(
       await artifact('agent', agent.key, 'result', agent.key);
     }
 
+    let scopeAgent: ScopeAgent | null = null;
+    const createdAgentMembers: AgentMember[] = [];
+    if (manifest.agent.operation === 'create' && input.placement) {
+      const timestamp = new Date().toISOString();
+      scopeAgent = scopeAgentSchema.parse({
+        key: newId(), organizationKey: input.context.organization.key, scopeKey: input.context.scope.key,
+        agentKey: agent.key, position: input.placement.position, status: 'active',
+        minimumAccessRole: input.placement.minimumAccessRole,
+        createdByUserOrganizationKey: input.placement.createdByUserOrganizationKey,
+        createdAt: timestamp, updatedAt: timestamp, embedding: [],
+      });
+      await writer.save(SCOPE_AGENTS_COLLECTION, scopeAgent);
+      await artifact('scope-agent', scopeAgent.key, 'result', agent.key);
+      for (const userOrganizationKey of [...new Set(input.placement.inheritedUserOrganizationKeys)]) {
+        const member = agentMemberSchema.parse({
+          key: newId(), organizationKey: input.context.organization.key, scopeKey: input.context.scope.key,
+          agentKey: agent.key, scopeAgentKey: scopeAgent.key, userOrganizationKey, source: 'inherited',
+          createdByUserOrganizationKey: input.placement.createdByUserOrganizationKey, createdAt: timestamp, embedding: [],
+        });
+        await writer.save(AGENT_MEMBERS_COLLECTION, member);
+        createdAgentMembers.push(member);
+        await artifact('agent-member', member.key, 'result', agent.key);
+      }
+    }
+
     const createdAgentSkills: AgentSkill[] = [];
     const createdAgentTools: AgentTool[] = [];
     const sourcedSkills = new Set<string>();
@@ -150,6 +185,6 @@ export async function persistGenesisManifest(
       await artifact('agent-tool', link.key, 'result', agent.key);
     }
 
-    return { agent, createdSkills: [...createdSkills.values()], agentSkills: createdAgentSkills, agentTools: createdAgentTools, artifacts };
+    return { agent, createdSkills: [...createdSkills.values()], agentSkills: createdAgentSkills, agentTools: createdAgentTools, scopeAgent, agentMembers: createdAgentMembers, artifacts };
   });
 }
