@@ -17,4 +17,17 @@ describe('tool handler registry', () => {
     expect(getTool('ask.answer').name).toBe('Ask');
     expect(() => getTool('nope.missing')).toThrow(UnknownToolError);
   });
+
+  test('registers the complete organization member tool surface', () => {
+    expect(TOOL_IDS.filter((id) => id.startsWith('organization.member.'))).toEqual([
+      'organization.member.list',
+      'organization.member.read',
+      'organization.member.add',
+      'organization.member.role.update',
+      'organization.member.activate',
+      'organization.member.suspend',
+      'organization.member.remove',
+    ]);
+    expect(getTool('organization.member.remove').description).toContain('immediately revoke runtime access');
+  });
 });

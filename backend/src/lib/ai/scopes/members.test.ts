@@ -75,7 +75,6 @@ function userOrganizationDoc(key: string, organizationId: string, userId: string
     orgTitle: null,
     status: 'active',
     joinedAt: '2026-07-16T00:00:00.000Z',
-    invitedByUserId: null,
     isMfaEnabled: false,
     totpSecret: null,
     lastTotpTimeStep: null,

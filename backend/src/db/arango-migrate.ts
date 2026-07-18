@@ -1042,7 +1042,6 @@ async function main() {
           orgTitle: nonEmptyString(member.title),
           status: nonEmptyString(member.status) ?? 'active',
           joinedAt: nonEmptyString(member.joinedAt) ?? nonEmptyString(member.createdAt) ?? new Date().toISOString(),
-          invitedByUserId: nonEmptyString(member.invitedByUserId),
           isMfaEnabled: member.isMfaEnabled === true,
           totpSecret: nonEmptyString(member.totpSecret),
           lastTotpTimeStep: typeof member.lastTotpTimeStep === 'number' ? member.lastTotpTimeStep : null,
@@ -1073,7 +1072,6 @@ async function main() {
           orgTitle: HAS(member, "orgTitle") ? member.orgTitle : (HAS(member, "title") ? member.title : null),
           status: HAS(member, "status") ? member.status : "active",
           joinedAt: HAS(member, "joinedAt") ? member.joinedAt : (HAS(member, "createdAt") ? member.createdAt : DATE_ISO8601(DATE_NOW())),
-          invitedByUserId: HAS(member, "invitedByUserId") ? member.invitedByUserId : null,
           isMfaEnabled: HAS(member, "isMfaEnabled") ? member.isMfaEnabled : false,
           totpSecret: HAS(member, "totpSecret") ? member.totpSecret : null,
           lastTotpTimeStep: HAS(member, "lastTotpTimeStep") ? member.lastTotpTimeStep : null,
@@ -1288,7 +1286,6 @@ async function main() {
         orgTitle: HAS(u, "organization_title") ? u.organization_title : null,
         status: "active",
         joinedAt: HAS(u, "createdAt") ? u.createdAt : DATE_ISO8601(DATE_NOW()),
-        invitedByUserId: null,
         isMfaEnabled: HAS(u, "isMfaEnabled") ? u.isMfaEnabled : false,
         totpSecret: HAS(u, "totpSecret") ? u.totpSecret : null,
         lastTotpTimeStep: HAS(u, "lastTotpTimeStep") ? u.lastTotpTimeStep : null,
@@ -1732,7 +1729,6 @@ async function main() {
           orgTitle: HAS(link, "orgTitle") ? link.orgTitle : null,
           status: HAS(link, "status") ? link.status : "active",
           joinedAt: link.joinedAt,
-          invitedByUserId: HAS(link, "invitedByUserId") ? link.invitedByUserId : null,
           isMfaEnabled: HAS(link, "isMfaEnabled") ? link.isMfaEnabled : false,
           totpSecret: HAS(link, "totpSecret") ? link.totpSecret : null,
           lastTotpTimeStep: HAS(link, "lastTotpTimeStep") ? link.lastTotpTimeStep : null,
@@ -1753,6 +1749,17 @@ async function main() {
     `);
     console.log('Copied user_organization -> userOrganizations');
   }
+
+  // Invitations are no longer part of organization membership. Strip the
+  // retired field from every live document so the production database and
+  // the Zod schema converge during the next deploy.
+  await targetDb.query(`
+    FOR membership IN userOrganizations
+      FILTER HAS(membership, "invitedByUserId")
+      UPDATE membership WITH { invitedByUserId: null }
+        IN userOrganizations
+        OPTIONS { keepNull: false }
+  `);
 
   // Normalize the public founder aliases and guarantee that every active
   // root-organization member can enter Nexus. Owners already inherit all

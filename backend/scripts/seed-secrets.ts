@@ -65,7 +65,7 @@ function resolveRefs(value: unknown, idMap: Map<string, string>): unknown {
 }
 
 function seededMembershipRole(role: unknown): UserOrganization['orgRole'] | null {
-  if (role === 'owner' || role === 'admin' || role === 'member' || role === 'viewer') return role;
+  if (role === 'owner' || role === 'admin' || role === 'moderator' || role === 'member' || role === 'viewer') return role;
   return null;
 }
 
@@ -93,7 +93,6 @@ async function syncSeededOrganizationMembership(input: {
     orgTitle: typeof input.organizationTitle === 'string' ? input.organizationTitle : existing?.orgTitle ?? null,
     status: 'active',
     joinedAt: existing?.joinedAt ?? input.now,
-    invitedByUserId: existing?.invitedByUserId ?? null,
     isMfaEnabled: existing?.isMfaEnabled ?? false,
     totpSecret: existing?.totpSecret ?? null,
     lastTotpTimeStep: existing?.lastTotpTimeStep ?? null,

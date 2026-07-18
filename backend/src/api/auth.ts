@@ -163,6 +163,7 @@ export function loginIdentityTypeForMembership(orgRole: UserOrganization['orgRol
 const membershipRoleRank: Record<UserOrganization['orgRole'], number> = {
   owner: 4,
   admin: 3,
+  moderator: 2,
   member: 2,
   viewer: 1,
 };
