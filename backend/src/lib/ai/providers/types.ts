@@ -86,6 +86,22 @@ export interface ProviderHealth {
   detail?: string;
 }
 
+export interface ProviderEmbedRequest {
+  externalModelId: string;
+  input: string | string[];
+  dimensions?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface ProviderEmbedResponse {
+  embeddings: number[][];
+  usage: TokenUsage;
+  providerId: ProviderId;
+  externalModelId: string;
+  rawResponse?: unknown;
+}
+
 /** The common contract every provider module implements. */
 export interface ProviderAdapter {
   readonly id: ProviderId;
@@ -94,6 +110,8 @@ export interface ProviderAdapter {
   execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>>;
 
   stream?<TInput>(request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk>;
+
+  embed?(request: ProviderEmbedRequest): Promise<ProviderEmbedResponse>;
 
   healthCheck?(): Promise<ProviderHealth>;
 }

@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { buildEmbeddingText, isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
-import { embed } from '@/lib/embed';
+import { embed, embeddingMetadata } from '@/lib/embed';
 import {
   SCOPE_SCOPES_COLLECTION,
   SCOPE_MEMBERS_COLLECTION,
@@ -24,7 +24,10 @@ import {
   type ScopesDatabase,
 } from './types';
 
-export function createScopeRepository(database: ScopesDatabase = db): ScopeRepository {
+export function createScopeRepository(
+  database: ScopesDatabase = db,
+  generateEmbedding: (text: string) => Promise<number[]> = async (text) => embed({ text }),
+): ScopeRepository {
   async function requireScope(scopeKey: string): Promise<Scope> {
     try {
       const doc = await database.collection(SCOPES_COLLECTION).document(scopeKey);
@@ -68,12 +71,10 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
       const parsed = scopeSchema.parse({ ...input, key: input.key ?? newId() });
       const scope = {
         ...parsed,
-        embedding: await embed({
-          text: buildEmbeddingText(scopesEmbedKeys.options, parsed)!,
-        }),
+        embedding: await generateEmbedding(buildEmbeddingText(scopesEmbedKeys.options, parsed)!),
       } satisfies Scope;
       try {
-        const result = await database.collection(SCOPES_COLLECTION).save(toArangoDoc(scope), { returnNew: true });
+        const result = await database.collection(SCOPES_COLLECTION).save(toArangoDoc({ ...scope, ...embeddingMetadata() }), { returnNew: true });
         const saved = (result as { new?: Record<string, unknown> }).new;
         return (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
       } catch (error) {
@@ -87,8 +88,8 @@ export function createScopeRepository(database: ScopesDatabase = db): ScopeRepos
     async updateScope(scopeKey, input) {
       const current = await requireScope(scopeKey);
       const parsed = scopeSchema.parse({ ...current, ...input });
-      const embedding = await embed({ text: buildEmbeddingText(scopesEmbedKeys.options, parsed)! });
-      const result = await database.collection(SCOPES_COLLECTION).update(scopeKey, { ...input, embedding }, { returnNew: true });
+      const embedding = await generateEmbedding(buildEmbeddingText(scopesEmbedKeys.options, parsed)!);
+      const result = await database.collection(SCOPES_COLLECTION).update(scopeKey, { ...input, embedding, ...embeddingMetadata() }, { returnNew: true });
       const saved = (result as { new?: Record<string, unknown> }).new;
       return saved ? scopeSchema.parse(withArangoKey(saved)) : { ...parsed, embedding };
     },

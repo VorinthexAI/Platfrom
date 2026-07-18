@@ -15,6 +15,8 @@ import {
   transcribeInputSchema,
   type ImageOutput,
   type ProviderAdapter,
+  type ProviderEmbedRequest,
+  type ProviderEmbedResponse,
   type ProviderExecuteRequest,
   type ProviderExecuteResponse,
   type ProviderFactory,
@@ -34,6 +36,35 @@ export const openAIProviderConfigSchema = z
 export type OpenAIProviderConfig = z.infer<typeof openAIProviderConfigSchema>;
 
 const PROVIDER_ID = 'openai' as const;
+
+async function createEmbeddings(client: OpenAI, request: ProviderEmbedRequest): Promise<ProviderEmbedResponse> {
+  try {
+    const raw = await client.embeddings.create(
+      {
+        model: request.externalModelId,
+        input: request.input,
+        encoding_format: 'float',
+        ...(request.dimensions ? { dimensions: request.dimensions } : {}),
+      },
+      { signal: resolveRequestSignal(request) },
+    );
+    const embeddings = [...raw.data]
+      .sort((left, right) => left.index - right.index)
+      .map((item) => item.embedding);
+    if (embeddings.length === 0) {
+      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai embeddings returned no vectors');
+    }
+    return {
+      embeddings,
+      usage: tokenUsage(raw.usage.prompt_tokens, 0, raw.usage.total_tokens),
+      providerId: PROVIDER_ID,
+      externalModelId: request.externalModelId,
+      rawResponse: raw,
+    };
+  } catch (err) {
+    throw normalizeProviderError(PROVIDER_ID, err);
+  }
+}
 
 const imageResponseSchema = z.object({
   data: z
@@ -167,6 +198,10 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
     stream(request) {
       if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
+    },
+
+    embed(request) {
+      return createEmbeddings(client, request);
     },
   };
 }

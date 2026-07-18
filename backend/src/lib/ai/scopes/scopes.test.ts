@@ -137,6 +137,11 @@ describe('scope schemas', () => {
 
 describe('scope repository', () => {
   const organizationKey = newId();
+  const generateEmbedding = async (text: string) => {
+    const vector = Array.from({ length: 1536 }, () => 0);
+    vector[0] = [...text].reduce((hash, character) => Math.imul(hash ^ character.charCodeAt(0), 16_777_619), 2_166_136_261);
+    return vector;
+  };
   const input = (overrides: Partial<{ organizationKey: string; slug: string; name: string; summary: string; description: string; position: number }> = {}) => ({
     organizationKey,
     slug: 'core',
@@ -149,7 +154,7 @@ describe('scope repository', () => {
 
   test('creates and lists scopes per organization with unique slugs', async () => {
     const { fake, stores } = createFakeDb();
-    const repository = createScopeRepository(fake);
+    const repository = createScopeRepository(fake, generateEmbedding);
     const core = await repository.createScope(input());
     expect(core.embedding).toHaveLength(1536);
     const updated = await repository.updateScope(core.key, { name: 'Core Intelligence', description: 'Updated scope description.' });
@@ -176,7 +181,7 @@ describe('scope repository', () => {
 
   test('enforces organization boundaries, strict parents, and cycles', async () => {
     const { fake } = createFakeDb();
-    const repository = createScopeRepository(fake);
+    const repository = createScopeRepository(fake, generateEmbedding);
     const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
     const core = await repository.createScope(input());
     const command = await repository.createScope(input({ slug: 'command', name: 'Command' }));
@@ -199,7 +204,7 @@ describe('scope repository', () => {
 
   test('removes relations and cascades them when a scope is deleted', async () => {
     const { fake, stores } = createFakeDb();
-    const repository = createScopeRepository(fake);
+    const repository = createScopeRepository(fake, generateEmbedding);
     const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
     const core = await repository.createScope(input());
     await repository.addScopeRelation(root.key, core.key);

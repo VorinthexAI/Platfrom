@@ -26,6 +26,8 @@ export {
   type ProviderExecuteRequest,
   type ProviderExecuteResponse,
   type ProviderStreamChunk,
+  type ProviderEmbedRequest,
+  type ProviderEmbedResponse,
   type ProviderHealth,
   type ChatInput,
   type ChatMessage,
