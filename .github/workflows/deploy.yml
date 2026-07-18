@@ -731,14 +731,18 @@ jobs:
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
           polar_access_token=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v')
           polar_server=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_SERVER")) | .v')
+          openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
           test -n "$polar_access_token" || { echo "::error::POLAR_ACCESS_TOKEN not found under $SSM_PATH"; exit 1; }
+          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; Beacon and provider-backed embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$polar_access_token"
+          echo "::add-mask::$openai_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
           echo "POLAR_ACCESS_TOKEN=$polar_access_token" >> "$GITHUB_ENV"
           echo "POLAR_SERVER=${polar_server:-production}" >> "$GITHUB_ENV"
+          echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
       - name: Apply migrations, seed nodes, and sync Polar products
         working-directory: .
         env:
@@ -747,6 +751,7 @@ jobs:
         run: |
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
+          bun run --cwd backend smoke:beacon
           bun run --cwd backend polar:sync
       - name: Close SSH ingress for this runner
         if: always()

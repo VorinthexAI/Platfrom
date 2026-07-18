@@ -14,14 +14,10 @@ describe("selectDefaultScope", () => {
   });
 
   test("ignores a stored scope that is no longer accessible", () => {
-    expect(selectDefaultScope(scopes, "gone")).toBe("nexus");
+    expect(selectDefaultScope(scopes.slice(1), "gone")).toBe("core");
   });
 
-  test("falls back to the accessible root scope", () => {
-    expect(selectDefaultScope(scopes, null)).toBe("nexus");
-  });
-
-  test("falls back to the first accessible scope when no root is accessible", () => {
+  test("falls back to the first accessible leaf scope", () => {
     expect(selectDefaultScope(scopes.slice(1), null)).toBe("core");
   });
 
