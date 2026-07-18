@@ -13,7 +13,7 @@ import { agentToolSchema } from '@/lib/db/agent-tools.node';
 import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { agentRunSchema, type AgentRun, type AgentRunRepository } from '@/lib/ai/agent-runs';
 import { agentRunStepSchema, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
-import type { GenesisCreationResult } from '@/lib/ai/genesis';
+import type { GenesisCreationResult } from '@/lib/ai/agents/genesis';
 import type { RuntimeEventInput } from '@/platform/events';
 import { BeaconDelegationError, delegateAgentCreationFromBeacon } from './delegate';
 

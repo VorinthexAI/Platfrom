@@ -9,7 +9,7 @@ import { getAgentBySlug, insertAgent, updateAgent, type Agent } from '@/lib/db/a
 import { deleteAgentSkill, getAgentSkillByPair, insertAgentSkill, listAgentSkillsByAgentKey, updateAgentSkillPriority, type AgentSkill } from '@/lib/db/agent-skills.node';
 import { deleteAgentTool, getAgentToolByPair, insertAgentTool, listAgentToolsByAgentKey, type AgentTool } from '@/lib/db/agent-tools.node';
 import { loadAgentRuntime } from '@/lib/ai/agents';
-import { cuidSchema } from '@/lib/ai/genesis/schemas';
+import { cuidSchema } from '@/lib/ai/agents/genesis/schemas';
 
 /**
  * Beacon is the canonical system agent behind Founders Gate: one immutable

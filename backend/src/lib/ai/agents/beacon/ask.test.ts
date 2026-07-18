@@ -15,7 +15,7 @@ import { agentRunSchema } from '@/lib/ai/agent-runs';
 import type { RunStoredAgentToolOptions, RunStoredAgentToolParams, StoredAgentRunResult } from '@/lib/ai/pipeline';
 import type { ProviderExecuteResponse } from '@/lib/ai/providers';
 import { tokenUsage } from '@/lib/ai/shared';
-import type { GenesisCreationResult } from '@/lib/ai/genesis';
+import type { GenesisCreationResult } from '@/lib/ai/agents/genesis';
 import {
   BEACON_NO_DELEGATE_MESSAGE,
   BEACON_DELEGATE_REGISTRY,

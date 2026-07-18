@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AiError } from '@/lib/ai/shared/result';
 import { sourceSelectionSchema } from '@/lib/ai/agent-run-sources';
 import { getAgentBySlug, loadAgentRuntime, type Agent } from '@/lib/ai/agents';
-import { createAgentFromGenesis, type ExecuteGenesisOptions } from '@/lib/ai/genesis';
+import { createAgentFromGenesis, type ExecuteGenesisOptions } from '@/lib/ai/agents/genesis';
 import { getDefaultAgentRunRepository, type AgentRunRepository } from '@/lib/ai/agent-runs';
 import { getDefaultAgentRunStepRepository, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import type { Organization } from '@/lib/db/organizations.node';
