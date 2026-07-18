@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
 
 /**
- * Every action the execution layer knows about, in `<domain>.<action>` dot
+ * Every action the execution layer knows about, in lowercase dot
  * notation. Actions describe WHAT must be done — they are provider- and
  * model-independent. This constant is the single source of truth: the
  * `ActionId` type, the zod enum, and the registry integrity checks all
@@ -14,6 +14,14 @@ export const ACTION_SLUGS = [
 
   'agent.create',
   'artifact.read',
+
+  'organization.member.list',
+  'organization.member.read',
+  'organization.member.add',
+  'organization.member.role.update',
+  'organization.member.activate',
+  'organization.member.suspend',
+  'organization.member.remove',
 
   'web.search',
   'web.deep-research',

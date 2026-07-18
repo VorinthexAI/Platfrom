@@ -27,6 +27,13 @@ export const TOOL_REGISTRY = {
   'image.create': { id: 'image.create', name: 'Create Image', description: 'Generate a new image from a text prompt.', scopeId: null },
   'audio.transcribe-file': { id: 'audio.transcribe-file', name: 'Transcribe Audio', description: 'Convert speech in an uploaded audio file into text.', scopeId: null },
   'speech.narrate': { id: 'speech.narrate', name: 'Narrate', description: 'Synthesize spoken audio from text.', scopeId: null },
+  'organization.member.list': { id: 'organization.member.list', name: 'List Organization Members', description: 'List members of the active organization with role, status, name, email, and alias filters plus pagination and sorting.', scopeId: null },
+  'organization.member.read': { id: 'organization.member.read', name: 'Read Organization Members', description: 'Resolve and read detailed member information within the active organization without guessing when identifiers are ambiguous.', scopeId: null },
+  'organization.member.add': { id: 'organization.member.add', name: 'Add Organization Member', description: 'Add an existing Vorinthex user to the active organization without sending an invitation.', scopeId: null },
+  'organization.member.role.update': { id: 'organization.member.role.update', name: 'Update Organization Member Role', description: 'Update roles for members of the active organization while enforcing role hierarchy and last-owner safeguards.', scopeId: null },
+  'organization.member.activate': { id: 'organization.member.activate', name: 'Activate Organization Member', description: 'Reactivate organization access for suspended or inactive members and resynchronize inherited agent access.', scopeId: null },
+  'organization.member.suspend': { id: 'organization.member.suspend', name: 'Suspend Organization Member', description: 'Immediately block organization, scope, agent, and delegated execution access while preserving membership relations.', scopeId: null },
+  'organization.member.remove': { id: 'organization.member.remove', name: 'Remove Organization Member', description: 'Remove members, immediately revoke runtime access, and clean related access, assignments, schedules, and sessions.', scopeId: null },
 } satisfies Record<ToolId, ToolDefinition>;
 export function getTool(toolId: string): ToolDefinition { const tool = (TOOL_REGISTRY as Record<string, ToolDefinition>)[toolId]; if (!tool) throw new UnknownToolError(toolId); return tool; }
 export function listTools() { return Object.values<ToolDefinition>(TOOL_REGISTRY); }

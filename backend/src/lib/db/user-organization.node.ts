@@ -5,8 +5,8 @@ import { createNodeHelpers, withArangoKey } from './base';
 
 export const USER_ORGANIZATION_COLLECTION = 'userOrganizations';
 
-export const userOrganizationRoleSchema = z.enum(['owner', 'admin', 'member', 'viewer']);
-export const userOrganizationStatusSchema = z.enum(['active', 'suspended']);
+export const userOrganizationRoleSchema = z.enum(['owner', 'admin', 'moderator', 'member', 'viewer']);
+export const userOrganizationStatusSchema = z.enum(['active', 'inactive', 'suspended']);
 
 export const userOrganizationSchema = z.object({
   key: z.string(),
@@ -16,7 +16,6 @@ export const userOrganizationSchema = z.object({
   orgTitle: z.string().nullable().default(null),
   status: userOrganizationStatusSchema.default('active'),
   joinedAt: z.string(),
-  invitedByUserId: z.string().nullable().default(null),
   isMfaEnabled: z.boolean().default(false),
   totpSecret: z.string().nullable().default(null),
   lastTotpTimeStep: z.number().nullable().default(null),

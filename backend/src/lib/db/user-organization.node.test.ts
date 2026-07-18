@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { userOrganizationRoleSchema, userOrganizationSchema } from './user-organization.node';
+import { userOrganizationRoleSchema, userOrganizationSchema, userOrganizationStatusSchema } from './user-organization.node';
 
 const baseLink = {
   key: 'uorg_1',
@@ -26,11 +26,16 @@ describe('user organization node schema', () => {
   });
 
   test('accepts only organization roles', () => {
-    for (const role of ['owner', 'admin', 'member', 'viewer'] as const) {
+    for (const role of ['owner', 'admin', 'moderator', 'member', 'viewer'] as const) {
       expect(userOrganizationRoleSchema.parse(role)).toBe(role);
     }
     expect(() => userOrganizationRoleSchema.parse('superAdmin')).toThrow();
     expect(() => userOrganizationSchema.parse({ ...baseLink, orgRole: 'boss' })).toThrow();
+  });
+
+  test('supports inactive memberships for explicit reactivation', () => {
+    expect(userOrganizationStatusSchema.parse('inactive')).toBe('inactive');
+    expect(userOrganizationSchema.parse({ ...baseLink, status: 'inactive' }).status).toBe('inactive');
   });
 
   test('never carries retired member or team fields', () => {
@@ -38,9 +43,11 @@ describe('user organization node schema', () => {
       ...baseLink,
       role: 'owner',
       teamId: 'team_legacy',
+      invitedByUserId: 'usr_inviter',
     });
 
     expect('role' in link).toBe(false);
     expect('teamId' in link).toBe(false);
+    expect('invitedByUserId' in link).toBe(false);
   });
 });

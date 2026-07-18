@@ -90,7 +90,6 @@ async function main() {
       orgTitle: 'Owner',
       status: 'active',
       joinedAt: existingLink?.joinedAt ?? now,
-      invitedByUserId: existingLink?.invitedByUserId ?? null,
       isMfaEnabled: existingLink?.isMfaEnabled ?? false,
       totpSecret: existingLink?.totpSecret ?? null,
       lastTotpTimeStep: existingLink?.lastTotpTimeStep ?? null,

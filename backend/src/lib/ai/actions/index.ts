@@ -17,7 +17,7 @@ export function assertActionRegistryIntegrity(): void {
   }
   for (const slug of ACTION_SLUGS) {
     if (!isValidActionIdFormat(slug)) {
-      throw new Error(`Action slug does not follow <domain>.<action> notation: ${slug}`);
+      throw new Error(`Action slug does not follow lowercase dot notation: ${slug}`);
     }
   }
 }

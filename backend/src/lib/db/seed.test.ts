@@ -208,6 +208,13 @@ describe('tool and tool-action seeds', () => {
       'ask.answer:core.ask',
       'audio.transcribe-file:audio.transcribe',
       'image.create:image.generate',
+      'organization.member.activate:organization.member.activate',
+      'organization.member.add:organization.member.add',
+      'organization.member.list:organization.member.list',
+      'organization.member.read:organization.member.read',
+      'organization.member.remove:organization.member.remove',
+      'organization.member.role.update:organization.member.role.update',
+      'organization.member.suspend:organization.member.suspend',
       'reason.solve:core.reason',
       'speech.narrate:audio.generate-speech',
     ]);
