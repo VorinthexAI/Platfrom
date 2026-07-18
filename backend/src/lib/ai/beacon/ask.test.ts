@@ -93,6 +93,52 @@ describe('Beacon delegate-only ask', () => {
     expect(events[1]).toEqual({ type: 'delta', text: 'Genesis created the requested agent architecture.' });
   });
 
+  test('forwards nested specialist tool events through the same live channel', async () => {
+    const f = fixture(); const captured: Array<{ params: RunStoredAgentToolParams; options: RunStoredAgentToolOptions }> = [];
+    const output = { metadata: { status: 'accepted', reason: 'Genesis matches request', score: 1 }, delegation: { target: 'genesis', operation: 'agent.create', request: 'Create an agent.' } };
+    const invocationKey = newId();
+    const events = await collect(streamFoundersBeaconAsk({ ...f.params, message: 'Create an agent.' }, {
+      runtimeData: f.runtimeData, getAgent: async () => f.beacon, runTool: runToolReturning(output, captured), events: async () => {},
+      delegateCreation: (async (_params: unknown, delegateOptions: RunStoredAgentToolOptions) => {
+        const identity = { invocationKey, agentKey: newId(), agentSlug: 'genesis', agentName: 'Genesis', toolKey: newId(), toolSlug: 'agent.create', toolName: 'Create agent', actionKey: newId(), actionSlug: 'agent.create', actionName: 'Create agent' };
+        await delegateOptions.events?.({ scopeId: f.scope.key, slug: 'tool.called', data: { ...identity, status: 'called' } });
+        await delegateOptions.events?.({ scopeId: f.scope.key, slug: 'tool.completed', data: { ...identity, status: 'completed', elapsedMs: 31 } });
+        return { beaconRunKey: newId(), genesisRunKey: newId(), creation: { persisted: true, toolOutput: { status: 'created' } } };
+      }) as never,
+    }));
+    const activities = events.filter((event) => event.type === 'tool').map((event) => event.activity);
+    expect(activities).toEqual([
+      expect.objectContaining({ invocationId: 'tool-1', phase: 'started', agent: { slug: 'genesis', name: 'Genesis' }, tool: { slug: 'agent.create', name: 'Create agent' } }),
+      expect.objectContaining({ invocationId: 'tool-1', phase: 'completed', elapsedMs: 31 }),
+    ]);
+  });
+
+  test('yields tool activity before the underlying execution completes', async () => {
+    const f = fixture();
+    const output = { metadata: { status: 'accepted', reason: 'No matching specialist', score: 1 }, delegation: { target: 'none', reason: 'NO_ELIGIBLE_DELEGATE' } };
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const runKey = newId(); const invocationKey = newId();
+    const runTool = (async (params: RunStoredAgentToolParams, options: RunStoredAgentToolOptions = {}) => {
+      const run = agentRunSchema.parse({ key: runKey, organizationKey: params.organizationKey, scopeKey: f.scope.key, agentKey: params.agentKey, principalType: 'member', userOrganizationKey: f.membership.key, status: 'accepted', reason: params.metadata.reason, score: 1, startedAt: now, endedAt: now, elapsedMs: 0, createdAt: now });
+      const identity = { invocationKey, runKey, agentKey: f.beacon.key, agentSlug: 'beacon', agentName: 'Beacon', toolKey: newId(), toolSlug: 'core.delegate', toolName: 'Delegate', actionKey: newId(), actionSlug: 'core.delegate', actionName: 'Delegate' };
+      await options.events?.({ scopeId: f.scope.key, slug: 'agent.started', data: { runKey, agentKey: f.beacon.key, status: 'started' } });
+      await options.events?.({ scopeId: f.scope.key, slug: 'tool.called', data: { ...identity, status: 'called' } });
+      await blocked;
+      await options.events?.({ scopeId: f.scope.key, slug: 'tool.completed', data: { ...identity, status: 'completed', elapsedMs: 17 } });
+      const response = { output, usage: tokenUsage(2, 1), providerId: 'openai', modelId: 'openai.gpt-5.4-mini', externalModelId: 'gpt-5.4-mini' } as ProviderExecuteResponse<unknown>;
+      await options.beforeFinalize?.({ run, response, agentContext: {} as never, recordArtifactCreated: async () => {} });
+      return { executed: true, run, step: {} as never, calls: [], response } as StoredAgentRunResult<unknown>;
+    }) as never;
+    const iterator = streamFoundersBeaconAsk(f.params, { runtimeData: f.runtimeData, getAgent: async () => f.beacon, runTool, events: async () => {} });
+    expect((await iterator.next()).value).toEqual({ type: 'started', runKey });
+    expect((await iterator.next()).value).toMatchObject({ type: 'tool', activity: { invocationId: 'tool-1', phase: 'started', agent: { slug: 'beacon' }, tool: { slug: 'core.delegate' } } });
+    release();
+    expect((await iterator.next()).value).toMatchObject({ type: 'tool', activity: { invocationId: 'tool-1', phase: 'completed', elapsedMs: 17 } });
+    expect((await iterator.next()).value).toEqual({ type: 'delta', text: BEACON_NO_DELEGATE_MESSAGE });
+    expect((await iterator.next()).value).toEqual({ type: 'completed', runKey });
+  });
+
   test('strictly rejects model prose or an unregistered specialist instead of surfacing an answer', () => {
     expect(beaconDelegationDecisionSchema.safeParse({ metadata: { status: 'accepted', reason: 'Answer directly', score: 1 }, delegation: { target: 'none', reason: 'NO_ELIGIBLE_DELEGATE' }, answer: 'There are seven scopes.' }).success).toBe(false);
     expect(beaconDelegationDecisionSchema.safeParse({ metadata: { status: 'accepted', reason: 'Use Steward', score: 1 }, delegation: { target: 'steward', operation: 'scope.list', request: 'Count scopes.' } }).success).toBe(false);

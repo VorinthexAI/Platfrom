@@ -193,7 +193,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   }
 
   const executedStep = preparedSteps.at(-1)!;
-  await emit('tool.called', { runKey: run.key, stepKey: executedStep.key, agentKey: runtime.agent.key, toolKey: request.toolKey, actionKey: selected.action.key, status: 'called' }, eventUserId);
+  await emit('tool.called', { runKey: run.key, invocationKey: executedStep.key, stepKey: executedStep.key, agentKey: runtime.agent.key, agentSlug: runtime.agent.slug, agentName: runtime.agent.name, toolKey: request.toolKey, toolSlug: granted.tool.slug, toolName: granted.tool.name, actionKey: selected.action.key, actionSlug: selected.action.slug, actionName: selected.action.name, status: 'called' }, eventUserId);
 
   let response: ProviderExecuteResponse<TOutput>;
   let responseMetadata: ReturnType<typeof validateAgentOutput>;
@@ -275,7 +275,9 @@ async function persistExecution(input: {
   const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ key: attempt.callKey, agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, toolKey: input.request.toolKey, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
   const run = await input.runs.updateRun(input.run.key, { status: input.status, reason: input.reason, score: input.score, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
   const terminalCall = persistedCalls.at(-1);
-  const terminalData = { runKey: run.key, stepKey: step.key, callKey: terminalCall?.key, agentKey: input.runtime.agent.key, toolKey: input.request.toolKey, actionKey: input.toolActionKey, status: input.status, reason: input.status === 'completed' ? undefined : input.eventReason, elapsedMs: endedAtMs - input.startedAtMs };
+  const terminalGrant = input.runtime.tools.find(({ tool }) => tool.key === input.request.toolKey);
+  const terminalAction = terminalGrant?.actions.find(({ action }) => action.key === input.toolActionKey);
+  const terminalData = { runKey: run.key, invocationKey: step.key, stepKey: step.key, callKey: terminalCall?.key, agentKey: input.runtime.agent.key, agentSlug: input.runtime.agent.slug, agentName: input.runtime.agent.name, toolKey: input.request.toolKey, toolSlug: terminalGrant?.tool.slug, toolName: terminalGrant?.tool.name, actionKey: input.toolActionKey, actionSlug: terminalAction?.action.slug, actionName: terminalAction?.action.name, status: input.status, reason: input.status === 'completed' ? undefined : input.eventReason, elapsedMs: endedAtMs - input.startedAtMs };
   await input.emit(input.status === 'completed' ? 'tool.completed' : 'tool.failed', terminalData, input.eventUserId);
   await input.emit(input.status === 'completed' ? 'agent.completed' : 'agent.failed', { runKey: run.key, agentKey: input.runtime.agent.key, status: input.status, reason: input.status === 'completed' ? undefined : input.eventReason, elapsedMs: endedAtMs - input.startedAtMs }, input.eventUserId);
   return { run, step, calls: persistedCalls };
