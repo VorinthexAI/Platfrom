@@ -40,9 +40,9 @@ import {
   listFounderArtifacts,
   resolveFounderArtifact,
   readFounderArtifactNode,
-  streamFounderArtifactInvalidations,
   updateFounderArtifact,
 } from './founder-artifacts';
+import { streamFounderOrganizationInvalidations } from './founder-events';
 import { collectFragment, getFragmentsStanding, getFragmentsSummary } from './fragments';
 import { streamLeaderboard } from './leaderboard';
 import { streamLiveCounters } from './live';
@@ -459,7 +459,7 @@ export function registerRoutes(app: Hono) {
   app.post('/founders/beacon/delegate', delegateFoundersBeacon);
   app.get('/founders/artifacts', listFounderArtifacts);
   app.post('/founders/artifacts', createFounderArtifact);
-  app.get('/founders/artifacts/stream', streamFounderArtifactInvalidations);
+  app.get('/founders/events/stream', streamFounderOrganizationInvalidations);
   app.get('/founders/artifacts/:artifactKey', getFounderArtifact);
   app.patch('/founders/artifacts/:artifactKey', updateFounderArtifact);
   app.delete('/founders/artifacts/:artifactKey', deleteFounderArtifact);
