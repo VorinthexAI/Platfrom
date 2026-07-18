@@ -22,7 +22,7 @@ import type { ReverseContextCompiler } from '@/lib/ai/reverse-context/compiler';
 import { newId } from '@/lib/ids';
 import { organizationKeySchema } from '@/lib/ai/shared/ids';
 import { recordRuntimeEvent, type RuntimeEventData, type RuntimeEventRecorder, type RuntimeEventSlug } from '@/platform/events';
-import { InvalidRunRequestError } from './validation';
+import { InvalidRunRequestError, ResponseValidationError } from './validation';
 import { validateAgentOutput, validateProviderResponse } from './validation';
 
 export const runStoredAgentToolParamsSchema = z.object({
@@ -199,7 +199,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   let responseMetadata: ReturnType<typeof validateAgentOutput>;
   try {
     const decision = await selectRoute(routeInput, options);
-    response = validateProviderResponse(await executeRoute<unknown, TOutput>({
+    response = normalizeStructuredProviderResponse(validateProviderResponse(await executeRoute<unknown, TOutput>({
       decision,
       input,
       adapters: options.adapters,
@@ -219,7 +219,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
           outputTokens: attempt.usage.outputTokens, elapsedMs: attempt.elapsedMs,
         }, eventUserId);
       },
-    }));
+    })));
     responseMetadata = validateAgentOutput(response.output);
     if (responseMetadata.status !== 'accepted' && !options.allowRejectedOutput) throw new InvalidRunRequestError('an executed tool response cannot be rejected after execution');
     await options.beforeFinalize?.({
@@ -239,7 +239,20 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
 function injectSystemPrompt(input: unknown, systemPrompt: string): unknown {
   if (!input || typeof input !== 'object' || !('messages' in input)) return input;
   const record = input as Record<string, unknown>;
-  return { ...record, system: typeof record.system === 'string' ? `${systemPrompt}\n\n${record.system}` : systemPrompt };
+  return { ...record, system: typeof record.system === 'string' ? `${systemPrompt}\n\n${record.system}` : systemPrompt, responseFormat: record.responseFormat ?? { type: 'json' } };
+}
+
+/** OpenAI-compatible chat adapters wrap structured JSON in ChatOutput.text. */
+export function normalizeStructuredProviderResponse<TOutput>(response: ProviderExecuteResponse<TOutput>): ProviderExecuteResponse<TOutput> {
+  const output = response.output;
+  if (!output || typeof output !== 'object' || 'metadata' in output || !('text' in output)) return response;
+  const text = (output as { text?: unknown }).text;
+  if (typeof text !== 'string') return response;
+  try {
+    return { ...response, output: JSON.parse(text) as TOutput };
+  } catch {
+    throw new ResponseValidationError('output.text must contain one valid JSON object');
+  }
 }
 
 async function persistExecution(input: {
