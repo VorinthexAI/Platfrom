@@ -22,6 +22,11 @@ export const serverEventSlugs = [
   'waitlist.signin_invite_sent', 'payment.checkout_created',
   'payment.checkout_completed', 'payment.ticket_purchased',
   'presence.session_expired', 'presence.session_joined', 'presence.session_left',
+  'organization.member.list', 'organization.member.read', 'organization.member.add',
+  'organization.member.role.update', 'organization.member.activate',
+  'organization.member.suspend', 'organization.member.remove',
+  'scope.list', 'scope.read', 'scope.create', 'scope.update', 'scope.move',
+  'scope.archive', 'scope.restore', 'scope.remove',
 ] as const;
 
 export const userEventSlugs = [

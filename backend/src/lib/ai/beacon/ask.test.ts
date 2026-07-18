@@ -188,7 +188,7 @@ describe('streamFoundersBeaconAsk', () => {
     const input = f.adapterRequests[0]!.input as { system?: string; messages: Array<{ role: string; content: string }> };
     expect(input.messages).toEqual([{ role: 'user', content: 'What is the Nexus?' }]);
     expect(input.system).toContain('Beacon — AI Coordinator');
-    expect(input.system).toContain(f.selectedScope.description);
+    expect(input.system).toContain(f.selectedScope.description ?? '');
     expect(input.system).toContain('plain Markdown text');
     expect(input.system).not.toContain('"status": "accepted" | "rejected"');
   });

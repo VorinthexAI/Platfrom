@@ -114,6 +114,16 @@ relations and selects deterministically using `modelActions.priority` only:
 9. return the first valid route.
 
 There is no random choice, quality/cost/speed scoring, or execution fallback.
+
+Organization-member and scope tools use a separate local execution boundary.
+GPT-5.4 Mini routes only through `core.reason` to select one granted tool and
+produce arguments matching its JSON schema. `runDomainAgentTool` then reloads
+the persisted agent grants, resolves the initiating human, validates the input
+with Zod, enforces organization and scope RBAC, and executes the local handler.
+These deterministic domain actions intentionally have no `modelActions` rows:
+models may interpret intent but can never perform database mutations directly.
+Mutations use Arango stream transactions and emit both domain audit events and
+the normal tool lifecycle events.
 A fixed route never bypasses organization provider permissions.
 
 ## Execution and validation

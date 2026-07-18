@@ -120,6 +120,7 @@ describe('scope schemas', () => {
     });
     expect(scopesEmbedKeys.options).toEqual(['summary']);
     expect(scopeSchema.parse({ ...scope, description: 'x'.repeat(10_000) }).description).toHaveLength(10_000);
+    expect(scopeSchema.parse({ ...scope, description: null }).description).toBeNull();
     expect(() => scopeSchema.parse({ ...scope, slug: 'Not Valid' })).toThrow();
     expect(scopeSchema.parse({ ...scope, organizationKey: 'legacy-root-key' }).organizationKey).toBe('legacy-root-key');
   });

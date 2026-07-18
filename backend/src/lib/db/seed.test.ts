@@ -121,6 +121,7 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.4-mini:core.reason',
       'openai.gpt-5.4-nano:core.ask',
     ]);
+    expect(parsed.some(({ actionSlug }) => actionSlug.startsWith('scope.') || actionSlug.startsWith('organization.member.'))).toBe(false);
   });
 
   test('seed exactly one OpenAI route for each model', () => {

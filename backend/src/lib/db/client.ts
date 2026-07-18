@@ -18,11 +18,14 @@ export async function closeDb() {
 
 export async function withTransaction<T>(
   collections: string[],
-  fn: (trx: Awaited<ReturnType<typeof db.beginTransaction>>) => Promise<T>,
+  fn: (trx: Awaited<ReturnType<typeof db.beginTransaction>> & { query: typeof db.query }) => Promise<T>,
 ): Promise<T> {
   const trx = await db.beginTransaction({ write: collections, exclusive: collections });
   try {
-    const result = await fn(trx);
+    const transaction = Object.assign(trx, {
+      query: ((query: Parameters<typeof db.query>[0], bindVars?: Parameters<typeof db.query>[1]) => trx.step(() => db.query(query as never, bindVars))) as typeof db.query,
+    });
+    const result = await fn(transaction);
     await trx.commit();
     return result;
   } catch (err) {

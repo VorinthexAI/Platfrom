@@ -82,7 +82,7 @@ function registerKnownResolvers(
   tools: readonly Tool[],
 ) {
   const registrations: Array<[string, OwnedArtifactReference[]]> = [
-    ['scope', scopes.map((scope) => ({ nodeType: 'scope', nodeKey: scope.key, organizationKey, scopeKey: scope.key, name: scope.name, summary: scope.description }))],
+    ['scope', scopes.map((scope) => ({ nodeType: 'scope', nodeKey: scope.key, organizationKey, scopeKey: scope.key, name: scope.name, summary: scope.description ?? scope.summary }))],
     ['agent', agents.map((agent) => ({ nodeType: 'agent', nodeKey: agent.key, organizationKey, scopeKey: agent.scopeKey, name: agent.name, summary: agent.title }))],
     ['skill', skills.map((skill) => ({ nodeType: 'skill', nodeKey: skill.key, organizationKey, scopeKey: null, name: skill.title, summary: `${skill.name}: ${skill.definition.slice(0, 1_500)}` }))],
     ['tool', tools.map((tool) => ({ nodeType: 'tool', nodeKey: tool.key, organizationKey, scopeKey: tool.scopeKey, name: tool.name, summary: tool.description }))],

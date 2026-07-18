@@ -7,7 +7,7 @@ export interface CreateScopeInput {
   slug: string;
   name: string;
   summary: string;
-  description: string;
+  description: string | null;
   position: number;
 }
 
