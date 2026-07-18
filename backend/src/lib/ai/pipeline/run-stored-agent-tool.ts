@@ -4,7 +4,7 @@ import { getDefaultAgentRunRepository, type AgentRunRepository } from '@/lib/ai/
 import { getDefaultAgentRunStepRepository, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import { getDefaultAgentRunCallRepository, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
 import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentContext, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
-import { authorizeAgentExecution, type ExecutionAccessDataSource, type ExecutionPrincipal, type ResolvedExecutionPrincipal } from '@/lib/ai/agents/access';
+import { authorizeAgentExecution, type ExecutionAccessDataSource, type ExecutionPrincipal } from '@/lib/ai/agents/access';
 import { sourceSelectionSchema, getDefaultAgentRunSourceRepository, type AgentRunSourceRepository } from '@/lib/ai/agent-run-sources';
 import { getDefaultAgentArtifactRepository, type AgentArtifactRepository } from '@/lib/ai/agent-artifacts';
 import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
@@ -69,8 +69,6 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
     run: AgentRun;
     response: ProviderExecuteResponse<unknown>;
     agentContext: AgentContext;
-    /** Server-resolved actor; never copied from model or client payloads. */
-    principal: ResolvedExecutionPrincipal;
     recordArtifactCreated: (artifact: { nodeType: string; nodeKey: string }) => Promise<void>;
   }) => Promise<void>;
   stepSlugs?: readonly string[];
@@ -219,7 +217,6 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       run,
       response: response as ProviderExecuteResponse<unknown>,
       agentContext,
-      principal,
       recordArtifactCreated: ({ nodeType, nodeKey }) => emit('artifact.created', { runKey: run.key, agentKey: runtime.agent.key, nodeType, nodeKey, status: 'created' }, eventUserId),
     });
   } catch (error) {

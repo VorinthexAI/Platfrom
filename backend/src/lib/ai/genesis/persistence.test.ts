@@ -45,15 +45,12 @@ async function setup(includeNewSkill = true) {
   return { f, context, validated };
 }
 
-const placement = { minimumAccessRole: 'admin' as const, position: 2, createdByUserOrganizationKey: newId(), inheritedUserOrganizationKeys: [newId(), newId()] };
-
 describe('Genesis transactional persistence', () => {
   test('atomically persists agent, skills, relations, and source/result provenance', async () => {
     const { context, validated, f } = await setup(); const transaction = new MemoryTransaction(); const runKey = newId();
-    const result = await persistGenesisManifest({ runKey, context, validated, placement }, transaction);
+    const result = await persistGenesisManifest({ runKey, context, validated }, transaction);
     expect(transaction.rows('agents')).toHaveLength(1);
-    expect(transaction.rows('scopeAgents')).toHaveLength(1);
-    expect(transaction.rows('agentMembers')).toHaveLength(2);
+    expect(transaction.rows('scopeAgents')).toHaveLength(0);
     expect(transaction.rows('skills')).toHaveLength(1);
     expect(transaction.rows('agentSkills')).toHaveLength(2);
     expect(transaction.rows('agentTools')).toHaveLength(1);
@@ -68,18 +65,19 @@ describe('Genesis transactional persistence', () => {
     ]));
   });
   test('declares the exact restricted read and write transaction boundary', () => {
-    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String).sort()).toEqual(['agentArtifactChecks', 'agentArtifacts', 'agentMembers', 'agentSkills', 'agentTools', 'agents', 'scopeAgents', 'skills'].sort());
+    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String).sort()).toEqual(['agentArtifactChecks', 'agentArtifacts', 'agentSkills', 'agentTools', 'agents', 'skills'].sort());
+    expect(GENESIS_TRANSACTION_COLLECTIONS.write.map(String)).not.toContain('scopeAgents');
     expect(GENESIS_TRANSACTION_COLLECTIONS.read.map(String).sort()).toEqual(['actions', 'agentRunSources', 'agents', 'organizations', 'scopeMembers', 'scopes', 'skills', 'toolActions', 'tools'].sort());
     for (const forbidden of ['tools', 'actions', 'models', 'providers', 'modelActions', 'modelProviders', 'organizationProviders']) expect(GENESIS_TRANSACTION_COLLECTIONS.write).not.toContain(forbidden);
   });
   test('rolls back every staged write when agentSkill creation fails', async () => {
     const { context, validated } = await setup(); const transaction = new MemoryTransaction('agentSkills');
-    await expect(persistGenesisManifest({ runKey: newId(), context, validated, placement }, transaction)).rejects.toThrow('forced agentSkills failure');
+    await expect(persistGenesisManifest({ runKey: newId(), context, validated }, transaction)).rejects.toThrow('forced agentSkills failure');
     expect(transaction.committed.size).toBe(0);
   });
   test('rolls back every staged write when agentTool creation fails', async () => {
     const { context, validated } = await setup(false); const transaction = new MemoryTransaction('agentTools');
-    await expect(persistGenesisManifest({ runKey: newId(), context, validated, placement }, transaction)).rejects.toThrow('forced agentTools failure');
+    await expect(persistGenesisManifest({ runKey: newId(), context, validated }, transaction)).rejects.toThrow('forced agentTools failure');
     expect(transaction.committed.size).toBe(0);
   });
 });

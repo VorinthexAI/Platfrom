@@ -203,35 +203,18 @@ any domain write. Agent similarity uses review/reject thresholds 0.85/0.95;
 skills use 0.80/0.90, with at most five comparisons for each.
 
 Accepted manifests are written through one Arango stream transaction covering
-`agents`, `skills`, `agentSkills`, `agentTools`, `scopeAgents`, inherited
-`agentMembers`, `agentArtifacts`, and the declared novelty-check collection.
-New agents are therefore executable immediately after commit instead of being
-left as unplaced registry definitions. The server derives placement from the
-resolved actor and persisted scope hierarchy; neither the model nor its
-manifest can invent membership grants. An owner may request an initial access
-threshold such as `admin`, while non-owners cannot lower it below their own
-effective role. Skill documents are created before their links, all keys and
-embeddings are backend-owned, and a failed link aborts the whole creation
-transaction. Rejected manifests remain auditable runs but do not create
-configuration. The run ledger uses twelve stable Genesis step slugs and records
-explicit sources, reused dependencies, and created results as artifact
+`agents`, `skills`, `agentSkills`, `agentTools`, `agentArtifacts`, and the
+declared novelty-check collection. Skill documents are created before their
+links, all keys and embeddings are backend-owned, and a failed link aborts the
+whole creation transaction. Rejected manifests remain auditable runs but do not
+create configuration. The run ledger uses twelve stable Genesis step slugs and
+records explicit sources, reused dependencies, and created results as artifact
 provenance.
 
 The handler's write allow-list is exactly `agents`, `skills`, `agentSkills`,
-`agentTools`, `scopeAgents`, `agentMembers`, `agentArtifacts`, and
-`agentArtifactChecks`. It cannot create tools, actions, models, providers,
-provider grants, or arbitrary documents. Seed reconciliation removes every
-other persisted Genesis tool grant.
-
-`steward/profile.ts` defines the unseeded Organization Steward skill and its
-complete local domain-tool bundle. A Genesis request with
-`profile: "organization-steward"` is rejected unless its validated manifest
-uses the canonical skill and attaches every registered domain tool. It is a
-reusable creation profile, not a privileged identity: GPT-5.4 Mini selects a
-granted tool through `core.reason`, then the local
-Zod/RBAC/transaction/event boundary executes it as the initiating human. Giving
-Steward every administration tool therefore does not let an admin cross
-owner-only boundaries.
+`agentTools`, `agentArtifacts`, and `agentArtifactChecks`. It cannot create
+tools, actions, models, providers, provider grants, or arbitrary documents.
+Seed reconciliation removes every other persisted Genesis tool grant.
 
 ## Provider configuration
 
