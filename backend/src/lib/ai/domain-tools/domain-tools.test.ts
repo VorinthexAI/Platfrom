@@ -19,9 +19,25 @@ import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { agentMemberSchema } from '@/lib/db/agent-members.node';
 import { tokenUsage } from '@/lib/ai/shared';
 import type { RuntimeEventInput } from '@/platform/events';
-import { DOMAIN_ACTION_SLUGS, domainToolInputSchemas, interpretAndRunDomainTool, runDomainAgentTool } from '.';
+import { artifactSchema } from '@/lib/artifacts/schema';
+import { DOMAIN_ACTION_SLUGS, domainToolInputSchemas, domainToolJsonSchemas, executeDomainTool, interpretAndRunDomainTool, runDomainAgentTool } from '.';
 
 const now = '2026-07-18T00:00:00.000Z';
+const organizationArtifactDefinition = {
+  version: 1 as const,
+  mode: 'live' as const,
+  root: 'organization',
+  nodes: { organization: { binding: 'organizationCurrent', kind: 'organization' as const } },
+  edges: [],
+  bindings: {
+    organizationCurrent: {
+      kind: 'query' as const,
+      queryId: 'organization.current',
+      variables: { organizationKey: { kind: 'context' as const, value: 'organizationKey' as const } },
+    },
+  },
+  view: { layout: 'tree' as const, theme: 'obsidian' as const },
+};
 
 function fixture() {
   const organization = organizationSchema.parse({ key: newId(), name: 'Acme', createdAt: now, updatedAt: now });
@@ -48,7 +64,10 @@ function fixture() {
 
 describe('domain tool schemas', () => {
   test('registers strict input schemas for every local domain action', () => {
-    expect(DOMAIN_ACTION_SLUGS).toHaveLength(50);
+    expect(DOMAIN_ACTION_SLUGS).toHaveLength(51);
+    expect(domainToolJsonSchemas['artifact.create']).toMatchObject({ type: 'object', required: ['name', 'definition'], properties: { definition: { type: 'object' } } });
+    expect(domainToolInputSchemas['artifact.create'].parse({ name: 'Organization', definition: organizationArtifactDefinition })).toMatchObject({ name: 'Organization', definition: { root: 'organization' } });
+    expect(() => domainToolInputSchemas['artifact.create'].parse({ name: 'Organization', definition: organizationArtifactDefinition, organizationKey: newId() })).toThrow();
     expect(domainToolInputSchemas['scope.list'].parse({})).toEqual({ includeDescendants: false, limit: 50 });
     expect(() => domainToolInputSchemas['scope.list'].parse({ unexpected: true })).toThrow();
     expect(() => domainToolInputSchemas['organization.member.add'].parse({ member: 'user@example.com', role: 'member' })).toThrow();
@@ -58,6 +77,30 @@ describe('domain tool schemas', () => {
 });
 
 describe('local domain tool boundary', () => {
+  test('creates a semantic artifact in the authenticated runtime scope without granting an agent', async () => {
+    const f = fixture(); const runtimeEvents: RuntimeEventInput[] = []; const domainEvents: Array<{ action: string; data: Record<string, unknown> }> = []; let receivedInput: unknown = null;
+    const artifactKey = newId();
+    const output = await executeDomainTool('artifact.create', { name: 'Organization', definition: organizationArtifactDefinition }, {
+      organizationKey: f.organization.key,
+      runtimeScopeKey: f.scope.key,
+      principal: { kind: 'member', user: f.user, userOrganization: f.membership, scopeMember: null },
+    }, {
+      artifacts: {
+        async create(input) {
+          receivedInput = input;
+          return artifactSchema.parse({ key: artifactKey, organizationKey: input.organizationKey, scopeKey: input.scopeKey, name: input.name, definition: input.definition, schemaVersion: 1, snapshotKey: null, createdByAgentRunKey: null, createdByUserOrganizationKey: input.createdByUserOrganizationKey, createdAt: now, updatedAt: now });
+        },
+      },
+      domainEvents: async (_context, action, data) => { domainEvents.push({ action, data }); },
+      runtimeEvents: async (event) => { runtimeEvents.push(event); },
+    });
+
+    expect(receivedInput).toMatchObject({ organizationKey: f.organization.key, scopeKey: f.scope.key, organizationWide: true, allowedScopeKeys: [f.scope.key], createdByUserOrganizationKey: f.membership.key });
+    expect(output).toEqual({ action: 'artifact.create', status: 'completed', data: { artifact: { key: artifactKey, name: 'Organization', mode: 'live', root: 'organization', layout: 'tree', theme: 'obsidian' } } });
+    expect(domainEvents).toEqual([{ action: 'artifact.create', data: { artifactKey } }]);
+    expect(runtimeEvents).toEqual([{ scopeId: f.scope.key, userId: f.user.key, slug: 'artifact.created', data: { nodeType: 'artifacts', nodeKey: artifactKey } }]);
+  });
+
   test('authorizes persisted grants and executes locally without a model route', async () => {
     const f = fixture(); const events: RuntimeEventInput[] = []; let receivedContext: unknown;
     const output = await runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, toolKey: f.tool.key, actionKey: f.action.key, principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: { query: 'ops' } }, {

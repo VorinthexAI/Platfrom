@@ -3,6 +3,8 @@ import { insertEvent } from '@/lib/db/events.node';
 import type { ResolvedExecutionPrincipal } from '@/lib/ai/agents/access';
 import { newId } from '@/lib/ids';
 import { AiError } from '@/lib/ai/shared/result';
+import { getDefaultArtifactService } from '@/lib/artifacts/service';
+import { recordRuntimeEvent, type RuntimeEventRecorder } from '@/platform/events';
 import { domainToolInputSchemas, domainToolResultSchema, type DomainActionSlug, type DomainToolResult } from './schemas';
 import { executeAccessDomainTool, syncOrganizationAgentMembers } from './execute-access-domains';
 
@@ -22,6 +24,14 @@ export interface DomainToolContext {
   organizationKey: string;
   runtimeScopeKey: string;
   principal: ResolvedExecutionPrincipal;
+}
+
+type ArtifactCreator = Pick<ReturnType<typeof getDefaultArtifactService>, 'create'>;
+
+export interface DomainToolExecutionOptions {
+  artifacts?: ArtifactCreator;
+  domainEvents?: (context: DomainToolContext, action: DomainActionSlug, data: Record<string, unknown>) => Promise<void>;
+  runtimeEvents?: RuntimeEventRecorder;
 }
 
 function memberPrincipal(context: DomainToolContext) {
@@ -124,10 +134,41 @@ function result(action: DomainActionSlug, data: unknown, status: 'completed' | '
   return domainToolResultSchema.parse({ action, status, data });
 }
 
-export async function executeDomainTool(action: DomainActionSlug, rawInput: unknown, context: DomainToolContext): Promise<DomainToolResult> {
+export async function executeDomainTool(action: DomainActionSlug, rawInput: unknown, context: DomainToolContext, options: DomainToolExecutionOptions = {}): Promise<DomainToolResult> {
   const input = domainToolInputSchemas[action].parse(rawInput) as any;
   const principal = memberPrincipal(context);
   if (action.startsWith('scope.member.') || action.startsWith('scope.agent.') || action.startsWith('agent.member.') || action.startsWith('organization.provider.') || /^organization\.(read|update|archive|restore)$/.test(action) || action.startsWith('access.')) return executeAccessDomainTool(action, input, context);
+
+  if (action === 'artifact.create') {
+    await assertScopeRole(context, context.runtimeScopeKey, ['owner', 'admin', 'moderator']);
+    const artifacts = options.artifacts ?? getDefaultArtifactService();
+    const artifact = await artifacts.create({
+      organizationKey: context.organizationKey,
+      scopeKey: context.runtimeScopeKey,
+      organizationWide: ['owner', 'admin'].includes(principal.userOrganization.orgRole),
+      allowedScopeKeys: [context.runtimeScopeKey],
+      name: input.name,
+      definition: input.definition,
+      createdByUserOrganizationKey: principal.userOrganization.key,
+    });
+    await (options.domainEvents ?? emitDomainEvent)(context, action, { artifactKey: artifact.key });
+    await (options.runtimeEvents ?? recordRuntimeEvent)({
+      scopeId: context.runtimeScopeKey,
+      userId: principal.user.key,
+      slug: 'artifact.created',
+      data: { nodeType: 'artifacts', nodeKey: artifact.key },
+    });
+    return result(action, {
+      artifact: {
+        key: artifact.key,
+        name: artifact.name,
+        mode: artifact.definition.mode,
+        root: artifact.definition.root,
+        layout: artifact.definition.view.layout,
+        theme: artifact.definition.view.theme,
+      },
+    });
+  }
 
   if (action.startsWith('organization.member.')) {
     const rows = await listMemberRows(context.organizationKey);

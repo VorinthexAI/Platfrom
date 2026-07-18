@@ -22,6 +22,7 @@ export const serverEventSlugs = [
   'waitlist.signin_invite_sent', 'payment.checkout_created',
   'payment.checkout_completed', 'payment.ticket_purchased',
   'presence.session_expired', 'presence.session_joined', 'presence.session_left',
+  'artifact.create',
   'organization.member.list', 'organization.member.read', 'organization.member.add',
   'organization.member.role.update', 'organization.member.activate',
   'organization.member.suspend', 'organization.member.remove',

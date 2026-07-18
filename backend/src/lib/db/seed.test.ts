@@ -206,6 +206,7 @@ describe('tool and tool-action seeds', () => {
     expect(new Set(parsed.map((relation) => relation.key)).size).toBe(parsed.length);
     expect(parsed.map(({ toolSlug, actionSlug }) => `${toolSlug}:${actionSlug}`).sort()).toEqual([
       'agent.create:agent.create',
+      'artifact.create:artifact.create',
       'artifact.read:artifact.read',
       'ask.answer:core.ask',
       'audio.transcribe-file:audio.transcribe',

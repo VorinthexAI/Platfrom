@@ -10,8 +10,34 @@ const property = (type: 'string' | 'boolean' | 'integer' | 'array', description:
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', additionalProperties: false, properties, ...(required.length ? { required } : {}) });
 const refs = property('array', 'One or more unambiguous keys, names, aliases, slugs, emails, or paths.', { items: { type: 'string' }, minItems: 1, maxItems: 100 });
 const role = { type: 'string', enum: ['owner', 'admin', 'moderator', 'viewer'] };
+const artifactPath = { type: 'array', items: { type: 'string' }, maxItems: 20 };
+const artifactVariable = {
+  oneOf: [
+    objectSchema({ kind: { const: 'literal' }, value: {} }, ['kind', 'value']),
+    objectSchema({ kind: { const: 'binding' }, binding: { type: 'string' } }, ['kind', 'binding']),
+    objectSchema({ kind: { const: 'context' }, value: { type: 'string', enum: ['organizationKey', 'scopeKey'] } }, ['kind', 'value']),
+  ],
+};
+const artifactBinding = {
+  oneOf: [
+    objectSchema({ kind: { const: 'node' }, ref: objectSchema({ type: { type: 'string' }, key: { type: 'string' } }, ['type', 'key']), path: artifactPath }, ['kind', 'ref']),
+    objectSchema({ kind: { const: 'query' }, queryId: { type: 'string' }, variables: { type: 'object', additionalProperties: artifactVariable }, path: artifactPath }, ['kind', 'queryId', 'variables']),
+    objectSchema({ kind: { const: 'artifact' }, artifactKey: { type: 'string' }, path: artifactPath }, ['kind', 'artifactKey']),
+  ],
+};
+const artifactDefinition = objectSchema({
+  version: { const: 1 },
+  mode: { type: 'string', enum: ['live', 'snapshot'] },
+  root: { type: 'string' },
+  nodes: { type: 'object', additionalProperties: objectSchema({ binding: { type: 'string' }, kind: { type: 'string', enum: ['organization', 'scope', 'member', 'agent', 'artifact', 'metric', 'event'] }, labelPath: artifactPath, statePath: artifactPath, weightPath: artifactPath, appearance: objectSchema({ shape: { type: 'string', enum: ['sphere', 'cube', 'ring', 'plane'] }, texture: { type: 'string' }, scale: { type: 'number' } }) }, ['binding', 'kind']) },
+  edges: { type: 'array', maxItems: 300, items: objectSchema({ from: { type: 'string' }, to: { type: 'string' }, relation: { type: 'string' }, directed: { type: 'boolean' } }, ['from', 'to', 'relation']) },
+  bindings: { type: 'object', additionalProperties: artifactBinding },
+  view: objectSchema({ layout: { type: 'string', enum: ['tree', 'cluster', 'galaxy', 'timeline', 'hierarchy', 'radial', 'force', 'grid', 'flow', 'orbit', 'layered', 'manual'] }, theme: { type: 'string', enum: ['obsidian', 'chrome', 'wireframe', 'blueprint', 'neural', 'holographic', 'minimal', 'monochrome'] }, camera: { type: 'string', enum: ['perspective', 'orthographic'] }, textures: { type: 'object', additionalProperties: { type: 'string' } }, spacing: { type: 'number' }, positions: { type: 'object', additionalProperties: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 } } }, ['layout', 'theme']),
+  actions: { type: 'object', additionalProperties: objectSchema({ actionId: { type: 'string' }, label: { type: 'string' }, input: { type: 'object', additionalProperties: artifactVariable } }, ['actionId', 'label']) },
+}, ['version', 'mode', 'root', 'nodes', 'edges', 'bindings', 'view']);
 
 export const domainToolJsonSchemas: Record<string, Record<string, unknown>> = {
+  'artifact.create': objectSchema({ name: { type: 'string', maxLength: 160 }, definition: artifactDefinition }, ['name', 'definition']),
   'organization.member.list': objectSchema({ role, status: { type: 'string', enum: ['active', 'inactive', 'suspended'] }, name: { type: 'string' }, email: { type: 'string' }, alias: { type: 'string' }, limit: property('integer', 'Page size, maximum 100.'), cursor: { type: 'string' }, sort: { type: 'string', enum: ['name', 'email', 'role', 'status'] } }),
   'organization.member.read': objectSchema({ members: refs }, ['members']),
   'organization.member.add': objectSchema({ member: { type: 'string' }, role }, ['member', 'role']),
