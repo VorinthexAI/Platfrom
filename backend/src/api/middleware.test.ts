@@ -86,6 +86,19 @@ describe('api middleware webhook exemptions', () => {
 });
 
 describe('validateQueryParams', () => {
+  test('allows only the artifact authorization context on artifact GET routes', async () => {
+    let nextCalls = 0;
+    await validateQueryParams(
+      middlewareContext('/api/v1/founders/artifacts', {}, '?organizationKey=root-org&scopeKey=cmrnlzf640000qc7k4p5zem5w'),
+      async () => { nextCalls += 1; },
+    );
+    expect(nextCalls).toBe(1);
+    await expect(validateQueryParams(
+      middlewareContext('/api/v1/founders/artifacts/stream', {}, '?organizationKey=root-org&scopeKey=cmrnlzf640000qc7k4p5zem5w&query=FOR'),
+      async () => { nextCalls += 1; },
+    )).rejects.toThrow();
+    expect(nextCalls).toBe(1);
+  });
   test('allows the OAuth start query params through the global whitelist', async () => {
     const redirectUri = encodeURIComponent('https://vorinthex.com/api/auth/oauth/google/callback');
     let nextCalls = 0;

@@ -52,7 +52,7 @@ export const runtimeEventSlugs = [
   'step.started', 'step.completed', 'step.failed',
   'tool.called', 'tool.completed', 'tool.failed',
   'model.called', 'model.completed', 'model.failed',
-  'artifact.created', 'artifact.used', 'guardrail.blocked',
+  'artifact.created', 'artifact.updated', 'artifact.deleted', 'artifact.resolved', 'artifact.used', 'guardrail.blocked',
 ] as const;
 
 export const registeredEventSlugs = [

@@ -13,6 +13,7 @@ import type { AccessibleOrganizationOption, AccessibleScopeOption, FoundersAccou
 import { useBeaconStream } from "@/lib/founders/use-beacon-stream";
 import { SafeMarkdown } from "@/lib/founders/markdown";
 import { AccountFooter } from "./AccountFooter";
+import { ArtifactWorkspace } from "./ArtifactWorkspace";
 import { BeaconInputIsland } from "./BeaconInputIsland";
 import { ContextSelector } from "./ContextSelector";
 import { FoundersBackdrop } from "./FoundersBackdrop";
@@ -38,6 +39,7 @@ export function FoundersGateApp() {
   const [scopesLoading, setScopesLoading] = useState(false);
   const [scopeKey, setScopeKey] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [workspace, setWorkspace] = useState<"beacon" | "artifacts">("beacon");
   const scopeRequestRef = useRef(0);
 
   const beacon = useBeaconStream();
@@ -163,6 +165,18 @@ export function FoundersGateApp() {
           disabled={!organizationKey}
         />
       </div>
+      <nav className="mt-8 grid grid-cols-2 gap-2" aria-label="Nexus workspace">
+        {(["beacon", "artifacts"] as const).map((item) => (
+          <button
+            key={item}
+            type="button"
+            onClick={() => { if (item === "artifacts") cancelBeacon(); setWorkspace(item); setDrawerOpen(false); }}
+            className={`rounded-xl border px-3 py-2 text-xs capitalize transition-colors ${workspace === item ? "border-[#d57828]/50 bg-[#d57828]/10 text-silver-50" : "border-white/8 text-silver-400 hover:border-white/20"}`}
+          >
+            {item}
+          </button>
+        ))}
+      </nav>
       <div className="flex-1" />
       {account ? (
         <AccountFooter
@@ -208,8 +222,12 @@ export function FoundersGateApp() {
             </button>
           </div>
 
+          {workspace === "artifacts" && organizationKey && scopeKey ? (
+            <div className="min-h-0 flex-1"><ArtifactWorkspace key={`${organizationKey}:${scopeKey}`} organizationKey={organizationKey} scopeKey={scopeKey} /></div>
+          ) : null}
+
           {/* The response canvas: one document, no bubbles, no history. */}
-          <div className="scrollbar-hide flex-1 overflow-y-auto px-4 sm:px-8">
+          {workspace === "beacon" ? <div className="scrollbar-hide flex-1 overflow-y-auto px-4 sm:px-8">
             <div className="mx-auto w-full max-w-[820px] pt-10 pb-56 sm:pt-16">
               {beacon.response || beacon.error ? (
                 <article aria-live="polite" aria-busy={beacon.status === "streaming"}>
@@ -226,10 +244,10 @@ export function FoundersGateApp() {
                 </div>
               )}
             </div>
-          </div>
+          </div> : null}
 
           {/* Floating input island — near the bottom, never attached to it. */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-7 px-4 sm:px-8">
+          {workspace === "beacon" ? <div className="pointer-events-none absolute inset-x-0 bottom-7 px-4 sm:px-8">
             <div className="pointer-events-auto mx-auto w-full max-w-[820px]">
               <BeaconInputIsland
                 status={beacon.status}
@@ -238,7 +256,7 @@ export function FoundersGateApp() {
                 onCancel={cancelBeacon}
               />
             </div>
-          </div>
+          </div> : null}
         </section>
       </div>
 

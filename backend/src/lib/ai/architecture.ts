@@ -42,6 +42,11 @@ export const AGENT_ARCHITECTURE = {
   },
   execution: ['tool', 'action', 'router', 'model', 'provider'],
   response: 'response',
+  artifactViews: {
+    definitions: 'artifacts',
+    snapshots: 'artifactSnapshots',
+    dependencies: 'artifactDependencies',
+  },
   executionHistory: {
     agentRun: 'agentRuns',
     agentRunSteps: 'agentRunSteps',
