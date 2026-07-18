@@ -14,7 +14,8 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).toContain('agents');
     expect(NODE_NAMES).toContain('agentSkills');
     expect(NODE_NAMES).toContain('agentTools');
-    expect(NODE_NAMES).not.toContain('scopeAgents');
+    expect(NODE_NAMES).toContain('scopeAgents');
+    expect(NODE_NAMES).toContain('agentMembers');
     expect(NODE_NAMES).toContain('skills');
     expect(NODE_NAMES).toContain('tools');
     expect(NODE_NAMES).toContain('toolActions');

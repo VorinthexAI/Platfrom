@@ -26,9 +26,9 @@ export async function runDomainAgentTool(rawInput: z.input<typeof runDomainAgent
   const input = runDomainAgentToolInputSchema.parse(rawInput);
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey) throw new Error('agent belongs to another organization');
-  const principal = await authorizeAgentExecution(runtime, input.principal, options.accessData);
   const grant = runtime.tools.find(({ tool }) => tool.key === input.toolKey);
   const linked = grant?.actions.find(({ action }) => action.key === input.actionKey);
+  const principal = await authorizeAgentExecution(runtime, input.principal, options.accessData, { allowArchivedOrganization: linked?.action.slug === 'organization.restore' });
   if (!grant || !linked || !isDomainActionSlug(linked.action.slug) || grant.tool.slug !== linked.action.slug) throw new Error('domain tool/action is not granted to the agent');
   const record = options.events ?? recordRuntimeEvent;
   const userId = principal.kind === 'member' ? principal.user.key : null;

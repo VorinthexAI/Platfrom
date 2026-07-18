@@ -241,6 +241,24 @@ const collections: CollectionSpec[] = [
     ],
   },
   {
+    name: 'scopeAgents',
+    skipEmbedding: true,
+    indexes: [
+      { fields: ['scopeKey', 'agentKey'], unique: true },
+      { fields: ['organizationKey', 'scopeKey', 'status', 'position'] },
+      { fields: ['agentKey', 'status'] },
+    ],
+  },
+  {
+    name: 'agentMembers',
+    skipEmbedding: true,
+    indexes: [
+      { fields: ['scopeAgentKey', 'userOrganizationKey', 'source'], unique: true },
+      { fields: ['organizationKey', 'agentKey', 'userOrganizationKey'] },
+      { fields: ['scopeKey', 'userOrganizationKey'] },
+    ],
+  },
+  {
     name: 'skills',
     embedKeys: ['name', 'title', 'definition'],
     indexes: [
@@ -510,6 +528,7 @@ async function main() {
   `);
   await ensureScopeScopesCollection(targetDb);
   await ensureScopeMembersCollection(targetDb);
+  await targetDb.query(`FOR member IN scopeMembers FILTER !HAS(member, "status") UPDATE member WITH { status: "active" } IN scopeMembers`);
 
   // Migrate the former DAG links into a strict tree. Legacy keys were not
   // domain CUIDs, so each copied relation receives a fresh key.
@@ -651,6 +670,35 @@ async function main() {
       });
     }
     if (!spec.skipEmbedding) await backfillCollectionEmbeddings(targetDb, spec);
+  }
+
+  // Every pre-relation agent is linked to its existing home scope. Existing
+  // scope memberships become inherited grants, preserving current access
+  // while making the new runtime checks authoritative on the next deploy.
+  const hierarchyCursor = await targetDb.query<{ parentKey: string; childKey: string }>('FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }');
+  const parentByChild = new Map((await hierarchyCursor.all()).map((relation) => [relation.childKey, relation.parentKey]));
+  const agentsWithoutRelations = await targetDb.query<{ agentKey: string; scopeKey: string; organizationKey: string }>(`
+    FOR agent IN agents
+      LET scope = FIRST(FOR candidate IN scopes FILTER candidate._key == agent.scopeKey RETURN candidate)
+      FILTER scope != null
+      FILTER LENGTH(FOR link IN scopeAgents FILTER link.scopeKey == scope._key && link.agentKey == agent._key LIMIT 1 RETURN 1) == 0
+      RETURN { agentKey: agent._key, scopeKey: scope._key, organizationKey: scope.organizationKey }
+  `);
+  for (const agent of await agentsWithoutRelations.all()) {
+    const timestamp = new Date().toISOString();
+    const scopeAgentKey = newId();
+    await targetDb.collection('scopeAgents').save({ _key: scopeAgentKey, ...agent, position: 1, status: 'active', minimumAccessRole: 'viewer', createdByUserOrganizationKey: null, createdAt: timestamp, updatedAt: timestamp, embedding: [] });
+    const ancestorKeys = [agent.scopeKey]; let parentKey = parentByChild.get(agent.scopeKey);
+    while (parentKey && !ancestorKeys.includes(parentKey)) { ancestorKeys.push(parentKey); parentKey = parentByChild.get(parentKey); }
+    const members = await targetDb.query<{ userOrganizationKey: string }>(`
+      FOR membership IN userOrganizations
+        FILTER membership.organizationId == @organizationKey && membership.status == "active"
+        LET elevated = membership.orgRole == "owner" || membership.orgRole == "admin"
+        LET scoped = LENGTH(FOR member IN scopeMembers FILTER member.userOrganizationKey == membership._key && member.scopeKey IN @ancestorKeys && member.status == "active" LIMIT 1 RETURN 1) > 0
+        FILTER elevated || scoped
+        RETURN { userOrganizationKey: membership._key }
+    `, { organizationKey: agent.organizationKey, ancestorKeys });
+    for (const member of await members.all()) await targetDb.collection('agentMembers').save({ _key: newId(), organizationKey: agent.organizationKey, scopeKey: agent.scopeKey, agentKey: agent.agentKey, scopeAgentKey, userOrganizationKey: member.userOrganizationKey, source: 'inherited', createdByUserOrganizationKey: null, createdAt: timestamp, embedding: [] });
   }
 
   // AI-layer collections rename: the first cut shipped snake_case names;

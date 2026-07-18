@@ -29,6 +29,8 @@ import { tokenUsage } from '@/lib/ai/shared';
 import { runStoredAgentTool } from './run-stored-agent-tool';
 import { InvalidRunRequestError, ResponseValidationError } from './validation';
 import type { RuntimeEventInput } from '@/platform/events';
+import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
+import { agentMemberSchema } from '@/lib/db/agent-members.node';
 
 const now = '2026-07-16T00:00:00.000Z';
 function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Task completed', score: 0.95 }, text: 'done' }) {
@@ -49,6 +51,8 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const toolAction = toolActionSchema.parse({ key: newId(), toolKey: tool.key, actionKey: action.key, priority: 100, enabled: true });
   const modelAction = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: action.key, priority: 100, enabled: true });
   const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-nano', enabled: true });
+  const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey, scopeKey: scope.key, agentKey: agent.key, position: 1, minimumAccessRole: 'moderator', createdAt: now, updatedAt: now });
+  const agentMember = agentMemberSchema.parse({ key: newId(), organizationKey, scopeKey: scope.key, agentKey: agent.key, scopeAgentKey: scopeAgent.key, userOrganizationKey: userOrganization.key, source: 'inherited', createdAt: now });
   const runtimeData: AgentRuntimeDataSource = {
     async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
     async getOrganization(key) { return key === organization.key ? organization : null; },
@@ -78,7 +82,7 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const adapters = { openai: { id: 'openai' as const, name: 'OpenAI', async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>) { adapterCalls.push(request as ProviderExecuteRequest); executionSnapshots.push({ runStatus: runStore[0]?.status, sourceCount: sourceStore.length }); return { output: output as TOutput, usage: tokenUsage(8, 5), providerId: 'openai' as const, modelId: request.modelId, externalModelId: request.externalModelId }; } } };
   const variables = { async insertVariable() { throw new Error('unused'); }, async listVariablesForContext() { return []; } };
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
-  const accessData = { async getUserOrganization(key: string) { return key === userOrganization.key ? userOrganization : null; }, async getUser(key: string) { return key === user.key ? user : null; }, async listScopeMembers() { return [scopeMember]; } };
+  const accessData = { async getUserOrganization(key: string) { return key === userOrganization.key ? userOrganization : null; }, async getUser(key: string) { return key === user.key ? user : null; }, async listScopeMembers() { return [scopeMember]; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return [agentMember]; } };
   const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts, events: async (event: RuntimeEventInput) => { eventStore.push(event); }, accessData, principal: { kind: 'member' as const, userOrganizationKey: userOrganization.key } };
   const params = { organizationKey, agentKey: agent.key, toolKey: tool.key, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: 'Hello' }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
   return { options, params, adapterCalls, executionSnapshots, eventStore, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope, user, userOrganization, scopeMember, accessData };
