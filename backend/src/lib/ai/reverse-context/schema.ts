@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { nodeTypeSchema } from '@/lib/ai/agent-run-sources';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 
 const metadataValueSchema = z.union([
   z.string().max(2_000),
@@ -21,7 +22,7 @@ export type KnowledgeBlock = z.infer<typeof knowledgeBlockSchema>;
 
 export const searchableNodeSchema = z.object({
   key: z.string().cuid(),
-  organizationKey: z.string().cuid(),
+  organizationKey: organizationKeySchema,
   scopeKey: z.string().cuid().nullable(),
   embedding: z.array(z.number().finite()).min(1),
   embeddingFields: z.array(z.string().trim().min(1).max(120)).min(1),

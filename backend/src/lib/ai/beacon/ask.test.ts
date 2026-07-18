@@ -28,8 +28,7 @@ import { BeaconAskRequestError, BeaconUnavailableError, streamFoundersBeaconAsk,
 
 const now = '2026-07-17T00:00:00.000Z';
 
-function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>) {
-  const organizationKey = newId();
+function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>, organizationKey = newId()) {
   const organization = organizationSchema.parse({ key: organizationKey, name: 'Vorinthex AI', is_root: true, createdAt: now, updatedAt: now });
   const beaconScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'nexus', name: 'Nexus', summary: 'The complete ecosystem.', description: 'The complete ecosystem.', position: 1 });
   const selectedScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'core', name: 'Core', summary: 'Personal AI brain scope.', description: 'Personal AI brain scope.', position: 2 });
@@ -171,6 +170,15 @@ describe('streamFoundersBeaconAsk', () => {
     });
     expect(f.adapterRequests).toHaveLength(1);
     expect(f.eventStore.every(({ scopeId }) => scopeId === f.beaconScope.key)).toBe(true);
+  });
+
+  test('streams Beacon for the preserved pre-CUID root organization', async () => {
+    const f = fixture(undefined, 'legacy-root-key');
+    const events = await collect(streamFoundersBeaconAsk(f.params, f.options));
+
+    expect(events.at(-1)?.type).toBe('completed');
+    expect(f.runStore[0]?.organizationKey).toBe('legacy-root-key');
+    expect(f.adapterRequests[0]?.organizationKey).toBe('legacy-root-key');
   });
 
   test('compiles the context against the selected scope with a plain user-text output contract', async () => {
