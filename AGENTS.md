@@ -30,9 +30,7 @@ New machine, in order:
    password manager, however your team already shares it; there is no
    git/GitHub-mediated handoff for this).
 3. Clone the repo, then unlock it: `git-crypt unlock <path-to-key>`.
-4. Install graphify (see the Graphify section below) and run `graphify
-   install` once to register it with your AI assistant.
-5. `bun install` from the repository root.
+4. `bun install` from the repository root.
 
 All vars and secrets, for both dev and prod, live in one git-crypt-encrypted
 file: `.github/environments.json` (`{ vars: {...}, secrets: { dev: {...}, prod:
@@ -67,21 +65,6 @@ bun run --cwd backend dev
 ## Next.js
 
 This repo uses a newer Next.js version with breaking changes. Before changing Next.js-specific APIs, conventions, or file structure, read the relevant guide in `node_modules/next/dist/docs/` and heed deprecation notices.
-
-## Graphify
-
-Always use graphify for codebase navigation — it's the default, not a fallback.
-
-Install: `uv tool install graphifyy` (or `pipx install graphifyy`), then run
-`graphify install` once to register it with your AI assistant. Repo:
-https://github.com/Graphify-Labs/graphify. Requires Python 3.10+.
-
-Order:
-
-1. Try `graphify explain "<most likely function/class/file/symbol>"`.
-2. If no exact symbol is known, try `graphify explain "<likely file name>"`.
-3. Use `graphify query` only when `explain` cannot identify a relevant node.
-4. Use `rg` only for narrow source verification after Graphify identifies the relevant file or symbol.
 
 ## SEO / AEO
 

@@ -22,8 +22,6 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
-graphify-out/
-
 launch/**/outputs/*
 !launch/**/outputs/.gitkeep
 
