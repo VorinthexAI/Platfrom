@@ -15,22 +15,19 @@ import { cuidSchema } from '@/lib/ai/genesis/schemas';
  * Beacon is the canonical system agent behind Founders Gate: one immutable
  * slug the backend resolves server-side, never an agent key accepted from a
  * client. It lives in the root organization's Nexus scope and is granted the
- * conversational ask/reason tools plus the narrow local delegation boundary.
+ * local delegation boundary only. Beacon can coordinate specialists but can
+ * never answer or reason directly through a model-facing tool grant.
  */
 export const BEACON_AGENT_SLUG = 'beacon' as const;
 export const BEACON_AGENT_NAME = 'Beacon';
 export const BEACON_AGENT_TITLE = 'AI Coordinator';
 export const BEACON_SCOPE_SLUG = 'nexus';
 export const BEACON_SKILL_SLUG = 'beacon-coordination';
-export const BEACON_ASK_TOOL_SLUG = 'ask.answer' as const;
-export const BEACON_REASON_TOOL_SLUG = 'reason.solve' as const;
 export const BEACON_DELEGATE_TOOL_SLUG = 'core.delegate' as const;
 
 export const BEACON_AGENT_KEY = cuidSchema.parse('cmbeaconagent0000000000001');
 export const BEACON_SKILL_KEY = cuidSchema.parse('cmbeaconskill0000000000001');
 export const BEACON_AGENT_SKILL_KEY = cuidSchema.parse('cmbeaconagentskill00000001');
-export const BEACON_AGENT_TOOL_ASK_KEY = cuidSchema.parse('cmbeaconagenttoolask000001');
-export const BEACON_AGENT_TOOL_REASON_KEY = cuidSchema.parse('cmbeaconagenttoolreason001');
 export const BEACON_AGENT_TOOL_DELEGATE_KEY = cuidSchema.parse('cmbeaconagenttooldelegate01');
 
 export class BeaconSeedPrerequisiteError extends AiError {
@@ -55,7 +52,7 @@ async function loadBeaconSkillDefinition(): Promise<string> {
   return definition;
 }
 
-/** Idempotently seeds Beacon into the organization's Nexus scope with ask + reason grants. */
+/** Idempotently seeds Beacon into Nexus with core.delegate as its only tool. */
 export async function seedBeacon(organizationKey: string): Promise<SeedBeaconResult> {
   const validOrganizationKey = z.string().trim().min(1).parse(organizationKey);
   const [definition, organization] = await Promise.all([
@@ -68,11 +65,7 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
     .find((candidate) => candidate.slug === BEACON_SCOPE_SLUG) ?? null;
   if (!scope) throw new BeaconSeedPrerequisiteError(`scope ${BEACON_SCOPE_SLUG}`);
 
-  const toolSeeds = [
-    { slug: BEACON_ASK_TOOL_SLUG, relationKey: BEACON_AGENT_TOOL_ASK_KEY },
-    { slug: BEACON_REASON_TOOL_SLUG, relationKey: BEACON_AGENT_TOOL_REASON_KEY },
-    { slug: BEACON_DELEGATE_TOOL_SLUG, relationKey: BEACON_AGENT_TOOL_DELEGATE_KEY },
-  ] as const;
+  const toolSeeds = [{ slug: BEACON_DELEGATE_TOOL_SLUG, relationKey: BEACON_AGENT_TOOL_DELEGATE_KEY }] as const;
   const tools: Tool[] = [];
   for (const seed of toolSeeds) {
     const tool = await getToolBySlug(seed.slug);
@@ -112,17 +105,9 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
   if (runtime.skills.length !== 1 || beaconSkills.length !== 1 || beaconSkills[0]?.relation.priority !== 100) {
     throw new BeaconSeedPrerequisiteError('Beacon must expose exactly one priority-100 coordination skill');
   }
-  const askGrant = runtime.tools.find(({ tool }) => tool.slug === BEACON_ASK_TOOL_SLUG);
-  const reasonGrant = runtime.tools.find(({ tool }) => tool.slug === BEACON_REASON_TOOL_SLUG);
   const delegateGrant = runtime.tools.find(({ tool }) => tool.slug === BEACON_DELEGATE_TOOL_SLUG);
-  if (runtime.tools.length !== 3 || askGrant?.actions.length !== 1 || askGrant.actions[0]?.action.slug !== 'core.ask') {
-    throw new BeaconSeedPrerequisiteError('Beacon must expose only ask.answer, reason.solve, and core.delegate with their canonical actions');
-  }
-  if (reasonGrant?.actions.length !== 1 || reasonGrant.actions[0]?.action.slug !== 'core.reason') {
-    throw new BeaconSeedPrerequisiteError('Beacon must expose only ask.answer, reason.solve, and core.delegate with their canonical actions');
-  }
-  if (delegateGrant?.actions.length !== 1 || delegateGrant.actions[0]?.action.slug !== 'core.delegate') {
-    throw new BeaconSeedPrerequisiteError('Beacon must expose only ask.answer, reason.solve, and core.delegate with their canonical actions');
+  if (runtime.tools.length !== 1 || delegateGrant?.actions.length !== 1 || delegateGrant.actions[0]?.action.slug !== 'core.delegate') {
+    throw new BeaconSeedPrerequisiteError('Beacon must expose only core.delegate mapped to core.delegate');
   }
 
   return { organizationKey: validOrganizationKey, scope, skill, agent, agentSkill, agentTools, tools };

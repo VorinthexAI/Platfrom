@@ -88,4 +88,13 @@ describe('agent execution access', () => {
     await expect(authorizeAgentExecution({ ...admin.runtime, agent: genesisRuntime.agent }, { kind: 'member', userOrganizationKey: adminMembership.key }, { ...admin.data, async getUserOrganization() { return adminMembership; } }, { serviceDelegation: { agentSlug: 'genesis', requiredOrganizationRole: 'owner' } })).rejects.toThrow('owner role is required');
     await expect(authorizeAgentExecution({ ...owner.runtime, agent: { ...owner.runtime.agent, slug: 'beacon' } }, { kind: 'member', userOrganizationKey: ownerMembership.key }, { ...owner.data, async getUserOrganization() { return ownerMembership; } }, { serviceDelegation: { agentSlug: 'genesis', requiredOrganizationRole: 'owner' } })).rejects.toThrow('identity does not match');
   });
+
+  test('allows active members to invoke only the canonical Beacon orchestration boundary', async () => {
+    const f = fixture();
+    const viewerMembership = userOrganizationSchema.parse({ ...f.userOrganization, orgRole: 'viewer' });
+    const beaconRuntime = { ...f.runtime, agent: { ...f.runtime.agent, slug: 'beacon', name: 'Beacon', title: 'AI Coordinator' } };
+    const resolved = await authorizeAgentExecution(beaconRuntime, { kind: 'member', userOrganizationKey: viewerMembership.key }, { ...f.data, async getUserOrganization() { return viewerMembership; }, async getScopeAgent() { throw new Error('Beacon orchestration must not depend on a target scopeAgent relation'); } }, { serviceDelegation: { agentSlug: 'beacon', requiredOrganizationRole: null } });
+    expect(resolved).toMatchObject({ kind: 'member', userOrganization: { orgRole: 'viewer' }, scopeMember: null });
+    await expect(authorizeAgentExecution({ ...beaconRuntime, agent: { ...beaconRuntime.agent, slug: 'genesis' } }, { kind: 'member', userOrganizationKey: viewerMembership.key }, { ...f.data, async getUserOrganization() { return viewerMembership; } }, { serviceDelegation: { agentSlug: 'beacon', requiredOrganizationRole: null } })).rejects.toThrow('identity does not match');
+  });
 });

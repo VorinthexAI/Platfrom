@@ -19,11 +19,9 @@ export type ResolvedExecutionPrincipal =
   | { kind: 'member'; user: User; userOrganization: UserOrganization; scopeMember: ScopeMember | null }
   | { kind: 'system' };
 
-export interface ServiceAgentDelegation {
-  /** Narrow server-only bypass for a fixed service agent; never accepted from HTTP input. */
-  agentSlug: 'genesis';
-  requiredOrganizationRole: 'owner';
-}
+export type ServiceAgentDelegation =
+  | { /** Beacon may orchestrate for any active member already authorized for the selected scope. */ agentSlug: 'beacon'; requiredOrganizationRole: null }
+  | { /** Genesis may create agents only for organization owners. */ agentSlug: 'genesis'; requiredOrganizationRole: 'owner' };
 
 export interface ExecutionAccessDataSource {
   getUserOrganization(key: string): Promise<UserOrganization | null>;
@@ -76,7 +74,7 @@ export async function authorizeAgentExecution(
     const membership = await source.getUserOrganization(parsed.userOrganizationKey);
     if (!membership || membership.status !== 'active') throw new AgentExecutionAccessError(`active organization membership ${parsed.userOrganizationKey} was not found`);
     if (membership.organizationId !== runtime.organization.key) throw new AgentExecutionAccessError('organization membership belongs to another organization');
-    if (membership.orgRole !== options.serviceDelegation.requiredOrganizationRole) throw new AgentExecutionAccessError(`${options.serviceDelegation.requiredOrganizationRole} role is required for service delegation`);
+    if (options.serviceDelegation.requiredOrganizationRole && membership.orgRole !== options.serviceDelegation.requiredOrganizationRole) throw new AgentExecutionAccessError(`${options.serviceDelegation.requiredOrganizationRole} role is required for service delegation`);
     const user = await source.getUser(membership.userId);
     if (!user) throw new AgentExecutionAccessError(`user ${membership.userId} was not found`);
     return { kind: 'member', user, userOrganization: membership, scopeMember: null };

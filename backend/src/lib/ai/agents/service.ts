@@ -75,7 +75,7 @@ export class DuplicateAgentLinkError extends Error {
 }
 
 export class RestrictedAgentToolGrantError extends Error {
-  constructor(public readonly toolSlug: string) { super(`${toolSlug} may only be granted to the canonical Beacon agent`); this.name = 'RestrictedAgentToolGrantError'; }
+  constructor(public readonly toolSlug: string, detail = `${toolSlug} may only be granted to the canonical Beacon agent`) { super(detail); this.name = 'RestrictedAgentToolGrantError'; }
 }
 
 export function createAgentService(source: AgentServiceDataSource = createDefaultAgentServiceDataSource()) {
@@ -129,6 +129,7 @@ export function createAgentService(source: AgentServiceDataSource = createDefaul
         throw new AgentReferenceNotFoundError('tool', valid.toolKey);
       }
       if (tool.slug === 'core.delegate' && agent.slug !== 'beacon') throw new RestrictedAgentToolGrantError(tool.slug);
+      if (agent.slug === 'beacon' && tool.slug !== 'core.delegate') throw new RestrictedAgentToolGrantError(tool.slug, 'the canonical Beacon agent may only be granted core.delegate');
       if (await source.findAgentTool(valid.agentKey, valid.toolKey)) {
         throw new DuplicateAgentLinkError('tool', valid.agentKey, valid.toolKey);
       }
