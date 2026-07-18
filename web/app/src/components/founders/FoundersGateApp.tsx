@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CloseIcon, MenuIcon } from "@vorinthex/shared/ui/icons";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   FoundersRequestError,
   fetchAccessibleOrganizations,
@@ -31,6 +32,7 @@ type GateState = "checking" | "ready" | "error";
  * enforces every access rule; this guard is presentation only.
  */
 export function FoundersGateApp() {
+  const reducedMotion = useReducedMotion();
   const [gate, setGate] = useState<GateState>("checking");
   const [account, setAccount] = useState<FoundersAccount | null>(null);
   const [organizations, setOrganizations] = useState<AccessibleOrganizationOption[]>([]);
@@ -261,15 +263,31 @@ export function FoundersGateApp() {
       ) : null}
 
       {/* Mobile drawer: the left panel slides in over a dimmed veil. */}
-      {drawerOpen ? (
-        <div className="fixed inset-0 z-30 lg:hidden" role="dialog" aria-modal="true" aria-label="Organization and scope panel">
-          <button
+      <AnimatePresence>
+        {drawerOpen ? (
+          <motion.div
+            className="fixed inset-0 z-30 lg:hidden"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Organization and scope panel"
+            initial="closed"
+            animate="open"
+            exit="closed"
+            variants={{ open: { transition: { staggerChildren: reducedMotion ? 0 : 0.03 } }, closed: { transition: { staggerChildren: reducedMotion ? 0 : 0.02, staggerDirection: -1 } } }}
+          >
+          <motion.button
             type="button"
             aria-label="Close panel"
             onClick={() => setDrawerOpen(false)}
             className="absolute inset-0 bg-black/55"
+            variants={{ open: { opacity: 1 }, closed: { opacity: 0 } }}
+            transition={{ duration: reducedMotion ? 0.12 : 0.3, ease: "easeOut" }}
           />
-          <div className="founders-surface absolute inset-y-0 left-0 flex w-[300px] max-w-[85vw] flex-col rounded-r-2xl p-5">
+          <motion.div
+            className="founders-surface absolute inset-y-0 left-0 flex w-[300px] max-w-[85vw] flex-col rounded-r-2xl p-5 shadow-[24px_0_80px_rgba(0,0,0,0.45)]"
+            variants={reducedMotion ? { open: { opacity: 1 }, closed: { opacity: 0 } } : { open: { x: 0, opacity: 1 }, closed: { x: "-105%", opacity: 0.9 } }}
+            transition={reducedMotion ? { duration: 0.12 } : { duration: 0.52, ease: [0.16, 1, 0.3, 1] }}
+          >
             <div className="mb-4 flex justify-end">
               <button
                 type="button"
@@ -281,9 +299,10 @@ export function FoundersGateApp() {
               </button>
             </div>
             {panel}
-          </div>
-        </div>
-      ) : null}
+          </motion.div>
+        </motion.div>
+        ) : null}
+      </AnimatePresence>
     </main>
   );
 }
