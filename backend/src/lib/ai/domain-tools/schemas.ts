@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { userOrganizationRoleSchema } from '@/lib/db/user-organization.node';
+import { artifactDefinitionSchema } from '@/lib/artifacts/schema';
 
 const referenceSchema = z.string().trim().min(1).max(320);
 const referencesSchema = z.array(referenceSchema).min(1).max(100);
@@ -9,6 +10,10 @@ const accessRoleSchema = z.enum(['owner', 'admin', 'moderator', 'viewer']);
 const paginationSchema = { limit: z.number().int().min(1).max(100).default(50), cursor: z.string().optional() };
 
 export const domainToolInputSchemas = {
+  'artifact.create': z.object({
+    name: z.string().trim().min(1).max(160),
+    definition: artifactDefinitionSchema,
+  }).strict(),
   'organization.member.list': z.object({ role: userOrganizationRoleSchema.optional(), status: z.enum(['active', 'inactive', 'suspended']).optional(), name: z.string().trim().min(1).optional(), email: z.string().trim().min(1).optional(), alias: z.string().trim().min(1).optional(), limit: z.number().int().min(1).max(100).default(50), cursor: z.string().optional(), sort: z.enum(['name', 'email', 'role', 'status']).default('name') }).strict(),
   'organization.member.read': z.object({ members: referencesSchema }).strict(),
   'organization.member.add': z.object({ member: referenceSchema, role: assignableOrganizationRoleSchema }).strict(),

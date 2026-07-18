@@ -6,6 +6,7 @@ export const TOOL_IDS = [
   'reason.solve',
   'core.delegate',
   'agent.create',
+  'artifact.create',
   'artifact.read',
   'image.create',
   'audio.transcribe-file',

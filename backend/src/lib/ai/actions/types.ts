@@ -14,6 +14,7 @@ export const ACTION_SLUGS = [
   'core.delegate',
 
   'agent.create',
+  'artifact.create',
   'artifact.read',
 
   'organization.member.list',
