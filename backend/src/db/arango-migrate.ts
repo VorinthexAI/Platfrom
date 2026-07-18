@@ -9,6 +9,8 @@ import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 import { ensureAgentRunStepsCollection } from '../lib/ai/agent-run-steps/indexes';
 import { ensureAgentRunCallsCollection } from '../lib/ai/agent-run-calls/indexes';
 import { ensureAgentArtifactsCollection } from '../lib/ai/agent-artifacts/indexes';
+import { ensureArtifactCollections } from '../lib/artifacts/indexes';
+import { seedNexusOrganizationArtifact } from '../lib/artifacts/seed';
 import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes';
 import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
 import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
@@ -818,6 +820,7 @@ async function main() {
     }
   }
   await ensureAgentArtifactsCollection(targetDb);
+  await ensureArtifactCollections(targetDb);
   await ensureAgentRunSourcesCollection(targetDb);
   await ensureAgentArtifactChecksCollection(targetDb);
   await ensureRuntimeVariablesCollection(targetDb);
@@ -1849,6 +1852,9 @@ async function main() {
     });
   }
   console.log('Normalized founder aliases and Nexus access');
+
+  await seedNexusOrganizationArtifact(targetDb, rootOrganizationId, nexusScopeId);
+  console.log('Seeded the Nexus spatial organization artifact');
 
   // The platforms collection is fully copied into organizations (same keys)
   // and nothing references it anymore — retire it. Teams follow the same

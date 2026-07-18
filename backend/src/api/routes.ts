@@ -33,6 +33,16 @@ import {
   listFoundersOrganizationScopes,
   listFoundersOrganizations,
 } from './founders';
+import {
+  createFounderArtifact,
+  deleteFounderArtifact,
+  getFounderArtifact,
+  listFounderArtifacts,
+  resolveFounderArtifact,
+  readFounderArtifactNode,
+  streamFounderArtifactInvalidations,
+  updateFounderArtifact,
+} from './founder-artifacts';
 import { collectFragment, getFragmentsStanding, getFragmentsSummary } from './fragments';
 import { streamLeaderboard } from './leaderboard';
 import { streamLiveCounters } from './live';
@@ -447,6 +457,14 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
   app.post('/founders/beacon/ask', askFoundersBeacon);
   app.post('/founders/beacon/delegate', delegateFoundersBeacon);
+  app.get('/founders/artifacts', listFounderArtifacts);
+  app.post('/founders/artifacts', createFounderArtifact);
+  app.get('/founders/artifacts/stream', streamFounderArtifactInvalidations);
+  app.get('/founders/artifacts/:artifactKey', getFounderArtifact);
+  app.patch('/founders/artifacts/:artifactKey', updateFounderArtifact);
+  app.delete('/founders/artifacts/:artifactKey', deleteFounderArtifact);
+  app.post('/founders/artifacts/:artifactKey/resolve', resolveFounderArtifact);
+  app.post('/founders/artifacts/:artifactKey/nodes/read', readFounderArtifactNode);
 
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);
