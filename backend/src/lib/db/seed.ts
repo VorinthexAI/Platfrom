@@ -3,9 +3,9 @@ import { closeDb } from './client';
 import { newId } from '@/lib/ids';
 import { getActionById, getActionBySlug, insertAction, updateAction, type Action } from './actions.node';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
-import { getModelBySlug, insertModel, updateModel, type Model } from './models.node';
+import { getAllModelsChunked, getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
 import { getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
-import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider } from './model-providers.node';
+import { deleteModelProvider as deletePersistedModelProvider, getAllModelProvidersChunked, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getToolBySlug, insertTool, updateTool, type Tool } from './tools.node';
 import { getToolActionByPair, insertToolAction, toolActionSeedSchema, updateToolAction } from './tool-actions.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
@@ -38,6 +38,24 @@ export interface AiRuntimeSeedUpserters {
   modelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult>;
   tool(seed: (typeof SEEDED_TOOLS)[number]): Promise<SeedResult>;
   toolAction(seed: (typeof SEEDED_TOOL_ACTIONS)[number]): Promise<SeedResult>;
+}
+
+export interface RootOpenAiRoutingDataSource {
+  listOrganizationProviderKeys(organizationKey: string): Promise<readonly string[]>;
+  addOrganizationProvider(organizationKey: string, providerKey: string): Promise<void>;
+  removeOrganizationProvider(organizationKey: string, providerKey: string): Promise<void>;
+  listModels(): Promise<readonly Model[]>;
+  updateModel(key: string, patch: Partial<Model>): Promise<void>;
+  listModelProviders(): Promise<readonly ModelProvider[]>;
+  deleteModelProvider(key: string): Promise<void>;
+}
+
+export interface RootOpenAiRoutingResult {
+  addedOpenAiProvider: boolean;
+  removedOrganizationProviders: number;
+  disabledStaleModels: number;
+  removedNonOpenAiModelRoutes: number;
+  verifiedCurrentModels: number;
 }
 
 const now = () => new Date().toISOString();
@@ -618,7 +636,7 @@ async function upsertSeedModel(seed: (typeof SEEDED_MODELS)[number]): Promise<Se
     supportedUseCases: seed.supportedUseCases,
     enabled: seed.enabled,
   };
-  await updateModel(existing.key, patch);
+  await updatePersistedModel(existing.key, patch);
   return { collection: 'models', key: existing.key, status: 'updated' };
 }
 
@@ -839,6 +857,62 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   return results;
 }
 
+async function collectChunks<T>(chunks: AsyncGenerator<T[], void, void>): Promise<T[]> {
+  const rows: T[] = [];
+  for await (const chunk of chunks) rows.push(...chunk);
+  return rows;
+}
+
+/**
+ * Reconciles the production root organization's executable AI boundary.
+ * Registry rows may outlive old seeds, so an additive upsert is insufficient:
+ * this removes historical organization/provider grants and model routes,
+ * disables models outside the current registry, and verifies that every
+ * current model has exactly one enabled OpenAI mapping.
+ */
+export async function reconcileRootOpenAiRouting(
+  organizationKey: string,
+  openAiProviderKey: string,
+  source: RootOpenAiRoutingDataSource,
+): Promise<RootOpenAiRoutingResult> {
+  const organizationProviderKeys = [...await source.listOrganizationProviderKeys(organizationKey)];
+  const enabledOpenAi = organizationProviderKeys.includes(openAiProviderKey);
+  if (!enabledOpenAi) await source.addOrganizationProvider(organizationKey, openAiProviderKey);
+
+  const staleOrganizationProviderKeys = organizationProviderKeys.filter((key) => key !== openAiProviderKey);
+  for (const providerKey of staleOrganizationProviderKeys) {
+    await source.removeOrganizationProvider(organizationKey, providerKey);
+  }
+
+  const currentModelSlugs = new Set<string>(SEEDED_MODELS.map(({ slug }) => slug));
+  const models = [...await source.listModels()];
+  const currentModelKeys = new Set(models.filter(({ slug }) => currentModelSlugs.has(slug)).map(({ key }) => key));
+  const staleModels = models.filter((model) => model.enabled && !currentModelSlugs.has(model.slug));
+  for (const model of staleModels) await source.updateModel(model.key, { enabled: false });
+
+  const modelProviders = [...await source.listModelProviders()];
+  const nonOpenAiRoutes = modelProviders.filter(({ modelKey, providerKey }) => currentModelKeys.has(modelKey) && providerKey !== openAiProviderKey);
+  for (const route of nonOpenAiRoutes) await source.deleteModelProvider(route.key);
+
+  const survivingRoutes = modelProviders.filter(({ providerKey }) => providerKey === openAiProviderKey);
+  for (const seed of SEEDED_MODEL_PROVIDERS) {
+    const model = models.find(({ slug }) => slug === seed.modelSlug);
+    if (!model || !model.enabled) throw new SeedReferenceError('model', seed.modelSlug, 'root OpenAI routing');
+    const routes = survivingRoutes.filter(({ modelKey, enabled }) => modelKey === model.key && enabled);
+    if (routes.length !== 1 || routes[0]?.providerModelId !== seed.providerModelId) {
+      throw new SeedReferenceError('modelProvider', `${seed.modelSlug}:openai:${seed.providerModelId}`, 'root OpenAI routing');
+    }
+  }
+
+  return {
+    addedOpenAiProvider: !enabledOpenAi,
+    removedOrganizationProviders: staleOrganizationProviderKeys.length,
+    disabledStaleModels: staleModels.length,
+    removedNonOpenAiModelRoutes: nonOpenAiRoutes.length,
+    verifiedCurrentModels: SEEDED_MODEL_PROVIDERS.length,
+  };
+}
+
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const results = await seedAiRuntimeNodes();
 
@@ -904,10 +978,16 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const openAi = await getProviderBySlug('openai');
   if (!openAi) throw new SeedReferenceError('provider', 'openai', 'Genesis');
   const organizationProviders = getDefaultOrganizationProviderRepository();
-  if (!await organizationProviders.hasProvider(rootOrganization.key, openAi.key)) {
-    const relation = await organizationProviders.addProvider(rootOrganization.key, openAi.key);
-    results.push({ collection: 'organizationProviders', key: relation.key, status: 'created' });
-  }
+  const routing = await reconcileRootOpenAiRouting(rootOrganization.key, openAi.key, {
+    listOrganizationProviderKeys: (organizationKey) => organizationProviders.listProviderKeys(organizationKey),
+    async addOrganizationProvider(organizationKey, providerKey) { await organizationProviders.addProvider(organizationKey, providerKey); },
+    async removeOrganizationProvider(organizationKey, providerKey) { await organizationProviders.removeProvider(organizationKey, providerKey); },
+    listModels: () => collectChunks(getAllModelsChunked()),
+    async updateModel(key, patch) { await updatePersistedModel(key, patch); },
+    listModelProviders: () => collectChunks(getAllModelProvidersChunked()),
+    async deleteModelProvider(key) { await deletePersistedModelProvider(key); },
+  });
+  console.info('Reconciled root organization OpenAI routing', routing);
   const genesis = await seedGenesis(rootOrganization.key);
   if (genesis.agent.scopeKey !== nexusScope.key) throw new SeedReferenceError('agent', 'genesis', 'Nexus');
   results.push(
