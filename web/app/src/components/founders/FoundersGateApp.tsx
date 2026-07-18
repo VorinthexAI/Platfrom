@@ -12,6 +12,7 @@ import {
 import { selectDefaultScope } from "@/lib/founders/scope-selection";
 import type { AccessibleOrganizationOption, AccessibleScopeOption, FoundersAccount } from "@/lib/founders/types";
 import { useBeaconStream } from "@/lib/founders/use-beacon-stream";
+import { BeaconToolActivityFeed } from "./BeaconToolActivityFeed";
 import { SafeMarkdown } from "@/lib/founders/markdown";
 import { AccountFooter } from "./AccountFooter";
 import { ArtifactWorkspace } from "./ArtifactWorkspace";
@@ -221,8 +222,9 @@ export function FoundersGateApp() {
           {/* The response canvas: one document, no bubbles, no history. */}
           <div className="scrollbar-hide flex-1 overflow-y-auto px-4 sm:px-8">
             <div className="mx-auto w-full max-w-[820px] pt-10 pb-56 sm:pt-16">
-              {beacon.response || beacon.error ? (
-                <article aria-live="polite" aria-busy={beacon.status === "streaming"}>
+              {beacon.response || beacon.error || beacon.tools.length > 0 ? (
+                <article aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
+                  <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />
                   {beacon.response ? <SafeMarkdown markdown={beacon.response} /> : null}
                   {beacon.error ? <p className="text-base leading-relaxed text-silver-100">{beacon.error}</p> : null}
                   {beacon.status === "streaming" || beacon.status === "connecting" ? (

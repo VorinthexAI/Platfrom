@@ -4,6 +4,7 @@ import { authorizeAgentExecution, executionPrincipalSchema, type ExecutionAccess
 import { recordRuntimeEvent, type RuntimeEventRecorder } from '@/platform/events';
 import { executeDomainTool, type DomainToolContext } from './execute';
 import { DOMAIN_ACTION_SLUGS, domainToolResultSchema, isDomainActionSlug } from './schemas';
+import { newId } from '@/lib/ids';
 
 export const runDomainAgentToolInputSchema = z.object({
   organizationKey: z.string().trim().min(1),
@@ -32,7 +33,7 @@ export async function runDomainAgentTool(rawInput: z.input<typeof runDomainAgent
   if (!grant || !linked || !isDomainActionSlug(linked.action.slug) || grant.tool.slug !== linked.action.slug) throw new Error('domain tool/action is not granted to the agent');
   const record = options.events ?? recordRuntimeEvent;
   const userId = principal.kind === 'member' ? principal.user.key : null;
-  const eventBase = { scopeId: runtime.scope.key, userId, data: { agentKey: runtime.agent.key, toolKey: grant.tool.key, actionKey: linked.action.key } };
+  const eventBase = { scopeId: runtime.scope.key, userId, data: { invocationKey: newId(), agentKey: runtime.agent.key, agentSlug: runtime.agent.slug, agentName: runtime.agent.name, toolKey: grant.tool.key, toolSlug: grant.tool.slug, toolName: grant.tool.name, actionKey: linked.action.key, actionSlug: linked.action.slug, actionName: linked.action.name } };
   await record({ ...eventBase, slug: 'tool.called', data: { ...eventBase.data, status: 'called' } });
   try {
     const context: DomainToolContext = { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal };

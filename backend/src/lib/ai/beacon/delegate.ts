@@ -69,7 +69,9 @@ export async function delegateAgentCreationFromBeacon(params: BeaconDelegatePara
   const emit = (slug: Parameters<RuntimeEventRecorder>[0]['slug'], data: Parameters<RuntimeEventRecorder>[0]['data']) => recordEvent({ scopeId: scope.key, userId: user.key, slug, data });
   await emit('agent.started', { runKey: run.key, agentKey: beacon.key, status: 'started' });
   await emit('step.started', { runKey: run.key, stepKey, agentKey: beacon.key, status: 'started' });
-  await emit('tool.called', { runKey: run.key, stepKey, agentKey: beacon.key, toolKey: delegateGrant.tool.key, actionKey: delegateGrant.actions[0]!.action.key, status: 'called' });
+  const delegateAction = delegateGrant.actions[0]!.action;
+  const toolIdentity = { invocationKey: stepKey, agentKey: beacon.key, agentSlug: beacon.slug, agentName: beacon.name, toolKey: delegateGrant.tool.key, toolSlug: delegateGrant.tool.slug, toolName: delegateGrant.tool.name, actionKey: delegateAction.key, actionSlug: delegateAction.slug, actionName: delegateAction.name };
+  await emit('tool.called', { runKey: run.key, stepKey, ...toolIdentity, status: 'called' });
 
   try {
     const create = options.createFromGenesis ?? createAgentFromGenesis;
@@ -82,7 +84,7 @@ export async function delegateAgentCreationFromBeacon(params: BeaconDelegatePara
     const endedAtMs = Date.now(); const endedAt = new Date(endedAtMs).toISOString(); const elapsedMs = endedAtMs - startedAtMs;
     await steps.insertStep({ key: stepKey, agentRunKey: run.key, stepSlug: 'delegate-to-genesis', status: 'completed', startedAt, endedAt, elapsedMs });
     await runs.updateRun(run.key, { status: 'completed', reason: DELEGATE_REASON, score: genesisResult.persisted ? 1 : 0, endedAt, elapsedMs });
-    await emit('tool.completed', { runKey: run.key, stepKey, agentKey: beacon.key, toolKey: delegateGrant.tool.key, actionKey: delegateGrant.actions[0]!.action.key, status: 'completed', elapsedMs });
+    await emit('tool.completed', { runKey: run.key, stepKey, ...toolIdentity, status: 'completed', elapsedMs });
     await emit('step.completed', { runKey: run.key, stepKey, agentKey: beacon.key, status: 'completed', elapsedMs });
     await emit('agent.completed', { runKey: run.key, agentKey: beacon.key, status: 'completed', elapsedMs });
     return { beaconRunKey: run.key, genesisRunKey: genesisResult.runKey, creation: genesisResult };
@@ -91,7 +93,7 @@ export async function delegateAgentCreationFromBeacon(params: BeaconDelegatePara
     const reason = (error instanceof Error ? error.message : String(error)).slice(0, 500);
     await steps.insertStep({ key: stepKey, agentRunKey: run.key, stepSlug: 'delegate-to-genesis', status: 'failed', startedAt, endedAt, elapsedMs });
     await runs.updateRun(run.key, { status: 'failed', reason: DELEGATE_REASON, score: 0, endedAt, elapsedMs });
-    await emit('tool.failed', { runKey: run.key, stepKey, agentKey: beacon.key, toolKey: delegateGrant.tool.key, actionKey: delegateGrant.actions[0]!.action.key, status: 'failed', reason, elapsedMs });
+    await emit('tool.failed', { runKey: run.key, stepKey, ...toolIdentity, status: 'failed', reason, elapsedMs });
     await emit('step.failed', { runKey: run.key, stepKey, agentKey: beacon.key, status: 'failed', reason, elapsedMs });
     await emit('agent.failed', { runKey: run.key, agentKey: beacon.key, status: 'failed', reason, elapsedMs });
     throw error;

@@ -163,8 +163,9 @@ export async function delegateFoundersBeacon(c: Context) {
 
 /**
  * POST /founders/beacon/ask — SSE stream of one isolated Beacon run.
- * Events: response.started, response.delta {text}, response.completed,
- * response.failed {error}. Only user-facing text is ever streamed.
+ * Events: response.started, tool.started/completed/failed, response.delta
+ * {text}, response.completed, response.failed {error}. Tool events expose
+ * only public identity and timing, never arguments, output, keys, or reasons.
  */
 export async function askFoundersBeacon(c: Context) {
   const auth = await requireFounder(c);
@@ -199,9 +200,11 @@ export async function askFoundersBeacon(c: Context) {
       for await (const event of events) {
         if (event.type === 'started') {
           await stream.writeSSE({ event: 'response.started', data: '{}' });
+        } else if (event.type === 'tool') {
+          await stream.writeSSE({ event: `tool.${event.activity.phase}`, data: JSON.stringify(event.activity) });
         } else if (event.type === 'delta') {
           await stream.writeSSE({ event: 'response.delta', data: JSON.stringify({ text: event.text }) });
-        } else {
+        } else if (event.type === 'completed') {
           await stream.writeSSE({ event: 'response.completed', data: '{}' });
         }
       }

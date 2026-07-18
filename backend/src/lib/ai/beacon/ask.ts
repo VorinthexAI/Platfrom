@@ -7,8 +7,10 @@ import type { Organization } from '@/lib/db/organizations.node';
 import type { User } from '@/lib/db/users.node';
 import type { UserOrganization } from '@/lib/db/user-organization.node';
 import type { Scope } from '@/lib/ai/scopes';
+import { recordRuntimeEvent, type RuntimeEventRecorder } from '@/platform/events';
 import { BEACON_AGENT_NAME, BEACON_AGENT_SLUG, BEACON_AGENT_TITLE, BEACON_DELEGATE_TOOL_SLUG } from './seed';
 import { delegateAgentCreationFromBeacon, type BeaconAgentCreationDelegationResult, type BeaconDelegateOptions } from './delegate';
+import { AsyncEventChannel, createBeaconToolActivityProjector, type BeaconToolActivity } from './tool-activity';
 
 export const BEACON_ASK_MAX_MESSAGE_LENGTH = 20_000;
 export const BEACON_NO_DELEGATE_MESSAGE = 'No eligible specialist agent is available for this request.';
@@ -87,6 +89,7 @@ export interface BeaconAskOptions extends BeaconDelegateOptions {
 
 export type BeaconAskEvent =
   | { type: 'started'; runKey: string }
+  | { type: 'tool'; activity: BeaconToolActivity }
   | { type: 'delta'; text: string }
   | { type: 'completed'; runKey: string };
 
@@ -119,8 +122,21 @@ export async function* streamFoundersBeaconAsk(params: BeaconAskParams, options:
   }
 
   const outcome: { decision?: BeaconDelegationDecision; delegated?: BeaconAgentCreationDelegationResult } = {};
+  const channel = new AsyncEventChannel<BeaconAskEvent>();
+  const projectToolActivity = createBeaconToolActivityProjector();
+  const persistedEvents = options.events ?? recordRuntimeEvent;
+  let started = false;
+  const liveEvents: RuntimeEventRecorder = async (event) => {
+    if (!started && event.slug === 'agent.started' && event.data.runKey) {
+      started = true;
+      channel.push({ type: 'started', runKey: event.data.runKey });
+    }
+    const activity = projectToolActivity(event);
+    if (activity) channel.push({ type: 'tool', activity });
+    await persistedEvents(event);
+  };
   const runTool = options.runTool ?? runStoredAgentTool;
-  const result = await runTool({
+  const execution = Promise.resolve(runTool({
     organizationKey: params.organization.key,
     agentKey: beacon.key,
     toolKey: grant.tool.key,
@@ -132,6 +148,7 @@ export async function* streamFoundersBeaconAsk(params: BeaconAskParams, options:
     outputSchema: BEACON_DELEGATION_OUTPUT_SCHEMA,
   }, {
     ...options,
+    events: liveEvents,
     principal: { kind: 'member', userOrganizationKey: params.membership.key },
     executionContext: { organization: params.organization, scope: params.scope },
     serviceDelegation: { agentSlug: 'beacon', requiredOrganizationRole: null },
@@ -142,14 +159,28 @@ export async function* streamFoundersBeaconAsk(params: BeaconAskParams, options:
       outcome.decision = parsedDecision;
       if (parsedDecision.delegation.target === 'genesis') {
         const delegateCreation = options.delegateCreation ?? delegateAgentCreationFromBeacon;
-        outcome.delegated = await delegateCreation({ ...params, input: { request: parsedDecision.delegation.request } }, options);
+        outcome.delegated = await delegateCreation(
+          { ...params, input: { request: parsedDecision.delegation.request } },
+          { ...options, events: liveEvents },
+        );
       }
     },
-  } as RunStoredAgentToolOptions) as StoredAgentRunResult<BeaconDelegationDecision>;
+  } as RunStoredAgentToolOptions) as Promise<StoredAgentRunResult<BeaconDelegationDecision>>)
+    .finally(() => channel.close());
+
+  let result: StoredAgentRunResult<BeaconDelegationDecision>;
+  try {
+    for await (const event of channel) yield event;
+    result = await execution;
+  } finally {
+    // A disconnected SSE consumer returns the generator early. Always observe
+    // the execution promise so an abort cannot become an unhandled rejection.
+    await execution.catch(() => undefined);
+  }
 
   if (!result.executed || !outcome.decision) throw new BeaconUnavailableError('delegation decision was not executed');
   const runKey = result.run.key;
-  yield { type: 'started', runKey };
+  if (!started) yield { type: 'started', runKey };
   if (outcome.decision.delegation.target === 'none') {
     yield { type: 'delta', text: BEACON_NO_DELEGATE_MESSAGE };
   } else {

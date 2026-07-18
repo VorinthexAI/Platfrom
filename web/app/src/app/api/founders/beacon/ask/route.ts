@@ -15,6 +15,8 @@ function devStubStream(): Response {
   const encoder = new TextEncoder();
   const chunks = [
     "event: response.started\ndata: {}\n\n",
+    'event: tool.started\ndata: {"invocationId":"tool-1","phase":"started","agent":{"slug":"beacon","name":"Beacon"},"tool":{"slug":"core.delegate","name":"Delegate"},"action":{"slug":"core.delegate","name":"Delegate"}}\n\n',
+    'event: tool.completed\ndata: {"invocationId":"tool-1","phase":"completed","agent":{"slug":"beacon","name":"Beacon"},"tool":{"slug":"core.delegate","name":"Delegate"},"action":{"slug":"core.delegate","name":"Delegate"},"elapsedMs":320}\n\n',
     'event: response.delta\ndata: {"text":"Beacon is running against the local dev stub — "}\n\n',
     'event: response.delta\ndata: {"text":"configure BACKEND_API_URL to reach the real runtime."}\n\n',
     "event: response.completed\ndata: {}\n\n",

@@ -2,15 +2,48 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createSseParser } from "./sse";
-import type { BeaconStatus } from "./types";
+import type { BeaconStatus, BeaconToolActivity } from "./types";
 
 export interface BeaconUiState {
   response: string;
+  tools: BeaconToolActivity[];
   status: BeaconStatus;
   error: string | null;
 }
 
-const IDLE_STATE: BeaconUiState = { response: "", status: "idle", error: null };
+const IDLE_STATE: BeaconUiState = { response: "", tools: [], status: "idle", error: null };
+
+export function parseBeaconToolActivity(eventName: string, raw: string): BeaconToolActivity | null {
+  const phase = eventName === "tool.started"
+    ? "started"
+    : eventName === "tool.completed"
+      ? "completed"
+      : eventName === "tool.failed"
+        ? "failed"
+        : null;
+  if (!phase) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<BeaconToolActivity>;
+    if (
+      typeof value.invocationId !== "string" ||
+      !value.agent || typeof value.agent.slug !== "string" || typeof value.agent.name !== "string" ||
+      !value.tool || typeof value.tool.slug !== "string" || typeof value.tool.name !== "string" ||
+      !value.action || typeof value.action.slug !== "string" || typeof value.action.name !== "string" ||
+      (value.elapsedMs !== undefined && (typeof value.elapsedMs !== "number" || value.elapsedMs < 0))
+    ) return null;
+    return { ...value, phase } as BeaconToolActivity;
+  } catch {
+    return null;
+  }
+}
+
+export function mergeBeaconToolActivity(current: BeaconToolActivity[], activity: BeaconToolActivity): BeaconToolActivity[] {
+  const index = current.findIndex(({ invocationId }) => invocationId === activity.invocationId);
+  if (index < 0) return [...current, activity];
+  const next = [...current];
+  next[index] = activity;
+  return next;
+}
 
 /**
  * Streams one ephemeral Beacon ask. Nothing is persisted client-side: the
@@ -45,7 +78,7 @@ export function useBeaconStream() {
     const controller = new AbortController();
     controllerRef.current = controller;
     activeRef.current = true;
-    setState({ response: "", status: "connecting", error: null });
+    setState({ response: "", tools: [], status: "connecting", error: null });
     try {
       const response = await fetch("/api/founders/beacon/ask", {
         method: "POST",
@@ -63,7 +96,7 @@ export function useBeaconStream() {
             : response.status === 429
               ? "Too many requests — give Beacon a moment."
               : "Beacon could not be reached.");
-        setState({ response: "", status: "failed", error: message });
+        setState({ response: "", tools: [], status: "failed", error: message });
         return;
       }
 
@@ -79,6 +112,16 @@ export function useBeaconStream() {
         for (const event of parser.push(decoder.decode(value, { stream: true }))) {
           if (event.event === "response.started") {
             setState((current) => ({ ...current, status: "streaming" }));
+          } else if (event.event.startsWith("tool.")) {
+            const activity = parseBeaconToolActivity(event.event, event.data);
+            if (activity) {
+              setState((current) => ({
+                ...current,
+                tools: mergeBeaconToolActivity(current.tools, activity),
+                status: "streaming",
+                error: null,
+              }));
+            }
           } else if (event.event === "response.delta") {
             let text = "";
             try {
@@ -90,6 +133,7 @@ export function useBeaconStream() {
             if (text) {
               setState((current) => ({
                 response: current.response + text,
+                tools: current.tools,
                 status: "streaming",
                 error: null,
               }));

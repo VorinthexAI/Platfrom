@@ -74,11 +74,18 @@ export type RuntimeEventSlug = z.infer<typeof runtimeEventSlugSchema>;
 
 export const runtimeEventDataSchema = z.object({
   runKey: z.string().cuid().optional(),
+  invocationKey: z.string().cuid().optional(),
   stepKey: z.string().cuid().optional(),
   callKey: z.string().cuid().optional(),
   agentKey: z.string().cuid().optional(),
+  agentSlug: z.string().trim().min(1).max(120).optional(),
+  agentName: z.string().trim().min(1).max(120).optional(),
   toolKey: z.string().cuid().optional(),
+  toolSlug: z.string().trim().min(1).max(160).optional(),
+  toolName: z.string().trim().min(1).max(100).optional(),
   actionKey: z.string().cuid().optional(),
+  actionSlug: z.string().trim().min(1).max(160).optional(),
+  actionName: z.string().trim().min(1).max(100).optional(),
   modelKey: z.string().cuid().optional(),
   providerKey: z.string().cuid().optional(),
   nodeType: z.string().trim().min(1).max(120).optional(),
