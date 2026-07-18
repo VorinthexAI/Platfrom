@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AiError } from '@/lib/ai/shared/result';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 import { genesisCreationManifestSchema, genesisGuardrailsSchema } from './schemas';
 import type { GenesisContext } from './context';
 import { validateGenesisManifest, type ValidateGenesisManifestOptions, type ValidatedGenesisManifest } from './validation';
@@ -9,7 +10,7 @@ export const CREATE_AGENT_TOOL_SLUG = 'agent.create' as const;
 export const CREATE_AGENT_ACTION_SLUG = 'agent.create' as const;
 
 export const createAgentToolInputSchema = z.object({
-  organizationKey: z.string().cuid(),
+  organizationKey: organizationKeySchema,
   scopeKey: z.string().cuid(),
   agentRunKey: z.string().cuid(),
   manifest: genesisCreationManifestSchema,

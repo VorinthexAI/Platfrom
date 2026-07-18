@@ -1,10 +1,11 @@
 import { z } from 'zod';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 
 export const AGENT_MEMORIES_COLLECTION = 'agentMemories';
 export const AGENT_MEMORY_TYPES = ['fact', 'preference', 'decision', 'instruction', 'observation', 'outcome'] as const;
 export const agentMemorySchema = z.object({
   key: z.string().cuid(),
-  organizationKey: z.string().cuid(),
+  organizationKey: organizationKeySchema,
   scopeKey: z.string().cuid(),
   agentKey: z.string().cuid(),
   skillKey: z.string().cuid().nullable(),

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 import { maxTenWordsSchema } from '@/lib/ai/agent-runs';
 import { sourceSelectionSchema } from '@/lib/ai/agent-run-sources';
 
@@ -115,7 +116,7 @@ export const genesisCreationManifestSchema = z.object({
 export type GenesisCreationManifest = z.infer<typeof genesisCreationManifestSchema>;
 
 export const genesisGuardrailsSchema = z.object({
-  organizationKey: cuidSchema,
+  organizationKey: organizationKeySchema,
   scopeKey: cuidSchema,
   allowedToolSlugs: z.tuple([z.literal('agent.create')]),
   allowedActionSlugs: z.tuple([z.literal('agent.create')]),
@@ -151,7 +152,7 @@ export const genesisSourcePolicySchema = z.object({
 });
 
 export const genesisRunInputSchema = z.object({
-  organizationKey: cuidSchema,
+  organizationKey: organizationKeySchema,
   scopeKey: cuidSchema,
   genesisAgentKey: cuidSchema,
   currentTask: z.string().trim().min(1).max(20_000),

@@ -4,9 +4,10 @@ import { NodeContextNotFoundError, type NodeResolverRegistry } from './resolver'
 import { AiError } from '@/lib/ai/shared/result';
 import { loadAgentRuntime, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
 import { nodeTypeSchema } from '@/lib/ai/agent-run-sources';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 
 export const artifactReadToolInputSchema = z.object({
-  organizationKey: z.string().cuid(),
+  organizationKey: organizationKeySchema,
   scopeKey: z.string().cuid(),
   agentKey: z.string().cuid(),
   nodeType: nodeTypeSchema,

@@ -6,6 +6,7 @@ import { rankKnowledgeBlocks } from './ranking';
 import { knowledgeBlockSchema, normalizeKnowledgeBlock, searchableNodeSchema, type KnowledgePack, type SearchableNode } from './schema';
 import { NodeContextNotFoundError, NodeResolverRegistry, nodeSimilaritySchema, type ResolverAccess } from './resolver';
 import type { KnowledgeSummarizer } from './compression';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 
 export interface ReverseContextCompilerOptions {
   registry: NodeResolverRegistry;
@@ -34,7 +35,7 @@ export class ReverseContextCompiler {
   constructor(private readonly options: ReverseContextCompilerOptions) {}
 
   async compile(input: CompileReverseContextInput): Promise<KnowledgePack> {
-    const access = z.object({ organizationKey: z.string().cuid(), scopeKey: z.string().cuid(), agentKey: z.string().cuid() }).strict().parse({ organizationKey: input.organizationKey, scopeKey: input.scopeKey, agentKey: input.agentKey });
+    const access = z.object({ organizationKey: organizationKeySchema, scopeKey: z.string().cuid(), agentKey: z.string().cuid() }).strict().parse({ organizationKey: input.organizationKey, scopeKey: input.scopeKey, agentKey: input.agentKey });
     const query = input.query.trim();
     if (!query) throw new Error('Reverse-context query cannot be empty');
     const topN = z.number().int().min(1).max(100).parse(input.topN ?? this.options.defaultTopN ?? 20);

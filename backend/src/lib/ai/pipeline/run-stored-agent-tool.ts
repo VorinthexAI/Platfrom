@@ -18,12 +18,13 @@ import { providerSlugSchema } from '@/lib/db/providers.node';
 import type { Action } from '@/lib/db/actions.node';
 import type { ReverseContextCompiler } from '@/lib/ai/reverse-context/compiler';
 import { newId } from '@/lib/ids';
+import { organizationKeySchema } from '@/lib/ai/shared/ids';
 import { recordRuntimeEvent, type RuntimeEventData, type RuntimeEventRecorder, type RuntimeEventSlug } from '@/platform/events';
 import { InvalidRunRequestError } from './validation';
 import { validateAgentOutput, validateProviderResponse } from './validation';
 
 export const runStoredAgentToolParamsSchema = z.object({
-  organizationKey: z.string().cuid(),
+  organizationKey: organizationKeySchema,
   agentKey: z.string().cuid(),
   toolKey: z.string().cuid(),
   actionKey: z.string().cuid().optional(),
