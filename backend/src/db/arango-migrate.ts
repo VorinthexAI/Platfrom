@@ -16,6 +16,7 @@ import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/in
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
+import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -28,24 +29,6 @@ interface CollectionSpec {
   embedKeys?: string[];
   skipEmbedding?: boolean;
 }
-
-const legacyIndexesToDrop: Record<string, string[][]> = {
-  members: [['userId']],
-  superAdmins: [['userId'], ['memberId']],
-  authChallenges: [['userId', 'kind']],
-  // Visitors are anonymous now: the emailHash/userId identity indexes go
-  // with the fields (scrubbed below); only distinctId + organizationId remain.
-  // The platformId index goes with the platform -> organization rename.
-  visitors: [['emailHash'], ['userId'], ['platformId']],
-  users: [['platformId'], ['platform_role'], ['organization_role']],
-  visitorSessions: [['platformId', 'connectedAt']],
-  userSessions: [['platformId', 'connectedAt']],
-  agents: [['orchestratorId'], ['orchestratorId', 'name'], ['enabled']],
-  skills: [['enabled']],
-  scopes: [['organizationId', 'name'], ['organizationId']],
-  organizations: [['ownerId']],
-  events: [['belongsTo', 'sourceId', 'createdAt']],
-};
 
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
   return buildEmbeddingText(embedKeys, doc);
@@ -650,12 +633,12 @@ async function main() {
           } IN agents OPTIONS { keepNull: false }
       `);
     }
-    const legacyIndexes = legacyIndexesToDrop[spec.name] ?? [];
+    const legacyIndexes = LEGACY_INDEX_FIELDS[spec.name] ?? [];
     if (legacyIndexes.length > 0) {
       const existingIndexes = await collection.indexes();
       for (const index of existingIndexes) {
-        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields : [];
-        if (legacyIndexes.some((legacy) => legacy.length === fields.length && legacy.every((field, i) => fields[i] === field))) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+        if (isLegacyIndex(spec.name, fields)) {
           await collection.dropIndex(index.id);
           console.log(`Dropped legacy index ${index.id} on ${spec.name}(${fields.join(', ')})`);
         }
