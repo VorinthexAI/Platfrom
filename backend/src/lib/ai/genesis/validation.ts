@@ -129,7 +129,9 @@ export async function validateGenesisManifest(
   if (agentOperation.operation === 'reuse') {
     const existing = agentsByKey.get(agentOperation.agentKey);
     if (!existing || existing.scopeKey !== context.scope.key) throw new GenesisManifestReferenceError('agent', agentOperation.agentKey);
+    if (existing.slug === 'beacon') throw new GenesisManifestConsistencyError('the canonical Beacon agent cannot be modified by Genesis');
   } else {
+    if (agentOperation.slug === 'beacon') throw new GenesisManifestConsistencyError('the canonical Beacon agent cannot be created or modified by Genesis');
     if (agentOperation.scopeKey !== context.scope.key) throw new GenesisManifestReferenceError('scope', agentOperation.scopeKey);
     agentKey = newId();
     const exact = agentsBySlug.get(agentOperation.slug);

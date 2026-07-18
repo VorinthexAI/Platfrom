@@ -129,7 +129,13 @@ the normal tool lifecycle events.
 
 `core.delegate` is also a local action with no `modelActions` row. Only the
 canonical Beacon agent is seeded with that tool, generic agent services and
-Genesis reject attempts to grant it elsewhere, and its handler accepts only an
+Genesis reject attempts to grant it elsewhere, and Beacon's seed reconciles
+away every direct `ask.answer` or `reason.solve` grant. Beacon may use the
+existing `core.reason` model route only inside `core.delegate` to produce a
+strict Zod-validated allowlist decision; model prose is never returned to the
+user. The current allowlist contains only Genesis for `agent.create`. Every
+other intent returns the server-owned `NO_ELIGIBLE_DELEGATE` result without a
+direct-answer fallback. The Genesis handler accepts only an
 owner-authorized request for the server-resolved Genesis identity. The
 `POST /founders/beacon/delegate` boundary re-resolves organization and scope,
 records a Beacon tool run, then executes Genesis with the initiating human's

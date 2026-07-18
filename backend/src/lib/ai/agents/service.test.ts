@@ -85,10 +85,11 @@ describe('agent service integrity', () => {
   });
 
   test('allows core.delegate grants only on the canonical Beacon identity', async () => {
-    const { scope, delegateTool, source } = fixture(); const service = createAgentService(source);
+    const { scope, tool, delegateTool, source } = fixture(); const service = createAgentService(source);
     const ordinary = await service.createAgent({ slug: 'forge', name: 'Forge', title: 'Developer', scopeKey: scope.key });
     await expect(service.grantTool({ agentKey: ordinary.key, toolKey: delegateTool.key })).rejects.toBeInstanceOf(RestrictedAgentToolGrantError);
     const beacon = await service.createAgent({ slug: 'beacon', name: 'Beacon', title: 'AI Coordinator', scopeKey: scope.key });
     await expect(service.grantTool({ agentKey: beacon.key, toolKey: delegateTool.key })).resolves.toMatchObject({ agentKey: beacon.key, toolKey: delegateTool.key });
+    await expect(service.grantTool({ agentKey: beacon.key, toolKey: tool.key })).rejects.toThrow('may only be granted core.delegate');
   });
 });
