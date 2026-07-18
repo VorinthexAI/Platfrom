@@ -30,4 +30,18 @@ describe('tool handler registry', () => {
     ]);
     expect(getTool('organization.member.remove').description).toContain('immediately revoke runtime access');
   });
+
+  test('registers the complete scope lifecycle tool surface', () => {
+    expect(TOOL_IDS.filter((id) => id.startsWith('scope.'))).toEqual([
+      'scope.list',
+      'scope.read',
+      'scope.create',
+      'scope.update',
+      'scope.move',
+      'scope.archive',
+      'scope.restore',
+      'scope.remove',
+    ]);
+    expect(getTool('scope.remove').description).toContain('owner-only confirmation');
+  });
 });

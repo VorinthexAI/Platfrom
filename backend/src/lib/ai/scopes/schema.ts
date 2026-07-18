@@ -25,6 +25,7 @@ export const scopeSchema = z.object({
   summary: z.string().trim().min(1),
   description: z.string().trim().min(1),
   position: z.number().int().positive(),
+  deletedAt: z.string().nullable().default(null),
   embedding: z.array(z.number().finite()).default([]),
 });
 
@@ -36,6 +37,7 @@ export const scopeScopeSchema = z
     key: z.string().cuid(),
     parentKey: z.string().cuid(),
     childKey: z.string().cuid(),
+    deletedAt: z.string().nullable().default(null),
   })
   .superRefine((relation, ctx) => {
     if (relation.parentKey === relation.childKey) {
