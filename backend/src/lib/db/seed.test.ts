@@ -226,7 +226,8 @@ describe('tool and tool-action seeds', () => {
       'scope.restore:scope.restore',
       'scope.update:scope.update',
       'speech.narrate:audio.generate-speech',
-    ]);
+      ...ACTION_SLUGS.filter((slug) => slug.startsWith('scope.member.') || slug.startsWith('scope.agent.') || slug.startsWith('agent.member.') || slug.startsWith('organization.provider.') || /^organization\.(read|update|archive|restore)$/.test(slug) || slug.startsWith('access.')).map((slug) => `${slug}:${slug}`),
+    ].sort());
   });
 });
 

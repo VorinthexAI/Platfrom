@@ -121,6 +121,7 @@ describe('scope member schema', () => {
       scopeKey: member.scopeKey,
       userOrganizationKey: member.userOrganizationKey,
       role: 'moderator',
+      status: 'active',
     });
     expect(SCOPE_MEMBER_ROLES).toEqual(['owner', 'admin', 'moderator', 'viewer']);
     expect(() => scopeMemberSchema.parse({ ...member, role: 'member' })).toThrow();

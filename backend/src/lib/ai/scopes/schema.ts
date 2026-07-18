@@ -56,6 +56,7 @@ export const scopeMemberSchema = z.object({
   scopeKey: z.string().cuid(),
   userOrganizationKey: z.string().cuid(),
   role: scopeMemberRoleSchema,
+  status: z.enum(['active', 'suspended']).default('active'),
 });
 
 export type ScopeMember = z.infer<typeof scopeMemberSchema>;

@@ -32,7 +32,7 @@ describe('tool handler registry', () => {
   });
 
   test('registers the complete scope lifecycle tool surface', () => {
-    expect(TOOL_IDS.filter((id) => id.startsWith('scope.'))).toEqual([
+    expect(TOOL_IDS.filter((id) => id.startsWith('scope.') && !id.startsWith('scope.agent.') && !id.startsWith('scope.member.'))).toEqual([
       'scope.list',
       'scope.read',
       'scope.create',
@@ -43,5 +43,13 @@ describe('tool handler registry', () => {
       'scope.remove',
     ]);
     expect(getTool('scope.remove').description).toContain('owner-only confirmation');
+  });
+
+  test('registers the complete local access-management surface', () => {
+    expect(TOOL_IDS.filter((id) => id.startsWith('scope.member.'))).toHaveLength(7);
+    expect(TOOL_IDS.filter((id) => id.startsWith('scope.agent.'))).toHaveLength(8);
+    expect(TOOL_IDS.filter((id) => id.startsWith('agent.member.'))).toHaveLength(5);
+    expect(TOOL_IDS.filter((id) => id.startsWith('organization.provider.'))).toHaveLength(5);
+    expect(TOOL_IDS.filter((id) => id.startsWith('access.'))).toHaveLength(6);
   });
 });

@@ -19,6 +19,7 @@ import { createAgentFromGenesis } from './execute';
 import { GENESIS_STEP_SLUGS } from './schemas';
 import { buildGenesisFixture } from './test-fixtures';
 import type { RuntimeEventInput } from '@/platform/events';
+import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 
 describe('Genesis end-to-end runtime', () => {
   test('routes through Mini/OpenAI, validates, persists atomically, and exposes the complete ledger', async () => {
@@ -52,7 +53,9 @@ describe('Genesis end-to-end runtime', () => {
     const runtimeEvents: RuntimeEventInput[] = [];
     const transaction: GenesisTransactionGateway = { async execute(callback) { const staged = new Map<string, Record<string, unknown>[]>(); const result = await callback({ async save(collection, document) { const rows = staged.get(collection) ?? []; rows.push(document); staged.set(collection, rows); } }); for (const [key, rows] of staged) transactionRows.set(key, rows); return result; } };
 
-    const result = await createAgentFromGenesis({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a Backend Developer agent.', sourceRefs: [{ nodeType: 'skill', nodeKey: f.backend.key, priority: 100 }] }, { ...f, data: routerData, adapters, runs, steps, calls, sources, artifacts, checks, events: async (event) => { runtimeEvents.push(event); }, transaction, generateEmbedding: async () => [1, 0] });
+    const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey: f.organization.key, scopeKey: f.scope.key, agentKey: f.genesis.key, position: 1, minimumAccessRole: 'owner', createdAt: now, updatedAt: now });
+    const accessData = { async getUserOrganization() { return null; }, async getUser() { return null; }, async listScopeMembers() { return []; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return []; } };
+    const result = await createAgentFromGenesis({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a Backend Developer agent.', sourceRefs: [{ nodeType: 'skill', nodeKey: f.backend.key, priority: 100 }] }, { ...f, data: routerData, adapters, runs, steps, calls, sources, artifacts, checks, events: async (event) => { runtimeEvents.push(event); }, transaction, accessData, generateEmbedding: async () => [1, 0] });
     expect(result.persisted).toBe(true); expect(result.manifest.agent).toMatchObject({ operation: 'create', slug: 'forge' });
     expect(result.context.tools.map(({ tool }) => tool.slug)).toEqual(['agent.create']);
     expect(result.toolOutput).toMatchObject({ status: 'created', agentKey: result.created?.agent.key, reusedSkillKeys: [f.backend.key] });

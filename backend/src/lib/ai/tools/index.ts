@@ -19,6 +19,20 @@ export {
   type ToolAction,
 } from '@/lib/db/tool-actions.node';
 export class UnknownToolError extends AiError { constructor(toolId: string) { super('unknown_tool', `Unknown tool: ${toolId}`); } }
+const accessToolIds = [
+  'scope.member.list', 'scope.member.read', 'scope.member.add', 'scope.member.role.update', 'scope.member.activate', 'scope.member.suspend', 'scope.member.remove',
+  'scope.agent.list', 'scope.agent.read', 'scope.agent.add', 'scope.agent.move', 'scope.agent.archive', 'scope.agent.restore', 'scope.agent.remove', 'scope.agent.access-threshold.update',
+  'agent.member.list', 'agent.member.read', 'agent.member.grant', 'agent.member.revoke', 'agent.member.sync',
+  'organization.provider.list', 'organization.provider.read', 'organization.provider.enable', 'organization.provider.disable', 'organization.provider.test',
+  'organization.read', 'organization.update', 'organization.archive', 'organization.restore',
+  'access.organization.evaluate', 'access.scope.evaluate', 'access.agent.evaluate', 'access.organization.explain', 'access.scope.explain', 'access.agent.explain',
+] as const;
+const accessToolRegistry = Object.fromEntries(accessToolIds.map((id) => [id, {
+  id,
+  name: id.split('.').map((part) => part[0]!.toUpperCase() + part.slice(1)).join(' '),
+  description: `Safely execute ${id} through the local domain authorization boundary.`,
+  scopeId: null,
+}])) as Record<(typeof accessToolIds)[number], ToolDefinition>;
 export const TOOL_REGISTRY = {
   'ask.answer': { id: 'ask.answer', name: 'Ask', description: 'Answer the user over the current message history. Granting this tool is what gives an agent a conversational surface at all.', scopeId: null },
   'reason.solve': { id: 'reason.solve', name: 'Solve', description: 'Work through a hard problem step by step before answering.', scopeId: null },
@@ -42,6 +56,7 @@ export const TOOL_REGISTRY = {
   'scope.archive': { id: 'scope.archive', name: 'Archive Scope', description: 'Archive scopes without deleting their data and immediately block new operational activity.', scopeId: null },
   'scope.restore': { id: 'scope.restore', name: 'Restore Scope', description: 'Restore archived scopes under active parents while preserving grants and keeping schedules paused.', scopeId: null },
   'scope.remove': { id: 'scope.remove', name: 'Remove Scope', description: 'Permanently remove an archived empty leaf scope through owner-only confirmation and atomic cleanup.', scopeId: null },
+  ...accessToolRegistry,
 } satisfies Record<ToolId, ToolDefinition>;
 export function getTool(toolId: string): ToolDefinition { const tool = (TOOL_REGISTRY as Record<string, ToolDefinition>)[toolId]; if (!tool) throw new UnknownToolError(toolId); return tool; }
 export function listTools() { return Object.values<ToolDefinition>(TOOL_REGISTRY); }

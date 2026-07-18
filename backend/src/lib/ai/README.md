@@ -115,7 +115,9 @@ relations and selects deterministically using `modelActions.priority` only:
 
 There is no random choice, quality/cost/speed scoring, or execution fallback.
 
-Organization-member and scope tools use a separate local execution boundary.
+Organization, organization-member/provider, scope, scope-member/agent,
+agent-member, and access evaluation/explanation tools use a separate local
+execution boundary.
 GPT-5.4 Mini routes only through `core.reason` to select one granted tool and
 produce arguments matching its JSON schema. `runDomainAgentTool` then reloads
 the persisted agent grants, resolves the initiating human, validates the input
@@ -124,6 +126,13 @@ These deterministic domain actions intentionally have no `modelActions` rows:
 models may interpret intent but can never perform database mutations directly.
 Mutations use Arango stream transactions and emit both domain audit events and
 the normal tool lifecycle events.
+
+`scopeAgents` is the authoritative lifecycle and minimum-role link between a
+scope and an existing agent definition. `agentMembers` stores inherited and
+explicit grants separately. Every AgentRun reloads these relations and requires
+an active organization, active scope, active scope-agent link, valid scope
+access, and at least one valid agent grant. Access explanations render the
+structured decision returned by the same evaluator used for enforcement.
 A fixed route never bypasses organization provider permissions.
 
 ## Execution and validation

@@ -60,6 +60,46 @@ export interface RootOpenAiRoutingResult {
 
 const now = () => new Date().toISOString();
 
+const ACCESS_DOMAIN_DEFINITIONS = [
+  ['scope.member.list', 'List Scope Members', 'List direct and inherited scope members with effective roles.'],
+  ['scope.member.read', 'Read Scope Members', 'Read detailed effective scope and agent access for selected members.'],
+  ['scope.member.add', 'Add Scope Member', 'Add existing organization members directly to a scope.'],
+  ['scope.member.role.update', 'Update Scope Member Role', 'Update direct scope roles and synchronize inherited agent access.'],
+  ['scope.member.activate', 'Activate Scope Member', 'Reactivate suspended direct scope memberships.'],
+  ['scope.member.suspend', 'Suspend Scope Member', 'Suspend direct scope memberships while preserving relations.'],
+  ['scope.member.remove', 'Remove Scope Member', 'Remove direct scope memberships and synchronize effective access.'],
+  ['scope.agent.list', 'List Scope Agents', 'List authorized agent relations in a scope.'],
+  ['scope.agent.read', 'Read Scope Agents', 'Read scope-agent relation details without guessing ambiguous references.'],
+  ['scope.agent.add', 'Add Scope Agent', 'Link an existing compatible agent to an active scope.'],
+  ['scope.agent.move', 'Move Scope Agent', 'Move or reorder an agent relation and resynchronize inherited access.'],
+  ['scope.agent.archive', 'Archive Scope Agent', 'Archive a scope-agent relation and block execution through it.'],
+  ['scope.agent.restore', 'Restore Scope Agent', 'Restore an archived scope-agent relation and recalculate inherited access.'],
+  ['scope.agent.remove', 'Remove Scope Agent', 'Remove an archived scope-agent relation without deleting the agent definition.'],
+  ['scope.agent.access-threshold.update', 'Update Scope Agent Access Threshold', 'Change the minimum scope role receiving inherited agent access.'],
+  ['agent.member.list', 'List Agent Members', 'List organization members with inherited or explicit agent access.'],
+  ['agent.member.read', 'Read Agent Members', 'Explain detailed effective access for selected agent members.'],
+  ['agent.member.grant', 'Grant Agent Member', 'Create explicit agent grants without changing scope or organization roles.'],
+  ['agent.member.revoke', 'Revoke Agent Member', 'Remove explicit grants while preserving inherited access.'],
+  ['agent.member.sync', 'Sync Agent Members', 'Idempotently recalculate inherited grants for one scope-agent relation.'],
+  ['organization.provider.list', 'List Organization Providers', 'List safe provider availability and routing status without secrets.'],
+  ['organization.provider.read', 'Read Organization Providers', 'Read safe provider configuration, models, actions, and routing eligibility.'],
+  ['organization.provider.enable', 'Enable Organization Provider', 'Enable an allowed global provider for the active organization.'],
+  ['organization.provider.disable', 'Disable Organization Provider', 'Immediately prevent new routes through an organization provider.'],
+  ['organization.provider.test', 'Test Organization Provider', 'Safely test provider configuration and routing health without exposing credentials.'],
+  ['organization.read', 'Read Organization', 'Read safe metadata and aggregate counts for the active organization.'],
+  ['organization.update', 'Update Organization', 'Update authorized organization display metadata.'],
+  ['organization.archive', 'Archive Organization', 'Archive a non-root organization and immediately block operational access.'],
+  ['organization.restore', 'Restore Organization', 'Restore an archived organization without restarting schedules or jobs.'],
+  ['access.organization.evaluate', 'Evaluate Organization Access', 'Return a machine-readable organization authorization decision.'],
+  ['access.scope.evaluate', 'Evaluate Scope Access', 'Return a machine-readable scope authorization decision.'],
+  ['access.agent.evaluate', 'Evaluate Agent Access', 'Return a machine-readable agent authorization decision.'],
+  ['access.organization.explain', 'Explain Organization Access', 'Explain an organization decision produced by the shared authorization engine.'],
+  ['access.scope.explain', 'Explain Scope Access', 'Explain a scope decision produced by the shared authorization engine.'],
+  ['access.agent.explain', 'Explain Agent Access', 'Explain an agent decision produced by the shared authorization engine.'],
+] as const;
+
+const accessSeedKey = (kind: 'action' | 'tool' | 'link', index: number) => `cmst${kind}${String(index + 1).padStart(14, '0')}`;
+
 export const SEEDED_ACTIONS = [
   {
     key: 'cm9action01vorinthexseed',
@@ -270,6 +310,17 @@ export const SEEDED_ACTIONS = [
     handlerKey: 'scope.remove',
     enabled: true,
   },
+  ...ACCESS_DOMAIN_DEFINITIONS.map(([slug, name, description], index) => ({
+    key: accessSeedKey('action', index),
+    slug,
+    name,
+    description,
+    objective: description,
+    inputDescription: `Strict local input for ${slug}; all identifiers are resolved inside the authenticated organization.`,
+    outputDescription: `A safe structured ${slug} result with explicit ambiguity and authorization decisions.`,
+    handlerKey: slug,
+    enabled: true,
+  })),
   {
     key: 'cm9action03vorinthexseed',
     slug: 'web.search',
@@ -668,6 +719,14 @@ export const SEEDED_TOOLS = [
     scopeKey: null,
     enabled: true,
   },
+  ...ACCESS_DOMAIN_DEFINITIONS.map(([slug], index) => ({
+    key: accessSeedKey('tool', index),
+    slug,
+    name: slug.split('.').map((part) => part[0]!.toUpperCase() + part.slice(1)).join(' '),
+    description: `Safely execute ${slug} through the local domain authorization boundary.`,
+    scopeKey: null,
+    enabled: true,
+  })),
 ] as const;
 
 export const SEEDED_TOOL_ACTIONS = [
@@ -693,6 +752,7 @@ export const SEEDED_TOOL_ACTIONS = [
   { key: 'cmrqa58d3000l047kf9zwbnsr', toolSlug: 'scope.archive', actionSlug: 'scope.archive', priority: 100, enabled: true },
   { key: 'cmrqa58d3000m047k7cpbc59c', toolSlug: 'scope.restore', actionSlug: 'scope.restore', priority: 100, enabled: true },
   { key: 'cmrqa58d3000n047kehxte6sq', toolSlug: 'scope.remove', actionSlug: 'scope.remove', priority: 100, enabled: true },
+  ...ACCESS_DOMAIN_DEFINITIONS.map(([slug], index) => ({ key: accessSeedKey('link', index), toolSlug: slug, actionSlug: slug, priority: 100, enabled: true })),
 ] as const;
 
 export const SEEDED_PRODUCTS = [

@@ -31,12 +31,14 @@ import { AGENT_RUN_SOURCES_COLLECTION } from './agent-run-sources';
 import { AGENT_ARTIFACT_CHECKS_COLLECTION } from './agent-artifact-checks';
 import { RUNTIME_VARIABLES_COLLECTION } from './runtime-variables';
 import { AGENT_ARCHITECTURE, AGENT_EXECUTION_SEQUENCE } from './architecture';
+import { SCOPE_AGENTS_COLLECTION, scopeAgentSchema } from '@/lib/db/scope-agents.node';
+import { AGENT_MEMBERS_COLLECTION, agentMemberSchema } from '@/lib/db/agent-members.node';
 
 describe('AI metadata model contract', () => {
   test('uses the canonical collection names', () => {
     expect([
       USERS_COLLECTION, ORGANIZATIONS_COLLECTION, USER_ORGANIZATION_COLLECTION,
-      SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, SCOPE_MEMBERS_COLLECTION,
+      SCOPES_COLLECTION, SCOPE_SCOPES_COLLECTION, SCOPE_MEMBERS_COLLECTION, SCOPE_AGENTS_COLLECTION, AGENT_MEMBERS_COLLECTION,
       SKILLS_COLLECTION, AGENTS_COLLECTION, AGENT_SKILLS_COLLECTION, AGENT_TOOLS_COLLECTION,
       ACTIONS_COLLECTION, PROVIDERS_COLLECTION, MODELS_COLLECTION,
       MODEL_ACTIONS_COLLECTION, MODEL_PROVIDERS_COLLECTION, ORGANIZATION_PROVIDERS_COLLECTION,
@@ -47,7 +49,7 @@ describe('AI metadata model contract', () => {
       RUNTIME_VARIABLES_COLLECTION,
     ]).toEqual([
       'users', 'organizations', 'userOrganizations',
-      'scopes', 'scopeScopes', 'scopeMembers',
+      'scopes', 'scopeScopes', 'scopeMembers', 'scopeAgents', 'agentMembers',
       'skills', 'agents', 'agentSkills', 'agentTools',
       'actions', 'providers', 'models',
       'modelActions', 'modelProviders', 'organizationProviders',
@@ -61,6 +63,8 @@ describe('AI metadata model contract', () => {
     expect(Object.keys(userOrganizationSchema.shape)).toEqual(expect.arrayContaining(['organizationId', 'userId']));
     expect(Object.keys(scopeScopeSchema.innerType().shape)).toEqual(expect.arrayContaining(['parentKey', 'childKey']));
     expect(Object.keys(scopeMemberSchema.shape)).toEqual(expect.arrayContaining(['scopeKey', 'userOrganizationKey', 'role']));
+    expect(Object.keys(scopeAgentSchema.shape)).toEqual(expect.arrayContaining(['scopeKey', 'agentKey', 'status', 'minimumAccessRole']));
+    expect(Object.keys(agentMemberSchema.shape)).toEqual(expect.arrayContaining(['scopeAgentKey', 'userOrganizationKey', 'source']));
     expect(agentSchema.shape).toHaveProperty('scopeKey');
     expect(Object.keys(agentSkillSchema.shape)).toEqual(expect.arrayContaining(['agentKey', 'skillKey', 'priority']));
     expect(Object.keys(agentToolSchema.shape)).toEqual(expect.arrayContaining(['agentKey', 'toolKey']));
@@ -78,7 +82,7 @@ describe('AI metadata model contract', () => {
   test('locks the complete organization, registry, runtime, execution, and history layers', () => {
     expect(AGENT_ARCHITECTURE.organization).toEqual({ users: 'users', scopes: 'scopes', enabledProviders: 'organizationProviders', agentRuns: 'agentRuns' });
     expect(AGENT_ARCHITECTURE.registries).toEqual({ agents: 'agents', skills: 'skills', tools: 'tools', actions: 'actions', models: 'models', providers: 'providers' });
-    expect(AGENT_ARCHITECTURE.linkingNodes).toEqual({ userOrganizations: 'userOrganizations', scopeScopes: 'scopeScopes', scopeMembers: 'scopeMembers', agentSkills: 'agentSkills', agentTools: 'agentTools', toolActions: 'toolActions', modelActions: 'modelActions', modelProviders: 'modelProviders', agentRunSources: 'agentRunSources' });
+    expect(AGENT_ARCHITECTURE.linkingNodes).toEqual({ userOrganizations: 'userOrganizations', scopeScopes: 'scopeScopes', scopeMembers: 'scopeMembers', scopeAgents: 'scopeAgents', agentMembers: 'agentMembers', agentSkills: 'agentSkills', agentTools: 'agentTools', toolActions: 'toolActions', modelActions: 'modelActions', modelProviders: 'modelProviders', agentRunSources: 'agentRunSources' });
     expect(AGENT_ARCHITECTURE.runtime.agentContext).toEqual(['organization', 'scope', 'agent', 'skills', 'tools', 'knowledge', 'permissions', 'guardrails', 'currentTask']);
     expect(AGENT_ARCHITECTURE.execution).toEqual(['tool', 'action', 'router', 'model', 'provider']);
     expect(AGENT_ARCHITECTURE.response).toBe('response');

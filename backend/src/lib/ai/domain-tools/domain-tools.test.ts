@@ -15,6 +15,8 @@ import { modelSchema } from '@/lib/db/models.node';
 import { providerSchema } from '@/lib/db/providers.node';
 import { modelActionSchema } from '@/lib/db/model-actions.node';
 import { modelProviderSchema } from '@/lib/db/model-providers.node';
+import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
+import { agentMemberSchema } from '@/lib/db/agent-members.node';
 import { tokenUsage } from '@/lib/ai/shared';
 import type { RuntimeEventInput } from '@/platform/events';
 import { DOMAIN_ACTION_SLUGS, domainToolInputSchemas, interpretAndRunDomainTool, runDomainAgentTool } from '.';
@@ -34,20 +36,24 @@ function fixture() {
   const agentSkill = agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 });
   const agentTool = agentToolSchema.parse({ key: newId(), agentKey: agent.key, toolKey: tool.key });
   const toolAction = toolActionSchema.parse({ key: newId(), toolKey: tool.key, actionKey: action.key, priority: 100, enabled: true });
+  const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, position: 1, minimumAccessRole: 'owner', createdAt: now, updatedAt: now });
+  const agentMember = agentMemberSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, scopeAgentKey: scopeAgent.key, userOrganizationKey: membership.key, source: 'inherited', createdAt: now });
   const runtimeData = {
     async getAgent(key: string) { return key === agent.key ? agent : null; }, async getScope(key: string) { return key === scope.key ? scope : null; }, async getOrganization(key: string) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkill]; }, async getSkill() { return skill; }, async listAgentTools() { return [agentTool]; }, async getTool() { return tool; }, async listToolActions() { return [toolAction]; }, async getAction() { return action; },
   };
-  const accessData = { async getUserOrganization() { return membership; }, async getUser() { return user; }, async listScopeMembers() { return [scopeMember]; } };
+  const accessData = { async getUserOrganization() { return membership; }, async getUser() { return user; }, async listScopeMembers() { return [scopeMember]; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return [agentMember]; } };
   return { organization, scope, user, membership, agent, action, tool, runtimeData, accessData };
 }
 
 describe('domain tool schemas', () => {
   test('registers strict input schemas for every local domain action', () => {
-    expect(DOMAIN_ACTION_SLUGS).toHaveLength(15);
+    expect(DOMAIN_ACTION_SLUGS).toHaveLength(50);
     expect(domainToolInputSchemas['scope.list'].parse({})).toEqual({ includeDescendants: false, limit: 50 });
     expect(() => domainToolInputSchemas['scope.list'].parse({ unexpected: true })).toThrow();
     expect(() => domainToolInputSchemas['organization.member.add'].parse({ member: 'user@example.com', role: 'member' })).toThrow();
+    expect(domainToolInputSchemas['scope.member.add'].parse({ scope: 'Finance', members: ['alice@example.com'], role: 'moderator' })).toMatchObject({ role: 'moderator' });
+    for (const schema of Object.values(domainToolInputSchemas)) expect(schema.safeParse({ unexpected: true }).success).toBe(false);
   });
 });
 
