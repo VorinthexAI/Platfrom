@@ -87,6 +87,9 @@ function querySchemaForPath(path: string) {
       redirect_uri: z.string().url(),
     });
   }
+  if (apiPath === '/founders/events/stream') {
+    return strictObject({ organizationKey: z.string().trim().min(1) });
+  }
   if (apiPath === '/founders/artifacts' || apiPath === '/founders/artifacts/stream' || /^\/founders\/artifacts\/[^/]+$/.test(apiPath)) {
     return strictObject({ organizationKey: z.string().trim().min(1).optional(), scopeKey: z.string().cuid().optional() });
   }

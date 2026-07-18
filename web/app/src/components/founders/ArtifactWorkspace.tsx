@@ -3,16 +3,15 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { CloseIcon } from "@vorinthex/shared/ui/icons";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { compileArtifactScene } from "@/lib/artifacts/scene-compiler";
 import { fetchArtifacts, readArtifactNode, resolveArtifact } from "@/lib/founders/client";
+import { subscribeOrganizationInvalidations } from "@/lib/founders/organization-events";
 import type { Artifact, ArtifactLayout, ArtifactNodeDetails, ArtifactTheme, ResolvedArtifact, SceneNode } from "@/lib/founders/types";
 import { SpatialArtifactCanvas } from "./SpatialArtifactCanvas";
 
 const LAYOUTS: ArtifactLayout[] = ["tree", "cluster", "galaxy", "timeline", "hierarchy", "radial", "force", "grid", "flow", "orbit", "layered"];
 const THEMES: ArtifactTheme[] = ["obsidian", "chrome", "wireframe", "blueprint", "neural", "holographic", "minimal", "monochrome"];
-
-type ArtifactInvalidation = { artifactKey: string; reason: "created" | "updated" | "deleted" };
 
 export function ArtifactWorkspace({ organizationKey, scopeKey, open, onOpenChange }: { organizationKey: string; scopeKey: string; open: boolean; onOpenChange(open: boolean): void }) {
   const reducedMotion = useReducedMotion();
@@ -25,6 +24,7 @@ export function ArtifactWorkspace({ organizationKey, scopeKey, open, onOpenChang
   const [nodeDetails, setNodeDetails] = useState<ArtifactNodeDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const selectedKeyRef = useRef(selectedKey);
 
   const loadList = useCallback(async (preferredKey?: string) => {
     try {
@@ -57,23 +57,23 @@ export function ArtifactWorkspace({ organizationKey, scopeKey, open, onOpenChang
 
   useEffect(() => { queueMicrotask(() => void loadList()); }, [loadList]);
   useEffect(() => { if (selectedKey) queueMicrotask(() => void loadArtifact(selectedKey)); }, [selectedKey, loadArtifact]);
+  useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
   useEffect(() => {
-    const source = new EventSource(`/api/founders/artifacts/stream?${new URLSearchParams({ organizationKey, scopeKey })}`);
-    const invalidate = (event: MessageEvent<string>) => {
-      const payload = JSON.parse(event.data) as ArtifactInvalidation;
-      if (payload.reason === "created") {
+    return subscribeOrganizationInvalidations(organizationKey, (event) => {
+      if (event.scopeKey !== scopeKey || event.resource?.type !== "artifacts") return;
+      const artifactKey = event.resource.key;
+      if (event.slug === "artifact.created") {
         setSelectedNode(null);
         setNodeDetails(null);
-        void loadList(payload.artifactKey);
+        void loadList(artifactKey);
         onOpenChange(true);
         return;
       }
+      if (event.slug !== "artifact.updated" && event.slug !== "artifact.deleted" && event.slug !== "artifact.invalidated") return;
       void loadList();
-      if (payload.artifactKey === selectedKey && payload.reason !== "deleted") void loadArtifact(payload.artifactKey);
-    };
-    source.addEventListener("artifact.invalidated", invalidate as EventListener);
-    return () => source.close();
-  }, [organizationKey, scopeKey, selectedKey, loadArtifact, loadList, onOpenChange]);
+      if (artifactKey === selectedKeyRef.current && event.slug !== "artifact.deleted") void loadArtifact(artifactKey);
+    });
+  }, [organizationKey, scopeKey, loadArtifact, loadList, onOpenChange]);
 
   const spatialResolved = useMemo(() => resolved ? {
     ...resolved,
