@@ -12,7 +12,7 @@ import { AGENT_ARCHITECT_SKILL_KEY, GENESIS_AGENT_KEY, GENESIS_AGENT_SKILL_KEY, 
 function fixture(routeValid = true, organizationKey = newId()) {
   const now = '2026-07-16T00:00:00.000Z';
   const organization = organizationSchema.parse({ key: organizationKey, name: 'Vorinthex', createdAt: now, updatedAt: now });
-  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'agent-builder', name: 'Agent Builder', summary: 'Build agents.', description: 'Build agents.', position: 2 });
+  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'nexus', name: 'Nexus', summary: 'Build agents.', description: 'Build agents.', position: 1 });
   const create = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create agent', scopeKey: null, enabled: true });
   const calls: string[] = [];
   const source: GenesisSeedDataSource = {
@@ -33,6 +33,7 @@ describe('Genesis canonical seed', () => {
     expect(seed.seed.skills).toHaveLength(1); expect(seed.seed.agents).toHaveLength(1); expect(seed.seed.agentSkills).toHaveLength(1); expect(seed.seed.agentTools).toHaveLength(1);
     expect(seed.seed.skills[0]?.key).toBe(AGENT_ARCHITECT_SKILL_KEY);
     expect(seed.seed.agents[0]?.key).toBe(GENESIS_AGENT_KEY);
+    expect(seed.seed.agents[0]?.scopeSlug).toBe('nexus');
     expect(seed.seed.agentSkills[0]).toMatchObject({ key: GENESIS_AGENT_SKILL_KEY, priority: 100 });
     expect(seed.seed.agentTools[0]).toMatchObject({ key: GENESIS_AGENT_TOOL_KEY, toolSlug: 'agent.create' });
     expect(definition).toContain('Reuse\n→ Extend\n→ Create');

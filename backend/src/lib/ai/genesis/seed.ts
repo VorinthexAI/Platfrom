@@ -22,7 +22,7 @@ export const GENESIS_AGENT_KEY = cuidSchema.parse('cmgenesis00000000000000001');
 export const AGENT_ARCHITECT_SKILL_KEY = cuidSchema.parse('cmskillarchitect00000000001');
 export const GENESIS_AGENT_SKILL_KEY = cuidSchema.parse('cmgenesisagentskill0000001');
 export const GENESIS_AGENT_TOOL_KEY = cuidSchema.parse('cmgenesisagenttoolcreate00001');
-export const GENESIS_SCOPE_SLUG = 'agent-builder';
+export const GENESIS_SCOPE_SLUG = 'nexus';
 export const GENESIS_CREATE_TOOL_SLUG = 'agent.create' as const;
 
 const genesisSeedSchema = z.object({

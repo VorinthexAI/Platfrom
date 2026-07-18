@@ -900,15 +900,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'scopeScopes', key: relation.key, status: 'created' });
   }
 
-  let genesisScope = organizationScopes.find((scope) => scope.slug === GENESIS_SCOPE_SLUG);
-  if (!genesisScope) {
-    genesisScope = await scopes.createScope({ organizationKey: rootOrganization.key, slug: GENESIS_SCOPE_SLUG, name: 'Agent Builder', summary: 'Genesis creates validated Vorinthex agents from governed manifests.', description: 'Scope for Genesis and the creation of validated Vorinthex agents.', position: 2 });
-    const rootScope = organizationScopes.find((scope) => scope.slug === 'nexus');
-    if (rootScope) {
-      await scopes.addScopeRelation(rootScope.key, genesisScope.key);
-    }
-    results.push({ collection: 'scopes', key: genesisScope.key, status: 'created' });
-  }
+  if (GENESIS_SCOPE_SLUG !== nexusScope.slug) throw new SeedReferenceError('scope', GENESIS_SCOPE_SLUG, 'Genesis');
   const openAi = await getProviderBySlug('openai');
   if (!openAi) throw new SeedReferenceError('provider', 'openai', 'Genesis');
   const organizationProviders = getDefaultOrganizationProviderRepository();
@@ -917,6 +909,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'organizationProviders', key: relation.key, status: 'created' });
   }
   const genesis = await seedGenesis(rootOrganization.key);
+  if (genesis.agent.scopeKey !== nexusScope.key) throw new SeedReferenceError('agent', 'genesis', 'Nexus');
   results.push(
     { collection: 'skills', key: genesis.skill.key, status: 'updated' },
     { collection: 'agents', key: genesis.agent.key, status: 'updated' },
@@ -925,6 +918,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   );
 
   const beacon = await seedBeacon(rootOrganization.key);
+  if (beacon.agent.scopeKey !== nexusScope.key) throw new SeedReferenceError('agent', 'beacon', 'Nexus');
   results.push(
     { collection: 'skills', key: beacon.skill.key, status: 'updated' },
     { collection: 'agents', key: beacon.agent.key, status: 'updated' },

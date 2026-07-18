@@ -46,7 +46,7 @@ app.use('*', cors({
     'svix-timestamp',
     'svix-signature',
   ],
-  exposeHeaders: ['X-Access-Token', 'X-Refresh-Token'],
+  exposeHeaders: ['X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
 }));
 app.use('*', requestLogger);
 app.use('*', rateLimitByIp);
@@ -82,4 +82,3 @@ if (import.meta.main) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }
-

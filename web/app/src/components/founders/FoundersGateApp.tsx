@@ -68,10 +68,11 @@ export function FoundersGateApp() {
     let cancelled = false;
     (async () => {
       try {
-        const [loadedAccount, loadedOrganizations] = await Promise.all([
-          fetchFoundersAccount(),
-          fetchAccessibleOrganizations(),
-        ]);
+        // Keep these sequential: when a 15-minute access token has just
+        // expired, the first request rotates the single-use refresh token
+        // and returns the new cookie pair before the second request starts.
+        const loadedAccount = await fetchFoundersAccount();
+        const loadedOrganizations = await fetchAccessibleOrganizations();
         if (cancelled) return;
         setAccount(loadedAccount);
         setOrganizations(loadedOrganizations);
@@ -210,9 +211,10 @@ export function FoundersGateApp() {
           {/* The response canvas: one document, no bubbles, no history. */}
           <div className="scrollbar-hide flex-1 overflow-y-auto px-4 sm:px-8">
             <div className="mx-auto w-full max-w-[820px] pt-10 pb-56 sm:pt-16">
-              {beacon.response ? (
+              {beacon.response || beacon.error ? (
                 <article aria-live="polite" aria-busy={beacon.status === "streaming"}>
-                  <SafeMarkdown markdown={beacon.response} />
+                  {beacon.response ? <SafeMarkdown markdown={beacon.response} /> : null}
+                  {beacon.error ? <p className="text-base leading-relaxed text-silver-100">{beacon.error}</p> : null}
                   {beacon.status === "streaming" || beacon.status === "connecting" ? (
                     <span aria-hidden className="mt-1 ml-0.5 inline-block h-4 w-[2px] bg-silver-100 motion-safe:animate-pulse" />
                   ) : null}
@@ -220,7 +222,7 @@ export function FoundersGateApp() {
               ) : (
                 <div className="flex min-h-[40svh] flex-col items-center justify-center text-center">
                   <h1 className="font-display text-2xl tracking-[0.12em] text-silver-50">Beacon</h1>
-                  <p className="mt-3 text-sm text-silver-300">Your gateway to the right intelligence.</p>
+                  <p className="mt-3 text-sm text-silver-300">Your gateway to intelligence</p>
                 </div>
               )}
             </div>
@@ -231,7 +233,6 @@ export function FoundersGateApp() {
             <div className="pointer-events-auto mx-auto w-full max-w-[820px]">
               <BeaconInputIsland
                 status={beacon.status}
-                error={beacon.error}
                 disabled={beaconDisabled}
                 onSubmit={submit}
                 onCancel={cancelBeacon}

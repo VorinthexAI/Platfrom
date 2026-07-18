@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendConfigured, backendStream } from "@/lib/backend";
-import { foundersAuthHeaders } from "@/lib/founders/server";
+import { applyFoundersSessionRotation, foundersAuthHeaders } from "@/lib/founders/server";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +51,11 @@ export async function POST(request: Request) {
   }
   if (!upstream.ok) {
     const data = await upstream.json().catch(() => null);
-    return NextResponse.json(data ?? { error: "request failed" }, { status: upstream.status });
+    const response = NextResponse.json(data ?? { error: "request failed" }, { status: upstream.status });
+    applyFoundersSessionRotation(response, upstream.headers);
+    return response;
   }
-  return new Response(upstream.body, { headers: SSE_HEADERS });
+  const response = new NextResponse(upstream.body, { headers: SSE_HEADERS });
+  applyFoundersSessionRotation(response, upstream.headers);
+  return response;
 }

@@ -53,9 +53,11 @@ export function setSessionCookies(c: Context, tokens: SessionTokens) {
   setCookie(c, REFRESH_COOKIE, tokens.refreshToken, cookieOptions(tokens.refreshTokenMaxAgeSeconds));
 }
 
-export function setSessionTokenHeaders(c: Context, tokens: { accessToken: string; refreshToken: string }) {
+export function setSessionTokenHeaders(c: Context, tokens: SessionTokens) {
   c.header('X-Access-Token', tokens.accessToken);
   c.header('X-Refresh-Token', tokens.refreshToken);
+  c.header('X-Access-Token-Max-Age', String(tokens.accessTokenMaxAgeSeconds));
+  c.header('X-Refresh-Token-Max-Age', String(tokens.refreshTokenMaxAgeSeconds));
 }
 
 function querySchemaForPath(path: string) {
