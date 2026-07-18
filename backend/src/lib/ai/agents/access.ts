@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { persistedKeySchema } from '@/lib/ai/shared/ids';
 import { AiError } from '@/lib/ai/shared/result';
 import { scopeMemberSchema, type ScopeMember } from '@/lib/ai/scopes';
 import { getUserById, type User } from '@/lib/db/users.node';
@@ -9,7 +10,7 @@ import { scopeAgentSchema, type ScopeAgent } from '@/lib/db/scope-agents.node';
 import { agentMemberSchema, type AgentMember } from '@/lib/db/agent-members.node';
 
 export const executionPrincipalSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('member'), userOrganizationKey: z.string().cuid() }).strict(),
+  z.object({ kind: z.literal('member'), userOrganizationKey: persistedKeySchema }).strict(),
   z.object({ kind: z.literal('system') }).strict(),
 ]);
 

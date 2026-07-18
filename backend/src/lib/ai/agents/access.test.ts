@@ -97,4 +97,12 @@ describe('agent execution access', () => {
     expect(resolved).toMatchObject({ kind: 'member', userOrganization: { orgRole: 'viewer' }, scopeMember: null });
     await expect(authorizeAgentExecution({ ...beaconRuntime, agent: { ...beaconRuntime.agent, slug: 'genesis' } }, { kind: 'member', userOrganizationKey: viewerMembership.key }, { ...f.data, async getUserOrganization() { return viewerMembership; } }, { serviceDelegation: { agentSlug: 'beacon', requiredOrganizationRole: null } })).rejects.toThrow('identity does not match');
   });
+
+  test('preserves legacy membership keys through Beacon delegation', async () => {
+    const f = fixture();
+    const legacyMembership = userOrganizationSchema.parse({ ...f.userOrganization, key: 'legacy-membership-key', orgRole: 'owner' });
+    const beaconRuntime = { ...f.runtime, agent: { ...f.runtime.agent, slug: 'beacon', name: 'Beacon', title: 'AI Coordinator' } };
+    const resolved = await authorizeAgentExecution(beaconRuntime, { kind: 'member', userOrganizationKey: legacyMembership.key }, { ...f.data, async getUserOrganization(key) { return key === legacyMembership.key ? legacyMembership : null; } }, { serviceDelegation: { agentSlug: 'beacon', requiredOrganizationRole: null } });
+    expect(resolved).toMatchObject({ kind: 'member', userOrganization: { key: 'legacy-membership-key' } });
+  });
 });
