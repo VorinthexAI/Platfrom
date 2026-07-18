@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { parseOrganizationInvalidation } from "./organization-events";
+import { parseNexusInvalidation } from "./nexus-events";
 
-describe("organization invalidation stream", () => {
+describe("Nexus invalidation stream", () => {
   test("accepts the thin invalidation envelope", () => {
-    expect(parseOrganizationInvalidation(JSON.stringify({
+    expect(parseNexusInvalidation(JSON.stringify({
       slug: "artifact.updated",
       scopeKey: "scope-1",
       resource: { type: "artifacts", key: "artifact-1" },
@@ -15,7 +15,7 @@ describe("organization invalidation stream", () => {
   });
 
   test("accepts collection-level invalidations", () => {
-    expect(parseOrganizationInvalidation('{"slug":"scope.list","scopeKey":"scope-1","resource":null}')).toEqual({
+    expect(parseNexusInvalidation('{"slug":"scope.list","scopeKey":"scope-1","resource":null}')).toEqual({
       slug: "scope.list",
       scopeKey: "scope-1",
       resource: null,
@@ -23,9 +23,9 @@ describe("organization invalidation stream", () => {
   });
 
   test("rejects malformed messages and never exposes extra payload fields", () => {
-    expect(parseOrganizationInvalidation("not-json")).toBeNull();
-    expect(parseOrganizationInvalidation('{"slug":"artifact.updated","scopeKey":"scope-1","resource":{"type":"artifacts"}}')).toBeNull();
-    expect(parseOrganizationInvalidation(JSON.stringify({
+    expect(parseNexusInvalidation("not-json")).toBeNull();
+    expect(parseNexusInvalidation('{"slug":"artifact.updated","scopeKey":"scope-1","resource":{"type":"artifacts"}}')).toBeNull();
+    expect(parseNexusInvalidation(JSON.stringify({
       slug: "tool.failed",
       scopeKey: "scope-1",
       resource: { type: "agentRuns", key: "run-1" },

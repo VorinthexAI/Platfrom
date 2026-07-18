@@ -6,7 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { compileArtifactScene } from "@/lib/artifacts/scene-compiler";
 import { fetchArtifacts, readArtifactNode, resolveArtifact } from "@/lib/founders/client";
-import { subscribeOrganizationInvalidations } from "@/lib/founders/organization-events";
+import { subscribeNexusInvalidations } from "@/lib/founders/nexus-events";
 import type { Artifact, ArtifactLayout, ArtifactNodeDetails, ArtifactTheme, ResolvedArtifact, SceneNode } from "@/lib/founders/types";
 import { SpatialArtifactCanvas } from "./SpatialArtifactCanvas";
 
@@ -59,7 +59,7 @@ export function ArtifactWorkspace({ organizationKey, scopeKey, open, onOpenChang
   useEffect(() => { if (selectedKey) queueMicrotask(() => void loadArtifact(selectedKey)); }, [selectedKey, loadArtifact]);
   useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
   useEffect(() => {
-    return subscribeOrganizationInvalidations(organizationKey, (event) => {
+    return subscribeNexusInvalidations(organizationKey, (event) => {
       if (event.scopeKey !== scopeKey || event.resource?.type !== "artifacts") return;
       const artifactKey = event.resource.key;
       if (event.slug === "artifact.created") {

@@ -99,15 +99,15 @@ describe('validateQueryParams', () => {
     )).rejects.toThrow();
     expect(nextCalls).toBe(1);
   });
-  test('allows only an organization key on the organization invalidation stream', async () => {
+  test('allows only an organization key on the Nexus invalidation stream', async () => {
     let nextCalls = 0;
     await validateQueryParams(
-      middlewareContext('/api/v1/founders/events/stream', {}, '?organizationKey=root-org'),
+      middlewareContext('/api/v1/nexus/events/stream', {}, '?organizationKey=root-org'),
       async () => { nextCalls += 1; },
     );
     expect(nextCalls).toBe(1);
     await expect(validateQueryParams(
-      middlewareContext('/api/v1/founders/events/stream', {}, '?organizationKey=root-org&scopeKey=cmrnlzf640000qc7k4p5zem5w'),
+      middlewareContext('/api/v1/nexus/events/stream', {}, '?organizationKey=root-org&scopeKey=cmrnlzf640000qc7k4p5zem5w'),
       async () => { nextCalls += 1; },
     )).rejects.toThrow();
     expect(nextCalls).toBe(1);
