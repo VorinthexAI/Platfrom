@@ -69,9 +69,9 @@ export async function getScopeAgent(scopeKey: string, agentKey: string): Promise
   return one<ScopeAgentRecord>('FOR link IN scopeAgents FILTER link.scopeKey == @scopeKey && link.agentKey == @agentKey LIMIT 1 RETURN MERGE(link, { key: link._key })', { scopeKey, agentKey });
 }
 
-export function organizationActionAllowed(role: AccessRole, action?: string) {
+function organizationActionAllowed(role: AccessRole, action?: string) {
   if (!action || action.endsWith('.read') || action.endsWith('.list') || action.includes('.evaluate') || action.includes('.explain')) return true;
-  if (action === 'organization.archive' || action === 'organization.restore') return role === 'owner';
+  if (action === 'organization.archive' || action === 'organization.restore' || action.endsWith('.remove')) return role === 'owner';
   return role === 'owner' || role === 'admin';
 }
 
@@ -88,7 +88,7 @@ export async function evaluateOrganizationAccess(context: DomainToolContext, inp
   return { allowed: true, reason: 'ALLOWED', effectiveRole: role, organization, membership };
 }
 
-export function scopeActionAllowed(role: AccessRole, action?: string) {
+function scopeActionAllowed(role: AccessRole, action?: string) {
   if (!action || action === 'read' || action.endsWith('.read') || action.endsWith('.list')) return true;
   if (action === 'scope.remove') return role === 'owner';
   if (action.includes('archive') || action.includes('restore') || action.includes('move') || action.includes('agent.') || action.includes('scope.member.')) return rankAccessRole(role) >= accessRoleRank.admin;

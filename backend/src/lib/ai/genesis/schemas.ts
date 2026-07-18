@@ -156,9 +156,6 @@ export const genesisRunInputSchema = z.object({
   scopeKey: cuidSchema,
   genesisAgentKey: cuidSchema,
   currentTask: z.string().trim().min(1).max(20_000),
-  profile: z.enum(['organization-steward']).optional(),
-  /** Initial inherited-access threshold. It is authorized against the resolved caller, never chosen by the model. */
-  minimumAccessRole: z.enum(['owner', 'admin', 'moderator', 'viewer']).optional(),
   requestedExplorationRate: z.number().min(0).max(1).optional(),
   sourceRefs: z.array(sourceSelectionSchema.extend({
     priority: z.number().int().nonnegative().default(100),
