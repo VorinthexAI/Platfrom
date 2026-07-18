@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { organizationKeySchema } from '@/lib/ai/shared/ids';
+import { organizationKeySchema, persistedKeySchema } from '@/lib/ai/shared/ids';
 
 export const AGENT_RUNS_COLLECTION = 'agentRuns';
 export const AGENT_RUN_STATUSES = ['accepted', 'rejected', 'completed', 'failed', 'cancelled', 'timeout'] as const;
@@ -21,7 +21,7 @@ export const agentRunObjectSchema = z.object({
   scopeKey: z.string().cuid(),
   agentKey: z.string().cuid(),
   principalType: z.enum(['member', 'system']).default('system'),
-  userOrganizationKey: z.string().cuid().nullable().default(null),
+  userOrganizationKey: persistedKeySchema.nullable().default(null),
   status: z.enum(AGENT_RUN_STATUSES),
   reason: maxTenWordsSchema,
   score: z.number().min(0).max(1),

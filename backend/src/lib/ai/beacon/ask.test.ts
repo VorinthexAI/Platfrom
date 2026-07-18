@@ -28,12 +28,12 @@ import { BeaconAskRequestError, BeaconUnavailableError, streamFoundersBeaconAsk,
 
 const now = '2026-07-17T00:00:00.000Z';
 
-function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>, organizationKey = newId()) {
+function fixture(chunks?: () => AsyncIterable<ProviderStreamChunk>, organizationKey = newId(), membershipKey = newId()) {
   const organization = organizationSchema.parse({ key: organizationKey, name: 'Vorinthex AI', is_root: true, createdAt: now, updatedAt: now });
   const beaconScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'nexus', name: 'Nexus', summary: 'The complete ecosystem.', description: 'The complete ecosystem.', position: 1 });
   const selectedScope = scopeSchema.parse({ key: newId(), organizationKey, slug: 'core', name: 'Core', summary: 'Personal AI brain scope.', description: 'Personal AI brain scope.', position: 2 });
   const user = userSchema.parse({ key: newId(), organizationId: organizationKey, email: 'founder@example.com', emailHash: 'founder-hash', createdAt: now, updatedAt: now });
-  const membership = userOrganizationSchema.parse({ key: newId(), organizationId: organizationKey, userId: user.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
+  const membership = userOrganizationSchema.parse({ key: membershipKey, organizationId: organizationKey, userId: user.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const agent = agentSchema.parse({ key: newId(), slug: 'beacon', name: 'Beacon', title: 'AI Coordinator', scopeKey: beaconScope.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'beacon-coordination', name: 'Beacon', title: 'AI Coordinator', definition: 'Answer founders precisely.' });
   const action = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer', handlerKey: 'core.ask', enabled: true });
@@ -172,12 +172,13 @@ describe('streamFoundersBeaconAsk', () => {
     expect(f.eventStore.every(({ scopeId }) => scopeId === f.beaconScope.key)).toBe(true);
   });
 
-  test('streams Beacon for the preserved pre-CUID root organization', async () => {
-    const f = fixture(undefined, 'legacy-root-key');
+  test('streams Beacon for preserved pre-CUID root and membership keys', async () => {
+    const f = fixture(undefined, 'legacy-root-key', 'legacy-membership-key');
     const events = await collect(streamFoundersBeaconAsk(f.params, f.options));
 
     expect(events.at(-1)?.type).toBe('completed');
     expect(f.runStore[0]?.organizationKey).toBe('legacy-root-key');
+    expect(f.runStore[0]?.userOrganizationKey).toBe('legacy-membership-key');
     expect(f.adapterRequests[0]?.organizationKey).toBe('legacy-root-key');
   });
 
