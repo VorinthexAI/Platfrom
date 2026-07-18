@@ -859,15 +859,19 @@ jobs:
           ssh-keyscan -T 10 -H "$EC2_HOST" >> ~/.ssh/known_hosts 2>/dev/null || echo "::warning::ssh-keyscan failed for graph database host; SSH will use accept-new."
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
-      - name: Fetch ArangoDB credentials from SSM
+      - name: Fetch ArangoDB and OpenAI credentials from SSM
         run: |
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
+          openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
+          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; provider-backed secret embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
+          echo "::add-mask::$openai_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
+          echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
       - name: Upsert db.seeds.secrets.json
         env:
           ARANGO_URL: http://127.0.0.1:8529
