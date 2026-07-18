@@ -26,7 +26,7 @@ import { agentRunSourceSchema, type AgentRunSource } from '@/lib/ai/agent-run-so
 import { agentArtifactSchema, type AgentArtifact } from '@/lib/ai/agent-artifacts';
 import { ArtifactResolverRegistry } from '@/lib/ai/artifact-resolvers';
 import { tokenUsage } from '@/lib/ai/shared';
-import { runStoredAgentTool } from './run-stored-agent-tool';
+import { normalizeStructuredProviderResponse, runStoredAgentTool } from './run-stored-agent-tool';
 import { InvalidRunRequestError, ResponseValidationError } from './validation';
 import type { RuntimeEventInput } from '@/platform/events';
 import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
@@ -98,6 +98,7 @@ describe('persisted agent pipeline', () => {
     expect(f.stepStore[0]).toMatchObject({ stepSlug: 'answer-request', status: 'completed', agentRunKey: f.runStore[0]?.key });
     expect(f.callStore[0]).toMatchObject({ skillKey: f.skill.key, toolKey: f.tool.key, actionKey: f.action.key, modelKey: f.model.key, providerKey: f.provider.key, totalTokens: 13 });
     expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain(JSON.stringify({ scopeId: f.agent.scopeKey }));
+    expect((f.adapterCalls[0]?.input as { responseFormat?: unknown }).responseFormat).toEqual({ type: 'json' });
     expect(f.eventStore.map(({ slug }) => slug)).toEqual([
       'agent.started', 'step.started', 'tool.called', 'model.called', 'model.completed',
       'step.completed', 'tool.completed', 'agent.completed',
@@ -146,6 +147,14 @@ describe('persisted agent pipeline', () => {
     await expect(runStoredAgentTool(f.params, f.options)).rejects.toBeInstanceOf(ResponseValidationError);
     expect(f.runStore[0]?.status).toBe('failed');
     expect(f.callStore[0]?.totalTokens).toBe(13);
+  });
+
+  test('strictly decodes OpenAI-compatible JSON text before output validation', async () => {
+    const structured = { metadata: { status: 'accepted', reason: 'Task completed', score: 1 }, delegation: { target: 'none', reason: 'NO_ELIGIBLE_DELEGATE' } };
+    const f = fixture({ text: JSON.stringify(structured), toolCalls: [], stopReason: 'stop' });
+    const result = await runStoredAgentTool(f.params, f.options);
+    expect(result.executed && result.response.output).toEqual(structured);
+    expect(() => normalizeStructuredProviderResponse({ output: { text: 'free-form answer' }, usage: tokenUsage(1, 1), providerId: 'openai', modelId: 'model', externalModelId: 'model' })).toThrow(ResponseValidationError);
   });
 
   test('records failed model, step, tool and agent lifecycle events', async () => {
