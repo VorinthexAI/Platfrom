@@ -46,6 +46,12 @@ describe('Genesis manifest validation', () => {
     const crossScope = { ...context, knowledge: { ...context.knowledge, existingTools: [...context.knowledge.existingTools, scopedTool] } };
     await expect(validateGenesisManifest(acceptedManifest(f, { agentTools: [{ operation: 'attach', toolKey: scopedTool.key, reason: 'Needed' }] }), crossScope, newId(), { checks: checkStore().repository, generateEmbedding: async () => [1, 0] })).rejects.toBeInstanceOf(GenesisManifestReferenceError);
   });
+  test('rejects the Beacon-only core.delegate tool for generated agents', async () => {
+    const f = buildGenesisFixture(); const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
+    const delegateTool = toolSchema.parse({ key: newId(), slug: 'core.delegate', name: 'Delegate', description: 'Beacon-only delegation.', scopeKey: null });
+    const withDelegate = { ...context, knowledge: { ...context.knowledge, existingTools: [...context.knowledge.existingTools, delegateTool] } };
+    await expect(validateGenesisManifest(acceptedManifest(f, { agentTools: [{ operation: 'attach', toolKey: delegateTool.key, reason: 'Attempt restricted delegation' }] }), withDelegate, newId(), { checks: checkStore().repository, generateEmbedding: async () => [1, 0] })).rejects.toThrow('Beacon-only tool');
+  });
   test('converts duplicate agent and skill creates to reuse', async () => {
     const f = buildGenesisFixture(); const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Avoid duplicates.' }, f);
     const duplicateAgent = acceptedManifest(f, { agent: { operation: 'create', slug: 'genesis', name: 'Genesis', title: 'Agent Architect', scopeKey: f.scope.key, explorationRate: 0.2 } });

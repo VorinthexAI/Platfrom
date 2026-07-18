@@ -29,8 +29,8 @@ function fixture() {
   const user = userSchema.parse({ key: newId(), organizationId: organization.key, email: 'owner@acme.test', emailHash: 'hash', createdAt: now, updatedAt: now });
   const membership = userOrganizationSchema.parse({ key: newId(), organizationId: organization.key, userId: user.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
   const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: membership.key, role: 'owner' });
-  const agent = agentSchema.parse({ key: newId(), slug: 'steward', name: 'Steward', title: 'Steward', scopeKey: scope.key });
-  const skill = skillSchema.parse({ key: newId(), slug: 'organization-steward', name: 'Organization Steward', title: 'Steward', definition: 'Manage authorized organization resources.' });
+  const agent = agentSchema.parse({ key: newId(), slug: 'organization-operator', name: 'Organization Operator', title: 'Operator', scopeKey: scope.key });
+  const skill = skillSchema.parse({ key: newId(), slug: 'organization-operations', name: 'Organization Operations', title: 'Operator', definition: 'Manage authorized organization resources.' });
   const action = actionSchema.parse({ key: newId(), slug: 'scope.list', name: 'List Scopes', description: 'List', objective: 'List', inputDescription: 'Filters', outputDescription: 'Scopes', handlerKey: 'scope.list' });
   const tool = toolSchema.parse({ key: newId(), slug: 'scope.list', name: 'List Scopes', description: 'List scopes' });
   const agentSkill = agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 });

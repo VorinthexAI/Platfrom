@@ -75,4 +75,17 @@ describe('agent execution access', () => {
     const f = fixture();
     await expect(authorizeAgentExecution(f.runtime, { kind: 'member', userOrganizationKey: f.userOrganization.key }, { ...f.data, async evaluateAgentAccess() { return { allowed: false, reason: 'ACTION_DENIED' }; } })).rejects.toThrow('ACTION_DENIED');
   });
+
+  test('allows only an owner to invoke the fixed Genesis service delegation', async () => {
+    const owner = fixture();
+    const genesisRuntime = { ...owner.runtime, agent: { ...owner.runtime.agent, slug: 'genesis', name: 'Genesis', title: 'Agent Architect' } };
+    const ownerMembership = userOrganizationSchema.parse({ ...owner.userOrganization, orgRole: 'owner' });
+    const resolved = await authorizeAgentExecution(genesisRuntime, { kind: 'member', userOrganizationKey: ownerMembership.key }, { ...owner.data, async getUserOrganization() { return ownerMembership; }, async getScopeAgent() { throw new Error('service delegation must not depend on a target scopeAgent relation'); } }, { serviceDelegation: { agentSlug: 'genesis', requiredOrganizationRole: 'owner' } });
+    expect(resolved).toMatchObject({ kind: 'member', userOrganization: { key: ownerMembership.key, orgRole: 'owner' }, scopeMember: null });
+
+    const admin = fixture();
+    const adminMembership = userOrganizationSchema.parse({ ...admin.userOrganization, orgRole: 'admin' });
+    await expect(authorizeAgentExecution({ ...admin.runtime, agent: genesisRuntime.agent }, { kind: 'member', userOrganizationKey: adminMembership.key }, { ...admin.data, async getUserOrganization() { return adminMembership; } }, { serviceDelegation: { agentSlug: 'genesis', requiredOrganizationRole: 'owner' } })).rejects.toThrow('owner role is required');
+    await expect(authorizeAgentExecution({ ...owner.runtime, agent: { ...owner.runtime.agent, slug: 'beacon' } }, { kind: 'member', userOrganizationKey: ownerMembership.key }, { ...owner.data, async getUserOrganization() { return ownerMembership; } }, { serviceDelegation: { agentSlug: 'genesis', requiredOrganizationRole: 'owner' } })).rejects.toThrow('identity does not match');
+  });
 });

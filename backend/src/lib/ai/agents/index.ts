@@ -57,6 +57,7 @@ export {
   type ExecutionAccessDataSource,
   type ExecutionPrincipal,
   type ResolvedExecutionPrincipal,
+  type ServiceAgentDelegation,
 } from './access';
 export {
   createAgentService,
@@ -66,6 +67,7 @@ export {
   AgentReferenceNotFoundError,
   DuplicateAgentSlugError,
   DuplicateAgentLinkError,
+  RestrictedAgentToolGrantError,
   type AgentServiceDataSource,
   type CreateAgentInput,
   type AttachAgentSkillInput,

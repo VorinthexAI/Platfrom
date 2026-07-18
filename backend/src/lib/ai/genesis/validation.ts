@@ -197,6 +197,7 @@ export async function validateGenesisManifest(
   for (const operation of parsed.agentTools) {
     const tool: Tool | undefined = toolsByKey.get(operation.toolKey);
     if (!tool || !tool.enabled) throw new GenesisManifestReferenceError('tool', operation.toolKey);
+    if (tool.slug === 'core.delegate') throw new GenesisManifestReferenceError('Beacon-only tool', operation.toolKey);
     if (tool.scopeKey !== null && tool.scopeKey !== context.scope.key) throw new GenesisManifestReferenceError('tool permission', operation.toolKey);
   }
 

@@ -122,6 +122,7 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.4-nano:core.ask',
     ]);
     expect(parsed.some(({ actionSlug }) => actionSlug.startsWith('scope.') || actionSlug.startsWith('organization.member.'))).toBe(false);
+    expect(parsed.some(({ actionSlug }) => actionSlug === 'core.delegate')).toBe(false);
   });
 
   test('seed exactly one OpenAI route for each model', () => {
@@ -208,6 +209,7 @@ describe('tool and tool-action seeds', () => {
       'artifact.read:artifact.read',
       'ask.answer:core.ask',
       'audio.transcribe-file:audio.transcribe',
+      'core.delegate:core.delegate',
       'image.create:image.generate',
       'organization.member.activate:organization.member.activate',
       'organization.member.add:organization.member.add',

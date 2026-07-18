@@ -19,6 +19,12 @@ export type ResolvedExecutionPrincipal =
   | { kind: 'member'; user: User; userOrganization: UserOrganization; scopeMember: ScopeMember | null }
   | { kind: 'system' };
 
+export interface ServiceAgentDelegation {
+  /** Narrow server-only bypass for a fixed service agent; never accepted from HTTP input. */
+  agentSlug: 'genesis';
+  requiredOrganizationRole: 'owner';
+}
+
 export interface ExecutionAccessDataSource {
   getUserOrganization(key: string): Promise<UserOrganization | null>;
   getUser(key: string): Promise<User | null>;
@@ -57,13 +63,24 @@ export async function authorizeAgentExecution(
   runtime: AgentRuntimeContext,
   principal: ExecutionPrincipal,
   source: ExecutionAccessDataSource = defaultAccessData,
-  options: { allowArchivedOrganization?: boolean } = {},
+  options: { allowArchivedOrganization?: boolean; serviceDelegation?: ServiceAgentDelegation } = {},
 ): Promise<ResolvedExecutionPrincipal> {
   const parsed = executionPrincipalSchema.parse(principal);
   if (runtime.scope.deletedAt !== null) {
     throw new AgentExecutionAccessError(`scope ${runtime.scope.key} is archived`);
   }
   if (!runtime.organization.isActive && !options.allowArchivedOrganization) throw new AgentExecutionAccessError(`organization ${runtime.organization.key} is archived`);
+  if (options.serviceDelegation) {
+    if (runtime.agent.slug !== options.serviceDelegation.agentSlug) throw new AgentExecutionAccessError('service delegation agent identity does not match');
+    if (parsed.kind !== 'member') throw new AgentExecutionAccessError('service delegation requires an initiating member');
+    const membership = await source.getUserOrganization(parsed.userOrganizationKey);
+    if (!membership || membership.status !== 'active') throw new AgentExecutionAccessError(`active organization membership ${parsed.userOrganizationKey} was not found`);
+    if (membership.organizationId !== runtime.organization.key) throw new AgentExecutionAccessError('organization membership belongs to another organization');
+    if (membership.orgRole !== options.serviceDelegation.requiredOrganizationRole) throw new AgentExecutionAccessError(`${options.serviceDelegation.requiredOrganizationRole} role is required for service delegation`);
+    const user = await source.getUser(membership.userId);
+    if (!user) throw new AgentExecutionAccessError(`user ${membership.userId} was not found`);
+    return { kind: 'member', user, userOrganization: membership, scopeMember: null };
+  }
   const scopeAgent = await source.getScopeAgent(runtime.scope.key, runtime.agent.key);
   if (!scopeAgent) throw new AgentExecutionAccessError(`agent ${runtime.agent.key} is not linked to scope ${runtime.scope.key}`);
   if (scopeAgent.status !== 'active') throw new AgentExecutionAccessError(`scope agent ${scopeAgent.key} is archived`);

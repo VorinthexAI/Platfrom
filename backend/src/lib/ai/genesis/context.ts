@@ -9,6 +9,7 @@ import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
 import type { AgentMemoryRepository } from '@/lib/ai/agent-memories';
 import { genesisGuardrailsSchema, genesisRunInputSchema, genesisSourcePolicySchema, type GenesisGuardrails, type GenesisRunInput } from './schemas';
 import { createNodeResolver, NodeResolverRegistry, ReverseContextCompiler, type SearchableDocument } from '@/lib/ai/reverse-context';
+import type { Organization } from '@/lib/db/organizations.node';
 
 export class GenesisIdentityError extends AiError {
   constructor(detail: string) { super('genesis_identity_invalid', `Invalid Genesis identity: ${detail}`); }
@@ -61,6 +62,8 @@ export interface CompileGenesisContextOptions {
   canUseSource?: SourcePermissionResolver;
   generateEmbedding?: (text: string) => Promise<readonly number[]>;
   knowledgeTokenBudget?: number;
+  /** Trusted target selected and authorized by a server-side delegator. */
+  executionContext?: { organization: Organization; scope: Scope };
 }
 
 function resolverFor(references: readonly OwnedArtifactReference[]): ArtifactResolver {
@@ -109,20 +112,24 @@ function catalogResolverRegistry(organizationKey: string, scopes: readonly Scope
 /** Compiles Genesis from resolved backend facts; no repository is exposed in the result. */
 export async function compileGenesisContext(input: GenesisRunInput, options: CompileGenesisContextOptions = {}): Promise<GenesisContext> {
   const parsed = genesisRunInputSchema.parse(input);
-  const runtime = await loadAgentRuntime(parsed.genesisAgentKey, options.runtimeData);
-  if (runtime.agent.slug !== 'genesis' || runtime.agent.name !== 'Genesis' || runtime.agent.title !== 'Agent Architect') {
-    throw new GenesisIdentityError(`${runtime.agent.slug}/${runtime.agent.name}/${runtime.agent.title}`);
+  const registeredRuntime = await loadAgentRuntime(parsed.genesisAgentKey, options.runtimeData);
+  if (registeredRuntime.agent.slug !== 'genesis' || registeredRuntime.agent.name !== 'Genesis' || registeredRuntime.agent.title !== 'Agent Architect') {
+    throw new GenesisIdentityError(`${registeredRuntime.agent.slug}/${registeredRuntime.agent.name}/${registeredRuntime.agent.title}`);
   }
+  const runtime = options.executionContext
+    ? { ...registeredRuntime, organization: options.executionContext.organization, scope: options.executionContext.scope }
+    : registeredRuntime;
   if (runtime.organization.key !== parsed.organizationKey || runtime.scope.organizationKey !== parsed.organizationKey) {
     throw new GenesisOrganizationMismatchError();
   }
-  if (runtime.scope.key !== parsed.scopeKey || runtime.agent.scopeKey !== parsed.scopeKey) throw new GenesisScopeMismatchError();
+  if (runtime.scope.key !== parsed.scopeKey || (!options.executionContext && runtime.agent.scopeKey !== parsed.scopeKey)) throw new GenesisScopeMismatchError();
 
   const catalog = options.catalog ?? defaultCatalog;
   const [scopes, allAgents, skills, allTools] = await Promise.all([
     catalog.listOrganizationScopes(parsed.organizationKey), catalog.listAgents(), catalog.listSkills(), catalog.listTools(),
   ]);
   const scopeKeys = new Set(scopes.map((scope) => scope.key));
+  if (!scopeKeys.has(runtime.scope.key)) throw new GenesisScopeMismatchError();
   const agents = allAgents.filter((agent) => scopeKeys.has(agent.scopeKey));
   const tools = allTools.filter((tool) => tool.scopeKey === null || scopeKeys.has(tool.scopeKey));
   const registry = options.artifactResolvers ?? new ArtifactResolverRegistry();

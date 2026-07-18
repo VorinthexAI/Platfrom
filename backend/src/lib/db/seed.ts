@@ -124,6 +124,17 @@ export const SEEDED_ACTIONS = [
     enabled: true,
   },
   {
+    key: 'cmcoredelegateaction000001',
+    slug: 'core.delegate',
+    name: 'Delegate',
+    description: 'Delegates one strictly validated task from Beacon to an allow-listed service agent.',
+    objective: 'Invoke the fixed Genesis service for an owner-authorized agent creation request while preserving the initiating human identity.',
+    inputDescription: 'A target organization, target scope, and natural-language agent architecture request resolved and authorized server-side.',
+    outputDescription: 'The delegated Genesis run and its validated agent creation result.',
+    handlerKey: 'core.delegate',
+    enabled: true,
+  },
+  {
     key: 'cmgenesisactioncreateagent001',
     slug: 'agent.create',
     name: 'Create Agent',
@@ -568,6 +579,14 @@ export const SEEDED_TOOLS = [
     enabled: true,
   },
   {
+    key: 'cmcoredelegatetool00000001',
+    slug: 'core.delegate',
+    name: 'Delegate',
+    description: 'Delegate one strictly validated task from Beacon to an allow-listed service agent.',
+    scopeKey: null,
+    enabled: true,
+  },
+  {
     key: 'cmartifactreadtool0000000001',
     slug: 'artifact.read',
     name: 'Read Artifact',
@@ -732,6 +751,7 @@ export const SEEDED_TOOLS = [
 export const SEEDED_TOOL_ACTIONS = [
   { key: 'cmrnc3nfh00053o7k3hfm3a82', toolSlug: 'ask.answer', actionSlug: 'core.ask', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00063o7keg8h70ut', toolSlug: 'reason.solve', actionSlug: 'core.reason', priority: 100, enabled: true },
+  { key: 'cmcoredelegatetoolaction001', toolSlug: 'core.delegate', actionSlug: 'core.delegate', priority: 100, enabled: true },
   { key: 'cmgenesistoolactioncreate001', toolSlug: 'agent.create', actionSlug: 'agent.create', priority: 100, enabled: true },
   { key: 'cmartifactreadtoolaction0001', toolSlug: 'artifact.read', actionSlug: 'artifact.read', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00073o7kdi1aee17', toolSlug: 'image.create', actionSlug: 'image.generate', priority: 100, enabled: true },

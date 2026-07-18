@@ -15,6 +15,7 @@ import {
   BeaconUnavailableError,
   streamFoundersBeaconAsk,
 } from '@/lib/ai/beacon/ask';
+import { beaconDelegateInputSchema, BeaconDelegationError, delegateAgentCreationFromBeacon } from '@/lib/ai/beacon/delegate';
 import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError } from '@/lib/ai/router';
 import { getAuthIdentity } from './security';
 import { parseJson, strictObject } from './validation';
@@ -36,8 +37,15 @@ export const foundersBeaconAskSchema = strictObject({
   message: z.string().trim().min(1).max(BEACON_ASK_MAX_MESSAGE_LENGTH),
 });
 
+export const foundersBeaconDelegateSchema = strictObject({
+  organizationKey: foundersOrganizationKeyParamSchema,
+  scopeKey: z.string().cuid(),
+  input: beaconDelegateInputSchema,
+});
+
 const BEACON_ASK_TIMEOUT_MS = 120_000;
 const BEACON_ASK_RATE_LIMIT_PER_MINUTE = 12;
+const BEACON_DELEGATE_RATE_LIMIT_PER_MINUTE = 3;
 
 type FounderContext = FoundersGateAccess & { identityType: 'user' | 'member' | 'superAdmin' };
 
@@ -120,6 +128,37 @@ async function askRateLimited(userKey: string): Promise<boolean> {
   const count = await redisConnection.incr(key);
   if (count === 1) await redisConnection.expire(key, windowSeconds + 10);
   return count > BEACON_ASK_RATE_LIMIT_PER_MINUTE;
+}
+
+async function delegateRateLimited(userKey: string): Promise<boolean> {
+  if (process.env.RATE_LIMIT_ENABLED !== 'true') return false;
+  const { redisConnection } = await import('@/lib/redis');
+  const windowSeconds = 60; const bucket = Math.floor(Date.now() / (windowSeconds * 1000));
+  const key = `rate-limit:founders-beacon-delegate:${userKey}:${bucket}`;
+  const count = await redisConnection.incr(key);
+  if (count === 1) await redisConnection.expire(key, windowSeconds + 10);
+  return count > BEACON_DELEGATE_RATE_LIMIT_PER_MINUTE;
+}
+
+/** POST /founders/beacon/delegate — executes Beacon's local core.delegate boundary. */
+export async function delegateFoundersBeacon(c: Context) {
+  const auth = await requireFounder(c);
+  if ('error' in auth) return auth.error;
+  const body = await parseJson(c, foundersBeaconDelegateSchema);
+  let organizationAccess; let scopeAccess;
+  try {
+    organizationAccess = await requireOrganizationAccess(auth.founder.user.key, body.organizationKey);
+    scopeAccess = await requireScopeAccess(organizationAccess.membership, body.scopeKey);
+  } catch (error) { return forbidden(c, error); }
+  if (organizationAccess.membership.orgRole !== 'owner') return c.json({ error: 'organization owner role required' }, 403);
+  if (await delegateRateLimited(auth.founder.user.key)) return c.json({ error: 'rate limit exceeded' }, 429);
+  try {
+    const result = await delegateAgentCreationFromBeacon({ organization: organizationAccess.organization, scope: scopeAccess.scope, membership: organizationAccess.membership, user: auth.founder.user, input: body.input });
+    return c.json({ beaconRunKey: result.beaconRunKey, genesisRunKey: result.genesisRunKey, status: result.creation.toolOutput.status, agentKey: result.creation.toolOutput.agentKey, createdSkillKeys: result.creation.toolOutput.createdSkillKeys, reusedSkillKeys: result.creation.toolOutput.reusedSkillKeys }, result.creation.persisted ? 201 : 422);
+  } catch (error) {
+    if (error instanceof BeaconDelegationError) return c.json({ error: error.message }, 403);
+    throw error;
+  }
 }
 
 /**
