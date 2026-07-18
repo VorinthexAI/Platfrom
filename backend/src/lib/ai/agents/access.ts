@@ -41,6 +41,9 @@ export async function authorizeAgentExecution(
   source: ExecutionAccessDataSource = defaultAccessData,
 ): Promise<ResolvedExecutionPrincipal> {
   const parsed = executionPrincipalSchema.parse(principal);
+  if (runtime.scope.deletedAt !== null) {
+    throw new AgentExecutionAccessError(`scope ${runtime.scope.key} is archived`);
+  }
   if (parsed.kind === 'system') return parsed;
 
   const membership = await source.getUserOrganization(parsed.userOrganizationKey);

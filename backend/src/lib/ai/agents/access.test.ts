@@ -48,4 +48,11 @@ describe('agent execution access', () => {
     const f = fixture();
     expect(await authorizeAgentExecution(f.runtime, { kind: 'system' }, f.data)).toEqual({ kind: 'system' });
   });
+
+  test('blocks member and delegated system execution in archived scopes', async () => {
+    const f = fixture();
+    const archived = { ...f.runtime, scope: { ...f.runtime.scope, deletedAt: '2026-07-18T00:00:00.000Z' } };
+    await expect(authorizeAgentExecution(archived, { kind: 'member', userOrganizationKey: f.userOrganization.key }, f.data)).rejects.toThrow('archived');
+    await expect(authorizeAgentExecution(archived, { kind: 'system' }, f.data)).rejects.toThrow('archived');
+  });
 });

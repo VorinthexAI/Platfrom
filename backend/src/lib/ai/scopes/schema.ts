@@ -23,7 +23,7 @@ export const scopeSchema = z.object({
   slug: scopeSlugSchema,
   name: z.string().trim().min(1).max(160),
   summary: z.string().trim().min(1),
-  description: z.string().trim().min(1),
+  description: z.string().trim().min(1).nullable(),
   position: z.number().int().positive(),
   deletedAt: z.string().nullable().default(null),
   embedding: z.array(z.number().finite()).default([]),
