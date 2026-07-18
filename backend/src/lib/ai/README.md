@@ -127,6 +127,14 @@ models may interpret intent but can never perform database mutations directly.
 Mutations use Arango stream transactions and emit both domain audit events and
 the normal tool lifecycle events.
 
+`core.delegate` is also a local action with no `modelActions` row. Only the
+canonical Beacon agent is seeded with that tool, generic agent services and
+Genesis reject attempts to grant it elsewhere, and its handler accepts only an
+owner-authorized request for the server-resolved Genesis identity. The
+`POST /founders/beacon/delegate` boundary re-resolves organization and scope,
+records a Beacon tool run, then executes Genesis with the initiating human's
+membership preserved in the Genesis run ledger.
+
 `scopeAgents` is the authoritative lifecycle and minimum-role link between a
 scope and an existing agent definition. `agentMembers` stores inherited and
 explicit grants separately. Every AgentRun reloads these relations and requires
@@ -194,7 +202,9 @@ version-controlled seed inputs are `genesis/seed/genesis.seed.json` and
 
 `createAgentFromGenesis` compiles a fresh `AgentContext`, presents the complete
 organization-owned agent/skill/tool catalog plus explicit sources, and requires
-a strict creation manifest. Genesis proposes only; the backend reparses the
+a strict creation manifest. A trusted Beacon delegation may supply a separately
+authorized target organization and scope while Genesis retains its immutable
+service identity and tool grants. Genesis proposes only; the backend reparses the
 manifest, then invokes the local `agent.create` handler. That handler reparses
 the complete input, verifies the exact Genesis capability guardrails, resolves
 references, enforces scope and tool permissions, applies

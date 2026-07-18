@@ -11,6 +11,7 @@ import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
 export const ACTION_SLUGS = [
   'core.ask',
   'core.reason',
+  'core.delegate',
 
   'agent.create',
   'artifact.read',

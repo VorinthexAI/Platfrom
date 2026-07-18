@@ -4,7 +4,7 @@ import { getDefaultAgentRunRepository, type AgentRunRepository } from '@/lib/ai/
 import { getDefaultAgentRunStepRepository, type AgentRunStep, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import { getDefaultAgentRunCallRepository, type AgentRunCall, type AgentRunCallRepository } from '@/lib/ai/agent-run-calls';
 import { compileAgentContext, compileAgentRuntimeContext, loadAgentRuntime, type AgentContext, type AgentRuntimeDataSource } from '@/lib/ai/agents/runtime';
-import { authorizeAgentExecution, type ExecutionAccessDataSource, type ExecutionPrincipal } from '@/lib/ai/agents/access';
+import { authorizeAgentExecution, type ExecutionAccessDataSource, type ExecutionPrincipal, type ServiceAgentDelegation } from '@/lib/ai/agents/access';
 import { sourceSelectionSchema, getDefaultAgentRunSourceRepository, type AgentRunSourceRepository } from '@/lib/ai/agent-run-sources';
 import { getDefaultAgentArtifactRepository, type AgentArtifactRepository } from '@/lib/ai/agent-artifacts';
 import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
@@ -16,6 +16,8 @@ import type { ProviderExecuteResponse } from '@/lib/ai/providers';
 import { modelSlugSchema } from '@/lib/db/models.node';
 import { providerSlugSchema } from '@/lib/db/providers.node';
 import type { Action } from '@/lib/db/actions.node';
+import type { Organization } from '@/lib/db/organizations.node';
+import type { Scope } from '@/lib/ai/scopes';
 import type { ReverseContextCompiler } from '@/lib/ai/reverse-context/compiler';
 import { newId } from '@/lib/ids';
 import { organizationKeySchema } from '@/lib/ai/shared/ids';
@@ -50,6 +52,9 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
   /** Trusted caller identity. System execution is available only through this server-side option. */
   principal?: ExecutionPrincipal;
   accessData?: ExecutionAccessDataSource;
+  /** Trusted target context for a server-mediated service-agent delegation. */
+  executionContext?: { organization: Organization; scope: Scope };
+  serviceDelegation?: ServiceAgentDelegation;
   runtimeData?: AgentRuntimeDataSource;
   runs?: AgentRunRepository;
   steps?: AgentRunStepRepository;
@@ -100,7 +105,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   if (!parsed.success) throw new InvalidRunRequestError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   const request = parsed.data;
   const recordEvent = options.events ?? recordRuntimeEvent;
-  const runtime = await loadAgentRuntime(request.agentKey, options.runtimeData, {
+  const registeredRuntime = await loadAgentRuntime(request.agentKey, options.runtimeData, {
     onGuardrailBlocked: async ({ scopeId, agentKey, toolKey, reason }) => {
       try {
         await recordEvent({ scopeId, userId: null, slug: 'guardrail.blocked', data: { agentKey, toolKey, reason } });
@@ -109,6 +114,10 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       }
     },
   });
+  const runtime = options.executionContext
+    ? { ...registeredRuntime, organization: options.executionContext.organization, scope: options.executionContext.scope }
+    : registeredRuntime;
+  if (runtime.scope.organizationKey !== runtime.organization.key) throw new InvalidRunRequestError('execution scope belongs to another organization');
   const emit = async (slug: RuntimeEventSlug, data: RuntimeEventData, userId: string | null = null) => {
     try {
       await recordEvent({ scopeId: runtime.scope.key, userId, slug, data });
@@ -123,7 +132,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   }
   let principal: Awaited<ReturnType<typeof authorizeAgentExecution>>;
   try {
-    principal = await authorizeAgentExecution(runtime, options.principal, options.accessData);
+    principal = await authorizeAgentExecution(runtime, options.principal, options.accessData, { serviceDelegation: options.serviceDelegation });
   } catch (error) {
     await emit('guardrail.blocked', { agentKey: runtime.agent.key, reason: runtimeEventReason(error) });
     throw error;

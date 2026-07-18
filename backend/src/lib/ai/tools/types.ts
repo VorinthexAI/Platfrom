@@ -4,6 +4,7 @@ import { DOT_NOTATION_PATTERN, isDotNotationId } from '@/lib/ai/shared/ids';
 export const TOOL_IDS = [
   'ask.answer',
   'reason.solve',
+  'core.delegate',
   'agent.create',
   'artifact.read',
   'image.create',
