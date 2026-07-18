@@ -39,9 +39,9 @@ export const foundersBeaconAskSchema = strictObject({
 const BEACON_ASK_TIMEOUT_MS = 120_000;
 const BEACON_ASK_RATE_LIMIT_PER_MINUTE = 12;
 
-type FounderContext = FoundersGateAccess & { identityType: 'user' | 'member' | 'superAdmin' };
+export type FounderContext = FoundersGateAccess & { identityType: 'user' | 'member' | 'superAdmin' };
 
-async function requireFounder(c: Context): Promise<{ founder: FounderContext } | { error: Response }> {
+export async function requireFounder(c: Context): Promise<{ founder: FounderContext } | { error: Response }> {
   const identity = await getAuthIdentity(c);
   if (!identity) return { error: c.json({ error: 'authentication required' }, 401) };
   try {
@@ -55,7 +55,7 @@ async function requireFounder(c: Context): Promise<{ founder: FounderContext } |
   }
 }
 
-function forbidden(c: Context, error: unknown): Response {
+export function forbidden(c: Context, error: unknown): Response {
   if (error instanceof FoundersAccessError) {
     const message = error.code === 'scope_forbidden' ? 'scope access denied' : 'organization access denied';
     return c.json({ error: message }, 403);
