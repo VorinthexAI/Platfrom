@@ -31,7 +31,7 @@ describe('agent.create local action handler', () => {
     const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
     let writes = 0;
     const result = await executeCreateAgentTool({ organizationKey: f.organization.key, scopeKey: f.scope.key, agentRunKey: newId(), manifest: rejectedManifest(f) }, context, { transaction: { async execute() { writes += 1; throw new Error('must not write'); } } });
-    expect(result.output).toEqual({ status: 'rejected', agentKey: null, createdSkillKeys: [], reusedSkillKeys: [], agentSkillKeys: [], agentToolKeys: [], artifactKeys: [], reason: 'Required tool is unavailable' });
+    expect(result.output).toEqual({ status: 'rejected', agentKey: null, createdSkillKeys: [], reusedSkillKeys: [], agentSkillKeys: [], agentToolKeys: [], scopeAgentKey: null, agentMemberKeys: [], artifactKeys: [], reason: 'Required tool is unavailable' });
     expect(writes).toBe(0);
   });
 

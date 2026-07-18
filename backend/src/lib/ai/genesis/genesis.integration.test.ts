@@ -20,6 +20,10 @@ import { GENESIS_STEP_SLUGS } from './schemas';
 import { buildGenesisFixture } from './test-fixtures';
 import type { RuntimeEventInput } from '@/platform/events';
 import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
+import { userSchema } from '@/lib/db/users.node';
+import { userOrganizationSchema } from '@/lib/db/user-organization.node';
+import { scopeMemberSchema } from '@/lib/ai/scopes';
+import { agentMemberSchema } from '@/lib/db/agent-members.node';
 
 describe('Genesis end-to-end runtime', () => {
   test('routes through Mini/OpenAI, validates, persists atomically, and exposes the complete ledger', async () => {
@@ -53,9 +57,14 @@ describe('Genesis end-to-end runtime', () => {
     const runtimeEvents: RuntimeEventInput[] = [];
     const transaction: GenesisTransactionGateway = { async execute(callback) { const staged = new Map<string, Record<string, unknown>[]>(); const result = await callback({ async save(collection, document) { const rows = staged.get(collection) ?? []; rows.push(document); staged.set(collection, rows); } }); for (const [key, rows] of staged) transactionRows.set(key, rows); return result; } };
 
+    const owner = userSchema.parse({ key: newId(), organizationId: f.organization.key, email: 'owner@example.test', emailHash: 'hash', createdAt: now, updatedAt: now });
+    const ownerMembership = userOrganizationSchema.parse({ key: newId(), organizationId: f.organization.key, userId: owner.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
+    const ownerScopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: f.scope.key, userOrganizationKey: ownerMembership.key, role: 'owner', status: 'active' });
     const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey: f.organization.key, scopeKey: f.scope.key, agentKey: f.genesis.key, position: 1, minimumAccessRole: 'owner', createdAt: now, updatedAt: now });
-    const accessData = { async getUserOrganization() { return null; }, async getUser() { return null; }, async listScopeMembers() { return []; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return []; } };
-    const result = await createAgentFromGenesis({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a Backend Developer agent.', sourceRefs: [{ nodeType: 'skill', nodeKey: f.backend.key, priority: 100 }] }, { ...f, data: routerData, adapters, runs, steps, calls, sources, artifacts, checks, events: async (event) => { runtimeEvents.push(event); }, transaction, accessData, generateEmbedding: async () => [1, 0] });
+    const genesisGrant = agentMemberSchema.parse({ key: newId(), organizationKey: f.organization.key, scopeKey: f.scope.key, agentKey: f.genesis.key, scopeAgentKey: scopeAgent.key, userOrganizationKey: ownerMembership.key, source: 'inherited', createdAt: now });
+    const accessData = { async getUserOrganization() { return ownerMembership; }, async getUser() { return owner; }, async listScopeMembers() { return [ownerScopeMember]; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return [genesisGrant]; } };
+    const eligibleMembershipKeys = [ownerMembership.key, newId()];
+    const result = await createAgentFromGenesis({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a Backend Developer agent.', minimumAccessRole: 'admin', sourceRefs: [{ nodeType: 'skill', nodeKey: f.backend.key, priority: 100 }] }, { ...f, principal: { kind: 'member', userOrganizationKey: ownerMembership.key }, data: routerData, adapters, runs, steps, calls, sources, artifacts, checks, events: async (event) => { runtimeEvents.push(event); }, transaction, accessData, generateEmbedding: async () => [1, 0], placementResolver: { async resolve(input) { return { ...input, position: 1, inheritedUserOrganizationKeys: eligibleMembershipKeys }; } } });
     expect(result.persisted).toBe(true); expect(result.manifest.agent).toMatchObject({ operation: 'create', slug: 'forge' });
     expect(result.context.tools.map(({ tool }) => tool.slug)).toEqual(['agent.create']);
     expect(result.toolOutput).toMatchObject({ status: 'created', agentKey: result.created?.agent.key, reusedSkillKeys: [f.backend.key] });
@@ -65,7 +74,10 @@ describe('Genesis end-to-end runtime', () => {
     expect(sourcesStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key });
     expect(artifactsStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key, relation: 'source' });
     expect(checksStore[0]?.candidateNodeType).toBe('agent');
-    expect(transactionRows.get('agents')).toHaveLength(1); expect(transactionRows.get('scopeAgents') ?? []).toHaveLength(0); expect(transactionRows.get('agentSkills')).toHaveLength(1); expect(transactionRows.get('agentTools')).toHaveLength(1);
+    expect(transactionRows.get('agents')).toHaveLength(1); expect(transactionRows.get('scopeAgents')).toHaveLength(1); expect(transactionRows.get('agentMembers')).toHaveLength(2); expect(transactionRows.get('agentSkills')).toHaveLength(1); expect(transactionRows.get('agentTools')).toHaveLength(1);
+    expect(result.toolOutput.scopeAgentKey).toBe(result.created?.scopeAgent?.key ?? null);
+    expect(result.toolOutput.agentMemberKeys).toHaveLength(2);
+    expect(result.created?.scopeAgent?.minimumAccessRole).toBe('admin');
     expect(result.created?.artifacts.some((artifact) => artifact.relation === 'result')).toBe(true);
     expect(runtimeEvents.filter(({ slug }) => slug === 'artifact.created')).toHaveLength(result.created?.artifacts.filter(({ relation }) => relation === 'result').length ?? 0);
     expect(runtimeEvents.every(({ scopeId }) => scopeId === f.scope.key)).toBe(true);

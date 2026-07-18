@@ -2,11 +2,12 @@ import { AiError } from '@/lib/ai/shared/result';
 import { runStoredAgentTool, type RunStoredAgentToolOptions } from '@/lib/ai/pipeline';
 import type { ProviderExecuteResponse } from '@/lib/ai/providers';
 import { ArtifactResolverRegistry } from '@/lib/ai/artifact-resolvers';
+import { ORGANIZATION_STEWARD_SKILL, ORGANIZATION_STEWARD_TOOL_SLUGS } from '@/lib/ai/steward';
 import { compileGenesisContext, renderGenesisContext, type CompileGenesisContextOptions, type GenesisContext } from './context';
 import { GENESIS_STEP_SLUGS, genesisCreationManifestSchema, genesisRunInputSchema, type GenesisCreationManifest, type GenesisRunInput } from './schemas';
 import type { ValidateGenesisManifestOptions, ValidatedGenesisManifest } from './validation';
 import type { GenesisTransactionGateway, PersistGenesisManifestResult } from './persistence';
-import { CREATE_AGENT_ACTION_SLUG, CREATE_AGENT_TOOL_SLUG, createAgentToolInputSchema, executeCreateAgentTool, type CreateAgentToolOutput } from './tool';
+import { CREATE_AGENT_ACTION_SLUG, CREATE_AGENT_TOOL_SLUG, createAgentToolInputSchema, executeCreateAgentTool, type CreateAgentToolOutput, type GenesisPlacementResolver } from './tool';
 
 export class GenesisRuntimeConfigurationError extends AiError {
   constructor(detail: string) { super('genesis_runtime_invalid', `Genesis runtime is invalid: ${detail}`); }
@@ -14,6 +15,7 @@ export class GenesisRuntimeConfigurationError extends AiError {
 
 export interface ExecuteGenesisOptions extends RunStoredAgentToolOptions, CompileGenesisContextOptions, ValidateGenesisManifestOptions {
   transaction?: GenesisTransactionGateway;
+  placementResolver?: GenesisPlacementResolver;
 }
 export interface GenesisCreationResult {
   runKey: string;
@@ -53,7 +55,7 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
     metadata: { status: 'accepted', reason: 'Genesis request validated', score: 1 },
     input: {
       messages: [{ role: 'user', content: parsed.currentTask }],
-      system: `You are Genesis. Return only the strict creation manifest.\n\nAgentContext:\n${renderGenesisContext(context)}`,
+      system: `You are Genesis. Return only the strict creation manifest.${parsed.profile === 'organization-steward' ? `\nThe requested profile is Organization Steward. Create or reuse this canonical skill: ${JSON.stringify(ORGANIZATION_STEWARD_SKILL)}. Attach every one of these existing tools: ${ORGANIZATION_STEWARD_TOOL_SLUGS.join(', ')}.` : ''}\n\nAgentContext:\n${renderGenesisContext(context)}`,
     },
     currentTask: parsed.currentTask,
     outputSchema: GENESIS_OUTPUT_SCHEMA_DESCRIPTION,
@@ -65,9 +67,9 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
     allowRejectedOutput: true,
     reasoningActionSlug: 'core.reason',
     stepSlugs: GENESIS_STEP_SLUGS,
-    beforeFinalize: async ({ run, response, recordArtifactCreated }) => {
+    beforeFinalize: async ({ run, response, principal, recordArtifactCreated }) => {
       const toolInput = createAgentToolInputSchema.parse({ organizationKey: parsed.organizationKey, scopeKey: parsed.scopeKey, agentRunKey: run.key, manifest: genesisCreationManifestSchema.parse(response.output) });
-      const handled = await executeCreateAgentTool(toolInput, context, options);
+      const handled = await executeCreateAgentTool(toolInput, context, { ...options, principal, requestedMinimumAccessRole: parsed.minimumAccessRole, requiredProfile: parsed.profile });
       outcome.validated = handled.validated;
       outcome.created = handled.persisted;
       outcome.toolOutput = handled.output;
