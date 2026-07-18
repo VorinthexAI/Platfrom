@@ -9,7 +9,7 @@ import { agentRunSchema } from '@/lib/ai/agent-runs/schema';
 import { organizationSchema } from '@/lib/db/organizations.node';
 import type { NodeRef, ArtifactLiteral } from './types';
 
-export interface ArtifactResolveContext { organizationKey: string; scopeKey: string }
+export interface ArtifactResolveContext { organizationKey: string; scopeKey: string; organizationWide?: boolean; allowedScopeKeys?: readonly string[] }
 export interface ResolvedValue { value: ArtifactLiteral; revision: string }
 
 function revision(value: unknown): string {
@@ -34,7 +34,8 @@ async function document(collectionName: string, key: string): Promise<Record<str
 const nodeLoaders: Record<(typeof ARTIFACT_NODE_TYPES)[number], NodeLoader> = {
   async agents(key, context) {
     const raw = await document('agents', key); if (!raw) return null;
-    const agent = agentSchema.parse(raw); if (agent.scopeKey !== context.scopeKey) return null;
+    const agent = agentSchema.parse(raw); if (!context.organizationWide && !(context.allowedScopeKeys ?? [context.scopeKey]).includes(agent.scopeKey)) return null;
+    const scopeRaw = await document('scopes', agent.scopeKey); if (!scopeRaw || scopeSchema.parse(scopeRaw).organizationKey !== context.organizationKey) return null;
     return publicAgent(agent);
   },
   async agentRuns(key, context) {
@@ -49,7 +50,7 @@ const nodeLoaders: Record<(typeof ARTIFACT_NODE_TYPES)[number], NodeLoader> = {
   },
   async scopes(key, context) {
     const raw = await document('scopes', key); if (!raw) return null;
-    const scope = scopeSchema.parse(raw); if (scope.organizationKey !== context.organizationKey || scope.key !== context.scopeKey) return null;
+    const scope = scopeSchema.parse(raw); if (scope.organizationKey !== context.organizationKey || (!context.organizationWide && !(context.allowedScopeKeys ?? [context.scopeKey]).includes(scope.key))) return null;
     return { key: scope.key, slug: scope.slug, name: scope.name, summary: scope.summary, description: scope.description, position: scope.position };
   },
   async organizations(key, context) {
@@ -65,10 +66,13 @@ export async function resolveArtifactNode(ref: NodeRef, context: ArtifactResolve
   if (!loader) throw new Error(`Artifact node type is not registered: ${ref.type}`);
   const value = await loader(ref.key, context);
   if (value === null) throw new Error(`Artifact node was not found or is outside the selected scope: ${ref.type}/${ref.key}`);
-  return { value, revision: revision(value) };
+  const resolved = { ...(value as Record<string, ArtifactLiteral>), ref: { nodeType: ref.type, nodeKey: ref.key } } satisfies ArtifactLiteral;
+  return { value: resolved, revision: revision(resolved) };
 }
 
 export const ARTIFACT_QUERY_IDS = {
+  ORGANIZATION_CURRENT: 'organization.current',
+  ORGANIZATION_SCOPES: 'organization.scopes',
   SCOPE_ACTIVE_AGENTS: 'scope.active-agents',
   AGENT_RUNS_RECENT: 'agent.runs.recent',
   ORGANIZATION_MEMBER_COUNTS: 'organization.member-counts',
@@ -93,11 +97,37 @@ function requireOrganization(input: { organizationKey: string }, context: Artifa
 const queryRegistry = new Map<string, ArtifactQueryDefinition<unknown>>();
 function register<Input>(definition: ArtifactQueryDefinition<Input>) { queryRegistry.set(definition.id, definition as ArtifactQueryDefinition<unknown>); }
 
+register<z.infer<typeof organizationInput>>({
+  id: ARTIFACT_QUERY_IDS.ORGANIZATION_CURRENT, inputSchema: organizationInput, authorize: requireOrganization,
+  async execute(input) {
+    const raw = await document('organizations', input.organizationKey); if (!raw) throw new Error('Organization was not found');
+    const organization = organizationSchema.parse(raw);
+    return { ref: { nodeType: 'organizations', nodeKey: organization.key }, name: organization.name, slug: organization.slug, state: organization.isActive ? 'active' : 'archived' };
+  },
+  dependencies: (input) => [`organization:${input.organizationKey}`, `node:organizations:${input.organizationKey}`], invalidatedBy: ['organization.update', 'organization.archive', 'organization.restore'],
+});
+
+register<z.infer<typeof organizationInput>>({
+  id: ARTIFACT_QUERY_IDS.ORGANIZATION_SCOPES, inputSchema: organizationInput, authorize: requireOrganization,
+  async execute(input, context) {
+    const allowedScopeKeys = context.organizationWide ? null : [...(context.allowedScopeKeys ?? [context.scopeKey])];
+    const cursor = await db.query('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey AND scope.deletedAt == null AND (@allowedScopeKeys == null OR scope._key IN @allowedScopeKeys) SORT scope.position ASC RETURN scope', { organizationKey: input.organizationKey, allowedScopeKeys });
+    return (await cursor.all() as Record<string, unknown>[]).map((raw) => {
+      const scope = scopeSchema.parse(withArangoKey(raw));
+      return { ref: { nodeType: 'scopes', nodeKey: scope.key }, parentRef: { nodeType: 'organizations', nodeKey: input.organizationKey }, name: scope.name, summary: scope.summary, state: 'active', weight: 1 };
+    });
+  },
+  dependencies: (input) => [`organization:${input.organizationKey}`, 'query:organization.scopes'], invalidatedBy: ['scope.create', 'scope.update', 'scope.move', 'scope.archive', 'scope.restore', 'scope.remove'],
+});
+
 register<z.infer<typeof scopeInput>>({
   id: ARTIFACT_QUERY_IDS.SCOPE_ACTIVE_AGENTS, inputSchema: scopeInput, authorize: requireScope,
   async execute(input, context) {
     const cursor = await db.query(`FOR link IN scopeAgents FILTER link.organizationKey == @organizationKey AND link.scopeKey == @scopeKey AND link.status == "active" FOR agent IN agents FILTER agent._key == link.agentKey SORT link.position ASC RETURN { agent, position: link.position }`, { organizationKey: context.organizationKey, scopeKey: input.scopeKey });
-    return (await cursor.all() as Array<{ agent: Record<string, unknown>; position: number }>).map((row) => ({ ...publicAgent(agentSchema.parse(withArangoKey(row.agent))), position: row.position }));
+    return (await cursor.all() as Array<{ agent: Record<string, unknown>; position: number }>).map((row) => {
+      const agent = agentSchema.parse(withArangoKey(row.agent));
+      return { ...publicAgent(agent), ref: { nodeType: 'agents', nodeKey: agent.key }, parentRef: { nodeType: 'scopes', nodeKey: input.scopeKey }, state: 'active', weight: Math.max(0.2, agent.explorationRate), position: row.position };
+    });
   },
   dependencies: (input) => [`scope:${input.scopeKey}`, 'query:scope.active-agents'], invalidatedBy: ['scope.agent.add', 'scope.agent.move', 'scope.agent.archive', 'scope.agent.restore', 'scope.agent.remove', 'scope.agent.access-threshold.update'],
 });
@@ -105,7 +135,10 @@ register<z.infer<typeof recentRunsInput>>({
   id: ARTIFACT_QUERY_IDS.AGENT_RUNS_RECENT, inputSchema: recentRunsInput, authorize: requireScope,
   async execute(input, context) {
     const cursor = await db.query(`FOR run IN agentRuns FILTER run.organizationKey == @organizationKey AND run.scopeKey == @scopeKey SORT run.createdAt DESC LIMIT @limit RETURN run`, { organizationKey: context.organizationKey, scopeKey: input.scopeKey, limit: input.limit });
-    return (await cursor.all()).map((raw) => publicRun(agentRunSchema.parse(withArangoKey(raw as Record<string, unknown>))));
+    return (await cursor.all()).map((raw) => {
+      const run = agentRunSchema.parse(withArangoKey(raw as Record<string, unknown>));
+      return { ...publicRun(run), ref: { nodeType: 'agentRuns', nodeKey: run.key }, parentRef: { nodeType: 'agents', nodeKey: run.agentKey }, state: run.status === 'failed' ? 'warning' : run.status === 'completed' ? 'active' : 'default', weight: Math.max(0.2, run.score) };
+    });
   },
   dependencies: (input) => [`scope:${input.scopeKey}`, 'query:agent.runs.recent'], invalidatedBy: ['agent.started', 'agent.completed', 'agent.failed'],
 });

@@ -39,6 +39,7 @@ import {
   getFounderArtifact,
   listFounderArtifacts,
   resolveFounderArtifact,
+  readFounderArtifactNode,
   streamFounderArtifactInvalidations,
   updateFounderArtifact,
 } from './founder-artifacts';
@@ -463,6 +464,7 @@ export function registerRoutes(app: Hono) {
   app.patch('/founders/artifacts/:artifactKey', updateFounderArtifact);
   app.delete('/founders/artifacts/:artifactKey', deleteFounderArtifact);
   app.post('/founders/artifacts/:artifactKey/resolve', resolveFounderArtifact);
+  app.post('/founders/artifacts/:artifactKey/nodes/read', readFounderArtifactNode);
 
   app.get('/system/orchestrators', listSystemOrchestrators);
   app.post('/system/orchestrators', createSystemOrchestrator);

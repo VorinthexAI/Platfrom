@@ -1,4 +1,4 @@
-import type { AccessibleOrganizationOption, AccessibleScopeOption, Artifact, FoundersAccount, ResolvedArtifact } from "./types";
+import type { AccessibleOrganizationOption, AccessibleScopeOption, Artifact, ArtifactNodeDetails, FoundersAccount, ResolvedArtifact, SceneNodeRef } from "./types";
 
 /**
  * Browser-side fetchers for the Founders Gate route handlers. Everything
@@ -51,4 +51,8 @@ export async function fetchArtifacts(organizationKey: string, scopeKey: string):
 
 export function resolveArtifact(artifactKey: string, organizationKey: string, scopeKey: string): Promise<ResolvedArtifact> {
   return postJson(`/api/founders/artifacts/${encodeURIComponent(artifactKey)}/resolve`, { organizationKey, scopeKey });
+}
+
+export function readArtifactNode(artifactKey: string, organizationKey: string, scopeKey: string, ref: SceneNodeRef): Promise<ArtifactNodeDetails> {
+  return postJson(`/api/founders/artifacts/${encodeURIComponent(artifactKey)}/nodes/read`, { organizationKey, scopeKey, ref: { type: ref.nodeType, key: ref.nodeKey } });
 }

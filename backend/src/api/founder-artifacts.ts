@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { artifactDefinitionSchema, ArtifactAuthorizationError, ArtifactCycleError, ArtifactNotFoundError, artifactQueryIdsInvalidatedBy, getDefaultArtifactService } from '@/lib/artifacts';
+import { artifactDefinitionSchema, nodeRefSchema, ArtifactAuthorizationError, ArtifactCycleError, ArtifactNotFoundError, artifactQueryIdsInvalidatedBy, getDefaultArtifactService } from '@/lib/artifacts';
 import { recordRuntimeEvent } from '@/platform/events';
 import { db } from '@/lib/db/client';
 import { withArangoKey } from '@/lib/db/base';
@@ -25,7 +25,8 @@ const updateSchema = strictObject({
   definition: artifactDefinitionSchema,
 });
 
-type ArtifactInvalidation = { organizationKey: string; scopeKey: string; artifactKey: string; reason: 'created' | 'updated' | 'deleted' };
+const readNodeSchema = strictObject({ organizationKey: foundersOrganizationKeyParamSchema, scopeKey: z.string().cuid(), ref: nodeRefSchema });
+type ArtifactInvalidation = { organizationKey: string; scopeKey: string; artifactKey: string; reason: 'created' | 'updated' | 'deleted'; changedRef?: { nodeType: string; nodeKey: string } };
 const artifactEvents = new EventEmitter();
 artifactEvents.setMaxListeners(500);
 
@@ -36,6 +37,15 @@ async function authorize(c: Context, organizationKey: string, scopeKey: string) 
     await requireScopeAccess(membership, scopeKey);
     return { founder: auth.founder, membership };
   } catch (error) { return { error: forbidden(c, error) }; }
+}
+
+function resolveContext(organizationKey: string, scopeKey: string, membership: { orgRole: string }) {
+  return {
+    organizationKey,
+    scopeKey,
+    organizationWide: membership.orgRole === 'owner' || membership.orgRole === 'admin',
+    allowedScopeKeys: [scopeKey],
+  };
 }
 
 function serviceError(c: Context, error: unknown): Response {
@@ -53,7 +63,7 @@ export async function listFounderArtifacts(c: Context) {
 export async function createFounderArtifact(c: Context) {
   const body = await parseJson(c, createSchema); const auth = await authorize(c, body.organizationKey, body.scopeKey); if ('error' in auth) return auth.error;
   try {
-    const artifact = await getDefaultArtifactService().create({ ...body, createdByUserOrganizationKey: auth.membership.key });
+    const artifact = await getDefaultArtifactService().create({ ...body, ...resolveContext(body.organizationKey, body.scopeKey, auth.membership), createdByUserOrganizationKey: auth.membership.key });
     await recordRuntimeEvent({ scopeId: body.scopeKey, userId: auth.founder.user.key, slug: 'artifact.created', data: { nodeType: 'artifacts', nodeKey: artifact.key } });
     artifactEvents.emit('invalidate', { organizationKey: body.organizationKey, scopeKey: body.scopeKey, artifactKey: artifact.key, reason: 'created' } satisfies ArtifactInvalidation);
     return c.json({ artifact }, 201);
@@ -62,13 +72,13 @@ export async function createFounderArtifact(c: Context) {
 
 export async function getFounderArtifact(c: Context) {
   const key = artifactKeySchema.parse(c.req.param('artifactKey')); const query = parseQuery(c, contextSchema); const auth = await authorize(c, query.organizationKey, query.scopeKey); if ('error' in auth) return auth.error;
-  try { return c.json({ artifact: await getDefaultArtifactService().get(key, query) }); } catch (error) { return serviceError(c, error); }
+  try { return c.json({ artifact: await getDefaultArtifactService().get(key, resolveContext(query.organizationKey, query.scopeKey, auth.membership)) }); } catch (error) { return serviceError(c, error); }
 }
 
 export async function updateFounderArtifact(c: Context) {
   const key = artifactKeySchema.parse(c.req.param('artifactKey')); const body = await parseJson(c, updateSchema); const auth = await authorize(c, body.organizationKey, body.scopeKey); if ('error' in auth) return auth.error;
   try {
-    const artifact = await getDefaultArtifactService().update(key, body, body);
+    const artifact = await getDefaultArtifactService().update(key, body, resolveContext(body.organizationKey, body.scopeKey, auth.membership));
     await recordRuntimeEvent({ scopeId: body.scopeKey, userId: auth.founder.user.key, slug: 'artifact.updated', data: { nodeType: 'artifacts', nodeKey: key } });
     artifactEvents.emit('invalidate', { organizationKey: body.organizationKey, scopeKey: body.scopeKey, artifactKey: key, reason: 'updated' } satisfies ArtifactInvalidation);
     return c.json({ artifact });
@@ -78,7 +88,7 @@ export async function updateFounderArtifact(c: Context) {
 export async function deleteFounderArtifact(c: Context) {
   const key = artifactKeySchema.parse(c.req.param('artifactKey')); const query = parseQuery(c, contextSchema); const auth = await authorize(c, query.organizationKey, query.scopeKey); if ('error' in auth) return auth.error;
   try {
-    await getDefaultArtifactService().remove(key, query);
+    await getDefaultArtifactService().remove(key, resolveContext(query.organizationKey, query.scopeKey, auth.membership));
     await recordRuntimeEvent({ scopeId: query.scopeKey, userId: auth.founder.user.key, slug: 'artifact.deleted', data: { nodeType: 'artifacts', nodeKey: key } });
     artifactEvents.emit('invalidate', { ...query, artifactKey: key, reason: 'deleted' } satisfies ArtifactInvalidation);
     return c.body(null, 204);
@@ -88,9 +98,17 @@ export async function deleteFounderArtifact(c: Context) {
 export async function resolveFounderArtifact(c: Context) {
   const key = artifactKeySchema.parse(c.req.param('artifactKey')); const body = await parseJson(c, contextSchema); const auth = await authorize(c, body.organizationKey, body.scopeKey); if ('error' in auth) return auth.error;
   try {
-    const resolved = await getDefaultArtifactService().resolve(key, body);
+    const resolved = await getDefaultArtifactService().resolve(key, resolveContext(body.organizationKey, body.scopeKey, auth.membership));
     await recordRuntimeEvent({ scopeId: body.scopeKey, userId: auth.founder.user.key, slug: 'artifact.resolved', data: { nodeType: 'artifacts', nodeKey: key } });
     return c.json(resolved);
+  } catch (error) { return serviceError(c, error); }
+}
+
+export async function readFounderArtifactNode(c: Context) {
+  const key = artifactKeySchema.parse(c.req.param('artifactKey')); const body = await parseJson(c, readNodeSchema); const auth = await authorize(c, body.organizationKey, body.scopeKey); if ('error' in auth) return auth.error;
+  try {
+    const result = await getDefaultArtifactService().readNode(key, body.ref, resolveContext(body.organizationKey, body.scopeKey, auth.membership));
+    return c.json({ ref: { nodeType: body.ref.type, nodeKey: body.ref.key }, details: result.value, revision: result.revision });
   } catch (error) { return serviceError(c, error); }
 }
 
@@ -132,7 +150,10 @@ export async function streamFounderArtifactInvalidations(c: Context) {
           `, { organizationKey: query.organizationKey, scopeKey: query.scopeKey, queryIds, nodeType: persistedEvent.data?.nodeType ?? null, nodeKey: persistedEvent.data?.nodeKey ?? null });
           for (const artifactKey of await dependencyCursor.all() as string[]) affected.add(artifactKey);
         }
-        for (const artifactKey of affected) await stream.writeSSE({ event: 'artifact.invalidated', data: JSON.stringify({ ...query, artifactKey, reason: 'updated' }) });
+        for (const artifactKey of affected) {
+          const latest = events.at(-1);
+          await stream.writeSSE({ event: 'artifact.invalidated', data: JSON.stringify({ ...query, artifactKey, reason: 'updated', ...(latest?.data?.nodeType && latest.data.nodeKey ? { changedRef: { nodeType: latest.data.nodeType, nodeKey: latest.data.nodeKey } } : {}) }) });
+        }
         if (!event && affected.size === 0) await stream.writeSSE({ event: 'heartbeat', data: '{}' });
       }
     } finally { artifactEvents.off('invalidate', listener); }
