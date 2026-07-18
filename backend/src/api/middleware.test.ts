@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
-import { rateLimitByIp, requireEnvApiKey, setSessionCookies, validateQueryParams } from './middleware';
+import { rateLimitByIp, requireEnvApiKey, setSessionCookies, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
   return {
@@ -144,5 +144,25 @@ describe('backend session cookies', () => {
     expect(cookies).toContain(`vorinthex_access=access-token; Max-Age=${FOUNDER_ACCESS_MAX_AGE_SECONDS}`);
     expect(cookies).toContain(`vorinthex_refresh=refresh-token; Max-Age=${FOUNDER_REFRESH_MAX_AGE_SECONDS}`);
     expect(cookies).not.toContain('Max-Age=31536000');
+  });
+
+  test('returns the rotated token pair and remaining lifetimes to server-side bridges', async () => {
+    const app = new Hono();
+    app.get('/', (c) => {
+      setSessionTokenHeaders(c, {
+        accessToken: 'rotated-access',
+        refreshToken: 'rotated-refresh',
+        accessTokenMaxAgeSeconds: 900,
+        refreshTokenMaxAgeSeconds: 43_200,
+        sessionExpiresAt: new Date(Date.now() + 43_200_000).toISOString(),
+      });
+      return c.json({ ok: true });
+    });
+
+    const response = await app.request('/');
+    expect(response.headers.get('x-access-token')).toBe('rotated-access');
+    expect(response.headers.get('x-refresh-token')).toBe('rotated-refresh');
+    expect(response.headers.get('x-access-token-max-age')).toBe('900');
+    expect(response.headers.get('x-refresh-token-max-age')).toBe('43200');
   });
 });

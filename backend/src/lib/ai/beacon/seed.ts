@@ -6,8 +6,8 @@ import { getDefaultScopeRepository, type Scope } from '@/lib/ai/scopes';
 import { getToolBySlug, type Tool } from '@/lib/db/tools.node';
 import { getSkillBySlug, insertSkill, updateSkill, type Skill } from '@/lib/db/skills.node';
 import { getAgentBySlug, insertAgent, updateAgent, type Agent } from '@/lib/db/agents.node';
-import { getAgentSkillByPair, insertAgentSkill, updateAgentSkillPriority, type AgentSkill } from '@/lib/db/agent-skills.node';
-import { getAgentToolByPair, insertAgentTool, type AgentTool } from '@/lib/db/agent-tools.node';
+import { deleteAgentSkill, getAgentSkillByPair, insertAgentSkill, listAgentSkillsByAgentKey, updateAgentSkillPriority, type AgentSkill } from '@/lib/db/agent-skills.node';
+import { deleteAgentTool, getAgentToolByPair, insertAgentTool, listAgentToolsByAgentKey, type AgentTool } from '@/lib/db/agent-tools.node';
 import { loadAgentRuntime } from '@/lib/ai/agents';
 import { cuidSchema } from '@/lib/ai/genesis/schemas';
 
@@ -91,6 +91,8 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
   const agentSkill = existingAgentSkill
     ? (existingAgentSkill.priority === 100 ? existingAgentSkill : await updateAgentSkillPriority(existingAgentSkill.key, 100))
     : await insertAgentSkill({ key: BEACON_AGENT_SKILL_KEY, agentKey: agent.key, skillKey: skill.key, priority: 100 });
+  const otherSkills = (await listAgentSkillsByAgentKey(agent.key)).filter(({ skillKey }) => skillKey !== skill.key);
+  await Promise.all(otherSkills.map(({ key }) => deleteAgentSkill(key)));
 
   const agentTools: AgentTool[] = [];
   for (const [index, seed] of toolSeeds.entries()) {
@@ -98,11 +100,22 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
     agentTools.push(await getAgentToolByPair(agent.key, tool.key)
       ?? await insertAgentTool({ key: seed.relationKey, agentKey: agent.key, toolKey: tool.key }));
   }
+  const allowedToolKeys = new Set(tools.map(({ key }) => key));
+  const otherTools = (await listAgentToolsByAgentKey(agent.key)).filter(({ toolKey }) => !allowedToolKeys.has(toolKey));
+  await Promise.all(otherTools.map(({ key }) => deleteAgentTool(key)));
 
   const runtime = await loadAgentRuntime(agent.key);
+  const beaconSkills = runtime.skills.filter(({ skill: runtimeSkill }) => runtimeSkill.slug === BEACON_SKILL_SLUG);
+  if (runtime.skills.length !== 1 || beaconSkills.length !== 1 || beaconSkills[0]?.relation.priority !== 100) {
+    throw new BeaconSeedPrerequisiteError('Beacon must expose exactly one priority-100 coordination skill');
+  }
   const askGrant = runtime.tools.find(({ tool }) => tool.slug === BEACON_ASK_TOOL_SLUG);
-  if (!askGrant || !askGrant.actions.some(({ action }) => action.slug === 'core.ask')) {
-    throw new BeaconSeedPrerequisiteError('Beacon must expose ask.answer mapped to core.ask');
+  const reasonGrant = runtime.tools.find(({ tool }) => tool.slug === BEACON_REASON_TOOL_SLUG);
+  if (runtime.tools.length !== 2 || askGrant?.actions.length !== 1 || askGrant.actions[0]?.action.slug !== 'core.ask') {
+    throw new BeaconSeedPrerequisiteError('Beacon must expose only ask.answer mapped to core.ask and reason.solve mapped to core.reason');
+  }
+  if (reasonGrant?.actions.length !== 1 || reasonGrant.actions[0]?.action.slug !== 'core.reason') {
+    throw new BeaconSeedPrerequisiteError('Beacon must expose only ask.answer mapped to core.ask and reason.solve mapped to core.reason');
   }
 
   return { organizationKey: validOrganizationKey, scope, skill, agent, agentSkill, agentTools, tools };

@@ -8,7 +8,6 @@ export const BEACON_INPUT_LIMIT = 20_000;
 
 interface BeaconInputIslandProps {
   status: BeaconStatus;
-  error: string | null;
   disabled: boolean;
   onSubmit: (message: string) => void;
   onCancel: () => void;
@@ -20,7 +19,7 @@ interface BeaconInputIslandProps {
  * The island is the only prominent surface on the canvas — a restrained
  * obsidian slab floating clear of the viewport edge.
  */
-export function BeaconInputIsland({ status, error, disabled, onSubmit, onCancel }: BeaconInputIslandProps) {
+export function BeaconInputIsland({ status, disabled, onSubmit, onCancel }: BeaconInputIslandProps) {
   const [message, setMessage] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const busy = status === "connecting" || status === "streaming";
@@ -47,8 +46,7 @@ export function BeaconInputIsland({ status, error, disabled, onSubmit, onCancel 
     }
   }
 
-  const statusLine = error
-    ?? (status === "connecting" ? "Reaching Beacon…" : status === "streaming" ? "Beacon is responding…" : "");
+  const statusLine = status === "connecting" ? "Reaching Beacon…" : status === "streaming" ? "Beacon is responding…" : "";
 
   return (
     <div className="founders-surface rounded-2xl p-3 transition-shadow focus-within:border-white/25 focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_24px_80px_rgba(0,0,0,0.38),0_0_44px_rgba(221,226,229,0.1)]">

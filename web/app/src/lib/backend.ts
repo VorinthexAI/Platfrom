@@ -23,6 +23,7 @@ export interface BackendResult<T> {
   ok: boolean;
   status: number;
   data: T | null;
+  headers: Headers | null;
 }
 
 export async function backendFetch<T = unknown>(
@@ -30,7 +31,7 @@ export async function backendFetch<T = unknown>(
   init: RequestInit = {},
 ): Promise<BackendResult<T>> {
   if (!BASE_URL || !API_KEY) {
-    return { ok: false, status: 503, data: null };
+    return { ok: false, status: 503, data: null, headers: null };
   }
   try {
     const response = await fetch(`${BASE_URL}/api/v1${path}`, {
@@ -43,9 +44,9 @@ export async function backendFetch<T = unknown>(
       cache: "no-store",
     });
     const data = (await response.json().catch(() => null)) as T | null;
-    return { ok: response.ok, status: response.status, data };
+    return { ok: response.ok, status: response.status, data, headers: response.headers };
   } catch {
-    return { ok: false, status: 502, data: null };
+    return { ok: false, status: 502, data: null, headers: null };
   }
 }
 

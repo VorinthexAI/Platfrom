@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendConfigured, backendFetch } from "@/lib/backend";
-import { foundersAuthHeaders } from "@/lib/founders/server";
+import { applyFoundersSessionRotation, foundersAuthHeaders } from "@/lib/founders/server";
 
 export const dynamic = "force-dynamic";
 
@@ -23,8 +23,10 @@ export async function GET(
     `/founders/organizations/${encodeURIComponent(organizationKey)}/scopes`,
     { headers: await foundersAuthHeaders() },
   );
-  return NextResponse.json(
+  const response = NextResponse.json(
     result.data ?? { error: "backend unavailable" },
     { status: result.ok ? 200 : result.status },
   );
+  applyFoundersSessionRotation(response, result.headers);
+  return response;
 }
