@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const upstream = await backendStream(`/founders/events/stream${url.search}`, {
+  const upstream = await backendStream(`/nexus/events/stream${url.search}`, {
     headers: await foundersAuthHeaders(),
     signal: request.signal,
     allowErrorResponse: true,

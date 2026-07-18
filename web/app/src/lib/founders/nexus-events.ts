@@ -1,15 +1,15 @@
-export type OrganizationInvalidation = {
+export type NexusInvalidation = {
   slug: string;
   scopeKey: string;
   resource: { type: string; key: string } | null;
 };
 
-type Listener = (event: OrganizationInvalidation) => void;
-type OrganizationChannel = { source: EventSource; listeners: Set<Listener> };
+type Listener = (event: NexusInvalidation) => void;
+type NexusChannel = { source: EventSource; listeners: Set<Listener> };
 
-const channels = new Map<string, OrganizationChannel>();
+const channels = new Map<string, NexusChannel>();
 
-export function parseOrganizationInvalidation(raw: string): OrganizationInvalidation | null {
+export function parseNexusInvalidation(raw: string): NexusInvalidation | null {
   try {
     const value = JSON.parse(raw) as unknown;
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -26,14 +26,14 @@ export function parseOrganizationInvalidation(raw: string): OrganizationInvalida
 }
 
 /** Shares one organization-wide SSE connection across all Nexus consumers. */
-export function subscribeOrganizationInvalidations(organizationKey: string, listener: Listener): () => void {
+export function subscribeNexusInvalidations(organizationKey: string, listener: Listener): () => void {
   let channel = channels.get(organizationKey);
   if (!channel) {
-    const source = new EventSource(`/api/founders/events/stream?${new URLSearchParams({ organizationKey })}`);
+    const source = new EventSource(`/api/nexus/events/stream?${new URLSearchParams({ organizationKey })}`);
     channel = { source, listeners: new Set() };
     channels.set(organizationKey, channel);
     source.addEventListener("invalidate", ((message: MessageEvent<string>) => {
-      const event = parseOrganizationInvalidation(message.data);
+      const event = parseNexusInvalidation(message.data);
       if (!event) return;
       for (const subscriber of channels.get(organizationKey)?.listeners ?? []) subscriber(event);
     }) as EventListener);

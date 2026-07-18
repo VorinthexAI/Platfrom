@@ -52,7 +52,7 @@ async function affectedArtifacts(organizationKey: string, event: StoredEvent): P
  * survive multiple API instances. Only slug + scope/resource identity leave
  * the backend; clients fetch authorized data through normal endpoints.
  */
-export async function streamFounderOrganizationInvalidations(c: Context) {
+export async function streamNexusOrganizationInvalidations(c: Context) {
   const query = parseQuery(c, organizationStreamQuerySchema);
   const connectedAt = new Date().toISOString();
   const auth = await requireFounder(c);
