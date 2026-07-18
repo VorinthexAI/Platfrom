@@ -134,9 +134,14 @@ export async function streamFounderArtifactInvalidations(c: Context) {
             RETURN event
         `, { scopeKey: query.scopeKey, lastCreatedAt, lastKey });
         const events = (await eventCursor.all() as Record<string, unknown>[]).map((event) => withArangoKey(event) as { key: string; createdAt: string; slug: string; data?: { nodeType?: string; nodeKey?: string } });
-        const affected = new Set<string>();
+        const affected = new Map<string, ArtifactInvalidation['reason']>();
         for (const persistedEvent of events) {
           lastCreatedAt = persistedEvent.createdAt; lastKey = persistedEvent.key;
+          if (persistedEvent.data?.nodeType === 'artifacts' && persistedEvent.data.nodeKey) {
+            if (persistedEvent.slug === 'artifact.created') affected.set(persistedEvent.data.nodeKey, 'created');
+            if (persistedEvent.slug === 'artifact.updated') affected.set(persistedEvent.data.nodeKey, 'updated');
+            if (persistedEvent.slug === 'artifact.deleted') affected.set(persistedEvent.data.nodeKey, 'deleted');
+          }
           const queryIds = artifactQueryIdsInvalidatedBy(persistedEvent.slug);
           const dependencyCursor = await db.query(`
             FOR dependency IN artifactDependencies
@@ -148,11 +153,11 @@ export async function streamFounderArtifactInvalidations(c: Context) {
                 )
               RETURN DISTINCT dependency.artifactKey
           `, { organizationKey: query.organizationKey, scopeKey: query.scopeKey, queryIds, nodeType: persistedEvent.data?.nodeType ?? null, nodeKey: persistedEvent.data?.nodeKey ?? null });
-          for (const artifactKey of await dependencyCursor.all() as string[]) affected.add(artifactKey);
+          for (const artifactKey of await dependencyCursor.all() as string[]) if (!affected.has(artifactKey)) affected.set(artifactKey, 'updated');
         }
-        for (const artifactKey of affected) {
+        for (const [artifactKey, reason] of affected) {
           const latest = events.at(-1);
-          await stream.writeSSE({ event: 'artifact.invalidated', data: JSON.stringify({ ...query, artifactKey, reason: 'updated', ...(latest?.data?.nodeType && latest.data.nodeKey ? { changedRef: { nodeType: latest.data.nodeType, nodeKey: latest.data.nodeKey } } : {}) }) });
+          await stream.writeSSE({ event: 'artifact.invalidated', data: JSON.stringify({ ...query, artifactKey, reason, ...(latest?.data?.nodeType && latest.data.nodeKey ? { changedRef: { nodeType: latest.data.nodeType, nodeKey: latest.data.nodeKey } } : {}) }) });
         }
         if (!event && affected.size === 0) await stream.writeSSE({ event: 'heartbeat', data: '{}' });
       }
