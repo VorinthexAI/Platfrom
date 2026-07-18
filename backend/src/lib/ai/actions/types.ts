@@ -23,6 +23,15 @@ export const ACTION_SLUGS = [
   'organization.member.suspend',
   'organization.member.remove',
 
+  'scope.list',
+  'scope.read',
+  'scope.create',
+  'scope.update',
+  'scope.move',
+  'scope.archive',
+  'scope.restore',
+  'scope.remove',
+
   'web.search',
   'web.deep-research',
 

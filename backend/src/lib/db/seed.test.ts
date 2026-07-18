@@ -216,6 +216,14 @@ describe('tool and tool-action seeds', () => {
       'organization.member.role.update:organization.member.role.update',
       'organization.member.suspend:organization.member.suspend',
       'reason.solve:core.reason',
+      'scope.archive:scope.archive',
+      'scope.create:scope.create',
+      'scope.list:scope.list',
+      'scope.move:scope.move',
+      'scope.read:scope.read',
+      'scope.remove:scope.remove',
+      'scope.restore:scope.restore',
+      'scope.update:scope.update',
       'speech.narrate:audio.generate-speech',
     ]);
   });

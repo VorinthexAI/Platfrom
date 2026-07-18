@@ -34,6 +34,14 @@ export const TOOL_REGISTRY = {
   'organization.member.activate': { id: 'organization.member.activate', name: 'Activate Organization Member', description: 'Reactivate organization access for suspended or inactive members and resynchronize inherited agent access.', scopeId: null },
   'organization.member.suspend': { id: 'organization.member.suspend', name: 'Suspend Organization Member', description: 'Immediately block organization, scope, agent, and delegated execution access while preserving membership relations.', scopeId: null },
   'organization.member.remove': { id: 'organization.member.remove', name: 'Remove Organization Member', description: 'Remove members, immediately revoke runtime access, and clean related access, assignments, schedules, and sessions.', scopeId: null },
+  'scope.list': { id: 'scope.list', name: 'List Scopes', description: 'List only scopes the initiating user may read in the active organization, with hierarchy filters and cursor pagination.', scopeId: null },
+  'scope.read': { id: 'scope.read', name: 'Read Scopes', description: 'Resolve and read one or more authorized scopes by key, name, slug, alias, or path without guessing ambiguous matches.', scopeId: null },
+  'scope.create': { id: 'scope.create', name: 'Create Scope', description: 'Create a non-root scope, its hierarchy relation, and an owner membership for the initiating creator.', scopeId: null },
+  'scope.update': { id: 'scope.update', name: 'Update Scope', description: 'Update authorized scope metadata without moving, reordering, archiving, restoring, deleting, or changing access relations.', scopeId: null },
+  'scope.move': { id: 'scope.move', name: 'Move Scope', description: 'Move or reorder a scope within its organization while preventing cycles and synchronizing inherited access.', scopeId: null },
+  'scope.archive': { id: 'scope.archive', name: 'Archive Scope', description: 'Archive scopes without deleting their data and immediately block new operational activity.', scopeId: null },
+  'scope.restore': { id: 'scope.restore', name: 'Restore Scope', description: 'Restore archived scopes under active parents while preserving grants and keeping schedules paused.', scopeId: null },
+  'scope.remove': { id: 'scope.remove', name: 'Remove Scope', description: 'Permanently remove an archived empty leaf scope through owner-only confirmation and atomic cleanup.', scopeId: null },
 } satisfies Record<ToolId, ToolDefinition>;
 export function getTool(toolId: string): ToolDefinition { const tool = (TOOL_REGISTRY as Record<string, ToolDefinition>)[toolId]; if (!tool) throw new UnknownToolError(toolId); return tool; }
 export function listTools() { return Object.values<ToolDefinition>(TOOL_REGISTRY); }

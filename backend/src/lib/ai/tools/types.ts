@@ -16,6 +16,14 @@ export const TOOL_IDS = [
   'organization.member.activate',
   'organization.member.suspend',
   'organization.member.remove',
+  'scope.list',
+  'scope.read',
+  'scope.create',
+  'scope.update',
+  'scope.move',
+  'scope.archive',
+  'scope.restore',
+  'scope.remove',
 ] as const;
 export type ToolId = (typeof TOOL_IDS)[number];
 export const toolIdSchema = z.enum(TOOL_IDS);
