@@ -6,13 +6,13 @@ import { actionSchema } from './actions.node';
 import { providerSchema } from './providers.node';
 import { modelSchema } from './models.node';
 import { modelActionSeedSchema } from './model-actions.node';
-import { modelProviderSeedSchema } from './model-providers.node';
+import { modelProviderSchema, modelProviderSeedSchema } from './model-providers.node';
 import { toolSchema } from './tools.node';
 import { toolActionSeedSchema } from './tool-actions.node';
 import { TOOL_REGISTRY } from '@/lib/ai/tools';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
-import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, reconcileRootOpenAiRouting, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type RootOpenAiRoutingDataSource, type SeedResult } from './seed';
 
 describe('scope seeds', () => {
   test('place the seven product scopes as siblings directly below Nexus', () => {
@@ -130,6 +130,58 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.4-mini:openai:gpt-5.4-mini',
       'openai.gpt-5.4-nano:openai:gpt-5.4-nano',
     ]);
+  });
+
+  test('reconciles the root organization to only current models routed through OpenAI', async () => {
+    const rootOrganizationKey = 'vorinthex-root';
+    const openAiProviderKey = SEEDED_PROVIDERS[0].key;
+    const legacyProviderKey = newId();
+    const models = [
+      ...SEEDED_MODELS.map((seed) => modelSchema.parse(seed)),
+      modelSchema.parse({
+        key: newId(), slug: 'legacy.old-model', name: 'Old Model', description: 'Legacy model.',
+        supportedUseCases: 'Historical workloads.', enabled: true,
+      }),
+    ];
+    const modelProviders = [
+      ...SEEDED_MODEL_PROVIDERS.map((seed) => {
+        const model = models.find(({ slug }) => slug === seed.modelSlug)!;
+        return modelProviderSchema.parse({ ...seed, modelKey: model.key, providerKey: openAiProviderKey });
+      }),
+      modelProviderSchema.parse({
+        key: newId(), modelKey: models[0]!.key, providerKey: legacyProviderKey,
+        providerModelId: 'legacy-mini', enabled: true,
+      }),
+    ];
+    const organizationProviderKeys = [legacyProviderKey];
+    const source: RootOpenAiRoutingDataSource = {
+      async listOrganizationProviderKeys() { return organizationProviderKeys; },
+      async addOrganizationProvider(_organizationKey, providerKey) { organizationProviderKeys.push(providerKey); },
+      async removeOrganizationProvider(_organizationKey, providerKey) { organizationProviderKeys.splice(organizationProviderKeys.indexOf(providerKey), 1); },
+      async listModels() { return models; },
+      async updateModel(key, patch) { Object.assign(models.find((model) => model.key === key)!, patch); },
+      async listModelProviders() { return modelProviders; },
+      async deleteModelProvider(key) { modelProviders.splice(modelProviders.findIndex((route) => route.key === key), 1); },
+    };
+
+    expect(await reconcileRootOpenAiRouting(rootOrganizationKey, openAiProviderKey, source)).toEqual({
+      addedOpenAiProvider: true,
+      removedOrganizationProviders: 1,
+      disabledStaleModels: 1,
+      removedNonOpenAiModelRoutes: 1,
+      verifiedCurrentModels: 2,
+    });
+    expect(organizationProviderKeys).toEqual([openAiProviderKey]);
+    expect(models.find(({ slug }) => slug === 'legacy.old-model')?.enabled).toBe(false);
+    expect(modelProviders.every(({ providerKey }) => providerKey === openAiProviderKey)).toBe(true);
+
+    expect(await reconcileRootOpenAiRouting(rootOrganizationKey, openAiProviderKey, source)).toEqual({
+      addedOpenAiProvider: false,
+      removedOrganizationProviders: 0,
+      disabledStaleModels: 0,
+      removedNonOpenAiModelRoutes: 0,
+      verifiedCurrentModels: 2,
+    });
   });
 });
 
