@@ -14,8 +14,8 @@ import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } fr
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers';
-import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/genesis/seed';
-import { seedBeacon } from '@/lib/ai/beacon/seed';
+import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/agents/genesis/seed';
+import { seedBeacon } from '@/lib/ai/agents/beacon/seed';
 
 export type SeedResult = {
   collection: string;

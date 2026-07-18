@@ -14,8 +14,8 @@ import {
   BEACON_ASK_MAX_MESSAGE_LENGTH,
   BeaconUnavailableError,
   streamFoundersBeaconAsk,
-} from '@/lib/ai/beacon/ask';
-import { beaconDelegateInputSchema, BeaconDelegationError, delegateAgentCreationFromBeacon } from '@/lib/ai/beacon/delegate';
+} from '@/lib/ai/agents/beacon/ask';
+import { beaconDelegateInputSchema, BeaconDelegationError, delegateAgentCreationFromBeacon } from '@/lib/ai/agents/beacon/delegate';
 import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError } from '@/lib/ai/router';
 import { getAuthIdentity } from './security';
 import { parseJson, strictObject } from './validation';

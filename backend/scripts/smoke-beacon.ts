@@ -1,4 +1,4 @@
-import { streamFoundersBeaconAsk } from '../src/lib/ai/beacon/ask';
+import { streamFoundersBeaconAsk } from '../src/lib/ai/agents/beacon/ask';
 import { getRootOrganization } from '../src/lib/db/organizations.node';
 import { getUserByEmail } from '../src/lib/db/users.node';
 import { getUserOrganizationByOrganizationAndUser } from '../src/lib/db/user-organization.node';

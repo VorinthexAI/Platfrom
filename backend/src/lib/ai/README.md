@@ -203,8 +203,8 @@ only the local `agent.create` tool mapped only to the `agent.create` action.
 Reasoning still uses the persisted `core.reason` route to GPT-5.4 Mini through
 an OpenAI provider enabled for the organization, but Reason Tool is not granted
 to Genesis. The canonical,
-version-controlled seed inputs are `genesis/seed/genesis.seed.json` and
-`genesis/seed/agent-architect.skill.md`.
+version-controlled seed inputs are `agents/genesis/seed/genesis.seed.json` and
+`agents/genesis/seed/agent-architect.skill.md`.
 
 `createAgentFromGenesis` compiles a fresh `AgentContext`, presents the complete
 organization-owned agent/skill/tool catalog plus explicit sources, and requires
