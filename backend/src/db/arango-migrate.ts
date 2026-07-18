@@ -472,6 +472,11 @@ async function main() {
         updatedAt: null
       } IN scopes OPTIONS { keepNull: false }
   `);
+  await targetDb.query(`
+    FOR scope IN scopes
+      FILTER !HAS(scope, "deletedAt")
+      UPDATE scope WITH { deletedAt: null } IN scopes
+  `);
   await ensureScopesCollection(targetDb);
   const scopeScopesCollection = targetDb.collection('scopeScopes');
   if (!(await scopeScopesCollection.exists())) await scopeScopesCollection.create();
@@ -497,6 +502,11 @@ async function main() {
       FILTER !HAS(relation, "parentKey") || relation.parentKey == null
         || !HAS(relation, "childKey") || relation.childKey == null
       REMOVE relation IN scopeScopes
+  `);
+  await targetDb.query(`
+    FOR relation IN scopeScopes
+      FILTER !HAS(relation, "deletedAt")
+      UPDATE relation WITH { deletedAt: null } IN scopeScopes
   `);
   await ensureScopeScopesCollection(targetDb);
   await ensureScopeMembersCollection(targetDb);
@@ -553,6 +563,7 @@ async function main() {
         _key: newId(),
         parentKey,
         childKey,
+        deletedAt: null,
       });
       seenChildren.add(childKey);
       const children = childrenByParent.get(parentKey) ?? new Set<string>();
@@ -939,6 +950,7 @@ async function main() {
         summary: seed.summary,
         description: seed.description,
         position: seed.position,
+        deletedAt: null,
         embedding,
       });
     }
@@ -967,6 +979,7 @@ async function main() {
       _key: newId(),
       parentKey,
       childKey,
+      deletedAt: null,
     });
   }
   console.log('Seeded canonical Nexus scope hierarchy');
