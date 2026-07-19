@@ -3,9 +3,9 @@ import { selectDefaultScope } from "./scope-selection";
 import type { AccessibleScopeOption } from "./types";
 
 const scopes: AccessibleScopeOption[] = [
-  { key: "nexus", name: "Nexus", position: 1, parentKey: null, path: ["Nexus"] },
-  { key: "core", name: "Core", position: 2, parentKey: "nexus", path: ["Nexus", "Core"] },
-  { key: "launch", name: "Launch", position: 3, parentKey: "nexus", path: ["Nexus", "Launch"] },
+  { key: "nexus", name: "Nexus", position: 1, level: 1, parentKey: null, path: ["Nexus"] },
+  { key: "core", name: "Core", position: 2, level: 2, parentKey: "nexus", path: ["Nexus", "Core"] },
+  { key: "launch", name: "Launch", position: 3, level: 2, parentKey: "nexus", path: ["Nexus", "Launch"] },
 ];
 
 describe("selectDefaultScope", () => {

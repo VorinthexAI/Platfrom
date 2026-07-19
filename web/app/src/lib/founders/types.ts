@@ -8,6 +8,7 @@ export type AccessibleScopeOption = {
   key: string;
   name: string;
   position: number;
+  level: number;
   parentKey: string | null;
   path: string[];
 };

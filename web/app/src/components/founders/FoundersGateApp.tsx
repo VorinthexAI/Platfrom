@@ -55,8 +55,7 @@ export function FoundersGateApp() {
     setScopes([]);
     setScopeKey(null);
     try {
-      const loaded = (await fetchAccessibleScopes(nextOrganizationKey))
-        .filter((scope) => scope.name !== "Agent Builder");
+      const loaded = await fetchAccessibleScopes(nextOrganizationKey);
       if (scopeRequestRef.current !== requestId) return;
       setScopes(loaded);
       const stored = window.localStorage.getItem(scopeStorageKey(nextOrganizationKey));

@@ -9,11 +9,12 @@ export interface CreateScopeInput {
   summary: string;
   description: string | null;
   position: number;
+  level?: number;
 }
 
 export interface ScopeRepository {
   createScope(input: CreateScopeInput): Promise<Scope>;
-  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'name' | 'summary' | 'description' | 'position'>>): Promise<Scope>;
+  updateScope(scopeKey: string, input: Partial<Pick<CreateScopeInput, 'name' | 'summary' | 'description' | 'position' | 'level'>>): Promise<Scope>;
   getScopeByKey(scopeKey: string): Promise<Scope | null>;
   listScopes(organizationKey: string): Promise<readonly Scope[]>;
   removeScope(scopeKey: string): Promise<void>;

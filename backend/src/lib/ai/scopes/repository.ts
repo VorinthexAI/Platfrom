@@ -142,8 +142,8 @@ export function createScopeRepository(
     },
 
     async addScopeRelation(parentKey, childKey) {
-      const relation = scopeScopeSchema.parse({ key: newId(), parentKey, childKey });
       const [parent, child] = await Promise.all([requireScope(parentKey), requireScope(childKey)]);
+      const relation = scopeScopeSchema.parse({ key: newId(), parentKey, childKey, level: parent.level + 1 });
       if (parent.organizationKey !== child.organizationKey) {
         throw new ScopeOrganizationMismatchError(parentKey, childKey);
       }
@@ -160,6 +160,7 @@ export function createScopeRepository(
 
       try {
         const result = await database.collection(SCOPE_SCOPES_COLLECTION).save(toArangoDoc(relation), { returnNew: true });
+        await database.collection(SCOPES_COLLECTION).update(child.key, { level: relation.level });
         const saved = (result as { new?: Record<string, unknown> }).new;
         return (saved ? scopeScopeSchema.parse(withArangoKey(saved)) : relation) satisfies ScopeScope;
       } catch (error) {
