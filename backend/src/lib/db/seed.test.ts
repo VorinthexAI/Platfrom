@@ -8,6 +8,7 @@ import { toolSchema } from './tools.node';
 import { toolActionSeedSchema } from './tool-actions.node';
 import { TOOL_REGISTRY } from '@/lib/ai/tools';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
+import { newId } from '@/lib/ids';
 import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 
 describe('scope seeds', () => {

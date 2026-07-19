@@ -525,9 +525,28 @@ export const SEEDED_PROVIDERS = [
   },
 ] as const;
 
-export const SEEDED_MODELS = [] as const;
-export const SEEDED_MODEL_ACTIONS = [] as const;
-export const SEEDED_MODEL_PROVIDERS = [] as const;
+export const SEEDED_MODELS: ReadonlyArray<{
+  key: string;
+  slug: string;
+  name: string;
+  description: string;
+  supportedUseCases: string;
+  enabled: boolean;
+}> = [];
+export const SEEDED_MODEL_ACTIONS: ReadonlyArray<{
+  key: string;
+  modelSlug: string;
+  actionSlug: string;
+  priority: number;
+  enabled: boolean;
+}> = [];
+export const SEEDED_MODEL_PROVIDERS: ReadonlyArray<{
+  key: string;
+  modelSlug: string;
+  providerSlug: string;
+  providerModelId: string;
+  enabled: boolean;
+}> = [];
 
 export const SEEDED_TOOLS = [
   {
