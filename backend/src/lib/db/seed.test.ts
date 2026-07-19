@@ -37,7 +37,7 @@ describe('scope seeds', () => {
       }
     }
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.position).toBe(1);
-    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.summary).toBe('Vorinthex is building an AI-native platform that empowers people and organizations to think, create, automate, and collaborate with intelligent systems, transforming AI from isolated tools into a trusted foundation for future work.');
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.summary).toBe('Vorinthex is an AI native platform that unifies intelligence, knowledge and execution into a single system that helps people and organizations think, build and achieve more with artificial intelligence.');
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ position }) => position === 2)).toBe(true);
     expect(Object.fromEntries(SEEDED_SCOPES.filter(({ slug }) => slug !== 'nexus').map(({ slug, description }) => [slug, description]))).toEqual({
       core: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
