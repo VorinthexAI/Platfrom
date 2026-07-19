@@ -3,11 +3,13 @@ import { ACTION_SLUGS } from '@/lib/ai/actions';
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
 import { actionSchema } from './actions.node';
 import { providerSchema } from './providers.node';
+import { voiceSchema } from './voices.node';
 import { toolSchema } from './tools.node';
 import { toolActionSeedSchema } from './tool-actions.node';
 import { TOOL_REGISTRY } from '@/lib/ai/tools';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
-import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { newId } from '@/lib/ids';
+import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 
 describe('scope seeds', () => {
   test('place the seven product scopes as siblings directly below Nexus', () => {
@@ -103,6 +105,19 @@ describe('model and routing relation seeds', () => {
     expect(SEEDED_MODELS).toEqual([]);
     expect(SEEDED_MODEL_ACTIONS).toEqual([]);
     expect(SEEDED_MODEL_PROVIDERS).toEqual([]);
+  });
+});
+
+describe('voice seeds', () => {
+  test('seed Amazon Nova 2 Sonic US-English voices', () => {
+    expect(SEEDED_VOICES).toHaveLength(2);
+    expect(SEEDED_VOICES).toEqual([
+      expect.objectContaining({ provider: 'aws-bedrock', model: 'amazon.nova-2-sonic-v1:0', voice: 'Tiffany', label: 'Lyra', language: 'en-US', format: 'mp3' }),
+      expect.objectContaining({ provider: 'aws-bedrock', model: 'amazon.nova-2-sonic-v1:0', voice: 'Matthew', label: 'Orion', language: 'en-US', format: 'mp3' }),
+    ]);
+    for (const seed of SEEDED_VOICES) {
+      expect(voiceSchema.parse({ key: 'cmrnlzf640000qc7k4p5zem5w', ...seed, createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z' }).embedding).toEqual([]);
+    }
   });
 });
 

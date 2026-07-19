@@ -525,9 +525,28 @@ export const SEEDED_PROVIDERS = [
   },
 ] as const;
 
-export const SEEDED_MODELS = [] as const;
-export const SEEDED_MODEL_ACTIONS = [] as const;
-export const SEEDED_MODEL_PROVIDERS = [] as const;
+export const SEEDED_MODELS: ReadonlyArray<{
+  key: string;
+  slug: string;
+  name: string;
+  description: string;
+  supportedUseCases: string;
+  enabled: boolean;
+}> = [];
+export const SEEDED_MODEL_ACTIONS: ReadonlyArray<{
+  key: string;
+  modelSlug: string;
+  actionSlug: string;
+  priority: number;
+  enabled: boolean;
+}> = [];
+export const SEEDED_MODEL_PROVIDERS: ReadonlyArray<{
+  key: string;
+  modelSlug: string;
+  providerSlug: string;
+  providerModelId: string;
+  enabled: boolean;
+}> = [];
 
 export const SEEDED_TOOLS = [
   {
@@ -909,7 +928,26 @@ type SeededVoice = Pick<Voice, 'provider' | 'model' | 'modelLabel' | 'voice' | '
 
 const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [];
 
-export const SEEDED_VOICES: SeededVoice[] = [];
+export const SEEDED_VOICES: SeededVoice[] = [
+  {
+    provider: 'aws-bedrock',
+    model: 'amazon.nova-2-sonic-v1:0',
+    modelLabel: 'Amazon Nova 2 Sonic',
+    voice: 'Tiffany',
+    label: 'Lyra',
+    language: 'en-US',
+    format: 'mp3',
+  },
+  {
+    provider: 'aws-bedrock',
+    model: 'amazon.nova-2-sonic-v1:0',
+    modelLabel: 'Amazon Nova 2 Sonic',
+    voice: 'Matthew',
+    label: 'Orion',
+    language: 'en-US',
+    format: 'mp3',
+  },
+];
 
 // backend/src/lib/db -> repo root, then into the checked-in orchestrator
 // source directory (present on a full checkout, e.g. the CI deploy job's
