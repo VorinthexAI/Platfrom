@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { compileGenesisContext, GenesisOrganizationMismatchError, renderGenesisContext } from './context';
+import { compileGenesisContext, GenesisOrganizationMismatchError, GenesisScopeMismatchError, renderGenesisContext } from './context';
 import { buildGenesisFixture } from './test-fixtures';
 import { organizationSchema } from '@/lib/db/organizations.node';
 import { scopeSchema } from '@/lib/ai/scopes';
@@ -30,14 +30,10 @@ describe('Genesis context compilation', () => {
     await expect(compileGenesisContext({ organizationKey: newId(), scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create an agent.' }, f)).rejects.toBeInstanceOf(GenesisOrganizationMismatchError);
   });
 
-  test('compiles a server-authorized delegation against a target organization and scope', async () => {
+  test('rejects a delegation context that overrides Genesis’s canonical scope', async () => {
     const f = buildGenesisFixture();
     const organization = organizationSchema.parse({ key: newId(), name: 'Customer Org', createdAt: f.now, updatedAt: f.now });
     const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'operations', name: 'Operations', summary: 'Operations', description: 'Operations', position: 1 });
-    const context = await compileGenesisContext({ organizationKey: organization.key, scopeKey: scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a generic organization agent.' }, { ...f, executionContext: { organization, scope }, catalog: { ...f.catalog, async listOrganizationScopes() { return [scope]; } } });
-    expect(context.organization.key).toBe(organization.key);
-    expect(context.scope.key).toBe(scope.key);
-    expect(context.agent).toMatchObject({ key: f.genesis.key, slug: 'genesis' });
-    expect(context.guardrails).toMatchObject({ organizationKey: organization.key, scopeKey: scope.key });
+    await expect(compileGenesisContext({ organizationKey: organization.key, scopeKey: scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create a generic organization agent.' }, { ...f, executionContext: { organization, scope }, catalog: { ...f.catalog, async listOrganizationScopes() { return [scope]; } } })).rejects.toBeInstanceOf(GenesisScopeMismatchError);
   });
 });

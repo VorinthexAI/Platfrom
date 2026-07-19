@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AiError } from '@/lib/ai/shared/result';
 import { sourceSelectionSchema } from '@/lib/ai/agent-run-sources';
 import { getAgentBySlug, loadAgentRuntime, type Agent } from '@/lib/ai/agents';
-import { createAgentFromGenesis, type ExecuteGenesisOptions } from '@/lib/ai/agents/genesis';
+import { createAgentFromGenesis, GENESIS_SCOPE_SLUG, type ExecuteGenesisOptions } from '@/lib/ai/agents/genesis';
 import { getDefaultAgentRunRepository, type AgentRunRepository } from '@/lib/ai/agent-runs';
 import { getDefaultAgentRunStepRepository, type AgentRunStepRepository } from '@/lib/ai/agent-run-steps';
 import type { Organization } from '@/lib/db/organizations.node';
@@ -55,9 +55,15 @@ export async function delegateAgentCreationFromBeacon(params: BeaconDelegatePara
   const [beacon, genesis] = await Promise.all([resolveAgent(BEACON_AGENT_SLUG), resolveAgent('genesis')]);
   if (!beacon || beacon.name !== BEACON_AGENT_NAME || beacon.title !== BEACON_AGENT_TITLE) throw new BeaconDelegationError('canonical Beacon is unavailable');
   if (!genesis || genesis.slug !== 'genesis' || genesis.name !== 'Genesis' || genesis.title !== 'Agent Architect') throw new BeaconDelegationError('canonical Genesis is unavailable');
-  const beaconRuntime = await loadAgentRuntime(beacon.key, options.runtimeData);
+  const [beaconRuntime, genesisRuntime] = await Promise.all([
+    loadAgentRuntime(beacon.key, options.runtimeData),
+    loadAgentRuntime(genesis.key, options.runtimeData),
+  ]);
   const delegateGrant = beaconRuntime.tools.find(({ tool }) => tool.slug === BEACON_DELEGATE_TOOL_SLUG);
   if (!delegateGrant || delegateGrant.actions.length !== 1 || delegateGrant.actions[0]?.action.slug !== 'core.delegate') throw new BeaconDelegationError('Beacon has no canonical core.delegate grant');
+  const genesisScope = genesisRuntime.scope;
+  if (genesisScope.organizationKey !== organization.key || genesisScope.slug !== GENESIS_SCOPE_SLUG) throw new BeaconDelegationError('canonical Genesis Launch scope is unavailable');
+  if (scope.key !== genesisScope.key) throw new BeaconDelegationError('Genesis delegation is available only from Launch');
 
   const runs = options.runs ?? getDefaultAgentRunRepository();
   const steps = options.steps ?? getDefaultAgentRunStepRepository();
@@ -75,10 +81,10 @@ export async function delegateAgentCreationFromBeacon(params: BeaconDelegatePara
 
   try {
     const create = options.createFromGenesis ?? createAgentFromGenesis;
-    const genesisResult = await create({ organizationKey: organization.key, scopeKey: scope.key, genesisAgentKey: genesis.key, currentTask: input.request, requestedExplorationRate: input.requestedExplorationRate, sourceRefs: input.sourceRefs }, {
+    const genesisResult = await create({ organizationKey: organization.key, scopeKey: genesisScope.key, genesisAgentKey: genesis.key, currentTask: input.request, requestedExplorationRate: input.requestedExplorationRate, sourceRefs: input.sourceRefs }, {
       ...options,
       principal: { kind: 'member', userOrganizationKey: membership.key },
-      executionContext: { organization, scope },
+      executionContext: { organization, scope: genesisScope },
       serviceDelegation: { agentSlug: 'genesis', requiredOrganizationRole: 'owner' },
     });
     const endedAtMs = Date.now(); const endedAt = new Date(endedAtMs).toISOString(); const elapsedMs = endedAtMs - startedAtMs;
