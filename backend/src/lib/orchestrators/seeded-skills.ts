@@ -1,6 +1,6 @@
 /**
  * Backend-owned snapshots of the regenerated orchestrator skills.
- * Keep these literals independent from scripts/orchestrators at runtime.
+ * Keep these literals self-contained at runtime.
  */
 export const SEEDED_ORCHESTRATOR_SKILLS = {
   Atlas: `---

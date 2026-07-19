@@ -7,4 +7,3 @@
 *.ico binary
 
 .github/environments.json filter=git-crypt diff=git-crypt
-launch/.env filter=git-crypt diff=git-crypt
