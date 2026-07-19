@@ -45,6 +45,14 @@ export function createOrganizationCredentialsRepository(database: OrganizationCr
       const credential = organizationCredentialSchema.parse(withArangoKey(document as Record<string, unknown>));
       return decryptOrganizationCredentials(credential.encryptedCredentials);
     },
+    async hasCredentials(organizationKey, providerKey) {
+      const validReferences = references.parse({ organizationKey, providerKey });
+      const cursor = await database.query(
+        'FOR credential IN @@collection FILTER credential.organizationKey == @organizationKey && credential.providerKey == @providerKey LIMIT 1 RETURN true',
+        { '@collection': ORGANIZATION_CREDENTIALS_COLLECTION, ...validReferences },
+      );
+      return (await cursor.next()) === true;
+    },
   };
 }
 

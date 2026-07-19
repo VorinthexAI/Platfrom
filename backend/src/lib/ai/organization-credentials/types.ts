@@ -11,6 +11,7 @@ export interface OrganizationCredentialsDatabase {
 export interface OrganizationCredentialsRepository {
   setCredentials(organizationKey: string, providerKey: string, credentials: OrganizationCredentials): Promise<OrganizationCredential>;
   getCredentials(organizationKey: string, providerKey: string): Promise<OrganizationCredentials | null>;
+  hasCredentials(organizationKey: string, providerKey: string): Promise<boolean>;
 }
 
 export interface OrganizationCredentialsSetupDatabase {

@@ -24,7 +24,6 @@ export const awsBedrockProviderConfigSchema = z
     region: z.string().min(1),
     accessKeyId: z.string().min(1),
     secretAccessKey: z.string().min(1),
-    sessionToken: z.string().min(1).optional(),
   })
   .strict();
 
@@ -81,7 +80,6 @@ function signBedrockRequest(config: AwsBedrockProviderConfig, path: string, body
     ['x-amz-content-sha256', payloadHash],
     ['x-amz-date', amzDate],
   ];
-  if (config.sessionToken) headerEntries.push(['x-amz-security-token', config.sessionToken]);
   headerEntries.sort(([a], [b]) => (a < b ? -1 : 1));
 
   const canonicalHeaders = headerEntries.map(([name, value]) => `${name}:${value}\n`).join('');

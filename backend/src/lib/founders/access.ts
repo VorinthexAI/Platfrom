@@ -92,6 +92,7 @@ export interface AccessibleOrganizationOption {
   key: string;
   name: string;
   alias: string | null;
+  role: UserOrganization['orgRole'];
 }
 
 /** Organizations the user may select: their own active memberships only. */
@@ -104,7 +105,12 @@ export async function listAccessibleOrganizations(
   for (const membership of memberships) {
     const organization = await source.getOrganization(membership.organizationId);
     if (!organization || organization.isActive === false) continue;
-    options.push({ key: organization.key, name: organization.name, alias: organization.slug ?? null });
+    options.push({
+      key: organization.key,
+      name: organization.name,
+      alias: organization.slug ?? null,
+      role: membership.orgRole,
+    });
   }
   options.sort((left, right) => left.name.localeCompare(right.name) || left.key.localeCompare(right.key));
   return options;

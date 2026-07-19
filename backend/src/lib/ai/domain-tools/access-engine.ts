@@ -71,6 +71,7 @@ export async function getScopeAgent(scopeKey: string, agentKey: string): Promise
 
 function organizationActionAllowed(role: AccessRole, action?: string) {
   if (!action || action.endsWith('.read') || action.endsWith('.list') || action.includes('.evaluate') || action.includes('.explain')) return true;
+  if (action.startsWith('organization.provider.')) return role === 'owner';
   if (action === 'organization.archive' || action === 'organization.restore' || action.endsWith('.remove')) return role === 'owner';
   return role === 'owner' || role === 'admin';
 }

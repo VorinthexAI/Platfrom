@@ -30,8 +30,10 @@ import {
   askFoundersBeacon,
   delegateFoundersBeacon,
   getFoundersAccount,
+  listFoundersOrganizationProviders,
   listFoundersOrganizationScopes,
   listFoundersOrganizations,
+  upsertFoundersOrganizationProvider,
 } from './founders';
 import {
   createFounderArtifact,
@@ -455,6 +457,8 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);
   app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
+  app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
+  app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
   app.post('/founders/beacon/ask', askFoundersBeacon);
   app.post('/founders/beacon/delegate', delegateFoundersBeacon);
   app.get('/founders/artifacts', listFounderArtifacts);
