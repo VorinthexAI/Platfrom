@@ -58,10 +58,12 @@ function fixture() {
   const nexus = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'nexus', name: 'Nexus', summary: 'Root scope', description: 'Root scope', position: 1 });
   const core = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'core', name: 'Core', summary: 'Core scope', description: 'Core scope', position: 2 });
   const launch = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'launch', name: 'Launch', summary: 'Launch scope', description: 'Launch scope', position: 3 });
+  const agentBuilder = scopeSchema.parse({ key: newId(), organizationKey: rootOrganization.key, slug: 'agent-builder', name: 'Agent Builder', summary: 'Legacy agent builder scope', description: 'Legacy agent builder scope', position: 4 });
   const foreignScope = scopeSchema.parse({ key: newId(), organizationKey: otherOrganization.key, slug: 'ops', name: 'Ops', summary: 'Foreign scope', description: 'Foreign scope', position: 1 });
   const relations = [
     scopeScopeSchema.parse({ key: newId(), parentKey: nexus.key, childKey: core.key }),
     scopeScopeSchema.parse({ key: newId(), parentKey: nexus.key, childKey: launch.key }),
+    scopeScopeSchema.parse({ key: newId(), parentKey: nexus.key, childKey: agentBuilder.key }),
   ];
 
   const state: FixtureState = {
@@ -69,11 +71,11 @@ function fixture() {
     organizations: [rootOrganization, otherOrganization],
     rootOrganization,
     memberships: [founderRootMembership, outsiderMembership],
-    scopes: [nexus, core, launch, foreignScope],
+    scopes: [nexus, core, launch, agentBuilder, foreignScope],
     relations,
     scopeMembers: [],
   };
-  return { state, source: sourceFor(state), rootOrganization, otherOrganization, founder, outsider, founderRootMembership, outsiderMembership, nexus, core, launch, foreignScope };
+  return { state, source: sourceFor(state), rootOrganization, otherOrganization, founder, outsider, founderRootMembership, outsiderMembership, nexus, core, launch, agentBuilder, foreignScope };
 }
 
 describe('requireFoundersGateAccess', () => {
@@ -176,6 +178,12 @@ describe('listAccessibleScopes', () => {
     expect(options[0]).toMatchObject({ parentKey: null, path: ['Nexus'] });
     expect(options[1]).toMatchObject({ parentKey: f.nexus.key, path: ['Nexus', 'Core'] });
     expect(options[2]).toMatchObject({ parentKey: f.nexus.key, path: ['Nexus', 'Launch'] });
+  });
+
+  test('omits the legacy Agent Builder scope', async () => {
+    const f = fixture();
+
+    expect((await listAccessibleScopes(f.founderRootMembership, f.source)).map(({ key }) => key)).not.toContain(f.agentBuilder.key);
   });
 
   test('exposes a parent when a plain member is assigned to it', async () => {
