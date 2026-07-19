@@ -199,7 +199,7 @@ jobs:
           load: false
           tags: vorinthex-web:ci
           cache-from: type=gha,scope=web
-          cache-to: type=gha,mode=max,scope=web
+          cache-to: type=gha,mode=max,scope=web,ignore-error=true
       - name: Build backend image (no push)
         uses: docker/build-push-action@v6
         with:
@@ -210,7 +210,7 @@ jobs:
           load: false
           tags: vorinthex-backend:ci
           cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=max,scope=backend
+          cache-to: type=gha,mode=max,scope=backend,ignore-error=true
 
   # ---------------------------------------------------------------------------
   # MOBILE: queue EAS internal Android distribution builds whenever
