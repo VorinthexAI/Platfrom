@@ -39,7 +39,6 @@ export function FoundersAccountPage() {
   const [gate, setGate] = useState<GateState>("checking");
   const [account, setAccount] = useState<FoundersAccount | null>(null);
   const [organizations, setOrganizations] = useState<AccessibleOrganizationOption[]>([]);
-  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,19 +73,14 @@ export function FoundersAccountPage() {
       ?? null;
   }, [organizations]);
 
-  async function signOut() {
-    if (signingOut) return;
-    setSigningOut(true);
-    try {
-      await fetch("/api/auth/signout", { method: "POST" });
-    } finally {
-      // The gate greeting caches the member identity locally — clear it so
-      // the next visitor starts from the email gate.
-      for (const key of ["vx_member_name", "vx_member_title", "vx_member_email"]) {
-        window.localStorage.removeItem(key);
-      }
-      router.replace("/");
+  function signOut() {
+    // Clear visible local session state and leave immediately; keepalive lets
+    // the cookie-clearing request finish after navigation begins.
+    for (const key of ["vx_member_name", "vx_member_title", "vx_member_email"]) {
+      window.localStorage.removeItem(key);
     }
+    void fetch("/api/auth/signout", { method: "POST", keepalive: true });
+    router.replace("/");
   }
 
   return (
@@ -114,9 +108,7 @@ export function FoundersAccountPage() {
                 <Button asChild variant="primary">
                   <Link href="/nexus">Back</Link>
                 </Button>
-                <Button type="button" onClick={signOut} disabled={signingOut} variant="secondary">
-                  {signingOut ? "Signing out…" : "Sign out"}
-                </Button>
+                <Button type="button" onClick={signOut} variant="secondary">Sign out</Button>
               </div>
             </>
           ) : null}

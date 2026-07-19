@@ -230,7 +230,7 @@ export async function listAccessibleScopes(
   }
 
   return ordered
-    .filter((scope) => stewards || accessibleKeys.has(scope.key))
+    .filter((scope) => scope.slug !== 'agent-builder' && (stewards || accessibleKeys.has(scope.key)))
     .map((scope) => ({
       key: scope.key,
       name: scope.name,
