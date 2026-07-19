@@ -24,7 +24,7 @@ import {
  * providers barrel.
  */
 
-export const ASK_ACTION_IDS = new Set(['core.ask', 'core.reason']);
+export const CHAT_ACTION_IDS = new Set(['core.chat', 'core.reason']);
 
 export interface OpenAICompatibleOptions {
   /** gpt-5-era OpenAI/Azure endpoints require `max_completion_tokens`; other compatible providers use `max_tokens`. */
@@ -37,19 +37,27 @@ export function buildChatCompletionParams(
   options: OpenAICompatibleOptions,
 ): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming {
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-  if (input.system) messages.push({ role: 'system', content: input.system });
-  for (const message of input.messages) messages.push({ role: message.role, content: message.content });
+  if (input.systemPrompt) messages.push({ role: 'system', content: input.systemPrompt });
+  for (const message of input.messages) {
+    const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
+    if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError('openai', 'unsupported_action', 'This provider adapter does not support non-text core.chat content');
+    if (message.role === 'tool') {
+      if (!message.toolCallId) throw new ProviderError('openai', 'response_invalid', 'core.chat tool messages require toolCallId');
+      messages.push({ role: 'tool', tool_call_id: message.toolCallId, content: text });
+    } else {
+      messages.push({ role: message.role, content: text });
+    }
+  }
 
   const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
     model: externalModelId,
     messages,
   };
-  if (input.maxOutputTokens !== undefined) {
-    if (options.maxTokensParam === 'max_completion_tokens') params.max_completion_tokens = input.maxOutputTokens;
-    else params.max_tokens = input.maxOutputTokens;
+  if (input.options?.maxTokens !== undefined) {
+    if (options.maxTokensParam === 'max_completion_tokens') params.max_completion_tokens = input.options.maxTokens;
+    else params.max_tokens = input.options.maxTokens;
   }
-  if (input.temperature !== undefined) params.temperature = input.temperature;
-  if (input.responseFormat?.type === 'json') params.response_format = { type: 'json_object' };
+  if (input.options?.temperature !== undefined) params.temperature = input.options.temperature;
   if (input.tools && input.tools.length > 0) {
     params.tools = input.tools.map((tool) => ({
       type: 'function' as const,

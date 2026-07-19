@@ -1,6 +1,6 @@
 import { AzureOpenAI } from 'openai';
 import { z } from 'zod';
-import { ASK_ACTION_IDS, executeOpenAICompatibleChat, streamOpenAICompatibleChat, unsupportedAction } from './openai-compatible';
+import { CHAT_ACTION_IDS, executeOpenAICompatibleChat, streamOpenAICompatibleChat, unsupportedAction } from './openai-compatible';
 import type { ProviderAdapter, ProviderFactory } from './types';
 
 /**
@@ -36,12 +36,12 @@ export function createAzureAIFoundryProvider(config: AzureAIFoundryProviderConfi
     name: 'Azure AI Foundry',
 
     async execute(request) {
-      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
     },
 
     stream(request) {
-      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
     },
   };

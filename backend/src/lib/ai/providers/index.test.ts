@@ -91,8 +91,8 @@ describe('provider error normalization', () => {
 
 describe('normalized chat input', () => {
   test('accepts a minimal chat request and rejects unknown fields', () => {
-    expect(chatInputSchema.parse({ messages: [{ role: 'user', content: 'hi' }] }).messages).toHaveLength(1);
-    expect(() => chatInputSchema.parse({ messages: [{ role: 'user', content: 'hi' }], extra: true })).toThrow();
-    expect(() => chatInputSchema.parse({ messages: [] })).toThrow();
+    expect(chatInputSchema.parse({ organizationProviderKey: 'provider', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] }).messages).toHaveLength(1);
+    expect(() => chatInputSchema.parse({ organizationProviderKey: 'provider', messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }], extra: true })).toThrow();
+    expect(() => chatInputSchema.parse({ organizationProviderKey: 'provider', messages: [] })).toThrow();
   });
 });

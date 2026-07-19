@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { actionIdSchema, type ActionId } from '@/lib/ai/actions/types';
+import { coreChatInputSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, type CoreChatInput, type CoreChatMessage, type CoreChatToolDefinition } from '@/lib/ai/actions/core-chat';
 import { organizationKeySchema } from '@/lib/ai/shared/ids';
 import type { TokenUsage } from '@/lib/ai/shared/usage';
 
@@ -132,39 +133,13 @@ export interface ProviderFactory {
 // until parsed, never cast.
 // ---------------------------------------------------------------------------
 
-export const chatMessageSchema = z
-  .object({
-    role: z.enum(['system', 'user', 'assistant']),
-    content: z.string().min(1),
-  })
-  .strict();
-
-export type ChatMessage = z.infer<typeof chatMessageSchema>;
-
-export const chatToolSchema = z
-  .object({
-    name: z.string().min(1),
-    description: z.string().default(''),
-    inputSchema: z.record(z.unknown()).default({}),
-  })
-  .strict();
-
-export type ChatTool = z.infer<typeof chatToolSchema>;
-
-/** Input for `core.ask` / `core.reason` (and any other chat-shaped action). */
-export const chatInputSchema = z
-  .object({
-    messages: z.array(chatMessageSchema).min(1),
-    system: z.string().optional(),
-    maxOutputTokens: z.number().int().positive().optional(),
-    temperature: z.number().min(0).max(2).optional(),
-    tools: z.array(chatToolSchema).optional(),
-    /** Structured output, where the provider supports it. */
-    responseFormat: z.object({ type: z.literal('json') }).strict().optional(),
-  })
-  .strict();
-
-export type ChatInput = z.infer<typeof chatInputSchema>;
+/** Compatibility aliases for the provider layer; the core action owns these schemas. */
+export const chatMessageSchema = coreChatMessageSchema;
+export type ChatMessage = CoreChatMessage;
+export const chatToolSchema = coreChatToolDefinitionSchema;
+export type ChatTool = CoreChatToolDefinition;
+export const chatInputSchema = coreChatInputSchema;
+export type ChatInput = CoreChatInput;
 
 export interface NormalizedToolCall {
   id: string;

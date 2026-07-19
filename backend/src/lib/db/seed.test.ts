@@ -87,7 +87,7 @@ describe('provider seeds', () => {
   test('seed only OpenAI while keeping its slug registered', () => {
     const slugs = SEEDED_PROVIDERS.map((provider) => provider.slug);
 
-    expect(slugs).toEqual(['openai']);
+    expect(slugs).toEqual(['openai', 'aws-bedrock']);
     expect(slugs.every((slug) => PROVIDER_SLUGS.includes(slug))).toBe(true);
     expect(new Set(slugs).size).toBe(slugs.length);
     expect(new Set(SEEDED_PROVIDERS.map((provider) => provider.key)).size).toBe(SEEDED_PROVIDERS.length);
@@ -120,8 +120,9 @@ describe('model and routing relation seeds', () => {
     const parsed = SEEDED_MODEL_ACTIONS.map((seed) => modelActionSeedSchema.parse(seed));
 
     expect(parsed.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`).sort()).toEqual([
+      'amazon.nova-2-sonic:core.chat',
       'openai.gpt-5.4-mini:core.reason',
-      'openai.gpt-5.4-nano:core.ask',
+      'openai.gpt-5.4-nano:core.chat',
     ]);
     expect(parsed.some(({ actionSlug }) => actionSlug.startsWith('scope.') || actionSlug.startsWith('organization.member.'))).toBe(false);
     expect(parsed.some(({ actionSlug }) => actionSlug === 'core.delegate')).toBe(false);
@@ -131,6 +132,7 @@ describe('model and routing relation seeds', () => {
     const parsed = SEEDED_MODEL_PROVIDERS.map((seed) => modelProviderSeedSchema.parse(seed));
 
     expect(parsed.map(({ modelSlug, providerSlug, providerModelId }) => `${modelSlug}:${providerSlug}:${providerModelId}`).sort()).toEqual([
+      'amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0',
       'openai.gpt-5.4-mini:openai:gpt-5.4-mini',
       'openai.gpt-5.4-nano:openai:gpt-5.4-nano',
     ]);
@@ -173,7 +175,7 @@ describe('model and routing relation seeds', () => {
       removedOrganizationProviders: 1,
       disabledStaleModels: 1,
       removedNonOpenAiModelRoutes: 1,
-      verifiedCurrentModels: 2,
+      verifiedCurrentModels: 3,
     });
     expect(organizationProviderKeys).toEqual([openAiProviderKey]);
     expect(models.find(({ slug }) => slug === 'legacy.old-model')?.enabled).toBe(false);
@@ -184,7 +186,7 @@ describe('model and routing relation seeds', () => {
       removedOrganizationProviders: 0,
       disabledStaleModels: 0,
       removedNonOpenAiModelRoutes: 0,
-      verifiedCurrentModels: 2,
+      verifiedCurrentModels: 3,
     });
   });
 });
@@ -210,7 +212,7 @@ describe('tool and tool-action seeds', () => {
       'agent.create:agent.create',
       'artifact.create:artifact.create',
       'artifact.read:artifact.read',
-      'ask.answer:core.ask',
+       'ask.answer:core.chat',
       'audio.transcribe-file:audio.transcribe',
       'core.delegate:core.delegate',
       'image.create:image.generate',

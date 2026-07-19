@@ -22,4 +22,4 @@ export {
   type RouteAttemptFailure,
 } from './errors';
 export { selectRoute } from './select-route';
-export { executeRoute, executeAction, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';
+export { executeRoute, executeAction, executeCoreChat, streamRoute, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';

@@ -4,6 +4,7 @@ import type { Model } from '@/lib/db/models.node';
 import type { ModelAction } from '@/lib/db/model-actions.node';
 import type { ModelProvider } from '@/lib/db/model-providers.node';
 import type { Provider } from '@/lib/db/providers.node';
+import type { OrganizationCredentialsRepository } from '@/lib/ai/organization-credentials';
 
 export interface RouteDecision {
   organizationKey: string;
@@ -12,6 +13,8 @@ export interface RouteDecision {
   modelKey: string;
   modelSlug: Model['slug'];
   providerKey: string;
+  /** Global provider key enabled for this organization and used to load its credentials. */
+  orgProviderKey: string;
   providerSlug: Provider['slug'];
   providerModelId: string;
 }
@@ -28,4 +31,5 @@ export interface RouterDataSource {
 export interface RouterDependencies {
   data?: RouterDataSource;
   adapters?: Partial<Record<ProviderId, ProviderAdapter>>;
+  credentials?: OrganizationCredentialsRepository;
 }

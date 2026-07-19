@@ -11,13 +11,13 @@ describe('action node schema', () => {
   test('parses a persisted action and applies node defaults', () => {
     const action = actionSchema.parse({
       key: newId(),
-      slug: 'core.ask',
+      slug: 'core.chat',
       name: 'Ask',
       description: 'Answer a conversational request.',
       objective: 'Provide a useful response to the user.',
       inputDescription: 'A message history and request context.',
       outputDescription: 'A text response.',
-      handlerKey: 'core.ask',
+      handlerKey: 'core.chat',
     });
 
     expect(action.enabled).toBe(true);
@@ -39,7 +39,7 @@ describe('action node schema', () => {
     expect(() => actionSchema.parse(base)).toThrow();
     expect(() => actionSchema.parse({
       ...base,
-      slug: 'core.ask',
+      slug: 'core.chat',
       handlerKey: 'core.reason',
     })).toThrow('handlerKey must match slug');
   });

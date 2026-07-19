@@ -25,14 +25,19 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
   if (!parsed.success) throw new RouteValidationError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   const request = parsed.data;
   const data = deps.data ?? defaultDataSource;
-  const adapters = deps.adapters ?? {};
   const action = await data.getActionBySlug(request.actionSlug);
   if (!action || !action.enabled) throw new NoEligibleRouteError(request.actionSlug, 'action is missing or disabled');
 
   const selectedModel = request.mode === 'model' || request.mode === 'fixed' ? await data.getModelBySlug(request.modelSlug) : null;
   if ((request.mode === 'model' || request.mode === 'fixed') && !selectedModel) throw new UnknownModelError(request.modelSlug);
-  const selectedProvider = request.mode === 'fixed' ? await data.getProviderBySlug(request.providerSlug) : null;
-  if (request.mode === 'fixed' && !selectedProvider) throw new UnknownProviderError(request.providerSlug);
+  const selectedProvider = request.mode === 'fixed'
+    ? await data.getProviderBySlug(request.providerSlug)
+    : request.organizationProviderKey
+      ? await data.getProviderByKey(request.organizationProviderKey)
+      : null;
+  if ((request.mode === 'fixed' || request.organizationProviderKey) && !selectedProvider) {
+    throw new UnknownProviderError(request.mode === 'fixed' ? request.providerSlug : request.organizationProviderKey!);
+  }
 
   const allowedProviderKeys = new Set(await data.listOrganizationProviderKeys(request.organizationKey));
   if (selectedProvider && !allowedProviderKeys.has(selectedProvider.key)) {
@@ -56,7 +61,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
     for (const modelProvider of modelProviders) {
       if (!allowedProviderKeys.has(modelProvider.providerKey)) continue;
       const provider = selectedProvider?.key === modelProvider.providerKey ? selectedProvider : await data.getProviderByKey(modelProvider.providerKey);
-      if (!provider || !adapters[provider.slug]) continue;
+      if (!provider) continue;
       return {
         organizationKey: request.organizationKey,
         actionKey: action.key,
@@ -64,6 +69,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
         modelKey: model.key,
         modelSlug: model.slug,
         providerKey: provider.key,
+        orgProviderKey: request.organizationProviderKey ?? provider.key,
         providerSlug: provider.slug,
         providerModelId: modelProvider.providerModelId,
       };

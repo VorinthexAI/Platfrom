@@ -2,7 +2,7 @@ import { createHash, createHmac } from 'node:crypto';
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
-import { ASK_ACTION_IDS, unsupportedAction } from './openai-compatible';
+import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
 import {
   chatInputSchema,
   resolveRequestSignal,
@@ -105,19 +105,22 @@ function signBedrockRequest(config: AwsBedrockProviderConfig, path: string, body
 
 function buildConverseBody(input: ChatInput): string {
   const messages: Array<{ role: 'user' | 'assistant'; content: Array<{ text: string }> }> = [];
-  const systemParts: string[] = input.system ? [input.system] : [];
+  const systemParts: string[] = input.systemPrompt ? [input.systemPrompt] : [];
   for (const message of input.messages) {
     if (message.role === 'system') {
-      systemParts.push(message.content);
+      systemParts.push(message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n'));
       continue;
     }
-    messages.push({ role: message.role, content: [{ text: message.content }] });
+    if (message.role === 'tool') throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support core.chat tool-result messages');
+    const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
+    if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support non-text core.chat content');
+    messages.push({ role: message.role, content: [{ text }] });
   }
   const body: Record<string, unknown> = { messages };
   if (systemParts.length > 0) body.system = systemParts.map((text) => ({ text }));
   const inferenceConfig: Record<string, unknown> = {};
-  if (input.maxOutputTokens !== undefined) inferenceConfig.maxTokens = input.maxOutputTokens;
-  if (input.temperature !== undefined) inferenceConfig.temperature = Math.min(input.temperature, 1);
+  if (input.options?.maxTokens !== undefined) inferenceConfig.maxTokens = input.options.maxTokens;
+  if (input.options?.temperature !== undefined) inferenceConfig.temperature = Math.min(input.options.temperature, 1);
   if (Object.keys(inferenceConfig).length > 0) body.inferenceConfig = inferenceConfig;
   return JSON.stringify(body);
 }
@@ -130,7 +133,7 @@ export function createAwsBedrockProvider(config: AwsBedrockProviderConfig): Prov
     name: 'AWS Bedrock',
 
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       const input = chatInputSchema.parse(request.input);
       const path = `/model/${encodeURIComponent(request.externalModelId)}/converse`;
       const body = buildConverseBody(input);
