@@ -617,13 +617,6 @@ export const SEEDED_MODEL_PROVIDERS = [
     enabled: true,
   },
   {
-    key: 'cmpollygenerativeroute0001',
-    modelSlug: 'amazon.polly-generative',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'amazon-polly-generative-engine',
-    enabled: false,
-  },
-  {
     key: 'cmtitanembedv2route0000001',
     modelSlug: 'amazon.titan-embed-text-v2',
     providerSlug: 'aws-bedrock',

@@ -117,7 +117,6 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-pro:aws-bedrock:amazon.nova-pro-v1:0:true',
       'amazon.nova-2-lite:aws-bedrock:amazon.nova-2-lite-v1:0:true',
       'amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0:true',
-      'amazon.polly-generative:aws-bedrock:amazon-polly-generative-engine:false',
       'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
     ]);
   });
