@@ -308,6 +308,25 @@ button:disabled {
   }
 }
 
+/* A composited glow drift keeps the Nexus workspace alive without restoring
+ * its full-screen WebGL shader, framebuffer, and requestAnimationFrame loop. */
+@keyframes nexus-backdrop-drift {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: translate3d(-1.5%, -1%, 0) scale(1.02);
+  }
+  50% {
+    opacity: 1;
+    transform: translate3d(1.5%, 1%, 0) scale(1.08);
+  }
+}
+
+.nexus-backdrop-drift {
+  animation: nexus-backdrop-drift 18s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
 /* The sound hint's speaker waves, breathing in sequence. */
 @keyframes sound-wave {
   0%,

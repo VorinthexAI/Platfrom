@@ -19,7 +19,7 @@ export function FoundersBackdrop() {
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0"
+        className="nexus-backdrop-drift pointer-events-none absolute -inset-[8%]"
         style={{
           background:
             "radial-gradient(72% 64% at 50% 42%, rgba(196, 76, 8, 0.18) 0%, transparent 54%), radial-gradient(92% 82% at 50% 50%, transparent 42%, rgba(10, 3, 1, 0.46) 78%, rgba(5, 1, 0, 0.7) 100%)",
