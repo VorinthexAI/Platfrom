@@ -4,6 +4,7 @@ import { embed, embeddingMetadata } from '../lib/embed';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
+import { ensureOrganizationCredentialsCollection } from '../lib/ai/organization-credentials/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 import { ensureAgentRunStepsCollection } from '../lib/ai/agent-run-steps/indexes';
@@ -734,9 +735,9 @@ async function main() {
     console.log(`Copied ${legacy} -> ${current} and dropped ${legacy}`);
   }
 
-  // organizationProviders is now an existence-only allow-list. Resolve the
-  // old provider slug to its persisted key and remove retired presentation
-  // and enabled fields. Invalid legacy references abort the migration.
+  // Resolve legacy provider links to the full organization-provider node.
+  // Invalid legacy references abort the migration rather than creating an
+  // orphaned credential authorization target.
   const organizationProviders = targetDb.collection('organizationProviders');
   if (!(await organizationProviders.exists())) await organizationProviders.create();
   const organizationProviderCursor = await targetDb.query<Record<string, unknown>>(`
@@ -748,27 +749,54 @@ async function main() {
     const organizationKey = nonEmptyString(legacyLink.organizationKey)
       ?? nonEmptyString(legacyLink.organizationId);
     let providerKey = nonEmptyString(legacyLink.providerKey);
+    let providerName = nonEmptyString(legacyLink.name);
     if (!providerKey) {
       const providerSlug = nonEmptyString(legacyLink.providerId);
       if (providerSlug) {
-        const providerCursor = await targetDb.query<{ _key: string }>(`
+        const providerCursor = await targetDb.query<{ _key: string; name: string }>(`
           FOR provider IN providers
             FILTER provider.slug == @providerSlug
             LIMIT 1
-            RETURN { _key: provider._key }
+            RETURN { _key: provider._key, name: provider.name }
         `, { providerSlug });
-        providerKey = (await providerCursor.next())?._key ?? null;
+        const provider = await providerCursor.next();
+        providerKey = provider?._key ?? null;
+        providerName ??= provider?.name ?? null;
       }
     }
-    if (!legacyKey || !organizationKey || !providerKey) {
+    if (providerKey && !providerName) {
+      const providerCursor = await targetDb.query<{ name: string }>(`
+        FOR provider IN providers
+          FILTER provider._key == @providerKey
+          LIMIT 1
+          RETURN { name: provider.name }
+      `, { providerKey });
+      providerName = (await providerCursor.next())?.name ?? null;
+    }
+    if (!legacyKey || !organizationKey || !providerKey || !providerName) {
       throw new Error(`Cannot migrate organizationProviders/${legacyKey ?? 'unknown'}: unresolved organization or provider reference`);
     }
     const key = organizationProviderSchema.shape.key.safeParse(legacyKey).success ? legacyKey : newId();
-    organizationProviderSchema.parse({ key, organizationKey, providerKey });
+    const timestamp = new Date().toISOString();
+    const migrated = organizationProviderSchema.parse({
+      key,
+      organizationKey,
+      providerKey,
+      name: providerName,
+      description: nonEmptyString(legacyLink.description),
+      inputTokens: typeof legacyLink.inputTokens === 'number' && legacyLink.inputTokens >= 0 ? legacyLink.inputTokens : 0,
+      outputTokens: typeof legacyLink.outputTokens === 'number' && legacyLink.outputTokens >= 0 ? legacyLink.outputTokens : 0,
+      totalTokens: typeof legacyLink.totalTokens === 'number' && legacyLink.totalTokens >= 0 ? legacyLink.totalTokens : 0,
+      lastUsedAt: nonEmptyString(legacyLink.lastUsedAt),
+      createdAt: nonEmptyString(legacyLink.createdAt) ?? timestamp,
+      updatedAt: nonEmptyString(legacyLink.updatedAt) ?? timestamp,
+      embedding: [],
+    });
+    const { key: _migratedKey, ...migratedDocument } = migrated;
     if (key === legacyKey) {
-      await organizationProviders.replace(legacyKey, { _key: key, organizationKey, providerKey });
+      await organizationProviders.replace(legacyKey, { _key: key, ...migratedDocument });
     } else {
-      await organizationProviders.save({ _key: key, organizationKey, providerKey });
+      await organizationProviders.save({ _key: key, ...migratedDocument });
       await organizationProviders.remove(legacyKey);
     }
   }
@@ -781,6 +809,7 @@ async function main() {
     }
   }
   await ensureOrganizationProvidersCollection(targetDb);
+  await ensureOrganizationCredentialsCollection(targetDb);
 
   // The call-level ledger cannot safely infer DB keys or provider-reported
   // usage for runs written with the retired slug-based shape. Preserve

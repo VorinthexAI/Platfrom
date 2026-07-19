@@ -159,7 +159,8 @@ describe('scope repository', () => {
 
   test('creates and lists scopes per organization with unique slugs', async () => {
     const { fake, stores } = createFakeDb();
-    const repository = createScopeRepository(fake, generateEmbedding);
+    const events: Array<{ scopeId: string; slug: string; data: { nodeType: string; nodeKey: string } }> = [];
+    const repository = createScopeRepository(fake, generateEmbedding, async (event) => { events.push(event); });
     const core = await repository.createScope(input());
     expect(core.embedding).toHaveLength(1536);
     const updated = await repository.updateScope(core.key, { name: 'Core Intelligence', description: 'Updated scope description.' });
@@ -181,12 +182,16 @@ describe('scope repository', () => {
 
     expect((await repository.listScopes(organizationKey)).map((scope) => scope.slug)).toEqual(['command', 'core']);
     expect(await repository.getScopeByKey(core.key)).toEqual(resummarized);
+    expect(events).toEqual(expect.arrayContaining([
+      { scopeId: core.key, slug: 'scope.create', data: { nodeType: 'scopes', nodeKey: core.key } },
+      { scopeId: core.key, slug: 'scope.update', data: { nodeType: 'scopes', nodeKey: core.key } },
+    ]));
     await expect(repository.createScope(input())).rejects.toBeInstanceOf(DuplicateScopeSlugError);
   });
 
   test('enforces organization boundaries, strict parents, and cycles', async () => {
     const { fake } = createFakeDb();
-    const repository = createScopeRepository(fake, generateEmbedding);
+    const repository = createScopeRepository(fake, generateEmbedding, async () => {});
     const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
     const core = await repository.createScope(input());
     const command = await repository.createScope(input({ slug: 'command', name: 'Command' }));
@@ -209,7 +214,7 @@ describe('scope repository', () => {
 
   test('removes relations and cascades them when a scope is deleted', async () => {
     const { fake, stores } = createFakeDb();
-    const repository = createScopeRepository(fake, generateEmbedding);
+    const repository = createScopeRepository(fake, generateEmbedding, async () => {});
     const root = await repository.createScope(input({ slug: 'root', name: 'Root' }));
     const core = await repository.createScope(input());
     await repository.addScopeRelation(root.key, core.key);

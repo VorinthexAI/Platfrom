@@ -42,7 +42,7 @@ export interface AiRuntimeSeedUpserters {
 
 export interface RootOpenAiRoutingDataSource {
   listOrganizationProviderKeys(organizationKey: string): Promise<readonly string[]>;
-  addOrganizationProvider(organizationKey: string, providerKey: string): Promise<void>;
+  addOrganizationProvider(organizationKey: string, providerKey: string, name: string): Promise<void>;
   removeOrganizationProvider(organizationKey: string, providerKey: string): Promise<void>;
   listModels(): Promise<readonly Model[]>;
   updateModel(key: string, patch: Partial<Model>): Promise<void>;
@@ -928,51 +928,20 @@ The long term vision is to create a new way of interacting with software. Rather
   },
 ] as const;
 
-// The Command orchestrator roster: one per scripts/orchestrators/<slug>-<role>
-// directory. `voice` here must match a (provider, model, voice) already in
-// SEEDED_VOICES below (derived from this list), and `dir` locates that
-// orchestrator's SKILL.md.
-const SEEDED_ORCHESTRATOR_SOURCES = [
-  { dir: 'atlas-ceo', name: 'Atlas', role: 'CEO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_onyx' },
-  { dir: 'apollo-cso', name: 'Apollo', role: 'CSO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_michael' },
-  { dir: 'athena-cpo', name: 'Athena', role: 'CPO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'af_kore' },
-  { dir: 'forge-cto', name: 'Forge', role: 'CTO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_fenrir' },
-  { dir: 'hermes-coo', name: 'Hermes', role: 'COO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'bm_daniel' },
-  { dir: 'iris-cco', name: 'Iris', role: 'CCO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'af_aoede' },
-  { dir: 'ledger-cfo', name: 'Ledger', role: 'CFO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'bm_george' },
-  { dir: 'mercury-cro', name: 'Mercury', role: 'CRO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_echo' },
-  { dir: 'metis-cio', name: 'Metis', role: 'CIO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'bf_emma' },
-  { dir: 'orbit-cmo', name: 'Orbit', role: 'CMO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'af_nova' },
-  { dir: 'sentinel-ciso', name: 'Sentinel', role: 'CISO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'am_adam' },
-  { dir: 'themis-clo', name: 'Themis', role: 'CLO', provider: 'openrouter', model: 'hexgrad/kokoro-82m', voice: 'bf_isabella' },
-];
+type SeededOrchestratorSource = {
+  dir: string;
+  name: string;
+  role: string;
+  provider: string;
+  model: string;
+  voice: string;
+};
 
-// Sourced from scripts/orchestrators/*/message.metadata.json — every Kokoro
-// voice already used for a generated Command orchestrator greeting, labeled
-// with that orchestrator's own name (derived from SEEDED_ORCHESTRATOR_SOURCES
-// above so the two never drift apart), plus the premium Gemini TTS voice used
-// for launch-asset voiceovers — not tied to any one orchestrator, so it gets
-// the brand's own label instead.
-export const SEEDED_VOICES = [
-  ...SEEDED_ORCHESTRATOR_SOURCES.map((orchestrator) => ({
-    provider: orchestrator.provider,
-    model: orchestrator.model,
-    modelLabel: 'Kokoro 82M',
-    voice: orchestrator.voice,
-    label: orchestrator.name,
-    language: 'en',
-    format: 'mp3',
-  })),
-  {
-    provider: 'openrouter',
-    model: 'google/gemini-3.1-flash-tts-preview',
-    modelLabel: 'Gemini 3.1 Flash TTS Preview',
-    voice: 'Charon',
-    label: 'Brand Primary',
-    language: 'en',
-    format: 'mp3',
-  },
-];
+type SeededVoice = Pick<Voice, 'provider' | 'model' | 'modelLabel' | 'voice' | 'label' | 'language' | 'format'>;
+
+const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [];
+
+export const SEEDED_VOICES: SeededVoice[] = [];
 
 // backend/src/lib/db -> repo root, then into the checked-in orchestrator
 // source directory (present on a full checkout, e.g. the CI deploy job's
@@ -1273,7 +1242,7 @@ export async function reconcileRootOpenAiRouting(
 ): Promise<RootOpenAiRoutingResult> {
   const organizationProviderKeys = [...await source.listOrganizationProviderKeys(organizationKey)];
   const enabledOpenAi = organizationProviderKeys.includes(openAiProviderKey);
-  if (!enabledOpenAi) await source.addOrganizationProvider(organizationKey, openAiProviderKey);
+  if (!enabledOpenAi) await source.addOrganizationProvider(organizationKey, openAiProviderKey, 'OpenAI');
 
   const staleOrganizationProviderKeys = organizationProviderKeys.filter((key) => key !== openAiProviderKey);
   for (const providerKey of staleOrganizationProviderKeys) {
@@ -1380,7 +1349,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const organizationProviders = getDefaultOrganizationProviderRepository();
   const routing = await reconcileRootOpenAiRouting(rootOrganization.key, openAi.key, {
     listOrganizationProviderKeys: (organizationKey) => organizationProviders.listProviderKeys(organizationKey),
-    async addOrganizationProvider(organizationKey, providerKey) { await organizationProviders.addProvider(organizationKey, providerKey); },
+    async addOrganizationProvider(organizationKey, providerKey, name) { await organizationProviders.addProvider(organizationKey, { providerKey, name, description: null }); },
     async removeOrganizationProvider(organizationKey, providerKey) { await organizationProviders.removeProvider(organizationKey, providerKey); },
     listModels: () => collectChunks(getAllModelsChunked()),
     async updateModel(key, patch) { await updatePersistedModel(key, patch); },

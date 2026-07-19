@@ -33,6 +33,18 @@ describe('organization invalidation projection', () => {
     });
   });
 
+  test('projects organization-provider events to their provider-link identity', () => {
+    expect(projectOrganizationInvalidation({
+      scopeId: scopeKey,
+      slug: 'organization.provider.usage',
+      data: { nodeType: 'organizationProviders', nodeKey: artifactKey, inputTokens: 800 },
+    })).toEqual({
+      slug: 'organization.provider.usage',
+      scopeKey,
+      resource: { type: 'organizationProviders', key: artifactKey },
+    });
+  });
+
   test('allows collection-level invalidation when no resource id exists', () => {
     expect(projectOrganizationInvalidation({ scopeId: scopeKey, slug: 'scope.list', data: {} })).toEqual({
       slug: 'scope.list',
@@ -53,6 +65,7 @@ describe('organization invalidation projection', () => {
     expect(isOrganizationInvalidationSlug('tool.called')).toBe(true);
     expect(isOrganizationInvalidationSlug('scope.agent.add')).toBe(true);
     expect(isOrganizationInvalidationSlug('organization.update')).toBe(true);
+    expect(isOrganizationInvalidationSlug('organization.provider.usage')).toBe(true);
     expect(isOrganizationInvalidationSlug('scope.agent.list')).toBe(false);
     expect(isOrganizationInvalidationSlug('landing.page_viewed')).toBe(false);
   });

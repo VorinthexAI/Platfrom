@@ -2,6 +2,7 @@ import { db } from '@/lib/db/client';
 import { buildEmbeddingText, isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
 import { embed, embeddingMetadata } from '@/lib/embed';
+import { recordOrganizationEvent, type OrganizationEventRecorder } from '@/lib/live/organization-events';
 import {
   SCOPE_SCOPES_COLLECTION,
   SCOPE_MEMBERS_COLLECTION,
@@ -27,6 +28,7 @@ import {
 export function createScopeRepository(
   database: ScopesDatabase = db,
   generateEmbedding: (text: string) => Promise<number[]> = async (text) => embed({ text }),
+  recordEvent: OrganizationEventRecorder = recordOrganizationEvent,
 ): ScopeRepository {
   async function requireScope(scopeKey: string): Promise<Scope> {
     try {
@@ -76,7 +78,9 @@ export function createScopeRepository(
       try {
         const result = await database.collection(SCOPES_COLLECTION).save(toArangoDoc({ ...scope, ...embeddingMetadata() }), { returnNew: true });
         const saved = (result as { new?: Record<string, unknown> }).new;
-        return (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
+        const created = (saved ? scopeSchema.parse(withArangoKey(saved)) : scope) satisfies Scope;
+        await recordEvent({ scopeId: created.key, slug: 'scope.create', data: { nodeType: 'scopes', nodeKey: created.key } });
+        return created;
       } catch (error) {
         if (isArangoUniqueConstraintError(error)) {
           throw new DuplicateScopeSlugError(scope.organizationKey, scope.slug);
@@ -91,7 +95,9 @@ export function createScopeRepository(
       const embedding = await generateEmbedding(buildEmbeddingText(scopesEmbedKeys.options, parsed)!);
       const result = await database.collection(SCOPES_COLLECTION).update(scopeKey, { ...input, embedding, ...embeddingMetadata() }, { returnNew: true });
       const saved = (result as { new?: Record<string, unknown> }).new;
-      return saved ? scopeSchema.parse(withArangoKey(saved)) : { ...parsed, embedding };
+      const updated = saved ? scopeSchema.parse(withArangoKey(saved)) : { ...parsed, embedding };
+      await recordEvent({ scopeId: updated.key, slug: 'scope.update', data: { nodeType: 'scopes', nodeKey: updated.key } });
+      return updated;
     },
 
     async getScopeByKey(scopeKey) {

@@ -11,6 +11,7 @@ describe('event catalog', () => {
     expect(eventSlugSchema.parse('payment.ticket_purchased')).toBe('payment.ticket_purchased');
     expect(eventSlugSchema.parse('waitlist:question')).toBe('waitlist:question');
     expect(eventSlugSchema.parse('email.bounced')).toBe('email.bounced');
+    expect(eventSlugSchema.parse('organization.provider.usage')).toBe('organization.provider.usage');
     expect(() => eventSlugSchema.parse('anything.custom')).toThrow();
   });
 
