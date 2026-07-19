@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import { backendFetch } from "@/lib/backend";
-import { foundersAuthHeaders } from "@/lib/founders/server";
-import { FoundersGateApp } from "@/components/founders/FoundersGateApp";
-import { NexusGate } from "./NexusGate";
+import { NexusEntry } from "./NexusEntry";
 
 export const metadata: Metadata = {
   title: "The Nexus",
@@ -10,11 +7,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function NexusPage() {
-  const session = await backendFetch("/founders/me", {
-    headers: await foundersAuthHeaders(),
-  });
-  if (session.ok) return <FoundersGateApp />;
-
-  return <NexusGate />;
+export default function NexusPage() {
+  return <NexusEntry />;
 }

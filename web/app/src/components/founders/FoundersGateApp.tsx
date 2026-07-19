@@ -25,6 +25,10 @@ const scopeStorageKey = (organizationKey: string) => `vx_founders_scope:${organi
 
 type GateState = "checking" | "ready" | "error";
 
+interface FoundersGateAppProps {
+  onUnauthorized?: () => void;
+}
+
 /**
  * Founders Gate V1: select an organization, select a scope, ask Beacon,
  * watch the response stream. The interface stays almost empty — the sun
@@ -32,7 +36,7 @@ type GateState = "checking" | "ready" | "error";
  * island carry contained obsidian surfaces. The backend independently
  * enforces every access rule; this guard is presentation only.
  */
-export function FoundersGateApp() {
+export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const reducedMotion = useReducedMotion();
   const [gate, setGate] = useState<GateState>("checking");
   const [account, setAccount] = useState<FoundersAccount | null>(null);
@@ -91,6 +95,10 @@ export function FoundersGateApp() {
       } catch (error) {
         if (cancelled) return;
         if (error instanceof FoundersRequestError && (error.status === 401 || error.status === 403)) {
+          if (onUnauthorized) {
+            onUnauthorized();
+            return;
+          }
           // Not an authenticated root member — back to the gate itself.
           window.location.replace("/nexus");
           return;
@@ -101,7 +109,7 @@ export function FoundersGateApp() {
     return () => {
       cancelled = true;
     };
-  }, [loadScopes]);
+  }, [loadScopes, onUnauthorized]);
 
   const changeOrganization = useCallback((nextKey: string) => {
     cancelBeacon();
