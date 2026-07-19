@@ -55,7 +55,8 @@ export function FoundersGateApp() {
     setScopes([]);
     setScopeKey(null);
     try {
-      const loaded = await fetchAccessibleScopes(nextOrganizationKey);
+      const loaded = (await fetchAccessibleScopes(nextOrganizationKey))
+        .filter((scope) => scope.name !== "Agent Builder");
       if (scopeRequestRef.current !== requestId) return;
       setScopes(loaded);
       const stored = window.localStorage.getItem(scopeStorageKey(nextOrganizationKey));
@@ -121,8 +122,6 @@ export function FoundersGateApp() {
   const scopeOptions = useMemo(() => scopes.map((scope) => ({
     key: scope.key,
     name: scope.name,
-    hint: scope.path.length > 1 ? scope.path.slice(0, -1).join(" / ") : null,
-    depth: Math.max(0, scope.path.length - 1),
   })), [scopes]);
 
   const organizationOptions = useMemo(() => organizations.map((organization) => ({
@@ -143,9 +142,11 @@ export function FoundersGateApp() {
       <main className="relative min-h-svh overflow-hidden bg-[#1c0701]">
         <FoundersBackdrop />
         <div className="relative z-10 flex min-h-svh items-center justify-center">
-          <p aria-live="polite" className="micro-label text-silver-300">
-            {gate === "checking" ? "Verifying access…" : "Nexus could not load. Refresh to retry."}
-          </p>
+          {gate === "checking" ? <div aria-busy="true" /> : (
+            <p aria-live="polite" className="micro-label text-silver-300">
+              Nexus could not load. Refresh to retry.
+            </p>
+          )}
         </div>
       </main>
     );
