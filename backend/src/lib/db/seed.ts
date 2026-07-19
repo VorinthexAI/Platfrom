@@ -528,16 +528,69 @@ export const SEEDED_PROVIDERS = [
 
 export const SEEDED_MODELS = [
   {
+    key: 'cmnovapremiermodel0000001',
+    slug: 'amazon.nova-premier',
+    name: 'Amazon Nova Premier',
+    description: 'Amazon Nova model for the deepest analysis, final reviews, and high-risk decisions.',
+    supportedUseCases: 'Deep analysis, final review, high-risk decisions, strategic reasoning, and complex agent execution.',
+    enabled: true,
+  },
+  {
+    key: 'cmnovapromodel00000000001',
+    slug: 'amazon.nova-pro',
+    name: 'Amazon Nova Pro',
+    description: 'Amazon Nova model for building features, coding, tool use, and iterative execution.',
+    supportedUseCases: 'Feature development, coding, tool use, iterative workflows, and general-purpose agent execution.',
+    enabled: true,
+  },
+  {
+    key: 'cmnova2litemodel00000001',
+    slug: 'amazon.nova-2-lite',
+    name: 'Amazon Nova 2 Lite',
+    description: 'Amazon Nova model for fast, economical agent steps, routing, classification, and simpler tasks.',
+    supportedUseCases: 'Fast agent steps, routing, classification, extraction, and lightweight task execution.',
+    enabled: true,
+  },
+  {
     key: 'cmnova2sonicmodel00000001',
     slug: 'amazon.nova-2-sonic',
     name: 'Amazon Nova 2 Sonic',
-    description: 'Amazon multimodal speech and language model for low-latency conversational AI workloads.',
-    supportedUseCases: 'Conversational AI, voice interactions, multimodal understanding, agent execution, and general-purpose assistant workloads.',
+    description: 'Amazon Nova model for real-time text and voice chat, orchestrator dialogue, and Beacon calls.',
+    supportedUseCases: 'Real-time text and voice chat, orchestrator dialogue, Beacon calls, and low-latency conversational AI.',
+    enabled: true,
+  },
+  {
+    key: 'cmpollygenerativemodel0001',
+    slug: 'amazon.polly-generative',
+    name: 'Amazon Polly Generative Engine',
+    description: 'Amazon Polly generative speech engine for longer narrations and saved audio files.',
+    supportedUseCases: 'Long-form narration, saved audio files, voice synthesis, and speech generation.',
     enabled: true,
   },
 ] as const;
 
 export const SEEDED_MODEL_ACTIONS = [
+  {
+    key: 'cmnovapremieraction0000001',
+    modelSlug: 'amazon.nova-premier',
+    actionSlug: 'core.chat',
+    priority: 400,
+    enabled: true,
+  },
+  {
+    key: 'cmnovaproaction0000000001',
+    modelSlug: 'amazon.nova-pro',
+    actionSlug: 'core.chat',
+    priority: 300,
+    enabled: true,
+  },
+  {
+    key: 'cmnova2liteaction00000001',
+    modelSlug: 'amazon.nova-2-lite',
+    actionSlug: 'core.chat',
+    priority: 200,
+    enabled: true,
+  },
   {
     key: 'cmnova2sonicaction0000001',
     modelSlug: 'amazon.nova-2-sonic',
@@ -549,11 +602,39 @@ export const SEEDED_MODEL_ACTIONS = [
 
 export const SEEDED_MODEL_PROVIDERS = [
   {
+    key: 'cmnovapremierroute0000001',
+    modelSlug: 'amazon.nova-premier',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'amazon.nova-premier-v1:0',
+    enabled: true,
+  },
+  {
+    key: 'cmnovaproroute0000000001',
+    modelSlug: 'amazon.nova-pro',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'amazon.nova-pro-v1:0',
+    enabled: true,
+  },
+  {
+    key: 'cmnova2literoute00000001',
+    modelSlug: 'amazon.nova-2-lite',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'amazon.nova-2-lite-v1:0',
+    enabled: true,
+  },
+  {
     key: 'cmnova2sonicroute00000001',
     modelSlug: 'amazon.nova-2-sonic',
     providerSlug: 'aws-bedrock',
     providerModelId: 'amazon.nova-2-sonic-v1:0',
     enabled: true,
+  },
+  {
+    key: 'cmpollygenerativeroute0001',
+    modelSlug: 'amazon.polly-generative',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'amazon-polly-generative-engine',
+    enabled: false,
   },
 ] as const;
 

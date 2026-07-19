@@ -102,10 +102,27 @@ describe('provider seeds', () => {
 });
 
 describe('model and routing relation seeds', () => {
-  test('seed Nova 2 Sonic through AWS Bedrock for core.chat', () => {
-    expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual(['amazon.nova-2-sonic']);
-    expect(SEEDED_MODEL_ACTIONS.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`)).toEqual(['amazon.nova-2-sonic:core.chat']);
-    expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId }) => `${modelSlug}:${providerSlug}:${providerModelId}`)).toEqual(['amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0']);
+  test('seed the five Amazon components through AWS Bedrock', () => {
+    expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual([
+      'amazon.nova-premier',
+      'amazon.nova-pro',
+      'amazon.nova-2-lite',
+      'amazon.nova-2-sonic',
+      'amazon.polly-generative',
+    ]);
+    expect(SEEDED_MODEL_ACTIONS.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`)).toEqual([
+      'amazon.nova-premier:core.chat',
+      'amazon.nova-pro:core.chat',
+      'amazon.nova-2-lite:core.chat',
+      'amazon.nova-2-sonic:core.chat',
+    ]);
+    expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
+      'amazon.nova-premier:aws-bedrock:amazon.nova-premier-v1:0:true',
+      'amazon.nova-pro:aws-bedrock:amazon.nova-pro-v1:0:true',
+      'amazon.nova-2-lite:aws-bedrock:amazon.nova-2-lite-v1:0:true',
+      'amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0:true',
+      'amazon.polly-generative:aws-bedrock:amazon-polly-generative-engine:false',
+    ]);
   });
 });
 

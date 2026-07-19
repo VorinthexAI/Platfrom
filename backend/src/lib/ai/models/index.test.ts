@@ -1,8 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { MODEL_SLUGS, modelSlugSchema } from './index';
 describe('logical model slugs', () => {
-  test('v1 declares only Nano and Mini without duplicated routes or actions', () => {
-    expect(MODEL_SLUGS).toEqual(['openai.gpt-5.4-nano', 'openai.gpt-5.4-mini', 'amazon.nova-2-sonic']);
+  test('declares the five Amazon model components', () => {
+    expect(MODEL_SLUGS).toEqual([
+      'amazon.nova-premier',
+      'amazon.nova-pro',
+      'amazon.nova-2-lite',
+      'amazon.nova-2-sonic',
+      'amazon.polly-generative',
+    ]);
     for (const slug of MODEL_SLUGS) expect(modelSlugSchema.parse(slug)).toBe(slug);
   });
   test('accepts lowercase dot/hyphen notation and rejects display names', () => {
