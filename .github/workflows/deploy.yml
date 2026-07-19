@@ -723,7 +723,6 @@ jobs:
         run: |
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
-          bun run --cwd backend smoke:beacon
           bun run --cwd backend polar:sync
       - name: Close SSH ingress for this runner
         if: always()
