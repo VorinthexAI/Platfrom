@@ -162,9 +162,9 @@ export function getRockTextures(styleKey: ChamberStyleKey): {
   const cached = textureCache.get(styleKey);
   if (cached) return cached;
   const style = CHAMBER_STYLES[styleKey];
-  // 1024px canvases: at the chamber's repeat the old 512px maps read as
-  // soft, pixelated smears; this keeps every vein and crack line crisp.
-  const size = 1024;
+  // 768px preserves the rock detail at chamber scale without retaining
+  // three 1024px source canvases and GPU textures for each visited biome.
+  const size = 768;
   const random = mulberry32(0x70c4 ^ styleKey.length * 7919);
 
   const paint = (grayscale: boolean) => {
@@ -188,7 +188,7 @@ export function getRockTextures(styleKey: ChamberStyleKey): {
     }
 
     // Mineral blotches — big soft masses first, small sharp ones on top.
-    for (let i = 0; i < 1500; i++) {
+    for (let i = 0; i < 900; i++) {
       const x = random() * size;
       const y = random() * size;
       const radius = 4 + random() * (i < 260 ? 88 : 26);
@@ -206,7 +206,7 @@ export function getRockTextures(styleKey: ChamberStyleKey): {
     }
 
     // Fracture lines: a dense primary network plus hairline branches.
-    for (let i = 0; i < 200; i++) {
+    for (let i = 0; i < 120; i++) {
       ctx.lineWidth = i < 70 ? 2.4 : 1.1;
       ctx.strokeStyle = grayscale
         ? "rgba(20,20,20,0.4)"
@@ -225,7 +225,7 @@ export function getRockTextures(styleKey: ChamberStyleKey): {
     }
 
     // Fine speckle.
-    for (let i = 0; i < 9500; i++) {
+    for (let i = 0; i < 5000; i++) {
       const light = random();
       ctx.fillStyle = grayscale
         ? `rgba(${Math.round(light * 255)},${Math.round(light * 255)},${Math.round(light * 255)},0.1)`
@@ -239,7 +239,7 @@ export function getRockTextures(styleKey: ChamberStyleKey): {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(4, 3);
-    texture.anisotropy = 8;
+    texture.anisotropy = 2;
     return texture;
   };
 
@@ -310,7 +310,7 @@ export function getRockTextures(styleKey: ChamberStyleKey): {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(4, 3);
-    texture.anisotropy = 8;
+    texture.anisotropy = 2;
     return texture;
   };
 
@@ -419,7 +419,7 @@ export function createChamberWallGeometry(
   seed: number,
   distortion = 1,
 ): THREE.BufferGeometry {
-  const geometry = new THREE.SphereGeometry(1, 96, 64);
+  const geometry = new THREE.SphereGeometry(1, 64, 48);
   const position = geometry.getAttribute("position") as THREE.BufferAttribute;
   const dir = new THREE.Vector3();
   for (let i = 0; i < position.count; i++) {
@@ -444,7 +444,7 @@ export function createChamberFloorGeometry(
   seed: number,
   radius: number,
 ): THREE.BufferGeometry {
-  const geometry = new THREE.CircleGeometry(radius, 72, 0, Math.PI * 2);
+  const geometry = new THREE.CircleGeometry(radius, 48, 0, Math.PI * 2);
   const position = geometry.getAttribute("position") as THREE.BufferAttribute;
   for (let i = 0; i < position.count; i++) {
     const x = position.getX(i);

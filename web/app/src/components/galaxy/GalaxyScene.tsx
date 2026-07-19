@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Canvas, useThree } from "@react-three/fiber";
+import { useEffect, useState } from "react";
+import { Canvas } from "@react-three/fiber";
 import { products, type ProductPlanetData } from "@/data/products";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import {
@@ -15,22 +15,12 @@ import {
   syncEntityUrl,
   useGalaxyStore,
 } from "@/lib/galaxy-store";
-import {
-  CHAMBER_STYLES,
-  getCrackTexture,
-  getRockTextures,
-  type ChamberStyleKey,
-} from "@/lib/three/chamber";
 import { AsteroidBelt } from "./AsteroidBelt";
-import { BiomeChamber } from "./BiomeChamber";
 import { CameraRig } from "./CameraRig";
 import { CaveScene } from "./CaveScene";
 import { CollectibleField } from "./CollectibleField";
-import { ExplosionField } from "./ExplosionField";
 import { HyperJumpStreaks } from "./HyperJumpStreaks";
 import { IntroCosmos } from "./IntroCosmos";
-import { MeteorShower } from "./MeteorShower";
-import { SunEjecta } from "./SunEjecta";
 import { NexusSun } from "./NexusSun";
 import { OrbitRing } from "./OrbitRing";
 import { OrbitingEntities } from "./OrbitingEntities";
@@ -43,57 +33,6 @@ import { WorldInterior } from "./WorldInterior";
 
 interface GalaxySceneProps {
   reducedMotion: boolean;
-}
-
-/**
- * First-entry warm-up. Entering a biome adds the chamber's point lights
- * to the scene, and a changed light count forces WebGL to recompile
- * EVERY lit material — planets, belt, rock, chamber — right at the
- * moment of entry: that was the "first biome is laggy, then fine" hitch.
- * This mounts one hidden chamber far below the galaxy a few seconds
- * after load, uploads every biome's textures, and compiles all shader
- * programs against interior lighting while nothing is moving.
- */
-function InteriorWarmup() {
-  const gl = useThree((s) => s.gl);
-  const camera = useThree((s) => s.camera);
-  const scene = useThree((s) => s.scene);
-  const [warming, setWarming] = useState(false);
-  const startedRef = useRef(false);
-
-  useEffect(() => {
-    // After the intro flight has landed and the system is idling.
-    const timer = window.setTimeout(() => setWarming(true), 5200);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!warming || startedRef.current) return;
-    startedRef.current = true;
-    let cancelled = false;
-    // Wait one frame so the hidden chamber is in the scene graph.
-    const frame = requestAnimationFrame(() => {
-      (Object.keys(CHAMBER_STYLES) as ChamberStyleKey[]).forEach((key) => {
-        const textures = getRockTextures(key);
-        gl.initTexture(textures.map);
-        gl.initTexture(textures.bumpMap);
-        gl.initTexture(textures.emissiveMap);
-      });
-      gl.initTexture(getCrackTexture());
-      const finish = () => {
-        if (!cancelled) setWarming(false);
-      };
-      gl.compileAsync(scene, camera).then(finish, finish);
-    });
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(frame);
-    };
-  }, [warming, gl, scene, camera]);
-
-  return warming ? (
-    <BiomeChamber styleKey="gem" seed={7} position={[0, -900, 0]} />
-  ) : null;
 }
 
 const coreCapabilityEntities = getCapabilitiesForCore();
@@ -150,12 +89,12 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
 
   return (
     <Canvas
-      frameloop={hidden ? "never" : "always"}
+      frameloop={hidden || reducedMotion ? "never" : "always"}
       // Render at CSS-pixel resolution so high-DPI displays cannot multiply
       // the full-screen color, depth, MSAA, and compositor buffer footprint.
-      dpr={1}
+      dpr={lowPower ? 0.65 : 0.8}
       camera={{ position: [0, 6.5, 15.5], fov: 42, near: 0.1, far: 320 }}
-      gl={{ antialias: !lowPower, powerPreference: "high-performance" }}
+      gl={{ antialias: false, powerPreference: "high-performance" }}
       aria-hidden
       className="!absolute !inset-0"
     >
@@ -165,16 +104,12 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
       <ambientLight intensity={0.3} color="#3c434a" />
       <directionalLight position={[8, 12, 6]} intensity={0.75} color="#dde2e5" />
 
-      <Starfield paused={paused} dense={!lowPower} />
+      <Starfield paused={paused} dense={false} />
 
       <SpinRig>
         <NexusSun paused={paused} />
-        <AsteroidBelt paused={paused} dense={!lowPower} />
-        <SystemDebris paused={paused} dense={!lowPower} />
-        {/* the belt lives: eruptions, strikes, collisions */}
-        <SunEjecta paused={paused} />
-        <MeteorShower paused={paused} />
-        <ExplosionField paused={paused} />
+        <AsteroidBelt paused={paused} dense={false} />
+        <SystemDebris paused={paused} dense={false} />
 
         {products.map((product) => (
           <OrbitRing key={`orbit-${product.key}`} radius={product.orbitRadius} />
@@ -214,7 +149,6 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
       {/* fellow explorers — world-space, outside the spinning rig */}
       <VisitorStars />
       <HyperJumpStreaks />
-      <InteriorWarmup />
       <CameraRig reducedMotion={reducedMotion} />
     </Canvas>
   );
