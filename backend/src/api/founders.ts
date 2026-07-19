@@ -24,6 +24,8 @@ import {
   PROVIDER_SLUGS,
   anthropicCredentialsSchema,
   awsBedrockCredentialsSchema,
+  awsPollyCredentialsSchema,
+  awsTranscribeCredentialsSchema,
   azureAIFoundryCredentialsSchema,
   googleVertexCredentialsSchema,
   openAICredentialsSchema,
@@ -66,6 +68,8 @@ export const foundersProviderCredentialsSchemas: Record<ProviderSlug, z.ZodTypeA
   'google-vertex': googleVertexCredentialsSchema,
   'azure-ai-foundry': azureAIFoundryCredentialsSchema,
   'aws-bedrock': awsBedrockCredentialsSchema,
+  'aws-polly': awsPollyCredentialsSchema,
+  'aws-transcribe': awsTranscribeCredentialsSchema,
   openrouter: openRouterCredentialsSchema,
 };
 

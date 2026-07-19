@@ -12,6 +12,9 @@ export const ACTION_SLUGS = [
   'core.chat',
   'core.reason',
   'core.delegate',
+  'core.embedd',
+  'core.speak',
+  'core.transcribe',
 
   'agent.create',
   'artifact.create',

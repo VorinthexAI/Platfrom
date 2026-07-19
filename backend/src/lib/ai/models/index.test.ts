@@ -9,6 +9,7 @@ describe('logical model slugs', () => {
       'amazon.nova-2-sonic',
       'amazon.polly-generative',
       'amazon.titan-embed-text-v2',
+      'aws.transcribe-standard',
     ]);
     for (const slug of MODEL_SLUGS) expect(modelSlugSchema.parse(slug)).toBe(slug);
   });

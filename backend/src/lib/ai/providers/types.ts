@@ -16,6 +16,8 @@ export const PROVIDER_SLUGS = [
   'google-vertex',
   'azure-ai-foundry',
   'aws-bedrock',
+  'aws-polly',
+  'aws-transcribe',
   'openrouter',
 ] as const;
 
@@ -37,6 +39,8 @@ export const PROVIDER_NAMES: Record<ProviderId, string> = {
   'google-vertex': 'Google Vertex AI',
   'azure-ai-foundry': 'Azure AI Foundry',
   'aws-bedrock': 'AWS Bedrock',
+  'aws-polly': 'AWS Polly',
+  'aws-transcribe': 'AWS Transcribe',
   openrouter: 'OpenRouter',
 };
 
@@ -195,6 +199,10 @@ export interface SpeechOutput {
   audioBase64: string;
   mimeType: string;
 }
+
+export const embeddingInputSchema = z.object({ text: z.string().min(1) }).strict();
+export type EmbeddingInput = z.infer<typeof embeddingInputSchema>;
+export interface EmbeddingOutput { embedding: number[]; }
 
 /**
  * Combines the request's abort signal with its timeout into one signal

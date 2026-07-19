@@ -7,6 +7,7 @@ export const MODEL_SLUGS = [
   'amazon.nova-2-sonic',
   'amazon.polly-generative',
   'amazon.titan-embed-text-v2',
+  'aws.transcribe-standard',
 ] as const;
 export const modelSlugSchema = z.string().trim().min(1).max(200).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, 'Model slug must use lowercase dot or hyphen notation');
 export type ModelSlug = z.infer<typeof modelSlugSchema>;

@@ -85,7 +85,7 @@ describe('provider seeds', () => {
   test('seed every supported provider while keeping its slug registered', () => {
     const slugs = SEEDED_PROVIDERS.map((provider) => provider.slug);
 
-    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'google-vertex', 'azure-ai-foundry', 'xai']);
+    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'aws-polly', 'aws-transcribe', 'google-vertex', 'azure-ai-foundry', 'xai']);
     expect(slugs.every((slug) => PROVIDER_SLUGS.includes(slug))).toBe(true);
     expect(new Set(slugs).size).toBe(slugs.length);
     expect(new Set(SEEDED_PROVIDERS.map((provider) => provider.key)).size).toBe(SEEDED_PROVIDERS.length);
@@ -102,7 +102,7 @@ describe('provider seeds', () => {
 });
 
 describe('model and routing relation seeds', () => {
-  test('seed the Amazon components through AWS Bedrock', () => {
+  test('seed the AWS model components through their service providers', () => {
     expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual([
       'amazon.nova-premier',
       'amazon.nova-pro',
@@ -110,14 +110,22 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-2-sonic',
       'amazon.polly-generative',
       'amazon.titan-embed-text-v2',
+      'aws.transcribe-standard',
     ]);
-    expect(SEEDED_MODEL_ACTIONS.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`)).toEqual(['amazon.nova-2-sonic:core.chat']);
+    expect(SEEDED_MODEL_ACTIONS.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`)).toEqual([
+      'amazon.nova-2-sonic:core.chat',
+      'amazon.titan-embed-text-v2:core.embedd',
+      'amazon.polly-generative:core.speak',
+      'aws.transcribe-standard:core.transcribe',
+    ]);
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'amazon.nova-premier:aws-bedrock:amazon.nova-premier-v1:0:true',
       'amazon.nova-pro:aws-bedrock:amazon.nova-pro-v1:0:true',
       'amazon.nova-2-lite:aws-bedrock:amazon.nova-2-lite-v1:0:true',
       'amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0:true',
       'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
+      'amazon.polly-generative:aws-polly:generative:true',
+      'aws.transcribe-standard:aws-transcribe:standard:true',
     ]);
   });
 });
