@@ -25,7 +25,9 @@ export async function embed(input: z.infer<typeof embedInputSchema>, options: Em
   const parsed = embedInputSchema.parse(input);
   const provider = options.provider;
   if (!provider?.embed) {
-    throw new Error('OpenAI embedding provider is unavailable. Supply an explicit provider adapter.');
+    // Callers that have not supplied credentials intentionally skip embeddings.
+    // This keeps seed and migration paths independent of ambient API keys.
+    return [];
   }
   const characters = [...parsed.text];
   const chunks: string[] = [];

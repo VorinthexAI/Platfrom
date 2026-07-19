@@ -18,8 +18,8 @@ describe('semantic embeddings', () => {
     expect(requests).toEqual([{ externalModelId: 'text-embedding-3-small', input: 'Backend Developer' }]);
   });
 
-  test('fails clearly when no explicit provider adapter is supplied', async () => {
-    await expect(embed({ text: 'Backend Developer' })).rejects.toThrow('Supply an explicit provider adapter');
+  test('skips embeddings when no explicit provider adapter is supplied', async () => {
+    await expect(embed({ text: 'Backend Developer' })).resolves.toEqual([]);
   });
 
   test('chunks long documents and returns one normalized aggregate vector', async () => {
