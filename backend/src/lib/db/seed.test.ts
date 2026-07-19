@@ -110,6 +110,7 @@ describe('model and routing relation seeds', () => {
 
 describe('voice seeds', () => {
   test('seed Amazon Nova 2 Sonic US-English voices', () => {
+    expect(SEEDED_VOICES).toHaveLength(2);
     expect(SEEDED_VOICES).toEqual([
       expect.objectContaining({ provider: 'aws-bedrock', model: 'amazon.nova-2-sonic-v1:0', voice: 'Tiffany', label: 'Lyra', language: 'en-US', format: 'mp3' }),
       expect.objectContaining({ provider: 'aws-bedrock', model: 'amazon.nova-2-sonic-v1:0', voice: 'Matthew', label: 'Orion', language: 'en-US', format: 'mp3' }),
