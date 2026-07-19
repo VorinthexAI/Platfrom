@@ -166,39 +166,43 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
   }
 };
 
-export const autoRefreshAuthTokens: MiddlewareHandler = async (c, next) => {
-  const bearerToken = getBearerToken(c);
-  const accessToken = bearerToken?.startsWith('vrtx_access_')
-    ? bearerToken
-    : getCookie(c, ACCESS_COOKIE);
+export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, rotateRefreshToken }): MiddlewareHandler {
+  return async (c, next) => {
+    const bearerToken = getBearerToken(c);
+    const accessToken = bearerToken?.startsWith('vrtx_access_')
+      ? bearerToken
+      : getCookie(c, ACCESS_COOKIE);
 
-  if (accessToken) {
-    const identity = await verifyAccessToken(accessToken);
-    if (identity) {
-      setAuthIdentity(c, identity);
-      return next();
+    if (accessToken) {
+      const identity = await dependencies.verifyAccessToken(accessToken);
+      if (identity) {
+        setAuthIdentity(c, identity);
+        return next();
+      }
     }
-  }
 
-  const cookieRefreshToken = getCookie(c, REFRESH_COOKIE);
-  const headerRefreshToken = c.req.header('x-refresh-token');
-  const refreshToken = cookieRefreshToken ?? headerRefreshToken;
-  if (!refreshToken) return next();
+    const cookieRefreshToken = getCookie(c, REFRESH_COOKIE);
+    const headerRefreshToken = c.req.header('x-refresh-token');
+    const refreshToken = cookieRefreshToken ?? headerRefreshToken;
+    if (!refreshToken) return next();
 
-  const tokens = await rotateRefreshToken(refreshToken);
-  if (!tokens) return next();
+    const tokens = await dependencies.rotateRefreshToken(refreshToken);
+    if (!tokens) return next();
 
-  const refreshedIdentity = await verifyAccessToken(tokens.accessToken);
-  if (refreshedIdentity) setAuthIdentity(c, refreshedIdentity);
+    const refreshedIdentity = await dependencies.verifyAccessToken(tokens.accessToken);
+    if (refreshedIdentity) setAuthIdentity(c, refreshedIdentity);
 
-  setSessionTokenHeaders(c, tokens);
+    setSessionTokenHeaders(c, tokens);
 
-  if (cookieRefreshToken) {
-    setSessionCookies(c, tokens);
-  }
+    if (cookieRefreshToken) {
+      setSessionCookies(c, tokens);
+    }
 
-  return next();
-};
+    return next();
+  };
+}
+
+export const autoRefreshAuthTokens = createAutoRefreshAuthTokens();
 
 export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   // Provider webhook retries burst from a small IP pool; rate-limiting them

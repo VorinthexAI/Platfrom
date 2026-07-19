@@ -301,7 +301,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.apollo",
       "description": "Strategy, foresight, growth, market direction, and long-term planning.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -318,10 +318,26 @@
           "audioPath": "outputs/audio/orchestrator/apollo/v1/apollo-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/apollo/v1/metadata.json",
           "createdAt": "2026-07-07T01:38:46.110Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Apollo, your fully autonomous Chief Strategy Orchestrator for Strategy, Foresight, Growth.",
+          "fullPrompt": "Create an audio asset for Apollo.\n\nTarget:\n- Type: orchestrator\n- Slug: apollo\n- Description: Strategy, foresight, growth, market direction, and long range planning.\nRole: CSO. Full title: Chief Strategy Orchestrator.\nFeature ideas: Strategy; Foresight; Growth; Market direction; Planning.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nApollo, your fully autonomous Chief Strategy Orchestrator for Strategy, Foresight, Growth.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/apollo/v2/apollo-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/apollo/v2/metadata.json",
+          "createdAt": "2026-07-19T20:42:39.095Z"
         }
       ],
       "createdAt": "2026-07-07T01:38:42.457Z",
-      "updatedAt": "2026-07-07T01:38:46.112Z"
+      "updatedAt": "2026-07-19T20:42:39.096Z"
     },
     {
       "id": "orchestrator-orchestrator-apollo-message",
@@ -359,7 +375,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.athena",
       "description": "Product, experience, innovation, roadmap, value, and users.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -376,10 +392,26 @@
           "audioPath": "outputs/audio/orchestrator/athena/v1/athena-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/athena/v1/metadata.json",
           "createdAt": "2026-07-07T01:39:12.009Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Athena, your fully autonomous Chief Product Orchestrator for Product, Experience, Roadmap.",
+          "fullPrompt": "Create an audio asset for Athena.\n\nTarget:\n- Type: orchestrator\n- Slug: athena\n- Description: Product, experience, innovation, roadmap, value, and users.\nRole: CPO. Full title: Chief Product Orchestrator.\nFeature ideas: Product; Experience; Roadmap; Users.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nAthena, your fully autonomous Chief Product Orchestrator for Product, Experience, Roadmap.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/athena/v2/athena-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/athena/v2/metadata.json",
+          "createdAt": "2026-07-19T20:43:26.639Z"
         }
       ],
       "createdAt": "2026-07-07T01:39:08.833Z",
-      "updatedAt": "2026-07-07T01:39:12.010Z"
+      "updatedAt": "2026-07-19T20:43:26.640Z"
     },
     {
       "id": "orchestrator-orchestrator-athena-message",
@@ -417,7 +449,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.atlas",
       "description": "Vision, leadership, direction, executive strategy, and company-level decisions.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v3",
       "versions": [
         {
           "id": "v1",
@@ -434,10 +466,40 @@
           "audioPath": "outputs/audio/orchestrator/atlas/v1/atlas-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/atlas/v1/metadata.json",
           "createdAt": "2026-07-07T01:38:32.677Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Atlas, your fully autonomous Chief Executive Orchestrator for Vision and direction, Executive strategy, Decision support.",
+          "fullPrompt": "Create an audio asset for Atlas.\n\nTarget:\n- Type: orchestrator\n- Slug: atlas\n- Description: Vision, leadership, direction, executive strategy, and company wide decisions.\nRole: CEO. Full title: Chief Executive Orchestrator.\nFeature ideas: Vision and direction; Executive strategy; Decision support; Leadership alignment; Company wide prioritization.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nAtlas, your fully autonomous Chief Executive Orchestrator for Vision and direction, Executive strategy, Decision support.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "duration": 8,
+          "format": "mp3",
+          "status": "failed",
+          "metadataPath": "outputs/audio/orchestrator/atlas/v2/metadata.json",
+          "error": "400 {\"error\":{\"message\":\"Gemini TTS only supports response_format=\\\"pcm\\\". Got \\\"mp3\\\".\",\"code\":400}}",
+          "createdAt": "2026-07-19T20:41:18.965Z"
+        },
+        {
+          "id": "v3",
+          "version": 3,
+          "prompt": "Atlas, your fully autonomous Chief Executive Orchestrator for Vision and direction, Executive strategy, Decision support.",
+          "fullPrompt": "Create an audio asset for Atlas.\n\nTarget:\n- Type: orchestrator\n- Slug: atlas\n- Description: Vision, leadership, direction, executive strategy, and company wide decisions.\nRole: CEO. Full title: Chief Executive Orchestrator.\nFeature ideas: Vision and direction; Executive strategy; Decision support; Leadership alignment; Company wide prioritization.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nAtlas, your fully autonomous Chief Executive Orchestrator for Vision and direction, Executive strategy, Decision support.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/atlas/v3/atlas-v3.pcm",
+          "metadataPath": "outputs/audio/orchestrator/atlas/v3/metadata.json",
+          "createdAt": "2026-07-19T20:42:09.194Z"
         }
       ],
       "createdAt": "2026-07-07T01:38:29.531Z",
-      "updatedAt": "2026-07-07T01:38:32.679Z"
+      "updatedAt": "2026-07-19T20:42:09.195Z"
     },
     {
       "id": "orchestrator-orchestrator-atlas-message",
@@ -469,13 +531,71 @@
       "updatedAt": "2026-07-08T21:28:50.051Z"
     },
     {
+      "id": "orchestrator-orchestrator-aura",
+      "slug": "orchestrator-aura",
+      "name": "Aura",
+      "category": "orchestrator",
+      "entityId": "orchestrator.aura",
+      "description": "Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Aura, your fully autonomous Chief Experience Orchestrator for Experience strategy, Customer journeys, Friction reduction.",
+          "fullPrompt": "Create an audio asset for Aura.\n\nTarget:\n- Type: orchestrator\n- Slug: aura\n- Description: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\nRole: CXO. Full title: Chief Experience Orchestrator.\nFeature ideas: Experience strategy; Customer journeys; Friction reduction; Touchpoints; Experience recovery.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nAura, your fully autonomous Chief Experience Orchestrator for Experience strategy, Customer journeys, Friction reduction.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/aura/v1/aura-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/aura/v1/metadata.json",
+          "createdAt": "2026-07-19T20:43:38.547Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:43:32.916Z",
+      "updatedAt": "2026-07-19T20:43:38.549Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-echo",
+      "slug": "orchestrator-echo",
+      "name": "Echo",
+      "category": "orchestrator",
+      "entityId": "orchestrator.echo",
+      "description": "Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Echo, your fully autonomous Chief Knowledge Orchestrator for Institutional learning, Knowledge discovery, Expertise reuse.",
+          "fullPrompt": "Create an audio asset for Echo.\n\nTarget:\n- Type: orchestrator\n- Slug: echo\n- Description: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\nRole: CKO. Full title: Chief Knowledge Orchestrator.\nFeature ideas: Institutional learning; Knowledge discovery; Expertise reuse; Trusted guidance; Organizational memory.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nEcho, your fully autonomous Chief Knowledge Orchestrator for Institutional learning, Knowledge discovery, Expertise reuse.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/echo/v1/echo-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/echo/v1/metadata.json",
+          "createdAt": "2026-07-19T20:42:54.926Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:42:49.440Z",
+      "updatedAt": "2026-07-19T20:42:54.928Z"
+    },
+    {
       "id": "orchestrator-orchestrator-forge",
       "slug": "orchestrator-forge",
       "name": "Forge",
       "category": "orchestrator",
       "entityId": "orchestrator.forge",
       "description": "Technology, architecture, engineering, infrastructure, and AI.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -492,10 +612,26 @@
           "audioPath": "outputs/audio/orchestrator/forge/v1/forge-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/forge/v1/metadata.json",
           "createdAt": "2026-07-07T01:39:16.161Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Forge, your fully autonomous Chief Technology Orchestrator for Technology, Architecture, Engineering.",
+          "fullPrompt": "Create an audio asset for Forge.\n\nTarget:\n- Type: orchestrator\n- Slug: forge\n- Description: Technology, architecture, engineering, infrastructure, and AI.\nRole: CTO. Full title: Chief Technology Orchestrator.\nFeature ideas: Technology; Architecture; Engineering; Infrastructure.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nForge, your fully autonomous Chief Technology Orchestrator for Technology, Architecture, Engineering.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/forge/v2/forge-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/forge/v2/metadata.json",
+          "createdAt": "2026-07-19T20:43:32.831Z"
         }
       ],
       "createdAt": "2026-07-07T01:39:12.358Z",
-      "updatedAt": "2026-07-07T01:39:16.167Z"
+      "updatedAt": "2026-07-19T20:43:32.833Z"
     },
     {
       "id": "orchestrator-orchestrator-forge-message",
@@ -527,13 +663,71 @@
       "updatedAt": "2026-07-08T21:29:28.051Z"
     },
     {
+      "id": "orchestrator-orchestrator-harmony",
+      "slug": "orchestrator-harmony",
+      "name": "Harmony",
+      "category": "orchestrator",
+      "entityId": "orchestrator.harmony",
+      "description": "People systems, talent, culture, organizational structure, capability, and sustained high quality work.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Harmony, your fully autonomous Chief Human Resources Orchestrator for People systems, Talent, Culture.",
+          "fullPrompt": "Create an audio asset for Harmony.\n\nTarget:\n- Type: orchestrator\n- Slug: harmony\n- Description: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\nRole: CHRO. Full title: Chief Human Resources Orchestrator.\nFeature ideas: People systems; Talent; Culture; Organization design; Capability.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nHarmony, your fully autonomous Chief Human Resources Orchestrator for People systems, Talent, Culture.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/harmony/v1/harmony-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/harmony/v1/metadata.json",
+          "createdAt": "2026-07-19T20:43:06.436Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:43:00.076Z",
+      "updatedAt": "2026-07-19T20:43:06.438Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-helios",
+      "slug": "orchestrator-helios",
+      "name": "Helios",
+      "category": "orchestrator",
+      "entityId": "orchestrator.helios",
+      "description": "Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Helios, your fully autonomous Chief AI Orchestrator for AI strategy, Use cases, Evaluation.",
+          "fullPrompt": "Create an audio asset for Helios.\n\nTarget:\n- Type: orchestrator\n- Slug: helios\n- Description: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\nRole: CAIO. Full title: Chief AI Orchestrator.\nFeature ideas: AI strategy; Use cases; Evaluation; Safety; Human accountability.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nHelios, your fully autonomous Chief AI Orchestrator for AI strategy, Use cases, Evaluation.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/helios/v1/helios-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/helios/v1/metadata.json",
+          "createdAt": "2026-07-19T20:43:50.023Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:43:43.982Z",
+      "updatedAt": "2026-07-19T20:43:50.025Z"
+    },
+    {
       "id": "orchestrator-orchestrator-hermes",
       "slug": "orchestrator-hermes",
       "name": "Hermes",
       "category": "orchestrator",
       "entityId": "orchestrator.hermes",
       "description": "Operations, execution, efficiency, systems, process, and delivery.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -550,10 +744,26 @@
           "audioPath": "outputs/audio/orchestrator/hermes/v1/hermes-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/hermes/v1/metadata.json",
           "createdAt": "2026-07-07T01:38:37.523Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Hermes, your fully autonomous Chief Operations Orchestrator for Operations, Execution, Efficiency.",
+          "fullPrompt": "Create an audio asset for Hermes.\n\nTarget:\n- Type: orchestrator\n- Slug: hermes\n- Description: Operations, execution, efficiency, systems, process, and delivery.\nRole: COO. Full title: Chief Operations Orchestrator.\nFeature ideas: Operations; Execution; Efficiency; Process; Delivery.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nHermes, your fully autonomous Chief Operations Orchestrator for Operations, Execution, Efficiency.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/hermes/v2/hermes-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/hermes/v2/metadata.json",
+          "createdAt": "2026-07-19T20:42:28.804Z"
         }
       ],
       "createdAt": "2026-07-07T01:38:33.169Z",
-      "updatedAt": "2026-07-07T01:38:37.524Z"
+      "updatedAt": "2026-07-19T20:42:28.806Z"
     },
     {
       "id": "orchestrator-orchestrator-hermes-message",
@@ -591,7 +801,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.iris",
       "description": "Communication, brand, voice, PR, messaging, and internal and external communications.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -608,10 +818,26 @@
           "audioPath": "outputs/audio/orchestrator/iris/v1/iris-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/iris/v1/metadata.json",
           "createdAt": "2026-07-07T01:38:51.407Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Iris, your fully autonomous Chief Communications Orchestrator for Communication, Brand voice, PR.",
+          "fullPrompt": "Create an audio asset for Iris.\n\nTarget:\n- Type: orchestrator\n- Slug: iris\n- Description: Communication, brand, voice, PR, messaging, and internal and external communications.\nRole: CCO. Full title: Chief Communications Orchestrator.\nFeature ideas: Communication; Brand voice; PR; Messaging.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nIris, your fully autonomous Chief Communications Orchestrator for Communication, Brand voice, PR.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/iris/v2/iris-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/iris/v2/metadata.json",
+          "createdAt": "2026-07-19T20:42:43.852Z"
         }
       ],
       "createdAt": "2026-07-07T01:38:46.540Z",
-      "updatedAt": "2026-07-07T01:38:51.408Z"
+      "updatedAt": "2026-07-19T20:42:43.853Z"
     },
     {
       "id": "orchestrator-orchestrator-iris-message",
@@ -649,7 +875,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.ledger",
       "description": "Finance, capital, budgets, cash flow, forecasting, and financial risk.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -666,10 +892,26 @@
           "audioPath": "outputs/audio/orchestrator/ledger/v1/ledger-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/ledger/v1/metadata.json",
           "createdAt": "2026-07-07T01:38:55.034Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Ledger, your fully autonomous Chief Financial Orchestrator for Finance, Budgets, Cash flow.",
+          "fullPrompt": "Create an audio asset for Ledger.\n\nTarget:\n- Type: orchestrator\n- Slug: ledger\n- Description: Finance, capital, budgets, cash flow, forecasting, and financial risk.\nRole: CFO. Full title: Chief Financial Orchestrator.\nFeature ideas: Finance; Budgets; Cash flow; Forecasting; Risk.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nLedger, your fully autonomous Chief Financial Orchestrator for Finance, Budgets, Cash flow.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/ledger/v2/ledger-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/ledger/v2/metadata.json",
+          "createdAt": "2026-07-19T20:42:49.353Z"
         }
       ],
       "createdAt": "2026-07-07T01:38:51.871Z",
-      "updatedAt": "2026-07-07T01:38:55.034Z"
+      "updatedAt": "2026-07-19T20:42:49.354Z"
     },
     {
       "id": "orchestrator-orchestrator-ledger-message",
@@ -701,13 +943,42 @@
       "updatedAt": "2026-07-08T21:30:36.536Z"
     },
     {
+      "id": "orchestrator-orchestrator-matrix",
+      "slug": "orchestrator-matrix",
+      "name": "Matrix",
+      "category": "orchestrator",
+      "entityId": "orchestrator.matrix",
+      "description": "Data governance, lineage, ownership, quality, definitions, and decision ready data assets.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Matrix, your fully autonomous Chief Data Orchestrator for Data governance, Lineage, Data quality.",
+          "fullPrompt": "Create an audio asset for Matrix.\n\nTarget:\n- Type: orchestrator\n- Slug: matrix\n- Description: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\nRole: CDO. Full title: Chief Data Orchestrator.\nFeature ideas: Data governance; Lineage; Data quality; Definitions; Decision ready data.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nMatrix, your fully autonomous Chief Data Orchestrator for Data governance, Lineage, Data quality.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/matrix/v1/matrix-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/matrix/v1/metadata.json",
+          "createdAt": "2026-07-19T20:42:59.969Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:42:55.018Z",
+      "updatedAt": "2026-07-19T20:42:59.971Z"
+    },
+    {
       "id": "orchestrator-orchestrator-mercury",
       "slug": "orchestrator-mercury",
       "name": "Mercury",
       "category": "orchestrator",
       "entityId": "orchestrator.mercury",
       "description": "Revenue, analytics, MRR, forecasting, sales patterns, churn, and retention.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -724,10 +995,26 @@
           "audioPath": "outputs/audio/orchestrator/mercury/v1/mercury-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/mercury/v1/metadata.json",
           "createdAt": "2026-07-07T01:39:04.218Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Mercury, your fully autonomous Chief Revenue Orchestrator for Revenue, Analytics, Forecasting.",
+          "fullPrompt": "Create an audio asset for Mercury.\n\nTarget:\n- Type: orchestrator\n- Slug: mercury\n- Description: Revenue, analytics, MRR, forecasting, sales patterns, churn, and retention.\nRole: CRO. Full title: Chief Revenue Orchestrator.\nFeature ideas: Revenue; Analytics; Forecasting; Retention.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nMercury, your fully autonomous Chief Revenue Orchestrator for Revenue, Analytics, Forecasting.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/mercury/v2/mercury-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/mercury/v2/metadata.json",
+          "createdAt": "2026-07-19T20:43:16.137Z"
         }
       ],
       "createdAt": "2026-07-07T01:39:00.264Z",
-      "updatedAt": "2026-07-07T01:39:04.231Z"
+      "updatedAt": "2026-07-19T20:43:16.139Z"
     },
     {
       "id": "orchestrator-orchestrator-mercury-message",
@@ -765,7 +1052,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.metis",
       "description": "Intelligence, knowledge, data, documents, RAG, internal brain, and integrations.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -782,10 +1069,26 @@
           "audioPath": "outputs/audio/orchestrator/metis/v1/metis-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/metis/v1/metadata.json",
           "createdAt": "2026-07-07T01:38:42.096Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Metis, your fully autonomous Chief Intelligence Orchestrator for Knowledge systems, Data, Documents.",
+          "fullPrompt": "Create an audio asset for Metis.\n\nTarget:\n- Type: orchestrator\n- Slug: metis\n- Description: Intelligence, knowledge, data, documents, RAG, internal brain, and integrations.\nRole: CIO. Full title: Chief Intelligence Orchestrator.\nFeature ideas: Knowledge systems; Data; Documents; RAG; Integrations.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nMetis, your fully autonomous Chief Intelligence Orchestrator for Knowledge systems, Data, Documents.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/metis/v2/metis-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/metis/v2/metadata.json",
+          "createdAt": "2026-07-19T20:42:33.932Z"
         }
       ],
       "createdAt": "2026-07-07T01:38:37.997Z",
-      "updatedAt": "2026-07-07T01:38:42.097Z"
+      "updatedAt": "2026-07-19T20:42:33.943Z"
     },
     {
       "id": "orchestrator-orchestrator-metis-message",
@@ -823,7 +1126,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.orbit",
       "description": "Marketing, growth, demand, branding, content, campaigns, SEO, and social.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -840,10 +1143,26 @@
           "audioPath": "outputs/audio/orchestrator/orbit/v1/orbit-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/orbit/v1/metadata.json",
           "createdAt": "2026-07-07T01:38:59.826Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Orbit, your fully autonomous Chief Marketing Orchestrator for Marketing, Demand, Content.",
+          "fullPrompt": "Create an audio asset for Orbit.\n\nTarget:\n- Type: orchestrator\n- Slug: orbit\n- Description: Marketing, growth, demand, branding, content, campaigns, SEO, and social.\nRole: CMO. Full title: Chief Marketing Orchestrator.\nFeature ideas: Marketing; Demand; Content; Campaigns; SEO.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nOrbit, your fully autonomous Chief Marketing Orchestrator for Marketing, Demand, Content.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/orbit/v2/orbit-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/orbit/v2/metadata.json",
+          "createdAt": "2026-07-19T20:43:11.335Z"
         }
       ],
       "createdAt": "2026-07-07T01:38:55.492Z",
-      "updatedAt": "2026-07-07T01:38:59.827Z"
+      "updatedAt": "2026-07-19T20:43:11.336Z"
     },
     {
       "id": "orchestrator-orchestrator-orbit-message",
@@ -875,13 +1194,71 @@
       "updatedAt": "2026-07-08T21:30:49.123Z"
     },
     {
+      "id": "orchestrator-orchestrator-phoenix",
+      "slug": "orchestrator-phoenix",
+      "name": "Phoenix",
+      "category": "orchestrator",
+      "entityId": "orchestrator.phoenix",
+      "description": "Growth, market insight, acquisition, activation, retention, and durable commercial value.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Phoenix, your fully autonomous Chief Growth Orchestrator for Market insight, Acquisition, Activation.",
+          "fullPrompt": "Create an audio asset for Phoenix.\n\nTarget:\n- Type: orchestrator\n- Slug: phoenix\n- Description: Growth, market insight, acquisition, activation, retention, and durable commercial value.\nRole: CGO. Full title: Chief Growth Orchestrator.\nFeature ideas: Market insight; Acquisition; Activation; Retention; Growth experiments.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nPhoenix, your fully autonomous Chief Growth Orchestrator for Market insight, Acquisition, Activation.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/phoenix/v1/phoenix-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/phoenix/v1/metadata.json",
+          "createdAt": "2026-07-19T20:42:20.630Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:42:09.307Z",
+      "updatedAt": "2026-07-19T20:42:20.634Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-pillar",
+      "slug": "orchestrator-pillar",
+      "name": "Pillar",
+      "category": "orchestrator",
+      "entityId": "orchestrator.pillar",
+      "description": "Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Pillar, your fully autonomous Chief Quality Orchestrator for Quality systems, Prevention, Delivery standards.",
+          "fullPrompt": "Create an audio asset for Pillar.\n\nTarget:\n- Type: orchestrator\n- Slug: pillar\n- Description: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\nRole: CQO. Full title: Chief Quality Orchestrator.\nFeature ideas: Quality systems; Prevention; Delivery standards; Defect detection; Continuous improvement.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nPillar, your fully autonomous Chief Quality Orchestrator for Quality systems, Prevention, Delivery standards.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/pillar/v1/pillar-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/pillar/v1/metadata.json",
+          "createdAt": "2026-07-19T20:43:43.890Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:43:38.627Z",
+      "updatedAt": "2026-07-19T20:43:43.892Z"
+    },
+    {
       "id": "orchestrator-orchestrator-sentinel",
       "slug": "orchestrator-sentinel",
       "name": "Sentinel",
       "category": "orchestrator",
       "entityId": "orchestrator.sentinel",
       "description": "Security, risk, protection, compliance, privacy, and trust.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -898,10 +1275,26 @@
           "audioPath": "outputs/audio/orchestrator/sentinel/v1/sentinel-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/sentinel/v1/metadata.json",
           "createdAt": "2026-07-07T01:39:08.486Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Sentinel, your fully autonomous Chief Security Orchestrator for Security, Risk, Compliance.",
+          "fullPrompt": "Create an audio asset for Sentinel.\n\nTarget:\n- Type: orchestrator\n- Slug: sentinel\n- Description: Security, risk, protection, compliance, privacy, and trust.\nRole: CISO. Full title: Chief Security Orchestrator.\nFeature ideas: Security; Risk; Compliance; Privacy; Trust.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nSentinel, your fully autonomous Chief Security Orchestrator for Security, Risk, Compliance.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/sentinel/v2/sentinel-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/sentinel/v2/metadata.json",
+          "createdAt": "2026-07-19T20:43:21.771Z"
         }
       ],
       "createdAt": "2026-07-07T01:39:04.813Z",
-      "updatedAt": "2026-07-07T01:39:08.488Z"
+      "updatedAt": "2026-07-19T20:43:21.773Z"
     },
     {
       "id": "orchestrator-orchestrator-sentinel-message",
@@ -939,7 +1332,7 @@
       "category": "orchestrator",
       "entityId": "orchestrator.themis",
       "description": "Legal, governance, ethics, contracts, compliance, and policy.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -956,10 +1349,26 @@
           "audioPath": "outputs/audio/orchestrator/themis/v1/themis-v1.wav",
           "metadataPath": "outputs/audio/orchestrator/themis/v1/metadata.json",
           "createdAt": "2026-07-07T01:39:20.032Z"
+        },
+        {
+          "prompt": "Themis, your fully autonomous Chief Legal Orchestrator for Legal, Governance, Contracts.",
+          "fullPrompt": "Create an audio asset for Themis.\n\nTarget:\n- Type: orchestrator\n- Slug: themis\n- Description: Legal, governance, ethics, contracts, compliance, and policy.\nRole: CLO. Full title: Chief Legal Orchestrator.\nFeature ideas: Legal; Governance; Contracts; Policy.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nThemis, your fully autonomous Chief Legal Orchestrator for Legal, Governance, Contracts.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/themis/v2/themis-v2.pcm",
+          "metadataPath": "outputs/audio/orchestrator/themis/v2/metadata.json",
+          "id": "v2",
+          "version": 2,
+          "createdAt": "2026-07-19T20:44:01.566Z"
         }
       ],
       "createdAt": "2026-07-07T01:39:16.807Z",
-      "updatedAt": "2026-07-07T01:39:20.037Z"
+      "updatedAt": "2026-07-19T20:44:01.569Z"
     },
     {
       "id": "orchestrator-orchestrator-themis-message",
@@ -968,8 +1377,11 @@
       "category": "orchestrator",
       "entityId": "orchestrator.themis",
       "description": "Themis spoken persona message generated with Kokoro 82M voice bf_isabella.",
+      "currentVersionId": "v1",
       "versions": [
         {
+          "id": "v1",
+          "version": 1,
           "prompt": "Hello, I am Themis, your Chief Legal Orchestrator.\n\nI help turn legal complexity into clear governance.\n\nMy role is to protect the company through contracts, policy, compliance, ethics, obligations, and the rules that shape responsible execution.\n\nBring me a partnership, product decision, claim, contract, policy, or risk that needs legal judgment. I will help clarify the obligation, expose the consequence, and shape a path that is practical, defensible, and aligned with the mission.\n\nI am Themis. I keep the company moving within clear boundaries.",
           "fullPrompt": "Create the spoken orchestrator introduction for Themis.\n\nModel: hexgrad/kokoro-82m\nVoice: bf_isabella\nRole: CLO\nTitle: Chief Legal Orchestrator\n\nHello, I am Themis, your Chief Legal Orchestrator.\n\nI help turn legal complexity into clear governance.\n\nMy role is to protect the company through contracts, policy, compliance, ethics, obligations, and the rules that shape responsible execution.\n\nBring me a partnership, product decision, claim, contract, policy, or risk that needs legal judgment. I will help clarify the obligation, expose the consequence, and shape a path that is practical, defensible, and aligned with the mission.\n\nI am Themis. I keep the company moving within clear boundaries.",
           "mode": "tts",
@@ -981,14 +1393,40 @@
           "status": "completed",
           "audioPath": "outputs/audio/orchestrator-messages/themis/v1/themis-message-v1.mp3",
           "metadataPath": "outputs/audio/orchestrator-messages/themis/v1/metadata.json",
-          "id": "v1",
-          "version": 1,
           "createdAt": "2026-07-08T21:30:53.167Z"
         }
       ],
       "createdAt": "2026-07-08T21:30:51.766Z",
-      "updatedAt": "2026-07-08T21:30:53.168Z",
-      "currentVersionId": "v1"
+      "updatedAt": "2026-07-08T21:30:53.168Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-vulcan",
+      "slug": "orchestrator-vulcan",
+      "name": "Vulcan",
+      "category": "orchestrator",
+      "entityId": "orchestrator.vulcan",
+      "description": "Observable, safe, maintainable automation that removes repeatable operational drag.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Vulcan, your fully autonomous Chief Automation Orchestrator for Process understanding, Automation design, Observability.",
+          "fullPrompt": "Create an audio asset for Vulcan.\n\nTarget:\n- Type: orchestrator\n- Slug: vulcan\n- Description: Observable, safe, maintainable automation that removes repeatable operational drag.\nRole: CAO. Full title: Chief Automation Orchestrator.\nFeature ideas: Process understanding; Automation design; Observability; Safety controls; Maintainability.\n\nAudio system:\nEnglish-only premium AI product voiceover. Use a clear adult male voice, controlled pacing, precise articulation, and a calm technical tone suitable for Vorinthex AI launch assets.\n\nTiming:\n- Exact intended duration: 8 seconds.\n- Pace: 72 BPM equivalent pulse, cinematic and controlled.\n- The file will be merged later into a Vorinthex AI video with ffmpeg.\n\n\nCreative direction:\n- Match the Vorinthex visual identity: obsidian space, chrome geometry, orbital motion, intelligent enterprise software.\n- Keep the asset clean enough for product launch loops and UI galleries.\n- Create a smooth intro, subtle midsection movement, and a clean tail that can cut at the requested duration.\n\nCustom instruction:\nVulcan, your fully autonomous Chief Automation Orchestrator for Process understanding, Automation design, Observability.\n\nNegative prompt:\nNo vocals, no lyrics, no dialogue, no cheap EDM, no horror sting, no comedy sound effects, no busy percussion, no distorted clipping, no sudden loud transient.",
+          "mode": "tts",
+          "model": "google/gemini-3.1-flash-tts-preview",
+          "voice": "Charon",
+          "language": "en",
+          "duration": 8,
+          "format": "pcm",
+          "status": "completed",
+          "audioPath": "outputs/audio/orchestrator/vulcan/v1/vulcan-v1.pcm",
+          "metadataPath": "outputs/audio/orchestrator/vulcan/v1/metadata.json",
+          "createdAt": "2026-07-19T20:43:55.875Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:43:50.106Z",
+      "updatedAt": "2026-07-19T20:43:55.877Z"
     },
     {
       "id": "product-product-command",

@@ -32,6 +32,7 @@
     "audio:list-targets": "bun run --cwd scripts/audio list-targets",
     "audio:generate": "bun run --cwd scripts/audio generate",
     "audio:tts": "bun run --cwd scripts/audio tts",
+    "audio:orchestrator-briefings": "bun run --cwd scripts/audio orchestrator:briefings",
     "audio:voice-samples": "bun run --cwd scripts/audio voice-samples",
     "audio:merge": "bun run --cwd scripts/audio merge",
     "audio:validate": "bun run --cwd scripts/audio validate",
@@ -59,5 +60,12 @@
   },
   "trustedDependencies": [
     "ffmpeg-static"
-  ]
+  ],
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1090.0",
+    "@aws-sdk/client-polly": "^3.1090.0",
+    "@aws-sdk/credential-provider-node": "^3.972.70",
+    "@smithy/node-http-handler": "^4.9.7",
+    "ffmpeg-static": "^5.3.0"
+  }
 }

@@ -10,6 +10,7 @@ From repo root:
 bun run audio:list-targets
 bun run audio:generate -- --type master-brand --slug vorinthex-ai --duration 12
 bun run audio:tts -- --prompt "Vorinthex AI is the nexus of intelligence."
+bun run audio:orchestrator-briefings
 bun run audio:generate -- --type product --slug core --mode soundtrack
 bun run audio:generate -- --type capability --slug archive --mode tts --voice Charon --prompt "Short English voiceover text."
 bun run audio:merge -- --video scripts/video/outputs/videos/master-brand/vorinthex-ai/v2/vorinthex-ai-v2.mp4 --audio scripts/audio/outputs/audio/master-brand/vorinthex-ai/v1/vorinthex-ai-v1.mp3

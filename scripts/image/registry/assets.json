@@ -329,6 +329,68 @@
       "updatedAt": "2026-07-06T23:11:03.354Z"
     },
     {
+      "id": "orchestrator-orchestrator-aura",
+      "slug": "orchestrator-aura",
+      "name": "Aura",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.",
+      "designIntent": "Logo for orchestrator entity orchestrator.aura, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Aura. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Aura is the CXO / Chief Experience Orchestrator. Abstractly communicate: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Aura\nType: orchestrator\nTagline: Chief Experience Orchestrator\nDescription: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\nKey ideas: Experience strategy; Customer journeys; Friction reduction; Touchpoints; Experience recovery.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Aura\nSlug: orchestrator-aura\nCategory: orchestrator\nDescription: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\nDesign intent: Logo for orchestrator entity orchestrator.aura, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Aura. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Aura is the CXO / Chief Experience Orchestrator. Abstractly communicate: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Aura\nType: orchestrator\nTagline: Chief Experience Orchestrator\nDescription: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\nKey ideas: Experience strategy; Customer journeys; Friction reduction; Touchpoints; Experience recovery.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Aura\nSlug: orchestrator-aura\nCategory: orchestrator\nDescription: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\nDesign intent: Logo for orchestrator entity orchestrator.aura, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Aura. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Aura is the CXO / Chief Experience Orchestrator. Abstractly communicate: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Aura\nType: orchestrator\nTagline: Chief Experience Orchestrator\nDescription: Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.\nKey ideas: Experience strategy; Customer journeys; Friction reduction; Touchpoints; Experience recovery.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-aura/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-aura/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-aura/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-aura/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-aura/v1/metadata.json",
+          "reviewPath": "runs/QFz03OQxB77O/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.aura",
+          "createdAt": "2026-07-19T20:07:34.998Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:06:38.912Z",
+      "updatedAt": "2026-07-19T20:07:35.001Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-echo",
+      "slug": "orchestrator-echo",
+      "name": "Echo",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.",
+      "designIntent": "Logo for orchestrator entity orchestrator.echo, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Echo. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Echo is the CKO / Chief Knowledge Orchestrator. Abstractly communicate: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Echo\nType: orchestrator\nTagline: Chief Knowledge Orchestrator\nDescription: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\nKey ideas: Institutional learning; Knowledge discovery; Expertise reuse; Trusted guidance; Organizational memory.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Echo\nSlug: orchestrator-echo\nCategory: orchestrator\nDescription: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\nDesign intent: Logo for orchestrator entity orchestrator.echo, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Echo. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Echo is the CKO / Chief Knowledge Orchestrator. Abstractly communicate: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Echo\nType: orchestrator\nTagline: Chief Knowledge Orchestrator\nDescription: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\nKey ideas: Institutional learning; Knowledge discovery; Expertise reuse; Trusted guidance; Organizational memory.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Echo\nSlug: orchestrator-echo\nCategory: orchestrator\nDescription: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\nDesign intent: Logo for orchestrator entity orchestrator.echo, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Echo. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Echo is the CKO / Chief Knowledge Orchestrator. Abstractly communicate: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Echo\nType: orchestrator\nTagline: Chief Knowledge Orchestrator\nDescription: Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.\nKey ideas: Institutional learning; Knowledge discovery; Expertise reuse; Trusted guidance; Organizational memory.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-echo/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-echo/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-echo/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-echo/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-echo/v1/metadata.json",
+          "reviewPath": "runs/U5PrfjZGtSM3/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.echo",
+          "createdAt": "2026-07-19T20:04:48.133Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:02:35.563Z",
+      "updatedAt": "2026-07-19T20:04:48.138Z"
+    },
+    {
       "id": "orchestrator-orchestrator-forge",
       "slug": "orchestrator-forge",
       "name": "Forge",
@@ -358,6 +420,68 @@
       ],
       "createdAt": "2026-07-06T22:14:08.576Z",
       "updatedAt": "2026-07-06T23:11:03.370Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-harmony",
+      "slug": "orchestrator-harmony",
+      "name": "Harmony",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "People systems, talent, culture, organizational structure, capability, and sustained high quality work.",
+      "designIntent": "Logo for orchestrator entity orchestrator.harmony, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Harmony. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Harmony is the CHRO / Chief Human Resources Orchestrator. Abstractly communicate: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Harmony\nType: orchestrator\nTagline: Chief Human Resources Orchestrator\nDescription: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\nKey ideas: People systems; Talent; Culture; Organization design; Capability.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Harmony\nSlug: orchestrator-harmony\nCategory: orchestrator\nDescription: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\nDesign intent: Logo for orchestrator entity orchestrator.harmony, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Harmony. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Harmony is the CHRO / Chief Human Resources Orchestrator. Abstractly communicate: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Harmony\nType: orchestrator\nTagline: Chief Human Resources Orchestrator\nDescription: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\nKey ideas: People systems; Talent; Culture; Organization design; Capability.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Harmony\nSlug: orchestrator-harmony\nCategory: orchestrator\nDescription: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\nDesign intent: Logo for orchestrator entity orchestrator.harmony, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Harmony. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Harmony is the CHRO / Chief Human Resources Orchestrator. Abstractly communicate: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Harmony\nType: orchestrator\nTagline: Chief Human Resources Orchestrator\nDescription: People systems, talent, culture, organizational structure, capability, and sustained high quality work.\nKey ideas: People systems; Talent; Culture; Organization design; Capability.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-harmony/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-harmony/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-harmony/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-harmony/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-harmony/v1/metadata.json",
+          "reviewPath": "runs/js_n27BGgFOV/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.harmony",
+          "createdAt": "2026-07-19T20:06:38.861Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:05:48.292Z",
+      "updatedAt": "2026-07-19T20:06:38.865Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-helios",
+      "slug": "orchestrator-helios",
+      "name": "Helios",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.",
+      "designIntent": "Logo for orchestrator entity orchestrator.helios, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Helios. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Helios is the CAIO / Chief AI Orchestrator. Abstractly communicate: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Helios\nType: orchestrator\nTagline: Chief AI Orchestrator\nDescription: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\nKey ideas: AI strategy; Use cases; Evaluation; Safety; Human accountability.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Helios\nSlug: orchestrator-helios\nCategory: orchestrator\nDescription: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\nDesign intent: Logo for orchestrator entity orchestrator.helios, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Helios. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Helios is the CAIO / Chief AI Orchestrator. Abstractly communicate: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Helios\nType: orchestrator\nTagline: Chief AI Orchestrator\nDescription: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\nKey ideas: AI strategy; Use cases; Evaluation; Safety; Human accountability.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Helios\nSlug: orchestrator-helios\nCategory: orchestrator\nDescription: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\nDesign intent: Logo for orchestrator entity orchestrator.helios, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Helios. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Helios is the CAIO / Chief AI Orchestrator. Abstractly communicate: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Helios\nType: orchestrator\nTagline: Chief AI Orchestrator\nDescription: Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.\nKey ideas: AI strategy; Use cases; Evaluation; Safety; Human accountability.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-helios/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-helios/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-helios/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-helios/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-helios/v1/metadata.json",
+          "reviewPath": "runs/dLRmuNTYIgyC/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.helios",
+          "createdAt": "2026-07-19T20:09:06.666Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:08:29.229Z",
+      "updatedAt": "2026-07-19T20:09:06.671Z"
     },
     {
       "id": "orchestrator-orchestrator-hermes",
@@ -453,6 +577,37 @@
       "updatedAt": "2026-07-06T23:11:03.458Z"
     },
     {
+      "id": "orchestrator-orchestrator-matrix",
+      "slug": "orchestrator-matrix",
+      "name": "Matrix",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Data governance, lineage, ownership, quality, definitions, and decision ready data assets.",
+      "designIntent": "Logo for orchestrator entity orchestrator.matrix, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Matrix. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Matrix is the CDO / Chief Data Orchestrator. Abstractly communicate: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Matrix\nType: orchestrator\nTagline: Chief Data Orchestrator\nDescription: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\nKey ideas: Data governance; Lineage; Data quality; Definitions; Decision ready data.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Matrix\nSlug: orchestrator-matrix\nCategory: orchestrator\nDescription: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\nDesign intent: Logo for orchestrator entity orchestrator.matrix, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Matrix. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Matrix is the CDO / Chief Data Orchestrator. Abstractly communicate: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Matrix\nType: orchestrator\nTagline: Chief Data Orchestrator\nDescription: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\nKey ideas: Data governance; Lineage; Data quality; Definitions; Decision ready data.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Matrix\nSlug: orchestrator-matrix\nCategory: orchestrator\nDescription: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\nDesign intent: Logo for orchestrator entity orchestrator.matrix, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Matrix. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Matrix is the CDO / Chief Data Orchestrator. Abstractly communicate: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Matrix\nType: orchestrator\nTagline: Chief Data Orchestrator\nDescription: Data governance, lineage, ownership, quality, definitions, and decision ready data assets.\nKey ideas: Data governance; Lineage; Data quality; Definitions; Decision ready data.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-matrix/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-matrix/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-matrix/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-matrix/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-matrix/v1/metadata.json",
+          "reviewPath": "runs/OMnaUfwJcPGY/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.matrix",
+          "createdAt": "2026-07-19T20:05:48.257Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:04:48.170Z",
+      "updatedAt": "2026-07-19T20:05:48.260Z"
+    },
+    {
       "id": "orchestrator-orchestrator-mercury",
       "slug": "orchestrator-mercury",
       "name": "Mercury",
@@ -546,6 +701,68 @@
       "updatedAt": "2026-07-06T23:11:03.535Z"
     },
     {
+      "id": "orchestrator-orchestrator-phoenix",
+      "slug": "orchestrator-phoenix",
+      "name": "Phoenix",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Growth, market insight, acquisition, activation, retention, and durable commercial value.",
+      "designIntent": "Logo for orchestrator entity orchestrator.phoenix, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Phoenix. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Phoenix is the CGO / Chief Growth Orchestrator. Abstractly communicate: Growth, market insight, acquisition, activation, retention, and durable commercial value.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Phoenix\nType: orchestrator\nTagline: Chief Growth Orchestrator\nDescription: Growth, market insight, acquisition, activation, retention, and durable commercial value.\nKey ideas: Market insight; Acquisition; Activation; Retention; Growth experiments.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Phoenix\nSlug: orchestrator-phoenix\nCategory: orchestrator\nDescription: Growth, market insight, acquisition, activation, retention, and durable commercial value.\nDesign intent: Logo for orchestrator entity orchestrator.phoenix, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Phoenix. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Phoenix is the CGO / Chief Growth Orchestrator. Abstractly communicate: Growth, market insight, acquisition, activation, retention, and durable commercial value.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Phoenix\nType: orchestrator\nTagline: Chief Growth Orchestrator\nDescription: Growth, market insight, acquisition, activation, retention, and durable commercial value.\nKey ideas: Market insight; Acquisition; Activation; Retention; Growth experiments.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Phoenix\nSlug: orchestrator-phoenix\nCategory: orchestrator\nDescription: Growth, market insight, acquisition, activation, retention, and durable commercial value.\nDesign intent: Logo for orchestrator entity orchestrator.phoenix, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Phoenix. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Phoenix is the CGO / Chief Growth Orchestrator. Abstractly communicate: Growth, market insight, acquisition, activation, retention, and durable commercial value.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Phoenix\nType: orchestrator\nTagline: Chief Growth Orchestrator\nDescription: Growth, market insight, acquisition, activation, retention, and durable commercial value.\nKey ideas: Market insight; Acquisition; Activation; Retention; Growth experiments.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-phoenix/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-phoenix/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-phoenix/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-phoenix/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-phoenix/v1/metadata.json",
+          "reviewPath": "runs/f8ByJCIBasLR/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.phoenix",
+          "createdAt": "2026-07-19T20:02:35.513Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:01:16.830Z",
+      "updatedAt": "2026-07-19T20:02:35.518Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-pillar",
+      "slug": "orchestrator-pillar",
+      "name": "Pillar",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.",
+      "designIntent": "Logo for orchestrator entity orchestrator.pillar, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Pillar. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Pillar is the CQO / Chief Quality Orchestrator. Abstractly communicate: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Pillar\nType: orchestrator\nTagline: Chief Quality Orchestrator\nDescription: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\nKey ideas: Quality systems; Prevention; Delivery standards; Defect detection; Continuous improvement.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Pillar\nSlug: orchestrator-pillar\nCategory: orchestrator\nDescription: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\nDesign intent: Logo for orchestrator entity orchestrator.pillar, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Pillar. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Pillar is the CQO / Chief Quality Orchestrator. Abstractly communicate: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Pillar\nType: orchestrator\nTagline: Chief Quality Orchestrator\nDescription: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\nKey ideas: Quality systems; Prevention; Delivery standards; Defect detection; Continuous improvement.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Pillar\nSlug: orchestrator-pillar\nCategory: orchestrator\nDescription: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\nDesign intent: Logo for orchestrator entity orchestrator.pillar, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Pillar. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Pillar is the CQO / Chief Quality Orchestrator. Abstractly communicate: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Pillar\nType: orchestrator\nTagline: Chief Quality Orchestrator\nDescription: Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.\nKey ideas: Quality systems; Prevention; Delivery standards; Defect detection; Continuous improvement.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-pillar/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-pillar/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-pillar/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-pillar/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-pillar/v1/metadata.json",
+          "reviewPath": "runs/aYhj73tplSfU/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.pillar",
+          "createdAt": "2026-07-19T20:08:29.199Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:07:35.032Z",
+      "updatedAt": "2026-07-19T20:08:29.202Z"
+    },
+    {
       "id": "orchestrator-orchestrator-sentinel",
       "slug": "orchestrator-sentinel",
       "name": "Sentinel",
@@ -606,6 +823,37 @@
       ],
       "createdAt": "2026-07-06T22:15:09.546Z",
       "updatedAt": "2026-07-06T23:11:03.590Z"
+    },
+    {
+      "id": "orchestrator-orchestrator-vulcan",
+      "slug": "orchestrator-vulcan",
+      "name": "Vulcan",
+      "category": "orchestrator",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Observable, safe, maintainable automation that removes repeatable operational drag.",
+      "designIntent": "Logo for orchestrator entity orchestrator.vulcan, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium Command orchestrator logo for Vulcan. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Vulcan is the CAO / Chief Automation Orchestrator. Abstractly communicate: Observable, safe, maintainable automation that removes repeatable operational drag.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Vulcan\nType: orchestrator\nTagline: Chief Automation Orchestrator\nDescription: Observable, safe, maintainable automation that removes repeatable operational drag.\nKey ideas: Process understanding; Automation design; Observability; Safety controls; Maintainability.",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Vulcan\nSlug: orchestrator-vulcan\nCategory: orchestrator\nDescription: Observable, safe, maintainable automation that removes repeatable operational drag.\nDesign intent: Logo for orchestrator entity orchestrator.vulcan, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Vulcan. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Vulcan is the CAO / Chief Automation Orchestrator. Abstractly communicate: Observable, safe, maintainable automation that removes repeatable operational drag.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Vulcan\nType: orchestrator\nTagline: Chief Automation Orchestrator\nDescription: Observable, safe, maintainable automation that removes repeatable operational drag.\nKey ideas: Process understanding; Automation design; Observability; Safety controls; Maintainability.\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Vulcan\nSlug: orchestrator-vulcan\nCategory: orchestrator\nDescription: Observable, safe, maintainable automation that removes repeatable operational drag.\nDesign intent: Logo for orchestrator entity orchestrator.vulcan, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium Command orchestrator logo for Vulcan. It should be a sibling to the Vorinthex master logo: circular chrome ring, dark center, precise executive insignia, no letters, no text. Vulcan is the CAO / Chief Automation Orchestrator. Abstractly communicate: Observable, safe, maintainable automation that removes repeatable operational drag.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Vulcan\nType: orchestrator\nTagline: Chief Automation Orchestrator\nDescription: Observable, safe, maintainable automation that removes repeatable operational drag.\nKey ideas: Process understanding; Automation design; Observability; Safety controls; Maintainability.\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/orchestrator/orchestrator-vulcan/v1/solid-1024.png",
+          "transparentPath": "assets/orchestrator/orchestrator-vulcan/v1/transparent-1024.png",
+          "solidSvgPath": "assets/orchestrator/orchestrator-vulcan/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/orchestrator/orchestrator-vulcan/v1/transparent-1024.svg",
+          "metadataPath": "assets/orchestrator/orchestrator-vulcan/v1/metadata.json",
+          "reviewPath": "runs/nwPvkmV5lR5j/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity orchestrator.vulcan",
+          "createdAt": "2026-07-19T20:09:45.093Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:09:06.699Z",
+      "updatedAt": "2026-07-19T20:09:45.096Z"
     },
     {
       "id": "product-product-command",
@@ -977,6 +1225,38 @@
       "updatedAt": "2026-07-08T17:43:30.497Z"
     },
     {
+      "id": "announcement-social-card-aura",
+      "slug": "social-card-aura",
+      "name": "Aura Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for aura.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for aura.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Aura\nSubdomain: aura.vorinthex.com\nCanonical route: /command/aura\nOpen Graph route: /command/aura/opengraph-image\nTwitter route: /command/aura/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-aura/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-aura/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-aura/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-aura/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-aura/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for aura.vorinthex.com.",
+          "createdAt": "2026-07-19T20:17:08.460Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:17:06.952Z",
+      "updatedAt": "2026-07-19T20:17:08.463Z"
+    },
+    {
       "id": "announcement-social-card-command",
       "slug": "social-card-command",
       "name": "Command Social Cards",
@@ -1124,6 +1404,38 @@
       "updatedAt": "2026-07-08T17:43:31.425Z"
     },
     {
+      "id": "announcement-social-card-echo",
+      "slug": "social-card-echo",
+      "name": "Echo Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for echo.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "versions": [
+        {
+          "prompt": "Materialize social preview cards for echo.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Echo\nSubdomain: echo.vorinthex.com\nCanonical route: /command/echo\nOpen Graph route: /command/echo/opengraph-image\nTwitter route: /command/echo/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-echo/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-echo/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-echo/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-echo/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-echo/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for echo.vorinthex.com.",
+          "id": "v1",
+          "version": 1,
+          "createdAt": "2026-07-19T20:20:06.060Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:20:04.856Z",
+      "updatedAt": "2026-07-19T20:20:06.063Z",
+      "currentVersionId": "v1"
+    },
+    {
       "id": "announcement-social-card-forge",
       "slug": "social-card-forge",
       "name": "Forge Social Cards",
@@ -1222,6 +1534,70 @@
       "updatedAt": "2026-07-08T17:43:31.901Z"
     },
     {
+      "id": "announcement-social-card-harmony",
+      "slug": "social-card-harmony",
+      "name": "Harmony Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for harmony.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for harmony.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Harmony\nSubdomain: harmony.vorinthex.com\nCanonical route: /command/harmony\nOpen Graph route: /command/harmony/opengraph-image\nTwitter route: /command/harmony/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-harmony/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-harmony/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-harmony/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-harmony/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-harmony/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for harmony.vorinthex.com.",
+          "createdAt": "2026-07-19T20:17:25.687Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:17:25.348Z",
+      "updatedAt": "2026-07-19T20:17:25.689Z"
+    },
+    {
+      "id": "announcement-social-card-helios",
+      "slug": "social-card-helios",
+      "name": "Helios Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for helios.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for helios.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Helios\nSubdomain: helios.vorinthex.com\nCanonical route: /command/helios\nOpen Graph route: /command/helios/opengraph-image\nTwitter route: /command/helios/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-helios/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-helios/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-helios/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-helios/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-helios/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for helios.vorinthex.com.",
+          "createdAt": "2026-07-19T20:17:26.291Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:17:26.014Z",
+      "updatedAt": "2026-07-19T20:17:26.293Z"
+    },
+    {
       "id": "announcement-social-card-hermes",
       "slug": "social-card-hermes",
       "name": "Hermes Social Cards",
@@ -1316,6 +1692,8 @@
           "createdAt": "2026-07-08T17:43:32.453Z"
         },
         {
+          "id": "v3",
+          "version": 3,
           "prompt": "Materialize social preview cards for hunt.vorinthex.com from Next.js metadata image routes.",
           "fullPrompt": "Target: The Hunt\nSubdomain: hunt.vorinthex.com\nCanonical route: /hunt\nOpen Graph route: /hunt/opengraph-image\nTwitter route: /hunt/twitter-image\nBase URL: http://127.0.0.1:3000",
           "slideshowPath": "assets/announcement/social-card-hunt/v3/metadata.json",
@@ -1328,8 +1706,6 @@
           "accepted": true,
           "rejected": false,
           "notes": "Generated Open Graph and Twitter cards for hunt.vorinthex.com.",
-          "id": "v3",
-          "version": 3,
           "createdAt": "2026-07-08T18:12:37.359Z"
         }
       ],
@@ -1484,6 +1860,38 @@
       "updatedAt": "2026-07-08T17:43:33.177Z"
     },
     {
+      "id": "announcement-social-card-matrix",
+      "slug": "social-card-matrix",
+      "name": "Matrix Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for matrix.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for matrix.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Matrix\nSubdomain: matrix.vorinthex.com\nCanonical route: /command/matrix\nOpen Graph route: /command/matrix/opengraph-image\nTwitter route: /command/matrix/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-matrix/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-matrix/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-matrix/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-matrix/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-matrix/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for matrix.vorinthex.com.",
+          "createdAt": "2026-07-19T20:17:26.894Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:17:26.582Z",
+      "updatedAt": "2026-07-19T20:17:26.897Z"
+    },
+    {
       "id": "announcement-social-card-mercury",
       "slug": "social-card-mercury",
       "name": "Mercury Social Cards",
@@ -1629,6 +2037,70 @@
       ],
       "createdAt": "2026-07-08T17:42:57.923Z",
       "updatedAt": "2026-07-08T17:43:33.693Z"
+    },
+    {
+      "id": "announcement-social-card-phoenix",
+      "slug": "social-card-phoenix",
+      "name": "Phoenix Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for phoenix.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for phoenix.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Phoenix\nSubdomain: phoenix.vorinthex.com\nCanonical route: /command/phoenix\nOpen Graph route: /command/phoenix/opengraph-image\nTwitter route: /command/phoenix/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-phoenix/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-phoenix/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-phoenix/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-phoenix/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-phoenix/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for phoenix.vorinthex.com.",
+          "createdAt": "2026-07-19T20:17:27.479Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:17:27.218Z",
+      "updatedAt": "2026-07-19T20:17:27.481Z"
+    },
+    {
+      "id": "announcement-social-card-pillar",
+      "slug": "social-card-pillar",
+      "name": "Pillar Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for pillar.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for pillar.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Pillar\nSubdomain: pillar.vorinthex.com\nCanonical route: /command/pillar\nOpen Graph route: /command/pillar/opengraph-image\nTwitter route: /command/pillar/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-pillar/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-pillar/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-pillar/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-pillar/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-pillar/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for pillar.vorinthex.com.",
+          "createdAt": "2026-07-19T20:17:28.086Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:17:27.808Z",
+      "updatedAt": "2026-07-19T20:17:28.089Z"
     },
     {
       "id": "announcement-social-card-sentinel",
@@ -1891,6 +2363,38 @@
       ],
       "createdAt": "2026-07-08T17:38:56.267Z",
       "updatedAt": "2026-07-08T17:43:29.111Z"
+    },
+    {
+      "id": "announcement-social-card-vulcan",
+      "slug": "social-card-vulcan",
+      "name": "Vulcan Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for vulcan.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Materialize social preview cards for vulcan.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Vulcan\nSubdomain: vulcan.vorinthex.com\nCanonical route: /command/vulcan\nOpen Graph route: /command/vulcan/opengraph-image\nTwitter route: /command/vulcan/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-vulcan/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-vulcan/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-vulcan/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-vulcan/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-vulcan/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for vulcan.vorinthex.com.",
+          "createdAt": "2026-07-19T20:17:28.647Z"
+        }
+      ],
+      "createdAt": "2026-07-19T20:17:28.419Z",
+      "updatedAt": "2026-07-19T20:17:28.650Z"
     },
     {
       "id": "master-brand-vorinthex-ai",

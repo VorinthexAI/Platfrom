@@ -7,6 +7,7 @@
     "audio": "bun src/index.ts",
     "generate": "bun src/index.ts generate",
     "tts": "bun src/index.ts tts",
+    "orchestrator:briefings": "bun src/generate-orchestrator-briefings.ts",
     "voice-samples": "bun src/voice-samples.ts",
     "list-targets": "bun src/index.ts list-targets",
     "merge": "bun src/index.ts merge",
