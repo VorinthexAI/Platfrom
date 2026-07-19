@@ -1023,16 +1023,30 @@ async function main() {
       deletedAt: null,
     });
   }
-  await targetDb.query(`
-    FOR scope IN scopes
-      LET level = FIRST(
-        FOR ancestor, relation, path IN 0..100 INBOUND scope scopeScopes
-          SORT LENGTH(path.edges) DESC
-          LIMIT 1
-          RETURN LENGTH(path.edges) + 1
-      )
-      UPDATE scope WITH { level: level == null ? 1 : level } IN scopes
+  const scopeHierarchyCursor = await targetDb.query<{ parentKey: string; childKey: string }>(`
+    FOR relation IN scopeScopes
+      FILTER relation.deletedAt == null
+      RETURN { parentKey: relation.parentKey, childKey: relation.childKey }
   `);
+  const hierarchyParentByChild = new Map<string, string>();
+  for (const relation of await scopeHierarchyCursor.all()) {
+    hierarchyParentByChild.set(relation.childKey, relation.parentKey);
+  }
+  const scopeLevel = (scopeKey: string): number => {
+    let level = 1;
+    let parentKey = hierarchyParentByChild.get(scopeKey);
+    const visited = new Set<string>([scopeKey]);
+    while (parentKey && !visited.has(parentKey)) {
+      visited.add(parentKey);
+      level += 1;
+      parentKey = hierarchyParentByChild.get(parentKey);
+    }
+    return level;
+  };
+  const scopeKeysCursor = await targetDb.query<{ _key: string }>('FOR scope IN scopes RETURN { _key: scope._key }');
+  for (const scope of await scopeKeysCursor.all()) {
+    await targetDb.collection('scopes').update(scope._key, { level: scopeLevel(scope._key) });
+  }
   await targetDb.query(`
     FOR relation IN scopeScopes
       LET child = DOCUMENT("scopes", relation.childKey)
