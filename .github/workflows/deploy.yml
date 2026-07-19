@@ -1,35 +1,18 @@
 name: Unified Deploy
 
-# Production deploy pipeline. Vercel has been fully removed — the Next.js web app
-# and the Bun backend both ship as container images to Amazon ECR and roll out on
-# the shared ECS cluster (vorinthex-production) behind the ALB.
+# Unified CI and production deployment pipeline.
 #
-# Flow:
-#   merge to main  ->  Build  ->  Test  ->  Docker Buildx  ->  Push ECR (web + backend)
-#                  ->  [Terraform Plan / Approval / Apply is owned by infra.yml]
-#                  ->  ECS Rolling Deploy (force-new-deployment + wait services-stable + health smoke)
-#                  ->  Early-infra blue-green (SSM) while the ECS cluster is INACTIVE
+# Active flow: PR verification, or a merged PR/manual run -> CI -> Docker
+# validation -> ECR image push -> database migration -> one SSM blue-green
+# deployment to the early-infra app box -> Cloudflare cache purge.
 #
-# While ECS is not provisioned yet, production traffic is served by the
-# single-box early-infra stack (web + api + redis + caddy behind Caddy). The
-# ECS rollout steps no-op in that state, and the `early-deploy` job performs
-# the same SSM blue-green swap as early-infra.yml so every merge to main still
-# reaches production. Once the cluster/service become ACTIVE the roles flip:
-# ECS rolls and `early-deploy` no-ops.
-#
-# `early-infra-standalone-build`/`-deploy` mirror early-infra.yml's own
-# build+deploy steps on every merge, deliberately in addition to
-# `early-deploy` — a second independent build + blue-green swap against the
-# same box. Kept intentionally duplicated rather than sequenced or merged,
-# and inlined here (not called via workflow_call) to avoid an OIDC subject
-# mismatch — see the comment above early-infra-standalone-build below.
-#
-# The GitHub `production` environment provides the manual approval gate.
-# Infrastructure provisioning (Terraform plan/apply) lives in infra.yml, not here.
+# Terraform remains in infra.yml because infrastructure provisioning is not an
+# application deploy. The former ECS rollout jobs are intentionally retained as
+# comments near the relevant active jobs for the later ECS migration.
 
 on:
   pull_request:
-    types: [closed]
+    types: [opened, reopened, synchronize, closed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -48,30 +31,25 @@ permissions:
   id-token: write
 
 concurrency:
-  group: production-deploy
-  cancel-in-progress: false
+  # PR validation runs do not block each other. A merged PR or manual dispatch
+  # serializes against other production deployments.
+  group: ${{ github.event.pull_request.merged && 'production-deploy' || github.event_name == 'workflow_dispatch' && 'production-deploy' || format('ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !github.event.pull_request.merged }}
 
 env:
   AWS_REGION: eu-north-1
-  ECS_CLUSTER: vorinthex-production
-  ECS_WEB_SERVICE: vorinthex-prod-web
-  ECS_API_SERVICE: vorinthex-prod-api
+  # LATER ECS target settings. The corresponding rollout jobs are disabled.
+  # ECS_CLUSTER: vorinthex-production
+  # ECS_WEB_SERVICE: vorinthex-prod-web
+  # ECS_API_SERVICE: vorinthex-prod-api
   ECR_WEB_REPOSITORY: vorinthex-web
   ECR_BACKEND_REPOSITORY: vorinthex-backend
   # ECS task defs (web + api) run on ARM (t4g) capacity, so images are built for arm64.
   IMAGE_PLATFORM: linux/arm64
+  BUN_VERSION: "1.2.19"
   COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
   SSM_PATH: /vorinthex/prod/
-  # The one true production domain — matches the sole redirect_uri registered
-  # with Google/Apple OAuth. Deliberately NOT sourced from secrets.CONFIG:
-  # deploy-web and early-infra-standalone-build both push the SAME mutable
-  # image tag (vorinthex-web:$COMMIT_SHA / :latest), so whichever job's push
-  # lands last wins for every consumer of that tag — if the two jobs baked in
-  # different NEXT_PUBLIC_SITE_URL values (e.g. the CONFIG secret holding a
-  # stale https://www.vorinthex.com from the pre-Vercel-removal setup), which
-  # domain actually goes live becomes a coin flip per deploy. Both web image
-  # builds pass this literal value as their NEXT_PUBLIC_SITE_URL build-arg so
-  # the two builds are byte-identical on this setting and the race is moot.
+  # Matches the sole redirect URI registered with Google and Apple OAuth.
   CANONICAL_SITE_URL: https://vorinthex.com
 
 jobs:
@@ -162,41 +140,77 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-  verify-web:
-    name: Verify web
+  ci-verify:
+    name: CI / lint, typecheck, build, and test
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.web == 'true'
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'pull_request' && github.event.action != 'closed')
+      || github.event.pull_request.merged == true
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: web/app/.next/cache
+          key: next-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          restore-keys: |
+            next-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+            next-${{ runner.os }}-
       - name: Install dependencies
-        run: bun install --frozen-lockfile --linker=hoisted
-      - name: Lint
+        run: bun install --frozen-lockfile
+      - name: Web lint
         run: bun run web:lint
-      - name: Typecheck
+      - name: Web typecheck
         run: bun run web:typecheck
-      - name: Test
-        run: bun run web:test
+      - name: Web build
+        run: bun run web:build
+      - name: Backend check
+        run: bun run backend:check
+      - name: Backend test
+        run: bun run backend:test
 
-  verify-backend:
-    name: Verify backend
+  ci-docker:
+    name: CI / build Docker images
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    needs: ci-verify
+    if: needs.ci-verify.result == 'success'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
-      - uses: oven-sh/setup-bun@v2
-      - name: Install dependencies
-        run: bun install --frozen-lockfile --linker=hoisted
-      - name: Typecheck
-        run: bun run backend:check
-      - name: Test
-        run: bun run backend:test
+      - uses: docker/setup-buildx-action@v3
+      - name: Build web image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: web/app/Dockerfile
+          push: false
+          load: false
+          tags: vorinthex-web:ci
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - name: Build backend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/deploy/Dockerfile
+          target: runtime
+          push: false
+          load: false
+          tags: vorinthex-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
   # ---------------------------------------------------------------------------
   # MOBILE: queue EAS internal Android distribution builds whenever
@@ -210,7 +224,7 @@ jobs:
     name: Mobile distro build (EAS)
     runs-on: ubuntu-latest
     needs: changes
-    if: needs.changes.outputs.mobile == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    if: needs.changes.outputs.mobile == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -247,8 +261,8 @@ jobs:
   deploy-web:
     name: Build image and roll web ECS service
     runs-on: ubuntu-latest
-    needs: [changes, verify-web]
-    if: needs.changes.outputs.web == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    needs: [changes, ci-docker]
+    if: needs.changes.outputs.web == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -305,51 +319,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=web,ignore-error=true
           provenance: false
 
-      - name: Roll web ECS service
-        run: |
-          CLUSTER_STATUS=$(aws ecs describe-clusters \
-            --clusters "$ECS_CLUSTER" \
-            --query 'clusters[0].status' \
-            --output text 2>/dev/null || echo INACTIVE)
-          if [ "$CLUSTER_STATUS" != "ACTIVE" ]; then
-            echo "::notice::Skipping ECS web rollout because cluster $ECS_CLUSTER is $CLUSTER_STATUS. Current production traffic is served by early-infra/Caddy."
-            exit 0
-          fi
-
-          SERVICE_STATUS=$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_WEB_SERVICE" \
-            --query 'services[0].status' \
-            --output text 2>/dev/null || echo INACTIVE)
-          if [ "$SERVICE_STATUS" != "ACTIVE" ]; then
-            echo "::notice::Skipping ECS web rollout because service $ECS_WEB_SERVICE is $SERVICE_STATUS. Current production traffic is served by early-infra/Caddy."
-            exit 0
-          fi
-
-          aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "$ECS_WEB_SERVICE" \
-            --force-new-deployment \
-            --query 'service.serviceName' --output text
-          echo "Waiting for $ECS_WEB_SERVICE to reach a steady state..."
-          aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_WEB_SERVICE"
-
-      - name: Web health smoke check
-        env:
-          PRODUCTION_URL: ${{ env.SITE_URL }}
-        run: |
-          URL="${PRODUCTION_URL:-https://www.vorinthex.com}"
-          for i in $(seq 1 24); do
-            CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
-            if [ "$CODE" = "200" ]; then
-              echo "Web is live (HTTP 200) at $URL on attempt $i/24"
-              exit 0
-            fi
-            echo "attempt $i/24: HTTP $CODE; retrying in 10s"
-            sleep 10
-          done
-          echo "::error::Web health check failed after 4 minutes ($URL)"
-          exit 1
+      # LATER ECS rollout (intentionally disabled): force a new web service
+      # deployment, wait for it to stabilize, then run the external web smoke
+      # check. The active early-infra deployment below owns this health check.
 
   cloudflare-cache:
     name: Purge Cloudflare cache
@@ -360,7 +332,7 @@ jobs:
     if: >-
       always()
       && needs.changes.outputs.web == 'true'
-      && (github.event_name == 'pull_request' || inputs.deploy)
+      && (github.event.pull_request.merged == true || inputs.deploy)
       && needs.deploy-web.result == 'success'
       && needs.early-deploy.result == 'success'
     environment: production
@@ -389,8 +361,8 @@ jobs:
   backend-secrets:
     name: Sync backend secrets
     runs-on: ubuntu-latest
-    needs: [changes, verify-backend]
-    if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    needs: [changes, ci-docker]
+    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -434,8 +406,8 @@ jobs:
   backend-image:
     name: Build and push backend image
     runs-on: ubuntu-latest
-    needs: [changes, verify-backend]
-    if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    needs: [changes, ci-docker]
+    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     outputs:
       image: ${{ steps.meta.outputs.image }}
@@ -495,7 +467,7 @@ jobs:
     name: Deploy graph database
     runs-on: ubuntu-latest
     needs: [changes, backend-secrets]
-    if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
@@ -618,7 +590,7 @@ jobs:
     name: Migrate graph database
     runs-on: ubuntu-latest
     needs: [changes, backend-image, backend-db]
-    if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     defaults:
       run:
         working-directory: backend
@@ -767,7 +739,7 @@ jobs:
     name: Upsert db.seeds.secrets.json to production
     runs-on: ubuntu-latest
     needs: [changes, backend-migrate]
-    if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
@@ -898,10 +870,11 @@ jobs:
   # image and ECS performs a rolling replacement (deploymentController ECS,
   # minimumHealthyPercent 100, per Terraform).
   backend-deploy:
-    name: Roll api ECS service
+    # LATER ECS deploy. Disabled while the single early-infra box serves production.
+    name: LATER / roll api ECS service
     runs-on: ubuntu-latest
     needs: [changes, backend-image, backend-migrate]
-    if: needs.changes.outputs.backend == 'true' && (github.event_name == 'pull_request' || inputs.deploy)
+    if: false # LATER: enable when ECS becomes the production runtime.
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -957,14 +930,11 @@ jobs:
   # definition revision with the freshly built image and rolls the service only
   # when the RENDER_TASK_FAMILY variable is configured.
   backend-render:
-    name: Deploy backend render role
+    # LATER ECS render deploy. Disabled while the single early-infra box serves production.
+    name: LATER / deploy backend render role
     runs-on: ubuntu-latest
     needs: [changes, backend-image, backend-migrate, backend-deploy]
-    if: >-
-      always() && needs.changes.outputs.backend == 'true'
-      && (github.event_name == 'pull_request' || inputs.deploy)
-      && needs.backend-migrate.result == 'success'
-      && needs.backend-deploy.result != 'failure' && needs.backend-deploy.result != 'cancelled'
+    if: false # LATER: enable with the ECS API service.
     environment: production
     env:
       IMAGE: ${{ needs.backend-image.outputs.image }}
@@ -1027,25 +997,21 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # EARLY-INFRA: while the ECS cluster is INACTIVE, production traffic is served
-  # by the single-box early-infra stack. This job performs the same SSM
-  # blue-green swap as early-infra.yml so every merge to main still reaches
-  # production. It no-ops once the ECS cluster/service become ACTIVE — from
-  # then on the ECS rollout steps above own the deploy.
+  # EARLY-INFRA: the active production deployment. It performs one SSM
+  # blue-green swap on the single app box for every changed web or backend
+  # service after its image and required graph migration are ready.
   # ---------------------------------------------------------------------------
   early-deploy:
     name: Blue-green deploy to early-infra box
     runs-on: ubuntu-latest
-    # deploy-web / backend-deploy no-op their ECS rollout while the cluster is
-    # INACTIVE, but sequencing after them keeps the ordering correct in both
-    # eras: images are pushed and DB migrations have run before the swap.
-    needs: [changes, deploy-web, backend-deploy]
+    # Images are pushed and graph migrations complete before the live swap.
+    needs: [changes, deploy-web, backend-migrate]
     if: >-
       always()
       && (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
-      && (github.event_name == 'pull_request' || inputs.deploy)
+      && (github.event.pull_request.merged == true || inputs.deploy)
       && (needs.changes.outputs.web != 'true' || needs.deploy-web.result == 'success')
-      && (needs.changes.outputs.backend != 'true' || needs.backend-deploy.result == 'success')
+      && (needs.changes.outputs.backend != 'true' || needs.backend-migrate.result == 'success')
     environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app
@@ -1070,27 +1036,7 @@ jobs:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Check whether ECS already serves production
-        id: ecs
-        run: |
-          CLUSTER_STATUS=$(aws ecs describe-clusters \
-            --clusters "$ECS_CLUSTER" \
-            --query 'clusters[0].status' \
-            --output text 2>/dev/null || echo INACTIVE)
-          SERVICE_STATUS=$(aws ecs describe-services \
-            --cluster "$ECS_CLUSTER" \
-            --services "$ECS_WEB_SERVICE" \
-            --query 'services[0].status' \
-            --output text 2>/dev/null || echo INACTIVE)
-          if [ "$CLUSTER_STATUS" = "ACTIVE" ] && [ "$SERVICE_STATUS" = "ACTIVE" ]; then
-            echo "::notice::Cluster $ECS_CLUSTER and service $ECS_WEB_SERVICE are ACTIVE — production is served by ECS, skipping the early-infra blue-green swap."
-            echo "active=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "active=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Blue-green deploy via SSM
-        if: steps.ecs.outputs.active != 'true'
         env:
           WEB_CHANGED: ${{ needs.changes.outputs.web }}
           BACKEND_CHANGED: ${{ needs.changes.outputs.backend }}
@@ -1108,7 +1054,7 @@ jobs:
             --filters "Name=tag:Name,Values=${APP_INSTANCE_TAG}" "Name=instance-state-name,Values=running" \
             --query 'Reservations[0].Instances[0].InstanceId' --output text)
           if [ "$IID" = "None" ] || [ -z "$IID" ]; then
-            echo "::error::Early-infra app box (tag Name=${APP_INSTANCE_TAG}) not found while the ECS cluster is INACTIVE — nothing would serve the new build."
+            echo "::error::Early-infra app box (tag Name=${APP_INSTANCE_TAG}) not found."
             exit 1
           fi
           echo "app box: $IID"
@@ -1146,7 +1092,6 @@ jobs:
           aws ssm get-command-invocation --command-id "$CMD" --instance-id "$IID" --query 'StandardOutputContent' --output text | tail -30
 
       - name: Web health smoke check
-        if: steps.ecs.outputs.active != 'true'
         run: |
           URL="${SITE_URL:-https://www.vorinthex.com}"
           for i in $(seq 1 24); do
@@ -1161,33 +1106,15 @@ jobs:
           echo "::error::Web health check failed after 4 minutes ($URL)"
           exit 1
 
-  # ---------------------------------------------------------------------------
-  # Mirrors early-infra.yml's own build+deploy jobs on every merge — a second,
-  # independent build + blue-green swap against the same early-infra box,
-  # from its own freshly-built images rather than the ones early-deploy above
-  # already pushed. This deliberately duplicates early-deploy (which already
-  # performs the same swap using this run's images and per-service tag
-  # selection); the two are not sequenced against each other.
-  #
-  # Inlined here (steps copied from early-infra.yml) rather than invoked via
-  # `uses: ./.github/workflows/early-infra.yml` (workflow_call): a job inside
-  # a called reusable workflow gets a different OIDC token subject than a
-  # top-level job, and this repo's deploy-role trust policy only allows the
-  # top-level shape — a workflow_call'd early-infra.yml job hit "Not
-  # authorized to perform sts:AssumeRoleWithWebIdentity". The trust policy is
-  # further scoped to the `production` GitHub environment specifically (every
-  # other job in this file that assumes the role sets `environment:
-  # production`), so these two jobs need it as well — omitting it hits the
-  # exact same AssumeRoleWithWebIdentity error, just from a different subject
-  # claim mismatch. Keep any edits to this logic mirrored in early-infra.yml
-  # (still the standalone entry point for manual dispatch).
-  # ---------------------------------------------------------------------------
+  # LATER REFERENCE ONLY: these disabled jobs document the former duplicate
+  # early-infra path. They must remain disabled; `early-deploy` is the only
+  # active app-box deployment.
   early-infra-standalone-build:
-    name: Early-infra deploy (standalone) / build
+    # Disabled duplicate path retained only as LATER reference. The active
+    # early-deploy job above is the one and only blue-green deployment.
+    name: LATER / early-infra duplicate build
     needs: [changes]
-    if: >-
-      (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
-      && (github.event_name == 'pull_request' || inputs.deploy)
+    if: false # LATER: do not run a second image build or app-box swap.
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -1230,7 +1157,7 @@ jobs:
             ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_BACKEND_REPOSITORY }}:latest
 
   early-infra-standalone-deploy:
-    name: Early-infra deploy (standalone) / deploy
+    name: LATER / early-infra duplicate deploy
     # backend-migrate is an explicit dependency (not just early-infra-standalone-build)
     # so this box's blue-green swap can never flip live traffic to new backend code
     # before a graph-db schema/collection rename (e.g. arango-migrate.ts) has actually
@@ -1238,10 +1165,7 @@ jobs:
     # collection. backend-migrate is skipped (not failed) on web-only deploys, so the
     # explicit always()-guarded condition below tolerates skipped as well as success.
     needs: [early-infra-standalone-build, backend-migrate]
-    if: |
-      always() &&
-      needs.early-infra-standalone-build.result == 'success' &&
-      (needs.backend-migrate.result == 'success' || needs.backend-migrate.result == 'skipped')
+    if: false # LATER: do not run a second blue-green swap.
     runs-on: ubuntu-latest
     environment: production
     env:
