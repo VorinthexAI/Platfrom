@@ -36,7 +36,10 @@ describe('action registry', () => {
       }
     };
     visit(sourceRoot);
-    expect(files.filter((path) => readFileSync(path, 'utf8').includes('core.ask'))).toEqual([]);
+    // The seed migration is the sole historical-data exception; all runtime
+    // paths must stay free of the retired action ID.
+    const historicalMigration = join(sourceRoot, 'db', 'seed.ts');
+    expect(files.filter((path) => path !== historicalMigration && readFileSync(path, 'utf8').includes('core.ask'))).toEqual([]);
   });
 
 });
