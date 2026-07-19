@@ -16,7 +16,6 @@ import {
   useGalaxyStore,
 } from "@/lib/galaxy-store";
 import { randomRockAnchor } from "@/lib/cave-config";
-import { prewarmChamberTextures } from "@/lib/three/chamber";
 import { useWebGLSupport } from "@/lib/use-webgl-support";
 import { StaticHeroFallback } from "./StaticHeroFallback";
 
@@ -65,12 +64,6 @@ export function UniverseStage({
   const stepBy = useGalaxyStore((s) => s.stepBy);
   const markExplored = useGalaxyStore((s) => s.markExplored);
   const startIntro = useGalaxyStore((s) => s.startIntro);
-
-  // Paint every biome's rock textures during idle time so the first
-  // entry into each chamber never hitches on canvas work.
-  useEffect(() => {
-    prewarmChamberTextures();
-  }, []);
 
   // Adopt deep-link state once on mount, and follow browser history.
   useEffect(() => {

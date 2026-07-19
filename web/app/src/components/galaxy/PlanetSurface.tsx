@@ -235,7 +235,7 @@ export function PlanetSurface({
   entityId,
   biome,
   radius = 0.6,
-  segments = 96,
+  segments = 64,
   paused,
   dormant,
   hovered,

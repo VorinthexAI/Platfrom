@@ -63,7 +63,7 @@ function SurfaceStar({ paused }: { paused: boolean }) {
 
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[SURFACE_RADIUS, 96, 96]} />
+      <sphereGeometry args={[SURFACE_RADIUS, 64, 64]} />
       <shaderMaterial
         ref={materialRef}
         vertexShader={SUN_SURFACE_VERTEX_SHADER}
@@ -93,8 +93,8 @@ export default function SunSurface() {
 
   return (
     <Canvas
-      frameloop={hidden ? "never" : "always"}
-      dpr={[1, 1.75]}
+      frameloop={hidden || reducedMotion ? "never" : "always"}
+      dpr={0.8}
       camera={{ fov: 55, near: 0.1, far: 30 }}
       gl={{ antialias: false, powerPreference: "high-performance" }}
       aria-hidden

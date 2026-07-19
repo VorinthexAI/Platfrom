@@ -106,7 +106,7 @@ function OrbitingBody({ entity, paused, visible, onSelect }: OrbitingBodyProps) 
         <PlanetSurface
           entityId={entity.id}
           radius={size * 0.62}
-          segments={48}
+          segments={32}
           paused={paused}
           dormant={dormant && !isFocused}
           hovered={hovered}
@@ -159,12 +159,12 @@ export function OrbitingEntities({
 
   return (
     <group>
-      {entities.map((entity) => (
+      {revealed && entities.map((entity) => (
         <OrbitingBody
           key={entity.id}
           entity={entity}
           paused={paused}
-          visible={revealed}
+          visible
           onSelect={onSelect}
         />
       ))}
