@@ -9,7 +9,9 @@ import { toolActionSeedSchema } from './tool-actions.node';
 import { TOOL_REGISTRY } from '@/lib/ai/tools';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
-import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 
 describe('scope seeds', () => {
   test('place the seven product scopes as siblings directly below Nexus', () => {
@@ -118,6 +120,28 @@ describe('voice seeds', () => {
     for (const seed of SEEDED_VOICES) {
       expect(voiceSchema.parse({ key: 'cmrnlzf640000qc7k4p5zem5w', ...seed, createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z' }).embedding).toEqual([]);
     }
+  });
+});
+
+describe('orchestrator seeds', () => {
+  test('seed exactly the 20 executive orchestrator sources with deterministic Nova voices', () => {
+    expect(SEEDED_ORCHESTRATOR_SOURCES).toHaveLength(20);
+    expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ dir, name, role }) => `${dir}:${name}:${role}`)).toEqual([
+      'atlas-ceo:Atlas:CEO', 'metis-cio:Metis:CIO', 'hermes-coo:Hermes:COO', 'phoenix-cgo:Phoenix:CGO', 'athena-cpo:Athena:CPO',
+      'ledger-cfo:Ledger:CFO', 'sentinel-ciso:Sentinel:CISO', 'iris-cco:Iris:CCO', 'orbit-cmo:Orbit:CMO', 'apollo-cso:Apollo:CSO',
+      'forge-cto:Forge:CTO', 'mercury-cro:Mercury:CRO', 'themis-clo:Themis:CLO', 'matrix-cdo:Matrix:CDO', 'echo-cko:Echo:CKO',
+      'harmony-chro:Harmony:CHRO', 'aura-cxo:Aura:CXO', 'pillar-cqo:Pillar:CQO', 'helios-caio:Helios:CAIO', 'vulcan-cao:Vulcan:CAO',
+    ]);
+    expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ voice }) => voice)).toEqual(Array.from({ length: 20 }, (_, index) => index % 2 === 0 ? 'Tiffany' : 'Matthew'));
+  });
+
+  test('keep orchestrator source folders free of message MP3 assets', async () => {
+    const root = join(import.meta.dir, '../../../../scripts/orchestrators');
+    const rootEntries = await readdir(root, { withFileTypes: true });
+    expect(rootEntries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort())
+      .toEqual(SEEDED_ORCHESTRATOR_SOURCES.map(({ dir }) => dir).sort());
+    const entries = await readdir(root, { recursive: true });
+    expect(entries.filter((entry) => entry.endsWith('message.mp3'))).toEqual([]);
   });
 });
 
