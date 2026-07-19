@@ -367,7 +367,7 @@ async function providerRows(context: DomainToolContext) {
       LET organizationProvider = FIRST(FOR link IN organizationProviders FILTER link.organizationKey == @organizationKey && link.providerKey == provider._key RETURN link)
       LET availableModels = (FOR relation IN modelProviders FILTER relation.providerKey == provider._key && relation.enabled == true FOR model IN models FILTER model._key == relation.modelKey && model.enabled == true RETURN { key: model._key, slug: model.slug, name: model.name, providerModelId: relation.providerModelId })
       LET allowedActions = UNIQUE(FLATTEN(FOR availableModel IN availableModels FOR route IN modelActions FILTER route.modelKey == availableModel.key && route.enabled == true FOR registeredAction IN actions FILTER registeredAction._key == route.actionKey RETURN registeredAction.slug))
-      RETURN { key: provider._key, slug: provider.slug, name: provider.name, description: provider.description, globallyEnabled: provider.enabled, enabled: organizationProvider != null, models: availableModels, actions: allowedActions }
+       RETURN { key: provider._key, slug: provider.slug, name: provider.name, enabled: organizationProvider != null, models: availableModels, actions: allowedActions }
   `, { organizationKey: context.organizationKey });
   return cursor.all();
 }
@@ -379,16 +379,15 @@ async function executeProvider(action: DomainActionSlug, input: Input, context: 
   if (action === 'organization.provider.list') {
     if (input.status) providers = providers.filter((provider: any) => provider.enabled === (input.status === 'enabled'));
     if (input.query) providers = providers.filter((provider: any) => `${provider.name} ${provider.slug}`.toLocaleLowerCase().includes(input.query.toLocaleLowerCase()));
-    return output(action, { providers: providers.map((provider: any) => { const configured = Boolean(getDefaultProviderAdapters()[providerSlugSchema.parse(provider.slug)]); return { key: provider.key, slug: provider.slug, name: provider.name, enabled: provider.enabled, credentialStatus: configured ? 'managed' : 'missing', health: provider.enabled && configured && provider.globallyEnabled && provider.models.length ? 'healthy' : 'unknown', availableModels: provider.models }; }) });
+    return output(action, { providers: providers.map((provider: any) => { const configured = Boolean(getDefaultProviderAdapters()[providerSlugSchema.parse(provider.slug)]); return { key: provider.key, slug: provider.slug, name: provider.name, enabled: provider.enabled, credentialStatus: configured ? 'managed' : 'missing', health: provider.enabled && configured && provider.models.length ? 'healthy' : 'unknown', availableModels: provider.models }; }) });
   }
   const needle = input.provider?.toLocaleLowerCase(); const matches = providers.filter((provider: any) => provider.key === input.provider || provider.slug.toLocaleLowerCase() === needle || provider.name.toLocaleLowerCase() === needle);
   if (action === 'organization.provider.read') {
-    return output(action, { matches: input.providers.map((reference: string) => { const lowered = reference.toLocaleLowerCase(); return { input: reference, results: providers.filter((provider: any) => provider.key === reference || provider.slug.toLocaleLowerCase() === lowered || provider.name.toLocaleLowerCase() === lowered).map((provider: any) => { const configured = Boolean(getDefaultProviderAdapters()[providerSlugSchema.parse(provider.slug)]); return { ...provider, credentialStatus: configured ? 'managed' : 'missing', health: provider.enabled && configured && provider.globallyEnabled && provider.models.length ? 'healthy' : 'unknown', routingEligible: provider.enabled && configured && provider.globallyEnabled && provider.models.length > 0, lastTestedAt: null, quota: null }; }) }; }) });
+    return output(action, { matches: input.providers.map((reference: string) => { const lowered = reference.toLocaleLowerCase(); return { input: reference, results: providers.filter((provider: any) => provider.key === reference || provider.slug.toLocaleLowerCase() === lowered || provider.name.toLocaleLowerCase() === lowered).map((provider: any) => { const configured = Boolean(getDefaultProviderAdapters()[providerSlugSchema.parse(provider.slug)]); return { ...provider, credentialStatus: configured ? 'managed' : 'missing', health: provider.enabled && configured && provider.models.length ? 'healthy' : 'unknown', routingEligible: provider.enabled && configured && provider.models.length > 0, lastTestedAt: null, quota: null }; }) }; }) });
   }
   if (matches.length !== 1) throw new DomainToolExecutionError(matches.length ? 'provider_ambiguous' : 'provider_not_found', `${input.provider} resolved to ${matches.length} providers`);
   const provider = matches[0]!;
   if (action === 'organization.provider.enable') {
-    if (!provider.globallyEnabled) throw new DomainToolExecutionError('provider_disabled_globally', 'The provider is disabled globally');
     if (!getDefaultProviderAdapters()[providerSlugSchema.parse(provider.slug)]) throw new DomainToolExecutionError('provider_credentials_missing', 'Provider credentials are not configured');
     await withTransaction(['organizationProviders'], async (trx) => { await trx.query('UPSERT { organizationKey: @organizationKey, providerKey: @providerKey } INSERT { _key: @key, organizationKey: @organizationKey, providerKey: @providerKey } UPDATE {} IN organizationProviders', { key: newId(), organizationKey: context.organizationKey, providerKey: provider.key }); });
     await audit(context, action, { providerKey: provider.key }); return output(action, { providerKey: provider.key, enabled: true, routingState: 'effective_immediately' });
@@ -399,7 +398,7 @@ async function executeProvider(action: DomainActionSlug, input: Input, context: 
     await withTransaction(['organizationProviders'], async (trx) => { await trx.query('FOR link IN organizationProviders FILTER link.organizationKey == @organizationKey && link.providerKey == @providerKey REMOVE link IN organizationProviders', { organizationKey: context.organizationKey, providerKey: provider.key }); });
     await audit(context, action, { providerKey: provider.key }); return output(action, { providerKey: provider.key, enabled: false, routingState: 'effective_immediately' });
   }
-  const started = Date.now(); const routingEligible = provider.enabled && provider.globallyEnabled && provider.models.length > 0;
+  const started = Date.now(); const routingEligible = provider.enabled && provider.models.length > 0;
   const providerSlug = providerSlugSchema.parse(provider.slug); const adapter = getDefaultProviderAdapters()[providerSlug];
   let success = routingEligible && Boolean(adapter); let message = success ? 'Provider credentials are configured and the routing graph is valid.' : 'Provider credentials or a routable model are unavailable.';
   if (success && input.mode === 'connectivity' && adapter?.healthCheck) { const health = await adapter.healthCheck(); success = health.healthy; message = health.detail ?? (success ? 'Provider connectivity is healthy.' : 'Provider connectivity failed.'); }

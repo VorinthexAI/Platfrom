@@ -76,7 +76,7 @@ const defaultSeedDataSource: GenesisSeedDataSource = {
     const [createAction, reasonAction] = await Promise.all([getActionBySlug('agent.create'), getActionBySlug('core.reason')]);
     const model = await getModelBySlug('openai.gpt-5.4-mini');
     const provider = await getProviderBySlug('openai');
-    if (!createAction?.enabled || !reasonAction?.enabled || !model?.enabled || !provider?.enabled) return false;
+    if (!createAction?.enabled || !reasonAction?.enabled || !model?.enabled || !provider) return false;
     const [toolAction, toolActions, modelAction, modelProvider, organizationEnabled] = await Promise.all([
       getToolActionByPair(toolKey, createAction.key),
       listToolActionsByToolKey(toolKey),

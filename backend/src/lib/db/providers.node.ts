@@ -13,10 +13,7 @@ export const providerObjectSchema = z.object({
   key: z.string().cuid(),
   slug: providerSlugSchema,
   name: z.string().trim().min(1).max(100),
-  description: z.string().trim().min(1).max(4000),
-  supportedUseCases: z.string().trim().min(1).max(4000),
   handlerKey: providerSlugSchema,
-  enabled: z.boolean().default(true),
   embedding: z.array(z.number().finite()).default([]),
 });
 
@@ -32,7 +29,7 @@ export const providerSchema = providerObjectSchema.superRefine((provider, ctx) =
 
 export type Provider = z.infer<typeof providerSchema>;
 
-export const providersEmbedKeys = z.enum(['name', 'description', 'supportedUseCases']);
+export const providersEmbedKeys = z.enum(['name', 'slug']);
 
 const helpers = createNodeHelpers(PROVIDERS_COLLECTION, providerSchema, providersEmbedKeys.options);
 

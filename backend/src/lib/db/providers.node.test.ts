@@ -13,17 +13,14 @@ describe('provider node schema', () => {
       key: newId(),
       slug: 'openai',
       name: 'OpenAI',
-      description: 'Provides multimodal AI models.',
-      supportedUseCases: 'Reasoning, language, image, and audio workloads.',
       handlerKey: 'openai',
     });
 
-    expect(provider.enabled).toBe(true);
     expect(provider.embedding).toEqual([]);
   });
 
-  test('embeds only semantic provider text', () => {
-    expect(providersEmbedKeys.options).toEqual(['name', 'description', 'supportedUseCases']);
+  test('embeds the provider name and slug', () => {
+    expect(providersEmbedKeys.options).toEqual(['name', 'slug']);
   });
 
   test('requires handlerKey to match slug', () => {
@@ -31,8 +28,6 @@ describe('provider node schema', () => {
       key: newId(),
       slug: 'openai',
       name: 'OpenAI',
-      description: 'Provides multimodal AI models.',
-      supportedUseCases: 'Reasoning and language workloads.',
       handlerKey: 'anthropic',
     })).toThrow('handlerKey must match slug');
   });

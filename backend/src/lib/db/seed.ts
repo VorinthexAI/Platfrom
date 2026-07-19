@@ -504,10 +504,7 @@ export const SEEDED_PROVIDERS = [
     key: 'cmrl6mtn60005a1b23aushlt0',
     slug: 'openai',
     name: 'OpenAI',
-    description: 'Provides language, reasoning, image, audio, and multimodal AI models through OpenAI APIs.',
-    supportedUseCases: 'Conversational AI, reasoning, structured outputs, image generation, audio generation, transcription, and multimodal workflows.',
     handlerKey: 'openai',
-    enabled: true,
   },
 ] as const;
 
@@ -1016,10 +1013,7 @@ async function upsertSeedProvider(seed: (typeof SEEDED_PROVIDERS)[number]): Prom
 
   const patch: Partial<Omit<Provider, 'key' | 'embedding'>> = {
     name: seed.name,
-    description: seed.description,
-    supportedUseCases: seed.supportedUseCases,
     handlerKey: seed.handlerKey,
-    enabled: seed.enabled,
   };
   await updateProvider(existing.key, patch);
   return { collection: 'providers', key: existing.key, status: 'updated' };

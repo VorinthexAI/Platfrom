@@ -57,7 +57,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
     for (const modelProvider of modelProviders) {
       if (!allowedProviderKeys.has(modelProvider.providerKey)) continue;
       const provider = selectedProvider?.key === modelProvider.providerKey ? selectedProvider : await data.getProviderByKey(modelProvider.providerKey);
-      if (!provider?.enabled || !adapters[provider.slug]) continue;
+      if (!provider || !adapters[provider.slug]) continue;
       return {
         organizationKey: request.organizationKey,
         actionKey: action.key,

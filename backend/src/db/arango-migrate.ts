@@ -138,11 +138,10 @@ const collections: CollectionSpec[] = [
   },
   {
     name: 'providers',
-    embedKeys: ['name', 'description', 'supportedUseCases'],
+    embedKeys: ['name', 'slug'],
     indexes: [
       { fields: ['slug'], unique: true },
       { fields: ['handlerKey'] },
-      { fields: ['enabled'] },
     ],
   },
   {
@@ -595,6 +594,16 @@ async function main() {
         FOR doc IN actions
           UPDATE doc WITH { createdAt: null, updatedAt: null }
           IN actions OPTIONS { keepNull: false }
+      `);
+    }
+    if (spec.name === 'providers') {
+      await targetDb.query(`
+        FOR doc IN providers
+          UPDATE doc WITH {
+            description: null,
+            supportedUseCases: null,
+            enabled: null
+          } IN providers OPTIONS { keepNull: false }
       `);
     }
     if (spec.name === 'skills') {
