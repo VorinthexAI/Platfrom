@@ -571,27 +571,6 @@ export const SEEDED_MODELS = [
 
 export const SEEDED_MODEL_ACTIONS = [
   {
-    key: 'cmnovapremieraction0000001',
-    modelSlug: 'amazon.nova-premier',
-    actionSlug: 'core.chat',
-    priority: 400,
-    enabled: true,
-  },
-  {
-    key: 'cmnovaproaction0000000001',
-    modelSlug: 'amazon.nova-pro',
-    actionSlug: 'core.chat',
-    priority: 300,
-    enabled: true,
-  },
-  {
-    key: 'cmnova2liteaction00000001',
-    modelSlug: 'amazon.nova-2-lite',
-    actionSlug: 'core.chat',
-    priority: 200,
-    enabled: true,
-  },
-  {
     key: 'cmnova2sonicaction0000001',
     modelSlug: 'amazon.nova-2-sonic',
     actionSlug: 'core.chat',
