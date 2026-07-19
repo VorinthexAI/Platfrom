@@ -146,9 +146,9 @@ describe('orchestrator seeds', () => {
     }
   });
 
-  test('does not load skills from scripts at runtime', async () => {
+  test('uses embedded skill snapshots at runtime', async () => {
     const seedSource = await Bun.file(join(import.meta.dir, 'seed.ts')).text();
-    expect(seedSource).not.toContain('scripts/orchestrators');
+    expect(seedSource).toContain('SEEDED_ORCHESTRATOR_SKILLS');
   });
 });
 

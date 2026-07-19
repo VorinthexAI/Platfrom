@@ -2,11 +2,8 @@
 # relative to the monorepo root. Keep the content-strip section in sync with
 # .github/workflows/deploy.yml.
 #
-# NOTE: the root package.json declares bun workspaces (web/app, backend, shared,
-# scripts/image, scripts/video, scripts/audio). Those workspace directories are
-# intentionally NOT excluded here — `bun install --frozen-lockfile` validates the
-# whole workspace graph against bun.lock, so their package.json files must be
-# present. Only node_modules / build output / secrets / brand assets are stripped.
+# The root Bun workspace graph contains only deployable app packages. Only
+# node_modules, build output, secrets, and brand assets are stripped here.
 
 # Dependencies and build artifacts (reinstalled/rebuilt inside the image)
 **/node_modules

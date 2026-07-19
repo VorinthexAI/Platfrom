@@ -7,9 +7,8 @@ prod.env
 # in .github/environments.json)
 environments/
 
-# These secret-bearing files are allowed in git only because .gitattributes
-# stores them through git-crypt.
-!launch/.env
+# This secret-bearing file is allowed in git only because .gitattributes
+# stores it through git-crypt.
 !.github/environments.json
 .temp
 backend/scripts/tmp-*.ts
@@ -22,8 +21,6 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
-launch/**/outputs/*
-!launch/**/outputs/.gitkeep
 
 terraform/**/.terraform/
 terraform/**/*.tfstate
@@ -32,9 +29,6 @@ terraform/**/tfplan
 
 .DS_Store
 Thumbs.db
-
-# Transient asset/gallery dev-server logs (lock git checkout on Windows)
-scripts/image/assets-server.*.log
 
 # expo CLI run at the repo root regenerates a stub app.json — never track it
 /app.json

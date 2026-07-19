@@ -52,4 +52,4 @@ Expected parameters include:
 - The app host receives `deploy/docker-compose.app.yml` and `deploy/deploy-app.sh`.
 - App deploy starts the idle color, waits for health, flips Caddy, then stops the old color.
 - Render deploy registers a new ECS task-definition revision and rolls `RENDER_ECS_SERVICE`.
-- Shared changes under `src/core`, `src/db`, `src/lib`, `deploy`, `.github`, or `scripts` deploy both roles.
+- Shared changes under `src/core`, `src/db`, `src/lib`, `deploy`, or `.github` deploy both roles.

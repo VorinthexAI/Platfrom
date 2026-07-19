@@ -6,36 +6,9 @@
     "web/app",
     "backend",
     "shared",
-    "mobile/app",
-    "scripts/image",
-    "scripts/video",
-    "scripts/audio"
+    "mobile/app"
   ],
   "scripts": {
-    "design": "bun run --cwd scripts/image design",
-    "design:galaxy": "bun run --cwd scripts/image generate:galaxy",
-    "design:slideshow": "bun run --cwd scripts/image slideshow",
-    "design:refresh-brand-capabilities": "bun run --cwd scripts/image refresh:brand-capabilities",
-    "og:cards": "bun run --cwd scripts/image og:cards",
-    "og:publish": "bun run --cwd scripts/image og:publish",
-    "design:gallery": "bun run --cwd scripts/image gallery",
-    "assets": "bun run --cwd scripts/image assets",
-    "design:validate": "bun run --cwd scripts/image validate",
-    "design:backup": "bun run --cwd scripts/image backup",
-    "design:backfill-svgs": "bun run --cwd scripts/image backfill:svgs",
-    "video": "bun run --cwd scripts/video video",
-    "video:list-targets": "bun run --cwd scripts/video list-targets",
-    "video:generate": "bun run --cwd scripts/video generate",
-    "video:capture-references": "bun run --cwd scripts/video capture-references",
-    "video:validate": "bun run --cwd scripts/video validate",
-    "audio": "bun run --cwd scripts/audio audio",
-    "audio:list-targets": "bun run --cwd scripts/audio list-targets",
-    "audio:generate": "bun run --cwd scripts/audio generate",
-    "audio:tts": "bun run --cwd scripts/audio tts",
-    "audio:orchestrator-briefings": "bun run --cwd scripts/audio orchestrator:briefings",
-    "audio:voice-samples": "bun run --cwd scripts/audio voice-samples",
-    "audio:merge": "bun run --cwd scripts/audio merge",
-    "audio:validate": "bun run --cwd scripts/audio validate",
     "domains:generate": "bun run .github/scripts/generate-domains.ts",
     "web:dev": "bun run --cwd web/app dev",
     "web:build": "bun run --cwd web/app build",
@@ -50,22 +23,11 @@
     "nodes": "bun run --cwd backend nodes",
     "backend:nodes": "bun run --cwd backend nodes",
     "backend:reset": "bun run --cwd backend reset",
-    "backend:create-super-admin": "bun run --cwd backend create:super-admin",
-    "agent": "bun run --cwd launch agent"
+    "backend:create-super-admin": "bun run --cwd backend create:super-admin"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
     "@types/react": "^19",
     "@types/react-dom": "^19"
-  },
-  "trustedDependencies": [
-    "ffmpeg-static"
-  ],
-  "dependencies": {
-    "@aws-sdk/client-bedrock-runtime": "^3.1090.0",
-    "@aws-sdk/client-polly": "^3.1090.0",
-    "@aws-sdk/credential-provider-node": "^3.972.70",
-    "@smithy/node-http-handler": "^4.9.7",
-    "ffmpeg-static": "^5.3.0"
   }
 }

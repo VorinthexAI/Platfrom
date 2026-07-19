@@ -23,7 +23,7 @@ import type { CapabilitySlug } from "@/data/registry";
  * BLACK on GLES — the "black square" bug), and expo-gl's own
  * texImage2D(asset) upload produced empty textures on real hardware while
  * working in the emulator. So the emblems ship as pre-baked raw RGBA
- * assets (scripts/image `logo:rgba`): uint32 LE width + height, then
+ * assets: uint32 LE width + height, then
  * pixel rows. The app reads the bytes with expo-file-system and hands
  * three a plain typed array — the one upload path that is identical on
  * every device, and that three re-uploads itself after any context loss.
