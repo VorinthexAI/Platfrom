@@ -132,7 +132,9 @@ export async function validateGenesisManifest(
     if (existing.slug === 'beacon') throw new GenesisManifestConsistencyError('the canonical Beacon agent cannot be modified by Genesis');
   } else {
     if (agentOperation.slug === 'beacon') throw new GenesisManifestConsistencyError('the canonical Beacon agent cannot be created or modified by Genesis');
-    if (agentOperation.scopeKey !== context.scope.key) throw new GenesisManifestReferenceError('scope', agentOperation.scopeKey);
+    // Genesis owns one canonical execution scope. Model output cannot choose
+    // where a newly created agent is deployed.
+    agentOperation = { ...agentOperation, scopeKey: context.scope.key };
     agentKey = newId();
     const exact = agentsBySlug.get(agentOperation.slug);
     const registry = new ArtifactResolverRegistry().register('agent', similarityResolver('agent', context.organization.key, agents, exact?.key));

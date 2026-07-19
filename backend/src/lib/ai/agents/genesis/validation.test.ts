@@ -46,6 +46,12 @@ describe('Genesis manifest validation', () => {
     const crossScope = { ...context, knowledge: { ...context.knowledge, existingTools: [...context.knowledge.existingTools, scopedTool] } };
     await expect(validateGenesisManifest(acceptedManifest(f, { agentTools: [{ operation: 'attach', toolKey: scopedTool.key, reason: 'Needed' }] }), crossScope, newId(), { checks: checkStore().repository, generateEmbedding: async () => [1, 0] })).rejects.toBeInstanceOf(GenesisManifestReferenceError);
   });
+
+  test('normalizes a requested agent scope to Genesis’s Launch scope', async () => {
+    const f = buildGenesisFixture(); const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
+    const validated = await validateGenesisManifest(acceptedManifest(f, { agent: { operation: 'create', slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: newId(), explorationRate: 0.2 } }), context, newId(), { checks: checkStore().repository, generateEmbedding: async () => [1, 0] });
+    expect(validated.manifest.agent).toMatchObject({ operation: 'create', scopeKey: f.scope.key });
+  });
   test('rejects the Beacon-only core.delegate tool for generated agents', async () => {
     const f = buildGenesisFixture(); const context = await compileGenesisContext({ organizationKey: f.organization.key, scopeKey: f.scope.key, genesisAgentKey: f.genesis.key, currentTask: 'Create Forge.' }, f);
     const delegateTool = toolSchema.parse({ key: newId(), slug: 'core.delegate', name: 'Delegate', description: 'Beacon-only delegation.', scopeKey: null });
