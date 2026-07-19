@@ -59,8 +59,5 @@
   },
   "trustedDependencies": [
     "ffmpeg-static"
-  ],
-  "patchedDependencies": {
-    "expo-modules-core@57.0.3": "patches/expo-modules-core@57.0.3.patch"
-  }
+  ]
 }
