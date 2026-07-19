@@ -935,7 +935,35 @@ type SeededOrchestratorSource = {
 
 type SeededVoice = Pick<Voice, 'provider' | 'model' | 'modelLabel' | 'voice' | 'label' | 'language' | 'format'>;
 
-const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [];
+export const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [
+  ['atlas-ceo', 'Atlas', 'CEO'],
+  ['metis-cio', 'Metis', 'CIO'],
+  ['hermes-coo', 'Hermes', 'COO'],
+  ['phoenix-cgo', 'Phoenix', 'CGO'],
+  ['athena-cpo', 'Athena', 'CPO'],
+  ['ledger-cfo', 'Ledger', 'CFO'],
+  ['sentinel-ciso', 'Sentinel', 'CISO'],
+  ['iris-cco', 'Iris', 'CCO'],
+  ['orbit-cmo', 'Orbit', 'CMO'],
+  ['apollo-cso', 'Apollo', 'CSO'],
+  ['forge-cto', 'Forge', 'CTO'],
+  ['mercury-cro', 'Mercury', 'CRO'],
+  ['themis-clo', 'Themis', 'CLO'],
+  ['matrix-cdo', 'Matrix', 'CDO'],
+  ['echo-cko', 'Echo', 'CKO'],
+  ['harmony-chro', 'Harmony', 'CHRO'],
+  ['aura-cxo', 'Aura', 'CXO'],
+  ['pillar-cqo', 'Pillar', 'CQO'],
+  ['helios-caio', 'Helios', 'CAIO'],
+  ['vulcan-cao', 'Vulcan', 'CAO'],
+].map(([dir, name, role], index) => ({
+  dir,
+  name,
+  role,
+  provider: 'aws-bedrock',
+  model: 'amazon.nova-2-sonic-v1:0',
+  voice: index % 2 === 0 ? 'Tiffany' : 'Matthew',
+}));
 
 export const SEEDED_VOICES: SeededVoice[] = [
   {
