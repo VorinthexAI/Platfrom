@@ -1,5 +1,6 @@
 import { join } from 'node:path';
-import { closeDb } from './client';
+import { aql } from 'arangojs';
+import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
 import { getActionById, getActionBySlug, insertAction, updateAction, type Action } from './actions.node';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
@@ -966,6 +967,15 @@ function loadOrchestratorSkill(dir: string): Promise<string> {
   return Bun.file(join(ORCHESTRATORS_SOURCE_DIR, dir, 'SKILL.md')).text();
 }
 
+/** Converts the retired persisted action before strict action parsing occurs. */
+async function migrateRetiredCoreAskAction(): Promise<void> {
+  await db.query(aql`
+    FOR action IN ${db.collection('actions')}
+      FILTER action.slug == ${'core.ask'}
+      UPDATE action WITH { slug: 'core.chat', handlerKey: 'core.chat' } IN ${db.collection('actions')}
+  `);
+}
+
 async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
   const existing = await getActionById(seed.key);
   if (!existing) {
@@ -1237,6 +1247,7 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
 }
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
+  await migrateRetiredCoreAskAction();
   const results = await seedAiRuntimeNodes();
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
