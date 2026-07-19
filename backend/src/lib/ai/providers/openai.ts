@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
-  ASK_ACTION_IDS,
+  CHAT_ACTION_IDS,
   executeOpenAICompatibleChat,
   streamOpenAICompatibleChat,
   unsupportedAction,
@@ -184,7 +184,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
     name: 'OpenAI',
 
     async execute(request) {
-      if (ASK_ACTION_IDS.has(request.actionId)) {
+      if (CHAT_ACTION_IDS.has(request.actionId)) {
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }
       try {
@@ -198,7 +198,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
     },
 
     stream(request) {
-      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       return streamOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
     },
 

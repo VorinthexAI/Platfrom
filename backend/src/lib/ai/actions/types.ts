@@ -9,7 +9,7 @@ import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
  * derive from it.
  */
 export const ACTION_SLUGS = [
-  'core.ask',
+  'core.chat',
   'core.reason',
   'core.delegate',
 

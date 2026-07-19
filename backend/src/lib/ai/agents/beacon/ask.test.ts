@@ -38,7 +38,7 @@ function fixture(extraTool = false) {
   const delegateTool = toolSchema.parse({ key: newId(), slug: 'core.delegate', name: 'Delegate', description: 'Delegate safely.' });
   const delegateAction = actionSchema.parse({ key: newId(), slug: 'core.delegate', name: 'Delegate', description: 'Delegate safely.', objective: 'Delegate', inputDescription: 'Task', outputDescription: 'Decision', handlerKey: 'core.delegate' });
   const askTool = toolSchema.parse({ key: newId(), slug: 'ask.answer', name: 'Ask', description: 'Forbidden direct answer.' });
-  const askAction = actionSchema.parse({ key: newId(), slug: 'core.ask', name: 'Ask', description: 'Ask.', objective: 'Ask', inputDescription: 'Task', outputDescription: 'Answer', handlerKey: 'core.ask' });
+  const askAction = actionSchema.parse({ key: newId(), slug: 'core.chat', name: 'Chat', description: 'Chat.', objective: 'Chat', inputDescription: 'Task', outputDescription: 'Answer', handlerKey: 'core.chat' });
   const toolLinks = [agentToolSchema.parse({ key: newId(), agentKey: beacon.key, toolKey: delegateTool.key })];
   if (extraTool) toolLinks.push(agentToolSchema.parse({ key: newId(), agentKey: beacon.key, toolKey: askTool.key }));
   const runtimeData = {

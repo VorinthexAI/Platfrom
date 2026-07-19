@@ -17,7 +17,7 @@ const openai = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenA
 const adapter: ProviderAdapter = { id: 'openai', name: 'OpenAI', async execute() { throw new Error('not executed in selection tests'); } };
 
 function fixture(overrides: { allowed?: string[]; modelActions?: ModelAction[]; modelProviders?: ModelProvider[]; models?: Model[]; providers?: Provider[] } = {}): RouterDependencies & { ask: Action; reason: Action; nano: Model; mini: Model } {
-  const ask = action('core.ask');
+  const ask = action('core.chat');
   const reason = action('core.reason');
   const nano = model('openai.gpt-5.4-nano');
   const mini = model('openai.gpt-5.4-mini');
@@ -45,7 +45,7 @@ function fixture(overrides: { allowed?: string[]; modelActions?: ModelAction[]; 
 describe('priority-only persisted router', () => {
   test('routes Ask only to Nano and Reason only to Mini in v1', async () => {
     const deps = fixture();
-    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.ask' }, deps)).modelSlug).toBe('openai.gpt-5.4-nano');
+    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.chat' }, deps)).modelSlug).toBe('openai.gpt-5.4-nano');
     expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.reason' }, deps)).modelSlug).toBe('openai.gpt-5.4-mini');
   });
 
@@ -56,30 +56,30 @@ describe('priority-only persisted router', () => {
     const deps = fixture({ modelActions: [low, high], models: [base.nano, base.mini] });
     // Rebind the generated fixture action keys to its own Ask action.
     const own = deps.data!;
-    const ask = await own.getActionBySlug('core.ask');
+    const ask = await own.getActionBySlug('core.chat');
     const links = [modelActionSchema.parse({ ...low, actionKey: ask!.key }), modelActionSchema.parse({ ...high, actionKey: ask!.key })];
     own.listModelActions = async () => links.sort((a, b) => b.priority - a.priority || a.key.localeCompare(b.key));
-    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.ask' }, deps)).modelKey).toBe(base.mini.key);
+    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.chat' }, deps)).modelKey).toBe(base.mini.key);
 
     const tied = fixture();
-    const tiedAsk = await tied.data!.getActionBySlug('core.ask');
+    const tiedAsk = await tied.data!.getActionBySlug('core.chat');
     const left = modelActionSchema.parse({ key: newId(), modelKey: tied.nano.key, actionKey: tiedAsk!.key, priority: 50, enabled: true });
     const right = modelActionSchema.parse({ key: newId(), modelKey: tied.mini.key, actionKey: tiedAsk!.key, priority: 50, enabled: true });
     tied.data!.listModelActions = async () => [right, left];
     const expected = left.key.localeCompare(right.key) < 0 ? left.modelKey : right.modelKey;
-    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.ask' }, tied)).modelKey).toBe(expected);
+    expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.chat' }, tied)).modelKey).toBe(expected);
   });
 
   test('never bypasses organizationProviders, including fixed mode', async () => {
     const deps = fixture({ allowed: [] });
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.ask' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
-    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'core.ask', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps)).rejects.toBeInstanceOf(ProviderNotEnabledForOrganizationError);
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.chat' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
+    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'core.chat', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps)).rejects.toBeInstanceOf(ProviderNotEnabledForOrganizationError);
   });
 
   test('model and fixed modes never silently change their requested route', async () => {
     const deps = fixture();
-    await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'core.ask', modelSlug: 'openai.gpt-5.4-mini' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
-    const fixed = await selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'core.ask', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps);
+    await expect(selectRoute({ mode: 'model', organizationKey, actionSlug: 'core.chat', modelSlug: 'openai.gpt-5.4-mini' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
+    const fixed = await selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'core.chat', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps);
     expect(fixed).toMatchObject({ modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' });
   });
 
@@ -88,14 +88,14 @@ describe('priority-only persisted router', () => {
     deps.data!.listModelActions = async (actionKey) => [modelActionSchema.parse({
       key: newId(), modelKey: deps.nano.key, actionKey, priority: 100, enabled: false,
     })];
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.ask' }, deps))
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.chat' }, deps))
       .rejects.toBeInstanceOf(NoEligibleRouteError);
 
     const enabledDeps = fixture();
     enabledDeps.data!.listModelProviders = async (modelKey) => [modelProviderSchema.parse({
       key: newId(), modelKey, providerKey: openai.key, providerModelId: 'gpt-5.4-nano', enabled: false,
     })];
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.ask' }, enabledDeps))
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'core.chat' }, enabledDeps))
       .rejects.toBeInstanceOf(NoEligibleRouteError);
   });
 });

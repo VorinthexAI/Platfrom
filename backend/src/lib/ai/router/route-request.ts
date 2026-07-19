@@ -4,7 +4,7 @@ import { modelSlugSchema } from '@/lib/db/models.node';
 import { providerSlugSchema } from '@/lib/db/providers.node';
 import { organizationKeySchema } from '@/lib/ai/shared/ids';
 
-const base = { organizationKey: organizationKeySchema, actionSlug: actionIdSchema };
+const base = { organizationKey: organizationKeySchema, actionSlug: actionIdSchema, organizationProviderKey: z.string().min(1).optional() };
 export const autoRouteRequestSchema = z.object({ mode: z.literal('auto'), ...base }).strict();
 export const modelRouteRequestSchema = z.object({ mode: z.literal('model'), ...base, modelSlug: modelSlugSchema }).strict();
 export const fixedRouteRequestSchema = z.object({ mode: z.literal('fixed'), ...base, modelSlug: modelSlugSchema, providerSlug: providerSlugSchema }).strict();

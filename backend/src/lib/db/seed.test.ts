@@ -101,10 +101,10 @@ describe('provider seeds', () => {
 });
 
 describe('model and routing relation seeds', () => {
-  test('does not seed models or routing relations', () => {
-    expect(SEEDED_MODELS).toEqual([]);
-    expect(SEEDED_MODEL_ACTIONS).toEqual([]);
-    expect(SEEDED_MODEL_PROVIDERS).toEqual([]);
+  test('seed Nova 2 Sonic through AWS Bedrock for core.chat', () => {
+    expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual(['amazon.nova-2-sonic']);
+    expect(SEEDED_MODEL_ACTIONS.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`)).toEqual(['amazon.nova-2-sonic:core.chat']);
+    expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId }) => `${modelSlug}:${providerSlug}:${providerModelId}`)).toEqual(['amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0']);
   });
 });
 
@@ -142,7 +142,7 @@ describe('tool and tool-action seeds', () => {
       'agent.create:agent.create',
       'artifact.create:artifact.create',
       'artifact.read:artifact.read',
-      'ask.answer:core.ask',
+       'ask.answer:core.chat',
       'audio.transcribe-file:audio.transcribe',
       'core.delegate:core.delegate',
       'image.create:image.generate',

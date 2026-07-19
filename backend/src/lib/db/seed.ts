@@ -84,13 +84,13 @@ const accessSeedKey = (kind: 'action' | 'tool' | 'link', index: number) => `cmst
 export const SEEDED_ACTIONS = [
   {
     key: 'cm9action01vorinthexseed',
-    slug: 'core.ask',
-    name: 'Ask',
+    slug: 'core.chat',
+    name: 'Chat',
     description: 'Answer a natural-language request within the active agent role and scope.',
     objective: 'Provide a clear and useful response while respecting skill, guardrails, tools, permissions, and schema.',
     inputDescription: 'A question, instruction, or conversational message with optional context and runtime metadata.',
     outputDescription: 'A schema-valid answer with mandatory metadata containing accepted or rejected status, a reason of at most ten words, and a self-assessed score.',
-    handlerKey: 'core.ask',
+    handlerKey: 'core.chat',
     enabled: true,
   },
   {
@@ -525,28 +525,36 @@ export const SEEDED_PROVIDERS = [
   },
 ] as const;
 
-export const SEEDED_MODELS: ReadonlyArray<{
-  key: string;
-  slug: string;
-  name: string;
-  description: string;
-  supportedUseCases: string;
-  enabled: boolean;
-}> = [];
-export const SEEDED_MODEL_ACTIONS: ReadonlyArray<{
-  key: string;
-  modelSlug: string;
-  actionSlug: string;
-  priority: number;
-  enabled: boolean;
-}> = [];
-export const SEEDED_MODEL_PROVIDERS: ReadonlyArray<{
-  key: string;
-  modelSlug: string;
-  providerSlug: string;
-  providerModelId: string;
-  enabled: boolean;
-}> = [];
+export const SEEDED_MODELS = [
+  {
+    key: 'cmnova2sonicmodel00000001',
+    slug: 'amazon.nova-2-sonic',
+    name: 'Amazon Nova 2 Sonic',
+    description: 'Amazon multimodal speech and language model for low-latency conversational AI workloads.',
+    supportedUseCases: 'Conversational AI, voice interactions, multimodal understanding, agent execution, and general-purpose assistant workloads.',
+    enabled: true,
+  },
+] as const;
+
+export const SEEDED_MODEL_ACTIONS = [
+  {
+    key: 'cmnova2sonicaction0000001',
+    modelSlug: 'amazon.nova-2-sonic',
+    actionSlug: 'core.chat',
+    priority: 100,
+    enabled: true,
+  },
+] as const;
+
+export const SEEDED_MODEL_PROVIDERS = [
+  {
+    key: 'cmnova2sonicroute00000001',
+    modelSlug: 'amazon.nova-2-sonic',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'amazon.nova-2-sonic-v1:0',
+    enabled: true,
+  },
+] as const;
 
 export const SEEDED_TOOLS = [
   {
@@ -752,7 +760,7 @@ export const SEEDED_TOOLS = [
 ] as const;
 
 export const SEEDED_TOOL_ACTIONS = [
-  { key: 'cmrnc3nfh00053o7k3hfm3a82', toolSlug: 'ask.answer', actionSlug: 'core.ask', priority: 100, enabled: true },
+  { key: 'cmrnc3nfh00053o7k3hfm3a82', toolSlug: 'ask.answer', actionSlug: 'core.chat', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00063o7keg8h70ut', toolSlug: 'reason.solve', actionSlug: 'core.reason', priority: 100, enabled: true },
   { key: 'cmcoredelegatetoolaction001', toolSlug: 'core.delegate', actionSlug: 'core.delegate', priority: 100, enabled: true },
   { key: 'cmgenesistoolactioncreate001', toolSlug: 'agent.create', actionSlug: 'agent.create', priority: 100, enabled: true },

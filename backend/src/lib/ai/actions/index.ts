@@ -1,6 +1,7 @@
 import { ACTION_SLUGS, isValidActionIdFormat } from './types';
 
 export { ACTION_SLUGS, actionIdSchema, type ActionId } from './types';
+export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, coreChatInputSchema, type CoreChatContent, type CoreChatMessage, type CoreChatToolDefinition, type CoreChatInput } from './core-chat';
 export {
   actionSchema,
   getActionById,

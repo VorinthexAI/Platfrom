@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
-import { ASK_ACTION_IDS, unsupportedAction } from './openai-compatible';
+import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
 import {
   chatInputSchema,
   resolveRequestSignal,
@@ -71,20 +71,22 @@ interface VertexContent {
 
 function buildGenerateContentBody(input: ChatInput): Record<string, unknown> {
   const contents: VertexContent[] = [];
-  const systemParts: string[] = input.system ? [input.system] : [];
+  const systemParts: string[] = input.systemPrompt ? [input.systemPrompt] : [];
   for (const message of input.messages) {
+    const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
+    if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'Google Vertex adapter does not support non-text core.chat content');
     if (message.role === 'system') {
-      systemParts.push(message.content);
+      systemParts.push(text);
       continue;
     }
-    contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text: message.content }] });
+    if (message.role === 'tool') throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'Google Vertex adapter does not support core.chat tool-result messages');
+    contents.push({ role: message.role === 'assistant' ? 'model' : 'user', parts: [{ text }] });
   }
   const body: Record<string, unknown> = { contents };
   if (systemParts.length > 0) body.systemInstruction = { parts: systemParts.map((text) => ({ text })) };
   const generationConfig: Record<string, unknown> = {};
-  if (input.maxOutputTokens !== undefined) generationConfig.maxOutputTokens = input.maxOutputTokens;
-  if (input.temperature !== undefined) generationConfig.temperature = input.temperature;
-  if (input.responseFormat?.type === 'json') generationConfig.responseMimeType = 'application/json';
+  if (input.options?.maxTokens !== undefined) generationConfig.maxOutputTokens = input.options.maxTokens;
+  if (input.options?.temperature !== undefined) generationConfig.temperature = input.options.temperature;
   if (Object.keys(generationConfig).length > 0) body.generationConfig = generationConfig;
   return body;
 }
@@ -112,7 +114,7 @@ export function createGoogleVertexProvider(config: GoogleVertexProviderConfig): 
     name: 'Google Vertex AI',
 
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       const input = chatInputSchema.parse(request.input);
       const { url, headers } = buildEndpoint(parsed, request.externalModelId);
       try {

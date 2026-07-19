@@ -9,7 +9,7 @@ describe('tool handler registry', () => {
       expect(tool).not.toHaveProperty('actionId');
       expect(tool).not.toHaveProperty('modelId');
       expect(tool).not.toHaveProperty('providerId');
-      expect(() => toolDefinitionSchema.parse({ ...tool, actionId: 'core.ask' })).toThrow();
+      expect(() => toolDefinitionSchema.parse({ ...tool, actionId: 'core.chat' })).toThrow();
     }
   });
   test('uses dot notation and resolves known handlers', () => {

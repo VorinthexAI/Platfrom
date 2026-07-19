@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError } from './errors';
-import { ASK_ACTION_IDS, unsupportedAction } from './openai-compatible';
+import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
 import {
   chatInputSchema,
   resolveRequestSignal,
@@ -33,23 +33,26 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
 
 function buildMessageParams(externalModelId: string, input: ChatInput): Anthropic.Messages.MessageCreateParamsNonStreaming {
   const messages: Anthropic.Messages.MessageParam[] = [];
-  const systemParts: string[] = input.system ? [input.system] : [];
+  const systemParts: string[] = input.systemPrompt ? [input.systemPrompt] : [];
   for (const message of input.messages) {
+    const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
+    if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'Anthropic adapter does not support non-text core.chat content');
     // Anthropic has no system role inside `messages` — fold system-role
     // messages into the top-level system prompt instead.
     if (message.role === 'system') {
-      systemParts.push(message.content);
+      systemParts.push(text);
       continue;
     }
-    messages.push({ role: message.role, content: message.content });
+    if (message.role === 'tool') throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'Anthropic adapter does not support core.chat tool-result messages');
+    messages.push({ role: message.role, content: text });
   }
   const params: Anthropic.Messages.MessageCreateParamsNonStreaming = {
     model: externalModelId,
-    max_tokens: input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+    max_tokens: input.options?.maxTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     messages,
   };
   if (systemParts.length > 0) params.system = systemParts.join('\n\n');
-  if (input.temperature !== undefined) params.temperature = Math.min(input.temperature, 1);
+  if (input.options?.temperature !== undefined) params.temperature = Math.min(input.options.temperature, 1);
   if (input.tools && input.tools.length > 0) {
     params.tools = input.tools.map((tool) => ({
       name: tool.name,
@@ -79,7 +82,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
     name: 'Anthropic',
 
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       const input = chatInputSchema.parse(request.input);
       try {
         const message = await client.messages.create(buildMessageParams(request.externalModelId, input), {
@@ -99,7 +102,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
     },
 
     async *stream<TInput>(request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
-      if (!ASK_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
+      if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       const input = chatInputSchema.parse(request.input);
       try {
         const stream = await client.messages.create(
