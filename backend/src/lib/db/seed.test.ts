@@ -9,7 +9,6 @@ import { toolActionSeedSchema } from './tool-actions.node';
 import { TOOL_REGISTRY } from '@/lib/ai/tools';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
-import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 
@@ -126,11 +125,11 @@ describe('voice seeds', () => {
 describe('orchestrator seeds', () => {
   test('seed exactly the 20 executive orchestrator sources with their assigned Nova voices', () => {
     expect(SEEDED_ORCHESTRATOR_SOURCES).toHaveLength(20);
-    expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ dir, name, role }) => `${dir}:${name}:${role}`)).toEqual([
-      'atlas-ceo:Atlas:CEO', 'metis-cio:Metis:CIO', 'echo-cko:Echo:CKO', 'matrix-cdo:Matrix:CDO', 'hermes-coo:Hermes:COO',
-      'harmony-chro:Harmony:CHRO', 'phoenix-cgo:Phoenix:CGO', 'iris-cco:Iris:CCO', 'orbit-cmo:Orbit:CMO', 'apollo-cso:Apollo:CSO',
-      'athena-cpo:Athena:CPO', 'forge-cto:Forge:CTO', 'aura-cxo:Aura:CXO', 'pillar-cqo:Pillar:CQO', 'helios-caio:Helios:CAIO',
-      'vulcan-cao:Vulcan:CAO', 'ledger-cfo:Ledger:CFO', 'mercury-cro:Mercury:CRO', 'sentinel-ciso:Sentinel:CISO', 'themis-clo:Themis:CLO',
+    expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ name, role }) => `${name}:${role}`)).toEqual([
+      'Atlas:CEO', 'Metis:CIO', 'Echo:CKO', 'Matrix:CDO', 'Hermes:COO',
+      'Harmony:CHRO', 'Phoenix:CGO', 'Iris:CCO', 'Orbit:CMO', 'Apollo:CSO',
+      'Athena:CPO', 'Forge:CTO', 'Aura:CXO', 'Pillar:CQO', 'Helios:CAIO',
+      'Vulcan:CAO', 'Ledger:CFO', 'Mercury:CRO', 'Sentinel:CISO', 'Themis:CLO',
     ]);
     expect(Object.fromEntries(SEEDED_ORCHESTRATOR_SOURCES.map(({ name, voice }) => [name, voice]))).toEqual({
       Atlas: 'Matthew', Metis: 'Matthew', Echo: 'Matthew', Matrix: 'Matthew', Hermes: 'Matthew', Harmony: 'Tiffany',
@@ -140,13 +139,16 @@ describe('orchestrator seeds', () => {
     });
   });
 
-  test('keep orchestrator source folders free of message MP3 assets', async () => {
-    const root = join(import.meta.dir, '../../../../scripts/orchestrators');
-    const rootEntries = await readdir(root, { withFileTypes: true });
-    expect(rootEntries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort())
-      .toEqual(SEEDED_ORCHESTRATOR_SOURCES.map(({ dir }) => dir).sort());
-    const entries = await readdir(root, { recursive: true });
-    expect(entries.filter((entry) => entry.endsWith('message.mp3'))).toEqual([]);
+  test('embed nonempty skills whose frontmatter matches the source manifest', () => {
+    for (const source of SEEDED_ORCHESTRATOR_SOURCES) {
+      expect(source.skill.trim()).not.toBe('');
+      expect(source.skill).toMatch(new RegExp(`^---\\nname: ${source.name}\\nrole: ${source.role}\\n`, 'm'));
+    }
+  });
+
+  test('does not load skills from scripts at runtime', async () => {
+    const seedSource = await Bun.file(join(import.meta.dir, 'seed.ts')).text();
+    expect(seedSource).not.toContain('scripts/orchestrators');
   });
 });
 

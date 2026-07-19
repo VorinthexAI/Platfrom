@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { aql } from 'arangojs';
 import { closeDb, db } from './client';
 import { newId } from '@/lib/ids';
@@ -16,6 +15,7 @@ import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orc
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/agents/genesis/seed';
 import { seedBeacon } from '@/lib/ai/agents/beacon/seed';
+import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 
 export type SeedResult = {
   collection: string;
@@ -925,44 +925,44 @@ The long term vision is to create a new way of interacting with software. Rather
 ] as const;
 
 type SeededOrchestratorSource = {
-  dir: string;
   name: string;
   role: string;
   provider: string;
   model: string;
   voice: string;
+  skill: string;
 };
 
 type SeededVoice = Pick<Voice, 'provider' | 'model' | 'modelLabel' | 'voice' | 'label' | 'language' | 'format'>;
 
 export const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [
-  ['atlas-ceo', 'Atlas', 'CEO', 'Matthew'],
-  ['metis-cio', 'Metis', 'CIO', 'Matthew'],
-  ['echo-cko', 'Echo', 'CKO', 'Matthew'],
-  ['matrix-cdo', 'Matrix', 'CDO', 'Matthew'],
-  ['hermes-coo', 'Hermes', 'COO', 'Matthew'],
-  ['harmony-chro', 'Harmony', 'CHRO', 'Tiffany'],
-  ['phoenix-cgo', 'Phoenix', 'CGO', 'Matthew'],
-  ['iris-cco', 'Iris', 'CCO', 'Tiffany'],
-  ['orbit-cmo', 'Orbit', 'CMO', 'Tiffany'],
-  ['apollo-cso', 'Apollo', 'CSO', 'Matthew'],
-  ['athena-cpo', 'Athena', 'CPO', 'Tiffany'],
-  ['forge-cto', 'Forge', 'CTO', 'Matthew'],
-  ['aura-cxo', 'Aura', 'CXO', 'Tiffany'],
-  ['pillar-cqo', 'Pillar', 'CQO', 'Matthew'],
-  ['helios-caio', 'Helios', 'CAIO', 'Matthew'],
-  ['vulcan-cao', 'Vulcan', 'CAO', 'Matthew'],
-  ['ledger-cfo', 'Ledger', 'CFO', 'Matthew'],
-  ['mercury-cro', 'Mercury', 'CRO', 'Matthew'],
-  ['sentinel-ciso', 'Sentinel', 'CISO', 'Matthew'],
-  ['themis-clo', 'Themis', 'CLO', 'Tiffany'],
-].map(([dir, name, role, voice]) => ({
-  dir,
+  ['Atlas', 'CEO', 'Matthew'],
+  ['Metis', 'CIO', 'Matthew'],
+  ['Echo', 'CKO', 'Matthew'],
+  ['Matrix', 'CDO', 'Matthew'],
+  ['Hermes', 'COO', 'Matthew'],
+  ['Harmony', 'CHRO', 'Tiffany'],
+  ['Phoenix', 'CGO', 'Matthew'],
+  ['Iris', 'CCO', 'Tiffany'],
+  ['Orbit', 'CMO', 'Tiffany'],
+  ['Apollo', 'CSO', 'Matthew'],
+  ['Athena', 'CPO', 'Tiffany'],
+  ['Forge', 'CTO', 'Matthew'],
+  ['Aura', 'CXO', 'Tiffany'],
+  ['Pillar', 'CQO', 'Matthew'],
+  ['Helios', 'CAIO', 'Matthew'],
+  ['Vulcan', 'CAO', 'Matthew'],
+  ['Ledger', 'CFO', 'Matthew'],
+  ['Mercury', 'CRO', 'Matthew'],
+  ['Sentinel', 'CISO', 'Matthew'],
+  ['Themis', 'CLO', 'Tiffany'],
+].map(([name, role, voice]) => ({
   name,
   role,
   provider: 'aws-bedrock',
   model: 'amazon.nova-2-sonic-v1:0',
   voice,
+  skill: SEEDED_ORCHESTRATOR_SKILLS[name as keyof typeof SEEDED_ORCHESTRATOR_SKILLS],
 }));
 
 export const SEEDED_VOICES: SeededVoice[] = [
@@ -985,15 +985,6 @@ export const SEEDED_VOICES: SeededVoice[] = [
     format: 'mp3',
   },
 ];
-
-// backend/src/lib/db -> repo root, then into the checked-in orchestrator
-// source directory (present on a full checkout, e.g. the CI deploy job's
-// runner, regardless of this script's own working directory).
-const ORCHESTRATORS_SOURCE_DIR = join(import.meta.dir, '../../../../scripts/orchestrators');
-
-function loadOrchestratorSkill(dir: string): Promise<string> {
-  return Bun.file(join(ORCHESTRATORS_SOURCE_DIR, dir, 'SKILL.md')).text();
-}
 
 /** Converts the retired persisted action before strict action parsing occurs. */
 async function migrateRetiredCoreAskAction(): Promise<void> {
@@ -1227,8 +1218,6 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
   if (!voice) {
     throw new Error(`Seed voice not found for orchestrator "${seed.name}": ${seed.provider}/${seed.model}/${seed.voice}`);
   }
-  const skill = await loadOrchestratorSkill(seed.dir);
-
   const existing = await getOrchestratorByName(seed.name);
   if (!existing) {
     const key = newId();
@@ -1237,7 +1226,7 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
       name: seed.name,
       role: seed.role,
       voiceId: voice.key,
-      skill,
+      skill: seed.skill,
       createdAt: now(),
       updatedAt: now(),
     });
@@ -1247,7 +1236,7 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
   const patch: Partial<Omit<Orchestrator, 'key' | 'embedding'>> = {
     role: seed.role,
     voiceId: voice.key,
-    skill,
+    skill: seed.skill,
     updatedAt: now(),
   };
   await updateOrchestrator(existing.key, patch);

@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import chalk from "chalk";
 import { loadConfig } from "./config";
@@ -20,8 +20,6 @@ async function main() {
   const config = loadConfig();
   const registry = new RegistryStore(config.rootDir);
   const assets = (await registry.listAssets()).filter((asset) => asset.slug.startsWith("social-card-"));
-
-  await rm(WEB_PUBLIC_DIR, { recursive: true, force: true });
 
   let published = 0;
   for (const asset of assets) {

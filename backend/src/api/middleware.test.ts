@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
-import { rateLimitByIp, requireEnvApiKey, setSessionCookies, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { createAutoRefreshAuthTokens, rateLimitByIp, requireEnvApiKey, setSessionCookies, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
   return {
@@ -190,5 +190,41 @@ describe('backend session cookies', () => {
     expect(response.headers.get('x-refresh-token')).toBe('rotated-refresh');
     expect(response.headers.get('x-access-token-max-age')).toBe('900');
     expect(response.headers.get('x-refresh-token-max-age')).toBe('43200');
+  });
+
+  test('refreshes an expired Nexus access token from its forwarded refresh token', async () => {
+    const app = new Hono<{ Variables: { authIdentity: { key: string; identityType: 'user' | 'member' | 'superAdmin' }; userId: string } }>();
+    const rotatedTokens = {
+      accessToken: 'vrtx_access_rotated',
+      refreshToken: 'vrtx_refresh_rotated',
+      accessTokenMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS,
+      refreshTokenMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS,
+      sessionExpiresAt: new Date(Date.now() + FOUNDER_REFRESH_MAX_AGE_SECONDS * 1000).toISOString(),
+    };
+    const rotateCalls: string[] = [];
+
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async (token) => token === rotatedTokens.accessToken
+        ? { key: 'founder', identityType: 'superAdmin' }
+        : null,
+      rotateRefreshToken: async (token) => {
+        rotateCalls.push(token);
+        return token === 'vrtx_refresh_valid' ? rotatedTokens : null;
+      },
+    }));
+    app.get('/', (c) => c.json({ identity: c.get('authIdentity') }));
+
+    const response = await app.request('/', {
+      headers: {
+        authorization: 'Bearer vrtx_access_expired',
+        'x-refresh-token': 'vrtx_refresh_valid',
+      },
+    });
+
+    expect(rotateCalls).toEqual(['vrtx_refresh_valid']);
+    expect(await response.json()).toEqual({ identity: { key: 'founder', identityType: 'superAdmin' } });
+    expect(response.headers.get('x-access-token')).toBe(rotatedTokens.accessToken);
+    expect(response.headers.get('x-refresh-token')).toBe(rotatedTokens.refreshToken);
+    expect(response.headers.get('set-cookie')).toBeNull();
   });
 });

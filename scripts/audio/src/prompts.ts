@@ -58,3 +58,16 @@ export function buildDefaultVoiceoverScript(target: AudioTarget): string {
 
   return `${target.name} is a Vorinthex AI orchestrator built to coordinate specialized intelligence with calm precision and operational control.`;
 }
+
+/** A concise, role-specific Command biome briefing for the Charon brand voice. */
+export function buildOrchestratorBriefingScript(target: AudioTarget): string {
+  const entity = target.entity;
+  if (target.category !== "orchestrator" || !entity?.fullTitle) {
+    throw new Error("Orchestrator briefing scripts require an orchestrator target.");
+  }
+
+  const focus = entity.content?.bullets?.slice(0, 3).join(", ");
+  if (!focus) throw new Error(`${target.slug} has no orchestrator briefing focus.`);
+
+  return `${target.name}, your fully autonomous ${entity.fullTitle} for ${focus}.`;
+}
