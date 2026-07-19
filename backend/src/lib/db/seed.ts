@@ -909,7 +909,26 @@ type SeededVoice = Pick<Voice, 'provider' | 'model' | 'modelLabel' | 'voice' | '
 
 const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [];
 
-export const SEEDED_VOICES: SeededVoice[] = [];
+export const SEEDED_VOICES: SeededVoice[] = [
+  {
+    provider: 'aws-bedrock',
+    model: 'amazon.nova-2-sonic-v1:0',
+    modelLabel: 'Amazon Nova 2 Sonic',
+    voice: 'Tiffany',
+    label: 'Lyra',
+    language: 'en-US',
+    format: 'mp3',
+  },
+  {
+    provider: 'aws-bedrock',
+    model: 'amazon.nova-2-sonic-v1:0',
+    modelLabel: 'Amazon Nova 2 Sonic',
+    voice: 'Matthew',
+    label: 'Orion',
+    language: 'en-US',
+    format: 'mp3',
+  },
+];
 
 // backend/src/lib/db -> repo root, then into the checked-in orchestrator
 // source directory (present on a full checkout, e.g. the CI deploy job's
