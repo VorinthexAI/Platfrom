@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createProviderAdaptersFromEnv, PROVIDER_REGISTRY } from './index';
+import { createProviderAdapter, PROVIDER_REGISTRY, type ProviderCallOptions } from './index';
 import { normalizeProviderError, PRE_EXECUTION_ERROR_CODES, ProviderError, providerErrorCodeForStatus } from './errors';
 import { PROVIDER_SLUGS, chatInputSchema } from './types';
 
@@ -34,35 +34,14 @@ describe('provider registry', () => {
     expect(factory.create({ accessToken: 'tok', projectId: 'proj' }).id).toBe('google-vertex');
   });
 
-  test('fromEnv returns null when configuration is missing', () => {
-    for (const factory of Object.values(PROVIDER_REGISTRY)) {
-      expect(factory.fromEnv({})).toBeNull();
-    }
-  });
-
-  test('createProviderAdaptersFromEnv only builds configured providers', () => {
-    const adapters = createProviderAdaptersFromEnv({
-      OPENAI_API_KEY: 'a',
-      ANTHROPIC_API_KEY: 'b',
-      GROK_API_KEY: 'c',
-    });
-    expect(Object.keys(adapters).sort()).toEqual(['anthropic', 'openai', 'xai']);
-    expect(adapters.openai?.id).toBe('openai');
-  });
-
-  test('aws-bedrock requires the explicit AWS_BEDROCK_REGION opt-in', () => {
-    const withoutRegion = createProviderAdaptersFromEnv({
-      AWS_ACCESS_KEY_ID: 'k',
-      AWS_SECRET_ACCESS_KEY: 's',
-    });
-    expect(withoutRegion['aws-bedrock']).toBeUndefined();
-
-    const withRegion = createProviderAdaptersFromEnv({
-      AWS_BEDROCK_REGION: 'us-east-1',
-      AWS_ACCESS_KEY_ID: 'k',
-      AWS_SECRET_ACCESS_KEY: 's',
-    });
-    expect(withRegion['aws-bedrock']?.id).toBe('aws-bedrock');
+  test('creates an adapter from explicit per-call credentials', () => {
+    const options: ProviderCallOptions = {
+      provider: 'openai',
+      model: 'gpt-5.4-mini',
+      prompt: 'Hello',
+      credentials: { apiKey: 'test-key' },
+    };
+    expect(createProviderAdapter(options).id).toBe('openai');
   });
 });
 

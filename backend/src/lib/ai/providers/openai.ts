@@ -34,6 +34,8 @@ export const openAIProviderConfigSchema = z
   .strict();
 
 export type OpenAIProviderConfig = z.infer<typeof openAIProviderConfigSchema>;
+export const openAICredentialsSchema = openAIProviderConfigSchema;
+export type OpenAICredentials = OpenAIProviderConfig;
 
 const PROVIDER_ID = 'openai' as const;
 
@@ -211,9 +213,5 @@ export const openAIProviderFactory: ProviderFactory = {
   configSchema: openAIProviderConfigSchema,
   create(config) {
     return createOpenAIProvider(openAIProviderConfigSchema.parse(config));
-  },
-  fromEnv(env) {
-    if (!env.OPENAI_API_KEY) return null;
-    return createOpenAIProvider({ apiKey: env.OPENAI_API_KEY });
   },
 };

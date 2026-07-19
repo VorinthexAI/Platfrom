@@ -18,6 +18,8 @@ export const azureAIFoundryProviderConfigSchema = z
   .strict();
 
 export type AzureAIFoundryProviderConfig = z.infer<typeof azureAIFoundryProviderConfigSchema>;
+export const azureAIFoundryCredentialsSchema = azureAIFoundryProviderConfigSchema;
+export type AzureAIFoundryCredentials = AzureAIFoundryProviderConfig;
 
 const PROVIDER_ID = 'azure-ai-foundry' as const;
 
@@ -50,15 +52,5 @@ export const azureAIFoundryProviderFactory: ProviderFactory = {
   configSchema: azureAIFoundryProviderConfigSchema,
   create(config) {
     return createAzureAIFoundryProvider(azureAIFoundryProviderConfigSchema.parse(config));
-  },
-  fromEnv(env) {
-    if (!env.AZURE_AI_FOUNDRY_API_KEY || !env.AZURE_AI_FOUNDRY_ENDPOINT) return null;
-    return createAzureAIFoundryProvider(
-      azureAIFoundryProviderConfigSchema.parse({
-        apiKey: env.AZURE_AI_FOUNDRY_API_KEY,
-        endpoint: env.AZURE_AI_FOUNDRY_ENDPOINT,
-        ...(env.AZURE_AI_FOUNDRY_API_VERSION ? { apiVersion: env.AZURE_AI_FOUNDRY_API_VERSION } : {}),
-      }),
-    );
   },
 };

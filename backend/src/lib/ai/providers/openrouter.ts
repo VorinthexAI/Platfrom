@@ -15,6 +15,8 @@ export const openRouterProviderConfigSchema = z
   .strict();
 
 export type OpenRouterProviderConfig = z.infer<typeof openRouterProviderConfigSchema>;
+export const openRouterCredentialsSchema = openRouterProviderConfigSchema;
+export type OpenRouterCredentials = OpenRouterProviderConfig;
 
 const PROVIDER_ID = 'openrouter' as const;
 
@@ -46,9 +48,5 @@ export const openRouterProviderFactory: ProviderFactory = {
   configSchema: openRouterProviderConfigSchema,
   create(config) {
     return createOpenRouterProvider(openRouterProviderConfigSchema.parse(config));
-  },
-  fromEnv(env) {
-    if (!env.OPENROUTER_API_KEY) return null;
-    return createOpenRouterProvider(openRouterProviderConfigSchema.parse({ apiKey: env.OPENROUTER_API_KEY }));
   },
 };

@@ -117,17 +117,13 @@ export interface ProviderAdapter {
 }
 
 /**
- * How adapters are obtained: secrets load at runtime (env / secret store),
- * so the registry holds factories, never adapters constructed at module
- * import time. `fromEnv` returns null when the provider's required
- * configuration is absent — the router then treats the adapter as
- * unavailable and never routes to it.
+ * The registry holds factories, never adapters constructed at module import
+ * time. Callers supply validated credentials when creating an adapter.
  */
 export interface ProviderFactory {
   readonly id: ProviderId;
   readonly configSchema: z.ZodTypeAny;
   create(config: unknown): ProviderAdapter;
-  fromEnv(env: Record<string, string | undefined>): ProviderAdapter | null;
 }
 
 // ---------------------------------------------------------------------------

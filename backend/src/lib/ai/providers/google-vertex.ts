@@ -33,6 +33,8 @@ export const googleVertexProviderConfigSchema = z
   });
 
 export type GoogleVertexProviderConfig = z.infer<typeof googleVertexProviderConfigSchema>;
+export const googleVertexCredentialsSchema = googleVertexProviderConfigSchema;
+export type GoogleVertexCredentials = GoogleVertexProviderConfig;
 
 const PROVIDER_ID = 'google-vertex' as const;
 
@@ -162,9 +164,5 @@ export const googleVertexProviderFactory: ProviderFactory = {
   configSchema: googleVertexProviderConfigSchema,
   create(config) {
     return createGoogleVertexProvider(googleVertexProviderConfigSchema.parse(config));
-  },
-  fromEnv(env) {
-    if (!env.GOOGLE_API_KEY) return null;
-    return createGoogleVertexProvider(googleVertexProviderConfigSchema.parse({ apiKey: env.GOOGLE_API_KEY }));
   },
 };

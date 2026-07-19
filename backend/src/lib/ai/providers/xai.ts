@@ -12,6 +12,8 @@ export const xaiProviderConfigSchema = z
   .strict();
 
 export type XaiProviderConfig = z.infer<typeof xaiProviderConfigSchema>;
+export const xaiCredentialsSchema = xaiProviderConfigSchema;
+export type XaiCredentials = XaiProviderConfig;
 
 const PROVIDER_ID = 'xai' as const;
 
@@ -40,12 +42,5 @@ export const xaiProviderFactory: ProviderFactory = {
   configSchema: xaiProviderConfigSchema,
   create(config) {
     return createXaiProvider(xaiProviderConfigSchema.parse(config));
-  },
-  fromEnv(env) {
-    // The repo's existing secret name for xAI is GROK_API_KEY; accept the
-    // canonical XAI_API_KEY as well.
-    const apiKey = env.GROK_API_KEY ?? env.XAI_API_KEY;
-    if (!apiKey) return null;
-    return createXaiProvider(xaiProviderConfigSchema.parse({ apiKey }));
   },
 };

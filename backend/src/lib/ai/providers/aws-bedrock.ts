@@ -16,10 +16,8 @@ import {
 
 /**
  * AWS Bedrock over the model-agnostic Converse REST API, signed with SigV4
- * directly (no @aws-sdk/client-bedrock-runtime dependency). Requires an
- * explicit AWS_BEDROCK_REGION opt-in from the environment — the repo's
- * generic AWS_* credentials point at LocalStack for S3, so their presence
- * alone must not make this adapter look available.
+ * directly (no @aws-sdk/client-bedrock-runtime dependency). Credentials are
+ * supplied explicitly by the caller for each adapter creation.
  */
 export const awsBedrockProviderConfigSchema = z
   .object({
@@ -31,6 +29,8 @@ export const awsBedrockProviderConfigSchema = z
   .strict();
 
 export type AwsBedrockProviderConfig = z.infer<typeof awsBedrockProviderConfigSchema>;
+export const awsBedrockCredentialsSchema = awsBedrockProviderConfigSchema;
+export type AwsBedrockCredentials = AwsBedrockProviderConfig;
 
 const PROVIDER_ID = 'aws-bedrock' as const;
 
@@ -176,16 +176,5 @@ export const awsBedrockProviderFactory: ProviderFactory = {
   configSchema: awsBedrockProviderConfigSchema,
   create(config) {
     return createAwsBedrockProvider(awsBedrockProviderConfigSchema.parse(config));
-  },
-  fromEnv(env) {
-    if (!env.AWS_BEDROCK_REGION || !env.AWS_ACCESS_KEY_ID || !env.AWS_SECRET_ACCESS_KEY) return null;
-    return createAwsBedrockProvider(
-      awsBedrockProviderConfigSchema.parse({
-        region: env.AWS_BEDROCK_REGION,
-        accessKeyId: env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-        ...(env.AWS_SESSION_TOKEN ? { sessionToken: env.AWS_SESSION_TOKEN } : {}),
-      }),
-    );
   },
 };

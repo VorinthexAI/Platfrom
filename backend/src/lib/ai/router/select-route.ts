@@ -1,5 +1,4 @@
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers/repository';
-import { getDefaultProviderAdapters } from '@/lib/ai/providers';
 import { getActionBySlug } from '@/lib/db/actions.node';
 import { getModelById, getModelBySlug } from '@/lib/db/models.node';
 import { listEnabledModelActionsByActionKey } from '@/lib/db/model-actions.node';
@@ -26,7 +25,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
   if (!parsed.success) throw new RouteValidationError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   const request = parsed.data;
   const data = deps.data ?? defaultDataSource;
-  const adapters = deps.adapters ?? getDefaultProviderAdapters();
+  const adapters = deps.adapters ?? {};
   const action = await data.getActionBySlug(request.actionSlug);
   if (!action || !action.enabled) throw new NoEligibleRouteError(request.actionSlug, 'action is missing or disabled');
 

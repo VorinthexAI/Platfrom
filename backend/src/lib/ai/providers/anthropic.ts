@@ -24,6 +24,8 @@ export const anthropicProviderConfigSchema = z
   .strict();
 
 export type AnthropicProviderConfig = z.infer<typeof anthropicProviderConfigSchema>;
+export const anthropicCredentialsSchema = anthropicProviderConfigSchema;
+export type AnthropicCredentials = AnthropicProviderConfig;
 
 const PROVIDER_ID = 'anthropic' as const;
 
@@ -131,9 +133,5 @@ export const anthropicProviderFactory: ProviderFactory = {
   configSchema: anthropicProviderConfigSchema,
   create(config) {
     return createAnthropicProvider(anthropicProviderConfigSchema.parse(config));
-  },
-  fromEnv(env) {
-    if (!env.ANTHROPIC_API_KEY) return null;
-    return createAnthropicProvider({ apiKey: env.ANTHROPIC_API_KEY });
   },
 };

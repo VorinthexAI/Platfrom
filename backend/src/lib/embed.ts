@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { openAIProviderFactory } from '@/lib/ai/providers/openai';
 import type { ProviderAdapter } from '@/lib/ai/providers/types';
 
 export const embedInputSchema = z.object({ text: z.string().min(1) }).strict();
@@ -8,33 +7,25 @@ export const EMBEDDING_PROVIDER_ID = 'openai' as const;
 export const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small';
 export const EMBEDDING_CHUNK_CHARACTERS = 4_000;
 
-export function getEmbeddingModel(env: Record<string, string | undefined> = process.env): string {
-  return env.OPENAI_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL;
+export function getEmbeddingModel(model?: string): string {
+  return model?.trim() || DEFAULT_EMBEDDING_MODEL;
 }
 
-export function embeddingMetadata(env: Record<string, string | undefined> = process.env) {
-  return { embeddingProvider: EMBEDDING_PROVIDER_ID, embeddingModel: getEmbeddingModel(env) } as const;
+export function embeddingMetadata(model?: string) {
+  return { embeddingProvider: EMBEDDING_PROVIDER_ID, embeddingModel: getEmbeddingModel(model) } as const;
 }
 
-interface EmbedOptions {
+export interface EmbedOptions {
   provider?: ProviderAdapter;
-  env?: Record<string, string | undefined>;
+  model?: string;
 }
 
-let cachedOpenAIProvider: ProviderAdapter | null | undefined;
-
-function getDefaultOpenAIProvider(): ProviderAdapter | null {
-  if (cachedOpenAIProvider === undefined) cachedOpenAIProvider = openAIProviderFactory.fromEnv(process.env);
-  return cachedOpenAIProvider;
-}
-
-/** Generates embeddings through the canonical OpenAI provider adapter. */
+/** Generates embeddings through an explicitly supplied OpenAI provider adapter. */
 export async function embed(input: z.infer<typeof embedInputSchema>, options: EmbedOptions = {}): Promise<number[]> {
   const parsed = embedInputSchema.parse(input);
-  const env = options.env ?? process.env;
-  const provider = options.provider ?? (options.env ? openAIProviderFactory.fromEnv(options.env) : getDefaultOpenAIProvider());
+  const provider = options.provider;
   if (!provider?.embed) {
-    throw new Error('OpenAI embedding provider is unavailable. Configure OPENAI_API_KEY.');
+    throw new Error('OpenAI embedding provider is unavailable. Supply an explicit provider adapter.');
   }
   const characters = [...parsed.text];
   const chunks: string[] = [];
@@ -42,7 +33,7 @@ export async function embed(input: z.infer<typeof embedInputSchema>, options: Em
     chunks.push(characters.slice(index, index + EMBEDDING_CHUNK_CHARACTERS).join(''));
   }
   const response = await provider.embed({
-    externalModelId: getEmbeddingModel(env),
+    externalModelId: getEmbeddingModel(options.model),
     input: chunks.length === 1 ? chunks[0]! : chunks,
   });
   if (response.embeddings.length !== chunks.length || response.embeddings.some((vector) => vector.length === 0)) {

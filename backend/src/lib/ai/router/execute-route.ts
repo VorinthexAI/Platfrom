@@ -1,4 +1,3 @@
-import { getDefaultProviderAdapters } from '@/lib/ai/providers';
 import { normalizeProviderError } from '@/lib/ai/providers/errors';
 import type { ProviderAdapter, ProviderExecuteResponse, ProviderId } from '@/lib/ai/providers/types';
 import { ZERO_TOKEN_USAGE, type TokenUsage } from '@/lib/ai/shared/usage';
@@ -40,7 +39,7 @@ export interface RouteAttemptTelemetry {
 /** V1 executes exactly the selected deterministic route; there are no scored fallbacks. */
 export async function executeRoute<TInput, TOutput>(options: ExecuteRouteOptions<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
   const { decision } = options;
-  const adapter = (options.adapters ?? getDefaultProviderAdapters())[decision.providerSlug];
+  const adapter = options.adapters?.[decision.providerSlug];
   if (!adapter) throw new ProviderExecutionError(decision.actionSlug, [{ modelId: decision.modelSlug, providerId: decision.providerSlug, externalModelId: decision.providerModelId, code: 'adapter_unavailable', message: 'provider adapter is unavailable' }]);
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();

@@ -5,6 +5,13 @@ import { googleVertexProviderFactory } from './google-vertex';
 import { openAIProviderFactory } from './openai';
 import { openRouterProviderFactory } from './openrouter';
 import { xaiProviderFactory } from './xai';
+import type { AnthropicCredentials } from './anthropic';
+import type { AwsBedrockCredentials } from './aws-bedrock';
+import type { AzureAIFoundryCredentials } from './azure-ai-foundry';
+import type { GoogleVertexCredentials } from './google-vertex';
+import type { OpenAICredentials } from './openai';
+import type { OpenRouterCredentials } from './openrouter';
+import type { XaiCredentials } from './xai';
 import type { ProviderAdapter, ProviderFactory, ProviderId } from './types';
 
 export {
@@ -50,23 +57,27 @@ export {
   PRE_EXECUTION_ERROR_CODES,
   type ProviderErrorCode,
 } from './errors';
-export { createOpenAIProvider, openAIProviderConfigSchema, openAIProviderFactory, type OpenAIProviderConfig } from './openai';
-export { createAnthropicProvider, anthropicProviderConfigSchema, anthropicProviderFactory, type AnthropicProviderConfig } from './anthropic';
-export { createXaiProvider, xaiProviderConfigSchema, xaiProviderFactory, type XaiProviderConfig } from './xai';
+export { createOpenAIProvider, openAICredentialsSchema, openAIProviderConfigSchema, openAIProviderFactory, type OpenAICredentials, type OpenAIProviderConfig } from './openai';
+export { createAnthropicProvider, anthropicCredentialsSchema, anthropicProviderConfigSchema, anthropicProviderFactory, type AnthropicCredentials, type AnthropicProviderConfig } from './anthropic';
+export { createXaiProvider, xaiCredentialsSchema, xaiProviderConfigSchema, xaiProviderFactory, type XaiCredentials, type XaiProviderConfig } from './xai';
 export {
   createGoogleVertexProvider,
+  googleVertexCredentialsSchema,
   googleVertexProviderConfigSchema,
   googleVertexProviderFactory,
+  type GoogleVertexCredentials,
   type GoogleVertexProviderConfig,
 } from './google-vertex';
 export {
   createAzureAIFoundryProvider,
+  azureAIFoundryCredentialsSchema,
   azureAIFoundryProviderConfigSchema,
   azureAIFoundryProviderFactory,
+  type AzureAIFoundryCredentials,
   type AzureAIFoundryProviderConfig,
 } from './azure-ai-foundry';
-export { createAwsBedrockProvider, awsBedrockProviderConfigSchema, awsBedrockProviderFactory, type AwsBedrockProviderConfig } from './aws-bedrock';
-export { createOpenRouterProvider, openRouterProviderConfigSchema, openRouterProviderFactory, type OpenRouterProviderConfig } from './openrouter';
+export { createAwsBedrockProvider, awsBedrockCredentialsSchema, awsBedrockProviderConfigSchema, awsBedrockProviderFactory, type AwsBedrockCredentials, type AwsBedrockProviderConfig } from './aws-bedrock';
+export { createOpenRouterProvider, openRouterCredentialsSchema, openRouterProviderConfigSchema, openRouterProviderFactory, type OpenRouterCredentials, type OpenRouterProviderConfig } from './openrouter';
 export {
   providerSchema,
   getProviderById,
@@ -92,31 +103,27 @@ export const PROVIDER_REGISTRY: Record<ProviderId, ProviderFactory> = {
   openrouter: openRouterProviderFactory,
 };
 
-/**
- * Builds adapters for every provider whose configuration is present in the
- * given environment. Providers with missing configuration are simply
- * absent — the router treats them as unavailable routes.
- */
-export function createProviderAdaptersFromEnv(
-  env: Record<string, string | undefined> = process.env,
-): Partial<Record<ProviderId, ProviderAdapter>> {
-  const adapters: Partial<Record<ProviderId, ProviderAdapter>> = {};
-  for (const factory of Object.values(PROVIDER_REGISTRY)) {
-    const adapter = factory.fromEnv(env);
-    if (adapter) adapters[factory.id] = adapter;
-  }
-  return adapters;
-}
+export type ProviderCredentials = {
+  openai: OpenAICredentials;
+  anthropic: AnthropicCredentials;
+  xai: XaiCredentials;
+  'google-vertex': GoogleVertexCredentials;
+  'azure-ai-foundry': AzureAIFoundryCredentials;
+  'aws-bedrock': AwsBedrockCredentials;
+  openrouter: OpenRouterCredentials;
+};
 
-let cachedDefaultAdapters: Partial<Record<ProviderId, ProviderAdapter>> | null = null;
+/** A future provider call always receives model, prompt, and credentials explicitly. */
+export type ProviderCallOptions = {
+  [Id in ProviderId]: {
+    provider: Id;
+    model: string;
+    prompt: string;
+    credentials: ProviderCredentials[Id];
+  };
+}[ProviderId];
 
-/** Process-wide adapters built once from `process.env` — the router's default. */
-export function getDefaultProviderAdapters(): Partial<Record<ProviderId, ProviderAdapter>> {
-  cachedDefaultAdapters ??= createProviderAdaptersFromEnv();
-  return cachedDefaultAdapters;
-}
-
-/** Test hook: clears the process-wide adapter cache. */
-export function resetDefaultProviderAdapters(): void {
-  cachedDefaultAdapters = null;
+/** Creates one adapter from credentials supplied by the caller, never process.env. */
+export function createProviderAdapter(options: ProviderCallOptions): ProviderAdapter {
+  return PROVIDER_REGISTRY[options.provider].create(options.credentials);
 }
