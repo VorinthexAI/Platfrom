@@ -7,6 +7,7 @@ interface SessionCookieOptions {
   secure: boolean;
   path: "/";
   maxAge: number;
+  domain?: string;
 }
 
 interface SessionCookieResponse {
@@ -34,14 +35,24 @@ export function setAuthSessionCookies(
   response: SessionCookieResponse,
   tokens: AuthSessionTokens,
   secure = process.env.NODE_ENV === "production",
+  domain = process.env.NODE_ENV === "production" ? "vorinthex.com" : undefined,
 ) {
-  const options = (maxAge: number) => ({
+  const options = (maxAge: number, cookieDomain: string | null = domain ?? null) => ({
     httpOnly: true,
     sameSite: "lax",
     secure,
     path: "/",
     maxAge,
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
   } as const);
-  if (tokens.accessToken) response.cookies.set(ACCESS_COOKIE, tokens.accessToken, options(requireMaxAge(tokens.accessTokenMaxAgeSeconds, ACCESS_COOKIE)));
-  if (tokens.refreshToken) response.cookies.set(REFRESH_COOKIE, tokens.refreshToken, options(requireMaxAge(tokens.refreshTokenMaxAgeSeconds, REFRESH_COOKIE)));
+  if (tokens.accessToken) {
+    // Remove the pre-root-domain cookie. Otherwise an old host-only refresh
+    // token can win when the browser sends duplicate cookie names.
+    if (domain) response.cookies.set(ACCESS_COOKIE, "", options(0, null));
+    response.cookies.set(ACCESS_COOKIE, tokens.accessToken, options(requireMaxAge(tokens.accessTokenMaxAgeSeconds, ACCESS_COOKIE)));
+  }
+  if (tokens.refreshToken) {
+    if (domain) response.cookies.set(REFRESH_COOKIE, "", options(0, null));
+    response.cookies.set(REFRESH_COOKIE, tokens.refreshToken, options(requireMaxAge(tokens.refreshTokenMaxAgeSeconds, REFRESH_COOKIE)));
+  }
 }

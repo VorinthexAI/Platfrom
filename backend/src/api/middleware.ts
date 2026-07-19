@@ -36,7 +36,9 @@ function setAuthIdentity(c: Parameters<MiddlewareHandler>[0], identity: AuthIden
 }
 
 function cookieOptions(maxAge: number) {
-  const domain = process.env.COOKIE_DOMAIN;
+  // Root-scope sessions let a founder enter Nexus from any product subdomain.
+  // The web bridge uses the same production fallback when it persists a rotation.
+  const domain = process.env.COOKIE_DOMAIN ?? (process.env.NODE_ENV === 'production' ? 'vorinthex.com' : undefined);
   const crossSite = Boolean(domain);
   return {
     httpOnly: true,

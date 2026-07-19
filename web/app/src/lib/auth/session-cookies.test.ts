@@ -9,14 +9,15 @@ import {
 
 describe("web auth session cookies", () => {
   test("applies founder 15-minute access and one-day refresh", () => {
-    const writes: Array<{ name: string; value: string; options: { maxAge: number; httpOnly: boolean; secure: boolean } }> = [];
-    const response = { cookies: { set(name: string, value: string, options: { maxAge: number; httpOnly: true; secure: boolean }) { writes.push({ name, value, options }); } } };
+    const writes: Array<{ name: string; value: string; options: { maxAge: number; httpOnly: boolean; secure: boolean; domain?: string } }> = [];
+    const response = { cookies: { set(name: string, value: string, options: { maxAge: number; httpOnly: true; secure: boolean; domain?: string }) { writes.push({ name, value, options }); } } };
 
-    setAuthSessionCookies(response, { accessToken: "access", refreshToken: "refresh", accessTokenMaxAgeSeconds: 15 * 60, refreshTokenMaxAgeSeconds: 24 * 60 * 60 }, true);
+    setAuthSessionCookies(response, { accessToken: "access", refreshToken: "refresh", accessTokenMaxAgeSeconds: 15 * 60, refreshTokenMaxAgeSeconds: 24 * 60 * 60 }, true, "vorinthex.com");
 
-    expect(writes.map(({ name }) => name)).toEqual([ACCESS_COOKIE, REFRESH_COOKIE]);
-    expect(writes.map(({ options }) => options.maxAge)).toEqual([15 * 60, 24 * 60 * 60]);
+    expect(writes.map(({ name }) => name)).toEqual([ACCESS_COOKIE, ACCESS_COOKIE, REFRESH_COOKIE, REFRESH_COOKIE]);
+    expect(writes.map(({ options }) => options.maxAge)).toEqual([0, 15 * 60, 0, 24 * 60 * 60]);
     expect(writes.every(({ options }) => options.httpOnly && options.secure)).toBe(true);
+    expect(writes.map(({ options }) => options.domain)).toEqual([undefined, "vorinthex.com", undefined, "vorinthex.com"]);
   });
 
   test("applies ordinary seven-day access and one-year refresh", () => {
