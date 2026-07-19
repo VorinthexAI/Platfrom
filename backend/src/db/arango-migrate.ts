@@ -15,6 +15,7 @@ import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes'
 import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
 import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
 import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
+import { createOpenAIProvider } from '../lib/ai/providers/openai';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
@@ -24,6 +25,9 @@ const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
 const username = process.env.ARANGO_USERNAME ?? 'root';
 const password = process.env.ARANGO_ROOT_PASSWORD ?? '';
+const openAiApiKey = process.env.OPENAI_API_KEY?.trim();
+if (!openAiApiKey) throw new Error('OPENAI_API_KEY is required to migrate embeddings');
+const embeddingProvider = createOpenAIProvider({ apiKey: openAiApiKey });
 
 interface CollectionSpec {
   name: string;
@@ -34,6 +38,10 @@ interface CollectionSpec {
 
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
   return buildEmbeddingText(embedKeys, doc);
+}
+
+function generateEmbedding(text: string) {
+  return embed({ text }, { provider: embeddingProvider });
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -118,7 +126,7 @@ async function backfillCollectionEmbeddings(targetDb: Database, spec: Collection
     const key = nonEmptyString(doc._key);
     if (!key) continue;
     const text = buildNodeEmbedText(spec.name, key, embedKeys, doc);
-    const embedding = text ? await embed({ text }) : [];
+    const embedding = text ? await generateEmbedding(text) : [];
     await collection.update(key, { embedding, ...metadata });
   }
   if (docs.length > 0) {
@@ -895,7 +903,7 @@ async function main() {
           metadata: platform.metadata && typeof platform.metadata === 'object' ? platform.metadata : {},
           createdAt: nonEmptyString(platform.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          embedding: await embed({ text: ['_organizations', key, name].join(':') }),
+          embedding: await generateEmbedding(['_organizations', key, name].join(':')),
         },
         { overwriteMode: 'ignore' },
       );
@@ -920,7 +928,7 @@ async function main() {
       metadata: {},
       createdAt: now,
       updatedAt: now,
-      embedding: await embed({ text: ['_organizations', rootOrganizationId, 'Vorinthex AI'].join(':') }),
+      embedding: await generateEmbedding(['_organizations', rootOrganizationId, 'Vorinthex AI'].join(':')),
     });
     console.log('Created root organization Vorinthex AI');
   }
@@ -961,7 +969,7 @@ async function main() {
     if (!summary) continue;
     await targetDb.collection('scopes').update(scope._key, {
       summary,
-      embedding: await embed({ text: buildEmbeddingText(['summary'], { summary })! }),
+      embedding: await generateEmbedding(buildEmbeddingText(['summary'], { summary })!),
     });
   }
 
@@ -978,7 +986,7 @@ async function main() {
     );
     const existing = await existingCursor.next();
     const scopeKey = existing?._key ?? seed.key;
-    const embedding = await embed({ text: buildEmbeddingText(['summary'], seed)! });
+    const embedding = await generateEmbedding(buildEmbeddingText(['summary'], seed)!);
     if (existing) {
       await targetDb.collection('scopes').update(scopeKey, {
         name: seed.name,
@@ -1093,7 +1101,7 @@ async function main() {
           metadata: {},
           createdAt: nonEmptyString(team.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          embedding: embedText ? await embed({ text: embedText }) : [],
+          embedding: embedText ? await generateEmbedding(embedText) : [],
         },
         { overwriteMode: 'ignore' },
       );
@@ -1455,7 +1463,7 @@ async function main() {
           payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
         },
         createdAt,
-        embedding: eventEmbedText ? await embed({ text: eventEmbedText }) : [],
+        embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
       });
     }
   }
@@ -1496,7 +1504,7 @@ async function main() {
           slug,
           data: event.data && typeof event.data === 'object' ? event.data : {},
           createdAt: typeof event.createdAt === 'string' ? event.createdAt : new Date().toISOString(),
-          embedding: eventEmbedText ? await embed({ text: eventEmbedText }) : [],
+          embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
         },
         { overwriteMode: 'ignore' },
       );
@@ -1554,7 +1562,7 @@ async function main() {
     const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
       ? buildNodeEmbedText('events', event._key, ['slug'], { slug: event.slug })
       : null;
-    const embedding = eventEmbedText ? await embed({ text: eventEmbedText }) : [];
+    const embedding = eventEmbedText ? await generateEmbedding(eventEmbedText) : [];
     await eventsCollection.update(event._key, {
       scopeId: nexusScopeId,
       sourceId: null,
@@ -1797,7 +1805,7 @@ async function main() {
       belongsTo: null,
       entityId: null,
       entityType: null,
-      embedding: eventEmbedText ? await embed({ text: eventEmbedText }) : [],
+      embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
     }, { keepNull: false });
   }
 
