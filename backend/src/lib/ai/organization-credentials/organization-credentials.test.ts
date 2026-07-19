@@ -14,7 +14,7 @@ function memoryDatabase(): OrganizationCredentialsDatabase & { docs: Map<string,
     docs,
     async query(query, vars = {}) {
       const document = [...docs.values()].find((candidate) => candidate.organizationKey === vars.organizationKey && candidate.providerKey === vars.providerKey);
-      return { async next() { return query.includes('RETURN credential._key') ? document?._key : document; } };
+      return { async next() { if (query.includes('RETURN credential._key')) return document?._key; if (query.includes('RETURN true')) return document ? true : undefined; return document; } };
     },
     collection() {
       return {
@@ -57,6 +57,8 @@ describe('organization credentials', () => {
       expect(database.docs.size).toBe(1);
       expect([...database.docs.values()][0]?.encryptedCredentials).not.toContain('second');
       expect(await repository.getCredentials(organizationKey, providerKey)).toEqual({ apiKey: 'second' });
+      expect(await repository.hasCredentials(organizationKey, providerKey)).toBe(true);
+      expect(await repository.hasCredentials(organizationKey, newId())).toBe(false);
     } finally {
       if (original === undefined) delete process.env.ORCHESTRATION_CREDENTIALS_MASTER_KEY;
       else process.env.ORCHESTRATION_CREDENTIALS_MASTER_KEY = original;

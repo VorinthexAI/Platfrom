@@ -2,6 +2,7 @@ export type AccessibleOrganizationOption = {
   key: string;
   name: string;
   alias: string | null;
+  role: "owner" | "admin" | "moderator" | "member" | "viewer";
 };
 
 export type AccessibleScopeOption = {
@@ -18,6 +19,13 @@ export type FoundersAccount = {
   rootOrganization: { key: string; name: string; alias: string | null };
   rootMembership: { role: string; title: string | null };
   applicationRole: string;
+};
+
+/** Safe provider metadata. Credential values are never returned to the browser. */
+export type OrganizationProvider = {
+  provider: string;
+  linked: boolean;
+  credentialsConfigured: boolean;
 };
 
 export type BeaconStatus =

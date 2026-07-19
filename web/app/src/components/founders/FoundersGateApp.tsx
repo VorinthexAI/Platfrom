@@ -19,7 +19,7 @@ import { ArtifactWorkspace } from "./ArtifactWorkspace";
 import { BeaconInputIsland } from "./BeaconInputIsland";
 import { ContextSelector } from "./ContextSelector";
 import { FoundersBackdrop } from "./FoundersBackdrop";
-import { OrganizationProviderSelector } from "./OrganizationProviderSelector";
+import { AccountModal } from "./AccountModal";
 
 const ORGANIZATION_STORAGE_KEY = "vx_founders_organization";
 const scopeStorageKey = (organizationKey: string) => `vx_founders_scope:${organizationKey}`;
@@ -48,6 +48,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [scopeKey, setScopeKey] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [artifactSheetOpen, setArtifactSheetOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const scopeRequestRef = useRef(0);
 
   const beacon = useBeaconStream();
@@ -178,17 +179,13 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
           onChange={changeScope}
           disabled={!organizationKey}
         />
-        {organizationKey ? <OrganizationProviderSelector key={organizationKey} organizationKey={organizationKey} /> : null}
       </div>
-      <nav className="mt-8 grid grid-cols-2 gap-2" aria-label="Nexus workspace">
-        <button type="button" onClick={() => { setArtifactSheetOpen(false); setDrawerOpen(false); }} className={`rounded-xl border px-3 py-2 text-xs transition-colors ${!artifactSheetOpen ? "border-[#d57828]/50 bg-[#d57828]/10 text-silver-50" : "border-white/8 text-silver-400 hover:border-white/20"}`}>Beacon</button>
-        <button type="button" onClick={() => { setArtifactSheetOpen(true); setDrawerOpen(false); }} className={`rounded-xl border px-3 py-2 text-xs transition-colors ${artifactSheetOpen ? "border-[#d57828]/50 bg-[#d57828]/10 text-silver-50" : "border-white/8 text-silver-400 hover:border-white/20"}`}>Artifacts</button>
-      </nav>
       <div className="flex-1" />
       {account ? (
         <AccountFooter
           name={account.user.name ?? account.user.alias ?? account.user.email}
           secondary={account.rootMembership.title ?? account.rootMembership.role}
+          onOpen={() => { setDrawerOpen(false); setAccountOpen(true); }}
         />
       ) : null}
     </>
@@ -271,6 +268,16 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
           scopeKey={scopeKey}
           open={artifactSheetOpen}
           onOpenChange={setArtifactSheetOpen}
+        />
+      ) : null}
+
+      {account && organizationKey ? (
+        <AccountModal
+          account={account}
+          organization={organizations.find((organization) => organization.key === organizationKey) ?? null}
+          open={accountOpen}
+          onOpenChange={setAccountOpen}
+          canManageProviders={organizations.find((organization) => organization.key === organizationKey)?.role === "owner"}
         />
       ) : null}
 

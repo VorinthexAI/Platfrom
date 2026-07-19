@@ -51,6 +51,18 @@ export function createOrganizationProviderRepository(
         throw error;
       }
     },
+    async upsertProvider(organizationKey, provider, scopeKey) {
+      try {
+        return await this.addProvider(organizationKey, provider, scopeKey);
+      } catch (error) {
+        if (!(error instanceof DuplicateOrganizationProviderError)) throw error;
+        const valid = organizationProviderSchema.pick({ organizationKey: true, providerKey: true }).parse({ organizationKey, providerKey: provider.providerKey });
+        const cursor = await database.query('FOR link IN @@collection FILTER link.organizationKey == @organizationKey && link.providerKey == @providerKey LIMIT 1 RETURN link', { '@collection': ORGANIZATION_PROVIDERS_COLLECTION, ...valid });
+        const existing = await cursor.next();
+        if (!existing || typeof existing !== 'object') throw error;
+        return organizationProviderSchema.parse(withArangoKey(existing as Record<string, unknown>));
+      }
+    },
     async updateProvider(organizationKey, providerKey, patch, scopeKey) {
       const valid = organizationProviderSchema.pick({ organizationKey: true, providerKey: true }).parse({ organizationKey, providerKey });
       const cursor = await database.query('FOR link IN @@collection FILTER link.organizationKey == @organizationKey && link.providerKey == @providerKey LIMIT 1 RETURN link._key', { '@collection': ORGANIZATION_PROVIDERS_COLLECTION, ...valid });

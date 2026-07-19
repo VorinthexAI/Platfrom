@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function FoundersAccountRoute() {
-  redirect("/nexus/account");
+  redirect("/nexus");
 }

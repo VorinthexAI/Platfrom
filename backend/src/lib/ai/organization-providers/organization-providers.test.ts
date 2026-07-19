@@ -59,6 +59,17 @@ describe('organizationProviders key allow-list', () => {
     expect(await repository.hasProvider(organizationKey, providerKey)).toBe(false);
   });
 
+  test('upsert returns the existing provider link without creating a duplicate', async () => {
+    const database = memoryDatabase();
+    const repository = createOrganizationProviderRepository(database);
+    const organizationKey = newId();
+    const providerKey = newId();
+    const first = await repository.upsertProvider(organizationKey, { providerKey, name: 'OpenAI', description: null });
+    const second = await repository.upsertProvider(organizationKey, { providerKey, name: 'OpenAI', description: null });
+    expect(second.key).toBe(first.key);
+    expect(database.docs.size).toBe(1);
+  });
+
   test('emits thin organization-provider invalidations for create, update and usage', async () => {
     const events: Array<{ scopeId: string; slug: string; data: { nodeType: string; nodeKey: string } }> = [];
     const repository = createOrganizationProviderRepository(memoryDatabase(), async (event) => { events.push(event); });

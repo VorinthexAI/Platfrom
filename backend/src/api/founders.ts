@@ -17,6 +17,21 @@ import {
 } from '@/lib/ai/agents/beacon/ask';
 import { beaconDelegateInputSchema, BeaconDelegationError, delegateAgentCreationFromBeacon } from '@/lib/ai/agents/beacon/delegate';
 import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError } from '@/lib/ai/router';
+import { getDefaultOrganizationCredentialsRepository } from '@/lib/ai/organization-credentials';
+import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers';
+import { getProviderBySlug } from '@/lib/db/providers.node';
+import {
+  PROVIDER_SLUGS,
+  anthropicCredentialsSchema,
+  awsBedrockCredentialsSchema,
+  azureAIFoundryCredentialsSchema,
+  googleVertexCredentialsSchema,
+  openAICredentialsSchema,
+  openRouterCredentialsSchema,
+  providerSlugSchema,
+  xaiCredentialsSchema,
+  type ProviderSlug,
+} from '@/lib/ai/providers';
 import { getAuthIdentity } from './security';
 import { parseJson, strictObject } from './validation';
 
@@ -42,6 +57,21 @@ export const foundersBeaconDelegateSchema = strictObject({
   scopeKey: z.string().cuid(),
   input: beaconDelegateInputSchema,
 });
+
+export const foundersProviderCredentialsBodySchema = strictObject({ credentials: z.unknown() });
+export const foundersProviderCredentialsSchemas: Record<ProviderSlug, z.ZodTypeAny> = {
+  openai: openAICredentialsSchema,
+  anthropic: anthropicCredentialsSchema,
+  xai: xaiCredentialsSchema,
+  'google-vertex': googleVertexCredentialsSchema,
+  'azure-ai-foundry': azureAIFoundryCredentialsSchema,
+  'aws-bedrock': awsBedrockCredentialsSchema,
+  openrouter: openRouterCredentialsSchema,
+};
+
+function parseFounderProviderCredentials(provider: ProviderSlug, credentials: unknown) {
+  return foundersProviderCredentialsSchemas[provider].parse(credentials);
+}
 
 const BEACON_ASK_TIMEOUT_MS = 120_000;
 const BEACON_ASK_RATE_LIMIT_PER_MINUTE = 12;
@@ -114,6 +144,59 @@ export async function listFoundersOrganizationScopes(c: Context) {
     const { membership } = await requireOrganizationAccess(auth.founder.user.key, parsedKey.data);
     const scopes = await listAccessibleScopes(membership);
     return c.json({ scopes });
+  } catch (error) {
+    return forbidden(c, error);
+  }
+}
+
+/** GET /founders/organizations/:organizationKey/providers — owner-visible provider connection status only. */
+export async function listFoundersOrganizationProviders(c: Context) {
+  const auth = await requireFounder(c);
+  if ('error' in auth) return auth.error;
+  const parsedKey = foundersOrganizationKeyParamSchema.safeParse(c.req.param('organizationKey'));
+  if (!parsedKey.success) return c.json({ error: 'invalid organization key' }, 400);
+  try {
+    const { membership } = await requireOrganizationAccess(auth.founder.user.key, parsedKey.data);
+    if (membership.orgRole !== 'owner') return c.json({ error: 'organization owner role required' }, 403);
+    const links = getDefaultOrganizationProviderRepository();
+    const credentials = getDefaultOrganizationCredentialsRepository();
+    const providers = await Promise.all(PROVIDER_SLUGS.map(async (provider) => {
+      const canonical = await getProviderBySlug(provider);
+      if (!canonical) return { provider, linked: false, credentialsConfigured: false };
+      const [linked, credentialsConfigured] = await Promise.all([
+        links.hasProvider(parsedKey.data, canonical.key),
+        credentials.hasCredentials(parsedKey.data, canonical.key),
+      ]);
+      return { provider, linked, credentialsConfigured };
+    }));
+    return c.json({ providers });
+  } catch (error) {
+    return forbidden(c, error);
+  }
+}
+
+/** PUT /founders/organizations/:organizationKey/providers/:provider — owner-only credential connect/update. */
+export async function upsertFoundersOrganizationProvider(c: Context) {
+  const auth = await requireFounder(c);
+  if ('error' in auth) return auth.error;
+  const organizationKey = foundersOrganizationKeyParamSchema.safeParse(c.req.param('organizationKey'));
+  const provider = providerSlugSchema.safeParse(c.req.param('provider'));
+  if (!organizationKey.success) return c.json({ error: 'invalid organization key' }, 400);
+  if (!provider.success) return c.json({ error: 'invalid provider' }, 400);
+  try {
+    const { membership } = await requireOrganizationAccess(auth.founder.user.key, organizationKey.data);
+    if (membership.orgRole !== 'owner') return c.json({ error: 'organization owner role required' }, 403);
+    const body = await parseJson(c, foundersProviderCredentialsBodySchema);
+    const parsedCredentials = parseFounderProviderCredentials(provider.data, body.credentials);
+    const canonical = await getProviderBySlug(provider.data);
+    if (!canonical) return c.json({ error: 'provider unavailable' }, 404);
+    await getDefaultOrganizationProviderRepository().upsertProvider(organizationKey.data, {
+      providerKey: canonical.key,
+      name: canonical.name,
+      description: null,
+    });
+    await getDefaultOrganizationCredentialsRepository().setCredentials(organizationKey.data, canonical.key, parsedCredentials);
+    return c.json({ provider: provider.data, linked: true, credentialsConfigured: true });
   } catch (error) {
     return forbidden(c, error);
   }
