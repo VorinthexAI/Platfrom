@@ -124,15 +124,20 @@ describe('voice seeds', () => {
 });
 
 describe('orchestrator seeds', () => {
-  test('seed exactly the 20 executive orchestrator sources with deterministic Nova voices', () => {
+  test('seed exactly the 20 executive orchestrator sources with their assigned Nova voices', () => {
     expect(SEEDED_ORCHESTRATOR_SOURCES).toHaveLength(20);
     expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ dir, name, role }) => `${dir}:${name}:${role}`)).toEqual([
-      'atlas-ceo:Atlas:CEO', 'metis-cio:Metis:CIO', 'hermes-coo:Hermes:COO', 'phoenix-cgo:Phoenix:CGO', 'athena-cpo:Athena:CPO',
-      'ledger-cfo:Ledger:CFO', 'sentinel-ciso:Sentinel:CISO', 'iris-cco:Iris:CCO', 'orbit-cmo:Orbit:CMO', 'apollo-cso:Apollo:CSO',
-      'forge-cto:Forge:CTO', 'mercury-cro:Mercury:CRO', 'themis-clo:Themis:CLO', 'matrix-cdo:Matrix:CDO', 'echo-cko:Echo:CKO',
-      'harmony-chro:Harmony:CHRO', 'aura-cxo:Aura:CXO', 'pillar-cqo:Pillar:CQO', 'helios-caio:Helios:CAIO', 'vulcan-cao:Vulcan:CAO',
+      'atlas-ceo:Atlas:CEO', 'metis-cio:Metis:CIO', 'echo-cko:Echo:CKO', 'matrix-cdo:Matrix:CDO', 'hermes-coo:Hermes:COO',
+      'harmony-chro:Harmony:CHRO', 'phoenix-cgo:Phoenix:CGO', 'iris-cco:Iris:CCO', 'orbit-cmo:Orbit:CMO', 'apollo-cso:Apollo:CSO',
+      'athena-cpo:Athena:CPO', 'forge-cto:Forge:CTO', 'aura-cxo:Aura:CXO', 'pillar-cqo:Pillar:CQO', 'helios-caio:Helios:CAIO',
+      'vulcan-cao:Vulcan:CAO', 'ledger-cfo:Ledger:CFO', 'mercury-cro:Mercury:CRO', 'sentinel-ciso:Sentinel:CISO', 'themis-clo:Themis:CLO',
     ]);
-    expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ voice }) => voice)).toEqual(Array.from({ length: 20 }, (_, index) => index % 2 === 0 ? 'Tiffany' : 'Matthew'));
+    expect(Object.fromEntries(SEEDED_ORCHESTRATOR_SOURCES.map(({ name, voice }) => [name, voice]))).toEqual({
+      Atlas: 'Matthew', Metis: 'Matthew', Echo: 'Matthew', Matrix: 'Matthew', Hermes: 'Matthew', Harmony: 'Tiffany',
+      Phoenix: 'Matthew', Iris: 'Tiffany', Orbit: 'Tiffany', Apollo: 'Matthew', Athena: 'Tiffany', Forge: 'Matthew',
+      Aura: 'Tiffany', Pillar: 'Matthew', Helios: 'Matthew', Vulcan: 'Matthew', Ledger: 'Matthew', Mercury: 'Matthew',
+      Sentinel: 'Matthew', Themis: 'Tiffany',
+    });
   });
 
   test('keep orchestrator source folders free of message MP3 assets', async () => {
