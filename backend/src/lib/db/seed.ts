@@ -567,6 +567,14 @@ export const SEEDED_MODELS = [
     supportedUseCases: 'Long-form narration, saved audio files, voice synthesis, and speech generation.',
     enabled: true,
   },
+  {
+    key: 'cmtitanembedv2model0000001',
+    slug: 'amazon.titan-embed-text-v2',
+    name: 'Amazon Titan Text Embeddings V2',
+    description: 'Amazon Bedrock-native embedding model optimized for retrieval-augmented generation workloads.',
+    supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
+    enabled: true,
+  },
 ] as const;
 
 export const SEEDED_MODEL_ACTIONS = [
@@ -614,6 +622,13 @@ export const SEEDED_MODEL_PROVIDERS = [
     providerSlug: 'aws-bedrock',
     providerModelId: 'amazon-polly-generative-engine',
     enabled: false,
+  },
+  {
+    key: 'cmtitanembedv2route0000001',
+    modelSlug: 'amazon.titan-embed-text-v2',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'amazon.titan-embed-text-v2:0',
+    enabled: true,
   },
 ] as const;
 

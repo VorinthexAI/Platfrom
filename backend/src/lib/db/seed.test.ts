@@ -102,13 +102,14 @@ describe('provider seeds', () => {
 });
 
 describe('model and routing relation seeds', () => {
-  test('seed the five Amazon components through AWS Bedrock', () => {
+  test('seed the Amazon components through AWS Bedrock', () => {
     expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual([
       'amazon.nova-premier',
       'amazon.nova-pro',
       'amazon.nova-2-lite',
       'amazon.nova-2-sonic',
       'amazon.polly-generative',
+      'amazon.titan-embed-text-v2',
     ]);
     expect(SEEDED_MODEL_ACTIONS.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`)).toEqual(['amazon.nova-2-sonic:core.chat']);
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
@@ -117,6 +118,7 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-2-lite:aws-bedrock:amazon.nova-2-lite-v1:0:true',
       'amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0:true',
       'amazon.polly-generative:aws-bedrock:amazon-polly-generative-engine:false',
+      'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
     ]);
   });
 });
