@@ -24,6 +24,11 @@ function memoryDatabase(): OrganizationProvidersDatabase & { docs: Map<string, R
           docs.set(String(doc._key), doc);
           return { new: doc };
         },
+        async update(key, patch) {
+          const document = { ...docs.get(key), ...patch };
+          docs.set(key, document);
+          return { new: document };
+        },
         async remove(key) { docs.delete(key); },
       };
     },
@@ -32,8 +37,9 @@ function memoryDatabase(): OrganizationProvidersDatabase & { docs: Map<string, R
 
 describe('organizationProviders key allow-list', () => {
   test('schema accepts the preserved root organization key and CUID provider key', () => {
-    const link = organizationProviderSchema.parse({ key: newId(), organizationKey: 'legacy-root-key', providerKey: newId() });
-    expect(Object.keys(link)).toEqual(['key', 'organizationKey', 'providerKey']);
+    const timestamp = new Date().toISOString();
+    const link = organizationProviderSchema.parse({ key: newId(), organizationKey: 'legacy-root-key', providerKey: newId(), name: 'OpenAI', createdAt: timestamp, updatedAt: timestamp });
+    expect(Object.keys(link)).toEqual(['key', 'organizationKey', 'providerKey', 'name', 'description', 'inputTokens', 'outputTokens', 'totalTokens', 'lastUsedAt', 'createdAt', 'updatedAt', 'embedding']);
     expect(link.organizationKey).toBe('legacy-root-key');
     expect(() => organizationProviderSchema.parse({ ...link, organizationKey: '' })).toThrow();
     expect(() => organizationProviderSchema.parse({ ...link, providerKey: 'legacy-provider-key' })).toThrow();
@@ -45,19 +51,37 @@ describe('organizationProviders key allow-list', () => {
     const repository = createOrganizationProviderRepository(database);
     const organizationKey = newId();
     const providerKey = newId();
-    await repository.addProvider(organizationKey, providerKey);
+    await repository.addProvider(organizationKey, { providerKey, name: 'OpenAI', description: null });
     expect(await repository.listProviderKeys(organizationKey)).toEqual([providerKey]);
     expect(await repository.hasProvider(organizationKey, providerKey)).toBe(true);
-    await expect(repository.addProvider(organizationKey, providerKey)).rejects.toBeInstanceOf(DuplicateOrganizationProviderError);
+    await expect(repository.addProvider(organizationKey, { providerKey, name: 'OpenAI', description: null })).rejects.toBeInstanceOf(DuplicateOrganizationProviderError);
     await repository.removeProvider(organizationKey, providerKey);
     expect(await repository.hasProvider(organizationKey, providerKey)).toBe(false);
+  });
+
+  test('emits thin organization-provider invalidations for create, update and usage', async () => {
+    const events: Array<{ scopeId: string; slug: string; data: { nodeType: string; nodeKey: string } }> = [];
+    const repository = createOrganizationProviderRepository(memoryDatabase(), async (event) => { events.push(event); });
+    const organizationKey = newId();
+    const providerKey = newId();
+    const scopeKey = newId();
+
+    const created = await repository.addProvider(organizationKey, { providerKey, name: 'OpenAI', description: null }, scopeKey);
+    await repository.updateProvider(organizationKey, providerKey, { name: 'OpenAI API', description: 'Primary routing provider.' }, scopeKey);
+    await repository.recordUsage(organizationKey, providerKey, { inputTokens: 4, outputTokens: 6, totalTokens: 10 }, scopeKey);
+
+    expect(events).toEqual([
+      { scopeId: scopeKey, slug: 'organization.provider.create', data: { nodeType: 'organizationProviders', nodeKey: created.key } },
+      { scopeId: scopeKey, slug: 'organization.provider.update', data: { nodeType: 'organizationProviders', nodeKey: created.key } },
+      { scopeId: scopeKey, slug: 'organization.provider.usage', data: { nodeType: 'organizationProviders', nodeKey: created.key } },
+    ]);
   });
 
   test('service resolves provider slugs and rejects missing references', async () => {
     const repository = createOrganizationProviderRepository(memoryDatabase());
     const organizationKey = newId();
     const providerKey = newId();
-    const service = createOrganizationProviderService(repository, { async organizationExists(key) { return key === organizationKey; }, async providerKeyForSlug(slug) { return slug === 'openai' ? providerKey : null; } });
+    const service = createOrganizationProviderService(repository, { async organizationExists(key) { return key === organizationKey; }, async providerForSlug(slug) { return slug === 'openai' ? { key: providerKey, name: 'OpenAI' } : null; } });
     expect((await service.enableProvider(organizationKey, 'openai')).providerKey).toBe(providerKey);
     await expect(service.enableProvider(newId(), 'openai')).rejects.toBeInstanceOf(OrganizationProviderReferenceError);
   });

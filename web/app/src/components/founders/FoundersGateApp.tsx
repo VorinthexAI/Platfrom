@@ -19,6 +19,7 @@ import { ArtifactWorkspace } from "./ArtifactWorkspace";
 import { BeaconInputIsland } from "./BeaconInputIsland";
 import { ContextSelector } from "./ContextSelector";
 import { FoundersBackdrop } from "./FoundersBackdrop";
+import { OrganizationProviderSelector } from "./OrganizationProviderSelector";
 
 const ORGANIZATION_STORAGE_KEY = "vx_founders_organization";
 const scopeStorageKey = (organizationKey: string) => `vx_founders_scope:${organizationKey}`;
@@ -177,6 +178,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
           onChange={changeScope}
           disabled={!organizationKey}
         />
+        {organizationKey ? <OrganizationProviderSelector key={organizationKey} organizationKey={organizationKey} /> : null}
       </div>
       <nav className="mt-8 grid grid-cols-2 gap-2" aria-label="Nexus workspace">
         <button type="button" onClick={() => { setArtifactSheetOpen(false); setDrawerOpen(false); }} className={`rounded-xl border px-3 py-2 text-xs transition-colors ${!artifactSheetOpen ? "border-[#d57828]/50 bg-[#d57828]/10 text-silver-50" : "border-white/8 text-silver-400 hover:border-white/20"}`}>Beacon</button>

@@ -33,6 +33,7 @@ const subjectFields: ReadonlyArray<readonly [key: string, type: string]> = [
   ['agentMemberKey', 'agentMembers'],
   ['scopeKey', 'scopes'],
   ['userOrganizationKey', 'userOrganizations'],
+  ['organizationProviderKey', 'organizationProviders'],
   ['providerKey', 'providers'],
   ['toolKey', 'tools'],
   ['actionKey', 'actions'],
@@ -47,7 +48,8 @@ const mutationSuffixes = [
 
 export function isOrganizationInvalidationSlug(slug: string): boolean {
   return runtimePrefixes.some((prefix) => slug.startsWith(prefix))
-    || mutationSuffixes.some((suffix) => slug.endsWith(suffix));
+    || mutationSuffixes.some((suffix) => slug.endsWith(suffix))
+    || slug === 'organization.provider.usage';
 }
 
 /** Excludes analytics/read events before the database returns them to SSE. */
