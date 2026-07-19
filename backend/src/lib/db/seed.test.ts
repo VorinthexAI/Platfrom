@@ -17,14 +17,14 @@ import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, S
 describe('scope seeds', () => {
   test('place the seven product scopes as siblings directly below Nexus', () => {
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === null).map(({ slug }) => slug)).toEqual(['nexus']);
-    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).map(({ slug }) => slug)).toEqual([
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual([
       'core',
       'launch',
       'studio',
-      'command',
       'head-quarters',
       'replica',
       'pilot',
+      'command',
     ]);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.key).toBe(NEXUS_SCOPE_KEY);
     expect(new Set(SEEDED_SCOPES.map(({ key }) => key)).size).toBe(SEEDED_SCOPES.length);
@@ -33,12 +33,14 @@ describe('scope seeds', () => {
       scopeSchema.parse({ ...scope, organizationKey: newId() });
       if (scope.parentKey) {
         expect(seededKeys.has(scope.parentKey)).toBe(true);
-        scopeScopeSchema.parse({ key: newId(), parentKey: scope.parentKey, childKey: scope.key });
+        scopeScopeSchema.parse({ key: newId(), parentKey: scope.parentKey, childKey: scope.key, level: scope.level });
       }
     }
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.position).toBe(1);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.level).toBe(1);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.summary).toBe('Vorinthex is an AI native platform that unifies intelligence, knowledge and execution into a single system that helps people and organizations think, build and achieve more with artificial intelligence.');
-    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ position }) => position === 2)).toBe(true);
+    expect(Object.fromEntries(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).map(({ slug, position }) => [slug, position]))).toEqual({ core: 1, launch: 2, studio: 3, command: 7, 'head-quarters': 4, replica: 5, pilot: 6 });
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ level }) => level === 2)).toBe(true);
     expect(Object.fromEntries(SEEDED_SCOPES.filter(({ slug }) => slug !== 'nexus').map(({ slug, description }) => [slug, description]))).toEqual({
       core: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
       launch: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',

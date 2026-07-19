@@ -169,20 +169,21 @@ describe('requireScopeAccess', () => {
 });
 
 describe('listAccessibleScopes', () => {
-  test('an owner sees only leaf scopes in hierarchy order with paths', async () => {
+  test('an owner sees every scope in hierarchy order with paths', async () => {
     const f = fixture();
     const options = await listAccessibleScopes(f.founderRootMembership, f.source);
-    expect(options.map(({ key }) => key)).toEqual([f.core.key, f.launch.key]);
-    expect(options[0]).toMatchObject({ parentKey: f.nexus.key, path: ['Nexus', 'Core'] });
-    expect(options[1]).toMatchObject({ parentKey: f.nexus.key, path: ['Nexus', 'Launch'] });
+    expect(options.map(({ key }) => key)).toEqual([f.nexus.key, f.core.key, f.launch.key]);
+    expect(options[0]).toMatchObject({ parentKey: null, path: ['Nexus'] });
+    expect(options[1]).toMatchObject({ parentKey: f.nexus.key, path: ['Nexus', 'Core'] });
+    expect(options[2]).toMatchObject({ parentKey: f.nexus.key, path: ['Nexus', 'Launch'] });
   });
 
-  test('does not expose a parent even when a plain member is assigned to it', async () => {
+  test('exposes a parent when a plain member is assigned to it', async () => {
     const f = fixture();
     const memberMembership = userOrganizationSchema.parse({ key: newId(), organizationId: f.rootOrganization.key, userId: f.outsider.key, orgRole: 'member', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
     f.state.memberships.push(memberMembership);
     f.state.scopeMembers.push(scopeMemberSchema.parse({ key: newId(), scopeKey: f.nexus.key, userOrganizationKey: memberMembership.key, role: 'viewer' }));
-    expect(await listAccessibleScopes(memberMembership, f.source)).toEqual([]);
+    expect((await listAccessibleScopes(memberMembership, f.source)).map(({ key }) => key)).toEqual([f.nexus.key]);
   });
 
   test('a plain member sees only scopes they were explicitly added to', async () => {

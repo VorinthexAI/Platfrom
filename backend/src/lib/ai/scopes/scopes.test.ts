@@ -115,6 +115,7 @@ describe('scope schemas', () => {
       summary: 'Conversational intelligence.',
       description: 'The conversational intelligence scope.',
       position: 2,
+      level: 1,
       deletedAt: null,
       embedding: [],
     });
@@ -128,10 +129,11 @@ describe('scope schemas', () => {
   test('scope relation rejects self-parenting', () => {
     const parentKey = newId();
     const childKey = newId();
-    expect(scopeScopeSchema.parse({ key: newId(), parentKey, childKey, position: 1 })).toEqual({
+    expect(scopeScopeSchema.parse({ key: newId(), parentKey, childKey, level: 2 })).toEqual({
       key: expect.any(String),
       parentKey,
       childKey,
+      level: 2,
       deletedAt: null,
     });
     expect(() => scopeScopeSchema.parse({ key: newId(), parentKey, childKey: parentKey })).toThrow();

@@ -856,6 +856,7 @@ Vorinthex is built to remain flexible as artificial intelligence continues to ev
 
 The long term vision is to create a new way of interacting with software. Rather than opening dozens of separate applications for different tasks, people will work alongside an intelligent system that understands their objectives, coordinates specialized capabilities and continuously learns from every action. Vorinthex represents a future where intelligence is persistent, collaborative and deeply integrated into everything people create, allowing individuals and organizations to focus less on software and more on achieving meaningful outcomes.`,
     position: 1,
+    level: 1,
     parentKey: null,
   },
   {
@@ -864,7 +865,8 @@ The long term vision is to create a new way of interacting with software. Rather
     name: 'Core',
     summary: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
     description: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
-    position: 2,
+    position: 1,
+    level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
@@ -874,6 +876,7 @@ The long term vision is to create a new way of interacting with software. Rather
     summary: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
     description: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
     position: 2,
+    level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
@@ -882,7 +885,8 @@ The long term vision is to create a new way of interacting with software. Rather
     name: 'Studio',
     summary: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
     description: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
-    position: 2,
+    position: 3,
+    level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
@@ -891,7 +895,8 @@ The long term vision is to create a new way of interacting with software. Rather
     name: 'Command',
     summary: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
     description: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
-    position: 2,
+    position: 7,
+    level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
@@ -900,7 +905,8 @@ The long term vision is to create a new way of interacting with software. Rather
     name: 'Head Quarters',
     summary: 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
     description: 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
-    position: 2,
+    position: 4,
+    level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
@@ -909,7 +915,8 @@ The long term vision is to create a new way of interacting with software. Rather
     name: 'Replica',
     summary: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
     description: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
-    position: 2,
+    position: 5,
+    level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
@@ -918,7 +925,8 @@ The long term vision is to create a new way of interacting with software. Rather
     name: 'Pilot',
     summary: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
     description: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
-    position: 2,
+    position: 6,
+    level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
 ] as const;
@@ -1320,8 +1328,8 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   for (const seed of SEEDED_SCOPES) {
     let existing = scopesBySlug.get(seed.slug);
     if (existing) {
-      if (existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position) {
-        existing = await scopes.updateScope(existing.key, { name: seed.name, summary: seed.summary, description: seed.description, position: seed.position });
+      if (existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position || existing.level !== seed.level) {
+        existing = await scopes.updateScope(existing.key, { name: seed.name, summary: seed.summary, description: seed.description, position: seed.position, level: seed.level });
         scopesBySlug.set(existing.slug, existing);
         const index = organizationScopes.findIndex((scope) => scope.key === existing!.key);
         if (index >= 0) organizationScopes[index] = existing;
@@ -1338,6 +1346,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
       summary: seed.summary,
       description: seed.description,
       position: seed.position,
+      level: seed.level,
     });
     organizationScopes.push(scope);
     scopesBySlug.set(scope.slug, scope);

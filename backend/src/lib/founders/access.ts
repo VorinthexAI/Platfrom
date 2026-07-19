@@ -166,14 +166,14 @@ export interface AccessibleScopeOption {
   key: string;
   name: string;
   position: number;
+  level: number;
   parentKey: string | null;
   path: string[];
 }
 
 /**
- * Accessible leaf scopes for the membership's organization, ordered by
- * hierarchy (depth-first from the roots) then position then name. Parent
- * scopes organize the tree but are not selectable execution contexts.
+ * Accessible scopes for the membership's organization, ordered by hierarchy
+ * (depth-first from the roots) then position then name.
  */
 export async function listAccessibleScopes(
   membership: UserOrganization,
@@ -183,12 +183,10 @@ export async function listAccessibleScopes(
   if (scopes.length === 0) return [];
   const scopeKeys = new Set(scopes.map((scope) => scope.key));
   const parentByChild = new Map<string, string>();
-  const parentKeys = new Set<string>();
   for (const scope of scopes) {
     for (const relation of await source.listChildRelations(scope.key)) {
       if (scopeKeys.has(relation.childKey)) {
         parentByChild.set(relation.childKey, relation.parentKey);
-        parentKeys.add(relation.parentKey);
       }
     }
   }
@@ -232,11 +230,12 @@ export async function listAccessibleScopes(
   }
 
   return ordered
-    .filter((scope) => !parentKeys.has(scope.key) && (stewards || accessibleKeys.has(scope.key)))
+    .filter((scope) => stewards || accessibleKeys.has(scope.key))
     .map((scope) => ({
       key: scope.key,
       name: scope.name,
       position: scope.position,
+      level: scope.level,
       parentKey: parentByChild.get(scope.key) ?? null,
       path: pathOf(scope),
     }));

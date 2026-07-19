@@ -470,6 +470,7 @@ async function main() {
         organizationKey: scope.organizationKey != null ? scope.organizationKey : scope.organizationId,
         slug: scope.slug != null && scope.slug != "" ? scope.slug : scope._key,
         position: HAS(scope, "position") && IS_NUMBER(scope.position) && scope.position > 0 ? scope.position : 1,
+        level: HAS(scope, "level") && IS_NUMBER(scope.level) && scope.level > 0 ? scope.level : 1,
         organizationId: null,
         createdAt: null,
         updatedAt: null
@@ -497,7 +498,8 @@ async function main() {
         childKey: HAS(relation, "childKey") && relation.childKey != null ? relation.childKey : relation.childScopeKey,
         parentScopeKey: null,
         childScopeKey: null,
-        position: null
+        position: null,
+        level: HAS(relation, "level") && IS_NUMBER(relation.level) && relation.level > 0 ? relation.level : 1
       } IN scopeScopes OPTIONS { keepNull: false }
   `);
   await targetDb.query(`
@@ -567,6 +569,7 @@ async function main() {
         _key: newId(),
         parentKey,
         childKey,
+        level: 1,
         deletedAt: null,
       });
       seenChildren.add(childKey);
@@ -1007,15 +1010,34 @@ async function main() {
       { childKey },
     );
     const relation = await relationCursor.next();
-    if (relation?.parentKey === parentKey) continue;
+    if (relation?.parentKey === parentKey) {
+      await targetDb.collection('scopeScopes').update(relation._key, { level: seed.level });
+      continue;
+    }
     if (relation) await targetDb.collection('scopeScopes').remove(relation._key);
     await targetDb.collection('scopeScopes').save({
       _key: newId(),
       parentKey,
       childKey,
+      level: seed.level,
       deletedAt: null,
     });
   }
+  await targetDb.query(`
+    FOR scope IN scopes
+      LET level = FIRST(
+        FOR ancestor, relation, path IN 0..100 INBOUND scope scopeScopes
+          SORT LENGTH(path.edges) DESC
+          LIMIT 1
+          RETURN LENGTH(path.edges) + 1
+      )
+      UPDATE scope WITH { level: level == null ? 1 : level } IN scopes
+  `);
+  await targetDb.query(`
+    FOR relation IN scopeScopes
+      LET child = DOCUMENT("scopes", relation.childKey)
+      UPDATE relation WITH { level: child == null ? 1 : child.level } IN scopeScopes
+  `);
   console.log('Seeded canonical Nexus scope hierarchy');
 
   // Teams collapse into organizations: a team becomes an ordinary
