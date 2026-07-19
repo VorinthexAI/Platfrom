@@ -34,8 +34,8 @@ Run the sync from `infra.yml` (`run_dns_sync=true`).
 
 ## Deploy
 
-`.github/workflows/early-infra.yml` builds the arm64 web+api images, pushes to
-ECR, and runs `deploy/early/deploy.sh` on the app box **via SSM** (no SSH):
+`.github/workflows/deploy.yml` builds the arm64 web+api images, pushes to ECR,
+and runs `deploy/early/deploy.sh` on the app box **via SSM** (no SSH):
 zero-downtime blue-green — brings the inactive colour up, health-checks it, flips
 Caddy, retires the old colour. Runtime secrets are pulled from SSM
 `/vorinthex/prod/*` at deploy time (redis + ArangoDB URLs are overridden locally).

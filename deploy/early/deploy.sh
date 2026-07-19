@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Blue-green deploy for the single-box early-infra app host.
-# Runs ON the app box, invoked via `aws ssm send-command` from deploy.yml or
-# early-infra.yml (or the bootstrap on first boot). Zero-downtime: brings the
+# Runs ON the app box, invoked via `aws ssm send-command` from deploy.yml (or
+# the bootstrap on first boot). Zero-downtime: brings the
 # inactive color up, health-checks it, flips Caddy, then retires the old color.
 #
 #   Usage: deploy.sh <web_image_tag> [api_image_tag]

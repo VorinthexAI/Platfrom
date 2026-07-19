@@ -2,7 +2,7 @@
 # user-data for the early-infra APP box (t4g.medium, ARM, public subnet).
 # Installs Docker + the compose plugin and lays out /opt/vorinthex. The actual
 # app (web + api + redis + caddy) is deployed by deploy.sh, pushed and run via
-# SSM (aws ssm send-command) from early-infra.yml — so this stays minimal and
+# SSM (aws ssm send-command) from deploy.yml — so this stays minimal and
 # the deploy logic lives in one place. SSM agent ships with AL2023.
 #
 # DB_PRIVATE_IP is templated in at launch: the ArangoDB the api talks to.
