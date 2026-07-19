@@ -70,7 +70,7 @@ describe('Genesis end-to-end runtime', () => {
     expect(sourcesStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key });
     expect(artifactsStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key, relation: 'source' });
     expect(checksStore[0]?.candidateNodeType).toBe('agent');
-    expect(transactionRows.get('agents')).toHaveLength(1); expect(transactionRows.get('scopeAgents') ?? []).toHaveLength(0); expect(transactionRows.get('agentSkills')).toHaveLength(1); expect(transactionRows.get('agentTools')).toHaveLength(1);
+    expect(transactionRows.get('agents')).toHaveLength(1); expect(transactionRows.get('scopeAgents')).toEqual([expect.objectContaining({ scopeKey: f.scope.key, agentKey: result.created?.agent.key, status: 'active', minimumAccessRole: 'owner' })]); expect(transactionRows.get('agentSkills')).toHaveLength(1); expect(transactionRows.get('agentTools')).toHaveLength(1);
     expect(result.created?.artifacts.some((artifact) => artifact.relation === 'result')).toBe(true);
     expect(runtimeEvents.filter(({ slug }) => slug === 'artifact.created')).toHaveLength(result.created?.artifacts.filter(({ relation }) => relation === 'result').length ?? 0);
     expect(runtimeEvents.every(({ scopeId }) => scopeId === f.scope.key)).toBe(true);
