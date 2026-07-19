@@ -1377,7 +1377,10 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'scopeScopes', key: relation.key, status: 'created' });
   }
 
-  if (GENESIS_SCOPE_SLUG !== nexusScope.slug) throw new SeedReferenceError('scope', GENESIS_SCOPE_SLUG, 'Genesis');
+  const genesisScopeSeed = SEEDED_SCOPES.find((scope) => scope.slug === GENESIS_SCOPE_SLUG);
+  if (!genesisScopeSeed) throw new SeedReferenceError('scope', GENESIS_SCOPE_SLUG, 'Genesis');
+  const genesisScope = await scopes.getScopeByKey(actualKeysBySeedKey.get(genesisScopeSeed.key) ?? genesisScopeSeed.key);
+  if (!genesisScope || genesisScope.slug !== GENESIS_SCOPE_SLUG) throw new SeedReferenceError('scope', GENESIS_SCOPE_SLUG, 'Genesis');
   const openAi = await getProviderBySlug('openai');
   if (!openAi) throw new SeedReferenceError('provider', 'openai', 'Genesis');
   const organizationProviders = getDefaultOrganizationProviderRepository();
@@ -1392,7 +1395,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   });
   console.info('Reconciled root organization OpenAI routing', routing);
   const genesis = await seedGenesis(rootOrganization.key);
-  if (genesis.agent.scopeKey !== nexusScope.key) throw new SeedReferenceError('agent', 'genesis', 'Nexus');
+  if (genesis.agent.scopeKey !== genesisScope.key) throw new SeedReferenceError('agent', 'genesis', 'Launch');
   results.push(
     { collection: 'skills', key: genesis.skill.key, status: 'updated' },
     { collection: 'agents', key: genesis.agent.key, status: 'updated' },

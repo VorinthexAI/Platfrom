@@ -17,7 +17,7 @@
         "slug": "genesis",
         "name": "Genesis",
         "title": "Agent Architect",
-        "scopeSlug": "nexus",
+        "scopeSlug": "launch",
         "explorationRate": 0.2,
         "embedding": []
       }

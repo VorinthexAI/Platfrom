@@ -116,13 +116,15 @@ export async function compileGenesisContext(input: GenesisRunInput, options: Com
   if (registeredRuntime.agent.slug !== 'genesis' || registeredRuntime.agent.name !== 'Genesis' || registeredRuntime.agent.title !== 'Agent Architect') {
     throw new GenesisIdentityError(`${registeredRuntime.agent.slug}/${registeredRuntime.agent.name}/${registeredRuntime.agent.title}`);
   }
-  const runtime = options.executionContext
-    ? { ...registeredRuntime, organization: options.executionContext.organization, scope: options.executionContext.scope }
-    : registeredRuntime;
+  if (options.executionContext && (
+    options.executionContext.organization.key !== registeredRuntime.organization.key
+    || options.executionContext.scope.key !== registeredRuntime.scope.key
+  )) throw new GenesisScopeMismatchError();
+  const runtime = registeredRuntime;
   if (runtime.organization.key !== parsed.organizationKey || runtime.scope.organizationKey !== parsed.organizationKey) {
     throw new GenesisOrganizationMismatchError();
   }
-  if (runtime.scope.key !== parsed.scopeKey || (!options.executionContext && runtime.agent.scopeKey !== parsed.scopeKey)) throw new GenesisScopeMismatchError();
+  if (runtime.scope.key !== parsed.scopeKey || runtime.agent.scopeKey !== parsed.scopeKey) throw new GenesisScopeMismatchError();
 
   const catalog = options.catalog ?? defaultCatalog;
   const [scopes, allAgents, skills, allTools] = await Promise.all([
