@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
 import { embed, embeddingMetadata } from '@/lib/embed';
+import { createOpenAIProvider } from '@/lib/ai/providers/openai';
+import type { ProviderAdapter } from '@/lib/ai/providers/types';
 
 const DEFAULT_CHUNK_SIZE = 500;
 const DEFAULT_PAGE_SIZE = 50;
@@ -59,6 +61,16 @@ function buildEmbedSlug(_collectionName: string, embedKeys: readonly string[], _
   return buildEmbeddingText(embedKeys, doc);
 }
 
+let embeddingProvider: ProviderAdapter | null | undefined;
+
+function getEmbeddingProvider(): ProviderAdapter | undefined {
+  if (embeddingProvider === undefined) {
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    embeddingProvider = apiKey ? createOpenAIProvider({ apiKey }) : null;
+  }
+  return embeddingProvider ?? undefined;
+}
+
 async function computeEmbedding(
   collectionName: string,
   embedKeys: readonly string[],
@@ -67,7 +79,7 @@ async function computeEmbedding(
 ): Promise<number[]> {
   const slug = buildEmbedSlug(collectionName, embedKeys, key, doc);
   if (!slug) return [];
-  return embed({ text: slug });
+  return embed({ text: slug }, { provider: getEmbeddingProvider() });
 }
 
 /**
