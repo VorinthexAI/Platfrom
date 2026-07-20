@@ -254,6 +254,11 @@ input:focus-visible {
   box-shadow: 0 0 24px rgba(221, 226, 229, 0.08);
 }
 
+/* The Arc already marks its selected card with an ember border. */
+button.nexus-arc-card:focus-visible {
+  outline: none;
+}
+
 /* Every clickable reads as clickable. */
 :is(
   a,

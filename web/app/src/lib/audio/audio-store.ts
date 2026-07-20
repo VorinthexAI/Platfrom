@@ -52,6 +52,7 @@ function settleAmbientVolume() {
 function ambientElement(): HTMLAudioElement {
   if (!ambient) {
     ambient = new Audio(AMBIENT_AUDIO_SRC);
+    ambient.autoplay = true;
     ambient.loop = true;
     ambient.preload = "auto";
     ambient.volume = AMBIENT_VOLUME;
