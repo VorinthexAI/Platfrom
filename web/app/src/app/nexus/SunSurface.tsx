@@ -94,7 +94,7 @@ export default function SunSurface() {
   return (
     <Canvas
       frameloop={hidden || reducedMotion ? "never" : "always"}
-      dpr={0.8}
+      dpr={1}
       camera={{ fov: 55, near: 0.1, far: 30 }}
       gl={{ antialias: false, powerPreference: "high-performance" }}
       aria-hidden

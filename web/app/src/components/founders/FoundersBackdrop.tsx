@@ -1,10 +1,12 @@
 "use client";
 
+import dynamic from "next/dynamic";
+
+const SunSurface = dynamic(() => import("@/app/nexus/SunSurface"), { ssr: false });
+
 /**
- * Nexus is a sustained workspace, so its backdrop deliberately stays in the
- * compositor. A full-screen shader canvas is reserved for the public galaxy;
- * this layered surface retains the warm sun treatment without a WebGL context,
- * shader program, framebuffer, or continuous render loop.
+ * Keep the authenticated workspace inside the same living sun surface as the
+ * founder gate. SunSurface pauses itself for hidden tabs and reduced motion.
  */
 export function FoundersBackdrop() {
   return (
@@ -17,6 +19,7 @@ export function FoundersBackdrop() {
             "radial-gradient(120% 100% at 50% 46%, #683009 0%, #351504 42%, #180703 76%, #080302 100%)",
         }}
       />
+      <SunSurface />
       <div
         aria-hidden
         className="nexus-backdrop-drift pointer-events-none absolute -inset-[8%]"
