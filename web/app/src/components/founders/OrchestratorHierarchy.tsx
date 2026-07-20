@@ -7,6 +7,7 @@ import { useReducedMotion } from "framer-motion";
 import * as THREE from "three";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
+import { PlanetSurface } from "@/components/galaxy/PlanetSurface";
 
 const ORCHESTRATORS = Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators);
 const ATLAS = VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
@@ -74,9 +75,10 @@ function NodeLabel({ entity, selected, onSelect, offset }: {
   );
 }
 
-function CelestialNode({ entity, selected, onSelect, root = false }: {
+function CelestialNode({ entity, selected, paused, onSelect, root = false }: {
   entity: GalaxyEntity;
   selected: boolean;
+  paused: boolean;
   onSelect: (entity: GalaxyEntity) => void;
   root?: boolean;
 }) {
@@ -94,14 +96,25 @@ function CelestialNode({ entity, selected, onSelect, root = false }: {
   return (
     <group>
       <group ref={visual}>
-        <mesh>
+        <PlanetSurface
+          entityId={entity.id}
+          biome="gas"
+          radius={size}
+          segments={32}
+          paused={paused}
+          dormant={false}
+          hovered={hovered}
+          focused={selected}
+        />
+        <mesh scale={1.16}>
           <sphereGeometry args={[size, 32, 32]} />
-          <meshStandardMaterial
-            color="#0b0602"
-            emissive={selected ? "#a84608" : "#351304"}
-            emissiveIntensity={selected ? 0.9 : 0.28}
-            metalness={0.88}
-            roughness={0.24}
+          <meshBasicMaterial
+            color="#ff7518"
+            transparent
+            opacity={selected ? 0.18 : 0.09}
+            side={THREE.BackSide}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
           />
         </mesh>
 
@@ -209,7 +222,7 @@ function OrbitBranch({ entity, depth, index, siblingCount, selectedSlug, paused,
       <AmberOrbit radius={radius} selected={branchSelected} />
       <primitive object={connector} />
       <group ref={body}>
-        <CelestialNode entity={entity} selected={selected} onSelect={onSelect} />
+        <CelestialNode entity={entity} selected={selected} paused={paused} onSelect={onSelect} />
         {children.map((child, childIndex) => (
           <OrbitBranch
             key={child.id}
@@ -279,7 +292,7 @@ function CommandSystem({ selectedSlug, paused, onSelect }: {
   return (
     <group ref={system} rotation={[-0.04, 0, 0]}>
       <AmberDust paused={paused} />
-      <CelestialNode entity={ATLAS} selected={selectedSlug === ATLAS.slug} onSelect={onSelect} root />
+      <CelestialNode entity={ATLAS} selected={selectedSlug === ATLAS.slug} paused={paused} onSelect={onSelect} root />
       {roots.map((entity, index) => (
         <OrbitBranch
           key={entity.id}
