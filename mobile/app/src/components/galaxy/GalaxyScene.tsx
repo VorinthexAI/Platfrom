@@ -93,11 +93,9 @@ export function GalaxyScene({
         near: 0.1,
         far: 160,
       }}
-      // MSAA off + capped dpr: on mobile GPUs the multisample buffers and
-      // extra fragments were costing whole frames — the swipe must never
-      // wait on the renderer.
-      gl={{ antialias: false, powerPreference: "high-performance" }}
-      dpr={[1, 1.5]}
+      // Cap high-density screens while retaining MSAA for thin orbit paths.
+      gl={{ antialias: true, powerPreference: "high-performance" }}
+      dpr={[1, 1.75]}
     >
       <color attach="background" args={[OBSIDIAN]} />
       {/* Fog band sits beyond the zoomed-out framing so the default view

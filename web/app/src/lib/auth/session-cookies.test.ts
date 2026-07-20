@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ACCESS_COOKIE,
+  clearAuthSessionCookies,
   REFRESH_COOKIE,
   setAuthSessionCookies,
 } from "./session-cookies";
@@ -32,5 +33,16 @@ describe("web auth session cookies", () => {
   test("refuses to guess a cookie lifetime when backend policy is missing", () => {
     const response = { cookies: { set() {} } };
     expect(() => setAuthSessionCookies(response, { accessToken: "access" }, false)).toThrow("Missing valid vorinthex_access max age");
+  });
+
+  test("clears host-only and shared production cookies", () => {
+    const writes: Array<{ name: string; options: { maxAge: number; domain?: string } }> = [];
+    const response = { cookies: { set(name: string, _value: string, options: { maxAge: number; httpOnly: true; secure: boolean; domain?: string }) { writes.push({ name, options }); } } };
+
+    clearAuthSessionCookies(response, true, "vorinthex.com");
+
+    expect(writes.map(({ name }) => name)).toEqual([ACCESS_COOKIE, REFRESH_COOKIE, ACCESS_COOKIE, REFRESH_COOKIE]);
+    expect(writes.map(({ options }) => options.maxAge)).toEqual([0, 0, 0, 0]);
+    expect(writes.map(({ options }) => options.domain)).toEqual([undefined, undefined, "vorinthex.com", "vorinthex.com"]);
   });
 });

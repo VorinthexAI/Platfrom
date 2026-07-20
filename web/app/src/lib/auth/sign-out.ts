@@ -11,9 +11,11 @@ import { useGalaxyStore } from "@/lib/galaxy-store";
  * - announces the change so `useAuthProfile` and every listener re-read;
  * - lands the camera back at the Nexus overview (a plain reset, no jump).
  */
-export async function signOut(): Promise<void> {
+export async function signOut(): Promise<boolean> {
+  let serverSignedOut = false;
   try {
-    await fetch("/api/auth/signout", { method: "POST" });
+    const response = await fetch("/api/auth/signout", { method: "POST" });
+    serverSignedOut = response.ok;
   } catch {
     // Even if the network call fails, still clear the local session so the
     // explorer isn't left looking signed in.
@@ -32,4 +34,5 @@ export async function signOut(): Promise<void> {
   useFragmentsStore.setState({ balance: 0, hasJoined: false });
   window.dispatchEvent(new Event("vx-profile-changed"));
   useGalaxyStore.getState().resetToSystem();
+  return serverSignedOut;
 }

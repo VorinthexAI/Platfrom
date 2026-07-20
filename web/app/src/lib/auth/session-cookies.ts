@@ -56,3 +56,26 @@ export function setAuthSessionCookies(
     response.cookies.set(REFRESH_COOKIE, tokens.refreshToken, options(requireMaxAge(tokens.refreshTokenMaxAgeSeconds, REFRESH_COOKIE)));
   }
 }
+
+/** Expires both legacy host-only cookies and the shared production cookies. */
+export function clearAuthSessionCookies(
+  response: SessionCookieResponse,
+  secure = process.env.NODE_ENV === "production",
+  domain = process.env.NODE_ENV === "production" ? "vorinthex.com" : undefined,
+) {
+  const options = (cookieDomain?: string) => ({
+    httpOnly: true,
+    sameSite: "lax",
+    secure,
+    path: "/",
+    maxAge: 0,
+    ...(cookieDomain ? { domain: cookieDomain } : {}),
+  } as const);
+
+  response.cookies.set(ACCESS_COOKIE, "", options());
+  response.cookies.set(REFRESH_COOKIE, "", options());
+  if (domain) {
+    response.cookies.set(ACCESS_COOKIE, "", options(domain));
+    response.cookies.set(REFRESH_COOKIE, "", options(domain));
+  }
+}

@@ -277,6 +277,11 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
           organization={organizations.find((organization) => organization.key === organizationKey) ?? null}
           open={accountOpen}
           onOpenChange={setAccountOpen}
+          onSignedOut={() => {
+            setAccountOpen(false);
+            if (onUnauthorized) onUnauthorized();
+            else window.location.replace("/nexus");
+          }}
           canManageProviders={organizations.find((organization) => organization.key === organizationKey)?.role === "owner"}
         />
       ) : null}

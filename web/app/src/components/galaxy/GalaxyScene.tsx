@@ -90,11 +90,10 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
   return (
     <Canvas
       frameloop={hidden || reducedMotion ? "never" : "always"}
-      // Render at CSS-pixel resolution so high-DPI displays cannot multiply
-      // the full-screen color, depth, MSAA, and compositor buffer footprint.
-      dpr={lowPower ? 0.65 : 0.8}
+      // Keep one WebGL pixel per CSS pixel without paying for full Retina DPR.
+      dpr={1}
       camera={{ position: [0, 6.5, 15.5], fov: 42, near: 0.1, far: 320 }}
-      gl={{ antialias: false, powerPreference: "high-performance" }}
+      gl={{ antialias: !lowPower, powerPreference: "high-performance" }}
       aria-hidden
       className="!absolute !inset-0"
     >
