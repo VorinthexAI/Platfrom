@@ -23,6 +23,7 @@ import { FoundersBackdrop } from "./FoundersBackdrop";
 import { AccountModal } from "./AccountModal";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
+import { getEntityById } from "@/lib/galaxy/registry-helpers";
 import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { NexusTransit } from "./NexusTransit";
@@ -58,8 +59,8 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [artifactSheetOpen, setArtifactSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [selectedOrchestratorSlug, setSelectedOrchestratorSlug] = useState("atlas");
-  const [enteredOrchestratorSlug, setEnteredOrchestratorSlug] = useState<string | null>(null);
+  const [selectedEntityId, setSelectedEntityId] = useState("product.core");
+  const [enteredEntityId, setEnteredEntityId] = useState<string | null>(null);
   const [transitDestination, setTransitDestination] = useState<string | null>("Nexus command station");
   const scopeRequestRef = useRef(0);
 
@@ -154,10 +155,9 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   })), [organizations]);
 
   const beaconDisabled = !organizationKey || !scopeKey;
-  const selectedOrchestrator = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedOrchestratorSlug]
-    ?? VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
-  const enteredOrchestrator = enteredOrchestratorSlug
-    ? VORINTHEX_GALAXY_REGISTRY.orchestrators[enteredOrchestratorSlug] ?? null
+  const selectedEntity = getEntityById(selectedEntityId) ?? VORINTHEX_GALAXY_REGISTRY.products.core;
+  const enteredEntity = enteredEntityId
+    ? getEntityById(enteredEntityId) ?? null
     : null;
   const hasBeaconOutput = Boolean(beacon.response || beacon.error || beacon.tools.length > 0);
   const activeDelegation = beacon.tools.at(-1) ?? null;
@@ -167,20 +167,20 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
     void beacon.ask({ organizationKey, scopeKey, message });
   }, [beacon, organizationKey, scopeKey]);
 
-  const enterOrchestrator = useCallback((orchestrator: GalaxyEntity) => {
+  const enterEntity = useCallback((entity: GalaxyEntity) => {
     cancelBeacon();
     resetBeacon();
     stopVoice();
-    setSelectedOrchestratorSlug(orchestrator.slug);
-    setEnteredOrchestratorSlug(orchestrator.slug);
-    setTransitDestination(`${orchestrator.name} command deck`);
+    setSelectedEntityId(entity.id);
+    setEnteredEntityId(entity.id);
+    setTransitDestination(`${entity.name} station interior`);
   }, [cancelBeacon, resetBeacon, stopVoice]);
 
-  const leaveOrchestrator = useCallback(() => {
+  const leaveEntity = useCallback(() => {
     cancelBeacon();
     resetBeacon();
     stopVoice();
-    setEnteredOrchestratorSlug(null);
+    setEnteredEntityId(null);
     setTransitDestination("Nexus command station");
   }, [cancelBeacon, resetBeacon, stopVoice]);
 
@@ -240,8 +240,8 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
       <div className="relative z-10 flex h-svh">
         <section className="relative flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-3 px-4 pt-4 sm:px-6">
-            {enteredOrchestrator ? (
-              <button type="button" onClick={leaveOrchestrator} aria-label="Return to Nexus command station" className="founders-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-silver-100">
+            {enteredEntity ? (
+              <button type="button" onClick={leaveEntity} aria-label="Return to Nexus command station" className="founders-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-silver-100">
                 <CloseIcon size="sm" />
               </button>
             ) : null}
@@ -269,14 +269,14 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
 
           <div className="relative min-h-0 flex-1 overflow-hidden">
             <div className="absolute inset-0">
-              {enteredOrchestrator ? (
-                <OrchestratorCommandDeck orchestrator={enteredOrchestrator} reducedMotion={Boolean(reducedMotion)} />
+              {enteredEntity ? (
+                <OrchestratorCommandDeck entity={enteredEntity} reducedMotion={Boolean(reducedMotion)} />
               ) : (
                 <div className="mx-auto h-full min-h-[670px] max-w-[1540px] px-4 pt-2 pb-24 sm:px-8 lg:pt-4">
                 <OrchestratorHierarchy
-                  selectedSlug={selectedOrchestrator.slug}
-                  onSelect={(orchestrator) => setSelectedOrchestratorSlug(orchestrator.slug)}
-                  onEnter={enterOrchestrator}
+                  selectedId={selectedEntity.id}
+                  onSelect={(entity) => setSelectedEntityId(entity.id)}
+                  onEnter={enterEntity}
                   organizations={organizations}
                   organizationKey={organizationKey}
                   onOrganizationSelect={changeOrganization}
@@ -287,23 +287,23 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
               )}
             </div>
 
-            {enteredOrchestrator ? (
+            {enteredEntity ? (
               <div className="pointer-events-none absolute inset-x-0 top-5 z-10 text-center">
-                <p className="font-mono text-[0.5rem] tracking-[0.35em] text-[#c3834c] uppercase">{enteredOrchestrator.role} command deck</p>
-                <h1 className="mt-1 text-xl tracking-[0.24em] text-silver-50 uppercase sm:text-2xl">{enteredOrchestrator.name}</h1>
+                <p className="font-mono text-[0.5rem] tracking-[0.35em] text-[#c3834c] uppercase">{enteredEntity.role ?? enteredEntity.label ?? enteredEntity.content?.eyebrow ?? enteredEntity.type} interior</p>
+                <h1 className="mt-1 text-xl tracking-[0.24em] text-silver-50 uppercase sm:text-2xl">{enteredEntity.name}</h1>
               </div>
             ) : (
               <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 text-center">
-                <p className="font-mono text-[0.5rem] tracking-[0.28em] text-[#b27a4d] uppercase">{selectedOrchestrator.name} selected</p>
-                <p className="mt-1 text-xs tracking-[0.16em] text-silver-400 uppercase">Click an orchestrator to enter its command deck</p>
+                <p className="font-mono text-[0.5rem] tracking-[0.28em] text-[#b27a4d] uppercase">{selectedEntity.name} selected</p>
+                <p className="mt-1 text-xs tracking-[0.16em] text-silver-400 uppercase">Click an entity to enter its station interior</p>
               </div>
             )}
 
-            {enteredOrchestrator ? (
-              <div className={`scrollbar-hide relative z-10 h-full overflow-y-auto px-4 sm:px-8 ${hasBeaconOutput ? "" : "pointer-events-none"}`}>
+            {enteredEntity ? (
+              <div className="scrollbar-hide pointer-events-none relative z-10 h-full overflow-y-auto px-4 sm:px-8">
                 <div className="mx-auto w-full max-w-[820px] pt-24 pb-64 sm:pt-28">
                   {hasBeaconOutput ? (
-                  <article aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
+                  <article className="pointer-events-auto" aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
                     <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />
                     {beacon.response ? <SafeMarkdown markdown={beacon.response} /> : null}
                     {beacon.error ? <p className="text-base leading-relaxed text-silver-100">{beacon.error}</p> : null}
@@ -317,23 +317,25 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
             ) : null}
           </div>
 
-          {enteredOrchestrator ? (
+          {enteredEntity ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 px-4 sm:px-8">
             <div className="pointer-events-auto mx-auto w-full max-w-[820px]">
               <BeaconInputIsland
                 status={beacon.status}
                 disabled={beaconDisabled}
-                assistantName={enteredOrchestrator.name}
+                assistantName={enteredEntity.name}
                 onSubmit={submit}
                 onCancel={cancelBeacon}
               />
               <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                <button type="button" onClick={() => playVoice(entityAudioUrl("orchestrator", enteredOrchestrator.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                <button type="button" onClick={() => playVoice(entityAudioUrl(enteredEntity.type, enteredEntity.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
                   <SpeakerIcon animated /> Play Briefing
                 </button>
-                <button type="button" onClick={() => playVoice(orchestratorMessageUrl(enteredOrchestrator.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
-                  <SpeakerIcon animated /> Meet {enteredOrchestrator.name}
-                </button>
+                {enteredEntity.type === "orchestrator" ? (
+                  <button type="button" onClick={() => playVoice(orchestratorMessageUrl(enteredEntity.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                    <SpeakerIcon animated /> Meet {enteredEntity.name}
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>
