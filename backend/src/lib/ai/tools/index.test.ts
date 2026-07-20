@@ -12,48 +12,10 @@ describe('tool handler registry', () => {
       expect(() => toolDefinitionSchema.parse({ ...tool, actionId: 'core.chat' })).toThrow();
     }
   });
-  test('uses dot notation and resolves known handlers', () => {
-    for (const id of TOOL_IDS) expect(isValidToolIdFormat(id)).toBe(true);
-    expect(getTool('ask.answer').name).toBe('Ask');
-    expect(() => getTool('nope.missing')).toThrow(UnknownToolError);
-  });
-
-  test('registers core.delegate as a local Beacon-only boundary', () => {
-    expect(getTool('core.delegate')).toMatchObject({ id: 'core.delegate', name: 'Delegate', scopeId: null });
-  });
-
-  test('registers the complete organization member tool surface', () => {
-    expect(TOOL_IDS.filter((id) => id.startsWith('organization.member.'))).toEqual([
-      'organization.member.list',
-      'organization.member.read',
-      'organization.member.add',
-      'organization.member.role.update',
-      'organization.member.activate',
-      'organization.member.suspend',
-      'organization.member.remove',
-    ]);
-    expect(getTool('organization.member.remove').description).toContain('immediately revoke runtime access');
-  });
-
-  test('registers the complete scope lifecycle tool surface', () => {
-    expect(TOOL_IDS.filter((id) => id.startsWith('scope.') && !id.startsWith('scope.agent.') && !id.startsWith('scope.member.'))).toEqual([
-      'scope.list',
-      'scope.read',
-      'scope.create',
-      'scope.update',
-      'scope.move',
-      'scope.archive',
-      'scope.restore',
-      'scope.remove',
-    ]);
-    expect(getTool('scope.remove').description).toContain('owner-only confirmation');
-  });
-
-  test('registers the complete local access-management surface', () => {
-    expect(TOOL_IDS.filter((id) => id.startsWith('scope.member.'))).toHaveLength(7);
-    expect(TOOL_IDS.filter((id) => id.startsWith('scope.agent.'))).toHaveLength(8);
-    expect(TOOL_IDS.filter((id) => id.startsWith('agent.member.'))).toHaveLength(5);
-    expect(TOOL_IDS.filter((id) => id.startsWith('organization.provider.'))).toHaveLength(5);
-    expect(TOOL_IDS.filter((id) => id.startsWith('access.'))).toHaveLength(6);
+  test('has no active tools', () => {
+    expect(TOOL_IDS).toEqual([]);
+    expect(listTools()).toEqual([]);
+    expect(() => getTool('anything')).toThrow(UnknownToolError);
+    expect(isValidToolIdFormat('anything')).toBe(false);
   });
 });

@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 
 /**
- * Minimal sanitized Markdown renderer for streamed Beacon responses. The
+ * Minimal sanitized Markdown renderer for streamed responses. The
  * repo has no markdown dependency, so this renders a small trusted subset —
  * headings, paragraphs, lists, blockquotes, fenced code, inline code,
  * bold/italic, and http(s) links — directly to React elements. Raw HTML is

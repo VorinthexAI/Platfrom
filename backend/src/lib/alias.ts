@@ -17,7 +17,7 @@
 const BASE_ALIAS_PREFIXES: readonly string[] = [
   'Orbit', 'Nexus', 'Nova', 'Ion', 'Zenith', 'Quantum', 'Astral', 'Ember', 'Chrome', 'Obsidian',
   'Void', 'Stellar', 'Lunar', 'Solar', 'Comet', 'Nebula', 'Photon', 'Gravity', 'Halo', 'Drift',
-  'Pulse', 'Vector', 'Cipher', 'Atlas', 'Aurora', 'Apex', 'Aether', 'Axiom', 'Beacon', 'Binary',
+  'Pulse', 'Vector', 'Cipher', 'Atlas', 'Aurora', 'Apex', 'Aether', 'Axiom', 'Radiance', 'Binary',
   'Blaze', 'Borealis', 'Catalyst', 'Celestial', 'Circuit', 'Cobalt', 'Cosmic', 'Crimson', 'Crystal', 'Cryo',
   'Delta', 'Dusk', 'Dynamo', 'Echo', 'Eclipse', 'Ecliptic', 'Electric', 'Elysian', 'Enigma', 'Epoch',
   'Equinox', 'Ether', 'Falcon', 'Flare', 'Flux', 'Forge', 'Fractal', 'Fusion', 'Galactic', 'Gamma',
@@ -57,7 +57,7 @@ const BASE_ALIAS_ROLES: readonly string[] = [
   'Initiate', 'Apprentice', 'Journeyman', 'Adept', 'Master', 'Grandmaster', 'Elder', 'Ancient', 'Primarch', 'Patriarch',
   'Matriarch', 'Regent', 'Sovereign', 'Monarch', 'Baron', 'Duke', 'Count', 'Viceroy', 'Chancellor', 'Steward',
   'Bailiff', 'Sheriff', 'Constable', 'Guardian', 'Protector', 'Defender', 'Shieldbearer', 'Standardbearer', 'Bannerman', 'Torchbearer',
-  'Lightkeeper', 'Beaconer', 'Lampwright', 'Lanternist', 'Flarecaster', 'Sparkwright', 'Stormcaller', 'Windrider', 'Cloudwalker', 'Skysailor',
+  'Lightkeeper', 'Radiant', 'Lampwright', 'Lanternist', 'Flarecaster', 'Sparkwright', 'Stormcaller', 'Windrider', 'Cloudwalker', 'Skysailor',
   'Aeronaut', 'Astronaut', 'Cosmonaut', 'Spacefarer', 'Starfarer', 'Voidwalker', 'Riftrunner', 'Warpdiver', 'Jumpmaster', 'Dropship',
   'Payloader', 'Cargomaster', 'Freighter', 'Hauler', 'Runner', 'Racer', 'Sprinter', 'Dasher', 'Glider', 'Drifter',
   'Floater', 'Hoverer', 'Orbiter', 'Circler', 'Looper', 'Spinner', 'Weaver', 'Threader', 'Knitter', 'Binder',
@@ -108,7 +108,7 @@ const PREFIX_HEADS: readonly string[] = [
   'Astro', 'Cosmo', 'Hyper', 'Ultra', 'Nova', 'Nebula', 'Comet', 'Orbit', 'Aero', 'Chrono',
   'Cryo', 'Umbra', 'Nexus', 'Core', 'Command', 'Studio', 'Launch', 'Atlas', 'Hermes', 'Metis',
   'Apollo', 'Iris', 'Ledger', 'Mercury', 'Sentinel', 'Athena', 'Forge', 'Themis', 'Archive', 'Gallery',
-  'Signal', 'Compass', 'Ascend', 'Aether', 'Axiom', 'Beacon', 'Binary', 'Catalyst', 'Celestial', 'Circuit',
+  'Signal', 'Compass', 'Ascend', 'Aether', 'Axiom', 'Radiance', 'Binary', 'Catalyst', 'Celestial', 'Circuit',
   'Cobalt', 'Cosmic', 'Crimson', 'Crystal', 'Delta', 'Dynamo', 'Echo', 'Eclipse', 'Electric', 'Elysian',
   'Enigma', 'Epoch', 'Equinox', 'Falcon', 'Flare', 'Flux', 'Fractal', 'Fusion', 'Galactic', 'Gamma',
   'Glacier', 'Granite', 'Graviton', 'Helio', 'Helix', 'Horizon', 'Igneous', 'Indigo', 'Inertia', 'Iridium',
@@ -130,13 +130,13 @@ const PREFIX_TAILS: readonly string[] = [
   'phase', 'pillar', 'portal', 'pulse', 'rail', 'relay', 'rift', 'ring', 'root', 'sail',
   'seal', 'sector', 'signal', 'sphere', 'stack', 'stream', 'summit', 'trail', 'vault', 'vector',
   'vertex', 'vessel', 'vista', 'wave', 'weave', 'wing', 'yard', 'anchor', 'array', 'axis',
-  'beacon', 'belt', 'bridgeway', 'camp', 'chart', 'cradle', 'dock', 'gatehouse', 'harvest', 'keel',
+  'radiance', 'belt', 'bridgeway', 'camp', 'chart', 'cradle', 'dock', 'gatehouse', 'harvest', 'keel',
   'loom', 'map', 'needle', 'orbit', 'prism', 'quartz', 'yardarm',
 ];
 
 const ROLE_HEADS: readonly string[] = [
   'Star', 'Void', 'Sky', 'Rift', 'Belt', 'Core', 'Dust', 'Flux', 'Nova', 'Orbit',
-  'Comet', 'Nebula', 'Photon', 'Aurora', 'Ion', 'Warp', 'Beacon', 'Cipher', 'Signal', 'Vault',
+  'Comet', 'Nebula', 'Photon', 'Aurora', 'Ion', 'Warp', 'Radiance', 'Cipher', 'Signal', 'Vault',
   'Relic', 'Ember', 'Frost', 'Storm', 'Dawn', 'Night', 'Halo', 'Prism', 'Quasar', 'Pulse',
   'Crystal', 'Fragment', 'Nexus', 'Command', 'Studio', 'Launch', 'Atlas', 'Hermes', 'Metis', 'Apollo',
   'Iris', 'Ledger', 'Mercury', 'Sentinel', 'Athena', 'Forge', 'Themis', 'Archive', 'Gallery', 'Compass',
@@ -159,7 +159,7 @@ const ROLE_TAILS: readonly string[] = [
   'locator', 'maker', 'mapper', 'navigator', 'operator', 'optimizer', 'pathfinder', 'pioneer', 'planner', 'plotter',
   'prospector', 'protector', 'ranger', 'recorder', 'refiner', 'runner', 'sage', 'sentinel', 'strategist', 'surveyor',
   'synthesizer', 'tactician', 'technician', 'tracker', 'translator', 'tuner', 'voyager', 'wanderer', 'wayfarer', 'analyst',
-  'appraiser', 'balancer', 'beaconer', 'bridger', 'controller', 'diplomat', 'harbinger', 'mediator', 'oracle', 'polisher',
+  'appraiser', 'balancer', 'radiant', 'bridger', 'controller', 'diplomat', 'harbinger', 'mediator', 'oracle', 'polisher',
   'resonator', 'stargazer', 'steward', 'trailblazer', 'transmitter', 'vanguardist', 'virtuoso', 'wavecrafter', 'windrider',
 ];
 
@@ -193,7 +193,7 @@ export const WELCOME_LINES: readonly string[] = [
   'Hermes carried the news fast — {alias} has arrived.',
   '{alias}, the Forge is already shaping something for you.',
   'One more explorer among the stars. Welcome aboard, {alias}.',
-  'Your beacon is lit, {alias}. Others will navigate by it.',
+  'Your signal is lit, {alias}. Others will navigate by it.',
   'Athena approves of this decision, {alias}.',
   'The Gallery has reserved a frame for you, {alias}.',
   'Docking complete, {alias}. Make yourself at home.',

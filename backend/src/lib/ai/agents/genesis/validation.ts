@@ -129,9 +129,7 @@ export async function validateGenesisManifest(
   if (agentOperation.operation === 'reuse') {
     const existing = agentsByKey.get(agentOperation.agentKey);
     if (!existing || existing.scopeKey !== context.scope.key) throw new GenesisManifestReferenceError('agent', agentOperation.agentKey);
-    if (existing.slug === 'beacon') throw new GenesisManifestConsistencyError('the canonical Beacon agent cannot be modified by Genesis');
   } else {
-    if (agentOperation.slug === 'beacon') throw new GenesisManifestConsistencyError('the canonical Beacon agent cannot be created or modified by Genesis');
     // Genesis owns one canonical execution scope. Model output cannot choose
     // where a newly created agent is deployed.
     agentOperation = { ...agentOperation, scopeKey: context.scope.key };
@@ -201,7 +199,6 @@ export async function validateGenesisManifest(
   for (const operation of parsed.agentTools) {
     const tool: Tool | undefined = toolsByKey.get(operation.toolKey);
     if (!tool || !tool.enabled) throw new GenesisManifestReferenceError('tool', operation.toolKey);
-    if (tool.slug === 'core.delegate') throw new GenesisManifestReferenceError('Beacon-only tool', operation.toolKey);
     if (tool.scopeKey !== null && tool.scopeKey !== context.scope.key) throw new GenesisManifestReferenceError('tool permission', operation.toolKey);
   }
 

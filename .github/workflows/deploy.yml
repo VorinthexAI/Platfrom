@@ -706,7 +706,7 @@ jobs:
           openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
           test -n "$polar_access_token" || { echo "::error::POLAR_ACCESS_TOKEN not found under $SSM_PATH"; exit 1; }
-          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; Beacon and provider-backed embeddings cannot run"; exit 1; }
+          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; provider-backed embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$polar_access_token"
           echo "::add-mask::$openai_api_key"

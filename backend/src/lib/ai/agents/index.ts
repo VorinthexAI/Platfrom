@@ -67,7 +67,6 @@ export {
   AgentReferenceNotFoundError,
   DuplicateAgentSlugError,
   DuplicateAgentLinkError,
-  RestrictedAgentToolGrantError,
   type AgentServiceDataSource,
   type CreateAgentInput,
   type AttachAgentSkillInput,

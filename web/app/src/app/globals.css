@@ -198,8 +198,8 @@ body {
     linear-gradient(180deg, var(--obsidian-900), var(--obsidian-950));
 }
 
-/* Founders Gate: the restrained translucent obsidian surface used by the
-   selectors, dropdowns, and the floating Beacon island. Everything else in
+ /* Founders Gate: the restrained translucent obsidian surface used by the
+    selectors, dropdowns, and floating workspace panels. Everything else in
    Founders Gate stays transparent so the sun texture reads through. */
 .founders-surface {
   background: rgba(8, 11, 15, 0.72);

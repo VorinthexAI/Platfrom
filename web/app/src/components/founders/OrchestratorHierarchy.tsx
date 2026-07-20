@@ -7,7 +7,6 @@ import { useReducedMotion } from "framer-motion";
 import * as THREE from "three";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
-import type { BeaconToolActivity } from "@/lib/founders/types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import NexusBrainCore from "./NexusBrainCore";
 
@@ -500,14 +499,18 @@ function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean
   const camera = useThree((state) => state.camera);
   const pointer = useThree((state) => state.pointer);
   const gl = useThree((state) => state.gl);
+  const viewportWidth = useThree((state) => state.size.width);
   const cameraRef = useRef(camera);
   const distance = useRef(27.5);
   const lookTarget = useRef(new THREE.Vector3(0, LAYER_HEIGHTS[0], 0));
   const selectedNode = NODE_BY_ID.get(selectedId) ?? NODE_BY_ID.get(CORE.id)!;
+  const compactViewport = viewportWidth < 640;
 
   useEffect(() => {
-    distance.current = selectedNode.layer === 0 ? 26 : 27.5 - selectedNode.layer * 0.18;
-  }, [selectedNode.layer]);
+    distance.current = compactViewport
+      ? selectedNode.layer === 0 ? 38 : 39
+      : selectedNode.layer === 0 ? 26 : 27.5 - selectedNode.layer * 0.18;
+  }, [compactViewport, selectedNode.layer]);
 
   useEffect(() => {
     const element = gl.domElement;
@@ -538,7 +541,7 @@ function LivingStation({ selectedId, paused, muted, delegation, onSelect, onEnte
   selectedId: string;
   paused: boolean;
   muted: boolean;
-  delegation: BeaconToolActivity | null;
+  delegation: { agent: { slug: string }; phase?: string } | null;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
 }) {
@@ -694,7 +697,7 @@ interface OrchestratorHierarchyProps {
   selectedId: string;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
-  delegation: BeaconToolActivity | null;
+  delegation: { agent: { slug: string }; phase?: string } | null;
   muted: boolean;
 }
 

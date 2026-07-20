@@ -115,31 +115,10 @@ relations and selects deterministically using `modelActions.priority` only:
 
 There is no random choice, quality/cost/speed scoring, or execution fallback.
 
-Organization, organization-member/provider, scope, scope-member/agent,
-agent-member, and access evaluation/explanation tools use a separate local
-execution boundary.
-GPT-5.4 Mini routes only through `core.reason` to select one granted tool and
-produce arguments matching its JSON schema. `runDomainAgentTool` then reloads
-the persisted agent grants, resolves the initiating human, validates the input
-with Zod, enforces organization and scope RBAC, and executes the local handler.
-These deterministic domain actions intentionally have no `modelActions` rows:
-models may interpret intent but can never perform database mutations directly.
-Mutations use Arango stream transactions and emit both domain audit events and
-the normal tool lifecycle events.
-
-`core.delegate` is also a local action with no `modelActions` row. Only the
-canonical Beacon agent is seeded with that tool, generic agent services and
-Genesis reject attempts to grant it elsewhere, and Beacon's seed reconciles
-away every direct `ask.answer` or `reason.solve` grant. Beacon may use the
-existing `core.reason` model route only inside `core.delegate` to produce a
-strict Zod-validated allowlist decision; model prose is never returned to the
-user. The current allowlist contains only Genesis for `agent.create`. Every
-other intent returns the server-owned `NO_ELIGIBLE_DELEGATE` result without a
-direct-answer fallback. The Genesis handler accepts only an
-owner-authorized request for the server-resolved Genesis identity. The
-`POST /founders/beacon/delegate` boundary re-resolves organization and scope,
-records a Beacon tool run, then executes Genesis with the initiating human's
-membership preserved in the Genesis run ledger.
+Tool execution is disabled. The action catalog remains dormant metadata; no
+tools, tool-action links, or agent-tool grants are seeded. The seed process
+removes existing tool records and links before reconciling the remaining AI
+metadata.
 
 `scopeAgents` is the authoritative lifecycle and minimum-role link between a
 scope and an existing agent definition. `agentMembers` stores inherited and
@@ -198,22 +177,15 @@ new call ledger.
 ## Genesis agent creation
 
 Genesis is the only manually seeded agent. It lives in the `agent-builder`
-scope, has the single `Agent Architect` skill at priority 100, and is granted
-only the local `agent.create` tool mapped only to the `agent.create` action.
-Reasoning still uses the persisted `core.reason` route to GPT-5.4 Mini through
-an OpenAI provider enabled for the organization, but Reason Tool is not granted
-to Genesis. The canonical,
+scope and has the single `Agent Architect` skill at priority 100. It has no
+tool grants. The canonical,
 version-controlled seed inputs are `agents/genesis/seed/genesis.seed.json` and
 `agents/genesis/seed/agent-architect.skill.md`.
 
 `createAgentFromGenesis` compiles a fresh `AgentContext`, presents the complete
-organization-owned agent/skill/tool catalog plus explicit sources, and requires
-a strict creation manifest. A trusted Beacon delegation may supply a separately
-authorized target organization and scope while Genesis retains its immutable
-service identity and tool grants. Genesis proposes only; the backend reparses the
-manifest, then invokes the local `agent.create` handler. That handler reparses
-the complete input, verifies the exact Genesis capability guardrails, resolves
-references, enforces scope and tool permissions, applies
+organization-owned agent and skill catalog plus explicit sources, and requires
+a strict creation manifest. Genesis proposes only; the backend reparses the
+manifest and applies
 Reuse -> Extend -> Create, embeds candidates, and runs novelty checks before
 any domain write. Agent similarity uses review/reject thresholds 0.85/0.95;
 skills use 0.80/0.90, with at most five comparisons for each.
@@ -228,9 +200,8 @@ records explicit sources, reused dependencies, and created results as artifact
 provenance.
 
 The handler's write allow-list is exactly `agents`, `skills`, `agentSkills`,
-`agentTools`, `agentArtifacts`, and `agentArtifactChecks`. It cannot create
-tools, actions, models, providers, provider grants, or arbitrary documents.
-Seed reconciliation removes every other persisted Genesis tool grant.
+`agentArtifacts`, and `agentArtifactChecks`. It cannot create tools, actions,
+models, providers, provider grants, or arbitrary documents.
 
 ## Provider configuration
 

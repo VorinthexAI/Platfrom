@@ -24,7 +24,6 @@
     "db:seed": "bun run load-local-env && bun --env-file=.env.local src/db/seed-all.ts",
     "seed:secrets": "bun run scripts/seed-secrets.ts",
     "polar:sync": "bun run scripts/sync-polar-products.ts",
-    "smoke:beacon": "bun run scripts/smoke-beacon.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",

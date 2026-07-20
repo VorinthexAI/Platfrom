@@ -1,69 +1,10 @@
 import { z } from 'zod';
 import { DOT_NOTATION_PATTERN, isDotNotationId } from '@/lib/ai/shared/ids';
 
-export const TOOL_IDS = [
-  'ask.answer',
-  'reason.solve',
-  'core.delegate',
-  'agent.create',
-  'artifact.create',
-  'artifact.read',
-  'image.create',
-  'audio.transcribe-file',
-  'speech.narrate',
-  'organization.member.list',
-  'organization.member.read',
-  'organization.member.add',
-  'organization.member.role.update',
-  'organization.member.activate',
-  'organization.member.suspend',
-  'organization.member.remove',
-  'scope.list',
-  'scope.read',
-  'scope.create',
-  'scope.update',
-  'scope.move',
-  'scope.archive',
-  'scope.restore',
-  'scope.remove',
-  'scope.member.list',
-  'scope.member.read',
-  'scope.member.add',
-  'scope.member.role.update',
-  'scope.member.activate',
-  'scope.member.suspend',
-  'scope.member.remove',
-  'scope.agent.list',
-  'scope.agent.read',
-  'scope.agent.add',
-  'scope.agent.move',
-  'scope.agent.archive',
-  'scope.agent.restore',
-  'scope.agent.remove',
-  'scope.agent.access-threshold.update',
-  'agent.member.list',
-  'agent.member.read',
-  'agent.member.grant',
-  'agent.member.revoke',
-  'agent.member.sync',
-  'organization.provider.list',
-  'organization.provider.read',
-  'organization.provider.enable',
-  'organization.provider.disable',
-  'organization.provider.test',
-  'organization.read',
-  'organization.update',
-  'organization.archive',
-  'organization.restore',
-  'access.organization.evaluate',
-  'access.scope.evaluate',
-  'access.agent.evaluate',
-  'access.organization.explain',
-  'access.scope.explain',
-  'access.agent.explain',
-] as const;
-export type ToolId = (typeof TOOL_IDS)[number];
-export const toolIdSchema = z.enum(TOOL_IDS);
+/** Tool execution is disabled. Actions remain as dormant metadata only. */
+export const TOOL_IDS = [] as const;
+export type ToolId = string;
+export const toolIdSchema = z.string().trim().min(1);
 
 /** Executable tool handlers contain no action/model/provider relation data. */
 export interface ToolDefinition { id: ToolId; name: string; description: string; scopeId: string | null }

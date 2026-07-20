@@ -61,7 +61,7 @@ describe('semantic graph compiler', () => {
     const graph = compileArtifactGraph(definition(), {
       currentOrganization: { ref: { nodeType: 'organizations', nodeKey: 'root-org' }, name: 'Vorinthex AI', state: 'active' },
       organizationScopes: [{ ref: { nodeType: 'scopes', nodeKey: 'scope-1' }, parentRef: { nodeType: 'organizations', nodeKey: 'root-org' }, name: 'Nexus' }],
-      activeAgents: [{ ref: { nodeType: 'agents', nodeKey: 'agent-1' }, parentRef: { nodeType: 'scopes', nodeKey: 'scope-1' }, name: 'Beacon', state: 'active', weight: 1.4 }],
+      activeAgents: [{ ref: { nodeType: 'agents', nodeKey: 'agent-1' }, parentRef: { nodeType: 'scopes', nodeKey: 'scope-1' }, name: 'Test Agent', state: 'active', weight: 1.4 }],
     });
     expect(graph.nodes.map((node) => ({ id: node.id, ref: node.ref, kind: node.kind }))).toEqual([
       { id: 'organization:organizations:root-org', ref: { nodeType: 'organizations', nodeKey: 'root-org' }, kind: 'organization' },
