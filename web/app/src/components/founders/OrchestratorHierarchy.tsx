@@ -19,16 +19,12 @@ const CAPABILITIES = (CORE.children ?? [])
   .filter((entity): entity is GalaxyEntity => Boolean(entity));
 const LAYER_RADII = [0, 2.7, 4.35, 5.75, 7.2, 8.75, 10.4, 12.1];
 const LAYER_HEIGHTS = [0.46, 0.32, 0.17, 0.02, -0.14, -0.3, -0.46, -0.62];
-const ORBIT_TILTS: Array<[number, number, number]> = [
-  [0, 0, 0],
-  [0.12, 0.08, 0.18],
-  [-0.2, 0.16, -0.24],
-  [0.28, -0.14, 0.36],
-  [-0.32, 0.2, 0.22],
-  [0.4, -0.18, -0.3],
-  [-0.26, 0.3, 0.44],
-];
-const ORBIT_SPEEDS = [0, 0.032, -0.027, 0.023, -0.019, 0.016, -0.014];
+const X_AXIS_ORBIT_LAYERS = [2, 4, 6];
+const Y_AXIS_ORBIT_LAYERS = [1, 3, 5];
+const ORBIT_SPEED_BASE = 0.06;
+const ORBIT_SPEED_STEP = 0.027;
+const ENTITY_SPIN_BASE = 0.16;
+const ENTITY_SPIN_STEP = 0.045;
 const NODE_ANGLES: Record<string, number> = {
   core: 90,
   archive: -90, gallery: -18, signal: 54, compass: 126, ascend: 198,
@@ -94,6 +90,19 @@ function activeBranch(selectedId: string) {
   return active;
 }
 
+function orbitPlaneRotation(layer: number): [number, number, number] {
+  const xAxis = layer % 2 === 0;
+  const family = xAxis ? X_AXIS_ORBIT_LAYERS : Y_AXIS_ORBIT_LAYERS;
+  const familyIndex = family.indexOf(layer);
+  const angle = familyIndex * Math.PI * 2 / family.length;
+  return xAxis ? [0, angle, 0] : [angle, 0, 0];
+}
+
+function orbitSpeed(layer: number) {
+  const direction = layer % 2 === 0 ? -1 : 1;
+  return direction * (ORBIT_SPEED_BASE + layer * ORBIT_SPEED_STEP);
+}
+
 function useBrushedMetalTexture() {
   const texture = useMemo(() => {
     const size = 128;
@@ -125,15 +134,16 @@ function useBrushedMetalTexture() {
 function OrbitLayer({ layer, paused, children }: { layer: number; paused: boolean; children: ReactNode }) {
   const orbit = useRef<THREE.Group>(null);
   const xAxis = layer % 2 === 0;
+  const speed = orbitSpeed(layer);
 
   useFrame((_, delta) => {
     if (paused || !orbit.current) return;
-    if (xAxis) orbit.current.rotation.x += delta * ORBIT_SPEEDS[layer];
-    else orbit.current.rotation.y += delta * ORBIT_SPEEDS[layer];
+    if (xAxis) orbit.current.rotation.x += delta * speed;
+    else orbit.current.rotation.y += delta * speed;
   });
 
   return (
-    <group rotation={ORBIT_TILTS[layer]}>
+    <group rotation={orbitPlaneRotation(layer)}>
       <group ref={orbit}>{children}</group>
     </group>
   );
@@ -320,12 +330,13 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
   const opacity = muted ? 0.28 : active ? 1 : 0.72;
   const descriptor = entity.role ?? entity.label ?? entity.content?.eyebrow ?? entity.tagline ?? entity.type;
   const spinDirection = [...entity.slug].reduce((total, character) => total + character.charCodeAt(0), 0) % 2 === 0 ? 1 : -1;
+  const spinSpeed = ENTITY_SPIN_BASE + node.layer * ENTITY_SPIN_STEP;
 
   useFrame(({ clock }, delta) => {
     if (animated.current) {
       const target = selected ? 1.18 : hovered ? 1.08 : 1;
       animated.current.scale.setScalar(THREE.MathUtils.damp(animated.current.scale.x, target, 5, delta));
-      animated.current.rotation.y += delta * spinDirection * (active ? 0.18 : 0.075);
+      animated.current.rotation.y += delta * spinDirection * spinSpeed;
     }
     if (halo.current) halo.current.rotation.z = clock.elapsedTime * 0.3;
   });
