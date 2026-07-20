@@ -36,6 +36,7 @@ import {
 } from '@/lib/ai/providers';
 import { getAuthIdentity } from './security';
 import { parseJson, strictObject } from './validation';
+import { getOrchestratorById } from '@/lib/db/orchestrators.node';
 
 /**
  * Founders Gate: the founder-facing surface. Every handler independently
@@ -110,6 +111,9 @@ export async function getFoundersAccount(c: Context) {
   const auth = await requireFounder(c);
   if ('error' in auth) return auth.error;
   const { user, rootOrganization, rootMembership, identityType } = auth.founder;
+  const orchestrator = rootMembership.orchestratorKey
+    ? await getOrchestratorById(rootMembership.orchestratorKey)
+    : null;
   return c.json({
     user: {
       key: user.key,
@@ -125,6 +129,7 @@ export async function getFoundersAccount(c: Context) {
     rootMembership: {
       role: rootMembership.orgRole,
       title: rootMembership.orgTitle,
+      orchestrator: orchestrator ? { key: orchestrator.key, slug: orchestrator.name.toLowerCase() } : null,
     },
     applicationRole: identityType,
   });

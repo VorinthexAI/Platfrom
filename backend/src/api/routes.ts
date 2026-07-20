@@ -126,6 +126,7 @@ export function registerRoutes(app: Hono) {
       expires_at: result.expiresAt.toISOString(),
       name: result.name,
       organization_title: result.organizationTitle,
+      orchestrator_slug: result.orchestratorSlug,
     });
   });
 

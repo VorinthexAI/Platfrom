@@ -14,6 +14,7 @@ export const userOrganizationSchema = z.object({
   userId: z.string(),
   orgRole: userOrganizationRoleSchema,
   orgTitle: z.string().nullable().default(null),
+  orchestratorKey: z.string().nullable().default(null),
   status: userOrganizationStatusSchema.default('active'),
   joinedAt: z.string(),
   isMfaEnabled: z.boolean().default(false),

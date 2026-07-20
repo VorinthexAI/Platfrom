@@ -212,6 +212,7 @@ const collections: CollectionSpec[] = [
       { fields: ['userId'] },
       { fields: ['organizationId', 'userId'], unique: true },
       { fields: ['organizationId', 'orgRole'] },
+      { fields: ['orchestratorKey'], sparse: true },
     ],
   },
   { name: 'minds', embedKeys: ['name'], indexes: [{ fields: ['userId'], unique: true }] },
@@ -1911,6 +1912,35 @@ async function main() {
         UPDATE user WITH { alias: founderAlias, updatedAt: DATE_ISO8601(DATE_NOW()) } IN users
   `, { rootOrganizationId });
 
+  // Founder memberships may enter their assigned command deck directly. The
+  // link remains optional for every other organization member.
+  await targetDb.query(`
+    FOR membership IN userOrganizations
+      FILTER membership.organizationId == @rootOrganizationId
+      FILTER !HAS(membership, "status") || membership.status == "active"
+      FOR user IN users
+        FILTER user._key == membership.userId
+        LET email = LOWER(user.email)
+        LET orchestratorName =
+          email == "oscar@vorinthex.com" ? "Atlas" :
+          email == "josef@vorinthex.com" ? "Orbit" :
+          email == "frank@vorinthex.com" ? "Mercury" :
+          email == "vincent@vorinthex.com" ? "Iris" :
+          email == "anton@vorinthex.com" ? "Apollo" : null
+        FILTER orchestratorName != null
+        LET orchestrator = FIRST(
+          FOR candidate IN orchestrators
+            FILTER candidate.name == orchestratorName
+            LIMIT 1
+            RETURN candidate
+        )
+        FILTER orchestrator != null
+        UPDATE membership WITH {
+          orchestratorKey: orchestrator._key,
+          updatedAt: DATE_ISO8601(DATE_NOW())
+        } IN userOrganizations
+  `, { rootOrganizationId });
+
   const rootMembershipCursor = await targetDb.query<{ key: string; orgRole: string }>(`
     FOR membership IN userOrganizations
       FILTER membership.organizationId == @rootOrganizationId
@@ -1933,7 +1963,7 @@ async function main() {
       role: membership.orgRole === 'owner' || membership.orgRole === 'admin' ? membership.orgRole : 'viewer',
     });
   }
-  console.log('Normalized founder aliases and Nexus access');
+  console.log('Normalized founder aliases, orchestrator links, and Nexus access');
 
   await seedNexusOrganizationArtifact(targetDb, rootOrganizationId, nexusScopeId);
   console.log('Seeded the Nexus spatial organization artifact');

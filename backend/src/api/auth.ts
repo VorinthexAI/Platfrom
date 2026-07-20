@@ -16,6 +16,7 @@ import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
 import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
 import { getOrganizationById } from '@/lib/db/organizations.node';
+import { getOrchestratorById } from '@/lib/db/orchestrators.node';
 import {
   listActiveUserOrganizationsByUser,
   updateUserOrganization,
@@ -62,6 +63,7 @@ interface LoginIdentity {
   emailHash: string;
   name: string | null;
   organizationTitle: string | null;
+  orchestratorKey: string | null;
   organizationIsRoot: boolean;
   organizationMfaEnabled: boolean;
   isMfaEnabled: boolean;
@@ -148,6 +150,7 @@ async function membershipIdentity(
     emailHash: user.emailHash,
     name: user.name,
     organizationTitle: membership.orgTitle,
+    orchestratorKey: membership.orchestratorKey,
     organizationIsRoot: organization.is_root,
     organizationMfaEnabled: organization.mfa_enabled,
     isMfaEnabled: membership.isMfaEnabled,
@@ -849,6 +852,9 @@ export async function requestFoundersGate(email: string) {
     expiresAt: challenge.expiresAt,
     name: identity.name,
     organizationTitle: identity.organizationTitle,
+    orchestratorSlug: identity.orchestratorKey
+      ? (await getOrchestratorById(identity.orchestratorKey))?.name.toLowerCase() ?? null
+      : null,
   };
 }
 

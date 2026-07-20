@@ -117,6 +117,14 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
         if (cancelled) return;
         setAccount(loadedAccount);
         setOrganizations(loadedOrganizations);
+        const assignedEntity = loadedAccount.rootMembership.orchestrator
+          ? getEntityById(`orchestrator.${loadedAccount.rootMembership.orchestrator.slug}`)
+          : null;
+        if (assignedEntity?.type === "orchestrator") {
+          setSelectedEntityId(assignedEntity.id);
+          setEnteredEntityId(assignedEntity.id);
+          setTransitDestination(`${assignedEntity.name} station interior`);
+        }
         const stored = window.localStorage.getItem(ORGANIZATION_STORAGE_KEY);
         const initialKey = loadedOrganizations.find((organization) => organization.key === stored)?.key
           ?? loadedOrganizations[0]?.key

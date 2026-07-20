@@ -20,6 +20,7 @@ describe('user organization node schema', () => {
     expect(link.orgRole).toBe('member');
     expect(link.status).toBe('active');
     expect(link.orgTitle).toBeNull();
+    expect(link.orchestratorKey).toBeNull();
     expect(link.isMfaEnabled).toBe(false);
     expect(link.totpSecret).toBeNull();
     expect(link.lastTotpTimeStep).toBeNull();
@@ -36,6 +37,10 @@ describe('user organization node schema', () => {
   test('supports inactive memberships for explicit reactivation', () => {
     expect(userOrganizationStatusSchema.parse('inactive')).toBe('inactive');
     expect(userOrganizationSchema.parse({ ...baseLink, status: 'inactive' }).status).toBe('inactive');
+  });
+
+  test('supports an optional assigned orchestrator', () => {
+    expect(userOrganizationSchema.parse({ ...baseLink, orchestratorKey: 'orch_atlas' }).orchestratorKey).toBe('orch_atlas');
   });
 
   test('never carries retired member or team fields', () => {
