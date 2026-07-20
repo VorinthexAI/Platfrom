@@ -305,20 +305,6 @@ export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?
   return { accessToken, refreshToken, accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds), refreshTokenMaxAgeSeconds: remainingSeconds, sessionExpiresAt: sessionExpiresAt.toISOString() };
 }
 
-export async function rotateRefreshToken(refreshToken: string): Promise<SessionTokens | null> {
-  const tokenHash = await sha256(refreshToken);
-  const user = await getUserByRefreshTokenHash(tokenHash);
-  if (!user || !isRefreshTokenActive(user.refreshTokenExpiresAt)) return null;
-  const identity = await organizationMembershipIdentity(user);
-  const identityType = identity?.type ?? 'user';
-  const policy = getAuthSessionPolicy(identityType);
-  const sessionExpiresAt = new Date(Math.min(
-    Date.parse(user.refreshTokenExpiresAt!),
-    Date.now() + policy.refreshMaxAgeSeconds * 1000,
-  ));
-  return identity ? issueTokens(identity, sessionExpiresAt) : issueUserTokens(user, sessionExpiresAt);
-}
-
 /**
  * Refresh an expired access token without rotating the refresh token. The
  * middleware can see several requests concurrently at the access-token

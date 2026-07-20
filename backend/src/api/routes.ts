@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import { getCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { listAllProducts } from '@/lib/db/products.node';
 import { getUserById } from '@/lib/db/users.node';
@@ -12,14 +11,13 @@ import {
   requestMfaResetEmail,
   requestSignInEmail,
   resetTotpForChallenge,
-  rotateRefreshToken,
   startTotpSetup,
   validateMagicLink,
   verifyTotpAndIssueSession,
 } from './auth';
 import { claimHandoff, getHandoffStatus, streamHandoff } from './auth-handoff';
 import { getUserId } from './security';
-import { REFRESH_COOKIE, setSessionCookies, setSessionTokenHeaders } from './middleware';
+import { setSessionCookies, setSessionTokenHeaders } from './middleware';
 import { joinNewsletter } from './newsletter';
 import { appendUserEvents, postUserEventsBodySchema } from './user-events';
 import { parseJson, parseQuery, strictObject } from './validation';
@@ -275,20 +273,6 @@ export function registerRoutes(app: Hono) {
       totp_challenge_token_hash: result.totpChallengeToken,
       expires_at: result.expiresAt.toISOString(),
     });
-  });
-
-  app.post('/auth/refresh', async (c) => {
-    const rawBody = await c.req.json().catch(() => ({}));
-    const body = strictObject({ refresh_token: z.string().optional() }).parse(rawBody);
-    const cookieRefreshToken = getCookie(c, REFRESH_COOKIE);
-    const refreshToken = cookieRefreshToken ?? c.req.header('x-refresh-token') ?? body.refresh_token;
-    if (!refreshToken) return c.json({ error: 'refresh token required' }, 401);
-
-    const result = await rotateRefreshToken(refreshToken);
-    if (!result) return c.json({ error: 'invalid refresh token' }, 401);
-    setSessionTokenHeaders(c, result);
-    if (cookieRefreshToken) setSessionCookies(c, result);
-    return c.json(result);
   });
 
   app.post('/auth/totp/setup/start', async (c) => {
