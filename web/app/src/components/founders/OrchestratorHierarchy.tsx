@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Billboard, Html, useTexture } from "@react-three/drei";
+import { Billboard, Environment, Html, Lightformer, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "framer-motion";
 import * as THREE from "three";
@@ -61,13 +61,41 @@ function activeBranch(selectedSlug: string) {
 
 type NavigateOrchestrator = (entity: GalaxyEntity, direction: 1 | -1) => void;
 
+function useBrushedMetalTexture() {
+  const texture = useMemo(() => {
+    const size = 128;
+    const data = new Uint8Array(size * size * 4);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const index = (y * size + x) * 4;
+        const grain = (x * 17 + y * 131 + (x * y % 29) * 7) % 46;
+        const value = THREE.MathUtils.clamp(112 + grain + Math.sin(y * 0.42) * 24, 72, 210);
+        data[index] = value;
+        data[index + 1] = value;
+        data[index + 2] = value;
+        data[index + 3] = 255;
+      }
+    }
+    const result = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    result.wrapS = THREE.RepeatWrapping;
+    result.wrapT = THREE.RepeatWrapping;
+    result.repeat.set(5, 1.5);
+    result.colorSpace = THREE.NoColorSpace;
+    result.needsUpdate = true;
+    return result;
+  }, []);
+
+  useEffect(() => () => texture.dispose(), [texture]);
+  return texture;
+}
+
 function handleTab(event: KeyboardEvent<HTMLButtonElement>, entity: GalaxyEntity, onNavigate: NavigateOrchestrator) {
   if (event.key !== "Tab") return;
   event.preventDefault();
   onNavigate(entity, event.shiftKey ? -1 : 1);
 }
 
-function EngineeredRing({ radius, layer, paused, active }: { radius: number; layer: number; paused: boolean; active: boolean }) {
+function EngineeredRing({ radius, layer, paused, active, metalTexture }: { radius: number; layer: number; paused: boolean; active: boolean; metalTexture: THREE.Texture }) {
   const rotation = useRef<THREE.Group>(null);
   const segments = 26 + layer * 8;
   const segmentLength = (Math.PI * 2 * radius / segments) * 0.76;
@@ -87,12 +115,16 @@ function EngineeredRing({ radius, layer, paused, active }: { radius: number; lay
       {[-0.2, 0, 0.2].map((offset, index) => (
         <mesh key={offset} position={xAxis ? [offset, 0, 0] : [0, offset, 0]} rotation={ringRotation} castShadow receiveShadow>
           <torusGeometry args={[radius + (index - 1) * 0.1, index === 1 ? 0.13 : 0.055, 8, 192]} />
-          <meshStandardMaterial
+          <meshPhysicalMaterial
             color={index === 1 ? "#14171a" : "#5d6267"}
             emissive={active && index === 1 ? "#592207" : "#000000"}
             emissiveIntensity={active ? 0.7 : 0}
             metalness={0.96}
             roughness={index === 1 ? 0.3 : 0.18}
+            roughnessMap={metalTexture}
+            clearcoat={0.42}
+            clearcoatRoughness={0.16}
+            envMapIntensity={1.6}
           />
         </mesh>
       ))}
@@ -112,13 +144,13 @@ function EngineeredRing({ radius, layer, paused, active }: { radius: number; lay
           >
             <mesh castShadow receiveShadow>
               <boxGeometry args={[major ? 0.5 : 0.28, major ? 0.4 : 0.22, segmentLength]} />
-              <meshPhysicalMaterial color={major ? "#30363a" : "#171b1e"} metalness={0.98} roughness={major ? 0.2 : 0.3} clearcoat={0.5} clearcoatRoughness={0.22} />
+              <meshPhysicalMaterial color={major ? "#30363a" : "#171b1e"} metalness={0.98} roughness={major ? 0.2 : 0.3} roughnessMap={metalTexture} clearcoat={0.5} clearcoatRoughness={0.22} envMapIntensity={1.7} />
             </mesh>
             {major ? (
               <>
                 <mesh position={xAxis ? [0, 0.215, 0] : [0.265, 0, 0]}>
                   <boxGeometry args={xAxis ? [0.28, 0.018, segmentLength * 0.62] : [0.018, 0.24, segmentLength * 0.62]} />
-                  <meshPhysicalMaterial color="#788087" metalness={1} roughness={0.13} clearcoat={0.7} />
+                  <meshPhysicalMaterial color="#788087" metalness={1} roughness={0.13} roughnessMap={metalTexture} clearcoat={0.7} envMapIntensity={2} />
                 </mesh>
                 <mesh position={xAxis ? [0, 0.227, 0] : [0.278, 0, 0]}>
                   <boxGeometry args={xAxis ? [0.12, 0.01, segmentLength * 0.34] : [0.01, 0.03, segmentLength * 0.34]} />
@@ -188,11 +220,12 @@ function EnergyConduit({ from, to, active, paused, reverse = false }: {
   );
 }
 
-function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }: {
+function CommandModule({ entity, selected, active, muted, metalTexture, onSelect, onNavigate }: {
   entity: GalaxyEntity;
   selected: boolean;
   active: boolean;
   muted: boolean;
+  metalTexture: THREE.Texture;
   onSelect: (entity: GalaxyEntity) => void;
   onNavigate: NavigateOrchestrator;
 }) {
@@ -218,15 +251,15 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
       <group ref={animated}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[0.5, 0.6, 0.34, 32]} />
-          <meshPhysicalMaterial color={active ? "#111518" : "#20262a"} emissive={active ? "#21140b" : "#000000"} emissiveIntensity={active ? 0.52 : 0} metalness={0.98} roughness={0.17} clearcoat={0.65} clearcoatRoughness={0.18} transparent opacity={opacity} />
+          <meshPhysicalMaterial color={active ? "#111518" : "#20262a"} emissive={active ? "#21140b" : "#000000"} emissiveIntensity={active ? 0.52 : 0} metalness={0.98} roughness={0.17} roughnessMap={metalTexture} clearcoat={0.65} clearcoatRoughness={0.18} envMapIntensity={1.8} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, -0.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.48, 0.045, 8, 64]} />
-          <meshPhysicalMaterial color="#929ba1" metalness={1} roughness={0.1} clearcoat={0.8} transparent opacity={opacity} />
+          <meshPhysicalMaterial color="#929ba1" metalness={1} roughness={0.1} roughnessMap={metalTexture} clearcoat={0.8} envMapIntensity={2.2} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, 0.29, 0]} castShadow>
           <cylinderGeometry args={[0.31, 0.42, 0.12, 12]} />
-          <meshPhysicalMaterial color={active ? "#3c3025" : "#42494e"} metalness={1} roughness={0.16} clearcoat={0.55} transparent opacity={opacity} />
+          <meshPhysicalMaterial color={active ? "#3c3025" : "#42494e"} metalness={1} roughness={0.16} roughnessMap={metalTexture} clearcoat={0.55} envMapIntensity={1.9} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, 0.19, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.46, 0.055, 8, 64]} />
@@ -244,7 +277,7 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
             <group key={`armor-${index}`} position={[Math.cos(angle) * 0.57, -0.08, Math.sin(angle) * 0.57]} rotation={[0, -angle, 0]}>
               <mesh castShadow>
                 <boxGeometry args={[0.2, 0.11, 0.2]} />
-                <meshPhysicalMaterial color="#687178" metalness={1} roughness={0.12} clearcoat={0.75} transparent opacity={opacity} />
+                <meshPhysicalMaterial color="#687178" metalness={1} roughness={0.12} roughnessMap={metalTexture} clearcoat={0.75} envMapIntensity={2.1} transparent opacity={opacity} />
               </mesh>
               <mesh position={[0, 0.065, 0.02]}>
                 <boxGeometry args={[0.09, 0.018, 0.12]} />
@@ -266,11 +299,11 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
       <Billboard position={[0, 0.35, 0]}>
         <mesh position={[0, 0, -0.07]}>
           <circleGeometry args={[0.47, 48]} />
-          <meshPhysicalMaterial color="#090c0e" metalness={0.96} roughness={0.2} clearcoat={0.55} transparent opacity={opacity} />
+          <meshPhysicalMaterial color="#090c0e" metalness={0.96} roughness={0.2} roughnessMap={metalTexture} clearcoat={0.55} envMapIntensity={1.7} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, 0, -0.055]}>
           <ringGeometry args={[0.47, 0.53, 48]} />
-          <meshPhysicalMaterial color={selected ? "#f2d4a7" : active ? "#b77a40" : "#7f8990"} metalness={1} roughness={0.12} clearcoat={0.8} transparent opacity={opacity} />
+          <meshPhysicalMaterial color={selected ? "#f2d4a7" : active ? "#b77a40" : "#7f8990"} metalness={1} roughness={0.12} roughnessMap={metalTexture} clearcoat={0.8} envMapIntensity={2.2} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, 0, -0.04]}>
           <ringGeometry args={[0.37, 0.39, 48]} />
@@ -319,22 +352,23 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
   );
 }
 
-function CivilizationPerimeter({ organizations, organizationKey, onOrganizationSelect, muted }: {
+function CivilizationPerimeter({ organizations, organizationKey, onOrganizationSelect, muted, metalTexture }: {
   organizations: AccessibleOrganizationOption[];
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
   muted: boolean;
+  metalTexture: THREE.Texture;
 }) {
   const radius = LAYER_RADII[4];
   return (
     <group position={[0, LAYER_HEIGHTS[4], 0]}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[radius, 0.22, 10, 220]} />
-        <meshPhysicalMaterial color="#171c20" metalness={0.99} roughness={0.18} clearcoat={0.55} clearcoatRoughness={0.2} />
+        <meshPhysicalMaterial color="#171c20" metalness={0.99} roughness={0.18} roughnessMap={metalTexture} clearcoat={0.55} clearcoatRoughness={0.2} envMapIntensity={1.8} />
       </mesh>
       <mesh position={[0, -0.04, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[radius, 0.27, 6, 220]} />
-        <meshPhysicalMaterial color="#343b40" metalness={1} roughness={0.14} clearcoat={0.6} side={THREE.BackSide} />
+        <meshPhysicalMaterial color="#343b40" metalness={1} roughness={0.14} roughnessMap={metalTexture} clearcoat={0.6} envMapIntensity={2} side={THREE.BackSide} />
       </mesh>
       <mesh position={[0, 0.16, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[radius, 0.018, 5, 220]} />
@@ -439,24 +473,29 @@ function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolea
   );
 }
 
-function CameraRig({ selectedSlug }: { selectedSlug: string }) {
+function CameraRig({ selectedSlug, paused }: { selectedSlug: string; paused: boolean }) {
   const camera = useThree((state) => state.camera);
   const pointer = useThree((state) => state.pointer);
   const cameraRef = useRef(camera);
   const distance = useRef(20.5);
+  const lookTarget = useRef(new THREE.Vector3(0, LAYER_HEIGHTS[0], 0));
   const selectedDepth = depthFor(VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug] ?? ATLAS);
 
   useEffect(() => {
     distance.current = selectedSlug === "atlas" ? 19.5 : 18 - selectedDepth * 0.45;
   }, [selectedDepth, selectedSlug]);
 
-  useFrame((_, delta) => {
+  useFrame(({ clock }, delta) => {
     const current = cameraRef.current;
     const desiredZ = distance.current;
+    const driftX = paused ? 0 : Math.sin(clock.elapsedTime * 0.17) * 0.09;
+    const driftY = paused ? 0 : Math.cos(clock.elapsedTime * 0.13) * 0.07;
     current.position.z = THREE.MathUtils.damp(current.position.z, desiredZ, 2.2, delta);
-    current.position.y = THREE.MathUtils.damp(current.position.y, desiredZ * 0.52 + pointer.y * 0.35, 2.2, delta);
-    current.position.x = THREE.MathUtils.damp(current.position.x, pointer.x * 0.65, 2.2, delta);
-    current.lookAt(0, selectedSlug === "atlas" ? LAYER_HEIGHTS[0] : 0, selectedSlug === "atlas" ? 0 : 1.1);
+    current.position.y = THREE.MathUtils.damp(current.position.y, desiredZ * 0.52 + pointer.y * 0.35 + driftY, 1.8, delta);
+    current.position.x = THREE.MathUtils.damp(current.position.x, pointer.x * 0.65 + driftX, 1.8, delta);
+    lookTarget.current.y = THREE.MathUtils.damp(lookTarget.current.y, selectedSlug === "atlas" ? LAYER_HEIGHTS[0] : 0, 2, delta);
+    lookTarget.current.z = THREE.MathUtils.damp(lookTarget.current.z, selectedSlug === "atlas" ? 0 : 1.1, 2, delta);
+    current.lookAt(lookTarget.current);
   });
   return null;
 }
@@ -498,6 +537,8 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
   const xRotationTarget = useRef(0);
   const yRotationTarget = useRef(0);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const angularVelocity = useRef(new THREE.Vector2());
+  const metalTexture = useBrushedMetalTexture();
   const branch = useMemo(() => activeBranch(selectedSlug), [selectedSlug]);
   const delegatedSlug = delegation?.agent.slug.split(".").at(-1) ?? null;
 
@@ -539,6 +580,7 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
       current.y = event.clientY;
       yRotationTarget.current += deltaX * 0.006;
       xRotationTarget.current = THREE.MathUtils.clamp(xRotationTarget.current + deltaY * 0.006, -1.2, 1.2);
+      angularVelocity.current.set(deltaY * 0.0018, deltaX * 0.0018);
       if (paused && station.current) {
         station.current.rotation.x = xRotationTarget.current;
         station.current.rotation.y = yRotationTarget.current;
@@ -564,8 +606,14 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
 
   useFrame((_, delta) => {
     if (!paused && station.current) {
-      station.current.rotation.x = THREE.MathUtils.damp(station.current.rotation.x, xRotationTarget.current, 2.4, delta);
-      station.current.rotation.y = THREE.MathUtils.damp(station.current.rotation.y, yRotationTarget.current, 2.4, delta);
+      if (!drag.current) {
+        yRotationTarget.current += angularVelocity.current.y * delta * 60;
+        xRotationTarget.current = THREE.MathUtils.clamp(xRotationTarget.current + angularVelocity.current.x * delta * 60, -1.2, 1.2);
+        angularVelocity.current.x = THREE.MathUtils.damp(angularVelocity.current.x, 0, 2.1, delta);
+        angularVelocity.current.y = THREE.MathUtils.damp(angularVelocity.current.y, 0, 2.1, delta);
+      }
+      station.current.rotation.x = THREE.MathUtils.damp(station.current.rotation.x, xRotationTarget.current, 2, delta);
+      station.current.rotation.y = THREE.MathUtils.damp(station.current.rotation.y, yRotationTarget.current, 2, delta);
     }
   });
 
@@ -580,6 +628,7 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
             layer={layer}
             paused={paused}
             active={!muted && [...branch].some((slug) => depthFor(VORINTHEX_GALAXY_REGISTRY.orchestrators[slug]) === layer)}
+            metalTexture={metalTexture}
           />
         ))}
 
@@ -601,9 +650,9 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
         ) : null}
 
         {ORCHESTRATORS.map((entity) => (
-          <CommandModule key={entity.id} entity={entity} selected={entity.slug === selectedSlug} active={branch.has(entity.slug)} muted={muted} onSelect={onSelect} onNavigate={onNavigate} />
+          <CommandModule key={entity.id} entity={entity} selected={entity.slug === selectedSlug} active={branch.has(entity.slug)} muted={muted} metalTexture={metalTexture} onSelect={onSelect} onNavigate={onNavigate} />
         ))}
-        <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} />
+        <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} metalTexture={metalTexture} />
       </group>
     </group>
   );
@@ -632,8 +681,13 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
   return (
     <div className={`relative h-full min-h-[560px] w-full cursor-grab overflow-hidden transition-opacity duration-700 active:cursor-grabbing ${props.muted ? "pointer-events-none opacity-25" : "opacity-100"}`} aria-label="Nexus command station">
       <Canvas dpr={[1, 1.35]} shadows camera={{ position: [0, 10.5, 20.5], fov: 42, near: 0.1, far: 120 }} gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }} className="!absolute !inset-0">
-        <CameraRig selectedSlug={props.selectedSlug} />
+        <CameraRig selectedSlug={props.selectedSlug} paused={paused} />
         <WheelNavigation selectedSlug={props.selectedSlug} onNavigate={navigate} />
+        <Environment resolution={128}>
+          <Lightformer form="rect" color="#fff7eb" intensity={3.4} scale={[14, 2, 1]} position={[0, 9, 4]} rotation={[-0.55, 0, 0]} />
+          <Lightformer form="rect" color="#91a8bd" intensity={2.2} scale={[5, 10, 1]} position={[-10, 2, 2]} rotation={[0, Math.PI / 2, 0]} />
+          <Lightformer form="ring" color="#d86b22" intensity={2.8} scale={5} position={[8, -2, -6]} rotation={[0, -0.7, 0]} />
+        </Environment>
         <ambientLight intensity={0.22} color="#5d4637" />
         <directionalLight castShadow position={[7, 13, 9]} intensity={1.55} color="#f2f4f5" shadow-mapSize={[1024, 1024]} />
         <directionalLight position={[-9, 5, -7]} intensity={0.7} color="#9ea9b2" />
