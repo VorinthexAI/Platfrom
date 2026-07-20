@@ -68,6 +68,21 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const { reset: resetBeacon, cancel: cancelBeacon } = beacon;
   const playVoice = useAudioStore((state) => state.playVoice);
   const stopVoice = useAudioStore((state) => state.stopVoice);
+  const startAmbient = useAudioStore((state) => state.startAmbient);
+  const ambientStarted = useAudioStore((state) => state.ambientStarted);
+
+  useEffect(() => {
+    // Try autoplay first; browsers that block it are released by the first
+    // interaction, matching the landing page's ambient soundtrack behavior.
+    startAmbient();
+    if (ambientStarted) return;
+    const release = () => startAmbient();
+    const events = ["pointerdown", "keydown", "wheel", "touchstart", "scroll"] as const;
+    for (const event of events) window.addEventListener(event, release, { passive: true });
+    return () => {
+      for (const event of events) window.removeEventListener(event, release);
+    };
+  }, [ambientStarted, startAmbient]);
 
   const loadScopes = useCallback(async (nextOrganizationKey: string) => {
     const requestId = scopeRequestRef.current + 1;

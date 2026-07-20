@@ -148,7 +148,7 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
                 tabIndex={selected ? 0 : -1}
                 onFocus={() => onSelect(entity)}
                 onClick={() => { if (selected) onEnter(entity); else onSelect(entity); }}
-                className="block w-full rounded-xl text-left outline-none focus-visible:ring-1 focus-visible:ring-[#e1a05e]"
+                className="nexus-arc-card block w-full rounded-xl text-left outline-none"
                 aria-label={selected ? `Enter ${entity.name}` : `Select ${entity.name}`}
               >
                 <span className="flex items-center gap-2.5">
