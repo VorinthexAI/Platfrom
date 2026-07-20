@@ -70,6 +70,7 @@ function handleTab(event: KeyboardEvent<HTMLButtonElement>, entity: GalaxyEntity
 function EngineeredRing({ radius, layer, paused, active }: { radius: number; layer: number; paused: boolean; active: boolean }) {
   const rotation = useRef<THREE.Group>(null);
   const segments = 26 + layer * 8;
+  const segmentLength = (Math.PI * 2 * radius / segments) * 0.76;
   const height = LAYER_HEIGHTS[layer];
   const xAxis = layer === 2;
   const ringRotation: [number, number, number] = xAxis ? [0, Math.PI / 2, 0] : [Math.PI / 2, 0, 0];
@@ -110,11 +111,19 @@ function EngineeredRing({ radius, layer, paused, active }: { radius: number; lay
             rotation={xAxis ? [angle, 0, 0] : [0, -angle, 0]}
           >
             <mesh castShadow receiveShadow>
-              <boxGeometry args={[major ? 0.62 : 0.32, major ? 0.44 : 0.24, major ? 0.48 : 0.3]} />
-              <meshStandardMaterial color={major ? "#24282b" : "#111416"} metalness={0.92} roughness={0.36} />
+              <boxGeometry args={[major ? 0.5 : 0.28, major ? 0.4 : 0.22, segmentLength]} />
+              <meshPhysicalMaterial color={major ? "#30363a" : "#171b1e"} metalness={0.98} roughness={major ? 0.2 : 0.3} clearcoat={0.5} clearcoatRoughness={0.22} />
             </mesh>
             {major ? (
               <>
+                <mesh position={xAxis ? [0, 0.215, 0] : [0.265, 0, 0]}>
+                  <boxGeometry args={xAxis ? [0.28, 0.018, segmentLength * 0.62] : [0.018, 0.24, segmentLength * 0.62]} />
+                  <meshPhysicalMaterial color="#788087" metalness={1} roughness={0.13} clearcoat={0.7} />
+                </mesh>
+                <mesh position={xAxis ? [0, 0.227, 0] : [0.278, 0, 0]}>
+                  <boxGeometry args={xAxis ? [0.12, 0.01, segmentLength * 0.34] : [0.01, 0.03, segmentLength * 0.34]} />
+                  <meshBasicMaterial color={active ? "#ffad55" : "#73401f"} toneMapped={false} />
+                </mesh>
                 <mesh position={[0, 0.42, 0]} castShadow>
                   <cylinderGeometry args={[0.055, 0.1, 0.62, 8]} />
                   <meshStandardMaterial color="#777d82" metalness={1} roughness={0.2} />
@@ -129,9 +138,9 @@ function EngineeredRing({ radius, layer, paused, active }: { radius: number; lay
                 </mesh>
               </>
             ) : null}
-            <mesh position={[0, 0.17, 0.18]}>
-              <boxGeometry args={[0.045, 0.03, 0.035]} />
-              <meshBasicMaterial color={active ? "#ff9d39" : "#67300f"} toneMapped={false} />
+            <mesh position={xAxis ? [0, 0.13, segmentLength * 0.35] : [major ? 0.27 : 0.16, 0.08, segmentLength * 0.35]}>
+              <sphereGeometry args={[major ? 0.026 : 0.018, 8, 8]} />
+              <meshBasicMaterial color={active ? "#ffb15c" : "#9b5629"} toneMapped={false} />
             </mesh>
           </group>
         );
@@ -209,7 +218,15 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
       <group ref={animated}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[0.5, 0.6, 0.34, 32]} />
-          <meshStandardMaterial color={active ? "#0b0e10" : "#171b1e"} emissive={active ? "#21140b" : "#000000"} emissiveIntensity={active ? 0.52 : 0} metalness={0.97} roughness={0.22} transparent opacity={opacity} />
+          <meshPhysicalMaterial color={active ? "#111518" : "#20262a"} emissive={active ? "#21140b" : "#000000"} emissiveIntensity={active ? 0.52 : 0} metalness={0.98} roughness={0.17} clearcoat={0.65} clearcoatRoughness={0.18} transparent opacity={opacity} />
+        </mesh>
+        <mesh position={[0, -0.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.48, 0.045, 8, 64]} />
+          <meshPhysicalMaterial color="#929ba1" metalness={1} roughness={0.1} clearcoat={0.8} transparent opacity={opacity} />
+        </mesh>
+        <mesh position={[0, 0.29, 0]} castShadow>
+          <cylinderGeometry args={[0.31, 0.42, 0.12, 12]} />
+          <meshPhysicalMaterial color={active ? "#3c3025" : "#42494e"} metalness={1} roughness={0.16} clearcoat={0.55} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, 0.19, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.46, 0.055, 8, 64]} />
@@ -221,6 +238,21 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
             <meshStandardMaterial color={active ? "#292d30" : "#4b5156"} metalness={0.92} roughness={0.3} transparent opacity={opacity} />
           </mesh>
         ))}
+        {[0, 1, 2, 3].map((index) => {
+          const angle = index * Math.PI / 2;
+          return (
+            <group key={`armor-${index}`} position={[Math.cos(angle) * 0.57, -0.08, Math.sin(angle) * 0.57]} rotation={[0, -angle, 0]}>
+              <mesh castShadow>
+                <boxGeometry args={[0.2, 0.11, 0.2]} />
+                <meshPhysicalMaterial color="#687178" metalness={1} roughness={0.12} clearcoat={0.75} transparent opacity={opacity} />
+              </mesh>
+              <mesh position={[0, 0.065, 0.02]}>
+                <boxGeometry args={[0.09, 0.018, 0.12]} />
+                <meshBasicMaterial color={active ? "#e78632" : "#76513a"} transparent opacity={opacity} toneMapped={false} />
+              </mesh>
+            </group>
+          );
+        })}
         <mesh position={[0, 0.48, 0]}>
           <cylinderGeometry args={[0.025, 0.04, 0.42, 8]} />
           <meshStandardMaterial color="#bfc5c9" metalness={1} roughness={0.14} transparent opacity={opacity} />
@@ -232,6 +264,18 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
       </group>
 
       <Billboard position={[0, 0.35, 0]}>
+        <mesh position={[0, 0, -0.07]}>
+          <circleGeometry args={[0.47, 48]} />
+          <meshPhysicalMaterial color="#090c0e" metalness={0.96} roughness={0.2} clearcoat={0.55} transparent opacity={opacity} />
+        </mesh>
+        <mesh position={[0, 0, -0.055]}>
+          <ringGeometry args={[0.47, 0.53, 48]} />
+          <meshPhysicalMaterial color={selected ? "#f2d4a7" : active ? "#b77a40" : "#7f8990"} metalness={1} roughness={0.12} clearcoat={0.8} transparent opacity={opacity} />
+        </mesh>
+        <mesh position={[0, 0, -0.04]}>
+          <ringGeometry args={[0.37, 0.39, 48]} />
+          <meshBasicMaterial color={active ? "#e88634" : "#657078"} transparent opacity={opacity * 0.9} toneMapped={false} />
+        </mesh>
         <mesh>
           <planeGeometry args={[0.58, 0.58]} />
           <meshBasicMaterial map={texture} color={selected ? "#ffffff" : active ? "#d7c3a6" : "#b7bdc1"} transparent alphaTest={0.02} opacity={opacity} depthWrite={false} toneMapped={false} />
@@ -286,7 +330,11 @@ function CivilizationPerimeter({ organizations, organizationKey, onOrganizationS
     <group position={[0, LAYER_HEIGHTS[4], 0]}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[radius, 0.22, 10, 220]} />
-        <meshStandardMaterial color="#0e1113" metalness={0.97} roughness={0.28} />
+        <meshPhysicalMaterial color="#171c20" metalness={0.99} roughness={0.18} clearcoat={0.55} clearcoatRoughness={0.2} />
+      </mesh>
+      <mesh position={[0, -0.04, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[radius, 0.27, 6, 220]} />
+        <meshPhysicalMaterial color="#343b40" metalness={1} roughness={0.14} clearcoat={0.6} side={THREE.BackSide} />
       </mesh>
       <mesh position={[0, 0.16, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[radius, 0.018, 5, 220]} />
