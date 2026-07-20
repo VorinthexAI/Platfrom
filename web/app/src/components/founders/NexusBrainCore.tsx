@@ -3,7 +3,7 @@
 import { Html } from "@react-three/drei";
 import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 
 const TOTAL_POINTS = 720;
@@ -24,7 +24,6 @@ export type NexusBrainCoreProps = {
   paused: boolean;
   onSelect: () => void;
   onEnter: () => void;
-  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 };
 
 function createRandom(seed: number): () => number {
@@ -131,7 +130,6 @@ export default function NexusBrainCore({
   paused,
   onSelect,
   onEnter,
-  onKeyDown,
 }: NexusBrainCoreProps) {
   const groupRef = useRef<THREE.Group>(null);
   const pulseMaterialRef = useRef<THREE.PointsMaterial>(null);
@@ -235,11 +233,10 @@ export default function NexusBrainCore({
         <button
           id="entity-control-product-core"
           type="button"
-          tabIndex={selected ? 0 : -1}
+          tabIndex={-1}
           aria-label="Enter Core, Your AI Brain"
           aria-pressed={selected}
           onFocus={onSelect}
-          onKeyDown={onKeyDown}
           onClick={(event) => {
             event.stopPropagation();
             activate();
