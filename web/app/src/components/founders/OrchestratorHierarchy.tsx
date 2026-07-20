@@ -8,24 +8,32 @@ import * as THREE from "three";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import type { AccessibleOrganizationOption, BeaconToolActivity } from "@/lib/founders/types";
+import { entityLogoUrl } from "@/lib/three/entity-logo";
+import NexusBrainCore from "./NexusBrainCore";
 
 const ORCHESTRATORS = Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators);
+const CORE = VORINTHEX_GALAXY_REGISTRY.products.core;
 const ATLAS = VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
-const BY_ID = new Map(ORCHESTRATORS.map((entity) => [entity.id, entity]));
-const LAYER_RADII = [0, 3.05, 5.35, 7.55, 9.35];
-const LAYER_HEIGHTS = [0.46, 0.24, -0.08, -0.42, -0.72];
+const CAPABILITIES = (CORE.children ?? [])
+  .map((id) => Object.values(VORINTHEX_GALAXY_REGISTRY.capabilities).find((entity) => entity.id === id))
+  .filter((entity): entity is GalaxyEntity => Boolean(entity));
+const LAYER_RADII = [0, 2.7, 4.35, 5.75, 7.2, 8.75, 10.4, 12.1];
+const LAYER_HEIGHTS = [0.46, 0.32, 0.17, 0.02, -0.14, -0.3, -0.46, -0.62];
 const NODE_ANGLES: Record<string, number> = {
+  core: 90,
+  archive: -90, gallery: -18, signal: 54, compass: 126, ascend: 198,
+  launch: -90, studio: 90,
   atlas: 90,
   metis: -90, hermes: -150, phoenix: -30, athena: 30, ledger: 90, sentinel: 150,
   echo: -105, matrix: -75, harmony: -150, iris: -30, forge: 15, helios: 45, mercury: 90, themis: 150,
   orbit: -42, apollo: -18, aura: 5, pillar: 24, vulcan: 45,
 };
 
-function depthFor(entity: GalaxyEntity) {
+function orchestratorDepth(entity: GalaxyEntity) {
   let depth = 0;
   let current = entity;
   while (current.reportsTo) {
-    const parent = BY_ID.get(current.reportsTo);
+    const parent = ORCHESTRATORS.find((candidate) => candidate.id === current.reportsTo);
     if (!parent) break;
     depth += 1;
     current = parent;
@@ -33,27 +41,47 @@ function depthFor(entity: GalaxyEntity) {
   return depth;
 }
 
-const TAB_ORDER = [...ORCHESTRATORS].sort(
-  (left, right) => depthFor(left) - depthFor(right) || (NODE_ANGLES[left.slug] ?? 0) - (NODE_ANGLES[right.slug] ?? 0),
+interface StationNode {
+  entity: GalaxyEntity;
+  layer: number;
+  parentId?: string;
+}
+
+const STATION_NODES: StationNode[] = [
+  { entity: CORE, layer: 0 },
+  ...CAPABILITIES.map((entity) => ({ entity, layer: 1, parentId: CORE.id! })),
+  { entity: VORINTHEX_GALAXY_REGISTRY.products.launch, layer: 2, parentId: CORE.id! },
+  { entity: VORINTHEX_GALAXY_REGISTRY.products.studio, layer: 2, parentId: CORE.id! },
+  { entity: ATLAS, layer: 3, parentId: CORE.id! },
+  ...ORCHESTRATORS.filter((entity) => entity.slug !== "atlas").map((entity) => ({
+    entity,
+    layer: orchestratorDepth(entity) + 3,
+    parentId: entity.reportsTo ?? undefined,
+  })),
+];
+const NODE_BY_ID = new Map(STATION_NODES.map((node) => [node.entity.id, node]));
+const NODE_BY_SLUG = new Map(STATION_NODES.map((node) => [node.entity.slug, node]));
+const TAB_ORDER = [...STATION_NODES].sort(
+  (left, right) => left.layer - right.layer || (NODE_ANGLES[left.entity.slug] ?? 0) - (NODE_ANGLES[right.entity.slug] ?? 0),
 );
 
-function modulePosition(entity: GalaxyEntity): [number, number, number] {
-  if (entity.slug === "atlas") return [0, LAYER_HEIGHTS[0], 0];
-  const layer = depthFor(entity);
+function modulePosition(node: StationNode): [number, number, number] {
+  if (node.layer === 0) return [0, LAYER_HEIGHTS[0], 0];
+  const { entity, layer } = node;
   const radius = LAYER_RADII[layer];
   const angle = THREE.MathUtils.degToRad(NODE_ANGLES[entity.slug] ?? 0);
-  return layer === 2
+  return layer % 2 === 0
     ? [LAYER_HEIGHTS[layer], Math.cos(angle) * radius, Math.sin(angle) * radius]
     : [Math.cos(angle) * radius, LAYER_HEIGHTS[layer], Math.sin(angle) * radius];
 }
 
-function activeBranch(selectedSlug: string) {
-  const active = new Set<string>([selectedSlug]);
-  let current = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug];
-  while (current?.reportsTo) {
-    const parent = BY_ID.get(current.reportsTo);
+function activeBranch(selectedId: string) {
+  const active = new Set<string>([selectedId]);
+  let current = NODE_BY_ID.get(selectedId);
+  while (current?.parentId) {
+    const parent = NODE_BY_ID.get(current.parentId);
     if (!parent) break;
-    active.add(parent.slug);
+    active.add(parent.entity.id);
     current = parent;
   }
   return active;
@@ -100,7 +128,7 @@ function EngineeredRing({ radius, layer, paused, active, metalTexture }: { radiu
   const segments = 26 + layer * 8;
   const segmentLength = (Math.PI * 2 * radius / segments) * 0.76;
   const height = LAYER_HEIGHTS[layer];
-  const xAxis = layer === 2;
+  const xAxis = layer % 2 === 0;
   const ringRotation: [number, number, number] = xAxis ? [0, Math.PI / 2, 0] : [Math.PI / 2, 0, 0];
 
   useFrame((_, delta) => {
@@ -233,10 +261,11 @@ function CommandModule({ entity, selected, active, muted, metalTexture, onSelect
   const animated = useRef<THREE.Group>(null);
   const halo = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
-  const texture = useTexture(entity.logo.src);
-  const depth = depthFor(entity);
-  const scale = depth === 0 ? 1.65 : depth === 1 ? 0.92 : depth === 2 ? 0.78 : 0.7;
+  const texture = useTexture(entityLogoUrl(entity.type, entity.slug));
+  const node = NODE_BY_ID.get(entity.id)!;
+  const scale = entity.slug === "atlas" ? 1.15 : entity.type === "product" ? 0.98 : entity.type === "capability" ? 0.76 : node.layer === 4 ? 0.9 : node.layer === 5 ? 0.76 : 0.68;
   const opacity = muted ? 0.24 : active ? 1 : 0.62;
+  const descriptor = entity.role ?? entity.label ?? entity.content?.eyebrow ?? entity.tagline ?? entity.type;
 
   useFrame(({ clock }, delta) => {
     if (animated.current) {
@@ -248,7 +277,7 @@ function CommandModule({ entity, selected, active, muted, metalTexture, onSelect
   });
 
   return (
-    <group position={modulePosition(entity)} scale={scale}>
+    <group position={modulePosition(node)} scale={scale}>
       <group ref={animated}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[0.5, 0.6, 0.34, 32]} />
@@ -333,18 +362,18 @@ function CommandModule({ entity, selected, active, muted, metalTexture, onSelect
 
       <Html center position={[0, -0.6, 0.3]} distanceFactor={11} zIndexRange={[20, 0]}>
         <button
-          id={`orchestrator-control-${entity.slug}`}
+          id={`entity-control-${entity.id.replaceAll(".", "-")}`}
           type="button"
           tabIndex={selected ? 0 : -1}
           aria-pressed={selected}
-          aria-label={`Enter ${entity.name} command deck, ${entity.role}`}
+          aria-label={`Enter ${entity.name}, ${descriptor}`}
           onFocus={() => onSelect(entity)}
           onKeyDown={(event) => handleTab(event, entity, onNavigate)}
           onClick={(event) => { event.stopPropagation(); onSelect(entity); onEnter(entity); }}
           className="flex min-w-[80px] flex-col items-center whitespace-nowrap rounded-md px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-[#ffc267] focus-visible:shadow-[0_0_20px_rgba(255,135,40,0.7)]"
           style={{ opacity }}
         >
-          <span className={`font-mono text-[0.55rem] tracking-[0.23em] ${selected ? "text-[#ffd799]" : "text-[#a87a50]"}`}>{entity.role}</span>
+          <span className={`font-mono text-[0.55rem] tracking-[0.23em] ${selected ? "text-[#ffd799]" : "text-[#a87a50]"}`}>{descriptor}</span>
           <span className={`mt-0.5 text-[0.62rem] font-medium tracking-[0.15em] uppercase ${selected ? "text-white" : "text-[#ddc1a2]"}`}>{entity.name}</span>
         </button>
       </Html>
@@ -360,9 +389,9 @@ function CivilizationPerimeter({ organizations, organizationKey, onOrganizationS
   muted: boolean;
   metalTexture: THREE.Texture;
 }) {
-  const radius = LAYER_RADII[4];
+  const radius = LAYER_RADII[7];
   return (
-    <group position={[0, LAYER_HEIGHTS[4], 0]}>
+    <group position={[0, LAYER_HEIGHTS[7], 0]}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[radius, 0.22, 10, 220]} />
         <meshPhysicalMaterial color="#171c20" metalness={0.99} roughness={0.18} roughnessMap={metalTexture} clearcoat={0.55} clearcoatRoughness={0.2} envMapIntensity={1.8} />
@@ -474,17 +503,17 @@ function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolea
   );
 }
 
-function CameraRig({ selectedSlug, paused }: { selectedSlug: string; paused: boolean }) {
+function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean }) {
   const camera = useThree((state) => state.camera);
   const pointer = useThree((state) => state.pointer);
   const cameraRef = useRef(camera);
-  const distance = useRef(20.5);
+  const distance = useRef(27.5);
   const lookTarget = useRef(new THREE.Vector3(0, LAYER_HEIGHTS[0], 0));
-  const selectedDepth = depthFor(VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug] ?? ATLAS);
+  const selectedNode = NODE_BY_ID.get(selectedId) ?? NODE_BY_ID.get(CORE.id)!;
 
   useEffect(() => {
-    distance.current = selectedSlug === "atlas" ? 19.5 : 18 - selectedDepth * 0.45;
-  }, [selectedDepth, selectedSlug]);
+    distance.current = selectedNode.layer === 0 ? 26 : 27.5 - selectedNode.layer * 0.18;
+  }, [selectedNode.layer]);
 
   useFrame(({ clock }, delta) => {
     const current = cameraRef.current;
@@ -494,14 +523,14 @@ function CameraRig({ selectedSlug, paused }: { selectedSlug: string; paused: boo
     current.position.z = THREE.MathUtils.damp(current.position.z, desiredZ, 2.2, delta);
     current.position.y = THREE.MathUtils.damp(current.position.y, desiredZ * 0.52 + pointer.y * 0.35 + driftY, 1.8, delta);
     current.position.x = THREE.MathUtils.damp(current.position.x, pointer.x * 0.65 + driftX, 1.8, delta);
-    lookTarget.current.y = THREE.MathUtils.damp(lookTarget.current.y, selectedSlug === "atlas" ? LAYER_HEIGHTS[0] : 0, 2, delta);
-    lookTarget.current.z = THREE.MathUtils.damp(lookTarget.current.z, selectedSlug === "atlas" ? 0 : 1.1, 2, delta);
+    lookTarget.current.y = THREE.MathUtils.damp(lookTarget.current.y, selectedNode.layer === 0 ? LAYER_HEIGHTS[0] : 0, 2, delta);
+    lookTarget.current.z = THREE.MathUtils.damp(lookTarget.current.z, selectedNode.layer === 0 ? 0 : 1.1, 2, delta);
     current.lookAt(lookTarget.current);
   });
   return null;
 }
 
-function WheelNavigation({ selectedSlug, onNavigate }: { selectedSlug: string; onNavigate: NavigateOrchestrator }) {
+function WheelNavigation({ selectedId, onNavigate }: { selectedId: string; onNavigate: NavigateOrchestrator }) {
   const gl = useThree((state) => state.gl);
   const lastNavigation = useRef(0);
 
@@ -512,18 +541,18 @@ function WheelNavigation({ selectedSlug, onNavigate }: { selectedSlug: string; o
       const now = performance.now();
       if (Math.abs(event.deltaY) < 4 || now - lastNavigation.current < 220) return;
       lastNavigation.current = now;
-      const entity = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug] ?? ATLAS;
+      const entity = NODE_BY_ID.get(selectedId)?.entity ?? CORE;
       onNavigate(entity, event.deltaY > 0 ? 1 : -1);
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
-  }, [gl, onNavigate, selectedSlug]);
+  }, [gl, onNavigate, selectedId]);
 
   return null;
 }
 
-function LivingStation({ selectedSlug, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onEnter, onNavigate }: {
-  selectedSlug: string;
+function LivingStation({ selectedId, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onEnter, onNavigate }: {
+  selectedId: string;
   paused: boolean;
   muted: boolean;
   delegation: BeaconToolActivity | null;
@@ -541,21 +570,22 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const angularVelocity = useRef(new THREE.Vector2());
   const metalTexture = useBrushedMetalTexture();
-  const branch = useMemo(() => activeBranch(selectedSlug), [selectedSlug]);
+  const branch = useMemo(() => activeBranch(selectedId), [selectedId]);
   const delegatedSlug = delegation?.agent.slug.split(".").at(-1) ?? null;
+  const selectedNode = NODE_BY_ID.get(selectedId) ?? NODE_BY_ID.get(CORE.id)!;
+  const delegatedNode = delegatedSlug ? NODE_BY_SLUG.get(delegatedSlug) : null;
 
   useEffect(() => {
-    const entity = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug];
-    if (!entity || !station.current) return;
-    const depth = depthFor(entity);
-    const angle = THREE.MathUtils.degToRad(NODE_ANGLES[entity.slug] ?? 0);
-    if (depth === 2) {
+    const node = NODE_BY_ID.get(selectedId);
+    if (!node || !station.current) return;
+    const angle = THREE.MathUtils.degToRad(NODE_ANGLES[node.entity.slug] ?? 0);
+    if (node.layer > 0 && node.layer % 2 === 0) {
       const desired = Math.PI / 2 - angle;
       const current = station.current.rotation.x;
       xRotationTarget.current = current + Math.atan2(Math.sin(desired - current), Math.cos(desired - current));
       yRotationTarget.current = 0;
     } else {
-      const desired = entity.slug === "atlas" ? 0 : angle - Math.PI / 2;
+      const desired = node.layer === 0 ? 0 : angle - Math.PI / 2;
       const current = station.current.rotation.y;
       yRotationTarget.current = current + Math.atan2(Math.sin(desired - current), Math.cos(desired - current));
       xRotationTarget.current = 0;
@@ -564,7 +594,7 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
       station.current.rotation.x = xRotationTarget.current;
       station.current.rotation.y = yRotationTarget.current;
     }
-  }, [paused, selectedSlug]);
+  }, [paused, selectedId]);
 
   useEffect(() => {
     const element = gl.domElement;
@@ -623,36 +653,46 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
     <group>
       <EnvironmentActivity paused={paused} muted={muted} />
       <group ref={station}>
-        {[1, 2, 3].map((layer) => (
+        {[1, 2, 3, 4, 5, 6].map((layer) => (
           <EngineeredRing
             key={layer}
             radius={LAYER_RADII[layer]}
             layer={layer}
             paused={paused}
-            active={!muted && [...branch].some((slug) => depthFor(VORINTHEX_GALAXY_REGISTRY.orchestrators[slug]) === layer)}
+            active={!muted && [...branch].some((id) => NODE_BY_ID.get(id)?.layer === layer)}
             metalTexture={metalTexture}
           />
         ))}
 
-        {ORCHESTRATORS.map((entity) => {
-          if (!entity.reportsTo) return null;
-          const parent = BY_ID.get(entity.reportsTo);
+        {STATION_NODES.map((node) => {
+          if (!node.parentId) return null;
+          const parent = NODE_BY_ID.get(node.parentId);
           if (!parent) return null;
-          return <EnergyConduit key={`${parent.id}:${entity.id}`} from={modulePosition(parent)} to={modulePosition(entity)} active={branch.has(parent.slug) && branch.has(entity.slug) && !muted} paused={paused} />;
+          return <EnergyConduit key={`${parent.entity.id}:${node.entity.id}`} from={modulePosition(parent)} to={modulePosition(node)} active={branch.has(parent.entity.id) && branch.has(node.entity.id) && !muted} paused={paused} />;
         })}
 
-        {delegatedSlug && VORINTHEX_GALAXY_REGISTRY.orchestrators[delegatedSlug] && delegatedSlug !== selectedSlug ? (
+        {delegatedNode && delegatedNode.entity.id !== selectedId ? (
           <EnergyConduit
-            from={modulePosition(VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug])}
-            to={modulePosition(VORINTHEX_GALAXY_REGISTRY.orchestrators[delegatedSlug])}
+            from={modulePosition(selectedNode)}
+            to={modulePosition(delegatedNode)}
             active
             paused={paused}
             reverse={delegation?.phase === "completed"}
           />
         ) : null}
 
-        {ORCHESTRATORS.map((entity) => (
-          <CommandModule key={entity.id} entity={entity} selected={entity.slug === selectedSlug} active={branch.has(entity.slug)} muted={muted} metalTexture={metalTexture} onSelect={onSelect} onEnter={onEnter} onNavigate={onNavigate} />
+        <group position={[0, LAYER_HEIGHTS[0], 0]}>
+          <NexusBrainCore
+            selected={selectedId === CORE.id}
+            active={branch.has(CORE.id)}
+            paused={paused}
+            onSelect={() => onSelect(CORE)}
+            onEnter={() => onEnter(CORE)}
+            onKeyDown={(event) => handleTab(event, CORE, onNavigate)}
+          />
+        </group>
+        {STATION_NODES.filter((node) => node.entity.id !== CORE.id).map(({ entity }) => (
+          <CommandModule key={entity.id} entity={entity} selected={entity.id === selectedId} active={branch.has(entity.id)} muted={muted} metalTexture={metalTexture} onSelect={onSelect} onEnter={onEnter} onNavigate={onNavigate} />
         ))}
         <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} metalTexture={metalTexture} />
       </group>
@@ -661,9 +701,9 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
 }
 
 interface OrchestratorHierarchyProps {
-  selectedSlug: string;
-  onSelect: (orchestrator: GalaxyEntity) => void;
-  onEnter: (orchestrator: GalaxyEntity) => void;
+  selectedId: string;
+  onSelect: (entity: GalaxyEntity) => void;
+  onEnter: (entity: GalaxyEntity) => void;
   organizations: AccessibleOrganizationOption[];
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
@@ -675,17 +715,17 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
   const paused = Boolean(useReducedMotion());
 
   function navigate(entity: GalaxyEntity, direction: 1 | -1) {
-    const currentIndex = TAB_ORDER.findIndex((candidate) => candidate.id === entity.id);
+    const currentIndex = TAB_ORDER.findIndex((candidate) => candidate.entity.id === entity.id);
     const next = TAB_ORDER[(currentIndex + direction + TAB_ORDER.length) % TAB_ORDER.length];
-    props.onSelect(next);
-    window.requestAnimationFrame(() => document.getElementById(`orchestrator-control-${next.slug}`)?.focus());
+    props.onSelect(next.entity);
+    window.requestAnimationFrame(() => document.getElementById(`entity-control-${next.entity.id.replaceAll(".", "-")}`)?.focus());
   }
 
   return (
     <div className={`relative h-full min-h-[560px] w-full cursor-grab overflow-hidden transition-opacity duration-700 active:cursor-grabbing ${props.muted ? "pointer-events-none opacity-25" : "opacity-100"}`} aria-label="Nexus command station">
-      <Canvas dpr={[1, 1.35]} shadows camera={{ position: [0, 10.5, 20.5], fov: 42, near: 0.1, far: 120 }} gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }} className="!absolute !inset-0">
-        <CameraRig selectedSlug={props.selectedSlug} paused={paused} />
-        <WheelNavigation selectedSlug={props.selectedSlug} onNavigate={navigate} />
+      <Canvas dpr={[1, 1.35]} shadows camera={{ position: [0, 14.2, 27.5], fov: 42, near: 0.1, far: 140 }} gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }} className="!absolute !inset-0">
+        <CameraRig selectedId={props.selectedId} paused={paused} />
+        <WheelNavigation selectedId={props.selectedId} onNavigate={navigate} />
         <Environment resolution={128}>
           <Lightformer form="rect" color="#fff7eb" intensity={3.4} scale={[14, 2, 1]} position={[0, 9, 4]} rotation={[-0.55, 0, 0]} />
           <Lightformer form="rect" color="#91a8bd" intensity={2.2} scale={[5, 10, 1]} position={[-10, 2, 2]} rotation={[0, Math.PI / 2, 0]} />
