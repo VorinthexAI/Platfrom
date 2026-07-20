@@ -453,57 +453,15 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
   );
 }
 
-function CivilizationPerimeter({ organizations, organizationKey, onOrganizationSelect, muted, metalTexture }: {
+function CivilizationPerimeter({ organizations, organizationKey, onOrganizationSelect, muted }: {
   organizations: AccessibleOrganizationOption[];
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
   muted: boolean;
-  metalTexture: THREE.Texture;
 }) {
   const radius = LAYER_RADII[7];
   return (
     <group position={[0, LAYER_HEIGHTS[7], 0]}>
-      <mesh rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.22, 10, 220]} />
-        <meshPhysicalMaterial color="#171c20" metalness={0.99} roughness={0.18} roughnessMap={metalTexture} clearcoat={0.55} clearcoatRoughness={0.2} envMapIntensity={1.8} />
-      </mesh>
-      <mesh position={[0, -0.04, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.27, 6, 220]} />
-        <meshPhysicalMaterial color="#343b40" metalness={1} roughness={0.14} roughnessMap={metalTexture} clearcoat={0.6} envMapIntensity={2} side={THREE.BackSide} />
-      </mesh>
-      <mesh position={[0, 0.16, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <torusGeometry args={[radius, 0.018, 5, 220]} />
-        <meshBasicMaterial color="#b05c22" transparent opacity={muted ? 0.16 : 0.48} />
-      </mesh>
-      {Array.from({ length: 12 }, (_, index) => {
-        const angle = (index / 12) * Math.PI * 2;
-        const major = index % 3 === 0;
-        return (
-          <group key={`dock-${index}`} position={[Math.cos(angle) * radius, 0, Math.sin(angle) * radius]} rotation={[0, -angle, 0]}>
-            <mesh castShadow>
-              <boxGeometry args={[major ? 1.25 : 0.62, major ? 0.72 : 0.38, major ? 0.9 : 0.5]} />
-              <meshStandardMaterial color={major ? "#202529" : "#111518"} metalness={0.96} roughness={0.3} />
-            </mesh>
-            {major ? (
-              <>
-                <mesh position={[0, 0.62, 0]} castShadow>
-                  <cylinderGeometry args={[0.16, 0.3, 0.78, 10]} />
-                  <meshStandardMaterial color="#555d63" metalness={1} roughness={0.2} />
-                </mesh>
-                <mesh position={[0, 1.08, 0]}>
-                  <sphereGeometry args={[0.07, 12, 12]} />
-                  <meshBasicMaterial color="#f2d6af" toneMapped={false} />
-                </mesh>
-                <mesh position={[0, -0.1, 0.86]} castShadow>
-                  <boxGeometry args={[0.18, 0.16, 0.9]} />
-                  <meshStandardMaterial color="#343a3f" metalness={0.95} roughness={0.28} />
-                </mesh>
-              </>
-            ) : null}
-          </group>
-        );
-      })}
-
       {organizations.map((organization, index) => {
         const angle = Math.PI + (index - (organizations.length - 1) / 2) * 0.18;
         const selected = organization.key === organizationKey;
@@ -742,7 +700,7 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
             onEnter={() => onEnter(CORE)}
           />
         </group>
-        <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} metalTexture={metalTexture} />
+        <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} />
       </group>
 
       {STATION_NODES.map((node) => {

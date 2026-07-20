@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type WheelEvent } from "react";
-import { ChevronDownIcon, ChevronUpIcon } from "@vorinthex/shared/ui/icons";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon } from "@vorinthex/shared/ui/icons";
 import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
@@ -122,8 +122,7 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
       </div>
 
       <div
-        className="absolute inset-x-16 top-14 bottom-3 flex items-start gap-3 overflow-x-auto overflow-y-hidden px-[42vw] pb-2 sm:inset-x-24 sm:gap-4"
-        style={{ scrollbarColor: "rgba(194,126,67,0.58) rgba(255,255,255,0.05)", scrollbarWidth: "thin" }}
+        className="scrollbar-hide absolute inset-x-16 top-14 bottom-3 flex items-start gap-3 overflow-x-auto overflow-y-hidden px-[42vw] pb-2 sm:inset-x-24 sm:gap-4"
       >
         {layer.entities.map((entity, index) => {
           const distance = Math.abs(index - selectedIndex);
@@ -162,6 +161,8 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
           );
         })}
       </div>
+      <button type="button" onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface absolute bottom-2 left-4 z-30 flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white sm:left-7"><ChevronLeftIcon size="sm" /></button>
+      <button type="button" onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface absolute right-4 bottom-2 z-30 flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white sm:right-7"><ChevronRightIcon size="sm" /></button>
     </section>
   );
 }
