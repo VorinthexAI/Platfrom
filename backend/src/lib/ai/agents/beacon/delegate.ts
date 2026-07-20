@@ -60,7 +60,7 @@ export async function delegateAgentCreationFromBeacon(params: BeaconDelegatePara
     loadAgentRuntime(genesis.key, options.runtimeData),
   ]);
   const delegateGrant = beaconRuntime.tools.find(({ tool }) => tool.slug === BEACON_DELEGATE_TOOL_SLUG);
-  if (!delegateGrant || delegateGrant.actions.length !== 1) throw new BeaconDelegationError('Beacon has no canonical core.delegate grant');
+  if (!delegateGrant) throw new BeaconDelegationError('Beacon has no canonical core.delegate grant');
   const genesisScope = genesisRuntime.scope;
   if (genesisScope.organizationKey !== organization.key || genesisScope.slug !== GENESIS_SCOPE_SLUG) throw new BeaconDelegationError('canonical Genesis Launch scope is unavailable');
   if (scope.key !== genesisScope.key) throw new BeaconDelegationError('Genesis delegation is available only from Launch');

@@ -63,7 +63,6 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
     principal: options.principal ?? { kind: 'system' },
     artifactResolvers,
     allowRejectedOutput: true,
-    reasoningActionSlug: 'reason',
     stepSlugs: GENESIS_STEP_SLUGS,
     beforeFinalize: async ({ run, response, recordArtifactCreated }) => {
       const toolInput = createAgentToolInputSchema.parse({ organizationKey: parsed.organizationKey, scopeKey: parsed.scopeKey, agentRunKey: run.key, manifest: genesisCreationManifestSchema.parse(response.output) });

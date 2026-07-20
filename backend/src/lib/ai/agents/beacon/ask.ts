@@ -116,8 +116,7 @@ export async function* streamFoundersBeaconAsk(params: BeaconAskParams, options:
   if (!beacon || beacon.name !== BEACON_AGENT_NAME || beacon.title !== BEACON_AGENT_TITLE) throw new BeaconUnavailableError('the canonical Beacon agent is not registered');
   const runtime = await loadAgentRuntime(beacon.key, options.runtimeData);
   const grant = runtime.tools.find(({ tool }) => tool.slug === BEACON_DELEGATE_TOOL_SLUG);
-  const action = grant?.actions[0];
-  if (runtime.tools.length !== 1 || !grant || grant.actions.length !== 1 || !action) {
+  if (runtime.tools.length !== 1 || !grant) {
     throw new BeaconUnavailableError('Beacon must have core.delegate as its only tool');
   }
 
