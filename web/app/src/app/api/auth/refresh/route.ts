@@ -4,12 +4,14 @@ import { applyFoundersSessionRotation, foundersAuthHeaders } from "@/lib/founder
 
 export const dynamic = "force-dynamic";
 
-/** Probes founder auth so middleware rotates and returns one fresh token pair. */
+/** Rotates the single-use founder refresh token and persists its replacement. */
 export async function POST() {
   if (!backendConfigured()) return NextResponse.json({ ok: true });
 
-  const result = await backendFetch("/founders/me", {
+  const result = await backendFetch("/auth/refresh", {
+    method: "POST",
     headers: await foundersAuthHeaders(),
+    body: "{}",
   });
   const response = NextResponse.json(
     { ok: result.ok },
