@@ -117,7 +117,7 @@ export async function* streamFoundersBeaconAsk(params: BeaconAskParams, options:
   const runtime = await loadAgentRuntime(beacon.key, options.runtimeData);
   const grant = runtime.tools.find(({ tool }) => tool.slug === BEACON_DELEGATE_TOOL_SLUG);
   const action = grant?.actions[0];
-  if (runtime.tools.length !== 1 || !grant || grant.actions.length !== 1 || action?.action.slug !== 'core.delegate') {
+  if (runtime.tools.length !== 1 || !grant || grant.actions.length !== 1 || !action) {
     throw new BeaconUnavailableError('Beacon must have core.delegate as its only tool');
   }
 
