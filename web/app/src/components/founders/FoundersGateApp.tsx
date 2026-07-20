@@ -245,9 +245,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                   organizations={organizations}
                   organizationKey={organizationKey}
                   onOrganizationSelect={changeOrganization}
-                  scopes={scopes}
-                  scopeKey={scopeKey}
-                  onScopeSelect={changeScope}
                   delegation={activeDelegation}
                   muted={hasBeaconOutput}
                 />

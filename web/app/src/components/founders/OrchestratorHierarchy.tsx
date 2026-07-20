@@ -7,7 +7,7 @@ import { useReducedMotion } from "framer-motion";
 import * as THREE from "three";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
-import type { AccessibleOrganizationOption, AccessibleScopeOption, BeaconToolActivity } from "@/lib/founders/types";
+import type { AccessibleOrganizationOption, BeaconToolActivity } from "@/lib/founders/types";
 
 const ORCHESTRATORS = Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators);
 const ATLAS = VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
@@ -193,7 +193,7 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
   const texture = useTexture(entity.logo.src);
   const depth = depthFor(entity);
   const scale = depth === 0 ? 1.65 : depth === 1 ? 0.92 : depth === 2 ? 0.78 : 0.7;
-  const opacity = muted ? 0.24 : active ? 1 : 0.28;
+  const opacity = muted ? 0.24 : active ? 1 : 0.62;
 
   useFrame(({ clock }, delta) => {
     if (animated.current) {
@@ -209,16 +209,16 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
       <group ref={animated}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[0.5, 0.6, 0.34, 32]} />
-          <meshStandardMaterial color="#0b0e10" emissive={active ? "#21140b" : "#000000"} emissiveIntensity={active ? 0.52 : 0} metalness={0.97} roughness={0.22} transparent opacity={opacity} />
+          <meshStandardMaterial color={active ? "#0b0e10" : "#171b1e"} emissive={active ? "#21140b" : "#000000"} emissiveIntensity={active ? 0.52 : 0} metalness={0.97} roughness={0.22} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, 0.19, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.46, 0.055, 8, 64]} />
-          <meshStandardMaterial color={selected ? "#e6ebee" : active ? "#9b815f" : "#32373b"} emissive={active ? "#824016" : "#000000"} emissiveIntensity={selected ? 1.4 : active ? 0.52 : 0} metalness={0.96} roughness={0.17} transparent opacity={opacity} />
+          <meshStandardMaterial color={selected ? "#e6ebee" : active ? "#9b815f" : "#62696e"} emissive={active ? "#824016" : "#000000"} emissiveIntensity={selected ? 1.4 : active ? 0.52 : 0} metalness={0.96} roughness={0.17} transparent opacity={opacity} />
         </mesh>
         {[0, 1, 2].map((index) => (
           <mesh key={index} position={[Math.cos(index * 2.094) * 0.55, 0.02, Math.sin(index * 2.094) * 0.55]} rotation={[0, -index * 2.094, 0]} castShadow>
             <boxGeometry args={[0.22, 0.18, 0.34]} />
-            <meshStandardMaterial color="#292d30" metalness={0.92} roughness={0.3} transparent opacity={opacity} />
+            <meshStandardMaterial color={active ? "#292d30" : "#4b5156"} metalness={0.92} roughness={0.3} transparent opacity={opacity} />
           </mesh>
         ))}
         <mesh position={[0, 0.48, 0]}>
@@ -234,7 +234,7 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
       <Billboard position={[0, 0.35, 0]}>
         <mesh>
           <planeGeometry args={[0.58, 0.58]} />
-          <meshBasicMaterial map={texture} color={selected ? "#ffffff" : active ? "#d7c3a6" : "#777b7e"} transparent alphaTest={0.02} opacity={opacity} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial map={texture} color={selected ? "#ffffff" : active ? "#d7c3a6" : "#b7bdc1"} transparent alphaTest={0.02} opacity={opacity} depthWrite={false} toneMapped={false} />
         </mesh>
         {selected ? (
           <mesh ref={halo} position={[0, 0, -0.03]}>
@@ -275,13 +275,10 @@ function CommandModule({ entity, selected, active, muted, onSelect, onNavigate }
   );
 }
 
-function CivilizationPerimeter({ organizations, organizationKey, onOrganizationSelect, scopes, scopeKey, onScopeSelect, muted }: {
+function CivilizationPerimeter({ organizations, organizationKey, onOrganizationSelect, muted }: {
   organizations: AccessibleOrganizationOption[];
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
-  scopes: AccessibleScopeOption[];
-  scopeKey: string | null;
-  onScopeSelect: (key: string) => void;
   muted: boolean;
 }) {
   const radius = LAYER_RADII[4];
@@ -319,26 +316,6 @@ function CivilizationPerimeter({ organizations, organizationKey, onOrganizationS
                   <meshStandardMaterial color="#343a3f" metalness={0.95} roughness={0.28} />
                 </mesh>
               </>
-            ) : null}
-          </group>
-        );
-      })}
-
-      {scopes.slice(0, 12).map((scope, index) => {
-        const angle = (index / Math.max(scopes.length, 1)) * Math.PI * 2;
-        const selected = scope.key === scopeKey;
-        return (
-          <group key={scope.key} position={[Math.cos(angle) * radius, 0.32, Math.sin(angle) * radius]}>
-            <mesh>
-              <octahedronGeometry args={[selected ? 0.2 : 0.13, 0]} />
-              <meshStandardMaterial color={selected ? "#e8f2eb" : "#333b37"} emissive={selected ? "#4eaf67" : "#000000"} emissiveIntensity={selected ? 1.4 : 0} metalness={0.7} roughness={0.3} />
-            </mesh>
-            {!muted ? (
-              <Html center position={[0, 0.34, 0]} distanceFactor={12}>
-                <button type="button" onClick={() => onScopeSelect(scope.key)} className={`whitespace-nowrap rounded-full border px-2 py-1 font-mono text-[0.48rem] tracking-[0.14em] uppercase ${selected ? "border-emerald-300/40 bg-emerald-950/60 text-emerald-100" : "border-white/10 bg-black/50 text-silver-400"}`}>
-                  {scope.name}
-                </button>
-              </Html>
             ) : null}
           </group>
         );
@@ -417,20 +394,9 @@ function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolea
 function CameraRig({ selectedSlug }: { selectedSlug: string }) {
   const camera = useThree((state) => state.camera);
   const pointer = useThree((state) => state.pointer);
-  const gl = useThree((state) => state.gl);
   const cameraRef = useRef(camera);
   const distance = useRef(20.5);
   const selectedDepth = depthFor(VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug] ?? ATLAS);
-
-  useEffect(() => {
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      distance.current = THREE.MathUtils.clamp(distance.current + event.deltaY * 0.008, 12.5, 28);
-    };
-    const element = gl.domElement;
-    element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
-  }, [gl]);
 
   useEffect(() => {
     distance.current = selectedSlug === "atlas" ? 19.5 : 18 - selectedDepth * 0.45;
@@ -447,7 +413,28 @@ function CameraRig({ selectedSlug }: { selectedSlug: string }) {
   return null;
 }
 
-function LivingStation({ selectedSlug, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, scopes, scopeKey, onScopeSelect, onSelect, onNavigate }: {
+function WheelNavigation({ selectedSlug, onNavigate }: { selectedSlug: string; onNavigate: NavigateOrchestrator }) {
+  const gl = useThree((state) => state.gl);
+  const lastNavigation = useRef(0);
+
+  useEffect(() => {
+    const element = gl.domElement;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const now = performance.now();
+      if (Math.abs(event.deltaY) < 4 || now - lastNavigation.current < 220) return;
+      lastNavigation.current = now;
+      const entity = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug] ?? ATLAS;
+      onNavigate(entity, event.deltaY > 0 ? 1 : -1);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [gl, onNavigate, selectedSlug]);
+
+  return null;
+}
+
+function LivingStation({ selectedSlug, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onNavigate }: {
   selectedSlug: string;
   paused: boolean;
   muted: boolean;
@@ -455,15 +442,14 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
   organizations: AccessibleOrganizationOption[];
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
-  scopes: AccessibleScopeOption[];
-  scopeKey: string | null;
-  onScopeSelect: (key: string) => void;
   onSelect: (entity: GalaxyEntity) => void;
   onNavigate: NavigateOrchestrator;
 }) {
   const station = useRef<THREE.Group>(null);
+  const gl = useThree((state) => state.gl);
   const xRotationTarget = useRef(0);
   const yRotationTarget = useRef(0);
+  const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const branch = useMemo(() => activeBranch(selectedSlug), [selectedSlug]);
   const delegatedSlug = delegation?.agent.slug.split(".").at(-1) ?? null;
 
@@ -488,6 +474,45 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
       station.current.rotation.y = yRotationTarget.current;
     }
   }, [paused, selectedSlug]);
+
+  useEffect(() => {
+    const element = gl.domElement;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+      element.setPointerCapture(event.pointerId);
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      const current = drag.current;
+      if (!current || current.pointerId !== event.pointerId) return;
+      const deltaX = event.clientX - current.x;
+      const deltaY = event.clientY - current.y;
+      current.x = event.clientX;
+      current.y = event.clientY;
+      yRotationTarget.current += deltaX * 0.006;
+      xRotationTarget.current = THREE.MathUtils.clamp(xRotationTarget.current + deltaY * 0.006, -1.2, 1.2);
+      if (paused && station.current) {
+        station.current.rotation.x = xRotationTarget.current;
+        station.current.rotation.y = yRotationTarget.current;
+      }
+    };
+    const stopDragging = (event: PointerEvent) => {
+      if (drag.current?.pointerId !== event.pointerId) return;
+      drag.current = null;
+      if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
+    };
+
+    element.addEventListener("pointerdown", onPointerDown);
+    element.addEventListener("pointermove", onPointerMove);
+    element.addEventListener("pointerup", stopDragging);
+    element.addEventListener("pointercancel", stopDragging);
+    return () => {
+      element.removeEventListener("pointerdown", onPointerDown);
+      element.removeEventListener("pointermove", onPointerMove);
+      element.removeEventListener("pointerup", stopDragging);
+      element.removeEventListener("pointercancel", stopDragging);
+    };
+  }, [gl, paused]);
 
   useFrame((_, delta) => {
     if (!paused && station.current) {
@@ -530,7 +555,7 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
         {ORCHESTRATORS.map((entity) => (
           <CommandModule key={entity.id} entity={entity} selected={entity.slug === selectedSlug} active={branch.has(entity.slug)} muted={muted} onSelect={onSelect} onNavigate={onNavigate} />
         ))}
-        <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} scopes={scopes} scopeKey={scopeKey} onScopeSelect={onScopeSelect} muted={muted} />
+        <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} />
       </group>
     </group>
   );
@@ -542,9 +567,6 @@ interface OrchestratorHierarchyProps {
   organizations: AccessibleOrganizationOption[];
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
-  scopes: AccessibleScopeOption[];
-  scopeKey: string | null;
-  onScopeSelect: (key: string) => void;
   delegation: BeaconToolActivity | null;
   muted: boolean;
 }
@@ -560,9 +582,10 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
   }
 
   return (
-    <div className={`relative h-full min-h-[560px] w-full overflow-hidden transition-opacity duration-700 ${props.muted ? "pointer-events-none opacity-25" : "opacity-100"}`} aria-label="Nexus command station">
+    <div className={`relative h-full min-h-[560px] w-full cursor-grab overflow-hidden transition-opacity duration-700 active:cursor-grabbing ${props.muted ? "pointer-events-none opacity-25" : "opacity-100"}`} aria-label="Nexus command station">
       <Canvas dpr={[1, 1.35]} shadows camera={{ position: [0, 10.5, 20.5], fov: 42, near: 0.1, far: 120 }} gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }} className="!absolute !inset-0">
         <CameraRig selectedSlug={props.selectedSlug} />
+        <WheelNavigation selectedSlug={props.selectedSlug} onNavigate={navigate} />
         <ambientLight intensity={0.22} color="#5d4637" />
         <directionalLight castShadow position={[7, 13, 9]} intensity={1.55} color="#f2f4f5" shadow-mapSize={[1024, 1024]} />
         <directionalLight position={[-9, 5, -7]} intensity={0.7} color="#9ea9b2" />
@@ -571,7 +594,7 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
       {!props.muted ? (
         <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 text-center">
           <p className="font-mono text-[0.48rem] tracking-[0.34em] text-[#9b6842] uppercase">Nexus Intelligence Civilization</p>
-          <p className="mt-1 font-mono text-[0.44rem] tracking-[0.16em] text-[#73533d] uppercase">Scroll to zoom / Tab to navigate</p>
+          <p className="mt-1 font-mono text-[0.44rem] tracking-[0.16em] text-[#73533d] uppercase">Drag to rotate / Scroll or Tab to navigate</p>
         </div>
       ) : null}
     </div>
