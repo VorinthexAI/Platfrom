@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type WheelEvent } from "react";
-import { ChevronDownIcon, ChevronUpIcon } from "@vorinthex/shared/ui/icons";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon } from "@vorinthex/shared/ui/icons";
 import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
@@ -32,9 +32,9 @@ const ENTITY_LAYERS: Array<{ name: string; entities: GalaxyEntity[] }> = [
   { name: "Capabilities", entities: CAPABILITIES },
   { name: "Products", entities: [VORINTHEX_GALAXY_REGISTRY.products.launch, VORINTHEX_GALAXY_REGISTRY.products.studio] },
   { name: "Atlas", entities: [VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas] },
-  { name: "Executive", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 1) },
-  { name: "Departments", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 2) },
-  { name: "Agents", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 3) },
+  { name: "Orchestrators Tier 1", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 1) },
+  { name: "Orchestrators Tier 2", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 2) },
+  { name: "Orchestrators Tier 3", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 3) },
 ];
 
 function descriptionFor(entity: GalaxyEntity) {
@@ -43,8 +43,8 @@ function descriptionFor(entity: GalaxyEntity) {
 
 function downwardArcTransform(index: number, center: number, depth: number, radius: number, rotation: number, scale = 1) {
   const position = Math.max(-1, Math.min(1, (index - center) / radius));
-  const offset = depth * (1 - position * position);
-  return `translateY(${offset}px) rotate(${position * -rotation}deg) scale(${scale})`;
+  const offset = depth * position * position;
+  return `translateY(${offset}px) rotate(${position * rotation}deg) scale(${scale})`;
 }
 
 interface NexusEntityArcProps {
@@ -117,13 +117,12 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
 
       <div className="absolute top-11 left-4 z-20 flex flex-col items-center gap-1 sm:left-7">
         <button type="button" onClick={() => selectLayer(-1)} aria-label="Previous station layer" className="founders-surface flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronUpIcon size="sm" /></button>
-        <span className="max-w-20 truncate font-mono text-[0.46rem] tracking-[0.16em] text-[#c18a5a] uppercase">{layer.name}</span>
+        <span className="w-32 whitespace-nowrap text-center font-mono text-[0.46rem] tracking-[0.16em] text-[#c18a5a] uppercase">{layer.name}</span>
         <button type="button" onClick={() => selectLayer(1)} aria-label="Next station layer" className="founders-surface flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronDownIcon size="sm" /></button>
       </div>
 
       <div
-        className="absolute inset-x-16 top-14 bottom-3 flex items-start gap-3 overflow-x-auto overflow-y-hidden px-[42vw] pb-2 sm:inset-x-24 sm:gap-4"
-        style={{ scrollbarColor: "rgba(194,126,67,0.58) rgba(255,255,255,0.05)", scrollbarWidth: "thin" }}
+        className="scrollbar-hide absolute inset-x-16 top-14 bottom-3 flex items-start gap-3 overflow-x-auto overflow-y-hidden px-[42vw] pb-2 sm:inset-x-24 sm:gap-4"
       >
         {layer.entities.map((entity, index) => {
           const distance = Math.abs(index - selectedIndex);
@@ -162,6 +161,8 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
           );
         })}
       </div>
+      <button type="button" onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface absolute bottom-2 left-4 z-30 flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white sm:left-7"><ChevronLeftIcon size="sm" /></button>
+      <button type="button" onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface absolute right-4 bottom-2 z-30 flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white sm:right-7"><ChevronRightIcon size="sm" /></button>
     </section>
   );
 }
