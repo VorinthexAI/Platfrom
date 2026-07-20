@@ -6,8 +6,6 @@ import { getProviderBySlug, insertProvider, updateProvider, type Provider } from
 import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
 import { getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
-import { getToolBySlug, insertTool, updateTool, type Tool } from './tools.node';
-import { getToolActionByPair, insertToolAction, toolActionSeedSchema, updateToolAction } from './tool-actions.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
 import { getUserByEmail } from './users.node';
@@ -16,8 +14,8 @@ import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } fr
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/agents/genesis/seed';
-import { seedBeacon } from '@/lib/ai/agents/beacon/seed';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
+import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 
 export type SeedResult = {
   collection: string;
@@ -38,8 +36,6 @@ export interface AiRuntimeSeedUpserters {
   model(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult>;
   modelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult>;
   modelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult>;
-  tool(seed: (typeof SEEDED_TOOLS)[number]): Promise<SeedResult>;
-  toolAction(seed: (typeof SEEDED_TOOL_ACTIONS)[number]): Promise<SeedResult>;
 }
 
 const now = () => new Date().toISOString();
@@ -84,7 +80,7 @@ const ACCESS_DOMAIN_DEFINITIONS = [
 
 const accessSeedKey = (kind: 'action' | 'tool' | 'link', index: number) => `cmst${kind}${String(index + 1).padStart(14, '0')}`;
 
-export const SEEDED_ACTIONS = [
+const LEGACY_SEEDED_ACTIONS = [
   {
     key: 'cm9action01vorinthexseed',
     slug: 'core.chat',
@@ -111,7 +107,7 @@ export const SEEDED_ACTIONS = [
     key: 'cmcoredelegateaction000001',
     slug: 'core.delegate',
     name: 'Delegate',
-    description: 'Delegates one strictly validated task from Beacon to an allow-listed service agent.',
+    description: 'Delegates one strictly validated task to an allow-listed service agent.',
     objective: 'Invoke the fixed Genesis service for an owner-authorized agent creation request while preserving the initiating human identity.',
     inputDescription: 'A target organization, target scope, and natural-language agent architecture request resolved and authorized server-side.',
     outputDescription: 'The delegated Genesis run and its validated agent creation result.',
@@ -516,6 +512,19 @@ export const SEEDED_ACTIONS = [
   },
 ] as const;
 
+/** Only generic runtime primitives are persisted as actions. Domain workflows are tools. */
+export const SEEDED_ACTIONS = ACTION_DEFINITIONS.map((definition, index) => ({
+  key: `cmruntimeaction${String(index + 1).padStart(10, '0')}`,
+  slug: definition.id,
+  name: definition.id.split('-').map((word) => word[0]!.toUpperCase() + word.slice(1)).join(' '),
+  description: `Generic ${definition.id} runtime primitive.`,
+  objective: `Execute the provider- and domain-neutral ${definition.id} primitive.`,
+  inputDescription: `Validated input for ${definition.id}.`,
+  outputDescription: `Normalized ${definition.id} result.`,
+  handlerKey: definition.id,
+  enabled: true,
+}));
+
 export const SEEDED_PROVIDERS = [
   {
     key: 'cmrl6mtn60005a1b23aushlt0',
@@ -602,8 +611,8 @@ export const SEEDED_MODELS = [
     key: 'cmnova2sonicmodel00000001',
     slug: 'amazon.nova-2-sonic',
     name: 'Amazon Nova 2 Sonic',
-    description: 'Amazon Nova model for real-time text and voice chat, orchestrator dialogue, and Beacon calls.',
-    supportedUseCases: 'Real-time text and voice chat, orchestrator dialogue, Beacon calls, and low-latency conversational AI.',
+    description: 'Amazon Nova model for real-time text and voice chat, orchestrator dialogue, and low-latency calls.',
+    supportedUseCases: 'Real-time text and voice chat, orchestrator dialogue, and low-latency conversational AI.',
     enabled: true,
   },
   {
@@ -632,7 +641,7 @@ export const SEEDED_MODELS = [
   },
 ] as const;
 
-export const SEEDED_MODEL_ACTIONS = [
+const LEGACY_SEEDED_MODEL_ACTIONS = [
   {
     key: 'cmnova2sonicaction0000001',
     modelSlug: 'amazon.nova-2-sonic',
@@ -662,6 +671,17 @@ export const SEEDED_MODEL_ACTIONS = [
     enabled: true,
   },
 ] as const;
+
+/** Model bindings are owned by actions and selected by descending priority. */
+export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition, actionIndex) =>
+  definition.models.map((binding, modelIndex) => ({
+    key: `cmmodelaction${String(actionIndex * 10 + modelIndex + 1).padStart(11, '0')}`,
+    modelSlug: binding.model,
+    actionSlug: definition.id,
+    priority: binding.priority,
+    enabled: true,
+  })),
+);
 
 export const SEEDED_MODEL_PROVIDERS = [
   {
@@ -715,7 +735,7 @@ export const SEEDED_MODEL_PROVIDERS = [
   },
 ] as const;
 
-export const SEEDED_TOOLS = [
+const RETIRED_TOOL_SEEDS = [
   {
     key: 'cmrnc3nfh00003o7k20dedfh7',
     slug: 'ask.answer',
@@ -744,7 +764,7 @@ export const SEEDED_TOOLS = [
     key: 'cmcoredelegatetool00000001',
     slug: 'core.delegate',
     name: 'Delegate',
-    description: 'Delegate one strictly validated task from Beacon to an allow-listed service agent.',
+    description: 'Delegate one strictly validated task to an allow-listed service agent.',
     scopeKey: null,
     enabled: true,
   },
@@ -918,7 +938,7 @@ export const SEEDED_TOOLS = [
   })),
 ] as const;
 
-export const SEEDED_TOOL_ACTIONS = [
+const RETIRED_TOOL_ACTION_SEEDS = [
   { key: 'cmrnc3nfh00053o7k3hfm3a82', toolSlug: 'ask.answer', actionSlug: 'core.chat', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00063o7keg8h70ut', toolSlug: 'reason.solve', actionSlug: 'core.reason', priority: 100, enabled: true },
   { key: 'cmcoredelegatetoolaction001', toolSlug: 'core.delegate', actionSlug: 'core.delegate', priority: 100, enabled: true },
@@ -945,6 +965,10 @@ export const SEEDED_TOOL_ACTIONS = [
   { key: 'cmrqa58d3000n047kehxte6sq', toolSlug: 'scope.remove', actionSlug: 'scope.remove', priority: 100, enabled: true },
   ...ACCESS_DOMAIN_DEFINITIONS.map(([slug], index) => ({ key: accessSeedKey('link', index), toolSlug: slug, actionSlug: slug, priority: 100, enabled: true })),
 ] as const;
+
+/** No executable tools or tool-action links are seeded. */
+export const SEEDED_TOOLS = [] as const;
+export const SEEDED_TOOL_ACTIONS = [] as const;
 
 export const SEEDED_PRODUCTS = [
   {
@@ -1161,6 +1185,12 @@ async function migrateRetiredCoreAskAction(): Promise<void> {
   `);
 }
 
+async function removeAllTools(): Promise<void> {
+  for (const collection of ['agentTools', 'toolActions', 'tools']) {
+    await db.query(aql`FOR document IN ${db.collection(collection)} REMOVE document IN ${db.collection(collection)}`);
+  }
+}
+
 async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
   const existing = await getActionById(seed.key);
   if (!existing) {
@@ -1261,46 +1291,6 @@ async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[num
     enabled: parsed.enabled,
   });
   return { collection: 'modelProviders', key: existing.key, status: 'updated' };
-}
-
-async function upsertSeedTool(seed: (typeof SEEDED_TOOLS)[number]): Promise<SeedResult> {
-  const existing = await getToolBySlug(seed.slug);
-  if (!existing) {
-    await insertTool(seed);
-    return { collection: 'tools', key: seed.key, status: 'created' };
-  }
-
-  const patch: Partial<Omit<Tool, 'key' | 'embedding'>> = {
-    name: seed.name,
-    description: seed.description,
-    scopeKey: seed.scopeKey,
-    enabled: seed.enabled,
-  };
-  await updateTool(existing.key, patch);
-  return { collection: 'tools', key: existing.key, status: 'updated' };
-}
-
-async function upsertSeedToolAction(seed: (typeof SEEDED_TOOL_ACTIONS)[number]): Promise<SeedResult> {
-  const parsed = toolActionSeedSchema.parse(seed);
-  const tool = await getToolBySlug(parsed.toolSlug);
-  if (!tool) throw new SeedReferenceError('tool', parsed.toolSlug, 'toolAction');
-  const action = await getActionBySlug(parsed.actionSlug);
-  if (!action) throw new SeedReferenceError('action', parsed.actionSlug, 'toolAction');
-
-  const existing = await getToolActionByPair(tool.key, action.key);
-  if (!existing) {
-    await insertToolAction({
-      key: parsed.key,
-      toolKey: tool.key,
-      actionKey: action.key,
-      priority: parsed.priority,
-      enabled: parsed.enabled,
-    });
-    return { collection: 'toolActions', key: parsed.key, status: 'created' };
-  }
-
-  await updateToolAction(existing.key, { priority: parsed.priority, enabled: parsed.enabled });
-  return { collection: 'toolActions', key: existing.key, status: 'updated' };
 }
 
 async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise<SeedResult> {
@@ -1431,8 +1421,6 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   model: upsertSeedModel,
   modelAction: upsertSeedModelAction,
   modelProvider: upsertSeedModelProvider,
-  tool: upsertSeedTool,
-  toolAction: upsertSeedToolAction,
 }): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
   for (const seed of SEEDED_ACTIONS) results.push(await upserters.action(seed));
@@ -1440,13 +1428,12 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   for (const seed of SEEDED_MODELS) results.push(await upserters.model(seed));
   for (const seed of SEEDED_MODEL_ACTIONS) results.push(await upserters.modelAction(seed));
   for (const seed of SEEDED_MODEL_PROVIDERS) results.push(await upserters.modelProvider(seed));
-  for (const seed of SEEDED_TOOLS) results.push(await upserters.tool(seed));
-  for (const seed of SEEDED_TOOL_ACTIONS) results.push(await upserters.toolAction(seed));
   return results;
 }
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   await migrateRetiredCoreAskAction();
+  await removeAllTools();
   const results = await seedAiRuntimeNodes();
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
@@ -1518,16 +1505,6 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     { collection: 'skills', key: genesis.skill.key, status: 'updated' },
     { collection: 'agents', key: genesis.agent.key, status: 'updated' },
     { collection: 'agentSkills', key: genesis.agentSkill.key, status: 'updated' },
-    { collection: 'agentTools', key: genesis.agentTool.key, status: 'updated' },
-  );
-
-  const beacon = await seedBeacon(rootOrganization.key);
-  if (beacon.agent.scopeKey !== nexusScope.key) throw new SeedReferenceError('agent', 'beacon', 'Nexus');
-  results.push(
-    { collection: 'skills', key: beacon.skill.key, status: 'updated' },
-    { collection: 'agents', key: beacon.agent.key, status: 'updated' },
-    { collection: 'agentSkills', key: beacon.agentSkill.key, status: 'updated' },
-    ...beacon.agentTools.map((agentTool) => ({ collection: 'agentTools', key: agentTool.key, status: 'updated' as const })),
   );
 
   for (const product of SEEDED_PRODUCTS) {

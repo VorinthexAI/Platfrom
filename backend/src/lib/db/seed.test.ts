@@ -4,13 +4,10 @@ import { PROVIDER_SLUGS } from '@/lib/ai/providers';
 import { actionSchema } from './actions.node';
 import { providerSchema } from './providers.node';
 import { voiceSchema } from './voices.node';
-import { toolSchema } from './tools.node';
-import { toolActionSeedSchema } from './tool-actions.node';
-import { TOOL_REGISTRY } from '@/lib/ai/tools';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_TOOLS, SEEDED_TOOL_ACTIONS, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 
 describe('scope seeds', () => {
   test('place the seven product scopes as siblings directly below Nexus', () => {
@@ -69,15 +66,9 @@ describe('action seeds', () => {
     }
   });
 
-  test('seed agent.create as a local architecture action with all embedding source fields', () => {
-    expect(SEEDED_ACTIONS.find(({ slug }) => slug === 'agent.create')).toEqual({
-      key: 'cmgenesisactioncreateagent001', slug: 'agent.create', name: 'Create Agent',
-      description: 'Validates and transactionally creates or reuses an agent, its required skills, skill relations, and allowed tool relations.',
-      objective: 'Persist a complete validated agent architecture from a Genesis creation manifest.',
-      inputDescription: 'A validated Genesis agent creation manifest containing an agent operation, skill operations, agent skill relations, and existing tools to attach.',
-      outputDescription: 'The persisted or reused agent, created skills, linking nodes, provenance artifacts, and validation result.',
-      handlerKey: 'agent.create', enabled: true,
-    });
+  test('does not seed domain workflows as actions', () => {
+    expect(SEEDED_ACTIONS.some(({ slug }) => slug.includes('.'))).toBe(false);
+    expect(SEEDED_ACTIONS.find(({ slug }) => slug === 'insert')).toMatchObject({ name: 'Insert', handlerKey: 'insert' });
   });
 });
 
@@ -112,12 +103,10 @@ describe('model and routing relation seeds', () => {
       'amazon.titan-embed-text-v2',
       'aws.transcribe-standard',
     ]);
-    expect(SEEDED_MODEL_ACTIONS.map(({ modelSlug, actionSlug }) => `${modelSlug}:${actionSlug}`)).toEqual([
-      'amazon.nova-2-sonic:core.chat',
-      'amazon.titan-embed-text-v2:core.embedd',
-      'amazon.polly-generative:core.speak',
-      'aws.transcribe-standard:core.transcribe',
-    ]);
+    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'chat').map(({ modelSlug }) => modelSlug))
+      .toEqual(['amazon.nova-pro', 'amazon.nova-2-lite', 'amazon.nova-premier']);
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'amazon.nova-premier:aws-bedrock:amazon.nova-premier-v1:0:true',
       'amazon.nova-pro:aws-bedrock:amazon.nova-pro-v1:0:true',
@@ -173,53 +162,6 @@ describe('orchestrator seeds', () => {
   });
 });
 
-describe('tool and tool-action seeds', () => {
-  test('mirror every runtime tool as a reusable persisted tool', () => {
-    expect(SEEDED_TOOLS.map((tool) => String(tool.slug)).sort()).toEqual(Object.keys(TOOL_REGISTRY).sort());
-    expect(new Set(SEEDED_TOOLS.map((tool) => tool.key)).size).toBe(SEEDED_TOOLS.length);
-
-    for (const seed of SEEDED_TOOLS) {
-      const parsed = toolSchema.parse(seed);
-      const runtime = TOOL_REGISTRY[parsed.slug];
-      expect(parsed.name).toBe(runtime.name);
-      expect(parsed.description).toBe(runtime.description);
-      expect(parsed.scopeKey).toBe(runtime.scopeId);
-    }
-  });
-
-  test('move every runtime action reference into toolActions', () => {
-    const parsed = SEEDED_TOOL_ACTIONS.map((seed) => toolActionSeedSchema.parse(seed));
-    expect(new Set(parsed.map((relation) => relation.key)).size).toBe(parsed.length);
-    expect(parsed.map(({ toolSlug, actionSlug }) => `${toolSlug}:${actionSlug}`).sort()).toEqual([
-      'agent.create:agent.create',
-      'artifact.create:artifact.create',
-      'artifact.read:artifact.read',
-       'ask.answer:core.chat',
-      'audio.transcribe-file:audio.transcribe',
-      'core.delegate:core.delegate',
-      'image.create:image.generate',
-      'organization.member.activate:organization.member.activate',
-      'organization.member.add:organization.member.add',
-      'organization.member.list:organization.member.list',
-      'organization.member.read:organization.member.read',
-      'organization.member.remove:organization.member.remove',
-      'organization.member.role.update:organization.member.role.update',
-      'organization.member.suspend:organization.member.suspend',
-      'reason.solve:core.reason',
-      'scope.archive:scope.archive',
-      'scope.create:scope.create',
-      'scope.list:scope.list',
-      'scope.move:scope.move',
-      'scope.read:scope.read',
-      'scope.remove:scope.remove',
-      'scope.restore:scope.restore',
-      'scope.update:scope.update',
-      'speech.narrate:audio.generate-speech',
-      ...ACTION_SLUGS.filter((slug) => slug.startsWith('scope.member.') || slug.startsWith('scope.agent.') || slug.startsWith('agent.member.') || slug.startsWith('organization.provider.') || /^organization\.(read|update|archive|restore)$/.test(slug) || slug.startsWith('access.')).map((slug) => `${slug}:${slug}`),
-    ].sort());
-  });
-});
-
 describe('AI runtime seed orchestration', () => {
   test('is idempotent across every v1 seed collection', async () => {
     const persisted = new Set<string>();
@@ -235,8 +177,6 @@ describe('AI runtime seed orchestration', () => {
       model: upsert('models'),
       modelAction: upsert('modelActions'),
       modelProvider: upsert('modelProviders'),
-      tool: upsert('tools'),
-      toolAction: upsert('toolActions'),
     };
 
     const first = await seedAiRuntimeNodes(upserters);

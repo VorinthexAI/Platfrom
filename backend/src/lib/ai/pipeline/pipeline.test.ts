@@ -166,7 +166,7 @@ describe('persisted agent pipeline', () => {
       'step.failed', 'tool.failed', 'agent.failed',
     ]);
     expect(f.eventStore.find(({ slug }) => slug === 'model.failed')?.data).toMatchObject({ callKey: f.callStore[0]?.key, inputTokens: 0, outputTokens: 0 });
-    expect(f.eventStore.find(({ slug }) => slug === 'agent.failed')?.data.reason).toContain('Every route for action core.chat failed');
+    expect(f.eventStore.find(({ slug }) => slug === 'agent.failed')?.data.reason).toContain('Every route for action chat failed');
   });
 
   test('supports validated rejected outputs and stable multi-step workflows', async () => {

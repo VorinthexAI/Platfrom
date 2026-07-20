@@ -28,10 +28,10 @@ describe('Genesis end-to-end runtime', () => {
     const f = buildGenesisFixture(); const now = f.now;
     const model = modelSchema.parse({ key: newId(), slug: 'openai.gpt-5.4-mini', name: 'GPT-5.4 Mini', description: 'Reasoning model', supportedUseCases: 'Reason', enabled: true });
     const provider = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
-    const modelAction = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: f.reasonAction.key, priority: 100, enabled: true });
+    const modelAction = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: f.createAction.key, priority: 100, enabled: true });
     const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-mini', enabled: true });
     const routerData: RouterDataSource = {
-      async getActionBySlug(slug) { return slug === 'core.reason' ? actionSchema.parse(f.reasonAction) : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey(key) { return key === model.key ? model : null; },
+      async getActionBySlug(slug) { return slug === 'insert' ? actionSchema.parse(f.createAction) : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey(key) { return key === model.key ? model : null; },
       async getProviderBySlug(slug) { return slug === provider.slug ? provider : null; }, async getProviderByKey(key) { return key === provider.key ? provider : null; }, async listModelActions() { return [modelAction]; }, async listModelProviders() { return [modelProvider]; }, async listOrganizationProviderKeys() { return [provider.key]; },
     };
     const manifest = {
@@ -63,7 +63,7 @@ describe('Genesis end-to-end runtime', () => {
     expect(result.persisted).toBe(true); expect(result.manifest.agent).toMatchObject({ operation: 'create', slug: 'forge' });
     expect(result.context.tools.map(({ tool }) => tool.slug)).toEqual(['agent.create']);
     expect(result.toolOutput).toMatchObject({ status: 'created', agentKey: result.created?.agent.key, reusedSkillKeys: [f.backend.key] });
-    expect(adapterRequests[0]).toMatchObject({ modelId: model.slug, externalModelId: 'gpt-5.4-mini', actionId: 'core.reason' });
+    expect(adapterRequests[0]).toMatchObject({ modelId: model.slug, externalModelId: 'gpt-5.4-mini', actionId: 'insert' });
     expect(runsStore[0]?.status).toBe('completed'); expect(stepsStore.map((step) => step.stepSlug)).toEqual([...GENESIS_STEP_SLUGS]);
     expect(runsStore[0]).toMatchObject({ principalType: 'member', userOrganizationKey: membership.key });
     expect(callsStore[0]).toMatchObject({ toolKey: f.createTool.key, actionKey: f.reasonAction.key, modelKey: model.key, providerKey: provider.key, totalTokens: 30 });
