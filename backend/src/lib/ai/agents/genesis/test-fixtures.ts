@@ -19,9 +19,9 @@ export function buildGenesisFixture() {
   const architect = skillSchema.parse({ key: newId(), slug: 'agent-architect', name: 'Agent Architecture', title: 'Agent Architect', definition: '# Agent Architect', embedding: [0, 1] });
   const backend = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: '# Backend Developer', embedding: [0, 1] });
   const reasonTool = toolSchema.parse({ key: newId(), slug: 'reason.solve', name: 'Reason', description: 'Reason through agent architecture.', scopeKey: null, enabled: true, embedding: [0, 1] });
-  const reasonAction = actionSchema.parse({ key: newId(), slug: 'core.reason', name: 'Reason', description: 'Reason', objective: 'Design', inputDescription: 'Request', outputDescription: 'Manifest', handlerKey: 'core.reason', enabled: true });
+  const reasonAction = actionSchema.parse({ key: newId(), slug: 'reason', name: 'Reason', description: 'Reason', objective: 'Design', inputDescription: 'Request', outputDescription: 'Manifest', handlerKey: 'reason', enabled: true });
   const createTool = toolSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create a validated agent architecture.', scopeKey: null, enabled: true, embedding: [0, 1] });
-  const createAction = actionSchema.parse({ key: newId(), slug: 'agent.create', name: 'Create Agent', description: 'Create agent', objective: 'Persist architecture', inputDescription: 'Manifest', outputDescription: 'Creation result', handlerKey: 'agent.create', enabled: true });
+  const createAction = actionSchema.parse({ key: newId(), slug: 'insert', name: 'Insert', description: 'Persist a node', objective: 'Persist architecture', inputDescription: 'Node', outputDescription: 'Created node', handlerKey: 'insert', enabled: true });
   const skillLink = agentSkillSchema.parse({ key: newId(), agentKey: genesis.key, skillKey: architect.key, priority: 100 });
   const toolLink = agentToolSchema.parse({ key: newId(), agentKey: genesis.key, toolKey: createTool.key });
   const actionLink = toolActionSchema.parse({ key: newId(), toolKey: createTool.key, actionKey: createAction.key, priority: 100, enabled: true });

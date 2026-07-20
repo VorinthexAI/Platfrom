@@ -5,7 +5,7 @@ import type { ProviderExecuteRequest } from '@/lib/ai/providers';
 import { executeRoute, type RouteAttemptTelemetry } from './execute-route';
 import type { RouteDecision } from './types';
 
-const decision: RouteDecision = { organizationKey: newId(), actionKey: newId(), actionSlug: 'core.chat', modelKey: newId(), modelSlug: 'openai.gpt-5.4-nano', providerKey: newId(), orgProviderKey: newId(), providerSlug: 'openai', providerModelId: 'gpt-5.4-nano' };
+const decision: RouteDecision = { organizationKey: newId(), actionKey: newId(), actionSlug: 'chat', modelKey: newId(), modelSlug: 'openai.gpt-5.4-nano', providerKey: newId(), orgProviderKey: newId(), providerSlug: 'openai', providerModelId: 'gpt-5.4-nano' };
 describe('route execution', () => {
   test('executes exactly one route and reports provider token usage', async () => {
     const calls: ProviderExecuteRequest[] = [];
