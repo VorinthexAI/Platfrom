@@ -1,12 +1,6 @@
-"use client";
-
-import dynamic from "next/dynamic";
-
-const SunSurface = dynamic(() => import("@/app/nexus/SunSurface"), { ssr: false });
-
 /**
- * Keep the authenticated workspace inside the same living sun surface as the
- * founder gate. SunSurface pauses itself for hidden tabs and reduced motion.
+ * A low-fidelity obsidian field keeps the workspace atmospheric without
+ * competing with its interactive hierarchy or spending a second WebGL loop.
  */
 export function FoundersBackdrop() {
   return (
@@ -16,16 +10,15 @@ export function FoundersBackdrop() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(120% 100% at 50% 46%, #683009 0%, #351504 42%, #180703 76%, #080302 100%)",
+            "radial-gradient(80% 72% at 55% 43%, #111820 0%, #090d12 48%, #040608 100%)",
         }}
       />
-      <SunSurface />
       <div
         aria-hidden
         className="nexus-backdrop-drift pointer-events-none absolute -inset-[8%]"
         style={{
           background:
-            "radial-gradient(72% 64% at 50% 42%, rgba(196, 76, 8, 0.18) 0%, transparent 54%), radial-gradient(92% 82% at 50% 50%, transparent 42%, rgba(10, 3, 1, 0.46) 78%, rgba(5, 1, 0, 0.7) 100%)",
+            "radial-gradient(56% 48% at 66% 35%, rgba(119, 145, 166, 0.08) 0%, transparent 62%), radial-gradient(50% 46% at 28% 72%, rgba(91, 107, 122, 0.06) 0%, transparent 68%), radial-gradient(92% 82% at 50% 50%, transparent 40%, rgba(0, 2, 4, 0.72) 100%)",
         }}
       />
     </>

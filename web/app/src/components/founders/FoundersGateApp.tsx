@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CloseIcon, MenuIcon } from "@vorinthex/shared/ui/icons";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import dynamic from "next/dynamic";
 import {
   FoundersRequestError,
   fetchAccessibleOrganizations,
@@ -20,6 +21,9 @@ import { BeaconInputIsland } from "./BeaconInputIsland";
 import { ContextSelector } from "./ContextSelector";
 import { FoundersBackdrop } from "./FoundersBackdrop";
 import { AccountModal } from "./AccountModal";
+import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
+
+const OrchestratorHierarchy = dynamic(() => import("./OrchestratorHierarchy"), { ssr: false });
 
 const ORGANIZATION_STORAGE_KEY = "vx_founders_organization";
 const scopeStorageKey = (organizationKey: string) => `vx_founders_scope:${organizationKey}`;
@@ -49,6 +53,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [artifactSheetOpen, setArtifactSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [selectedOrchestratorSlug, setSelectedOrchestratorSlug] = useState("atlas");
   const scopeRequestRef = useRef(0);
 
   const beacon = useBeaconStream();
@@ -140,6 +145,8 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   })), [organizations]);
 
   const beaconDisabled = !organizationKey || !scopeKey;
+  const selectedOrchestrator = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedOrchestratorSlug]
+    ?? VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
 
   const submit = useCallback((message: string) => {
     if (!organizationKey || !scopeKey) return;
@@ -228,7 +235,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
 
           {/* The response canvas: one document, no bubbles, no history. */}
           <div className="scrollbar-hide flex-1 overflow-y-auto px-4 sm:px-8">
-            <div className="mx-auto w-full max-w-[820px] pt-10 pb-56 sm:pt-16">
+            <div className={`mx-auto w-full pb-56 ${beacon.response || beacon.error || beacon.tools.length > 0 ? "max-w-[820px] pt-10 sm:pt-16" : "h-full max-w-[1280px] pt-2 lg:pt-4"}`}>
               {beacon.response || beacon.error || beacon.tools.length > 0 ? (
                 <article aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
                   <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />
@@ -239,10 +246,10 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                   ) : null}
                 </article>
               ) : (
-                <div className="flex min-h-[40svh] flex-col items-center justify-center text-center">
-                  <h1 className="font-display text-2xl tracking-[0.12em] text-silver-50">Beacon</h1>
-                  <p className="mt-3 text-sm text-silver-300">Your gateway to intelligence</p>
-                </div>
+                <OrchestratorHierarchy
+                  selectedSlug={selectedOrchestrator.slug}
+                  onSelect={(orchestrator) => setSelectedOrchestratorSlug(orchestrator.slug)}
+                />
               )}
             </div>
           </div>
@@ -253,6 +260,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
               <BeaconInputIsland
                 status={beacon.status}
                 disabled={beaconDisabled}
+                assistantName={selectedOrchestrator.name}
                 onSubmit={submit}
                 onCancel={cancelBeacon}
               />
