@@ -207,7 +207,7 @@ describe('backend session cookies', () => {
       verifyAccessToken: async (token) => token === rotatedTokens.accessToken
         ? { key: 'founder', identityType: 'superAdmin' }
         : null,
-      rotateRefreshToken: async (token) => {
+      refreshAccessToken: async (token) => {
         rotateCalls.push(token);
         return token === 'vrtx_refresh_valid' ? rotatedTokens : null;
       },

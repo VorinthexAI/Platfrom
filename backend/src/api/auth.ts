@@ -319,6 +319,38 @@ export async function rotateRefreshToken(refreshToken: string): Promise<SessionT
   return identity ? issueTokens(identity, sessionExpiresAt) : issueUserTokens(user, sessionExpiresAt);
 }
 
+/**
+ * Refresh an expired access token without rotating the refresh token. The
+ * middleware can see several requests concurrently at the access-token
+ * boundary; rotating here would make every request after the first one race
+ * with a now-invalid cookie and turn a healthy session into a logout.
+ */
+export async function refreshAccessToken(refreshToken: string): Promise<SessionTokens | null> {
+  const tokenHash = await sha256(refreshToken);
+  const user = await getUserByRefreshTokenHash(tokenHash);
+  if (!user || !isRefreshTokenActive(user.refreshTokenExpiresAt)) return null;
+  const identity = await organizationMembershipIdentity(user);
+  const identityType = identity?.type ?? 'user';
+  const policy = getAuthSessionPolicy(identityType);
+  const sessionExpiresAt = new Date(Math.min(
+    Date.parse(user.refreshTokenExpiresAt!),
+    Date.now() + policy.refreshMaxAgeSeconds * 1000,
+  ));
+  const issuedAt = Date.now();
+  const remainingSeconds = Math.max(0, Math.floor((sessionExpiresAt.getTime() - issuedAt) / 1000));
+  const accessToken = await createAccessToken(
+    { key: identity?.key ?? user.key, identityType },
+    sessionExpiresAt,
+  );
+  return {
+    accessToken,
+    refreshToken,
+    accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds),
+    refreshTokenMaxAgeSeconds: remainingSeconds,
+    sessionExpiresAt: sessionExpiresAt.toISOString(),
+  };
+}
+
 export function isRefreshTokenActive(expiresAt: string | null, now = Date.now()): boolean {
   if (!expiresAt) return false;
   const expiry = Date.parse(expiresAt);
