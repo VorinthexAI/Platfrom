@@ -1,6 +1,12 @@
+"use client";
+
+import dynamic from "next/dynamic";
+
+const SunSurface = dynamic(() => import("@/app/nexus/SunSurface"), { ssr: false });
+
 /**
- * A low-fidelity obsidian field keeps the workspace atmospheric without
- * competing with its interactive hierarchy or spending a second WebGL loop.
+ * The original living Nexus surface, subdued beneath the workspace so its
+ * amber motion remains visible without competing with interactive content.
  */
 export function FoundersBackdrop() {
   return (
@@ -10,15 +16,18 @@ export function FoundersBackdrop() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(80% 72% at 55% 43%, #111820 0%, #090d12 48%, #040608 100%)",
+            "radial-gradient(90% 76% at 54% 46%, #281207 0%, #130904 50%, #050302 100%)",
         }}
       />
+      <div aria-hidden className="pointer-events-none absolute inset-0 opacity-25 [filter:saturate(.58)_brightness(.52)_contrast(1.1)]">
+        <SunSurface />
+      </div>
       <div
         aria-hidden
         className="nexus-backdrop-drift pointer-events-none absolute -inset-[8%]"
         style={{
           background:
-            "radial-gradient(56% 48% at 66% 35%, rgba(119, 145, 166, 0.08) 0%, transparent 62%), radial-gradient(50% 46% at 28% 72%, rgba(91, 107, 122, 0.06) 0%, transparent 68%), radial-gradient(92% 82% at 50% 50%, transparent 40%, rgba(0, 2, 4, 0.72) 100%)",
+            "radial-gradient(62% 54% at 54% 44%, rgba(218, 104, 20, 0.09) 0%, transparent 66%), radial-gradient(96% 88% at 50% 50%, transparent 34%, rgba(6, 2, 0, 0.72) 78%, rgba(2, 1, 0, 0.92) 100%)",
         }}
       />
     </>

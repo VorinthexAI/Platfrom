@@ -235,7 +235,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
 
           {/* The response canvas: one document, no bubbles, no history. */}
           <div className="scrollbar-hide flex-1 overflow-y-auto px-4 sm:px-8">
-            <div className={`mx-auto w-full pb-56 ${beacon.response || beacon.error || beacon.tools.length > 0 ? "max-w-[820px] pt-10 sm:pt-16" : "h-full max-w-[1280px] pt-2 lg:pt-4"}`}>
+            <div className={`mx-auto w-full ${beacon.response || beacon.error || beacon.tools.length > 0 ? "max-w-[820px] pt-10 pb-56 sm:pt-16" : "h-full min-h-[670px] max-w-[1280px] pt-2 pb-32 lg:pt-4"}`}>
               {beacon.response || beacon.error || beacon.tools.length > 0 ? (
                 <article aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
                   <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />

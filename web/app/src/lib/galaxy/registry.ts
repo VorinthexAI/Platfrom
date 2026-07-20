@@ -736,10 +736,9 @@ function orchestrator(input: OrchestratorInput): GalaxyEntity {
     launchDate: "TBD",
     statusLabel: "Coming Soon",
     logo: {
-      src: "",
+      src: `/logos/entities/orchestrator-${input.slug}.png`,
       alt: `${input.name}, ${input.role} orchestrator`,
-      kind: "procedural",
-      iconKey: "orchestrator",
+      kind: "png",
     },
     visual: {
       celestialKind: "moon",
