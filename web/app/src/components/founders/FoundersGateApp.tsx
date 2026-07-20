@@ -248,9 +248,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                   selectedId={selectedEntity.id}
                   onSelect={(entity) => setSelectedEntityId(entity.id)}
                   onEnter={enterEntity}
-                  organizations={organizations}
-                  organizationKey={organizationKey}
-                  onOrganizationSelect={changeOrganization}
                   delegation={activeDelegation}
                   muted={false}
                 />

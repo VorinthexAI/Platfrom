@@ -94,14 +94,14 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
     const now = performance.now();
     if (Math.abs(event.deltaY) < 5 || now - wheelAt.current < 180) return;
     wheelAt.current = now;
-    selectEntity(selectedIndex + (event.deltaY > 0 ? 1 : -1));
+    selectLayer(event.deltaY > 0 ? 1 : -1);
   }
 
   return (
     <section className="pointer-events-auto absolute inset-x-0 bottom-0 z-20 h-[270px] overflow-hidden" aria-label="Nexus entity navigator" onWheel={handleWheel}>
       <div aria-hidden className="absolute inset-x-[-8%] bottom-[-155px] h-[390px] rounded-[50%_50%_0_0/100%_100%_0_0] border-t border-[#b36c32]/30 bg-[linear-gradient(180deg,rgba(31,24,20,0.82),rgba(4,6,8,0.97)_48%)] shadow-[0_-28px_90px_rgba(0,0,0,0.6),inset_0_2px_0_rgba(255,255,255,0.05),inset_0_18px_50px_rgba(191,93,27,0.06)] backdrop-blur-xl" />
 
-      <div aria-hidden className="pointer-events-none absolute inset-x-24 top-5 flex justify-center gap-4 opacity-20">
+      <div aria-hidden className="pointer-events-none absolute inset-x-24 top-10 flex justify-center gap-4 opacity-20">
         {outerLayer.entities.slice(0, 8).map((entity, index, entities) => (
           <div
             key={entity.id}
@@ -122,7 +122,7 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
       </div>
 
       <div
-        className="scrollbar-hide absolute inset-x-16 top-14 bottom-3 flex items-start gap-3 overflow-x-auto overflow-y-hidden px-[42vw] pb-2 sm:inset-x-24 sm:gap-4"
+        className="scrollbar-hide absolute inset-x-16 top-20 bottom-0 flex items-start gap-3 overflow-x-auto overflow-y-hidden px-[42vw] pb-2 sm:inset-x-24 sm:gap-4"
       >
         {layer.entities.map((entity, index) => {
           const distance = Math.abs(index - selectedIndex);
@@ -161,8 +161,8 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
           );
         })}
       </div>
-      <button type="button" onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface absolute bottom-2 left-4 z-30 flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white sm:left-7"><ChevronLeftIcon size="sm" /></button>
-      <button type="button" onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface absolute right-4 bottom-2 z-30 flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white sm:right-7"><ChevronRightIcon size="sm" /></button>
+      <button type="button" onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface absolute top-1/2 left-24 z-30 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-silver-300 hover:text-white sm:left-40"><ChevronLeftIcon size="sm" /></button>
+      <button type="button" onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface absolute top-1/2 right-24 z-30 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-silver-300 hover:text-white sm:right-40"><ChevronRightIcon size="sm" /></button>
     </section>
   );
 }

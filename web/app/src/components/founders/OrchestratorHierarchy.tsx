@@ -7,7 +7,7 @@ import { useReducedMotion } from "framer-motion";
 import * as THREE from "three";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
-import type { AccessibleOrganizationOption, BeaconToolActivity } from "@/lib/founders/types";
+import type { BeaconToolActivity } from "@/lib/founders/types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import NexusBrainCore from "./NexusBrainCore";
 
@@ -17,8 +17,8 @@ const ATLAS = VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
 const CAPABILITIES = (CORE.children ?? [])
   .map((id) => Object.values(VORINTHEX_GALAXY_REGISTRY.capabilities).find((entity) => entity.id === id))
   .filter((entity): entity is GalaxyEntity => Boolean(entity));
-const LAYER_RADII = [0, 2.7, 4.35, 5.75, 7.2, 8.75, 10.4, 12.1];
-const LAYER_HEIGHTS = [0.46, 0.32, 0.17, 0.02, -0.14, -0.3, -0.46, -0.62];
+const LAYER_RADII = [0, 2.7, 4.35, 5.75, 7.2, 8.75, 10.4];
+const LAYER_HEIGHTS = [0.46, 0.32, 0.17, 0.02, -0.14, -0.3, -0.46];
 const X_AXIS_ORBIT_LAYERS = [2, 4, 6];
 const Y_AXIS_ORBIT_LAYERS = [1, 3, 5];
 const ORBIT_SPEED_BASE = 0.06;
@@ -453,42 +453,6 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
   );
 }
 
-function CivilizationPerimeter({ organizations, organizationKey, onOrganizationSelect, muted }: {
-  organizations: AccessibleOrganizationOption[];
-  organizationKey: string | null;
-  onOrganizationSelect: (key: string) => void;
-  muted: boolean;
-}) {
-  const radius = LAYER_RADII[7];
-  return (
-    <group position={[0, LAYER_HEIGHTS[7], 0]}>
-      {organizations.map((organization, index) => {
-        const angle = Math.PI + (index - (organizations.length - 1) / 2) * 0.18;
-        const selected = organization.key === organizationKey;
-        return (
-          <group key={organization.key} position={[Math.cos(angle) * (radius + 0.65), 0.5, Math.sin(angle) * (radius + 0.65)]}>
-            <mesh>
-              <cylinderGeometry args={[selected ? 0.26 : 0.2, selected ? 0.3 : 0.23, 0.28, 8]} />
-              <meshStandardMaterial color={selected ? "#e3e8eb" : "#303438"} emissive={selected ? "#8f4214" : "#000000"} emissiveIntensity={selected ? 1.1 : 0} metalness={0.9} roughness={0.24} />
-            </mesh>
-            <mesh position={[0, 0.16, 0]} rotation={[Math.PI / 2, 0, 0]}>
-              <torusGeometry args={[selected ? 0.3 : 0.25, 0.025, 6, 32]} />
-              <meshBasicMaterial color={selected ? "#e3c39d" : "#545b60"} />
-            </mesh>
-            {!muted ? (
-              <Html center position={[0, 0.42, 0]} distanceFactor={12}>
-                <button type="button" onClick={() => onOrganizationSelect(organization.key)} className={`whitespace-nowrap font-mono text-[0.5rem] tracking-[0.16em] uppercase ${selected ? "text-[#ffd19a]" : "text-silver-500"}`}>
-                  {organization.name}
-                </button>
-              </Html>
-            ) : null}
-          </group>
-        );
-      })}
-    </group>
-  );
-}
-
 function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolean }) {
   const dust = useRef<THREE.Points>(null);
   const drones = useRef<THREE.Group>(null);
@@ -570,14 +534,11 @@ function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean
   return null;
 }
 
-function LivingStation({ selectedId, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onEnter }: {
+function LivingStation({ selectedId, paused, muted, delegation, onSelect, onEnter }: {
   selectedId: string;
   paused: boolean;
   muted: boolean;
   delegation: BeaconToolActivity | null;
-  organizations: AccessibleOrganizationOption[];
-  organizationKey: string | null;
-  onOrganizationSelect: (key: string) => void;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
 }) {
@@ -700,7 +661,6 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
             onEnter={() => onEnter(CORE)}
           />
         </group>
-        <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} />
       </group>
 
       {STATION_NODES.map((node) => {
@@ -734,9 +694,6 @@ interface OrchestratorHierarchyProps {
   selectedId: string;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
-  organizations: AccessibleOrganizationOption[];
-  organizationKey: string | null;
-  onOrganizationSelect: (key: string) => void;
   delegation: BeaconToolActivity | null;
   muted: boolean;
 }
