@@ -32,9 +32,9 @@ const ENTITY_LAYERS: Array<{ name: string; entities: GalaxyEntity[] }> = [
   { name: "Capabilities", entities: CAPABILITIES },
   { name: "Products", entities: [VORINTHEX_GALAXY_REGISTRY.products.launch, VORINTHEX_GALAXY_REGISTRY.products.studio] },
   { name: "Atlas", entities: [VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas] },
-  { name: "Executive", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 1) },
-  { name: "Departments", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 2) },
-  { name: "Agents", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 3) },
+  { name: "Orchestrators Tier 1", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 1) },
+  { name: "Orchestrators Tier 2", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 2) },
+  { name: "Orchestrators Tier 3", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 3) },
 ];
 
 function descriptionFor(entity: GalaxyEntity) {
@@ -117,7 +117,7 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
 
       <div className="absolute top-11 left-4 z-20 flex flex-col items-center gap-1 sm:left-7">
         <button type="button" onClick={() => selectLayer(-1)} aria-label="Previous station layer" className="founders-surface flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronUpIcon size="sm" /></button>
-        <span className="max-w-20 truncate font-mono text-[0.46rem] tracking-[0.16em] text-[#c18a5a] uppercase">{layer.name}</span>
+        <span className="w-32 whitespace-nowrap text-center font-mono text-[0.46rem] tracking-[0.16em] text-[#c18a5a] uppercase">{layer.name}</span>
         <button type="button" onClick={() => selectLayer(1)} aria-label="Next station layer" className="founders-surface flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronDownIcon size="sm" /></button>
       </div>
 

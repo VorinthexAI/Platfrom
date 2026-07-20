@@ -25,7 +25,6 @@ import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { getEntityById } from "@/lib/galaxy/registry-helpers";
 import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
-import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { NexusTransit } from "./NexusTransit";
 import { NexusEntityArc } from "./NexusEntityArc";
 
@@ -290,16 +289,16 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                 onCancel={cancelBeacon}
               />
               <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                <button type="button" onClick={() => playVoice(entityAudioUrl(enteredEntity.type, enteredEntity.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
-                  <SpeakerIcon animated /> Play Briefing
+                <button type="button" onClick={() => playVoice(entityAudioUrl(enteredEntity.type, enteredEntity.slug))} className="founders-surface inline-flex items-center rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                  Play Briefing
                 </button>
                 {enteredEntity.type === "orchestrator" ? (
-                  <button type="button" onClick={() => playVoice(orchestratorMessageUrl(enteredEntity.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
-                    <SpeakerIcon animated /> Meet {enteredEntity.name}
+                  <button type="button" onClick={() => playVoice(orchestratorMessageUrl(enteredEntity.slug))} className="founders-surface inline-flex items-center rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                    Meet {enteredEntity.name}
                   </button>
                 ) : null}
-                <button type="button" onClick={leaveEntity} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
-                  <CloseIcon size="sm" /> Exit
+                <button type="button" onClick={leaveEntity} className="founders-surface inline-flex items-center rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                  Exit
                 </button>
               </div>
             </div>
