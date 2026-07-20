@@ -43,8 +43,8 @@ function descriptionFor(entity: GalaxyEntity) {
 
 function downwardArcTransform(index: number, center: number, depth: number, radius: number, rotation: number, scale = 1) {
   const position = Math.max(-1, Math.min(1, (index - center) / radius));
-  const offset = depth * (1 - position * position);
-  return `translateY(${offset}px) rotate(${position * -rotation}deg) scale(${scale})`;
+  const offset = depth * position * position;
+  return `translateY(${offset}px) rotate(${position * rotation}deg) scale(${scale})`;
 }
 
 interface NexusEntityArcProps {
