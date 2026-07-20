@@ -139,7 +139,7 @@ export async function* streamFoundersBeaconAsk(params: BeaconAskParams, options:
     organizationKey: params.organization.key,
     agentKey: beacon.key,
     toolKey: grant.tool.key,
-    actionKey: action.action.key,
+    actionKey: grant.actions[0]?.action.key,
     stepSlug: 'select-delegate',
     metadata: { status: 'accepted', reason: 'Select an allowed specialist', score: 1 },
     input: { messages: [{ role: 'user', content: message }], system: BEACON_DELEGATION_PROMPT },
