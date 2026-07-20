@@ -232,6 +232,9 @@ body {
 
 [aria-label="Provider Management"] form > .vui-button {
   margin-top: 0.5rem;
+  min-height: 36px;
+  padding: 9px 18px;
+  font-size: 10px;
   width: fit-content;
 }
 
