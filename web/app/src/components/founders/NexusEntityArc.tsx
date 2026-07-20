@@ -41,6 +41,12 @@ function descriptionFor(entity: GalaxyEntity) {
   return entity.content?.drawerLine ?? entity.shortDescription ?? entity.tagline ?? entity.label ?? entity.type;
 }
 
+function downwardArcTransform(index: number, center: number, depth: number, radius: number, rotation: number, scale = 1) {
+  const position = Math.max(-1, Math.min(1, (index - center) / radius));
+  const offset = depth * (1 - position * position);
+  return `translateY(${offset}px) rotate(${position * -rotation}deg) scale(${scale})`;
+}
+
 interface NexusEntityArcProps {
   selectedEntityId: string;
   onSelect: (entity: GalaxyEntity) => void;
@@ -96,8 +102,12 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
       <div aria-hidden className="absolute inset-x-[-8%] bottom-[-155px] h-[390px] rounded-[50%_50%_0_0/100%_100%_0_0] border-t border-[#b36c32]/30 bg-[linear-gradient(180deg,rgba(31,24,20,0.82),rgba(4,6,8,0.97)_48%)] shadow-[0_-28px_90px_rgba(0,0,0,0.6),inset_0_2px_0_rgba(255,255,255,0.05),inset_0_18px_50px_rgba(191,93,27,0.06)] backdrop-blur-xl" />
 
       <div aria-hidden className="pointer-events-none absolute inset-x-24 top-5 flex justify-center gap-4 opacity-20">
-        {outerLayer.entities.slice(0, 8).map((entity) => (
-          <div key={entity.id} className="flex h-10 w-24 items-center gap-2 rounded-lg border border-white/10 bg-black/50 px-2">
+        {outerLayer.entities.slice(0, 8).map((entity, index, entities) => (
+          <div
+            key={entity.id}
+            className="flex h-10 w-24 items-center gap-2 rounded-lg border border-white/10 bg-black/50 px-2 transition-transform duration-500"
+            style={{ transform: downwardArcTransform(index, (entities.length - 1) / 2, 28, Math.max(1, (entities.length - 1) / 2), 5) }}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={entityLogoUrl(entity.type, entity.slug)} alt="" className="h-5 w-5 rounded-full opacity-70" />
             <span className="truncate font-mono text-[0.42rem] tracking-[0.12em] text-silver-300 uppercase">{entity.name}</span>
@@ -118,12 +128,12 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
         {layer.entities.map((entity, index) => {
           const distance = Math.abs(index - selectedIndex);
           const selected = entity.id === selectedEntityId;
-          const offset = selected ? 24 : distance === 1 ? 8 : 0;
+          const scale = selected ? 1 : Math.max(0.9, 0.98 - distance * 0.025);
           return (
             <article
               key={entity.id}
               className={`relative mt-2 w-[190px] shrink-0 rounded-2xl border p-3 backdrop-blur-md transition-[transform,opacity,border-color,background-color] duration-500 ${selected ? "border-[#d8904d]/55 bg-[#18130f]/90 opacity-100 shadow-[0_18px_50px_rgba(0,0,0,0.5),0_0_35px_rgba(209,111,37,0.12)]" : "border-white/10 bg-[#080b0d]/78 opacity-72"}`}
-              style={{ transform: `translateY(${offset}px) scale(${selected ? 1 : Math.max(0.9, 0.98 - distance * 0.025)})` }}
+              style={{ transform: downwardArcTransform(index, selectedIndex, 44, 4, 7, scale) }}
             >
               <button
                 id={`arc-card-${entity.id.replaceAll(".", "-")}`}
