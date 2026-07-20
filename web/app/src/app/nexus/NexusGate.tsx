@@ -7,8 +7,10 @@ import { Button, TextInput } from "@vorinthex/shared/ui/components";
 import { TotpSetupPanel, TotpVerifyPanel, type TotpSetupData } from "@/components/auth/TotpWizard";
 import { CloseIcon } from "@/components/ui/icons";
 import { normalizeEmailInput } from "@/lib/email";
+import { getEntityById } from "@/lib/galaxy/registry-helpers";
 
 const SunSurface = dynamic(() => import("./SunSurface"), { ssr: false });
+const OrchestratorHierarchy = dynamic(() => import("@/components/founders/OrchestratorHierarchy"), { ssr: false });
 
 type FoundersGatePhase =
   | { kind: "gate" }
@@ -27,6 +29,7 @@ export function NexusGate() {
   const [email, setEmail] = useState("");
   const [gateStatus, setGateStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [gateError, setGateError] = useState("");
+  const [nexusEntityId, setNexusEntityId] = useState<string | null>(null);
 
   function onTotpSuccess(name: string | null, title: string | null) {
     if (name) window.localStorage.setItem("vx_member_name", name);
@@ -70,6 +73,10 @@ export function NexusGate() {
       window.localStorage.setItem("vx_member_email", normalizedEmail);
       if (typeof data.name === "string") window.localStorage.setItem("vx_member_name", data.name);
       if (typeof data.title === "string") window.localStorage.setItem("vx_member_title", data.title);
+      if (typeof data.orchestrator_slug === "string") {
+        const entity = getEntityById(`orchestrator.${data.orchestrator_slug}`);
+        if (entity?.type === "orchestrator") setNexusEntityId(entity.id);
+      }
 
       if (data.status === "totp_required") {
         setPhase({ kind: "verify", challenge: data.totp_challenge_token_hash });
@@ -114,7 +121,17 @@ export function NexusGate() {
             "radial-gradient(120% 100% at 50% 46%, #7a2d05 0%, #4a1503 44%, #1c0701 78%, #0a0301 100%)",
         }}
       />
-      <SunSurface />
+      {nexusEntityId ? (
+        <div aria-hidden className="pointer-events-none absolute inset-0 opacity-80">
+          <OrchestratorHierarchy
+            selectedId={nexusEntityId}
+            onSelect={() => undefined}
+            onEnter={() => undefined}
+            delegation={null}
+            muted={false}
+          />
+        </div>
+      ) : <SunSurface />}
       {/* Soft darkening toward the edges so the card reads against the
           brightest convection cells. */}
       <div

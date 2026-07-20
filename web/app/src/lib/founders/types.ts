@@ -17,7 +17,7 @@ export type AccessibleScopeOption = {
 export type FoundersAccount = {
   user: { key: string; name: string | null; alias: string | null; email: string };
   rootOrganization: { key: string; name: string; alias: string | null };
-  rootMembership: { role: string; title: string | null };
+  rootMembership: { role: string; title: string | null; orchestrator: { key: string; slug: string } | null };
   applicationRole: string;
 };
 

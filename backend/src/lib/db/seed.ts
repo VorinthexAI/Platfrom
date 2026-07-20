@@ -9,6 +9,8 @@ import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, u
 import { getToolBySlug, insertTool, updateTool, type Tool } from './tools.node';
 import { getToolActionByPair, insertToolAction, toolActionSeedSchema, updateToolAction } from './tool-actions.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
+import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
+import { getUserByEmail } from './users.node';
 import { getProductByProductId, insertProduct, updateProduct, type Product } from './products.node';
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
@@ -1121,6 +1123,14 @@ export const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [
   skill: SEEDED_ORCHESTRATOR_SKILLS[name as keyof typeof SEEDED_ORCHESTRATOR_SKILLS],
 }));
 
+const SEEDED_FOUNDER_ORCHESTRATORS = {
+  'oscar@vorinthex.com': 'Atlas',
+  'josef@vorinthex.com': 'Orbit',
+  'frank@vorinthex.com': 'Mercury',
+  'vincent@vorinthex.com': 'Iris',
+  'anton@vorinthex.com': 'Apollo',
+} as const;
+
 export const SEEDED_VOICES: SeededVoice[] = [
   {
     provider: 'aws-bedrock',
@@ -1399,6 +1409,22 @@ async function upsertSeedOrchestrator(seed: (typeof SEEDED_ORCHESTRATOR_SOURCES)
   return { collection: 'orchestrators', key: existing.key, status: 'updated' };
 }
 
+async function assignSeededFounderOrchestrators(rootOrganizationKey: string): Promise<SeedResult[]> {
+  const results: SeedResult[] = [];
+  for (const [email, orchestratorName] of Object.entries(SEEDED_FOUNDER_ORCHESTRATORS)) {
+    const [user, orchestrator] = await Promise.all([
+      getUserByEmail(email),
+      getOrchestratorByName(orchestratorName),
+    ]);
+    if (!user || !orchestrator) continue;
+    const membership = await getUserOrganizationByOrganizationAndUser(rootOrganizationKey, user.key);
+    if (!membership || membership.orchestratorKey === orchestrator.key) continue;
+    await updateUserOrganization(membership.key, { orchestratorKey: orchestrator.key, updatedAt: now() });
+    results.push({ collection: 'userOrganizations', key: membership.key, status: 'updated' });
+  }
+  return results;
+}
+
 export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   action: upsertSeedAction,
   provider: upsertSeedProvider,
@@ -1515,6 +1541,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   for (const orchestrator of SEEDED_ORCHESTRATOR_SOURCES) {
     results.push(await upsertSeedOrchestrator(orchestrator));
   }
+  results.push(...await assignSeededFounderOrchestrators(rootOrganization.key));
 
   return results;
 }
