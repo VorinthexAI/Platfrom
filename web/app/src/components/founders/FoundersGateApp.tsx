@@ -22,8 +22,13 @@ import { ContextSelector } from "./ContextSelector";
 import { FoundersBackdrop } from "./FoundersBackdrop";
 import { AccountModal } from "./AccountModal";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
+import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
+import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
+import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
+import { NexusTransit } from "./NexusTransit";
 
 const OrchestratorHierarchy = dynamic(() => import("./OrchestratorHierarchy"), { ssr: false });
+const OrchestratorCommandDeck = dynamic(() => import("./OrchestratorCommandDeck"), { ssr: false });
 
 const ORGANIZATION_STORAGE_KEY = "vx_founders_organization";
 const scopeStorageKey = (organizationKey: string) => `vx_founders_scope:${organizationKey}`;
@@ -54,10 +59,14 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [artifactSheetOpen, setArtifactSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [selectedOrchestratorSlug, setSelectedOrchestratorSlug] = useState("atlas");
+  const [enteredOrchestratorSlug, setEnteredOrchestratorSlug] = useState<string | null>(null);
+  const [transitDestination, setTransitDestination] = useState<string | null>("Nexus command station");
   const scopeRequestRef = useRef(0);
 
   const beacon = useBeaconStream();
   const { reset: resetBeacon, cancel: cancelBeacon } = beacon;
+  const playVoice = useAudioStore((state) => state.playVoice);
+  const stopVoice = useAudioStore((state) => state.stopVoice);
 
   const loadScopes = useCallback(async (nextOrganizationKey: string) => {
     const requestId = scopeRequestRef.current + 1;
@@ -147,6 +156,9 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const beaconDisabled = !organizationKey || !scopeKey;
   const selectedOrchestrator = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedOrchestratorSlug]
     ?? VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
+  const enteredOrchestrator = enteredOrchestratorSlug
+    ? VORINTHEX_GALAXY_REGISTRY.orchestrators[enteredOrchestratorSlug] ?? null
+    : null;
   const hasBeaconOutput = Boolean(beacon.response || beacon.error || beacon.tools.length > 0);
   const activeDelegation = beacon.tools.at(-1) ?? null;
 
@@ -154,6 +166,27 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
     if (!organizationKey || !scopeKey) return;
     void beacon.ask({ organizationKey, scopeKey, message });
   }, [beacon, organizationKey, scopeKey]);
+
+  const enterOrchestrator = useCallback((orchestrator: GalaxyEntity) => {
+    cancelBeacon();
+    resetBeacon();
+    stopVoice();
+    setSelectedOrchestratorSlug(orchestrator.slug);
+    setEnteredOrchestratorSlug(orchestrator.slug);
+    setTransitDestination(`${orchestrator.name} command deck`);
+  }, [cancelBeacon, resetBeacon, stopVoice]);
+
+  const leaveOrchestrator = useCallback(() => {
+    cancelBeacon();
+    resetBeacon();
+    stopVoice();
+    setEnteredOrchestratorSlug(null);
+    setTransitDestination("Nexus command station");
+  }, [cancelBeacon, resetBeacon, stopVoice]);
+
+  const completeTransit = useCallback(() => setTransitDestination(null), []);
+
+  useEffect(() => () => stopVoice(), [stopVoice]);
 
   if (gate !== "ready") {
     return (
@@ -205,14 +238,13 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
       <FoundersBackdrop />
 
       <div className="relative z-10 flex h-svh">
-        {/* Desktop left panel: transparent, divider only. */}
-        <aside className="hidden w-[280px] shrink-0 flex-col p-5 lg:flex" style={{ borderRight: "1px solid rgba(221, 226, 229, 0.08)" }}>
-          {panel}
-        </aside>
-
         <section className="relative flex min-w-0 flex-1 flex-col">
-          {/* Mobile context bar: current organization and scope stay visible. */}
-          <div className="flex items-center gap-3 px-4 pt-4 lg:hidden">
+          <div className="flex items-center gap-3 px-4 pt-4 sm:px-6">
+            {enteredOrchestrator ? (
+              <button type="button" onClick={leaveOrchestrator} aria-label="Return to Nexus command station" className="founders-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-silver-100">
+                <CloseIcon size="sm" />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setDrawerOpen(true)}
@@ -235,25 +267,42 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
             </button>
           </div>
 
-          {/* The station remains the workspace; conversation floats above it. */}
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            <div className="absolute inset-0 px-4 sm:px-8">
-              <div className="mx-auto h-full min-h-[670px] max-w-[1320px] pt-2 pb-32 lg:pt-4">
+            <div className="absolute inset-0">
+              {enteredOrchestrator ? (
+                <OrchestratorCommandDeck orchestrator={enteredOrchestrator} reducedMotion={Boolean(reducedMotion)} />
+              ) : (
+                <div className="mx-auto h-full min-h-[670px] max-w-[1540px] px-4 pt-2 pb-24 sm:px-8 lg:pt-4">
                 <OrchestratorHierarchy
                   selectedSlug={selectedOrchestrator.slug}
                   onSelect={(orchestrator) => setSelectedOrchestratorSlug(orchestrator.slug)}
+                  onEnter={enterOrchestrator}
                   organizations={organizations}
                   organizationKey={organizationKey}
                   onOrganizationSelect={changeOrganization}
                   delegation={activeDelegation}
-                  muted={hasBeaconOutput}
+                  muted={false}
                 />
-              </div>
+                </div>
+              )}
             </div>
 
-            <div className={`scrollbar-hide relative z-10 h-full overflow-y-auto px-4 sm:px-8 ${hasBeaconOutput ? "" : "pointer-events-none"}`}>
-              <div className="mx-auto w-full max-w-[820px] pt-10 pb-56 sm:pt-16">
-                {hasBeaconOutput ? (
+            {enteredOrchestrator ? (
+              <div className="pointer-events-none absolute inset-x-0 top-5 z-10 text-center">
+                <p className="font-mono text-[0.5rem] tracking-[0.35em] text-[#c3834c] uppercase">{enteredOrchestrator.role} command deck</p>
+                <h1 className="mt-1 text-xl tracking-[0.24em] text-silver-50 uppercase sm:text-2xl">{enteredOrchestrator.name}</h1>
+              </div>
+            ) : (
+              <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 text-center">
+                <p className="font-mono text-[0.5rem] tracking-[0.28em] text-[#b27a4d] uppercase">{selectedOrchestrator.name} selected</p>
+                <p className="mt-1 text-xs tracking-[0.16em] text-silver-400 uppercase">Click an orchestrator to enter its command deck</p>
+              </div>
+            )}
+
+            {enteredOrchestrator ? (
+              <div className={`scrollbar-hide relative z-10 h-full overflow-y-auto px-4 sm:px-8 ${hasBeaconOutput ? "" : "pointer-events-none"}`}>
+                <div className="mx-auto w-full max-w-[820px] pt-24 pb-64 sm:pt-28">
+                  {hasBeaconOutput ? (
                   <article aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
                     <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />
                     {beacon.response ? <SafeMarkdown markdown={beacon.response} /> : null}
@@ -263,24 +312,38 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                     ) : null}
                   </article>
                 ) : null}
+                </div>
               </div>
-            </div>
+            ) : null}
           </div>
 
-          {/* Floating input island — near the bottom, never attached to it. */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-7 px-4 sm:px-8">
+          {enteredOrchestrator ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 px-4 sm:px-8">
             <div className="pointer-events-auto mx-auto w-full max-w-[820px]">
               <BeaconInputIsland
                 status={beacon.status}
                 disabled={beaconDisabled}
-                assistantName={selectedOrchestrator.name}
+                assistantName={enteredOrchestrator.name}
                 onSubmit={submit}
                 onCancel={cancelBeacon}
               />
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                <button type="button" onClick={() => playVoice(entityAudioUrl("orchestrator", enteredOrchestrator.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                  <SpeakerIcon animated /> Play Briefing
+                </button>
+                <button type="button" onClick={() => playVoice(orchestratorMessageUrl(enteredOrchestrator.slug))} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                  <SpeakerIcon animated /> Meet {enteredOrchestrator.name}
+                </button>
+              </div>
             </div>
           </div>
+          ) : null}
         </section>
       </div>
+
+      <AnimatePresence>
+        {transitDestination ? <NexusTransit key={transitDestination} destination={transitDestination} reducedMotion={Boolean(reducedMotion)} onComplete={completeTransit} /> : null}
+      </AnimatePresence>
 
       {organizationKey && scopeKey ? (
         <ArtifactWorkspace
@@ -307,11 +370,10 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
         />
       ) : null}
 
-      {/* Mobile drawer: the left panel slides in over a dimmed veil. */}
       <AnimatePresence>
         {drawerOpen ? (
           <motion.div
-            className="fixed inset-0 z-30 lg:hidden"
+            className="fixed inset-0 z-30"
             role="dialog"
             aria-modal="true"
             aria-label="Organization and scope panel"

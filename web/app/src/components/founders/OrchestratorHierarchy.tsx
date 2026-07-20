@@ -220,13 +220,14 @@ function EnergyConduit({ from, to, active, paused, reverse = false }: {
   );
 }
 
-function CommandModule({ entity, selected, active, muted, metalTexture, onSelect, onNavigate }: {
+function CommandModule({ entity, selected, active, muted, metalTexture, onSelect, onEnter, onNavigate }: {
   entity: GalaxyEntity;
   selected: boolean;
   active: boolean;
   muted: boolean;
   metalTexture: THREE.Texture;
   onSelect: (entity: GalaxyEntity) => void;
+  onEnter: (entity: GalaxyEntity) => void;
   onNavigate: NavigateOrchestrator;
 }) {
   const animated = useRef<THREE.Group>(null);
@@ -323,7 +324,7 @@ function CommandModule({ entity, selected, active, muted, metalTexture, onSelect
 
       <mesh
         visible={false}
-        onClick={(event) => { event.stopPropagation(); if (event.delta <= 8) onSelect(entity); }}
+        onClick={(event) => { event.stopPropagation(); if (event.delta <= 8) { onSelect(entity); onEnter(entity); } }}
         onPointerOver={(event) => { event.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }}
         onPointerOut={() => { setHovered(false); document.body.style.cursor = "auto"; }}
       >
@@ -336,10 +337,10 @@ function CommandModule({ entity, selected, active, muted, metalTexture, onSelect
           type="button"
           tabIndex={selected ? 0 : -1}
           aria-pressed={selected}
-          aria-label={`Chat with ${entity.name}, ${entity.role}`}
+          aria-label={`Enter ${entity.name} command deck, ${entity.role}`}
           onFocus={() => onSelect(entity)}
           onKeyDown={(event) => handleTab(event, entity, onNavigate)}
-          onClick={(event) => { event.stopPropagation(); onSelect(entity); }}
+          onClick={(event) => { event.stopPropagation(); onSelect(entity); onEnter(entity); }}
           className="flex min-w-[80px] flex-col items-center whitespace-nowrap rounded-md px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-[#ffc267] focus-visible:shadow-[0_0_20px_rgba(255,135,40,0.7)]"
           style={{ opacity }}
         >
@@ -521,7 +522,7 @@ function WheelNavigation({ selectedSlug, onNavigate }: { selectedSlug: string; o
   return null;
 }
 
-function LivingStation({ selectedSlug, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onNavigate }: {
+function LivingStation({ selectedSlug, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onEnter, onNavigate }: {
   selectedSlug: string;
   paused: boolean;
   muted: boolean;
@@ -530,6 +531,7 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
   onSelect: (entity: GalaxyEntity) => void;
+  onEnter: (entity: GalaxyEntity) => void;
   onNavigate: NavigateOrchestrator;
 }) {
   const station = useRef<THREE.Group>(null);
@@ -650,7 +652,7 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
         ) : null}
 
         {ORCHESTRATORS.map((entity) => (
-          <CommandModule key={entity.id} entity={entity} selected={entity.slug === selectedSlug} active={branch.has(entity.slug)} muted={muted} metalTexture={metalTexture} onSelect={onSelect} onNavigate={onNavigate} />
+          <CommandModule key={entity.id} entity={entity} selected={entity.slug === selectedSlug} active={branch.has(entity.slug)} muted={muted} metalTexture={metalTexture} onSelect={onSelect} onEnter={onEnter} onNavigate={onNavigate} />
         ))}
         <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} metalTexture={metalTexture} />
       </group>
@@ -661,6 +663,7 @@ function LivingStation({ selectedSlug, paused, muted, delegation, organizations,
 interface OrchestratorHierarchyProps {
   selectedSlug: string;
   onSelect: (orchestrator: GalaxyEntity) => void;
+  onEnter: (orchestrator: GalaxyEntity) => void;
   organizations: AccessibleOrganizationOption[];
   organizationKey: string | null;
   onOrganizationSelect: (key: string) => void;
@@ -696,7 +699,7 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
       {!props.muted ? (
         <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 text-center">
           <p className="font-mono text-[0.48rem] tracking-[0.34em] text-[#9b6842] uppercase">Nexus Intelligence Civilization</p>
-          <p className="mt-1 font-mono text-[0.44rem] tracking-[0.16em] text-[#73533d] uppercase">Drag to rotate / Scroll or Tab to navigate</p>
+          <p className="mt-1 font-mono text-[0.44rem] tracking-[0.16em] text-[#73533d] uppercase">Drag to rotate / Scroll or Tab to navigate / Click to enter</p>
         </div>
       ) : null}
     </div>
