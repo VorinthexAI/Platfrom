@@ -22,7 +22,7 @@ describe('AWS Transcribe provider', () => {
       return new Response(JSON.stringify({ results: { transcripts: [{ transcript: 'recognized text' }] } }), { status: 200 });
     }) as unknown as typeof fetch;
     const provider = createAwsTranscribeProvider({ region: 'us-east-1', accessKeyId: 'key', secretAccessKey: 'secret' });
-    const result = await provider.execute({ actionId: 'core.transcribe', modelId: 'aws.transcribe-standard', externalModelId: 'standard', input: { audioBase64: 'AQID', mimeType: 'audio/mpeg' }, organizationKey: 'organization', timeoutMs: 2_000 });
+    const result = await provider.execute({ actionId: 'transcribe', modelId: 'aws.transcribe-standard', externalModelId: 'standard', input: { audioBase64: 'AQID', mimeType: 'audio/mpeg' }, organizationKey: 'organization', timeoutMs: 2_000 });
     expect(result.output).toEqual({ text: 'recognized text' });
     expect(commands).toEqual(['PutObjectCommand', 'DeleteObjectCommand']);
   });

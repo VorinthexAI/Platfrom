@@ -117,20 +117,20 @@ describe('local domain tool boundary', () => {
     await expect(runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, toolKey: f.tool.key, actionKey: newId(), principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: {} }, { runtimeData: f.runtimeData, accessData: f.accessData, events: async () => {} })).rejects.toThrow('not granted');
   });
 
-  test('uses core.reason on Mini to interpret, then executes the selected tool locally', async () => {
+  test('uses reason on Mini to interpret, then executes the selected tool locally', async () => {
     const f = fixture();
-    const reason = actionSchema.parse({ key: newId(), slug: 'core.reason', name: 'Reason', description: 'Interpret tool intent', objective: 'Choose a tool', inputDescription: 'Request', outputDescription: 'Tool call', handlerKey: 'core.reason' });
+    const reason = actionSchema.parse({ key: newId(), slug: 'reason', name: 'Reason', description: 'Interpret tool intent', objective: 'Choose a tool', inputDescription: 'Request', outputDescription: 'Tool call', handlerKey: 'reason' });
     const model = modelSchema.parse({ key: newId(), slug: 'openai.gpt-5.4-mini', name: 'Mini', description: 'Reasoning model', supportedUseCases: 'Tool selection' });
     const provider = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai' });
     const route = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: reason.key, priority: 100 });
     const providerRoute = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-mini' });
     const output = await interpretAndRunDomainTool({ organizationKey: f.organization.key, agentKey: f.agent.key, principal: { kind: 'member', userOrganizationKey: f.membership.key }, request: 'List scopes matching operations' }, {
       runtimeData: f.runtimeData, accessData: f.accessData, events: async () => {},
-      data: { async getActionBySlug(slug) { return slug === 'core.reason' ? reason : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey() { return model; }, async getProviderBySlug() { return provider; }, async getProviderByKey() { return provider; }, async listModelActions() { return [route]; }, async listModelProviders() { return [providerRoute]; }, async listOrganizationProviderKeys() { return [provider.key]; } },
+      data: { async getActionBySlug(slug) { return slug === 'reason' ? reason : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey() { return model; }, async getProviderBySlug() { return provider; }, async getProviderByKey() { return provider; }, async listModelActions() { return [route]; }, async listModelProviders() { return [providerRoute]; }, async listOrganizationProviderKeys() { return [provider.key]; } },
       adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>() { return { output: { text: '', stopReason: 'tool_calls', toolCalls: [{ id: 'call-1', name: 'scope__list', arguments: { query: 'operations' } }] } as TOutput, usage: tokenUsage(10, 4), providerId: 'openai' as const, modelId: model.slug, externalModelId: 'gpt-5.4-mini' }; } } },
       execute: async (action, input) => ({ action, status: 'completed', data: input }),
     });
-    expect(output.model).toMatchObject({ actionSlug: 'core.reason', modelSlug: 'openai.gpt-5.4-mini', providerSlug: 'openai' });
+    expect(output.model).toMatchObject({ actionSlug: 'reason', modelSlug: 'openai.gpt-5.4-mini', providerSlug: 'openai' });
     expect(output.output).toEqual({ action: 'scope.list', status: 'completed', data: { query: 'operations' } });
   });
 });
