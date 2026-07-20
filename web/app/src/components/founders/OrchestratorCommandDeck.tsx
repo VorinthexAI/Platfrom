@@ -67,7 +67,7 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
     };
   }, [gl]);
 
-  useFrame(({ clock }, delta) => {
+  useFrame((_, delta) => {
     if (!camera.current) return;
 
     if (!drag.current.active) {
@@ -76,9 +76,10 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
         desired.current.pitch = THREE.MathUtils.clamp(desired.current.pitch + velocity.current.pitch, -0.2, 0.19);
         velocity.current.yaw = THREE.MathUtils.damp(velocity.current.yaw, 0, 8, delta);
         velocity.current.pitch = THREE.MathUtils.damp(velocity.current.pitch, 0, 8, delta);
-      } else if (!reducedMotion && performance.now() - lastInteraction.current > 2600) {
-        desired.current.yaw = THREE.MathUtils.damp(desired.current.yaw, Math.sin(clock.elapsedTime * 0.16) * 0.13, 0.42, delta);
-        desired.current.pitch = THREE.MathUtils.damp(desired.current.pitch, Math.sin(clock.elapsedTime * 0.11) * 0.025, 0.42, delta);
+      } else if (performance.now() - lastInteraction.current > 700) {
+        const magnetStrength = reducedMotion ? 8 : 1.65;
+        desired.current.yaw = THREE.MathUtils.damp(desired.current.yaw, 0, magnetStrength, delta);
+        desired.current.pitch = THREE.MathUtils.damp(desired.current.pitch, 0, magnetStrength, delta);
       }
     }
 

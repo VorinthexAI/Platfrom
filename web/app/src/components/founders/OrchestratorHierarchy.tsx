@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { Billboard, Environment, Html, Lightformer, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "framer-motion";
@@ -71,9 +71,6 @@ const STATION_NODES: StationNode[] = [
 ];
 const NODE_BY_ID = new Map(STATION_NODES.map((node) => [node.entity.id, node]));
 const NODE_BY_SLUG = new Map(STATION_NODES.map((node) => [node.entity.slug, node]));
-const TAB_ORDER = [...STATION_NODES].sort(
-  (left, right) => left.layer - right.layer || (NODE_ANGLES[left.entity.slug] ?? 0) - (NODE_ANGLES[right.entity.slug] ?? 0),
-);
 
 function modulePosition(node: StationNode): [number, number, number] {
   if (node.layer === 0) return [0, LAYER_HEIGHTS[0], 0];
@@ -96,8 +93,6 @@ function activeBranch(selectedId: string) {
   }
   return active;
 }
-
-type NavigateOrchestrator = (entity: GalaxyEntity, direction: 1 | -1) => void;
 
 function useBrushedMetalTexture() {
   const texture = useMemo(() => {
@@ -125,12 +120,6 @@ function useBrushedMetalTexture() {
 
   useEffect(() => () => texture.dispose(), [texture]);
   return texture;
-}
-
-function handleTab(event: KeyboardEvent<HTMLButtonElement>, entity: GalaxyEntity, onNavigate: NavigateOrchestrator) {
-  if (event.key !== "Tab") return;
-  event.preventDefault();
-  onNavigate(entity, event.shiftKey ? -1 : 1);
 }
 
 function OrbitLayer({ layer, paused, children }: { layer: number; paused: boolean; children: ReactNode }) {
@@ -312,7 +301,7 @@ function DynamicEnergyConduit({ fromId, toId, nodeObjects, active, paused, rever
   );
 }
 
-function CommandModule({ entity, selected, active, muted, metalTexture, nodeObjects, onSelect, onEnter, onNavigate }: {
+function CommandModule({ entity, selected, active, muted, metalTexture, nodeObjects, onSelect, onEnter }: {
   entity: GalaxyEntity;
   selected: boolean;
   active: boolean;
@@ -321,7 +310,6 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
   nodeObjects: MutableRefObject<Map<string, THREE.Object3D>>;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
-  onNavigate: NavigateOrchestrator;
 }) {
   const animated = useRef<THREE.Group>(null);
   const halo = useRef<THREE.Mesh>(null);
@@ -437,11 +425,10 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
         <button
           id={`entity-control-${entity.id.replaceAll(".", "-")}`}
           type="button"
-          tabIndex={selected ? 0 : -1}
+          tabIndex={-1}
           aria-pressed={selected}
           aria-label={`Enter ${entity.name}, ${descriptor}`}
           onFocus={() => onSelect(entity)}
-          onKeyDown={(event) => handleTab(event, entity, onNavigate)}
           onClick={(event) => { event.stopPropagation(); onSelect(entity); onEnter(entity); }}
           className="flex min-w-[80px] flex-col items-center whitespace-nowrap rounded-md px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-[#ffc267] focus-visible:shadow-[0_0_20px_rgba(255,135,40,0.7)]"
           style={{ opacity }}
@@ -614,7 +601,7 @@ function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean
   return null;
 }
 
-function LivingStation({ selectedId, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onEnter, onNavigate }: {
+function LivingStation({ selectedId, paused, muted, delegation, organizations, organizationKey, onOrganizationSelect, onSelect, onEnter }: {
   selectedId: string;
   paused: boolean;
   muted: boolean;
@@ -624,7 +611,6 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
   onOrganizationSelect: (key: string) => void;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
-  onNavigate: NavigateOrchestrator;
 }) {
   const station = useRef<THREE.Group>(null);
   const gl = useThree((state) => state.gl);
@@ -674,7 +660,7 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
       current.x = event.clientX;
       current.y = event.clientY;
       yRotationTarget.current += deltaX * 0.006;
-      xRotationTarget.current = THREE.MathUtils.clamp(xRotationTarget.current + deltaY * 0.006, -1.2, 1.2);
+      xRotationTarget.current += deltaY * 0.006;
       angularVelocity.current.set(deltaY * 0.0018, deltaX * 0.0018);
       if (paused && station.current) {
         station.current.rotation.x = xRotationTarget.current;
@@ -703,7 +689,7 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
     if (!paused && station.current) {
       if (!drag.current) {
         yRotationTarget.current += angularVelocity.current.y * delta * 60;
-        xRotationTarget.current = THREE.MathUtils.clamp(xRotationTarget.current + angularVelocity.current.x * delta * 60, -1.2, 1.2);
+        xRotationTarget.current += angularVelocity.current.x * delta * 60;
         angularVelocity.current.x = THREE.MathUtils.damp(angularVelocity.current.x, 0, 2.1, delta);
         angularVelocity.current.y = THREE.MathUtils.damp(angularVelocity.current.y, 0, 2.1, delta);
       }
@@ -725,7 +711,7 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
               metalTexture={metalTexture}
             />
             {STATION_NODES.filter((node) => node.layer === layer).map(({ entity }) => (
-              <CommandModule key={entity.id} entity={entity} selected={entity.id === selectedId} active={branch.has(entity.id)} muted={muted} metalTexture={metalTexture} nodeObjects={nodeObjects} onSelect={onSelect} onEnter={onEnter} onNavigate={onNavigate} />
+              <CommandModule key={entity.id} entity={entity} selected={entity.id === selectedId} active={branch.has(entity.id)} muted={muted} metalTexture={metalTexture} nodeObjects={nodeObjects} onSelect={onSelect} onEnter={onEnter} />
             ))}
           </OrbitLayer>
         ))}
@@ -743,7 +729,6 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
             paused={paused}
             onSelect={() => onSelect(CORE)}
             onEnter={() => onEnter(CORE)}
-            onKeyDown={(event) => handleTab(event, CORE, onNavigate)}
           />
         </group>
         <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} metalTexture={metalTexture} />
@@ -790,13 +775,6 @@ interface OrchestratorHierarchyProps {
 export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps) {
   const paused = Boolean(useReducedMotion());
 
-  function navigate(entity: GalaxyEntity, direction: 1 | -1) {
-    const currentIndex = TAB_ORDER.findIndex((candidate) => candidate.entity.id === entity.id);
-    const next = TAB_ORDER[(currentIndex + direction + TAB_ORDER.length) % TAB_ORDER.length];
-    props.onSelect(next.entity);
-    window.requestAnimationFrame(() => document.getElementById(`entity-control-${next.entity.id.replaceAll(".", "-")}`)?.focus());
-  }
-
   return (
     <div className={`relative h-full min-h-[560px] w-full cursor-grab overflow-hidden transition-opacity duration-700 active:cursor-grabbing ${props.muted ? "pointer-events-none opacity-25" : "opacity-100"}`} aria-label="Nexus command station">
       <Canvas dpr={[1, 1.35]} shadows camera={{ position: [0, 14.2, 27.5], fov: 42, near: 0.1, far: 140 }} gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }} className="!absolute !inset-0">
@@ -809,14 +787,8 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
         <ambientLight intensity={0.22} color="#5d4637" />
         <directionalLight castShadow position={[7, 13, 9]} intensity={1.55} color="#f2f4f5" shadow-mapSize={[1024, 1024]} />
         <directionalLight position={[-9, 5, -7]} intensity={0.7} color="#9ea9b2" />
-        <LivingStation {...props} paused={paused} onNavigate={navigate} />
+        <LivingStation {...props} paused={paused} />
       </Canvas>
-      {!props.muted ? (
-        <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 text-center">
-          <p className="font-mono text-[0.48rem] tracking-[0.34em] text-[#9b6842] uppercase">Nexus Intelligence Civilization</p>
-          <p className="mt-1 font-mono text-[0.44rem] tracking-[0.16em] text-[#73533d] uppercase">Drag to rotate / Scroll to zoom / Tab to navigate / Click to enter</p>
-        </div>
-      ) : null}
     </div>
   );
 }

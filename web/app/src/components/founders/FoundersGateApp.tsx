@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CloseIcon, MenuIcon } from "@vorinthex/shared/ui/icons";
+import { CloseIcon } from "@vorinthex/shared/ui/icons";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import {
@@ -27,6 +27,7 @@ import { getEntityById } from "@/lib/galaxy/registry-helpers";
 import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { NexusTransit } from "./NexusTransit";
+import { NexusEntityArc } from "./NexusEntityArc";
 
 const OrchestratorHierarchy = dynamic(() => import("./OrchestratorHierarchy"), { ssr: false });
 const OrchestratorCommandDeck = dynamic(() => import("./OrchestratorCommandDeck"), { ssr: false });
@@ -181,7 +182,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
     resetBeacon();
     stopVoice();
     setEnteredEntityId(null);
-    setTransitDestination("Nexus command station");
   }, [cancelBeacon, resetBeacon, stopVoice]);
 
   const completeTransit = useCallback(() => setTransitDestination(null), []);
@@ -239,34 +239,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
 
       <div className="relative z-10 flex h-svh">
         <section className="relative flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-3 px-4 pt-4 sm:px-6">
-            {enteredEntity ? (
-              <button type="button" onClick={leaveEntity} aria-label="Return to Nexus command station" className="founders-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-silver-100">
-                <CloseIcon size="sm" />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              aria-label="Open organization and scope panel"
-              className="founders-surface flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-silver-100"
-            >
-              <MenuIcon size="sm" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(true)}
-              className="founders-surface min-w-0 flex-1 rounded-xl px-4 py-2 text-left"
-            >
-              <span className="block truncate text-xs text-silver-100">
-                {organizations.find((organization) => organization.key === organizationKey)?.name ?? ""}
-              </span>
-              <span className="block truncate font-mono text-[0.58rem] tracking-[0.18em] text-silver-500 uppercase">
-                {scopes.find((scope) => scope.key === scopeKey)?.name ?? ""}
-              </span>
-            </button>
-          </div>
-
           <div className="relative min-h-0 flex-1 overflow-hidden">
             <div className="absolute inset-0">
               {enteredEntity ? (
@@ -287,17 +259,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
               )}
             </div>
 
-            {enteredEntity ? (
-              <div className="pointer-events-none absolute inset-x-0 top-5 z-10 text-center">
-                <p className="font-mono text-[0.5rem] tracking-[0.35em] text-[#c3834c] uppercase">{enteredEntity.role ?? enteredEntity.label ?? enteredEntity.content?.eyebrow ?? enteredEntity.type} interior</p>
-                <h1 className="mt-1 text-xl tracking-[0.24em] text-silver-50 uppercase sm:text-2xl">{enteredEntity.name}</h1>
-              </div>
-            ) : (
-              <div className="pointer-events-none absolute inset-x-0 bottom-8 z-10 text-center">
-                <p className="font-mono text-[0.5rem] tracking-[0.28em] text-[#b27a4d] uppercase">{selectedEntity.name} selected</p>
-                <p className="mt-1 text-xs tracking-[0.16em] text-silver-400 uppercase">Click an entity to enter its station interior</p>
-              </div>
-            )}
+            {!enteredEntity ? <NexusEntityArc selectedEntityId={selectedEntity.id} onSelect={(entity) => setSelectedEntityId(entity.id)} onEnter={enterEntity} /> : null}
 
             {enteredEntity ? (
               <div className="scrollbar-hide pointer-events-none relative z-10 h-full overflow-y-auto px-4 sm:px-8">
@@ -336,6 +298,9 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                     <SpeakerIcon animated /> Meet {enteredEntity.name}
                   </button>
                 ) : null}
+                <button type="button" onClick={leaveEntity} className="founders-surface inline-flex items-center gap-2 rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                  <CloseIcon size="sm" /> Exit
+                </button>
               </div>
             </div>
           </div>
