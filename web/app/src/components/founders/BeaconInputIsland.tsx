@@ -9,6 +9,7 @@ export const BEACON_INPUT_LIMIT = 20_000;
 interface BeaconInputIslandProps {
   status: BeaconStatus;
   disabled: boolean;
+  assistantName?: string;
   onSubmit: (message: string) => void;
   onCancel: () => void;
 }
@@ -19,7 +20,7 @@ interface BeaconInputIslandProps {
  * The island is the only prominent surface on the canvas — a restrained
  * obsidian slab floating clear of the viewport edge.
  */
-export function BeaconInputIsland({ status, disabled, onSubmit, onCancel }: BeaconInputIslandProps) {
+export function BeaconInputIsland({ status, disabled, assistantName = "Beacon", onSubmit, onCancel }: BeaconInputIslandProps) {
   const [message, setMessage] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const busy = status === "connecting" || status === "streaming";
@@ -46,12 +47,12 @@ export function BeaconInputIsland({ status, disabled, onSubmit, onCancel }: Beac
     }
   }
 
-  const statusLine = status === "connecting" ? "Reaching Beacon…" : status === "streaming" ? "Beacon is responding…" : "";
+  const statusLine = status === "connecting" ? `Reaching ${assistantName}…` : status === "streaming" ? `${assistantName} is responding…` : "";
 
   return (
     <div className="founders-surface rounded-2xl p-3 transition-shadow focus-within:border-white/25 focus-within:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_24px_80px_rgba(0,0,0,0.38),0_0_44px_rgba(221,226,229,0.1)]">
       <label className="block">
-        <span className="sr-only">Ask Beacon</span>
+        <span className="sr-only">Ask {assistantName}</span>
         <textarea
           ref={textareaRef}
           value={message}
@@ -60,8 +61,8 @@ export function BeaconInputIsland({ status, disabled, onSubmit, onCancel }: Beac
           rows={1}
           maxLength={BEACON_INPUT_LIMIT}
           disabled={disabled}
-          placeholder="Ask Beacon..."
-          aria-label="Ask Beacon"
+          placeholder={`Ask ${assistantName}...`}
+          aria-label={`Ask ${assistantName}`}
           className="scrollbar-hide w-full resize-none bg-transparent px-2 py-1.5 text-[0.95rem] leading-relaxed text-silver-50 outline-none placeholder:text-silver-500 disabled:cursor-not-allowed"
         />
       </label>
@@ -88,7 +89,7 @@ export function BeaconInputIsland({ status, disabled, onSubmit, onCancel }: Beac
             type="button"
             onClick={submit}
             disabled={disabled || !message.trim()}
-            aria-label="Ask Beacon"
+            aria-label={`Ask ${assistantName}`}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/20 text-[#10141a] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ background: "var(--gradient-chrome)" }}
           >
