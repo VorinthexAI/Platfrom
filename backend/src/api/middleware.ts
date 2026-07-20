@@ -5,7 +5,7 @@ import { timingSafeEqual } from '@/lib/crypto';
 import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
 import { strictObject } from './validation';
-import { rotateRefreshToken, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
+import { refreshAccessToken, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
@@ -166,7 +166,7 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
   }
 };
 
-export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, rotateRefreshToken }): MiddlewareHandler {
+export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, refreshAccessToken }): MiddlewareHandler {
   return async (c, next) => {
     const bearerToken = getBearerToken(c);
     const accessToken = bearerToken?.startsWith('vrtx_access_')
@@ -186,7 +186,7 @@ export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, 
     const refreshToken = cookieRefreshToken ?? headerRefreshToken;
     if (!refreshToken) return next();
 
-    const tokens = await dependencies.rotateRefreshToken(refreshToken);
+    const tokens = await dependencies.refreshAccessToken(refreshToken);
     if (!tokens) return next();
 
     const refreshedIdentity = await dependencies.verifyAccessToken(tokens.accessToken);
