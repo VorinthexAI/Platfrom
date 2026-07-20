@@ -147,6 +147,8 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const beaconDisabled = !organizationKey || !scopeKey;
   const selectedOrchestrator = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedOrchestratorSlug]
     ?? VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas;
+  const hasBeaconOutput = Boolean(beacon.response || beacon.error || beacon.tools.length > 0);
+  const activeDelegation = beacon.tools.at(-1) ?? null;
 
   const submit = useCallback((message: string) => {
     if (!organizationKey || !scopeKey) return;
@@ -233,24 +235,38 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
             </button>
           </div>
 
-          {/* The response canvas: one document, no bubbles, no history. */}
-          <div className="scrollbar-hide flex-1 overflow-y-auto px-4 sm:px-8">
-            <div className={`mx-auto w-full ${beacon.response || beacon.error || beacon.tools.length > 0 ? "max-w-[820px] pt-10 pb-56 sm:pt-16" : "h-full min-h-[670px] max-w-[1280px] pt-2 pb-32 lg:pt-4"}`}>
-              {beacon.response || beacon.error || beacon.tools.length > 0 ? (
-                <article aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
-                  <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />
-                  {beacon.response ? <SafeMarkdown markdown={beacon.response} /> : null}
-                  {beacon.error ? <p className="text-base leading-relaxed text-silver-100">{beacon.error}</p> : null}
-                  {beacon.status === "streaming" || beacon.status === "connecting" ? (
-                    <span aria-hidden className="mt-1 ml-0.5 inline-block h-4 w-[2px] bg-silver-100 motion-safe:animate-pulse" />
-                  ) : null}
-                </article>
-              ) : (
+          {/* The station remains the workspace; conversation floats above it. */}
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <div className="absolute inset-0 px-4 sm:px-8">
+              <div className="mx-auto h-full min-h-[670px] max-w-[1320px] pt-2 pb-32 lg:pt-4">
                 <OrchestratorHierarchy
                   selectedSlug={selectedOrchestrator.slug}
                   onSelect={(orchestrator) => setSelectedOrchestratorSlug(orchestrator.slug)}
+                  organizations={organizations}
+                  organizationKey={organizationKey}
+                  onOrganizationSelect={changeOrganization}
+                  scopes={scopes}
+                  scopeKey={scopeKey}
+                  onScopeSelect={changeScope}
+                  delegation={activeDelegation}
+                  muted={hasBeaconOutput}
                 />
-              )}
+              </div>
+            </div>
+
+            <div className={`scrollbar-hide relative z-10 h-full overflow-y-auto px-4 sm:px-8 ${hasBeaconOutput ? "" : "pointer-events-none"}`}>
+              <div className="mx-auto w-full max-w-[820px] pt-10 pb-56 sm:pt-16">
+                {hasBeaconOutput ? (
+                  <article aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
+                    <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />
+                    {beacon.response ? <SafeMarkdown markdown={beacon.response} /> : null}
+                    {beacon.error ? <p className="text-base leading-relaxed text-silver-100">{beacon.error}</p> : null}
+                    {beacon.status === "streaming" || beacon.status === "connecting" ? (
+                      <span aria-hidden className="mt-1 ml-0.5 inline-block h-4 w-[2px] bg-silver-100 motion-safe:animate-pulse" />
+                    ) : null}
+                  </article>
+                ) : null}
+              </div>
             </div>
           </div>
 
