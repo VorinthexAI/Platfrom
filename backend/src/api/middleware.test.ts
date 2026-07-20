@@ -227,4 +227,18 @@ describe('backend session cookies', () => {
     expect(response.headers.get('x-refresh-token')).toBe(rotatedTokens.refreshToken);
     expect(response.headers.get('set-cookie')).toBeNull();
   });
+
+  test('leaves the refresh endpoint to perform its own single rotation', async () => {
+    const app = new Hono();
+    const rotateRefreshToken = async () => {
+      throw new Error('auto-refresh must not rotate this endpoint');
+    };
+    app.use('*', createAutoRefreshAuthTokens({ verifyAccessToken: async () => null, rotateRefreshToken }));
+    app.post('/auth/refresh', (c) => c.json({ ok: true }));
+
+    const response = await app.request('/auth/refresh', { method: 'POST' });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
 });

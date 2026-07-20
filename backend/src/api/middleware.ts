@@ -168,6 +168,10 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
 
 export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, rotateRefreshToken }): MiddlewareHandler {
   return async (c, next) => {
+    // The refresh endpoint owns the single explicit rotation. If this
+    // middleware rotates first, the endpoint would receive a spent token.
+    if (c.req.path.endsWith('/auth/refresh')) return next();
+
     const bearerToken = getBearerToken(c);
     const accessToken = bearerToken?.startsWith('vrtx_access_')
       ? bearerToken
