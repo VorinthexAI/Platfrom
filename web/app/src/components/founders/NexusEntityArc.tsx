@@ -60,10 +60,14 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
   const layer = ENTITY_LAYERS[layerIndex];
   const selectedIndex = Math.max(0, layer.entities.findIndex((entity) => entity.id === selectedEntityId));
   const outerLayer = ENTITY_LAYERS[(layerIndex + 1) % ENTITY_LAYERS.length];
-
-  useEffect(() => {
-    document.getElementById(`arc-card-${selectedEntityId.replaceAll(".", "-")}`)?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-  }, [selectedEntityId]);
+  const arcEntities = layer.entities
+    .map((entity, index) => {
+      const forward = (index - selectedIndex + layer.entities.length) % layer.entities.length;
+      const offset = forward > layer.entities.length / 2 ? forward - layer.entities.length : forward;
+      return { entity, offset };
+    })
+    .filter(({ offset }) => Math.abs(offset) <= 2)
+    .sort((left, right) => left.offset - right.offset);
 
   useEffect(() => {
     const handleTab = (event: globalThis.KeyboardEvent) => {
@@ -101,12 +105,12 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
     <section className="pointer-events-auto absolute inset-x-0 bottom-0 z-20 h-[270px] overflow-hidden" aria-label="Nexus entity navigator" onWheel={handleWheel}>
       <div aria-hidden className="absolute inset-x-[-8%] bottom-[-155px] h-[390px] rounded-[50%_50%_0_0/100%_100%_0_0] border-t border-[#b36c32]/30 bg-[linear-gradient(180deg,rgba(31,24,20,0.82),rgba(4,6,8,0.97)_48%)] shadow-[0_-28px_90px_rgba(0,0,0,0.6),inset_0_2px_0_rgba(255,255,255,0.05),inset_0_18px_50px_rgba(191,93,27,0.06)] backdrop-blur-xl" />
 
-      <div aria-hidden className="pointer-events-none absolute inset-x-24 top-10 flex justify-center gap-4 opacity-20">
-        {outerLayer.entities.slice(0, 8).map((entity, index, entities) => (
+      <div aria-hidden className="pointer-events-none absolute inset-x-24 top-16 flex justify-center gap-4 opacity-20">
+        {outerLayer.entities.slice(0, 5).map((entity, index, entities) => (
           <div
             key={entity.id}
             className="flex h-10 w-24 items-center gap-2 rounded-lg border border-white/10 bg-black/50 px-2 transition-transform duration-500"
-            style={{ transform: downwardArcTransform(index, (entities.length - 1) / 2, 28, Math.max(1, (entities.length - 1) / 2), 5) }}
+            style={{ transform: downwardArcTransform(index, (entities.length - 1) / 2, 40, 3, 7) }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={entityLogoUrl(entity.type, entity.slug)} alt="" className="h-5 w-5 rounded-full opacity-70" />
@@ -122,17 +126,21 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
       </div>
 
       <div
-        className="scrollbar-hide absolute inset-x-16 top-20 bottom-0 flex items-start gap-3 overflow-x-auto overflow-y-hidden px-[42vw] pb-2 sm:inset-x-24 sm:gap-4"
+        className="absolute inset-x-16 top-20 bottom-0 overflow-hidden pb-2 sm:inset-x-24"
       >
-        {layer.entities.map((entity, index) => {
-          const distance = Math.abs(index - selectedIndex);
+        {arcEntities.map(({ entity, offset }) => {
+          const distance = Math.abs(offset);
           const selected = entity.id === selectedEntityId;
           const scale = selected ? 1 : Math.max(0.9, 0.98 - distance * 0.025);
           return (
-            <article
+            <div
               key={entity.id}
-              className={`relative mt-2 w-[190px] shrink-0 rounded-2xl border p-3 backdrop-blur-md transition-[transform,opacity,border-color,background-color] duration-500 ${selected ? "border-[#d8904d]/55 bg-[#18130f]/90 opacity-100 shadow-[0_18px_50px_rgba(0,0,0,0.5),0_0_35px_rgba(209,111,37,0.12)]" : "border-white/10 bg-[#080b0d]/78 opacity-72"}`}
-              style={{ transform: downwardArcTransform(index, selectedIndex, 44, 4, 7, scale) }}
+              className="absolute top-2 left-1/2 w-[190px] transition-transform duration-500"
+              style={{ transform: `translateX(calc(-50% + ${offset * 206}px))` }}
+            >
+            <article
+              className={`relative rounded-2xl border p-3 backdrop-blur-md transition-[transform,opacity,border-color,background-color] duration-500 ${selected ? "border-[#d8904d]/55 bg-[#18130f]/90 opacity-100 shadow-[0_18px_50px_rgba(0,0,0,0.5),0_0_35px_rgba(209,111,37,0.12)]" : "border-white/10 bg-[#080b0d]/78 opacity-72"}`}
+              style={{ transform: downwardArcTransform(offset, 0, 120, 4, 12, scale) }}
             >
               <button
                 id={`arc-card-${entity.id.replaceAll(".", "-")}`}
@@ -158,11 +166,14 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
                 {entity.type === "orchestrator" ? <button type="button" onClick={() => playVoice(orchestratorMessageUrl(entity.slug))} className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-1 font-mono text-[0.44rem] tracking-[0.1em] text-silver-300 uppercase hover:border-white/25 hover:text-white"><SpeakerIcon animated width={11} height={11} /> Meet</button> : null}
               </div>
             </article>
+            </div>
           );
         })}
       </div>
-      <button type="button" onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface absolute top-1/2 left-24 z-30 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-silver-300 hover:text-white sm:left-40"><ChevronLeftIcon size="sm" /></button>
-      <button type="button" onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface absolute top-1/2 right-24 z-30 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-silver-300 hover:text-white sm:right-40"><ChevronRightIcon size="sm" /></button>
+      <div className="absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2">
+        <button type="button" onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronLeftIcon size="sm" /></button>
+        <button type="button" onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronRightIcon size="sm" /></button>
+      </div>
     </section>
   );
 }
