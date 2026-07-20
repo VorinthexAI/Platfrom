@@ -24,7 +24,7 @@ export function createAwsTranscribeProvider(config: AwsTranscribeProviderConfig)
     id: PROVIDER_ID,
     name: 'AWS Transcribe',
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-      if (request.actionId !== 'core.transcribe') throw unsupportedAction(PROVIDER_ID, request.actionId);
+    if (request.actionId !== 'transcribe') throw unsupportedAction(PROVIDER_ID, request.actionId);
       const signal = resolveRequestSignal(request);
       const objectKey = `transcribe/${request.organizationKey}/${newId()}`;
       try {

@@ -85,12 +85,12 @@ export async function executeAction<TInput, TOutput>(request: RouteRequestInput,
   return executeRoute<TInput, TOutput>({ decision, input, adapters: options.adapters, credentials: options.credentials, timeoutMs: options.timeoutMs, signal: options.signal });
 }
 
-/** Executes standalone core.chat through the caller-selected organization provider. */
+/** Executes standalone chat through the caller-selected organization provider. */
 export async function executeCoreChat<TOutput>(organizationKey: string, input: CoreChatInput, options: ExecuteActionOptions = {}) {
   return executeAction<CoreChatInput, TOutput>({
     mode: 'auto',
     organizationKey,
-    actionSlug: 'core.chat',
+    actionSlug: 'chat',
     organizationProviderKey: input.organizationProviderKey,
   }, input, options);
 }

@@ -71,7 +71,7 @@ export function createAwsBedrockProvider(config: AwsBedrockProviderConfig): Prov
     name: 'AWS Bedrock',
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
       try {
-        if (request.actionId === 'core.embedd') {
+        if (request.actionId === 'embed') {
           const input = embeddingInputSchema.parse(request.input);
           const result = await embed(parsed, { externalModelId: request.externalModelId, input: input.text, timeoutMs: request.timeoutMs, signal: request.signal });
           const output: EmbeddingOutput = { embedding: result.embeddings[0]! };

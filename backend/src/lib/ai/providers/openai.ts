@@ -188,9 +188,9 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }
       try {
-        if (request.actionId === 'image.generate') return await executeImageGenerate(client, request);
-        if (request.actionId === 'audio.transcribe') return await executeTranscribe(client, request);
-        if (request.actionId === 'audio.generate-speech') return await executeSpeech(client, request);
+        if (request.actionId === 'generate-image') return await executeImageGenerate(client, request);
+        if (request.actionId === 'transcribe') return await executeTranscribe(client, request);
+        if (request.actionId === 'generate-speech') return await executeSpeech(client, request);
       } catch (err) {
         throw normalizeProviderError(PROVIDER_ID, err);
       }

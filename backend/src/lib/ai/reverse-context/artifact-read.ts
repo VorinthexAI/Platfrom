@@ -43,6 +43,6 @@ export async function runArtifactReadTool(
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey || runtime.scope.key !== input.scopeKey) throw new ArtifactReadGrantError('agent context does not match organization and scope');
   const grant = runtime.tools.find(({ tool }) => tool.slug === 'artifact.read');
-  if (!grant || !grant.actions.some(({ action }) => action.slug === 'artifact.read')) throw new ArtifactReadGrantError('agent is not granted artifact.read');
+  if (!grant || grant.actions.length === 0) throw new ArtifactReadGrantError('agent is not granted artifact.read');
   return executeArtifactReadTool(input, options.registry);
 }

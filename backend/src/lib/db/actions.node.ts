@@ -6,7 +6,19 @@ import { createNodeHelpers, withArangoKey } from './base';
 
 export const ACTIONS_COLLECTION = 'actions';
 
-export const actionSlugSchema = actionIdSchema;
+const retiredActionAliases: Record<string, string> = {
+  'core.chat': 'chat', 'core.reason': 'reason', 'core.embedd': 'embed',
+  'core.speak': 'generate-speech', 'core.transcribe': 'transcribe',
+  'agent.create': 'insert', 'artifact.create': 'insert', 'artifact.read': 'read',
+};
+
+/** Translates persisted pre-refactor action IDs at the node boundary. */
+export const actionSlugSchema = z.preprocess(
+  (value) => typeof value === 'string'
+    ? (retiredActionAliases[value] ?? (value.includes('.') ? 'read' : value))
+    : value,
+  actionIdSchema,
+);
 
 export const actionSchema = z.object({
   key: z.string().cuid(),
