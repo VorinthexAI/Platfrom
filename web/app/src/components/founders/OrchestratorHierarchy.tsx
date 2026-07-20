@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type ReactNode } from "react";
 import { Billboard, Environment, Html, Lightformer, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "framer-motion";
@@ -19,6 +19,16 @@ const CAPABILITIES = (CORE.children ?? [])
   .filter((entity): entity is GalaxyEntity => Boolean(entity));
 const LAYER_RADII = [0, 2.7, 4.35, 5.75, 7.2, 8.75, 10.4, 12.1];
 const LAYER_HEIGHTS = [0.46, 0.32, 0.17, 0.02, -0.14, -0.3, -0.46, -0.62];
+const ORBIT_TILTS: Array<[number, number, number]> = [
+  [0, 0, 0],
+  [0.12, 0.08, 0.18],
+  [-0.2, 0.16, -0.24],
+  [0.28, -0.14, 0.36],
+  [-0.32, 0.2, 0.22],
+  [0.4, -0.18, -0.3],
+  [-0.26, 0.3, 0.44],
+];
+const ORBIT_SPEEDS = [0, 0.032, -0.027, 0.023, -0.019, 0.016, -0.014];
 const NODE_ANGLES: Record<string, number> = {
   core: 90,
   archive: -90, gallery: -18, signal: 54, compass: 126, ascend: 198,
@@ -123,23 +133,32 @@ function handleTab(event: KeyboardEvent<HTMLButtonElement>, entity: GalaxyEntity
   onNavigate(entity, event.shiftKey ? -1 : 1);
 }
 
-function EngineeredRing({ radius, layer, paused, active, metalTexture }: { radius: number; layer: number; paused: boolean; active: boolean; metalTexture: THREE.Texture }) {
-  const rotation = useRef<THREE.Group>(null);
+function OrbitLayer({ layer, paused, children }: { layer: number; paused: boolean; children: ReactNode }) {
+  const orbit = useRef<THREE.Group>(null);
+  const xAxis = layer % 2 === 0;
+
+  useFrame((_, delta) => {
+    if (paused || !orbit.current) return;
+    if (xAxis) orbit.current.rotation.x += delta * ORBIT_SPEEDS[layer];
+    else orbit.current.rotation.y += delta * ORBIT_SPEEDS[layer];
+  });
+
+  return (
+    <group rotation={ORBIT_TILTS[layer]}>
+      <group ref={orbit}>{children}</group>
+    </group>
+  );
+}
+
+function EngineeredRing({ radius, layer, active, metalTexture }: { radius: number; layer: number; active: boolean; metalTexture: THREE.Texture }) {
   const segments = 26 + layer * 8;
   const segmentLength = (Math.PI * 2 * radius / segments) * 0.76;
   const height = LAYER_HEIGHTS[layer];
   const xAxis = layer % 2 === 0;
   const ringRotation: [number, number, number] = xAxis ? [0, Math.PI / 2, 0] : [Math.PI / 2, 0, 0];
 
-  useFrame((_, delta) => {
-    if (!paused && rotation.current) {
-      if (xAxis) rotation.current.rotation.x -= delta * 0.007;
-      else rotation.current.rotation.y += delta * 0.005;
-    }
-  });
-
   return (
-    <group ref={rotation} position={xAxis ? [height, 0, 0] : [0, height, 0]}>
+    <group position={xAxis ? [height, 0, 0] : [0, height, 0]}>
       {[-0.2, 0, 0.2].map((offset, index) => (
         <mesh key={offset} position={xAxis ? [offset, 0, 0] : [0, offset, 0]} rotation={ringRotation} castShadow receiveShadow>
           <torusGeometry args={[radius + (index - 1) * 0.1, index === 1 ? 0.13 : 0.055, 8, 192]} />
@@ -209,38 +228,83 @@ function EngineeredRing({ radius, layer, paused, active, metalTexture }: { radiu
   );
 }
 
-function EnergyConduit({ from, to, active, paused, reverse = false }: {
-  from: [number, number, number];
-  to: [number, number, number];
+function DynamicEnergyConduit({ fromId, toId, nodeObjects, active, paused, reverse = false }: {
+  fromId: string;
+  toId: string;
+  nodeObjects: MutableRefObject<Map<string, THREE.Object3D>>;
   active: boolean;
   paused: boolean;
   reverse?: boolean;
 }) {
+  const segments = 24;
+  const lineObject = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array((segments + 1) * 3), 3));
+    const material = new THREE.LineBasicMaterial({
+      color: active ? "#ff9d35" : "#6f3818",
+      transparent: true,
+      opacity: active ? 0.78 : 0.28,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const line = new THREE.Line(geometry, material);
+    line.frustumCulled = false;
+    return line;
+  }, [active]);
+  const attribute = useRef<THREE.BufferAttribute | null>(null);
   const pulse = useRef<THREE.Mesh>(null);
-  const curve = useMemo(() => {
-    const start = new THREE.Vector3(...from);
-    const end = new THREE.Vector3(...to);
-    const middle = start.clone().lerp(end, 0.5);
-    middle.y += 0.28 + start.distanceTo(end) * 0.04;
-    return new THREE.CatmullRomCurve3([start, middle, end]);
-  }, [from, to]);
-  const geometry = useMemo(() => new THREE.TubeGeometry(curve, 32, active ? 0.026 : 0.012, 6, false), [active, curve]);
+  const start = useRef(new THREE.Vector3());
+  const end = useRef(new THREE.Vector3());
+  const control = useRef(new THREE.Vector3());
 
-  useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(() => {
+    attribute.current = lineObject.geometry.getAttribute("position") as THREE.BufferAttribute;
+    return () => {
+      attribute.current = null;
+      lineObject.geometry.dispose();
+      lineObject.material.dispose();
+    };
+  }, [lineObject]);
+
   useFrame(({ clock }) => {
-    if (!active || paused || !pulse.current) return;
-    const progress = (clock.elapsedTime * 0.34) % 1;
-    pulse.current.position.copy(curve.getPointAt(reverse ? 1 - progress : progress));
+    const from = nodeObjects.current.get(fromId);
+    const to = nodeObjects.current.get(toId);
+    const positionAttribute = attribute.current;
+    if (!from || !to || !positionAttribute) return;
+    const positions = positionAttribute.array as Float32Array;
+    from.getWorldPosition(start.current);
+    to.getWorldPosition(end.current);
+    control.current.copy(start.current).lerp(end.current, 0.5);
+    control.current.y += 0.25 + start.current.distanceTo(end.current) * 0.035;
+
+    for (let index = 0; index <= segments; index += 1) {
+      const progress = index / segments;
+      const inverse = 1 - progress;
+      const offset = index * 3;
+      positions[offset] = inverse * inverse * start.current.x + 2 * inverse * progress * control.current.x + progress * progress * end.current.x;
+      positions[offset + 1] = inverse * inverse * start.current.y + 2 * inverse * progress * control.current.y + progress * progress * end.current.y;
+      positions[offset + 2] = inverse * inverse * start.current.z + 2 * inverse * progress * control.current.z + progress * progress * end.current.z;
+    }
+    positionAttribute.needsUpdate = true;
+
+    if (active && !paused && pulse.current) {
+      const rawProgress = (clock.elapsedTime * 0.34) % 1;
+      const progress = reverse ? 1 - rawProgress : rawProgress;
+      const inverse = 1 - progress;
+      pulse.current.position.set(
+        inverse * inverse * start.current.x + 2 * inverse * progress * control.current.x + progress * progress * end.current.x,
+        inverse * inverse * start.current.y + 2 * inverse * progress * control.current.y + progress * progress * end.current.y,
+        inverse * inverse * start.current.z + 2 * inverse * progress * control.current.z + progress * progress * end.current.z,
+      );
+    }
   });
 
   return (
     <group>
-      <mesh geometry={geometry}>
-        <meshBasicMaterial color={active ? "#ff9d35" : "#52260d"} transparent opacity={active ? 0.76 : 0.2} blending={THREE.AdditiveBlending} />
-      </mesh>
+      <primitive object={lineObject} />
       {active ? (
         <mesh ref={pulse}>
-          <sphereGeometry args={[0.075, 12, 12]} />
+          <sphereGeometry args={[0.07, 10, 10]} />
           <meshBasicMaterial color="#fff1d0" toneMapped={false} blending={THREE.AdditiveBlending} />
         </mesh>
       ) : null}
@@ -248,12 +312,13 @@ function EnergyConduit({ from, to, active, paused, reverse = false }: {
   );
 }
 
-function CommandModule({ entity, selected, active, muted, metalTexture, onSelect, onEnter, onNavigate }: {
+function CommandModule({ entity, selected, active, muted, metalTexture, nodeObjects, onSelect, onEnter, onNavigate }: {
   entity: GalaxyEntity;
   selected: boolean;
   active: boolean;
   muted: boolean;
   metalTexture: THREE.Texture;
+  nodeObjects: MutableRefObject<Map<string, THREE.Object3D>>;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
   onNavigate: NavigateOrchestrator;
@@ -264,24 +329,32 @@ function CommandModule({ entity, selected, active, muted, metalTexture, onSelect
   const texture = useTexture(entityLogoUrl(entity.type, entity.slug));
   const node = NODE_BY_ID.get(entity.id)!;
   const scale = entity.slug === "atlas" ? 1.15 : entity.type === "product" ? 0.98 : entity.type === "capability" ? 0.76 : node.layer === 4 ? 0.9 : node.layer === 5 ? 0.76 : 0.68;
-  const opacity = muted ? 0.24 : active ? 1 : 0.62;
+  const opacity = muted ? 0.28 : active ? 1 : 0.72;
   const descriptor = entity.role ?? entity.label ?? entity.content?.eyebrow ?? entity.tagline ?? entity.type;
+  const spinDirection = [...entity.slug].reduce((total, character) => total + character.charCodeAt(0), 0) % 2 === 0 ? 1 : -1;
 
   useFrame(({ clock }, delta) => {
     if (animated.current) {
       const target = selected ? 1.18 : hovered ? 1.08 : 1;
       animated.current.scale.setScalar(THREE.MathUtils.damp(animated.current.scale.x, target, 5, delta));
-      animated.current.rotation.y += delta * (active ? 0.16 : 0.04);
+      animated.current.rotation.y += delta * spinDirection * (active ? 0.18 : 0.075);
     }
     if (halo.current) halo.current.rotation.z = clock.elapsedTime * 0.3;
   });
 
   return (
-    <group position={modulePosition(node)} scale={scale}>
+    <group
+      ref={(object) => {
+        if (object) nodeObjects.current.set(entity.id, object);
+        else nodeObjects.current.delete(entity.id);
+      }}
+      position={modulePosition(node)}
+      scale={scale}
+    >
       <group ref={animated}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[0.5, 0.6, 0.34, 32]} />
-          <meshPhysicalMaterial color={active ? "#111518" : "#20262a"} emissive={active ? "#21140b" : "#000000"} emissiveIntensity={active ? 0.52 : 0} metalness={0.98} roughness={0.17} roughnessMap={metalTexture} clearcoat={0.65} clearcoatRoughness={0.18} envMapIntensity={1.8} transparent opacity={opacity} />
+          <meshPhysicalMaterial color={active ? "#111518" : "#2a3136"} emissive={active ? "#21140b" : "#050708"} emissiveIntensity={active ? 0.52 : 0.16} metalness={0.98} roughness={0.17} roughnessMap={metalTexture} clearcoat={0.65} clearcoatRoughness={0.18} envMapIntensity={2} transparent opacity={opacity} />
         </mesh>
         <mesh position={[0, -0.18, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[0.48, 0.045, 8, 64]} />
@@ -341,7 +414,7 @@ function CommandModule({ entity, selected, active, muted, metalTexture, onSelect
         </mesh>
         <mesh>
           <planeGeometry args={[0.58, 0.58]} />
-          <meshBasicMaterial map={texture} color={selected ? "#ffffff" : active ? "#d7c3a6" : "#b7bdc1"} transparent alphaTest={0.02} opacity={opacity} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial map={texture} color={selected ? "#ffffff" : active ? "#d7c3a6" : "#d3d9dd"} transparent alphaTest={0.02} opacity={opacity} depthWrite={false} toneMapped={false} />
         </mesh>
         {selected ? (
           <mesh ref={halo} position={[0, 0, -0.03]}>
@@ -506,6 +579,7 @@ function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolea
 function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean }) {
   const camera = useThree((state) => state.camera);
   const pointer = useThree((state) => state.pointer);
+  const gl = useThree((state) => state.gl);
   const cameraRef = useRef(camera);
   const distance = useRef(27.5);
   const lookTarget = useRef(new THREE.Vector3(0, LAYER_HEIGHTS[0], 0));
@@ -514,6 +588,16 @@ function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean
   useEffect(() => {
     distance.current = selectedNode.layer === 0 ? 26 : 27.5 - selectedNode.layer * 0.18;
   }, [selectedNode.layer]);
+
+  useEffect(() => {
+    const element = gl.domElement;
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      distance.current = THREE.MathUtils.clamp(distance.current + event.deltaY * 0.009, 17, 38);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [gl]);
 
   useFrame(({ clock }, delta) => {
     const current = cameraRef.current;
@@ -527,27 +611,6 @@ function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean
     lookTarget.current.z = THREE.MathUtils.damp(lookTarget.current.z, selectedNode.layer === 0 ? 0 : 1.1, 2, delta);
     current.lookAt(lookTarget.current);
   });
-  return null;
-}
-
-function WheelNavigation({ selectedId, onNavigate }: { selectedId: string; onNavigate: NavigateOrchestrator }) {
-  const gl = useThree((state) => state.gl);
-  const lastNavigation = useRef(0);
-
-  useEffect(() => {
-    const element = gl.domElement;
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const now = performance.now();
-      if (Math.abs(event.deltaY) < 4 || now - lastNavigation.current < 220) return;
-      lastNavigation.current = now;
-      const entity = NODE_BY_ID.get(selectedId)?.entity ?? CORE;
-      onNavigate(entity, event.deltaY > 0 ? 1 : -1);
-    };
-    element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
-  }, [gl, onNavigate, selectedId]);
-
   return null;
 }
 
@@ -569,10 +632,10 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
   const yRotationTarget = useRef(0);
   const drag = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const angularVelocity = useRef(new THREE.Vector2());
+  const nodeObjects = useRef(new Map<string, THREE.Object3D>());
   const metalTexture = useBrushedMetalTexture();
   const branch = useMemo(() => activeBranch(selectedId), [selectedId]);
   const delegatedSlug = delegation?.agent.slug.split(".").at(-1) ?? null;
-  const selectedNode = NODE_BY_ID.get(selectedId) ?? NODE_BY_ID.get(CORE.id)!;
   const delegatedNode = delegatedSlug ? NODE_BY_SLUG.get(delegatedSlug) : null;
 
   useEffect(() => {
@@ -654,34 +717,26 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
       <EnvironmentActivity paused={paused} muted={muted} />
       <group ref={station}>
         {[1, 2, 3, 4, 5, 6].map((layer) => (
-          <EngineeredRing
-            key={layer}
-            radius={LAYER_RADII[layer]}
-            layer={layer}
-            paused={paused}
-            active={!muted && [...branch].some((id) => NODE_BY_ID.get(id)?.layer === layer)}
-            metalTexture={metalTexture}
-          />
+          <OrbitLayer key={layer} layer={layer} paused={paused}>
+            <EngineeredRing
+              radius={LAYER_RADII[layer]}
+              layer={layer}
+              active={!muted && [...branch].some((id) => NODE_BY_ID.get(id)?.layer === layer)}
+              metalTexture={metalTexture}
+            />
+            {STATION_NODES.filter((node) => node.layer === layer).map(({ entity }) => (
+              <CommandModule key={entity.id} entity={entity} selected={entity.id === selectedId} active={branch.has(entity.id)} muted={muted} metalTexture={metalTexture} nodeObjects={nodeObjects} onSelect={onSelect} onEnter={onEnter} onNavigate={onNavigate} />
+            ))}
+          </OrbitLayer>
         ))}
 
-        {STATION_NODES.map((node) => {
-          if (!node.parentId) return null;
-          const parent = NODE_BY_ID.get(node.parentId);
-          if (!parent) return null;
-          return <EnergyConduit key={`${parent.entity.id}:${node.entity.id}`} from={modulePosition(parent)} to={modulePosition(node)} active={branch.has(parent.entity.id) && branch.has(node.entity.id) && !muted} paused={paused} />;
-        })}
-
-        {delegatedNode && delegatedNode.entity.id !== selectedId ? (
-          <EnergyConduit
-            from={modulePosition(selectedNode)}
-            to={modulePosition(delegatedNode)}
-            active
-            paused={paused}
-            reverse={delegation?.phase === "completed"}
-          />
-        ) : null}
-
-        <group position={[0, LAYER_HEIGHTS[0], 0]}>
+        <group
+          ref={(object) => {
+            if (object) nodeObjects.current.set(CORE.id, object);
+            else nodeObjects.current.delete(CORE.id);
+          }}
+          position={[0, LAYER_HEIGHTS[0], 0]}
+        >
           <NexusBrainCore
             selected={selectedId === CORE.id}
             active={branch.has(CORE.id)}
@@ -691,11 +746,32 @@ function LivingStation({ selectedId, paused, muted, delegation, organizations, o
             onKeyDown={(event) => handleTab(event, CORE, onNavigate)}
           />
         </group>
-        {STATION_NODES.filter((node) => node.entity.id !== CORE.id).map(({ entity }) => (
-          <CommandModule key={entity.id} entity={entity} selected={entity.id === selectedId} active={branch.has(entity.id)} muted={muted} metalTexture={metalTexture} onSelect={onSelect} onEnter={onEnter} onNavigate={onNavigate} />
-        ))}
         <CivilizationPerimeter organizations={organizations} organizationKey={organizationKey} onOrganizationSelect={onOrganizationSelect} muted={muted} metalTexture={metalTexture} />
       </group>
+
+      {STATION_NODES.map((node) => {
+        if (!node.parentId || !NODE_BY_ID.has(node.parentId)) return null;
+        return (
+          <DynamicEnergyConduit
+            key={`${node.parentId}:${node.entity.id}`}
+            fromId={node.parentId}
+            toId={node.entity.id}
+            nodeObjects={nodeObjects}
+            active={branch.has(node.parentId) && branch.has(node.entity.id) && !muted}
+            paused={paused}
+          />
+        );
+      })}
+      {delegatedNode && delegatedNode.entity.id !== selectedId ? (
+        <DynamicEnergyConduit
+          fromId={selectedId}
+          toId={delegatedNode.entity.id}
+          nodeObjects={nodeObjects}
+          active
+          paused={paused}
+          reverse={delegation?.phase === "completed"}
+        />
+      ) : null}
     </group>
   );
 }
@@ -725,7 +801,6 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
     <div className={`relative h-full min-h-[560px] w-full cursor-grab overflow-hidden transition-opacity duration-700 active:cursor-grabbing ${props.muted ? "pointer-events-none opacity-25" : "opacity-100"}`} aria-label="Nexus command station">
       <Canvas dpr={[1, 1.35]} shadows camera={{ position: [0, 14.2, 27.5], fov: 42, near: 0.1, far: 140 }} gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }} className="!absolute !inset-0">
         <CameraRig selectedId={props.selectedId} paused={paused} />
-        <WheelNavigation selectedId={props.selectedId} onNavigate={navigate} />
         <Environment resolution={128}>
           <Lightformer form="rect" color="#fff7eb" intensity={3.4} scale={[14, 2, 1]} position={[0, 9, 4]} rotation={[-0.55, 0, 0]} />
           <Lightformer form="rect" color="#91a8bd" intensity={2.2} scale={[5, 10, 1]} position={[-10, 2, 2]} rotation={[0, Math.PI / 2, 0]} />
@@ -739,7 +814,7 @@ export default function OrchestratorHierarchy(props: OrchestratorHierarchyProps)
       {!props.muted ? (
         <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 text-center">
           <p className="font-mono text-[0.48rem] tracking-[0.34em] text-[#9b6842] uppercase">Nexus Intelligence Civilization</p>
-          <p className="mt-1 font-mono text-[0.44rem] tracking-[0.16em] text-[#73533d] uppercase">Drag to rotate / Scroll or Tab to navigate / Click to enter</p>
+          <p className="mt-1 font-mono text-[0.44rem] tracking-[0.16em] text-[#73533d] uppercase">Drag to rotate / Scroll to zoom / Tab to navigate / Click to enter</p>
         </div>
       ) : null}
     </div>
