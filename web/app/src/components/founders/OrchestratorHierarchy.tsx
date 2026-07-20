@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Billboard, Html, Line, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "framer-motion";
@@ -18,6 +18,21 @@ const NODE_ANGLES: Record<string, number> = {
   echo: -105, matrix: -75, harmony: -150, iris: -30, forge: 15, helios: 45, mercury: 90, themis: 150,
   orbit: -42, apollo: -18, aura: 5, pillar: 24, vulcan: 45,
 };
+
+const TAB_ORDER = [
+  ATLAS,
+  ...ORCHESTRATORS
+    .filter((entity) => entity.slug !== "atlas")
+    .sort((left, right) => depthFor(left) - depthFor(right) || (NODE_ANGLES[left.slug] ?? 0) - (NODE_ANGLES[right.slug] ?? 0)),
+];
+
+type NavigateOrchestrator = (entity: GalaxyEntity, direction: 1 | -1) => void;
+
+function handleTab(event: KeyboardEvent<HTMLButtonElement>, entity: GalaxyEntity, onNavigate: NavigateOrchestrator) {
+  if (event.key !== "Tab") return;
+  event.preventDefault();
+  onNavigate(entity, event.shiftKey ? -1 : 1);
+}
 
 function depthFor(entity: GalaxyEntity) {
   let depth = 0;
@@ -113,7 +128,7 @@ function StationSpokes() {
   );
 }
 
-function DockingPod({ entity, selected, onSelect }: { entity: GalaxyEntity; selected: boolean; onSelect: (entity: GalaxyEntity) => void }) {
+function DockingPod({ entity, selected, onSelect, onNavigate }: { entity: GalaxyEntity; selected: boolean; onSelect: (entity: GalaxyEntity) => void; onNavigate: NavigateOrchestrator }) {
   const pulse = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
   const texture = useTexture(entity.logo.src);
@@ -160,7 +175,17 @@ function DockingPod({ entity, selected, onSelect }: { entity: GalaxyEntity; sele
         </mesh>
       </group>
       <Html center position={[0, -0.67, 0.5]} distanceFactor={10.5} zIndexRange={[20, 0]}>
-        <button type="button" aria-pressed={selected} aria-label={`Chat with ${entity.name}, ${entity.role}`} onClick={(event) => { event.stopPropagation(); onSelect(entity); }} className="flex min-w-[78px] flex-col items-center whitespace-nowrap outline-none">
+        <button
+          id={`orchestrator-control-${entity.slug}`}
+          type="button"
+          tabIndex={selected ? 0 : -1}
+          aria-pressed={selected}
+          aria-label={`Chat with ${entity.name}, ${entity.role}`}
+          onFocus={() => onSelect(entity)}
+          onKeyDown={(event) => handleTab(event, entity, onNavigate)}
+          onClick={(event) => { event.stopPropagation(); onSelect(entity); }}
+          className="flex min-w-[78px] flex-col items-center whitespace-nowrap rounded-md px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-[#ffad43] focus-visible:shadow-[0_0_18px_rgba(255,126,24,0.72)]"
+        >
           <span className={`font-mono text-[0.55rem] tracking-[0.22em] ${selected ? "text-[#ffd79c]" : "text-[#bd8149]"}`}>{entity.role}</span>
           <span className={`mt-0.5 text-[0.61rem] font-medium tracking-[0.14em] uppercase ${selected ? "text-white" : "text-[#e7c6a3]"}`}>{entity.name}</span>
         </button>
@@ -170,7 +195,7 @@ function DockingPod({ entity, selected, onSelect }: { entity: GalaxyEntity; sele
   );
 }
 
-function ReactorCore({ selected, paused, onSelect }: { selected: boolean; paused: boolean; onSelect: (entity: GalaxyEntity) => void }) {
+function ReactorCore({ selected, paused, onSelect, onNavigate }: { selected: boolean; paused: boolean; onSelect: (entity: GalaxyEntity) => void; onNavigate: NavigateOrchestrator }) {
   const material = useRef<THREE.ShaderMaterial>(null);
   const cageA = useRef<THREE.Mesh>(null);
   const cageB = useRef<THREE.Mesh>(null);
@@ -207,7 +232,17 @@ function ReactorCore({ selected, paused, onSelect }: { selected: boolean; paused
         </mesh>
       </Billboard>
       <Html center position={[0, -1.08, 1]} distanceFactor={10.5} zIndexRange={[25, 0]}>
-        <button type="button" aria-pressed={selected} onClick={() => onSelect(ATLAS)} className="flex min-w-[96px] flex-col items-center whitespace-nowrap outline-none">
+        <button
+          id="orchestrator-control-atlas"
+          type="button"
+          tabIndex={selected ? 0 : -1}
+          aria-pressed={selected}
+          aria-label="Chat with Atlas, CEO"
+          onFocus={() => onSelect(ATLAS)}
+          onKeyDown={(event) => handleTab(event, ATLAS, onNavigate)}
+          onClick={() => onSelect(ATLAS)}
+          className="flex min-w-[96px] flex-col items-center whitespace-nowrap rounded-md px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-[#ffc66f] focus-visible:shadow-[0_0_22px_rgba(255,126,24,0.82)]"
+        >
           <span className="font-mono text-[0.58rem] tracking-[0.24em] text-[#ffd08b]">CEO</span>
           <span className="mt-0.5 text-[0.66rem] font-semibold tracking-[0.16em] text-white uppercase">Atlas</span>
         </button>
@@ -257,9 +292,29 @@ function CameraRig({ paused }: { paused: boolean }) {
   return null;
 }
 
-function CommandStation({ selectedSlug, paused, onSelect }: { selectedSlug: string; paused: boolean; onSelect: (entity: GalaxyEntity) => void }) {
+function CommandStation({ selectedSlug, paused, onSelect, onNavigate }: { selectedSlug: string; paused: boolean; onSelect: (entity: GalaxyEntity) => void; onNavigate: NavigateOrchestrator }) {
+  const station = useRef<THREE.Group>(null);
+  const rotationTarget = useRef(-0.015);
+
+  useEffect(() => {
+    const entity = VORINTHEX_GALAXY_REGISTRY.orchestrators[selectedSlug];
+    if (!entity || entity.slug === "atlas" || !station.current) return;
+    const angle = THREE.MathUtils.degToRad(NODE_ANGLES[entity.slug] ?? 0);
+    const desired = Math.PI / 2 - angle;
+    const current = station.current.rotation.z;
+    const shortestTurn = Math.atan2(Math.sin(desired - current), Math.cos(desired - current));
+    rotationTarget.current = current + shortestTurn;
+    if (paused) station.current.rotation.z = rotationTarget.current;
+  }, [paused, selectedSlug]);
+
+  useFrame((_, delta) => {
+    if (!paused && station.current) {
+      station.current.rotation.z = THREE.MathUtils.damp(station.current.rotation.z, rotationTarget.current, 3.2, delta);
+    }
+  });
+
   return (
-    <group rotation={[0.12, 0, -0.015]}>
+    <group ref={station} rotation={[0.12, 0, -0.015]}>
       <StationSpokes />
       <StationRing radius={LAYER_RADII[1]} layer={1} paused={paused} />
       <StationRing radius={LAYER_RADII[2]} layer={2} paused={paused} />
@@ -271,8 +326,8 @@ function CommandStation({ selectedSlug, paused, onSelect }: { selectedSlug: stri
         const active = entity.slug === selectedSlug || parent.slug === selectedSlug;
         return <Line key={`${parent.id}:${entity.id}`} points={[stationPosition(parent), stationPosition(entity)]} color={active ? "#ffad43" : "#a34812"} lineWidth={active ? 1.6 : 0.55} transparent opacity={active ? 0.8 : 0.34} />;
       })}
-      <ReactorCore selected={selectedSlug === "atlas"} paused={paused} onSelect={onSelect} />
-      {ORCHESTRATORS.filter((entity) => entity.slug !== "atlas").map((entity) => <DockingPod key={entity.id} entity={entity} selected={entity.slug === selectedSlug} onSelect={onSelect} />)}
+      <ReactorCore selected={selectedSlug === "atlas"} paused={paused} onSelect={onSelect} onNavigate={onNavigate} />
+      {ORCHESTRATORS.filter((entity) => entity.slug !== "atlas").map((entity) => <DockingPod key={entity.id} entity={entity} selected={entity.slug === selectedSlug} onSelect={onSelect} onNavigate={onNavigate} />)}
       <StationDebris paused={paused} />
     </group>
   );
@@ -285,6 +340,15 @@ interface OrchestratorHierarchyProps {
 
 export default function OrchestratorHierarchy({ selectedSlug, onSelect }: OrchestratorHierarchyProps) {
   const paused = Boolean(useReducedMotion());
+
+  function navigate(entity: GalaxyEntity, direction: 1 | -1) {
+    const currentIndex = TAB_ORDER.findIndex((candidate) => candidate.id === entity.id);
+    const nextIndex = (currentIndex + direction + TAB_ORDER.length) % TAB_ORDER.length;
+    const next = TAB_ORDER[nextIndex];
+    onSelect(next);
+    window.requestAnimationFrame(() => document.getElementById(`orchestrator-control-${next.slug}`)?.focus());
+  }
+
   return (
     <div className="relative h-full min-h-[540px] w-full overflow-hidden" aria-label="Nexus command station">
       <Canvas dpr={[1, 1.35]} shadows camera={{ position: [0, 1.1, 16.4], fov: 43, near: 0.1, far: 90 }} gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }} className="!absolute !inset-0">
@@ -292,11 +356,12 @@ export default function OrchestratorHierarchy({ selectedSlug, onSelect }: Orches
         <ambientLight intensity={0.28} color="#75401f" />
         <directionalLight castShadow position={[4, 8, 10]} intensity={1.8} color="#ffe0b1" />
         <pointLight position={[-5, 2, 5]} intensity={2.2} color="#df6818" distance={15} />
-        <CommandStation selectedSlug={selectedSlug} paused={paused} onSelect={onSelect} />
+        <CommandStation selectedSlug={selectedSlug} paused={paused} onSelect={onSelect} onNavigate={navigate} />
       </Canvas>
       <div className="pointer-events-none absolute top-3 left-1/2 -translate-x-1/2 text-center">
         <p className="font-mono text-[0.5rem] tracking-[0.3em] text-[#8f552a] uppercase">Nexus Command Station</p>
         <p className="mt-1 text-[0.58rem] tracking-[0.16em] text-[#d18a49] uppercase">Three operational layers online</p>
+        <p className="mt-1 font-mono text-[0.46rem] tracking-[0.16em] text-[#7f5937] uppercase">Tab / Shift+Tab to cycle</p>
       </div>
     </div>
   );
