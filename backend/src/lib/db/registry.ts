@@ -91,3 +91,11 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
 };
 
 export const NODE_NAMES = Object.keys(NODE_REGISTRY).sort();
+
+/** Registers a node accessor at startup so generic consumers discover new nodes automatically. */
+export function registerNode(name: string, accessors: NodeAccessors): void {
+  if (!/^[A-Za-z][A-Za-z0-9]*$/.test(name)) throw new Error(`Invalid node name: ${name}`);
+  if (NODE_REGISTRY[name]) throw new Error(`Node already registered: ${name}`);
+  NODE_REGISTRY[name] = accessors;
+  NODE_NAMES.splice(0, NODE_NAMES.length, ...Object.keys(NODE_REGISTRY).sort());
+}

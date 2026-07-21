@@ -18,7 +18,6 @@ const traverseValueSchema = z.union([z.string(), z.number().finite(), z.boolean(
 export const traverseInputSchema = z.object({
   node: z.string().min(1),
   where: z.record(z.string().regex(/^[A-Za-z][A-Za-z0-9]*$/), traverseValueSchema).default({}),
-  limit: z.number().int().min(1).max(100).default(50),
   similarity: z.object({
     embedding: z.array(z.number().finite()).min(1),
     threshold: z.number().finite().min(-1).max(1),
@@ -56,7 +55,7 @@ export async function traverseNodes(
   const results: Array<Record<string, unknown> & { similarity?: number }> = [];
   let after: string | undefined;
   do {
-    const page = await node.listPage(after, Math.min(request.limit, 100));
+    const page = await node.listPage(after, 500);
     for (const rawItem of page.items) {
       if (!rawItem || typeof rawItem !== 'object' || Array.isArray(rawItem)) continue;
       const item = rawItem as Record<string, unknown>;
@@ -65,7 +64,6 @@ export async function traverseNodes(
       const similarity = request.similarity ? cosineSimilarity(request.similarity.embedding, embedding) : null;
       if (request.similarity && (similarity === null || similarity < request.similarity.threshold)) continue;
       results.push({ ...item, ...(similarity === null ? {} : { similarity }) });
-      if (results.length === request.limit) return results;
     }
     after = page.nextCursor ?? undefined;
   } while (after);

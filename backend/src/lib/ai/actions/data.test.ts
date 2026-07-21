@@ -32,6 +32,21 @@ describe('registered node traversal', () => {
     ]);
   });
 
+  test('returns every matching record across registry pages', async () => {
+    const pagedRegistry = {
+      documents: {
+        async listPage(after?: string) {
+          if (!after) return { items: [{ key: 'one', status: 'active', embedding: [] }], nextCursor: 'one' };
+          return { items: [{ key: 'two', status: 'active', embedding: [] }], nextCursor: null };
+        },
+      },
+    };
+    await expect(traverseNodes({ node: 'documents', where: { status: 'active' } }, pagedRegistry)).resolves.toEqual([
+      { key: 'one', status: 'active', embedding: [] },
+      { key: 'two', status: 'active', embedding: [] },
+    ]);
+  });
+
   test('rejects unknown collections and unsafe selector paths', async () => {
     await expect(traverseNodes({ node: 'missing' }, registry)).rejects.toThrow('Unknown node collection');
     await expect(traverseNodes({ node: 'documents', where: { 'status.value': 'active' } }, registry)).rejects.toThrow();
