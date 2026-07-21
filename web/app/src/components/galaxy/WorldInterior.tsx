@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useLoader, type ThreeEvent } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
+import { entityLogoUrl } from "@/lib/three/entity-logo";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { CollectibleDef, GalaxyEntity } from "@/lib/galaxy/registry-types";
 import {
@@ -65,7 +66,7 @@ function InteriorEmblem({
   const timeRef = useRef(0);
   const texture = useLoader(
     THREE.TextureLoader,
-    `/logos/entities/${entity.type}-${entity.slug}.png`,
+    entityLogoUrl(entity.type, entity.slug),
   );
 
   // One material for all shards — the texture tiles live in the UVs.
