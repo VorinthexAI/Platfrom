@@ -37,7 +37,7 @@ describe('static Bedrock Titan embeddings', () => {
     }) as typeof fetch;
 
     await expect(embedText({ text: 'Backend Developer' })).resolves.toEqual([0.25, 0.75]);
-    expect(request?.url).toContain(`/model/${encodeURIComponent(BEDROCK_EMBEDDING_MODEL_ID)}/invoke`);
+    expect(request?.url).toContain(`/model/${BEDROCK_EMBEDDING_MODEL_ID}/invoke`);
     await expect(request?.json()).resolves.toEqual({ inputText: 'Backend Developer' });
     expect(embeddingMetadata()).toEqual({ embeddingProvider: 'aws-bedrock', embeddingModel: 'amazon.titan-embed-text-v2' });
   });

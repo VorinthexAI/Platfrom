@@ -34,10 +34,12 @@ export async function embedText(input: z.infer<typeof embedInputSchema>): Promis
     chunks.push(characters.slice(index, index + EMBEDDING_CHUNK_CHARACTERS).join(''));
   }
   const host = `bedrock-runtime.${credentials.region}.amazonaws.com`;
-  const path = `/model/${encodeURIComponent(BEDROCK_EMBEDDING_MODEL_ID)}/invoke`;
+  const path = `/model/${BEDROCK_EMBEDDING_MODEL_ID}/invoke`;
+  // Bedrock URI-encodes the model separator while validating SigV4.
+  const canonicalPath = `/model/${encodeURIComponent(BEDROCK_EMBEDDING_MODEL_ID)}/invoke`;
   const embeddings = await Promise.all(chunks.map(async (inputText) => {
     const body = JSON.stringify({ inputText });
-    const signed = signAwsRequest(credentials, 'bedrock', host, path, body, { 'content-type': 'application/json', accept: 'application/json' });
+    const signed = signAwsRequest(credentials, 'bedrock', host, canonicalPath, body, { 'content-type': 'application/json', accept: 'application/json' });
     const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body });
     if (!response.ok) throw new Error(`AWS Bedrock Titan embedding request failed with status ${response.status}.`);
     return titanEmbeddingResponseSchema.parse(await response.json()).embedding;
