@@ -724,7 +724,6 @@ jobs:
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
-          DEFER_THROTTLED_EMBEDDINGS: 'true'
         run: |
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
@@ -856,7 +855,6 @@ jobs:
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
-          DEFER_THROTTLED_EMBEDDINGS: 'true'
           SEEDS_FILE: ${{ github.workspace }}/db-seeds.secrets.json
         run: |
           jq -c '.secrets.prod.db_seeds' .github/environments.json > "$SEEDS_FILE"

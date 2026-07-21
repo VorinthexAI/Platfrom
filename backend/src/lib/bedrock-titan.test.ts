@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { BEDROCK_EMBEDDING_MODEL_ID, BedrockEmbeddingRequestError, embedText, embeddingMetadata } from './bedrock-titan';
+import { BEDROCK_EMBEDDING_MODEL_ID, embedText, embeddingMetadata } from './bedrock-titan';
 
 const originalFetch = globalThis.fetch;
 const originalEnvironment = {
@@ -7,7 +7,6 @@ const originalEnvironment = {
   AWS_DEFAULT_REGION: process.env.AWS_DEFAULT_REGION,
   AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
   AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
-  DEFER_THROTTLED_EMBEDDINGS: process.env.DEFER_THROTTLED_EMBEDDINGS,
 };
 
 afterEach(() => {
@@ -47,11 +46,10 @@ describe('static Bedrock Titan embeddings', () => {
     process.env.AWS_REGION = 'us-east-1';
     process.env.AWS_ACCESS_KEY_ID = 'key';
     process.env.AWS_SECRET_ACCESS_KEY = 'secret';
-    delete process.env.DEFER_THROTTLED_EMBEDDINGS;
     let requests = 0;
     globalThis.fetch = (async () => {
       requests += 1;
-      if (requests === 1) return new Response('throttled', { status: 429, headers: { 'retry-after': '0' } });
+      if (requests === 1) return new Response('throttled', { status: 429, headers: { 'retry-after': '0.001' } });
       return new Response(JSON.stringify({ embedding: [0.5, 0.5] }), { status: 200 });
     }) as unknown as typeof fetch;
 
@@ -59,19 +57,22 @@ describe('static Bedrock Titan embeddings', () => {
     expect(requests).toBe(2);
   });
 
-  test('immediately surfaces throttling when callers can defer embeddings', async () => {
+  test('serializes concurrent Titan invocations', async () => {
     process.env.AWS_REGION = 'us-east-1';
     process.env.AWS_ACCESS_KEY_ID = 'key';
     process.env.AWS_SECRET_ACCESS_KEY = 'secret';
-    process.env.DEFER_THROTTLED_EMBEDDINGS = 'true';
-    let requests = 0;
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
     globalThis.fetch = (async () => {
-      requests += 1;
-      return new Response('throttled', { status: 429 });
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeRequests -= 1;
+      return new Response(JSON.stringify({ embedding: [0.5, 0.5] }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await expect(embedText({ text: 'defer me' })).rejects.toBeInstanceOf(BedrockEmbeddingRequestError);
-    expect(requests).toBe(1);
+    await Promise.all([embedText({ text: 'first' }), embedText({ text: 'second' })]);
+    expect(maxActiveRequests).toBe(1);
   });
 
   test('chunks long documents and returns one normalized aggregate vector', async () => {
