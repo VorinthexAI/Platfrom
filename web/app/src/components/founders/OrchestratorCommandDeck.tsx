@@ -1,11 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { Billboard, Environment, Lightformer, PerspectiveCamera, useTexture } from "@react-three/drei";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Billboard, Environment, Html, Lightformer, PerspectiveCamera, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
+import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 
 const AMBER = "#d98432";
 const HOT_AMBER = "#ffb35f";
@@ -17,6 +18,30 @@ interface OrchestratorCommandDeckProps {
   reducedMotion: boolean;
 }
 
+type ScopeLayer = "Nexus" | "Products" | "Capabilities" | "Orchestrators";
+
+interface ScopeNode {
+  entity: GalaxyEntity;
+  layer: ScopeLayer;
+  parentId?: string;
+  position: number;
+}
+
+const SCOPE_LAYERS: Record<ScopeLayer, { radius: number; speed: number }> = {
+  Nexus: { radius: 1.35, speed: 0.1 },
+  Products: { radius: 2.35, speed: 0.16 },
+  Capabilities: { radius: 3.35, speed: 0.23 },
+  Orchestrators: { radius: 4.55, speed: 0.31 },
+};
+
+const scopeNodes: ScopeNode[] = [
+  { entity: VORINTHEX_GALAXY_REGISTRY.nexus, layer: "Nexus", position: 0 },
+  ...Object.values(VORINTHEX_GALAXY_REGISTRY.products).map((entity, position) => ({ entity, layer: "Products" as const, parentId: entity.parentId, position })),
+  ...Object.values(VORINTHEX_GALAXY_REGISTRY.capabilities).map((entity, position) => ({ entity, layer: "Capabilities" as const, parentId: entity.parentId, position })),
+  ...Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators).map((entity, position) => ({ entity, layer: "Orchestrators" as const, parentId: entity.reportsTo ?? entity.parentId, position })),
+];
+const scopeNodeById = new Map(scopeNodes.map((node) => [node.entity.id, node]));
+
 function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
   const camera = useRef<THREE.PerspectiveCamera>(null);
   const drag = useRef({ active: false, x: 0, y: 0 });
@@ -24,6 +49,8 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
   const current = useRef({ yaw: 0, pitch: 0 });
   const velocity = useRef({ yaw: 0, pitch: 0 });
   const lastInteraction = useRef(0);
+  const distance = useRef(0);
+  const desiredDistance = useRef(0);
   const { gl, size } = useThree();
   const compact = size.width < 680;
 
@@ -54,18 +81,25 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
       lastInteraction.current = performance.now();
       if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
     };
+    const wheel = (event: WheelEvent) => {
+      event.preventDefault();
+      desiredDistance.current = THREE.MathUtils.clamp(desiredDistance.current + event.deltaY * 0.006, 0, compact ? 5.8 : 4.8);
+      lastInteraction.current = performance.now();
+    };
 
     element.addEventListener("pointerdown", pointerDown);
     element.addEventListener("pointermove", pointerMove);
     element.addEventListener("pointerup", pointerUp);
     element.addEventListener("pointercancel", pointerUp);
+    element.addEventListener("wheel", wheel, { passive: false });
     return () => {
       element.removeEventListener("pointerdown", pointerDown);
       element.removeEventListener("pointermove", pointerMove);
       element.removeEventListener("pointerup", pointerUp);
       element.removeEventListener("pointercancel", pointerUp);
+      element.removeEventListener("wheel", wheel);
     };
-  }, [gl]);
+  }, [compact, gl]);
 
   useFrame((_, delta) => {
     if (!camera.current) return;
@@ -85,7 +119,9 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
 
     current.current.yaw = THREE.MathUtils.damp(current.current.yaw, desired.current.yaw, 9, delta);
     current.current.pitch = THREE.MathUtils.damp(current.current.pitch, desired.current.pitch, 9, delta);
+    distance.current = THREE.MathUtils.damp(distance.current, desiredDistance.current, 7, delta);
     camera.current.rotation.set(0.04 + current.current.pitch, current.current.yaw, 0, "YXZ");
+    camera.current.position.z = (compact ? 12.8 : 11.2) + distance.current;
   });
 
   return (
@@ -499,7 +535,89 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   );
 }
 
-function CommandDeckScene(props: OrchestratorCommandDeckProps) {
+function scopePosition(node: ScopeNode, elapsed: number): THREE.Vector3 {
+  const { radius, speed } = SCOPE_LAYERS[node.layer];
+  const peers = scopeNodes.filter((candidate) => candidate.layer === node.layer);
+  const angle = node.position / peers.length * Math.PI * 2 + elapsed * speed;
+  return new THREE.Vector3(Math.cos(angle) * radius, 2.35 + Math.sin(angle) * radius * 0.62, -2.35);
+}
+
+function ScopeConnection({ node, parent, reducedMotion }: { node: ScopeNode; parent: ScopeNode; reducedMotion: boolean }) {
+  const geometry = useMemo(() => new THREE.BufferGeometry(), []);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  useFrame(({ clock }) => {
+    const elapsed = reducedMotion ? 0 : clock.elapsedTime;
+    geometry.setFromPoints([scopePosition(node, elapsed), scopePosition(parent, elapsed)]);
+  });
+
+  return (
+    <lineSegments geometry={geometry} renderOrder={2}>
+      <lineBasicMaterial color={AMBER} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+    </lineSegments>
+  );
+}
+
+function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: ScopeNode; selected: boolean; reducedMotion: boolean; onSelect: (id: string) => void }) {
+  const group = useRef<THREE.Group>(null);
+  const texture = useTexture(entityLogoUrl(node.entity.type, node.entity.slug));
+
+  useFrame(({ clock }) => {
+    if (!group.current) return;
+    group.current.position.copy(scopePosition(node, reducedMotion ? 0 : clock.elapsedTime));
+  });
+
+  return (
+    <group ref={group} onClick={(event) => { event.stopPropagation(); onSelect(node.entity.id); }}>
+      <Billboard>
+        <mesh>
+          <circleGeometry args={[selected ? 0.34 : 0.24, 32]} />
+          <meshBasicMaterial color={selected ? HOT_AMBER : "#10191e"} transparent opacity={selected ? 0.94 : 0.8} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0, 0.012]}>
+          <ringGeometry args={[selected ? 0.35 : 0.25, selected ? 0.43 : 0.31, 32]} />
+          <meshBasicMaterial color={selected ? "#fff1cf" : "#76858d"} transparent opacity={selected ? 1 : 0.62} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0, 0.024]}>
+          <planeGeometry args={[selected ? 0.42 : 0.3, selected ? 0.42 : 0.3]} />
+          <meshBasicMaterial map={texture} color="#fff4dc" transparent alphaTest={0.02} depthWrite={false} toneMapped={false} />
+        </mesh>
+        {selected ? <pointLight color={HOT_AMBER} intensity={1.2} distance={2.2} /> : null}
+        <Html center position={[0, -0.42, 0]} distanceFactor={7} style={{ pointerEvents: "none" }}>
+          <div className={`w-20 text-center font-mono uppercase tracking-[0.14em] ${selected ? "text-[#ffe2b6]" : "text-slate-300"}`}>
+            <p className="text-[7px] opacity-70">{node.layer === "Nexus" ? "Nexus" : node.layer.slice(0, -1)}</p>
+            <p className="mt-0.5 text-[9px] font-semibold">{node.entity.name}</p>
+          </div>
+        </Html>
+      </Billboard>
+    </group>
+  );
+}
+
+function ScopeOrbitalSystem({ selectedId, reducedMotion, onSelect }: { selectedId: string; reducedMotion: boolean; onSelect: (id: string) => void }) {
+  return (
+    <group>
+      {Object.entries(SCOPE_LAYERS).map(([layer, { radius }]) => (
+        <mesh key={layer} position={[0, 2.35, -2.42]} rotation={[0, 0, 0]}>
+          <ringGeometry args={[radius - 0.012, radius + 0.012, 96]} />
+          <meshBasicMaterial color={layer === "Nexus" ? HOT_AMBER : "#49636e"} transparent opacity={0.34} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+        </mesh>
+      ))}
+      {scopeNodes.map((node) => {
+        const parent = node.parentId ? scopeNodeById.get(node.parentId) : undefined;
+        return parent ? <ScopeConnection key={`link-${node.entity.id}`} node={node} parent={parent} reducedMotion={reducedMotion} /> : null;
+      })}
+      {scopeNodes.map((node) => <ScopeOrbitNode key={node.entity.id} node={node} selected={node.entity.id === selectedId} reducedMotion={reducedMotion} onSelect={onSelect} />)}
+    </group>
+  );
+}
+
+interface CommandDeckSceneProps extends OrchestratorCommandDeckProps {
+  selectedScopeId: string;
+  onSelectScope: (id: string) => void;
+}
+
+function CommandDeckScene(props: CommandDeckSceneProps) {
   return (
     <>
       <color attach="background" args={["#030608"]} />
@@ -525,14 +643,22 @@ function CommandDeckScene(props: OrchestratorCommandDeckProps) {
       <Console position={[3.45, 0.75, -2.25]} rotation={[0, -0.28, 0]} />
       <Console position={[0, 0.68, -3.25]} />
       <IdentityMedallion {...props} />
+      <ScopeOrbitalSystem selectedId={props.selectedScopeId} reducedMotion={props.reducedMotion} onSelect={props.onSelectScope} />
     </>
   );
 }
 
 export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckProps) {
   const { entity } = props;
-  const sceneProps = { entity, reducedMotion: props.reducedMotion };
-  const instruction = `Drag to look around the ${entity.name} Nexus command deck`;
+  const [selectedScopeId, setSelectedScopeId] = useState(VORINTHEX_GALAXY_REGISTRY.nexus.id);
+  const selectedScope = scopeNodeById.get(selectedScopeId) ?? scopeNodes[0]!;
+  const selectedScopeIndex = scopeNodes.findIndex((node) => node.entity.id === selectedScope.entity.id);
+  const stepScope = (direction: -1 | 1) => {
+    const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
+    setSelectedScopeId(scopeNodes[nextIndex]!.entity.id);
+  };
+  const sceneProps = { entity, reducedMotion: props.reducedMotion, selectedScopeId, onSelectScope: setSelectedScopeId };
+  const instruction = `Drag to look around the ${entity.name} Nexus command deck. Use the mouse wheel to zoom.`;
 
   return (
     <div className="relative h-full min-h-[360px] w-full overflow-hidden bg-black/70" aria-label={`${entity.name} Nexus command deck`}>
@@ -549,6 +675,16 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
+      <div className="pointer-events-none absolute inset-x-4 top-4 z-10 flex items-center justify-between text-slate-100 sm:inset-x-7 sm:top-6">
+        <div className="min-w-0 rounded-full border border-white/10 bg-black/45 px-3 py-2 backdrop-blur-md">
+          <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-[#ffba72]">{selectedScope.layer}</p>
+          <p className="truncate font-mono text-sm font-semibold uppercase tracking-[0.16em]">{selectedScope.entity.name}</p>
+        </div>
+        <div className="pointer-events-auto flex overflow-hidden rounded-full border border-white/15 bg-black/55 backdrop-blur-md">
+          <button type="button" onClick={() => stepScope(-1)} aria-label="Previous scope" className="flex h-10 w-10 items-center justify-center text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">‹</button>
+          <button type="button" onClick={() => stepScope(1)} aria-label="Next scope" className="flex h-10 w-10 items-center justify-center border-l border-white/10 text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">›</button>
+        </div>
+      </div>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:radial-gradient(rgba(255,255,255,0.7)_0.5px,transparent_0.7px)] [background-size:3px_3px]" />
     </div>
