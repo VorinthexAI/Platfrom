@@ -12,7 +12,11 @@ export type CapabilityIcon =
   | "gallery"
   | "signal"
   | "compass"
-  | "ascend";
+  | "ascend"
+  | "chorus"
+  | "cadence"
+  | "momentum"
+  | "prism";
 
 export interface CapabilityAsteroidData {
   key: string;

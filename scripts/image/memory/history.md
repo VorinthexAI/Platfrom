@@ -1072,3 +1072,87 @@ Paths:
 Asset: Replica Social Cards
 Action: Generated v2
 Notes: Generated Open Graph and Twitter cards for replica.vorinthex.com.
+## 2026-07-21 21:45
+Asset: Chorus
+Action: Created asset
+Notes: Chorus is an AI native communication workspace for messaging, channels, threads, announcements, direct messages, and real time collaboration. It understands conversations semantically so people can search by meaning, summarize discussions, identify action items, translate messages, and recover important context without manual organization. Chorus supports rich communication data including reactions, mentions, attachments, presence, and persistent conversation history.
+## 2026-07-21 21:46
+Asset: Chorus
+Action: Generated v1
+Notes: Generated from galaxy registry entity capability.chorus
+Paths:
+- solid: assets/capability/capability-chorus/v1/solid-1024.png
+- transparent: assets/capability/capability-chorus/v1/transparent-1024.png
+- solid svg: assets/capability/capability-chorus/v1/solid-1024.svg
+- transparent svg: assets/capability/capability-chorus/v1/transparent-1024.svg
+## 2026-07-21 21:46
+Asset: Cadence
+Action: Created asset
+Notes: Cadence is an intelligent planning system for calendars, events, meetings, reminders, availability, deadlines, recurring schedules, reservations, and planning windows. It understands relationships between commitments, priorities, people, and resources, then helps resolve conflicts, suggest useful times, prepare agendas, protect focus time, and maintain clear follow through. Cadence treats time as structured information rather than a simple chronological list.
+## 2026-07-21 21:47
+Asset: Cadence
+Action: Generated v1
+Notes: Generated from galaxy registry entity capability.cadence
+Paths:
+- solid: assets/capability/capability-cadence/v1/solid-1024.png
+- transparent: assets/capability/capability-cadence/v1/transparent-1024.png
+- solid svg: assets/capability/capability-cadence/v1/solid-1024.svg
+- transparent svg: assets/capability/capability-cadence/v1/transparent-1024.svg
+## 2026-07-21 21:47
+Asset: Momentum
+Action: Created asset
+Notes: Momentum is an AI native execution workspace for projects, milestones, roadmaps, epics, tasks, tickets, objectives, dependencies, sprints, and execution status. It understands how work progresses, detects bottlenecks, suggests priorities, estimates complexity, generates implementation plans, and keeps outcomes moving from strategy into action. Momentum gives personal and professional work a clear structure without reducing progress to a static task list.
+## 2026-07-21 21:48
+Asset: Momentum
+Action: Generated v1
+Notes: Generated from galaxy registry entity capability.momentum
+Paths:
+- solid: assets/capability/capability-momentum/v1/solid-1024.png
+- transparent: assets/capability/capability-momentum/v1/transparent-1024.png
+- solid svg: assets/capability/capability-momentum/v1/solid-1024.svg
+- transparent svg: assets/capability/capability-momentum/v1/transparent-1024.svg
+## 2026-07-21 21:48
+Asset: Prism
+Action: Created asset
+Notes: Prism is a real time meeting workspace for voice calls, video sessions, screen sharing, recordings, live transcription, captions, and AI assistance. It understands conversations as they happen, making discussions searchable and turning decisions, follow up items, and important context into durable knowledge. Prism preserves the full meeting experience through participants, recordings, transcripts, summaries, and collaborative session metadata.
+## 2026-07-21 21:49
+Asset: Prism
+Action: Generated v1
+Notes: Generated from galaxy registry entity capability.prism
+Paths:
+- solid: assets/capability/capability-prism/v1/solid-1024.png
+- transparent: assets/capability/capability-prism/v1/transparent-1024.png
+- solid svg: assets/capability/capability-prism/v1/solid-1024.svg
+- transparent svg: assets/capability/capability-prism/v1/transparent-1024.svg
+## 2026-07-21 22:04
+Asset: Chorus Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for chorus.vorinthex.com.
+## 2026-07-21 22:04
+Asset: Chorus Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for chorus.vorinthex.com.
+## 2026-07-21 22:04
+Asset: Cadence Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for cadence.vorinthex.com.
+## 2026-07-21 22:04
+Asset: Cadence Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for cadence.vorinthex.com.
+## 2026-07-21 22:04
+Asset: Momentum Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for momentum.vorinthex.com.
+## 2026-07-21 22:04
+Asset: Momentum Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for momentum.vorinthex.com.
+## 2026-07-21 22:05
+Asset: Prism Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for prism.vorinthex.com.
+## 2026-07-21 22:05
+Asset: Prism Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for prism.vorinthex.com.
