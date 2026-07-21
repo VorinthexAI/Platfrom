@@ -13,7 +13,6 @@ import { getProductByProductId, insertProduct, updateProduct, type Product } fro
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
-import { seedGenesis, GENESIS_SCOPE_SLUG } from '@/lib/ai/agents/genesis/seed';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 
@@ -104,17 +103,6 @@ const LEGACY_SEEDED_ACTIONS = [
     enabled: true,
   },
   {
-    key: 'cmcoredelegateaction000001',
-    slug: 'core.delegate',
-    name: 'Delegate',
-    description: 'Delegates one strictly validated task to an allow-listed service agent.',
-    objective: 'Invoke the fixed Genesis service for an owner-authorized agent creation request while preserving the initiating human identity.',
-    inputDescription: 'A target organization, target scope, and natural-language agent architecture request resolved and authorized server-side.',
-    outputDescription: 'The delegated Genesis run and its validated agent creation result.',
-    handlerKey: 'core.delegate',
-    enabled: true,
-  },
-  {
     key: 'cmcoreembedaction00000001',
     slug: 'core.embedd',
     name: 'Embed',
@@ -145,17 +133,6 @@ const LEGACY_SEEDED_ACTIONS = [
     inputDescription: 'Base64-encoded audio, its MIME type, and an optional language code.',
     outputDescription: 'The recognized transcript text.',
     handlerKey: 'core.transcribe',
-    enabled: true,
-  },
-  {
-    key: 'cmgenesisactioncreateagent001',
-    slug: 'agent.create',
-    name: 'Create Agent',
-    description: 'Validates and transactionally creates or reuses an agent, its required skills, skill relations, and allowed tool relations.',
-    objective: 'Persist a complete validated agent architecture from a Genesis creation manifest.',
-    inputDescription: 'A validated Genesis agent creation manifest containing an agent operation, skill operations, agent skill relations, and existing tools to attach.',
-    outputDescription: 'The persisted or reused agent, created skills, linking nodes, provenance artifacts, and validation result.',
-    handlerKey: 'agent.create',
     enabled: true,
   },
   {
@@ -753,22 +730,6 @@ const RETIRED_TOOL_SEEDS = [
     enabled: true,
   },
   {
-    key: 'cmgenesistoolcreateagent0001',
-    slug: 'agent.create',
-    name: 'Create Agent',
-    description: 'Creates or reuses a complete agent architecture from a validated Genesis manifest.',
-    scopeKey: null,
-    enabled: true,
-  },
-  {
-    key: 'cmcoredelegatetool00000001',
-    slug: 'core.delegate',
-    name: 'Delegate',
-    description: 'Delegate one strictly validated task to an allow-listed service agent.',
-    scopeKey: null,
-    enabled: true,
-  },
-  {
     key: 'cmartifactcreatetool00000001',
     slug: 'artifact.create',
     name: 'Create Artifact',
@@ -941,8 +902,6 @@ const RETIRED_TOOL_SEEDS = [
 const RETIRED_TOOL_ACTION_SEEDS = [
   { key: 'cmrnc3nfh00053o7k3hfm3a82', toolSlug: 'ask.answer', actionSlug: 'core.chat', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00063o7keg8h70ut', toolSlug: 'reason.solve', actionSlug: 'core.reason', priority: 100, enabled: true },
-  { key: 'cmcoredelegatetoolaction001', toolSlug: 'core.delegate', actionSlug: 'core.delegate', priority: 100, enabled: true },
-  { key: 'cmgenesistoolactioncreate001', toolSlug: 'agent.create', actionSlug: 'agent.create', priority: 100, enabled: true },
   { key: 'cmartifactcreatetoolaction001', toolSlug: 'artifact.create', actionSlug: 'artifact.create', priority: 100, enabled: true },
   { key: 'cmartifactreadtoolaction0001', toolSlug: 'artifact.read', actionSlug: 'artifact.read', priority: 100, enabled: true },
   { key: 'cmrnc3nfh00073o7kdi1aee17', toolSlug: 'image.create', actionSlug: 'image.generate', priority: 100, enabled: true },
@@ -1438,7 +1397,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
   const rootOrganization = await getRootOrganization();
-  if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'Genesis');
+  if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'Beacon');
   const scopes = getDefaultScopeRepository();
   const organizationScopes = [...await scopes.listScopes(rootOrganization.key)];
   const scopesBySlug = new Map(organizationScopes.map((scope) => [scope.slug, scope]));
@@ -1495,17 +1454,6 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'scopeScopes', key: relation.key, status: 'created' });
   }
 
-  const genesisScopeSeed = SEEDED_SCOPES.find((scope) => scope.slug === GENESIS_SCOPE_SLUG);
-  if (!genesisScopeSeed) throw new SeedReferenceError('scope', GENESIS_SCOPE_SLUG, 'Genesis');
-  const genesisScope = await scopes.getScopeByKey(actualKeysBySeedKey.get(genesisScopeSeed.key) ?? genesisScopeSeed.key);
-  if (!genesisScope || genesisScope.slug !== GENESIS_SCOPE_SLUG) throw new SeedReferenceError('scope', GENESIS_SCOPE_SLUG, 'Genesis');
-  const genesis = await seedGenesis(rootOrganization.key);
-  if (genesis.agent.scopeKey !== genesisScope.key) throw new SeedReferenceError('agent', 'genesis', 'Launch');
-  results.push(
-    { collection: 'skills', key: genesis.skill.key, status: 'updated' },
-    { collection: 'agents', key: genesis.agent.key, status: 'updated' },
-    { collection: 'agentSkills', key: genesis.agentSkill.key, status: 'updated' },
-  );
 
   for (const product of SEEDED_PRODUCTS) {
     results.push(await upsertSeedProduct(product));

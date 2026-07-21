@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { NODE_NAMES } from './registry';
+import { NODE_NAMES, NODE_REGISTRY, registerNode } from './registry';
 import { organizationSchema } from './organizations.node';
 import { userOrganizationSchema } from './user-organization.node';
 import { userSchema } from './users.node';
@@ -36,5 +36,12 @@ describe('node registry schema contracts', () => {
     expect(userSchema.shape).toHaveProperty('embedding');
     expect(organizationSchema.shape).toHaveProperty('embedding');
     expect(userOrganizationSchema.shape).toHaveProperty('embedding');
+  });
+
+  test('registers new nodes for generic consumers', () => {
+    const name = 'traverseTestNode';
+    registerNode(name, { listPage: async () => ({ items: [], nextCursor: null }), async *getAllChunked() {}, async upsertByKey() { return {}; } });
+    expect(NODE_REGISTRY[name]).toBeDefined();
+    expect(NODE_NAMES).toContain(name);
   });
 });

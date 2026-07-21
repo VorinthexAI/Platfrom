@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ZERO_TOKEN_USAGE } from '@/lib/ai/shared/usage';
-import { awsCredentialsSchema, signAwsRequest } from './aws-sigv4';
+import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import { unsupportedAction } from './openai-compatible';
 import { resolveRequestSignal, speechInputSchema, type ProviderAdapter, type ProviderExecuteRequest, type ProviderExecuteResponse, type ProviderFactory, type SpeechOutput } from './types';
@@ -11,8 +11,8 @@ export const awsPollyCredentialsSchema = awsPollyProviderConfigSchema;
 export type AwsPollyCredentials = AwsPollyProviderConfig;
 const PROVIDER_ID = 'aws-polly' as const;
 
-export function createAwsPollyProvider(config: AwsPollyProviderConfig): ProviderAdapter {
-  const parsed = awsPollyProviderConfigSchema.parse(config);
+export function createAwsPollyProvider(config?: Partial<AwsPollyProviderConfig>, env?: AwsCredentialEnvironment): ProviderAdapter {
+  const parsed = resolveAwsCredentials(config, env);
   return {
     id: PROVIDER_ID,
     name: 'AWS Polly',

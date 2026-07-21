@@ -10,7 +10,6 @@ import {
   AgentReferenceNotFoundError,
   DuplicateAgentLinkError,
   DuplicateAgentSlugError,
-  RestrictedAgentToolGrantError,
   createAgentService,
   type AgentServiceDataSource,
 } from './service';
@@ -25,10 +24,9 @@ function fixture() {
   const tool = toolSchema.parse({
     key: newId(), slug: 'reason.solve', name: 'Reason Tool', description: 'Reason about a task.',
   });
-  const delegateTool = toolSchema.parse({ key: newId(), slug: 'core.delegate', name: 'Delegate', description: 'Beacon-only delegation.' });
   const agents = new Map<string, Agent>();
   const skills = new Map([[skill.key, skill]] satisfies [string, Skill][]);
-  const tools = new Map([[tool.key, tool], [delegateTool.key, delegateTool]] satisfies [string, Tool][]);
+  const tools = new Map([[tool.key, tool]] satisfies [string, Tool][]);
   const agentSkills = new Map<string, AgentSkill>();
   const agentTools = new Map<string, AgentTool>();
 
@@ -56,7 +54,7 @@ function fixture() {
       return link;
     },
   };
-  return { scope, skill, tool, delegateTool, source };
+  return { scope, skill, tool, source };
 }
 
 describe('agent service integrity', () => {
@@ -84,12 +82,4 @@ describe('agent service integrity', () => {
       .rejects.toBeInstanceOf(DuplicateAgentLinkError);
   });
 
-  test('allows core.delegate grants only on the canonical Beacon identity', async () => {
-    const { scope, tool, delegateTool, source } = fixture(); const service = createAgentService(source);
-    const ordinary = await service.createAgent({ slug: 'forge', name: 'Forge', title: 'Developer', scopeKey: scope.key });
-    await expect(service.grantTool({ agentKey: ordinary.key, toolKey: delegateTool.key })).rejects.toBeInstanceOf(RestrictedAgentToolGrantError);
-    const beacon = await service.createAgent({ slug: 'beacon', name: 'Beacon', title: 'AI Coordinator', scopeKey: scope.key });
-    await expect(service.grantTool({ agentKey: beacon.key, toolKey: delegateTool.key })).resolves.toMatchObject({ agentKey: beacon.key, toolKey: delegateTool.key });
-    await expect(service.grantTool({ agentKey: beacon.key, toolKey: tool.key })).rejects.toThrow('may only be granted core.delegate');
-  });
 });

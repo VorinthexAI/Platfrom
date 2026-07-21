@@ -6,18 +6,20 @@ import type { ModelProvider } from '@/lib/db/model-providers.node';
 import type { Provider } from '@/lib/db/providers.node';
 import type { OrganizationCredentialsRepository } from '@/lib/ai/organization-credentials';
 
-export interface RouteDecision {
+interface RouteDecisionBase {
   organizationKey: string;
   actionKey: string;
   actionSlug: Action['slug'];
   modelKey: string;
   modelSlug: Model['slug'];
   providerKey: string;
-  /** Global provider key enabled for this organization and used to load its credentials. */
-  orgProviderKey: string;
   providerSlug: Provider['slug'];
   providerModelId: string;
 }
+export type RouteDecision = RouteDecisionBase & (
+  | { credentialSource: 'organization'; /** Global provider key used to load organization credentials. */ orgProviderKey: string }
+  | { credentialSource: 'environment'; orgProviderKey?: never }
+);
 export interface RouterDataSource {
   getActionBySlug(slug: Action['slug']): Promise<Action | null>;
   getModelBySlug(slug: Model['slug']): Promise<Model | null>;

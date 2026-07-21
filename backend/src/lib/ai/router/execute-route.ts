@@ -5,6 +5,7 @@ import { getDefaultOrganizationCredentialsRepository } from '@/lib/ai/organizati
 import { ZERO_TOKEN_USAGE, type TokenUsage } from '@/lib/ai/shared/usage';
 import { ProviderExecutionError } from './errors';
 import { selectRoute } from './select-route';
+import { createStaticProviderAdapter } from './static-routes';
 import type { RouteRequestInput } from './route-request';
 import type { RouteDecision, RouterDependencies } from './types';
 import type { CoreChatInput } from '@/lib/ai/actions/core-chat';
@@ -23,6 +24,7 @@ export interface ExecuteRouteOptions<TInput> {
 async function resolveAdapter(decision: RouteDecision, adapters: ExecuteRouteOptions<unknown>['adapters'], credentials: ExecuteRouteOptions<unknown>['credentials']): Promise<ProviderAdapter | undefined> {
   const injected = adapters?.[decision.providerSlug];
   if (injected) return injected;
+  if (decision.credentialSource === 'environment') return createStaticProviderAdapter(decision.providerSlug);
   const encryptedRepository = credentials ?? getDefaultOrganizationCredentialsRepository();
   const organizationCredentials = await encryptedRepository.getCredentials(decision.organizationKey, decision.orgProviderKey);
   if (!organizationCredentials) return undefined;

@@ -2,7 +2,7 @@ import { ACTION_SLUGS, isValidActionIdFormat } from './types';
 
 export { ACTION_SLUGS, actionIdSchema, type ActionId } from './types';
 export { ACTION_DEFINITIONS, getActionDefinition, type ActionDefinition, type ActionModelBinding, type ActionModelPolicy } from './definitions';
-export { createDataActions, type ActionNode } from './data';
+export { createDataActions, traverseInputSchema, traverseNodes, type ActionNode, type TraverseInput } from './data';
 export { coreChatContentSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, coreChatInputSchema, type CoreChatContent, type CoreChatMessage, type CoreChatToolDefinition, type CoreChatInput } from './core-chat';
 export {
   actionSchema,

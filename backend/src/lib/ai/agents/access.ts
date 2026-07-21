@@ -20,9 +20,7 @@ export type ResolvedExecutionPrincipal =
   | { kind: 'member'; user: User; userOrganization: UserOrganization; scopeMember: ScopeMember | null }
   | { kind: 'system' };
 
-export type ServiceAgentDelegation =
-  | { /** Beacon may orchestrate for any active member already authorized for the selected scope. */ agentSlug: 'beacon'; requiredOrganizationRole: null }
-  | { /** Genesis may create agents only for organization owners. */ agentSlug: 'genesis'; requiredOrganizationRole: 'owner' };
+export type ServiceAgentDelegation = { agentSlug: 'beacon'; requiredOrganizationRole: null };
 
 export interface ExecutionAccessDataSource {
   getUserOrganization(key: string): Promise<UserOrganization | null>;
@@ -104,7 +102,7 @@ export async function authorizeAgentExecution(
   if (agentGrants.length === 0) throw new AgentExecutionAccessError(`membership ${membership.key} has no agent grant for ${runtime.agent.key}`);
   const effectiveRole = membership.orgRole === 'owner' || membership.orgRole === 'admin' ? membership.orgRole : scopeMember?.role ?? null;
   const roleRank = { owner: 4, admin: 3, moderator: 2, viewer: 1 } as const;
-  if ((['genesis', 'beacon'].includes(runtime.agent.slug) || runtime.agent.slug.startsWith('system-')) && effectiveRole !== 'owner') throw new AgentExecutionAccessError(`system agent ${runtime.agent.key} requires owner access`);
+  if ((runtime.agent.slug === 'beacon' || runtime.agent.slug.startsWith('system-')) && effectiveRole !== 'owner') throw new AgentExecutionAccessError(`system agent ${runtime.agent.key} requires owner access`);
   if (agentGrants.every((grant) => grant.source === 'inherited') && (!effectiveRole || roleRank[effectiveRole] < roleRank[scopeAgent.minimumAccessRole])) throw new AgentExecutionAccessError(`inherited grant does not meet ${scopeAgent.minimumAccessRole} threshold`);
   const resolved = { kind: 'member' as const, user, userOrganization: membership, scopeMember };
   const sharedDecision = await source.evaluateAgentAccess?.(runtime, resolved);

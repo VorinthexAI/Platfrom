@@ -3,13 +3,12 @@ import { z } from 'zod';
 import { AiError } from '@/lib/ai/shared/result';
 import { getOrganizationById } from '@/lib/db/organizations.node';
 import { getDefaultScopeRepository, type Scope } from '@/lib/ai/scopes';
-import { getToolBySlug, type Tool } from '@/lib/db/tools.node';
 import { getSkillBySlug, insertSkill, updateSkill, type Skill } from '@/lib/db/skills.node';
 import { getAgentBySlug, insertAgent, updateAgent, type Agent } from '@/lib/db/agents.node';
 import { deleteAgentSkill, getAgentSkillByPair, insertAgentSkill, listAgentSkillsByAgentKey, updateAgentSkillPriority, type AgentSkill } from '@/lib/db/agent-skills.node';
-import { deleteAgentTool, getAgentToolByPair, insertAgentTool, listAgentToolsByAgentKey, type AgentTool } from '@/lib/db/agent-tools.node';
+import { deleteAgentTool, listAgentToolsByAgentKey } from '@/lib/db/agent-tools.node';
 import { loadAgentRuntime } from '@/lib/ai/agents';
-import { cuidSchema } from '@/lib/ai/agents/genesis/schemas';
+const cuidSchema = z.string().cuid();
 
 /**
  * Beacon is the canonical system agent behind Founders Gate: one immutable
@@ -23,12 +22,10 @@ export const BEACON_AGENT_NAME = 'Beacon';
 export const BEACON_AGENT_TITLE = 'AI Coordinator';
 export const BEACON_SCOPE_SLUG = 'nexus';
 export const BEACON_SKILL_SLUG = 'beacon-coordination';
-export const BEACON_DELEGATE_TOOL_SLUG = 'core.delegate' as const;
 
 export const BEACON_AGENT_KEY = cuidSchema.parse('cmbeaconagent0000000000001');
 export const BEACON_SKILL_KEY = cuidSchema.parse('cmbeaconskill0000000000001');
 export const BEACON_AGENT_SKILL_KEY = cuidSchema.parse('cmbeaconagentskill00000001');
-export const BEACON_AGENT_TOOL_DELEGATE_KEY = cuidSchema.parse('cmbeaconagenttooldelegate01');
 
 export class BeaconSeedPrerequisiteError extends AiError {
   constructor(detail: string) {
@@ -42,8 +39,6 @@ export interface SeedBeaconResult {
   skill: Skill;
   agent: Agent;
   agentSkill: AgentSkill;
-  agentTools: AgentTool[];
-  tools: Tool[];
 }
 
 async function loadBeaconSkillDefinition(): Promise<string> {
@@ -52,7 +47,7 @@ async function loadBeaconSkillDefinition(): Promise<string> {
   return definition;
 }
 
-/** Idempotently seeds Beacon into Nexus with core.delegate as its only tool. */
+/** Idempotently seeds Beacon into Nexus without executable tool grants. */
 export async function seedBeacon(organizationKey: string): Promise<SeedBeaconResult> {
   const validOrganizationKey = z.string().trim().min(1).parse(organizationKey);
   const [definition, organization] = await Promise.all([
@@ -64,14 +59,6 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
   const scope = (await getDefaultScopeRepository().listScopes(validOrganizationKey))
     .find((candidate) => candidate.slug === BEACON_SCOPE_SLUG) ?? null;
   if (!scope) throw new BeaconSeedPrerequisiteError(`scope ${BEACON_SCOPE_SLUG}`);
-
-  const toolSeeds = [{ slug: BEACON_DELEGATE_TOOL_SLUG, relationKey: BEACON_AGENT_TOOL_DELEGATE_KEY }] as const;
-  const tools: Tool[] = [];
-  for (const seed of toolSeeds) {
-    const tool = await getToolBySlug(seed.slug);
-    if (!tool || !tool.enabled) throw new BeaconSeedPrerequisiteError(`tool ${seed.slug}`);
-    tools.push(tool);
-  }
 
   const existingSkill = await getSkillBySlug(BEACON_SKILL_SLUG);
   const skill = existingSkill
@@ -90,25 +77,14 @@ export async function seedBeacon(organizationKey: string): Promise<SeedBeaconRes
   const otherSkills = (await listAgentSkillsByAgentKey(agent.key)).filter(({ skillKey }) => skillKey !== skill.key);
   await Promise.all(otherSkills.map(({ key }) => deleteAgentSkill(key)));
 
-  const agentTools: AgentTool[] = [];
-  for (const [index, seed] of toolSeeds.entries()) {
-    const tool = tools[index]!;
-    agentTools.push(await getAgentToolByPair(agent.key, tool.key)
-      ?? await insertAgentTool({ key: seed.relationKey, agentKey: agent.key, toolKey: tool.key }));
-  }
-  const allowedToolKeys = new Set(tools.map(({ key }) => key));
-  const otherTools = (await listAgentToolsByAgentKey(agent.key)).filter(({ toolKey }) => !allowedToolKeys.has(toolKey));
-  await Promise.all(otherTools.map(({ key }) => deleteAgentTool(key)));
+  await Promise.all((await listAgentToolsByAgentKey(agent.key)).map(({ key }) => deleteAgentTool(key)));
 
   const runtime = await loadAgentRuntime(agent.key);
   const beaconSkills = runtime.skills.filter(({ skill: runtimeSkill }) => runtimeSkill.slug === BEACON_SKILL_SLUG);
   if (runtime.skills.length !== 1 || beaconSkills.length !== 1 || beaconSkills[0]?.relation.priority !== 100) {
     throw new BeaconSeedPrerequisiteError('Beacon must expose exactly one priority-100 coordination skill');
   }
-  const delegateGrant = runtime.tools.find(({ tool }) => tool.slug === BEACON_DELEGATE_TOOL_SLUG);
-  if (runtime.tools.length !== 1 || delegateGrant?.actions.length !== 1 || delegateGrant.actions[0]?.action.slug !== 'core.delegate') {
-    throw new BeaconSeedPrerequisiteError('Beacon must expose only core.delegate mapped to core.delegate');
-  }
+  if (runtime.tools.length !== 0) throw new BeaconSeedPrerequisiteError('Beacon must not expose executable tools');
 
-  return { organizationKey: validOrganizationKey, scope, skill, agent, agentSkill, agentTools, tools };
+  return { organizationKey: validOrganizationKey, scope, skill, agent, agentSkill };
 }

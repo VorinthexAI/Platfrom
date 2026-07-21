@@ -36,8 +36,6 @@ const accessToolRegistry = Object.fromEntries(accessToolIds.map((id) => [id, {
 export const TOOL_REGISTRY = {
   'ask.answer': { id: 'ask.answer', name: 'Ask', description: 'Answer the user over the current message history. Granting this tool is what gives an agent a conversational surface at all.', scopeId: null },
   'reason.solve': { id: 'reason.solve', name: 'Solve', description: 'Work through a hard problem step by step before answering.', scopeId: null },
-  'core.delegate': { id: 'core.delegate', name: 'Delegate', description: 'Delegate one strictly validated task from Beacon to an allow-listed service agent.', scopeId: null },
-  'agent.create': { id: 'agent.create', name: 'Create Agent', description: 'Creates or reuses a complete agent architecture from a validated Genesis manifest.', scopeId: null },
   'artifact.create': { id: 'artifact.create', name: 'Create Artifact', description: 'Create a validated semantic graph artifact from live bindings in the active scope.', scopeId: null },
   'artifact.read': { id: 'artifact.read', name: 'Read Artifact', description: 'Lazily load an authorized artifact through its registered context resolver.', scopeId: null },
   'image.create': { id: 'image.create', name: 'Create Image', description: 'Generate a new image from a text prompt.', scopeId: null },
