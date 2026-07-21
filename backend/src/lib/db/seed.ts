@@ -788,52 +788,22 @@ The long term vision is to create a new way of interacting with software. Rather
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
-    key: 'cmrnlzf640002qc7kfp2qelhq',
-    slug: 'launch',
-    name: 'Launch',
-    summary: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
-    description: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
+    key: 'cmrnlzf640004qc7kdvj99uva',
+    slug: 'command',
+    name: 'Command',
+    summary: 'A command center with 20 AI executive orchestrators, from Atlas to Vulcan, for every function of the company.',
+    description: 'A command center with 20 AI executive orchestrators, led by Atlas and spanning operations, intelligence, growth, product, finance, security, and more, leading the work while you lead the vision.',
     position: 2,
     level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
   {
-    key: 'cmrnlzf640003qc7k4n8zesyz',
-    slug: 'studio',
-    name: 'Studio',
-    summary: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
-    description: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
-    position: 3,
-    level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
-  },
-  {
-    key: 'cmrnlzf640004qc7kdvj99uva',
-    slug: 'command',
-    name: 'Command',
-    summary: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
-    description: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
-    position: 7,
-    level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
-  },
-  {
     key: 'cmrnlzf640005qc7kefvra0bn',
-    slug: 'head-quarters',
-    name: 'Head Quarters',
-    summary: 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
-    description: 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
-    position: 4,
-    level: 2,
-    parentKey: NEXUS_SCOPE_KEY,
-  },
-  {
-    key: 'cmrnlzf640006qc7kfjl23jc3',
-    slug: 'replica',
-    name: 'Replica',
-    summary: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
-    description: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
-    position: 5,
+    slug: 'hq',
+    name: 'HQ',
+    summary: 'The organization workspace for communication, collaboration, planning, and coordinated work.',
+    description: 'HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.',
+    position: 3,
     level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
@@ -841,12 +811,67 @@ The long term vision is to create a new way of interacting with software. Rather
     key: 'cmrnlzf640007qc7kd6a2g0o8',
     slug: 'pilot',
     name: 'Pilot',
-    summary: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
-    description: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
+    summary: 'A learning platform for the AI era.',
+    description: 'Pilot is the Vorinthex learning platform for the AI era, built to help people develop the understanding and practical fluency they need to move forward.',
+    position: 4,
+    level: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640003qc7k4n8zesyz',
+    slug: 'studio',
+    name: 'Studio',
+    summary: 'A unified studio for chat, image, video, music, voice, code, documents, and research.',
+    description: 'Every leading AI model in one interface, chat, image, video, music, voice, code, documents, and research in a single creative workspace.',
+    position: 5,
+    level: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  {
+    key: 'cmrnlzf640002qc7kfp2qelhq',
+    slug: 'launch',
+    name: 'Launch',
+    summary: 'A lightweight platform to create agents, automations, workflows, and deploy them everywhere.',
+    description: 'A lightweight platform to create agents, automations, and workflows, then deploy them everywhere your work happens.',
     position: 6,
     level: 2,
     parentKey: NEXUS_SCOPE_KEY,
   },
+  {
+    key: 'cmrnlzf640006qc7kfjl23jc3',
+    slug: 'replica',
+    name: 'Replica',
+    summary: 'A sandbox for experiencing a product before you connect.',
+    description: 'Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.',
+    position: 7,
+    level: 2,
+    parentKey: NEXUS_SCOPE_KEY,
+  },
+  { key: 'cmrnlzf650001qc7k4p5zem5w', slug: 'archive', name: 'Archive', summary: 'Capture notes, ideas, research, labels, folders, semantic search, and knowledge graph connections.', description: 'Archive lets you capture, organize, semantically search, and connect your notes through folders, labels, backlinks, and graph traversal.', position: 1, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650002qc7k4p5zem5w', slug: 'gallery', name: 'Gallery', summary: 'A smart image and memory library with albums, clusters, sharing links, QR invites, and AI powered discovery.', description: 'Gallery organizes memories and images into smart albums, clusters, shared links, QR invites, and AI powered discovery.', position: 2, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650003qc7k4p5zem5w', slug: 'signal', name: 'Signal', summary: 'An AI inbox guard across email and messages that filters noise, prioritizes what matters, and can reply in your tone.', description: 'Signal is an AI inbox guard that filters noise across connected inboxes, prioritizes important messages, and can reply in your tone when approved.', position: 3, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650004qc7k4p5zem5w', slug: 'compass', name: 'Compass', summary: 'A 3D life map for memories, places visited, cities to visit, countries planned, and journeys rendered as a globe.', description: 'Compass maps visited places, future destinations, travel memories, and plans on an interactive 3D globe.', position: 4, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650005qc7k4p5zem5w', slug: 'ascend', name: 'Ascend', summary: 'A personal AI coach for mental goals, habits, health, routines, finance, and custom AI generated audio books.', description: 'Ascend is a personal AI coach for goals, habits, health, routines, finance, and custom AI generated audio books and learning journeys.', position: 5, level: 3, parentKey: 'cmrnlzf640001qc7kazsr96k5' },
+  { key: 'cmrnlzf650006qc7k4p5zem5w', slug: 'atlas', name: 'Atlas', summary: 'Vision, leadership, direction, executive strategy, and company wide decisions.', description: 'Vision, leadership, direction, executive strategy, and company wide decisions.', position: 1, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650007qc7k4p5zem5w', slug: 'hermes', name: 'Hermes', summary: 'Operations, execution, efficiency, systems, process, and delivery.', description: 'Operations, execution, efficiency, systems, process, and delivery.', position: 2, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650008qc7k4p5zem5w', slug: 'metis', name: 'Metis', summary: 'Intelligence, knowledge, data, documents, RAG, internal brain, and integrations.', description: 'Intelligence, knowledge, data, documents, RAG, internal brain, and integrations.', position: 3, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650009qc7k4p5zem5w', slug: 'phoenix', name: 'Phoenix', summary: 'Growth, market insight, acquisition, activation, retention, and durable commercial value.', description: 'Growth, market insight, acquisition, activation, retention, and durable commercial value.', position: 4, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650010qc7k4p5zem5w', slug: 'apollo', name: 'Apollo', summary: 'Strategy, foresight, growth, market direction, and long range planning.', description: 'Strategy, foresight, growth, market direction, and long range planning.', position: 5, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650011qc7k4p5zem5w', slug: 'iris', name: 'Iris', summary: 'Communication, brand, voice, PR, messaging, and internal and external communications.', description: 'Communication, brand, voice, PR, messaging, and internal and external communications.', position: 6, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650012qc7k4p5zem5w', slug: 'echo', name: 'Echo', summary: 'Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.', description: 'Institutional learning, expertise reuse, durable guidance, knowledge discovery, and trusted organizational memory.', position: 7, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650013qc7k4p5zem5w', slug: 'matrix', name: 'Matrix', summary: 'Data governance, lineage, ownership, quality, definitions, and decision ready data assets.', description: 'Data governance, lineage, ownership, quality, definitions, and decision ready data assets.', position: 8, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650014qc7k4p5zem5w', slug: 'harmony', name: 'Harmony', summary: 'People systems, talent, culture, organizational structure, capability, and sustained high quality work.', description: 'People systems, talent, culture, organizational structure, capability, and sustained high quality work.', position: 9, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650015qc7k4p5zem5w', slug: 'ledger', name: 'Ledger', summary: 'Finance, capital, budgets, cash flow, forecasting, and financial risk.', description: 'Finance, capital, budgets, cash flow, forecasting, and financial risk.', position: 10, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650016qc7k4p5zem5w', slug: 'orbit', name: 'Orbit', summary: 'Marketing, growth, demand, branding, content, campaigns, SEO, and social.', description: 'Marketing, growth, demand, branding, content, campaigns, SEO, and social.', position: 11, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650017qc7k4p5zem5w', slug: 'mercury', name: 'Mercury', summary: 'Revenue, analytics, MRR, forecasting, sales patterns, churn, and retention.', description: 'Revenue, analytics, MRR, forecasting, sales patterns, churn, and retention.', position: 12, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650018qc7k4p5zem5w', slug: 'sentinel', name: 'Sentinel', summary: 'Security, risk, protection, compliance, privacy, and trust.', description: 'Security, risk, protection, compliance, privacy, and trust.', position: 13, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650019qc7k4p5zem5w', slug: 'athena', name: 'Athena', summary: 'Product, experience, innovation, roadmap, value, and users.', description: 'Product, experience, innovation, roadmap, value, and users.', position: 14, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650020qc7k4p5zem5w', slug: 'forge', name: 'Forge', summary: 'Technology, architecture, engineering, infrastructure, and AI.', description: 'Technology, architecture, engineering, infrastructure, and AI.', position: 15, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650021qc7k4p5zem5w', slug: 'aura', name: 'Aura', summary: 'Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.', description: 'Customer and product experience, journey coherence, friction reduction, confidence, and meaningful touchpoints.', position: 16, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650022qc7k4p5zem5w', slug: 'pillar', name: 'Pillar', summary: 'Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.', description: 'Quality systems, prevention, measurable delivery standards, early defect detection, and durable improvement.', position: 17, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650023qc7k4p5zem5w', slug: 'helios', name: 'Helios', summary: 'Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.', description: 'Accountable AI capability, use cases, evaluation, safety, human ownership, and durable advantage.', position: 18, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650024qc7k4p5zem5w', slug: 'vulcan', name: 'Vulcan', summary: 'Observable, safe, maintainable automation that removes repeatable operational drag.', description: 'Observable, safe, maintainable automation that removes repeatable operational drag.', position: 19, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
+  { key: 'cmrnlzf650025qc7k4p5zem5w', slug: 'themis', name: 'Themis', summary: 'Legal, governance, ethics, contracts, compliance, and policy.', description: 'Legal, governance, ethics, contracts, compliance, and policy.', position: 20, level: 3, parentKey: 'cmrnlzf640004qc7kdvj99uva' },
 ] as const;
 
 type SeededOrchestratorSource = {
@@ -1198,6 +1223,18 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
   const rootOrganization = await getRootOrganization();
   if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'core seed');
+  await db.query(aql`
+    LET hasHq = LENGTH((
+      FOR existing IN ${db.collection('scopes')}
+        FILTER existing.organizationKey == ${rootOrganization.key} AND existing.slug == ${'hq'}
+        RETURN 1
+    ))
+    FOR scope IN ${db.collection('scopes')}
+      FILTER scope.organizationKey == ${rootOrganization.key}
+      FILTER scope.slug == ${'head-quarters'}
+      FILTER hasHq == 0
+      UPDATE scope WITH { slug: 'hq' } IN ${db.collection('scopes')}
+  `);
   const scopes = getDefaultScopeRepository();
   const organizationScopes = [...await scopes.listScopes(rootOrganization.key)];
   const scopesBySlug = new Map(organizationScopes.map((scope) => [scope.slug, scope]));
@@ -1231,25 +1268,25 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'scopes', key: scope.key, status: 'created' });
   }
 
-  const nexusScope = await scopes.getScopeByKey(actualKeysBySeedKey.get(NEXUS_SCOPE_KEY) ?? NEXUS_SCOPE_KEY);
-  if (!nexusScope) throw new SeedReferenceError('scope', 'nexus', 'scopeScopes');
   const relationsByChild = new Map<string, { parentKey: string; childKey: string }>();
   for (const scope of organizationScopes) {
     for (const relation of await scopes.listChildRelations(scope.key)) {
       relationsByChild.set(relation.childKey, relation);
     }
   }
-  const nexusChildren = SEEDED_SCOPES.filter((scope) => scope.parentKey === NEXUS_SCOPE_KEY);
-  for (const seed of nexusChildren) {
+  for (const seed of SEEDED_SCOPES.filter((scope) => scope.parentKey)) {
     const childKey = actualKeysBySeedKey.get(seed.key) ?? seed.key;
     const child = await scopes.getScopeByKey(childKey);
     if (!child) throw new SeedReferenceError('scope', seed.slug, 'scopeScopes');
+    const parentKey = actualKeysBySeedKey.get(seed.parentKey!) ?? seed.parentKey!;
+    const parent = await scopes.getScopeByKey(parentKey);
+    if (!parent) throw new SeedReferenceError('scope', seed.parentKey!, 'scopeScopes');
     const existingRelation = relationsByChild.get(child.key);
-    if (existingRelation?.parentKey === nexusScope.key) continue;
+    if (existingRelation?.parentKey === parent.key) continue;
     if (existingRelation) {
       await scopes.removeScopeRelation(existingRelation.parentKey, child.key);
     }
-    const relation = await scopes.addScopeRelation(nexusScope.key, child.key);
+    const relation = await scopes.addScopeRelation(parent.key, child.key);
     relationsByChild.set(child.key, relation);
     results.push({ collection: 'scopeScopes', key: relation.key, status: 'created' });
   }

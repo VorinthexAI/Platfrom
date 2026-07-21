@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { embed, embeddingMetadata } from '../lib/embed';
+import { embedText, embeddingMetadata } from '../lib/bedrock-titan';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -16,7 +16,6 @@ import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes'
 import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
 import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
 import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
-import { createOpenAIProvider } from '../lib/ai/providers/openai';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
@@ -26,10 +25,6 @@ const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
 const username = process.env.ARANGO_USERNAME ?? 'root';
 const password = process.env.ARANGO_ROOT_PASSWORD ?? '';
-const openAiApiKey = process.env.OPENAI_API_KEY?.trim();
-if (!openAiApiKey) throw new Error('OPENAI_API_KEY is required to migrate embeddings');
-const embeddingProvider = createOpenAIProvider({ apiKey: openAiApiKey });
-
 interface CollectionSpec {
   name: string;
   indexes?: Array<{ fields: string[]; unique?: boolean; sparse?: boolean }>;
@@ -42,7 +37,7 @@ function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: re
 }
 
 function generateEmbedding(text: string) {
-  return embed({ text }, { provider: embeddingProvider });
+  return embedText({ text });
 }
 
 function nonEmptyString(value: unknown): string | null {

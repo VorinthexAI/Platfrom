@@ -10,16 +10,16 @@ import { join } from 'node:path';
 import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 
 describe('scope seeds', () => {
-  test('place the seven product scopes as siblings directly below Nexus', () => {
+  test('place products and their Core capability and Command orchestrator children in the Nexus hierarchy', () => {
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === null).map(({ slug }) => slug)).toEqual(['nexus']);
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual([
       'core',
-      'launch',
-      'studio',
-      'head-quarters',
-      'replica',
-      'pilot',
       'command',
+      'hq',
+      'pilot',
+      'studio',
+      'launch',
+      'replica',
     ]);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.key).toBe(NEXUS_SCOPE_KEY);
     expect(new Set(SEEDED_SCOPES.map(({ key }) => key)).size).toBe(SEEDED_SCOPES.length);
@@ -34,17 +34,16 @@ describe('scope seeds', () => {
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.position).toBe(1);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.level).toBe(1);
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'nexus')?.summary).toBe('Vorinthex is an AI native platform that unifies intelligence, knowledge and execution into a single system that helps people and organizations think, build and achieve more with artificial intelligence.');
-    expect(Object.fromEntries(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).map(({ slug, position }) => [slug, position]))).toEqual({ core: 1, launch: 2, studio: 3, command: 7, 'head-quarters': 4, replica: 5, pilot: 6 });
+    expect(Object.fromEntries(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).map(({ slug, position }) => [slug, position]))).toEqual({ core: 1, command: 2, hq: 3, pilot: 4, studio: 5, launch: 6, replica: 7 });
     expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === NEXUS_SCOPE_KEY).every(({ level }) => level === 2)).toBe(true);
-    expect(Object.fromEntries(SEEDED_SCOPES.filter(({ slug }) => slug !== 'nexus').map(({ slug, description }) => [slug, description]))).toEqual({
-      core: 'Your personal AI brain for memory, knowledge, reasoning, and everyday productivity across work and life.',
-      launch: 'Build, automate, deploy, and manage intelligent workflows, agents, and business processes from one unified workspace.',
-      studio: 'Create websites, apps, documents, images, videos, music, and code with AI powered creative and development tools.',
-      command: 'Manage AI executive teams and orchestrators that help lead strategy, operations, growth, finance, technology, and security.',
-      'head-quarters': 'Collaborate across teams, projects, files, calendars, meetings, and communication in one centralized workspace.',
-      replica: 'Explore interactive demonstrations of every Vorinthex capability using realistic sample data before deploying your own.',
-      pilot: 'Your conversational AI assistant that helps you navigate, operate, and get the most out of the entire Vorinthex platform.',
-    });
+    const core = SEEDED_SCOPES.find(({ slug }) => slug === 'core')!;
+    const command = SEEDED_SCOPES.find(({ slug }) => slug === 'command')!;
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['archive', 'gallery', 'signal', 'compass', 'ascend']);
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === command.key).sort((left, right) => left.position - right.position).map(({ slug }) => slug)).toEqual(['atlas', 'hermes', 'metis', 'phoenix', 'apollo', 'iris', 'echo', 'matrix', 'harmony', 'ledger', 'orbit', 'mercury', 'sentinel', 'athena', 'forge', 'aura', 'pillar', 'helios', 'vulcan', 'themis']);
+    expect(SEEDED_SCOPES.filter(({ parentKey }) => parentKey === core.key || parentKey === command.key).every(({ level }) => level === 3)).toBe(true);
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'hq')).toMatchObject({ name: 'HQ', key: 'cmrnlzf640005qc7kefvra0bn' });
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'archive')).toMatchObject({ summary: 'Capture notes, ideas, research, labels, folders, semantic search, and knowledge graph connections.', description: 'Archive lets you capture, organize, semantically search, and connect your notes through folders, labels, backlinks, and graph traversal.' });
+    expect(SEEDED_SCOPES.find(({ slug }) => slug === 'atlas')).toMatchObject({ summary: 'Vision, leadership, direction, executive strategy, and company wide decisions.', description: 'Vision, leadership, direction, executive strategy, and company wide decisions.' });
   });
 });
 

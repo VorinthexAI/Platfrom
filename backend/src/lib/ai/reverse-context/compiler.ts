@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { embed } from '@/lib/embed';
+import { embedText } from '@/lib/bedrock-titan';
 import { sourceSelectionSchema, type SourceSelection } from '@/lib/ai/agent-run-sources';
 import { buildKnowledgePack } from './knowledge-pack';
 import { rankKnowledgeBlocks } from './ranking';
@@ -42,7 +42,7 @@ export class ReverseContextCompiler {
     const tokenBudget = z.number().int().min(64).max(200_000).parse(input.tokenBudget ?? this.options.defaultTokenBudget ?? 4_000);
     const manualSources = z.array(sourceSelectionSchema).parse(input.manualSources ?? []);
     const nodeTypes = [...new Set((input.nodeTypes ?? this.options.registry.listNodeTypes()).map((type) => this.options.registry.get(type).nodeType))];
-    const queryEmbedding = await (this.options.generateEmbedding ?? (async (text: string) => embed({ text })))(query);
+    const queryEmbedding = await (this.options.generateEmbedding ?? (async (text: string) => embedText({ text })))(query);
 
     const candidates: Array<Parameters<typeof rankKnowledgeBlocks>[0][number]> = [];
     for (const source of manualSources.sort((left, right) => right.priority - left.priority)) {

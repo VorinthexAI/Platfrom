@@ -34,6 +34,7 @@ const ENTITY_LAYERS: Array<{ name: string; entities: GalaxyEntity[] }> = [
     name: "Products",
     entities: [
       VORINTHEX_GALAXY_REGISTRY.products.hq,
+      VORINTHEX_GALAXY_REGISTRY.products.command,
       VORINTHEX_GALAXY_REGISTRY.products.launch,
       VORINTHEX_GALAXY_REGISTRY.products.studio,
       VORINTHEX_GALAXY_REGISTRY.products.replica,

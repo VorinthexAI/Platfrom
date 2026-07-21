@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { embed } from '@/lib/embed';
+import { embedText } from '@/lib/bedrock-titan';
 import { AiError } from '@/lib/ai/shared/result';
 import { nodeTypeSchema } from '@/lib/ai/agent-run-sources';
 import { type ArtifactResolverRegistry, defaultArtifactResolverRegistry } from '@/lib/ai/artifact-resolvers';
@@ -70,7 +70,7 @@ export async function checkArtifactNovelty(input: CheckArtifactNoveltyInput, opt
   }).strict().parse(input);
   const registry = options.resolvers ?? defaultArtifactResolverRegistry;
   const policy = (options.policies ?? defaultSimilarityPolicyRegistry).get(parsed.candidateNodeType);
-  const embedding = await (options.generateEmbedding ?? (async (text) => embed({ text })))(parsed.candidateText);
+  const embedding = await (options.generateEmbedding ?? (async (text) => embedText({ text })))(parsed.candidateText);
   const similar = [...await registry.get(parsed.candidateNodeType).findSimilar(embedding, parsed.limit)]
     .filter((match) => match.reference.nodeKey !== parsed.candidateNodeKey)
     .sort((left, right) => right.similarity - left.similarity);

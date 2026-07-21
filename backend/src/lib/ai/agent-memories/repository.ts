@@ -2,7 +2,7 @@ import { aql } from 'arangojs';
 import type { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
-import { embed } from '@/lib/embed';
+import { embedText } from '@/lib/bedrock-titan';
 import { newId } from '@/lib/ids';
 import { AGENT_MEMORIES_COLLECTION, agentMemorySchema, type AgentMemory } from './schema';
 
@@ -16,7 +16,7 @@ export function createAgentMemoryRepository(database = db): AgentMemoryRepositor
     async insertMemory(input) {
       const key = input.key ?? newId();
       const parsed = agentMemorySchema.parse({ ...input, key, embedding: [], createdAt: new Date().toISOString() });
-      const memory = { ...parsed, embedding: await embed({ text: parsed.content }) };
+      const memory = { ...parsed, embedding: await embedText({ text: parsed.content }) };
       const result = await database.collection(AGENT_MEMORIES_COLLECTION).save(toArangoDoc(memory), { returnNew: true });
       return agentMemorySchema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
