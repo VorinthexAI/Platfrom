@@ -1051,7 +1051,7 @@
       "locked": false,
       "description": "Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.",
       "designIntent": "Logo for product entity product.replica, generated from web/app/src/lib/galaxy/registry.ts.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -1068,10 +1068,26 @@
           "rejected": false,
           "notes": "Generated from galaxy registry entity product.replica",
           "createdAt": "2026-07-21T15:22:24.838Z"
+        },
+        {
+          "id": "v2",
+          "version": 2,
+          "prompt": "Create a premium test chamber logo: a single circular chrome aperture framing one small suspended sphere in a dark glass interior. The sphere should feel precisely contained, as though inside a controlled simulation chamber. Use a clean engineered silhouette, restrained inner light, obsidian negative space, and no text. Do not use mirrors, portals, cubes, shields, brains, buildings, people, or generic app icon geometry.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Replica\nType: product\nTagline: Experience Before You Connect\nDescription: Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.\nKey ideas: Explore a product in a dedicated sandbox.; Experience its value before you connect.; Decide what comes next with clarity..",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Replica\nSlug: product-replica\nCategory: product\nDescription: Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.\nDesign intent: Logo for product entity product.replica, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium test chamber logo: a single circular chrome aperture framing one small suspended sphere in a dark glass interior. The sphere should feel precisely contained, as though inside a controlled simulation chamber. Use a clean engineered silhouette, restrained inner light, obsidian negative space, and no text. Do not use mirrors, portals, cubes, shields, brains, buildings, people, or generic app icon geometry.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Replica\nType: product\nTagline: Experience Before You Connect\nDescription: Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.\nKey ideas: Explore a product in a dedicated sandbox.; Experience its value before you connect.; Decide what comes next with clarity..\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: Replica\nSlug: product-replica\nCategory: product\nDescription: Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.\nDesign intent: Logo for product entity product.replica, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium test chamber logo: a single circular chrome aperture framing one small suspended sphere in a dark glass interior. The sphere should feel precisely contained, as though inside a controlled simulation chamber. Use a clean engineered silhouette, restrained inner light, obsidian negative space, and no text. Do not use mirrors, portals, cubes, shields, brains, buildings, people, or generic app icon geometry.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: Replica\nType: product\nTagline: Experience Before You Connect\nDescription: Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.\nKey ideas: Explore a product in a dedicated sandbox.; Experience its value before you connect.; Decide what comes next with clarity..\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/product/product-replica/v2/solid-1024.png",
+          "transparentPath": "assets/product/product-replica/v2/transparent-1024.png",
+          "solidSvgPath": "assets/product/product-replica/v2/solid-1024.svg",
+          "transparentSvgPath": "assets/product/product-replica/v2/transparent-1024.svg",
+          "metadataPath": "assets/product/product-replica/v2/metadata.json",
+          "reviewPath": "runs/NBkFa9dHz_Sn/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity product.replica",
+          "createdAt": "2026-07-21T16:18:59.137Z"
         }
       ],
       "createdAt": "2026-07-21T15:21:13.253Z",
-      "updatedAt": "2026-07-21T15:22:24.842Z"
+      "updatedAt": "2026-07-21T16:18:59.143Z"
     },
     {
       "id": "product-product-studio",
@@ -2285,8 +2301,11 @@
       "locked": false,
       "description": "Open Graph and Twitter preview cards for pilot.vorinthex.com.",
       "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
       "versions": [
         {
+          "id": "v1",
+          "version": 1,
           "prompt": "Materialize social preview cards for pilot.vorinthex.com from Next.js metadata image routes.",
           "fullPrompt": "Target: Pilot\nSubdomain: pilot.vorinthex.com\nCanonical route: /pilot\nOpen Graph route: /pilot/opengraph-image\nTwitter route: /pilot/twitter-image\nBase URL: http://localhost:3000",
           "slideshowPath": "assets/announcement/social-card-pilot/v1/metadata.json",
@@ -2299,14 +2318,11 @@
           "accepted": true,
           "rejected": false,
           "notes": "Generated Open Graph and Twitter cards for pilot.vorinthex.com.",
-          "id": "v1",
-          "version": 1,
           "createdAt": "2026-07-21T15:33:13.285Z"
         }
       ],
       "createdAt": "2026-07-21T15:33:13.214Z",
-      "updatedAt": "2026-07-21T15:33:13.287Z",
-      "currentVersionId": "v1"
+      "updatedAt": "2026-07-21T15:33:13.287Z"
     },
     {
       "id": "announcement-social-card-replica",
@@ -2317,7 +2333,7 @@
       "locked": false,
       "description": "Open Graph and Twitter preview cards for replica.vorinthex.com.",
       "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
-      "currentVersionId": "v1",
+      "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
@@ -2335,10 +2351,27 @@
           "rejected": false,
           "notes": "Generated Open Graph and Twitter cards for replica.vorinthex.com.",
           "createdAt": "2026-07-21T15:33:12.974Z"
+        },
+        {
+          "prompt": "Materialize social preview cards for replica.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: Replica\nSubdomain: replica.vorinthex.com\nCanonical route: /replica\nOpen Graph route: /replica/opengraph-image\nTwitter route: /replica/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-replica/v2/metadata.json",
+          "previewPath": "assets/announcement/social-card-replica/v2/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-replica/v2/opengraph-1200x630.png",
+            "assets/announcement/social-card-replica/v2/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-replica/v2/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for replica.vorinthex.com.",
+          "id": "v2",
+          "version": 2,
+          "createdAt": "2026-07-21T16:19:16.464Z"
         }
       ],
       "createdAt": "2026-07-21T15:27:11.625Z",
-      "updatedAt": "2026-07-21T15:33:12.976Z"
+      "updatedAt": "2026-07-21T16:19:16.466Z"
     },
     {
       "id": "announcement-social-card-sentinel",

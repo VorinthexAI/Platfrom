@@ -1,6 +1,6 @@
 # Replica Logo Prompt
 
-Create a premium sibling product logo for Replica. It should feel like it belongs beside the Vorinthex master logo: a centered chrome emblem, circular or orbital silhouette, obsidian negative space, sharp engineered geometry, and no text. Encode this product idea abstractly: Experience Before You Connect.
+Create a premium test chamber logo: a single circular chrome aperture framing one small suspended sphere in a dark glass interior. The sphere should feel precisely contained, as though inside a controlled simulation chamber. Use a clean engineered silhouette, restrained inner light, obsidian negative space, and no text. Do not use mirrors, portals, cubes, shields, brains, buildings, people, or generic app icon geometry.
 
 Keep the whole family visually consistent with the existing Vorinthex AI logo:
 - obsidian black base
