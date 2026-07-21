@@ -30,12 +30,6 @@
         "priority": 100
       }
     ],
-    "agentTools": [
-      {
-        "key": "cmgenesisagenttoolcreate00001",
-        "agentSlug": "genesis",
-        "toolSlug": "agent.create"
-      }
-    ]
+    "agentTools": []
   }
 }
