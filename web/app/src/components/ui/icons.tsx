@@ -33,4 +33,8 @@ export const capabilityIcons: Record<CapabilityIcon, typeof ArchiveIcon> = {
   signal: SignalIcon,
   compass: CompassIcon,
   ascend: AscendIcon,
+  chorus: SignalIcon,
+  cadence: CompassIcon,
+  momentum: AscendIcon,
+  prism: GalleryIcon,
 };

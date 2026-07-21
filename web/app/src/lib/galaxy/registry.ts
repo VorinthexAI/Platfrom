@@ -136,6 +136,10 @@ const core: GalaxyEntity = {
     "capability.signal",
     "capability.compass",
     "capability.ascend",
+    "capability.chorus",
+    "capability.cadence",
+    "capability.momentum",
+    "capability.prism",
   ],
 };
 
@@ -588,7 +592,12 @@ function capability(
     ...rest,
     type: "capability",
     parentId: "product.core",
-    logo: { src: "", alt: `${input.name} icon`, kind: "procedural", iconKey },
+    logo: {
+      src: `/logos/entities/capability-${input.slug}.png`,
+      alt: `${input.name} icon`,
+      kind: "png",
+      iconKey,
+    },
     seo: {
       title: seoTitle,
       description: seoDescription,
@@ -902,6 +911,258 @@ const ascend = capability({
       "Define goals for fitness, mental growth, money, and habits.",
       "Generate custom audio books and learning journeys.",
       "Track progress and receive coaching based on real context.",
+    ],
+    primaryCta: "Join Hunt",
+    secondaryCta: "Explore Core",
+  },
+});
+
+const chorus = capability({
+  id: "capability.chorus",
+  slug: "chorus",
+  name: "Chorus",
+  iconKey: "signal",
+  shortDescription:
+    "Communication intelligence for messaging, channels, threads, and real time collaboration between people and AI.",
+  longDescription:
+    "Chorus is an AI native communication workspace for messaging, channels, threads, announcements, direct messages, and real time collaboration. It understands conversations semantically so people can search by meaning, summarize discussions, identify action items, translate messages, and recover important context without manual organization. Chorus supports rich communication data including reactions, mentions, attachments, presence, and persistent conversation history.",
+  tagline: "Every conversation, understood",
+  isLive: true,
+  visibility: "live",
+  launchDate: "TBD",
+  statusLabel: "Launching First",
+  price: { amount: 12.99, currency: "USD", interval: "month" },
+  visual: {
+    celestialKind: "asteroid",
+    orbitLevel: 1,
+    orbitRadius: 3.75,
+    orbitSpeed: 0.105,
+    orbitInclination: -0.3,
+    orbitTilt: 0.2,
+    initialAngle: 5.75,
+    size: 0.3,
+    materialPreset: "chrome-line-asteroid",
+    accent: "chrome",
+  },
+  routes: {
+    path: "/core/chorus",
+    subdomains: ["chorus.vorinthex.com"],
+    canonical: "/core/chorus",
+  },
+  seoTitle: "Chorus, Every Conversation Understood | Core",
+  seoDescription:
+    "Chorus is an AI native communication workspace for messaging, channels, threads, collaboration, semantic search, summaries, and action items.",
+  aeo: {
+    summary:
+      "Chorus is communication intelligence for messaging, channels, threads, and real time collaboration between people and AI.",
+    questions: [
+      {
+        question: "What is Chorus?",
+        answer:
+          "Chorus is an AI native communication workspace that understands messages, channels, threads, and collaboration by meaning. It creates summaries, action items, translations, and searchable conversation context.",
+      },
+    ],
+    llmsText: "AI native communication workspace for conversations and collaboration.",
+  },
+  content: {
+    eyebrow: "Core Capability",
+    headline: "Every conversation, understood.",
+    subheadline: "Messaging and collaboration with memory built in.",
+    body: "Chorus turns conversations into structured, searchable intelligence. Messages, threads, decisions, and action items stay clear and useful as discussions evolve.",
+    drawerLine: "Communication intelligence for messages, threads, and collaboration.",
+    bullets: [
+      "Search conversations by meaning, not only keywords.",
+      "Summarize discussions and extract action items automatically.",
+      "Keep channels, threads, mentions, reactions, and files organized.",
+    ],
+    primaryCta: "Join Hunt",
+    secondaryCta: "Explore Core",
+  },
+});
+
+const cadence = capability({
+  id: "capability.cadence",
+  slug: "cadence",
+  name: "Cadence",
+  iconKey: "compass",
+  shortDescription:
+    "Temporal intelligence for calendars, schedules, meetings, availability, reminders, and recurring events.",
+  longDescription:
+    "Cadence is an intelligent planning system for calendars, events, meetings, reminders, availability, deadlines, recurring schedules, reservations, and planning windows. It understands relationships between commitments, priorities, people, and resources, then helps resolve conflicts, suggest useful times, prepare agendas, protect focus time, and maintain clear follow through. Cadence treats time as structured information rather than a simple chronological list.",
+  tagline: "Time, intelligently arranged",
+  isLive: true,
+  visibility: "live",
+  launchDate: "TBD",
+  statusLabel: "Launching First",
+  price: { amount: 16.99, currency: "USD", interval: "month" },
+  visual: {
+    celestialKind: "asteroid",
+    orbitLevel: 1,
+    orbitRadius: 4.1,
+    orbitSpeed: 0.095,
+    orbitInclination: 0.25,
+    orbitTilt: -0.3,
+    initialAngle: 0.55,
+    size: 0.3,
+    materialPreset: "chrome-line-asteroid",
+    accent: "chrome",
+  },
+  routes: {
+    path: "/core/cadence",
+    subdomains: ["cadence.vorinthex.com"],
+    canonical: "/core/cadence",
+  },
+  seoTitle: "Cadence, Time Intelligently Arranged | Core",
+  seoDescription:
+    "Cadence is temporal intelligence for calendars, schedules, meetings, availability, reminders, recurring events, and intelligent planning.",
+  aeo: {
+    summary:
+      "Cadence is temporal intelligence for calendars, schedules, meetings, availability, reminders, recurring events, and planning.",
+    questions: [
+      {
+        question: "What is Cadence?",
+        answer:
+          "Cadence is an intelligent planning system that understands calendars, commitments, availability, meetings, deadlines, recurring events, and focus time to help arrange time with less friction.",
+      },
+    ],
+    llmsText: "Temporal intelligence for intelligent calendars and planning.",
+  },
+  content: {
+    eyebrow: "Core Capability",
+    headline: "Time, intelligently arranged.",
+    subheadline: "A calendar that understands commitments, priorities, and momentum.",
+    body: "Cadence turns schedules into an intelligent planning system. It sees the relationships between events, deadlines, availability, and priorities so time can be arranged with confidence.",
+    drawerLine: "Temporal intelligence for calendars, schedules, and planning.",
+    bullets: [
+      "Resolve conflicts and suggest useful meeting times.",
+      "Protect focus time around real priorities.",
+      "Manage events, reminders, availability, and recurring schedules.",
+    ],
+    primaryCta: "Join Hunt",
+    secondaryCta: "Explore Core",
+  },
+});
+
+const momentum = capability({
+  id: "capability.momentum",
+  slug: "momentum",
+  name: "Momentum",
+  iconKey: "ascend",
+  shortDescription:
+    "Execution intelligence for projects, tasks, tickets, milestones, roadmaps, and structured work plans.",
+  longDescription:
+    "Momentum is an AI native execution workspace for projects, milestones, roadmaps, epics, tasks, tickets, objectives, dependencies, sprints, and execution status. It understands how work progresses, detects bottlenecks, suggests priorities, estimates complexity, generates implementation plans, and keeps outcomes moving from strategy into action. Momentum gives personal and professional work a clear structure without reducing progress to a static task list.",
+  tagline: "Turn plans into progress",
+  isLive: true,
+  visibility: "live",
+  launchDate: "TBD",
+  statusLabel: "Launching First",
+  price: { amount: 21.99, currency: "USD", interval: "month" },
+  visual: {
+    celestialKind: "asteroid",
+    orbitLevel: 1,
+    orbitRadius: 4.45,
+    orbitSpeed: 0.085,
+    orbitInclination: -0.2,
+    orbitTilt: 0.35,
+    initialAngle: 1.9,
+    size: 0.3,
+    materialPreset: "chrome-line-asteroid",
+    accent: "chrome",
+  },
+  routes: {
+    path: "/core/momentum",
+    subdomains: ["momentum.vorinthex.com"],
+    canonical: "/core/momentum",
+  },
+  seoTitle: "Momentum, Turn Plans Into Progress | Core",
+  seoDescription:
+    "Momentum is execution intelligence for projects, tasks, tickets, milestones, roadmaps, objectives, dependencies, and work plans.",
+  aeo: {
+    summary:
+      "Momentum is execution intelligence for projects, tasks, tickets, milestones, roadmaps, objectives, dependencies, and work plans.",
+    questions: [
+      {
+        question: "What is Momentum?",
+        answer:
+          "Momentum is an AI native execution workspace that organizes projects and plans, detects bottlenecks, suggests priorities, estimates complexity, and turns meaningful objectives into structured progress.",
+      },
+    ],
+    llmsText: "AI native execution workspace for projects and structured work.",
+  },
+  content: {
+    eyebrow: "Core Capability",
+    headline: "Turn plans into progress.",
+    subheadline: "Structured execution for the work that matters.",
+    body: "Momentum gives projects a living structure from objectives and roadmaps to tasks and milestones. It helps reveal what is next, what is blocked, and what will move the work forward.",
+    drawerLine: "Execution intelligence for projects, tasks, and progress.",
+    bullets: [
+      "Break objectives into milestones, tasks, and dependencies.",
+      "Detect bottlenecks and recommend useful priorities.",
+      "Track roadmaps, tickets, sprints, and execution history.",
+    ],
+    primaryCta: "Join Hunt",
+    secondaryCta: "Explore Core",
+  },
+});
+
+const prism = capability({
+  id: "capability.prism",
+  slug: "prism",
+  name: "Prism",
+  iconKey: "gallery",
+  shortDescription:
+    "Meeting and presence intelligence for voice, video, screen sharing, recordings, transcription, and collaborative sessions.",
+  longDescription:
+    "Prism is a real time meeting workspace for voice calls, video sessions, screen sharing, recordings, live transcription, captions, and AI assistance. It understands conversations as they happen, making discussions searchable and turning decisions, follow up items, and important context into durable knowledge. Prism preserves the full meeting experience through participants, recordings, transcripts, summaries, and collaborative session metadata.",
+  tagline: "Meetings that keep thinking",
+  isLive: true,
+  visibility: "live",
+  launchDate: "TBD",
+  statusLabel: "Launching First",
+  price: { amount: 18.99, currency: "USD", interval: "month" },
+  visual: {
+    celestialKind: "asteroid",
+    orbitLevel: 1,
+    orbitRadius: 4.8,
+    orbitSpeed: 0.075,
+    orbitInclination: 0.35,
+    orbitTilt: -0.2,
+    initialAngle: 3.25,
+    size: 0.3,
+    materialPreset: "chrome-line-asteroid",
+    accent: "chrome",
+  },
+  routes: {
+    path: "/core/prism",
+    subdomains: ["prism.vorinthex.com"],
+    canonical: "/core/prism",
+  },
+  seoTitle: "Prism, Meetings That Keep Thinking | Core",
+  seoDescription:
+    "Prism is meeting and presence intelligence for voice, video, screen sharing, recordings, live transcription, summaries, and searchable conversations.",
+  aeo: {
+    summary:
+      "Prism is meeting and presence intelligence for voice, video, screen sharing, recordings, live transcription, summaries, and searchable conversations.",
+    questions: [
+      {
+        question: "What is Prism?",
+        answer:
+          "Prism is a real time meeting workspace that provides voice and video sessions, screen sharing, recordings, live transcription, captions, summaries, and searchable conversation context.",
+      },
+    ],
+    llmsText: "Meeting and presence intelligence for searchable conversations.",
+  },
+  content: {
+    eyebrow: "Core Capability",
+    headline: "Meetings that keep thinking.",
+    subheadline: "Turn live conversations into searchable knowledge.",
+    body: "Prism captures the meaning of meetings while they happen. Voice, video, transcripts, decisions, recordings, and follow up context remain useful long after the call ends.",
+    drawerLine: "Meeting intelligence for voice, video, transcripts, and presence.",
+    bullets: [
+      "Host voice and video sessions with screen sharing.",
+      "Create live transcripts, captions, recordings, and summaries.",
+      "Preserve decisions and follow up context from every meeting.",
     ],
     primaryCta: "Join Hunt",
     secondaryCta: "Explore Core",
@@ -1436,7 +1697,7 @@ export const VORINTHEX_GALAXY_REGISTRY = {
   },
   nexus,
   products: { core, hq, command, studio, launch, replica, pilot },
-  capabilities: { archive, gallery, signal, compass, ascend },
+  capabilities: { archive, gallery, signal, compass, ascend, chorus, cadence, momentum, prism },
   orchestrators: Object.fromEntries(
     orchestrators.map((o) => [o.slug, o]),
   ) as Record<string, GalaxyEntity>,
