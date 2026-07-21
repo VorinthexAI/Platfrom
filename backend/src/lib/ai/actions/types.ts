@@ -6,11 +6,11 @@ import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
  * authorization and domain capabilities are enforced at direct action boundaries.
  */
 export const ACTION_SLUGS = [
-  'ask', 'chat', 'orchestrator-chat', 'reason', 'deep-reason', 'embed', 'speak', 'transcribe', 'web-search',
+  'ask', 'chat', 'reason', 'deep-reason', 'embed', 'speak', 'transcribe', 'web-search',
   'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
   'generate-image', 'edit-image',
   'generate-video', 'edit-video', 'extend-video', 'analyze-video',
-  'generate-speech', 'analyze-audio', 'generate-music',
+  'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
 ] as const;
 
 export type ActionId = (typeof ACTION_SLUGS)[number] | (string & {});
