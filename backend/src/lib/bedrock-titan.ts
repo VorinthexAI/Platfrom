@@ -5,6 +5,7 @@ export const EMBEDDING_PROVIDER_ID = 'aws-bedrock' as const;
 export const EMBEDDING_MODEL = 'amazon.titan-embed-text-v2';
 export const BEDROCK_EMBEDDING_MODEL_ID = 'amazon.titan-embed-text-v2:0';
 export const EMBEDDING_CHUNK_CHARACTERS = 4_000;
+const THROTTLE_RETRY_DELAYS_MS = [500, 1_000, 2_000];
 
 const embedInputSchema = z.object({ text: z.string().min(1) }).strict();
 const titanEmbeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1) }).passthrough();
@@ -40,9 +41,15 @@ export async function embedText(input: z.infer<typeof embedInputSchema>): Promis
   const embeddings = await Promise.all(chunks.map(async (inputText) => {
     const body = JSON.stringify({ inputText });
     const signed = signAwsRequest(credentials, 'bedrock', host, canonicalPath, body, { 'content-type': 'application/json', accept: 'application/json' });
-    const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body });
-    if (!response.ok) throw new Error(`AWS Bedrock Titan embedding request failed with status ${response.status}.`);
-    return titanEmbeddingResponseSchema.parse(await response.json()).embedding;
+    for (const retryDelay of [...THROTTLE_RETRY_DELAYS_MS, null]) {
+      const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body });
+      if (response.ok) return titanEmbeddingResponseSchema.parse(await response.json()).embedding;
+      if (response.status !== 429 || retryDelay === null) {
+        throw new Error(`AWS Bedrock Titan embedding request failed with status ${response.status}.`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryDelay));
+    }
+    throw new Error('AWS Bedrock Titan embedding request retry loop ended unexpectedly.');
   }));
 
   if (embeddings.length === 1) return embeddings[0]!;
