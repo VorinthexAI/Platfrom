@@ -10,6 +10,17 @@ const THROTTLE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000, 60_000];
 const embedInputSchema = z.object({ text: z.string().min(1) }).strict();
 const titanEmbeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1) }).passthrough();
 
+export class BedrockEmbeddingRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`AWS Bedrock Titan embedding request failed with status ${status}.`);
+    this.name = 'BedrockEmbeddingRequestError';
+  }
+}
+
+export function isBedrockEmbeddingThrottle(error: unknown): error is BedrockEmbeddingRequestError {
+  return error instanceof BedrockEmbeddingRequestError && error.status === 429;
+}
+
 export function embeddingMetadata() {
   return { embeddingProvider: EMBEDDING_PROVIDER_ID, embeddingModel: EMBEDDING_MODEL } as const;
 }
@@ -49,8 +60,8 @@ export async function embedText(input: z.infer<typeof embedInputSchema>): Promis
         embedding = titanEmbeddingResponseSchema.parse(await response.json()).embedding;
         break;
       }
-      if (response.status !== 429 || retryDelay === null) {
-        throw new Error(`AWS Bedrock Titan embedding request failed with status ${response.status}.`);
+      if (response.status !== 429 || retryDelay === null || process.env.DEFER_THROTTLED_EMBEDDINGS === 'true') {
+        throw new BedrockEmbeddingRequestError(response.status);
       }
       const retryAfter = Number(response.headers.get('retry-after'));
       const waitMs = Number.isFinite(retryAfter) && retryAfter > 0

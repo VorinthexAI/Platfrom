@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { embedText, embeddingMetadata } from '../lib/bedrock-titan';
+import { embedText, embeddingMetadata, isBedrockEmbeddingThrottle } from '../lib/bedrock-titan';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -36,8 +36,22 @@ function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: re
   return buildEmbeddingText(embedKeys, doc);
 }
 
-function generateEmbedding(text: string) {
-  return embedText({ text });
+let deferredEmbeddings = false;
+
+async function generateEmbedding(text: string): Promise<number[] | null> {
+  if (deferredEmbeddings) return null;
+  try {
+    return await embedText({ text });
+  } catch (error) {
+    if (process.env.DEFER_THROTTLED_EMBEDDINGS !== 'true' || !isBedrockEmbeddingThrottle(error)) throw error;
+    console.warn('Bedrock is throttled; continuing the migration and leaving embeddings eligible for a later backfill.');
+    deferredEmbeddings = true;
+    return null;
+  }
+}
+
+function embeddingPatch(embedding: number[] | null): { embedding?: number[] } {
+  return embedding === null ? {} : { embedding };
 }
 
 function nonEmptyString(value: unknown): string | null {
@@ -123,6 +137,7 @@ async function backfillCollectionEmbeddings(targetDb: Database, spec: Collection
     if (!key) continue;
     const text = buildNodeEmbedText(spec.name, key, embedKeys, doc);
     const embedding = text ? await generateEmbedding(text) : [];
+    if (embedding === null) return;
     await collection.update(key, { embedding, ...metadata });
   }
   if (docs.length > 0) {
@@ -920,7 +935,7 @@ async function main() {
           metadata: platform.metadata && typeof platform.metadata === 'object' ? platform.metadata : {},
           createdAt: nonEmptyString(platform.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          embedding: await generateEmbedding(['_organizations', key, name].join(':')),
+          ...embeddingPatch(await generateEmbedding(['_organizations', key, name].join(':'))),
         },
         { overwriteMode: 'ignore' },
       );
@@ -945,7 +960,7 @@ async function main() {
       metadata: {},
       createdAt: now,
       updatedAt: now,
-      embedding: await generateEmbedding(['_organizations', rootOrganizationId, 'Vorinthex AI'].join(':')),
+      ...embeddingPatch(await generateEmbedding(['_organizations', rootOrganizationId, 'Vorinthex AI'].join(':'))),
     });
     console.log('Created root organization Vorinthex AI');
   }
@@ -986,7 +1001,7 @@ async function main() {
     if (!summary) continue;
     await targetDb.collection('scopes').update(scope._key, {
       summary,
-      embedding: await generateEmbedding(buildEmbeddingText(['summary'], { summary })!),
+      ...embeddingPatch(await generateEmbedding(buildEmbeddingText(['summary'], { summary })!)),
     });
   }
 
@@ -1010,7 +1025,7 @@ async function main() {
         summary: seed.summary,
         description: seed.description,
         position: seed.position,
-        embedding,
+        ...embeddingPatch(embedding),
       });
     } else {
       await targetDb.collection('scopes').save({
@@ -1022,7 +1037,7 @@ async function main() {
         description: seed.description,
         position: seed.position,
         deletedAt: null,
-        embedding,
+        ...embeddingPatch(embedding),
       });
     }
     actualScopeKeys.set(seed.key, scopeKey);
@@ -1118,7 +1133,7 @@ async function main() {
           metadata: {},
           createdAt: nonEmptyString(team.createdAt) ?? new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          embedding: embedText ? await generateEmbedding(embedText) : [],
+          ...(embedText ? embeddingPatch(await generateEmbedding(embedText)) : { embedding: [] }),
         },
         { overwriteMode: 'ignore' },
       );
@@ -1480,7 +1495,7 @@ async function main() {
           payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
         },
         createdAt,
-        embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
+        ...(eventEmbedText ? embeddingPatch(await generateEmbedding(eventEmbedText)) : { embedding: [] }),
       });
     }
   }
@@ -1521,7 +1536,7 @@ async function main() {
           slug,
           data: event.data && typeof event.data === 'object' ? event.data : {},
           createdAt: typeof event.createdAt === 'string' ? event.createdAt : new Date().toISOString(),
-          embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
+          ...(eventEmbedText ? embeddingPatch(await generateEmbedding(eventEmbedText)) : { embedding: [] }),
         },
         { overwriteMode: 'ignore' },
       );
@@ -1587,7 +1602,7 @@ async function main() {
       userId,
       entityId: null,
       entityType: null,
-      embedding,
+      ...embeddingPatch(embedding),
     }, { keepNull: false });
   }
 
@@ -1822,7 +1837,7 @@ async function main() {
       belongsTo: null,
       entityId: null,
       entityType: null,
-      embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
+      ...(eventEmbedText ? embeddingPatch(await generateEmbedding(eventEmbedText)) : { embedding: [] }),
     }, { keepNull: false });
   }
 
