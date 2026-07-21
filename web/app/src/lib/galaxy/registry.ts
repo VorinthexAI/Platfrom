@@ -155,7 +155,7 @@ const hq: GalaxyEntity = {
   visibility: "teaser",
   launchDate: "TBD",
   statusLabel: "Coming Soon",
-  logo: { src: "/logos/entities/product-hq.svg", alt: "HQ", kind: "svg", iconKey: "hq" },
+  logo: { src: "/logos/entities/product-hq.png", alt: "HQ", kind: "png", iconKey: "hq" },
   visual: {
     celestialKind: "planet",
     orbitLevel: 2,

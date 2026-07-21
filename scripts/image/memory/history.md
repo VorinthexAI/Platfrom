@@ -974,3 +974,24 @@ Notes: Open Graph and Twitter preview cards for echo.vorinthex.com.
 Asset: Echo Social Cards
 Action: Generated v1
 Notes: Generated Open Graph and Twitter cards for echo.vorinthex.com.
+## 2026-07-21 14:33
+Asset: HQ
+Action: Created asset
+Notes: HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.
+## 2026-07-21 14:34
+Asset: HQ
+Action: Generated v1
+Notes: Generated from galaxy registry entity product.hq
+Paths:
+- solid: assets/product/product-hq/v1/solid-1024.png
+- transparent: assets/product/product-hq/v1/transparent-1024.png
+- solid svg: assets/product/product-hq/v1/solid-1024.svg
+- transparent svg: assets/product/product-hq/v1/transparent-1024.svg
+## 2026-07-21 14:35
+Asset: HQ Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for hq.vorinthex.com.
+## 2026-07-21 14:36
+Asset: HQ Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for hq.vorinthex.com.

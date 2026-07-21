@@ -918,6 +918,37 @@
       "updatedAt": "2026-07-06T23:11:03.653Z"
     },
     {
+      "id": "product-product-hq",
+      "slug": "product-hq",
+      "name": "HQ",
+      "category": "product",
+      "status": "reviewed",
+      "locked": false,
+      "description": "HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.",
+      "designIntent": "Logo for product entity product.hq, generated from web/app/src/lib/galaxy/registry.ts.",
+      "currentVersionId": "v1",
+      "versions": [
+        {
+          "id": "v1",
+          "version": 1,
+          "prompt": "Create a premium sibling product logo for HQ. It should feel like it belongs beside the Vorinthex master logo: a centered chrome emblem, circular or orbital silhouette, obsidian negative space, sharp engineered geometry, and no text. Encode this product idea abstractly: Your organization, in sync.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: HQ\nType: product\nTagline: Your organization, in sync\nDescription: HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.\n",
+          "fullPrompt": "# Solid Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: HQ\nSlug: product-hq\nCategory: product\nDescription: HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.\nDesign intent: Logo for product entity product.hq, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium sibling product logo for HQ. It should feel like it belongs beside the Vorinthex master logo: a centered chrome emblem, circular or orbital silhouette, obsidian negative space, sharp engineered geometry, and no text. Encode this product idea abstractly: Your organization, in sync.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: HQ\nType: product\nTagline: Your organization, in sync\nDescription: HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.\n\n\n# Export Requirements\nExport on solid obsidian background #030405.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n\n# Transparent Prompt\n\n# System Identity\nYou are the Vorinthex AI local design engine.\nCreate premium, minimal, production-ready brand assets.\nPreserve locked identity rules exactly and never introduce text, watermarks, or unrelated symbols.\nFor logo/icon work, the mark must use the canvas assertively: fill roughly 90% of the 1024x1024 box, with only a small safe margin.\nAvoid tiny centered logos, excessive empty border space, distant camera framing, or a badge floating in the middle of the canvas.\n\n# Design System\n# Vorinthex AI Design System\n\n## Brand Essence\n\nVorinthex AI should feel like obsidian intelligence: dark, premium, metallic, exact and futuristic.\n\n## Visual Language\n\n- Obsidian black base\n- Chrome silver highlights\n- Dark glass materials\n- Subtle glow only\n- No colorful gradients\n- No gold unless explicitly requested\n- No blue unless explicitly requested\n- No neon cyberpunk colors\n- No childish effects\n- No cartoon styling\n- No excessive sparkles\n- No glitter overload\n- Premium, minimal, industrial\n- Apple x Nothing x Dyson x Interstellar\n- High contrast\n- Sharp geometry\n- Symmetry\n- Lots of negative space\n\n## Logo Requirements\n\n- 3D chrome / polished metal\n- Clean silhouette\n- Strong app-icon readability\n- Works at small size\n- Should look premium on black\n- Should also work on transparent background\n- Avoid overcomplicated internal details\n- Avoid random symbols\n- Avoid extra text in logo exports\n\n## Export Requirements\n\nEvery generated logo must produce:\n\n1. 1024x1024 PNG with solid obsidian background\n2. 1024x1024 PNG with full transparent background\n3. Metadata JSON\n4. Prompt snapshot\n5. Review notes\n6. Optional lock file if accepted\n\n\n# Baseline Prompt\n# Baseline Image Prompt\n\nCreate a premium, minimal, 3D metallic logo/icon for Vorinthex AI.\n\nUse a dark obsidian and chrome design language.\nThe logo must be centered, symmetrical and fill almost the whole 1024x1024 canvas.\nTarget 88-95% canvas occupancy with only a small 4-6% safe margin.\nDo not make a small centered emblem with large empty margins.\nUse realistic polished metal with subtle reflections.\nKeep the background clean.\nDo not include text unless explicitly requested.\nDo not add unrelated symbols.\nDo not add excessive glitter, stars, flares or noise.\nThe result must feel like a high-end AI company asset.\n\n\n# Mode\nGenerate a production-quality 1024x1024 PNG logo asset.\nThe visual mark must fill 88-95% of the canvas, remain centered, and avoid cropping.\nUse an app-icon composition: large, close, readable, and nearly edge-to-edge with a controlled 4-6% safe margin.\nDo not create a small emblem surrounded by large empty background space.\n\n# Locked Rules\nNo asset lock is currently active.\n\n# Rejected Directions To Avoid\n# Rejected Directions\n\n\n# Asset\nName: HQ\nSlug: product-hq\nCategory: product\nDescription: HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.\nDesign intent: Logo for product entity product.hq, generated from web/app/src/lib/galaxy/registry.ts.\n\n# Current Instruction\nCreate a premium sibling product logo for HQ. It should feel like it belongs beside the Vorinthex master logo: a centered chrome emblem, circular or orbital silhouette, obsidian negative space, sharp engineered geometry, and no text. Encode this product idea abstractly: Your organization, in sync.\n\nKeep the whole family visually consistent with the existing Vorinthex AI logo:\n- obsidian black base\n- polished chrome / silver material\n- dark glass inner negative space\n- one clear central geometric mark\n- premium enterprise AI tone\n- symmetrical, engineered, timeless\n- fill 88-95% of the 1024x1024 box\n- no text, no letters, no watermark, no colorful background\n\nEntity metadata:\nName: HQ\nType: product\nTagline: Your organization, in sync\nDescription: HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.\n\n\n# Export Requirements\nExport as a true transparent PNG with alpha. No background layer. No checkerboard.\nImage size: 1024x1024\nThe visual mark must fill 85-95% of the canvas and remain centered.\n\n# Negative Prompt\nDo not include text.\nDo not include watermark.\nDo not include colored background.\nDo not include red, pink, purple, blue or gold backgrounds.\nDo not include glitter overload.\nDo not include excessive sparkles.\nDo not include unrelated symbols.\nDo not create a badge that looks like a gaming logo.\nDo not create a cartoon.\nDo not create a flat icon unless requested.\nDo not crop the logo.\nDo not leave excessive empty margins.\nDo not add shadows that require a background.\nDo not add random letters.\nDo not change locked geometry.\n",
+          "solidPath": "assets/product/product-hq/v1/solid-1024.png",
+          "transparentPath": "assets/product/product-hq/v1/transparent-1024.png",
+          "solidSvgPath": "assets/product/product-hq/v1/solid-1024.svg",
+          "transparentSvgPath": "assets/product/product-hq/v1/transparent-1024.svg",
+          "metadataPath": "assets/product/product-hq/v1/metadata.json",
+          "reviewPath": "runs/Xgsb5BNzAgpf/review.md",
+          "accepted": false,
+          "rejected": false,
+          "notes": "Generated from galaxy registry entity product.hq",
+          "createdAt": "2026-07-21T14:34:24.476Z"
+        }
+      ],
+      "createdAt": "2026-07-21T14:33:12.613Z",
+      "updatedAt": "2026-07-21T14:34:24.484Z"
+    },
+    {
       "id": "product-product-launch",
       "slug": "product-launch",
       "name": "Launch",
@@ -1412,8 +1443,11 @@
       "locked": false,
       "description": "Open Graph and Twitter preview cards for echo.vorinthex.com.",
       "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "currentVersionId": "v1",
       "versions": [
         {
+          "id": "v1",
+          "version": 1,
           "prompt": "Materialize social preview cards for echo.vorinthex.com from Next.js metadata image routes.",
           "fullPrompt": "Target: Echo\nSubdomain: echo.vorinthex.com\nCanonical route: /command/echo\nOpen Graph route: /command/echo/opengraph-image\nTwitter route: /command/echo/twitter-image\nBase URL: http://localhost:3000",
           "slideshowPath": "assets/announcement/social-card-echo/v1/metadata.json",
@@ -1426,14 +1460,11 @@
           "accepted": true,
           "rejected": false,
           "notes": "Generated Open Graph and Twitter cards for echo.vorinthex.com.",
-          "id": "v1",
-          "version": 1,
           "createdAt": "2026-07-19T20:20:06.060Z"
         }
       ],
       "createdAt": "2026-07-19T20:20:04.856Z",
-      "updatedAt": "2026-07-19T20:20:06.063Z",
-      "currentVersionId": "v1"
+      "updatedAt": "2026-07-19T20:20:06.063Z"
     },
     {
       "id": "announcement-social-card-forge",
@@ -1645,6 +1676,38 @@
       ],
       "createdAt": "2026-07-08T17:42:56.359Z",
       "updatedAt": "2026-07-08T17:43:32.082Z"
+    },
+    {
+      "id": "announcement-social-card-hq",
+      "slug": "social-card-hq",
+      "name": "HQ Social Cards",
+      "category": "announcement",
+      "status": "reviewed",
+      "locked": false,
+      "description": "Open Graph and Twitter preview cards for hq.vorinthex.com.",
+      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
+      "versions": [
+        {
+          "prompt": "Materialize social preview cards for hq.vorinthex.com from Next.js metadata image routes.",
+          "fullPrompt": "Target: HQ\nSubdomain: hq.vorinthex.com\nCanonical route: /hq\nOpen Graph route: /hq/opengraph-image\nTwitter route: /hq/twitter-image\nBase URL: http://localhost:3000",
+          "slideshowPath": "assets/announcement/social-card-hq/v1/metadata.json",
+          "previewPath": "assets/announcement/social-card-hq/v1/opengraph-1200x630.png",
+          "slidePaths": [
+            "assets/announcement/social-card-hq/v1/opengraph-1200x630.png",
+            "assets/announcement/social-card-hq/v1/twitter-1200x630.png"
+          ],
+          "metadataPath": "assets/announcement/social-card-hq/v1/metadata.json",
+          "accepted": true,
+          "rejected": false,
+          "notes": "Generated Open Graph and Twitter cards for hq.vorinthex.com.",
+          "id": "v1",
+          "version": 1,
+          "createdAt": "2026-07-21T14:36:02.822Z"
+        }
+      ],
+      "createdAt": "2026-07-21T14:35:28.871Z",
+      "updatedAt": "2026-07-21T14:36:02.825Z",
+      "currentVersionId": "v1"
     },
     {
       "id": "announcement-social-card-hunt",
