@@ -23,7 +23,7 @@ const nexus: GalaxyEntity = {
   name: "Nexus",
   shortDescription: "The Source of Intelligence.",
   longDescription:
-    "The Nexus is the heart of the Vorinthex AI galaxy, the intelligence that Core, Command, Studio, and Launch all orbit.",
+    "The Nexus is the heart of the Vorinthex AI galaxy, the intelligence that Core, HQ, Command, Studio, and Launch all orbit.",
   tagline: "The Source of Intelligence",
   isLive: true,
   visibility: "live",
@@ -44,12 +44,12 @@ const nexus: GalaxyEntity = {
   },
   aeo: {
     summary:
-      "Vorinthex AI is the Nexus of Intelligence: a unified AI ecosystem beginning with Core, a personal AI Brain, alongside Command, Studio, and Launch.",
+      "Vorinthex AI is the Nexus of Intelligence: a unified AI ecosystem beginning with Core, a personal AI Brain, alongside HQ, Command, Studio, and Launch.",
     questions: [
       {
         question: "What is Vorinthex AI?",
         answer:
-          "Vorinthex AI is the Nexus of Intelligence: a premium ecosystem of AI products built around personal intelligence, AI orchestration, creation, and deployment. Its products are Core, Command, Studio, and Launch.",
+          "Vorinthex AI is the Nexus of Intelligence: a premium ecosystem of AI products built around personal intelligence, organization, orchestration, creation, and deployment. Its products are Core, HQ, Command, Studio, and Launch.",
       },
     ],
     llmsText:
@@ -62,7 +62,7 @@ const nexus: GalaxyEntity = {
     primaryCta: "Join",
     secondaryCta: "Already hunting? Sign in",
   },
-  children: ["product.core", "product.command", "product.studio", "product.launch"],
+  children: ["product.core", "product.hq", "product.command", "product.studio", "product.launch"],
 };
 
 /* -------------------------------------------------------------------- */
@@ -137,6 +137,67 @@ const core: GalaxyEntity = {
     "capability.compass",
     "capability.ascend",
   ],
+};
+
+const hq: GalaxyEntity = {
+  id: "product.hq",
+  slug: "hq",
+  type: "product",
+  parentId: "nexus.star",
+  name: "HQ",
+  shortDescription:
+    "The organization workspace for communication, collaboration, planning, and coordinated work.",
+  longDescription:
+    "HQ is the shared operating space for an organization. Bring conversations, plans, projects, decisions, knowledge, and coordinated work into one focused headquarters.",
+  tagline: "Your organization, in sync",
+  label: "Organization Workspace",
+  isLive: false,
+  visibility: "teaser",
+  launchDate: "TBD",
+  statusLabel: "Coming Soon",
+  logo: { src: "/logos/entities/product-hq.svg", alt: "HQ", kind: "svg", iconKey: "hq" },
+  visual: {
+    celestialKind: "planet",
+    orbitLevel: 2,
+    orbitRadius: 6,
+    orbitSpeed: 0.085,
+    initialAngle: 1.7,
+    size: 0.9,
+    materialPreset: "locked-command-station",
+    lockedMaterialPreset: "dark-locked-chrome",
+    accent: "chrome",
+  },
+  routes: { path: "/hq", subdomains: ["hq.vorinthex.com"], canonical: "/hq" },
+  seo: {
+    title: "HQ | The Organization Workspace | Vorinthex AI",
+    description:
+      "HQ is the Vorinthex organization workspace for communication, collaboration, planning, decisions, and coordinated work.",
+    indexable: true,
+    schemaType: "SoftwareApplication",
+  },
+  aeo: {
+    summary:
+      "HQ is the organization workspace from Vorinthex AI for communication, collaboration, planning, decisions, knowledge, and coordinated work.",
+    questions: [
+      {
+        question: "What is HQ by Vorinthex AI?",
+        answer:
+          "HQ is the organization workspace from Vorinthex AI. It brings communication, collaboration, planning, decisions, knowledge, and coordinated work into one shared headquarters.",
+      },
+    ],
+    llmsText: "Organization workspace for communication, collaboration, planning, and coordinated work.",
+  },
+  content: {
+    eyebrow: "Organization Workspace",
+    headline: "Your organization, in sync.",
+    subheadline: "Communication, collaboration, planning, and coordinated work in one headquarters.",
+    body: "HQ gives every organization one focused place to communicate, collaborate, plan, decide, and move work forward together.",
+    drawerLine: "One headquarters for communication, collaboration, planning, and coordinated work.",
+    primaryCta: "Join Hunt",
+    secondaryCta: "Explore HQ",
+    statusNote: "HQ joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
+  },
+  children: [],
 };
 
 const command: GalaxyEntity = {
@@ -1225,7 +1286,7 @@ export const VORINTHEX_GALAXY_REGISTRY = {
     },
   },
   nexus,
-  products: { core, command, studio, launch },
+  products: { core, hq, command, studio, launch },
   capabilities: { archive, gallery, signal, compass, ascend },
   orchestrators: Object.fromEntries(
     orchestrators.map((o) => [o.slug, o]),

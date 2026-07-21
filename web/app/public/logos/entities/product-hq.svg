@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">HQ</title>
+  <desc id="desc">A chrome headquarters mark with four connected rooms around a shared center.</desc>
+  <defs>
+    <linearGradient id="chrome" x1="80" y1="72" x2="432" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff"/><stop offset=".2" stop-color="#9ca5ae"/><stop offset=".5" stop-color="#f7fafc"/><stop offset=".78" stop-color="#616b75"/><stop offset="1" stop-color="#d6dde3"/>
+    </linearGradient>
+    <radialGradient id="core" cx="50%" cy="42%" r="62%"><stop stop-color="#222a31"/><stop offset="1" stop-color="#07090b"/></radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="#050607"/>
+  <rect x="30" y="30" width="452" height="452" rx="94" fill="none" stroke="url(#chrome)" stroke-width="18"/>
+  <path d="M256 106 350 160v108l-94 54-94-54V160l94-54Z" fill="url(#core)" stroke="url(#chrome)" stroke-width="16" stroke-linejoin="round"/>
+  <path d="M256 106v216M162 160l188 108M350 160 162 268" fill="none" stroke="url(#chrome)" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="256" cy="214" r="31" fill="#07090b" stroke="url(#chrome)" stroke-width="12"/>
+  <circle cx="256" cy="214" r="8" fill="#f6fbff"/>
+</svg>

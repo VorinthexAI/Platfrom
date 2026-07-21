@@ -42,7 +42,7 @@ export function buildLlmsTxt(): string {
 
 > ${nexus.aeo?.summary ?? brand.tagline}
 
-${brand.name}, "${brand.tagline}", is a premium AI ecosystem. ${nexus.content?.subheadline ?? ""} The first product to launch is Core, a personal AI Brain that learns, remembers, and evolves with each user, expanded through paid Capabilities. Command (an AI orchestrator suite), Studio (a unified AI workspace), and Launch (an AI agent deployment platform) follow it.
+${brand.name}, "${brand.tagline}", is a premium AI ecosystem. ${nexus.content?.subheadline ?? ""} The first product to launch is Core, a personal AI Brain that learns, remembers, and evolves with each user, expanded through paid Capabilities. HQ (an organization workspace), Command (an AI orchestrator suite), Studio (a unified AI workspace), and Launch (an AI agent deployment platform) follow it.
 
 The site is a 3D galaxy: each product is a world orbiting the Nexus star, and visitors collect Intelligence Fragments while exploring in the hunt. Fragments feed the Nexus and place collectors on the hunt's leaderboard; the higher a collector stands at launch, the greater their prizes, offers, and early access. Access before launch is by waitlist.
 
@@ -93,7 +93,7 @@ ${orchestrators
 
 ## Brand
 
-Visual style: obsidian black, chrome/silver, premium, precise, futuristic, minimal, and spacious. Canonical domain: ${absoluteUrl("/")}. Product subdomains (core, command, studio, launch, and each capability and orchestrator) all resolve to their canonical page on the main domain.
+Visual style: obsidian black, chrome/silver, premium, precise, futuristic, minimal, and spacious. Canonical domain: ${absoluteUrl("/")}. Product subdomains (core, hq, command, studio, launch, and each capability and orchestrator) all resolve to their canonical page on the main domain.
 `;
 }
 
