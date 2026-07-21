@@ -4,7 +4,8 @@ import { newId } from '@/lib/ids';
 import { getActionById, getActionBySlug, insertAction, updateAction, type Action } from './actions.node';
 import { getProviderBySlug, insertProvider, updateProvider, type Provider } from './providers.node';
 import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
-import { getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
+import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
+import { isArangoUniqueConstraintError } from './base';
 import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
@@ -928,10 +929,19 @@ async function migrateRetiredCoreAskAction(): Promise<void> {
 }
 
 async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
-  const existing = await getActionById(seed.key);
+  const existingBySlug = await getActionBySlug(seed.slug);
+  const existingByKey = await getActionById(seed.key);
+  const existing = existingBySlug ?? existingByKey;
   if (!existing) {
-    await insertAction(seed);
-    return { collection: 'actions', key: seed.key, status: 'created' };
+    let key = existingByKey ? newId() : seed.key;
+    try {
+      await insertAction({ ...seed, key });
+    } catch (error) {
+      if (!isArangoUniqueConstraintError(error)) throw error;
+      key = newId();
+      await insertAction({ ...seed, key });
+    }
+    return { collection: 'actions', key, status: 'created' };
   }
 
   const patch: Partial<Omit<Action, 'key' | 'embedding'>> = {
@@ -989,14 +999,28 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
 
   const existing = await getModelActionByPair(model.key, action.key);
   if (!existing) {
-    await insertModelAction({
-      key: parsed.key,
-      modelKey: model.key,
-      actionKey: action.key,
-      priority: parsed.priority,
-      enabled: parsed.enabled,
-    });
-    return { collection: 'modelActions', key: parsed.key, status: 'created' };
+    const seededKeyOwner = await getModelActionById(parsed.key);
+    let key = seededKeyOwner ? newId() : parsed.key;
+    try {
+      await insertModelAction({
+        key,
+        modelKey: model.key,
+        actionKey: action.key,
+        priority: parsed.priority,
+        enabled: parsed.enabled,
+      });
+    } catch (error) {
+      if (!isArangoUniqueConstraintError(error)) throw error;
+      key = newId();
+      await insertModelAction({
+        key,
+        modelKey: model.key,
+        actionKey: action.key,
+        priority: parsed.priority,
+        enabled: parsed.enabled,
+      });
+    }
+    return { collection: 'modelActions', key, status: 'created' };
   }
 
   await updateModelAction(existing.key, { priority: parsed.priority, enabled: parsed.enabled });
