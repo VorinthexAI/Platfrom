@@ -49,12 +49,30 @@ describe('static Bedrock Titan embeddings', () => {
     let requests = 0;
     globalThis.fetch = (async () => {
       requests += 1;
-      if (requests === 1) return new Response('throttled', { status: 429, headers: { 'retry-after': '0' } });
+      if (requests === 1) return new Response('throttled', { status: 429, headers: { 'retry-after': '0.001' } });
       return new Response(JSON.stringify({ embedding: [0.5, 0.5] }), { status: 200 });
     }) as unknown as typeof fetch;
 
     await expect(embedText({ text: 'retry me' })).resolves.toEqual([0.5, 0.5]);
     expect(requests).toBe(2);
+  });
+
+  test('serializes concurrent Titan invocations', async () => {
+    process.env.AWS_REGION = 'us-east-1';
+    process.env.AWS_ACCESS_KEY_ID = 'key';
+    process.env.AWS_SECRET_ACCESS_KEY = 'secret';
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    globalThis.fetch = (async () => {
+      activeRequests += 1;
+      maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      activeRequests -= 1;
+      return new Response(JSON.stringify({ embedding: [0.5, 0.5] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await Promise.all([embedText({ text: 'first' }), embedText({ text: 'second' })]);
+    expect(maxActiveRequests).toBe(1);
   });
 
   test('chunks long documents and returns one normalized aggregate vector', async () => {
