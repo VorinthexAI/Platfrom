@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@vorinthex/shared/ui/components";
 import { CloseIcon } from "@vorinthex/shared/ui/icons";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
@@ -309,17 +310,17 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                 onCancel={cancelBeacon}
               />
               <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                <button type="button" onClick={() => playVoice(entityAudioUrl(enteredEntity.type, enteredEntity.slug))} className="founders-surface inline-flex items-center rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                <Button variant="secondary" onClick={() => playVoice(entityAudioUrl(enteredEntity.type, enteredEntity.slug))}>
                   Play Briefing
-                </button>
+                </Button>
                 {enteredEntity.type === "orchestrator" ? (
-                  <button type="button" onClick={() => playVoice(orchestratorMessageUrl(enteredEntity.slug))} className="founders-surface inline-flex items-center rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                  <Button variant="secondary" onClick={() => playVoice(orchestratorMessageUrl(enteredEntity.slug))}>
                     Meet {enteredEntity.name}
-                  </button>
+                  </Button>
                 ) : null}
-                <button type="button" onClick={leaveEntity} className="founders-surface inline-flex items-center rounded-full px-4 py-2 font-mono text-[0.58rem] tracking-[0.16em] text-silver-200 uppercase transition-colors hover:border-white/25 hover:text-white">
+                <Button variant="secondary" onClick={leaveEntity}>
                   Exit
-                </button>
+                </Button>
               </div>
             </div>
           </div>
