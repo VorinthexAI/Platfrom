@@ -47,7 +47,7 @@ env:
   # ECS task defs (web + api) run on ARM (t4g) capacity, so images are built for arm64.
   IMAGE_PLATFORM: linux/arm64
   BUN_VERSION: "1.2.19"
-  COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+  COMMIT_SHA: ${{ github.event_name == 'pull_request' && !github.event.pull_request.merged && github.event.pull_request.head.sha || github.event.pull_request.merge_commit_sha || github.sha }}
   SSM_PATH: /vorinthex/prod/
   # Matches the sole redirect URI registered with Google and Apple OAuth.
   CANONICAL_SITE_URL: https://vorinthex.com
