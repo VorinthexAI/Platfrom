@@ -3,7 +3,7 @@ import { DOT_NOTATION_PATTERN } from '@/lib/ai/shared/ids';
 
 /**
  * Stable, provider- and domain-neutral runtime primitives. Workflows,
- * authorization, and domain capabilities belong to tools, never actions.
+ * authorization and domain capabilities are enforced at direct action boundaries.
  */
 export const ACTION_SLUGS = [
   'ask', 'chat', 'reason', 'deep-reason', 'embed', 'speak', 'transcribe', 'web-search',

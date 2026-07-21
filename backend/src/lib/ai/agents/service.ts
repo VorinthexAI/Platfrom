@@ -11,13 +11,7 @@ import {
   insertAgentSkill,
   type AgentSkill,
 } from '@/lib/db/agent-skills.node';
-import {
-  getAgentToolByPair,
-  insertAgentTool,
-  type AgentTool,
-} from '@/lib/db/agent-tools.node';
 import { getSkillById, type Skill } from '@/lib/db/skills.node';
-import { getToolById, type Tool } from '@/lib/db/tools.node';
 import { getDefaultScopeRepository, type Scope } from '@/lib/ai/scopes';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 
@@ -31,30 +25,21 @@ export const attachAgentSkillInputSchema = z.object({
   priority: z.number().int().nonnegative().default(100),
 }).strict();
 
-export const grantAgentToolInputSchema = z.object({
-  agentKey: z.string().cuid(),
-  toolKey: z.string().cuid(),
-}).strict();
-
 export type CreateAgentInput = z.input<typeof createAgentInputSchema>;
 export type AttachAgentSkillInput = z.input<typeof attachAgentSkillInputSchema>;
-export type GrantAgentToolInput = z.input<typeof grantAgentToolInputSchema>;
 
 export interface AgentServiceDataSource {
   findAgentByKey(key: string): Promise<Agent | null>;
   findAgentBySlug(slug: string): Promise<Agent | null>;
   findScopeByKey(key: string): Promise<Scope | null>;
   findSkillByKey(key: string): Promise<Skill | null>;
-  findToolByKey(key: string): Promise<Tool | null>;
   findAgentSkill(agentKey: string, skillKey: string): Promise<AgentSkill | null>;
-  findAgentTool(agentKey: string, toolKey: string): Promise<AgentTool | null>;
   saveAgent(input: CreateAgentInput): Promise<Agent>;
   saveAgentSkill(input: AttachAgentSkillInput): Promise<AgentSkill>;
-  saveAgentTool(input: GrantAgentToolInput): Promise<AgentTool>;
 }
 
 export class AgentReferenceNotFoundError extends Error {
-  constructor(public readonly reference: 'agent' | 'scope' | 'skill' | 'tool', public readonly key: string) {
+  constructor(public readonly reference: 'agent' | 'scope' | 'skill', public readonly key: string) {
     super(`${reference} reference ${key} does not exist`);
     this.name = 'AgentReferenceNotFoundError';
   }
@@ -68,7 +53,7 @@ export class DuplicateAgentSlugError extends Error {
 }
 
 export class DuplicateAgentLinkError extends Error {
-  constructor(public readonly relation: 'skill' | 'tool', public readonly agentKey: string, public readonly targetKey: string) {
+  constructor(public readonly relation: 'skill', public readonly agentKey: string, public readonly targetKey: string) {
     super(`Agent ${agentKey} already has ${relation} ${targetKey}`);
     this.name = 'DuplicateAgentLinkError';
   }
@@ -116,24 +101,6 @@ export function createAgentService(source: AgentServiceDataSource = createDefaul
         throw error;
       }
     },
-
-    async grantTool(input: GrantAgentToolInput): Promise<AgentTool> {
-      const valid = grantAgentToolInputSchema.parse(input);
-      const agent = await requireAgent(valid.agentKey);
-      const tool = await source.findToolByKey(valid.toolKey);
-      if (!tool) {
-        throw new AgentReferenceNotFoundError('tool', valid.toolKey);
-      }
-      if (await source.findAgentTool(valid.agentKey, valid.toolKey)) {
-        throw new DuplicateAgentLinkError('tool', valid.agentKey, valid.toolKey);
-      }
-      try {
-        return await source.saveAgentTool(valid);
-      } catch (error) {
-        if (isArangoUniqueConstraintError(error)) throw new DuplicateAgentLinkError('tool', valid.agentKey, valid.toolKey);
-        throw error;
-      }
-    },
   };
 }
 
@@ -144,11 +111,8 @@ function createDefaultAgentServiceDataSource(): AgentServiceDataSource {
     findAgentBySlug: getAgentBySlug,
     findScopeByKey: scopes.getScopeByKey,
     findSkillByKey: getSkillById,
-    findToolByKey: getToolById,
     findAgentSkill: getAgentSkillByPair,
-    findAgentTool: getAgentToolByPair,
     saveAgent: insertAgent,
     saveAgentSkill: insertAgentSkill,
-    saveAgentTool: insertAgentTool,
   };
 }

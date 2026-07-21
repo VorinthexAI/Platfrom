@@ -5,8 +5,7 @@ separate ArangoDB nodes:
 
 ```text
 Agent -> agentSkills -> Skills
-      -> agentTools  -> Tools -> toolActions -> Actions
-                                             -> Router
+                         -> Actions -> Router
                                              -> modelActions -> Models
                                              -> modelProviders -> Providers
                                              -> organizationProviders
@@ -23,8 +22,7 @@ lower-camel-case collection names.
 
 Every execution calls `loadAgentRuntime` and `compileAgentContext` afresh. The
 loader resolves the agent's effective scope through `scopeAgents`, resolves its
-organization, orders linked skills by descending
-`priority`, and loads explicitly granted tools and their enabled actions. The
+organization, and orders linked skills by descending `priority`. The
 context compiler then resolves runtime variables, reusable memories, explicit
 artifact sources, permissions, guardrails, and exploration policy. Agents only
 receive this value; they never receive repositories or query storage.
@@ -39,10 +37,10 @@ system principal instead.
 `AgentContext` contains:
 
 1. organization, scope, and agent identity;
-2. ordered skills and explicitly granted tools;
+2. ordered skills;
 3. precedence-resolved runtime variables and scoped memories;
 4. compact artifact references, never full documents by default;
-5. derived permissions and `{ "scopeId": scopeAgents.scopeKey }` guardrails;
+5. `{ "scopeId": scopeAgents.scopeKey }` guardrails;
 6. source policy and the current task.
 
 Agents persist only `explorationRate` (`0` through `1`). Context exposes the
@@ -66,9 +64,9 @@ automatic ranking combines similarity, manual priority, and freshness. The
 knowledge-pack builder then deduplicates, trims, optionally summarizes, and
 drops the lowest-ranked blocks until its runtime-owned token budget is met.
 Summary packs always contain references and compact summaries with
-`content: null`; complete safe content is lazy-loaded through the separately
-granted `artifact.read` tool, which repeats agent grant, organization, scope,
-and resolver permission checks. Raw rows, Arango metadata, embeddings, and
+`content: null`; complete safe content is lazy-loaded through `artifact.read`,
+which repeats agent context, organization, scope, and resolver permission
+checks. Raw rows, Arango metadata, embeddings, and
 undeclared fields never enter provider context.
 
 ## Artifact sources, provenance, and novelty
@@ -93,10 +91,8 @@ rejected. Review/reject outcomes are auditable in `agentArtifactChecks`.
 Built-in policies match the architecture specification for hooks, images, and
 blog posts; new artifact types must register both a resolver and a policy.
 
-Tools contain no provider or model selection. A UI can derive surfaces from
-the grants: `ask.answer` exposes chat, `image.create` exposes image generation,
-and `audio.transcribe-file` exposes audio upload. Without Ask Tool, direct chat
-must not be shown and the persisted pipeline rejects that execution.
+Direct actions contain no provider or model selection. Provider routing uses
+the requested action slug and retains the model/provider relation checks.
 
 ## Routing
 
@@ -118,14 +114,13 @@ There is no random choice, quality/cost/speed scoring, or execution fallback.
 Organization, organization-member/provider, scope, scope-member/agent,
 agent-member, and access evaluation/explanation tools use a separate local
 execution boundary.
-GPT-5.4 Mini routes only through `core.reason` to select one granted tool and
+GPT-5.4 Mini routes only through `core.reason` to select one direct action and
 produce arguments matching its JSON schema. `runDomainAgentTool` then reloads
-the persisted agent grants, resolves the initiating human, validates the input
+the agent context, resolves the initiating human, validates the input
 with Zod, enforces organization and scope RBAC, and executes the local handler.
 These deterministic domain actions intentionally have no `modelActions` rows:
 models may interpret intent but can never perform database mutations directly.
-Mutations use Arango stream transactions and emit both domain audit events and
-the normal tool lifecycle events.
+Mutations use Arango stream transactions and emit domain audit events.
 
 `scopeAgents` is the authoritative lifecycle and minimum-role link between a
 scope and an existing agent definition. `agentMembers` stores inherited and
@@ -138,7 +133,7 @@ A fixed route never bypasses organization provider permissions.
 ## Execution and validation
 
 `runStoredAgentTool` is the secure public execution entry point. It resolves
-agent, skill, tool, action, model, and provider keys server-side. Every output
+agent, skill, action, model, and provider routing server-side. Every output
 has strict metadata:
 
 ```ts
@@ -171,7 +166,7 @@ Every new run also records `principalType` and, for member executions,
 auditable without placing user profile data in model context.
 
 The generic `events` timeline records only stable lifecycle slugs:
-`agent.*`, `step.*`, `tool.*`, `model.*`, `artifact.created`,
+`agent.*`, `step.*`, `model.*`, `artifact.created`,
 `artifact.used`, and `guardrail.blocked`. Payloads contain relation keys,
 status, timing, and token counts only. Full inputs, outputs, and artifacts stay
 in the run, call, and domain collections. Every runtime event takes `scopeId`

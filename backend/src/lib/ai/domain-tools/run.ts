@@ -9,8 +9,7 @@ import { newId } from '@/lib/ids';
 export const runDomainAgentToolInputSchema = z.object({
   organizationKey: z.string().trim().min(1),
   agentKey: z.string().cuid(),
-  toolKey: z.string().cuid(),
-  actionKey: z.string().cuid(),
+  actionSlug: z.string().trim().min(1).max(160),
   principal: executionPrincipalSchema,
   input: z.unknown(),
 }).strict();
@@ -22,26 +21,22 @@ export interface RunDomainAgentToolOptions {
   execute?: typeof executeDomainTool;
 }
 
-/** Secure local tool boundary. The calling model chooses a granted tool and supplies JSON; only this backend handler may read or mutate domain data. */
+/** Secure local action boundary. Only this backend handler may read or mutate domain data. */
 export async function runDomainAgentTool(rawInput: z.input<typeof runDomainAgentToolInputSchema>, options: RunDomainAgentToolOptions = {}) {
   const input = runDomainAgentToolInputSchema.parse(rawInput);
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey) throw new Error('agent belongs to another organization');
-  const grant = runtime.tools.find(({ tool }) => tool.key === input.toolKey);
-  const linked = grant?.actions.find(({ action }) => action.key === input.actionKey);
-  const principal = await authorizeAgentExecution(runtime, input.principal, options.accessData, { allowArchivedOrganization: grant?.tool.slug === 'organization.restore' });
-  if (!grant || !linked || !isDomainActionSlug(grant.tool.slug)) throw new Error('domain tool/action is not granted to the agent');
+  if (!isDomainActionSlug(input.actionSlug)) throw new Error(`unknown domain action ${input.actionSlug}`);
+  const principal = await authorizeAgentExecution(runtime, input.principal, options.accessData, { allowArchivedOrganization: input.actionSlug === 'organization.restore' });
   const record = options.events ?? recordRuntimeEvent;
   const userId = principal.kind === 'member' ? principal.user.key : null;
-  const eventBase = { scopeId: runtime.scope.key, userId, data: { invocationKey: newId(), agentKey: runtime.agent.key, agentSlug: runtime.agent.slug, agentName: runtime.agent.name, toolKey: grant.tool.key, toolSlug: grant.tool.slug, toolName: grant.tool.name, actionKey: linked.action.key, actionSlug: linked.action.slug, actionName: linked.action.name } };
-  await record({ ...eventBase, slug: 'tool.called', data: { ...eventBase.data, status: 'called' } });
+  const eventBase = { scopeId: runtime.scope.key, userId, data: { invocationKey: newId(), agentKey: runtime.agent.key, agentSlug: runtime.agent.slug, agentName: runtime.agent.name, actionSlug: input.actionSlug } };
   try {
     const context: DomainToolContext = { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal };
-    const output = domainToolResultSchema.parse(await (options.execute ?? executeDomainTool)(grant.tool.slug, input.input, context));
-    await record({ ...eventBase, slug: 'tool.completed', data: { ...eventBase.data, status: output.status } });
+    const output = domainToolResultSchema.parse(await (options.execute ?? executeDomainTool)(input.actionSlug, input.input, context));
     return output;
   } catch (error) {
-    await record({ ...eventBase, slug: 'tool.failed', data: { ...eventBase.data, status: 'failed', reason: (error instanceof Error ? error.message : String(error)).slice(0, 500) } });
+    await record({ ...eventBase, slug: 'agent.failed', data: { ...eventBase.data, status: 'failed', reason: (error instanceof Error ? error.message : String(error)).slice(0, 500) } });
     throw error;
   }
 }

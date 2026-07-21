@@ -3,9 +3,6 @@ import { newId } from '@/lib/ids';
 import { agentSchema } from '@/lib/db/agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
-import { agentToolSchema } from '@/lib/db/agent-tools.node';
-import { toolSchema } from '@/lib/db/tools.node';
-import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { actionSchema } from '@/lib/db/actions.node';
 import { modelSchema } from '@/lib/db/models.node';
 import { modelActionSchema } from '@/lib/db/model-actions.node';
@@ -43,12 +40,9 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const agent = agentSchema.parse({ key: newId(), slug: 'forge', name: 'Forge', title: 'Backend Developer', scopeKey: scope.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend systems.' });
   const action = actionSchema.parse({ key: newId(), slug: 'core.chat', name: 'Chat', description: 'Answer', objective: 'Answer', inputDescription: 'Question', outputDescription: 'Answer with metadata', handlerKey: 'core.chat', enabled: true });
-  const tool = toolSchema.parse({ key: newId(), slug: 'ask.answer', name: 'Ask', description: 'Answer the user', scopeKey: null, enabled: true });
   const model = modelSchema.parse({ key: newId(), slug: 'openai.gpt-5.4-nano', name: 'Nano', description: 'Fast model', supportedUseCases: 'Ask', enabled: true });
   const provider = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', handlerKey: 'openai' });
   const agentSkill = agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 });
-  const agentTool = agentToolSchema.parse({ key: newId(), agentKey: agent.key, toolKey: tool.key });
-  const toolAction = toolActionSchema.parse({ key: newId(), toolKey: tool.key, actionKey: action.key, priority: 100, enabled: true });
   const modelAction = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: action.key, priority: 100, enabled: true });
   const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-nano', enabled: true });
   const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey, scopeKey: scope.key, agentKey: agent.key, position: 1, minimumAccessRole: 'moderator', createdAt: now, updatedAt: now });
@@ -57,8 +51,6 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
     async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
     async getOrganization(key) { return key === organization.key ? organization : null; },
     async listAgentSkills() { return [agentSkill]; }, async getSkill(key) { return key === skill.key ? skill : null; },
-    async listAgentTools() { return [agentTool]; }, async getTool(key) { return key === tool.key ? tool : null; },
-    async listToolActions() { return [toolAction]; }, async getAction(key) { return key === action.key ? action : null; },
   };
   const routerData: RouterDataSource = {
     async getActionBySlug(slug) { return slug === action.slug ? action : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey(key) { return key === model.key ? model : null; },
@@ -84,8 +76,8 @@ function fixture(output: unknown = { metadata: { status: 'accepted', reason: 'Ta
   const memories = { async insertMemory() { throw new Error('unused'); }, async listMemoriesForAgent() { return []; } };
   const accessData = { async getUserOrganization(key: string) { return key === userOrganization.key ? userOrganization : null; }, async getUser(key: string) { return key === user.key ? user : null; }, async listScopeMembers() { return [scopeMember]; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return [agentMember]; } };
   const options = { runtimeData, data: routerData, adapters, runs, steps, calls, variables, memories, sources, artifacts, events: async (event: RuntimeEventInput) => { eventStore.push(event); }, accessData, principal: { kind: 'member' as const, userOrganizationKey: userOrganization.key } };
-  const params = { organizationKey, agentKey: agent.key, toolKey: tool.key, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
-  return { options, params, adapterCalls, executionSnapshots, eventStore, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, tool, action, model, provider, organizationKey, scope, user, userOrganization, scopeMember, accessData };
+  const params = { organizationKey, agentKey: agent.key, actionSlug: action.slug, stepSlug: 'answer-request', metadata: { status: 'accepted' as const, reason: 'Inside assigned scope', score: 0.9 }, input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }, currentTask: 'Answer the user.', outputSchema: 'Object with metadata and text.' };
+  return { options, params, adapterCalls, executionSnapshots, eventStore, runStore, stepStore, callStore, sourceStore, artifactStore, agent, skill, action, model, provider, organizationKey, scope, user, userOrganization, scopeMember, accessData };
 }
 
 describe('persisted agent pipeline', () => {
@@ -96,18 +88,18 @@ describe('persisted agent pipeline', () => {
     expect(f.runStore[0]?.status).toBe('completed');
     expect(f.runStore[0]).toMatchObject({ principalType: 'member', userOrganizationKey: f.userOrganization.key });
     expect(f.stepStore[0]).toMatchObject({ stepSlug: 'answer-request', status: 'completed', agentRunKey: f.runStore[0]?.key });
-    expect(f.callStore[0]).toMatchObject({ skillKey: f.skill.key, toolKey: f.tool.key, actionKey: f.action.key, modelKey: f.model.key, providerKey: f.provider.key, totalTokens: 13 });
+    expect(f.callStore[0]).toMatchObject({ skillKey: f.skill.key, actionKey: f.action.key, modelKey: f.model.key, providerKey: f.provider.key, totalTokens: 13 });
     expect((f.adapterCalls[0]?.input as { system?: string }).system).toContain(JSON.stringify({ scopeId: f.agent.scopeKey }));
     expect((f.adapterCalls[0]?.input as { responseFormat?: unknown }).responseFormat).toEqual({ type: 'json' });
     expect(f.eventStore.map(({ slug }) => slug)).toEqual([
-      'agent.started', 'step.started', 'tool.called', 'model.called', 'model.completed',
-      'step.completed', 'tool.completed', 'agent.completed',
+      'agent.started', 'step.started', 'model.called', 'model.completed',
+      'step.completed', 'agent.completed',
     ]);
     expect(f.eventStore.every(({ scopeId, userId }) => scopeId === f.scope.key && userId === f.user.key)).toBe(true);
     expect(f.eventStore.find(({ slug }) => slug === 'model.completed')?.data).toMatchObject({ callKey: f.callStore[0]?.key, inputTokens: 8, outputTokens: 5 });
   });
 
-  test('rejected metadata stores a summary and never executes tools or creates steps/calls', async () => {
+  test('rejected metadata stores a summary and never executes a model or creates steps/calls', async () => {
     const f = fixture();
     const result = await runStoredAgentTool({ ...f.params, metadata: { status: 'rejected', reason: 'Outside assigned scope', score: 0.1 } }, f.options);
     expect(result.executed).toBe(false);
@@ -116,13 +108,6 @@ describe('persisted agent pipeline', () => {
     expect(f.stepStore).toHaveLength(0);
     expect(f.callStore).toHaveLength(0);
     expect(f.eventStore.map(({ slug }) => slug)).toEqual(['agent.started', 'agent.failed']);
-  });
-
-  test('an ungranted Ask Tool cannot expose direct chat', async () => {
-    const f = fixture();
-    await expect(runStoredAgentTool({ ...f.params, toolKey: newId() }, f.options)).rejects.toBeInstanceOf(InvalidRunRequestError);
-    expect(f.adapterCalls).toHaveLength(0);
-    expect(f.eventStore.map(({ slug }) => slug)).toEqual(['guardrail.blocked']);
   });
 
   test('requires active organization and scope membership before execution', async () => {
@@ -157,13 +142,13 @@ describe('persisted agent pipeline', () => {
     expect(() => normalizeStructuredProviderResponse({ output: { text: 'free-form answer' }, usage: tokenUsage(1, 1), providerId: 'openai', modelId: 'model', externalModelId: 'model' })).toThrow(ResponseValidationError);
   });
 
-  test('records failed model, step, tool and agent lifecycle events', async () => {
+  test('records failed model, step, and agent lifecycle events', async () => {
     const f = fixture();
     f.options.adapters.openai!.execute = async () => { throw new Error('Provider unavailable'); };
     await expect(runStoredAgentTool(f.params, f.options)).rejects.toThrow();
     expect(f.eventStore.map(({ slug }) => slug)).toEqual([
-      'agent.started', 'step.started', 'tool.called', 'model.called', 'model.failed',
-      'step.failed', 'tool.failed', 'agent.failed',
+      'agent.started', 'step.started', 'model.called', 'model.failed',
+      'step.failed', 'agent.failed',
     ]);
     expect(f.eventStore.find(({ slug }) => slug === 'model.failed')?.data).toMatchObject({ callKey: f.callStore[0]?.key, inputTokens: 0, outputTokens: 0 });
     expect(f.eventStore.find(({ slug }) => slug === 'agent.failed')?.data.reason).toContain('Every route for action chat failed');

@@ -7,10 +7,7 @@ import { scopeMemberSchema, scopeSchema } from '@/lib/ai/scopes';
 import { agentSchema } from '@/lib/db/agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { actionSchema } from '@/lib/db/actions.node';
-import { toolSchema } from '@/lib/db/tools.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
-import { agentToolSchema } from '@/lib/db/agent-tools.node';
-import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import { modelSchema } from '@/lib/db/models.node';
 import { providerSchema } from '@/lib/db/providers.node';
 import { modelActionSchema } from '@/lib/db/model-actions.node';
@@ -48,18 +45,15 @@ function fixture() {
   const agent = agentSchema.parse({ key: newId(), slug: 'organization-operator', name: 'Organization Operator', title: 'Operator', scopeKey: scope.key });
   const skill = skillSchema.parse({ key: newId(), slug: 'organization-operations', name: 'Organization Operations', title: 'Operator', definition: 'Manage authorized organization resources.' });
   const action = actionSchema.parse({ key: newId(), slug: 'scope.list', name: 'List Scopes', description: 'List', objective: 'List', inputDescription: 'Filters', outputDescription: 'Scopes', handlerKey: 'scope.list' });
-  const tool = toolSchema.parse({ key: newId(), slug: 'scope.list', name: 'List Scopes', description: 'List scopes' });
   const agentSkill = agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 });
-  const agentTool = agentToolSchema.parse({ key: newId(), agentKey: agent.key, toolKey: tool.key });
-  const toolAction = toolActionSchema.parse({ key: newId(), toolKey: tool.key, actionKey: action.key, priority: 100, enabled: true });
   const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, position: 1, minimumAccessRole: 'owner', createdAt: now, updatedAt: now });
   const agentMember = agentMemberSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, scopeAgentKey: scopeAgent.key, userOrganizationKey: membership.key, source: 'inherited', createdAt: now });
   const runtimeData = {
     async getAgent(key: string) { return key === agent.key ? agent : null; }, async getScope(key: string) { return key === scope.key ? scope : null; }, async getOrganization(key: string) { return key === organization.key ? organization : null; },
-    async listAgentSkills() { return [agentSkill]; }, async getSkill() { return skill; }, async listAgentTools() { return [agentTool]; }, async getTool() { return tool; }, async listToolActions() { return [toolAction]; }, async getAction() { return action; },
+    async listAgentSkills() { return [agentSkill]; }, async getSkill() { return skill; },
   };
   const accessData = { async getUserOrganization() { return membership; }, async getUser() { return user; }, async listScopeMembers() { return [scopeMember]; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return [agentMember]; } };
-  return { organization, scope, user, membership, agent, action, tool, runtimeData, accessData };
+  return { organization, scope, user, membership, agent, action, runtimeData, accessData };
 }
 
 describe('domain tool schemas', () => {
@@ -101,23 +95,23 @@ describe('local domain tool boundary', () => {
     expect(runtimeEvents).toEqual([{ scopeId: f.scope.key, userId: f.user.key, slug: 'artifact.created', data: { nodeType: 'artifacts', nodeKey: artifactKey } }]);
   });
 
-  test('authorizes persisted grants and executes locally without a model route', async () => {
+  test('authorizes a direct action and executes locally without a model route', async () => {
     const f = fixture(); const events: RuntimeEventInput[] = []; let receivedContext: unknown;
-    const output = await runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, toolKey: f.tool.key, actionKey: f.action.key, principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: { query: 'ops' } }, {
+    const output = await runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, actionSlug: 'scope.list', principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: { query: 'ops' } }, {
       runtimeData: f.runtimeData, accessData: f.accessData, events: async (event) => { events.push(event); },
       execute: async (action, input, context) => { receivedContext = context; return { action, status: 'completed', data: { input } }; },
     });
     expect(output).toEqual({ action: 'scope.list', status: 'completed', data: { input: { query: 'ops' } } });
     expect(receivedContext).toMatchObject({ organizationKey: f.organization.key, runtimeScopeKey: f.scope.key, principal: { kind: 'member' } });
-    expect(events.map(({ slug }) => slug)).toEqual(['tool.called', 'tool.completed']);
+    expect(events).toEqual([]);
   });
 
-  test('rejects an action that is not linked to the granted tool', async () => {
+  test('rejects an unknown direct action', async () => {
     const f = fixture();
-    await expect(runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, toolKey: f.tool.key, actionKey: newId(), principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: {} }, { runtimeData: f.runtimeData, accessData: f.accessData, events: async () => {} })).rejects.toThrow('not granted');
+    await expect(runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, actionSlug: 'unknown.action', principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: {} }, { runtimeData: f.runtimeData, accessData: f.accessData, events: async () => {} })).rejects.toThrow('unknown domain action');
   });
 
-  test('uses reason on Mini to interpret, then executes the selected tool locally', async () => {
+  test('uses reason on Mini to interpret, then executes the selected action locally', async () => {
     const f = fixture();
     const reason = actionSchema.parse({ key: newId(), slug: 'reason', name: 'Reason', description: 'Interpret tool intent', objective: 'Choose a tool', inputDescription: 'Request', outputDescription: 'Tool call', handlerKey: 'reason' });
     const model = modelSchema.parse({ key: newId(), slug: 'openai.gpt-5.4-mini', name: 'Mini', description: 'Reasoning model', supportedUseCases: 'Tool selection' });

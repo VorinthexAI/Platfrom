@@ -30,7 +30,7 @@ describe('split agent execution storage', () => {
     const step = agentRunStepSchema.parse({ key: keys[4], agentRunKey: keys[0], stepSlug: 'reason-about-architecture', status: 'completed', startedAt: now, endedAt: now, elapsedMs: 0 });
     expect(step.stepSlug).toBe('reason-about-architecture');
     expect(() => agentRunStepSchema.parse({ ...step, stepSlug: 'reason.about' })).toThrow();
-    const call = { key: keys[5], agentRunKey: keys[0], agentRunStepKey: step.key, skillKey: keys[6], toolKey: keys[7], actionKey: keys[8], modelKey: keys[9], providerKey: keys[10], inputTokens: 4, outputTokens: 6, totalTokens: 10, startedAt: now, endedAt: now, elapsedMs: 0 };
+    const call = { key: keys[5], agentRunKey: keys[0], agentRunStepKey: step.key, skillKey: keys[6], actionKey: keys[8], modelKey: keys[9], providerKey: keys[10], inputTokens: 4, outputTokens: 6, totalTokens: 10, startedAt: now, endedAt: now, elapsedMs: 0 };
     expect(agentRunCallSchema.parse(call).totalTokens).toBe(10);
     expect(() => agentRunCallSchema.parse({ ...call, totalTokens: 11 })).toThrow();
   });

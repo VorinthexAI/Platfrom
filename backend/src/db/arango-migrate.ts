@@ -175,23 +175,6 @@ const collections: CollectionSpec[] = [
     ],
   },
   {
-    name: 'tools',
-    embedKeys: ['name', 'description'],
-    indexes: [
-      { fields: ['slug'], unique: true },
-      { fields: ['scopeKey'] },
-      { fields: ['enabled'] },
-    ],
-  },
-  {
-    name: 'toolActions',
-    skipEmbedding: true,
-    indexes: [
-      { fields: ['toolKey', 'actionKey'], unique: true },
-      { fields: ['actionKey', 'enabled', 'priority'] },
-    ],
-  },
-  {
     name: 'users',
     embedKeys: ['email', 'name'],
     indexes: [
@@ -444,13 +427,22 @@ async function main() {
   await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['skillKey'], unique: false });
   await agentSkillsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'priority'], unique: false });
 
-  const agentToolsCollection = targetDb.collection('agentTools');
-  if (!(await agentToolsCollection.exists())) {
-    await agentToolsCollection.create();
+  // Persisted tool catalogs and grants are retired. These collections contain
+  // configuration only; audit records remain in agent run and event collections.
+  for (const name of ['agentTools', 'toolActions', 'tools']) {
+    const collection = targetDb.collection(name);
+    if (await collection.exists()) {
+      await collection.drop();
+      console.log(`Dropped retired ${name} collection`);
+    }
   }
-  await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey', 'toolKey'], unique: true });
-  await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['agentKey'], unique: false });
-  await agentToolsCollection.ensureIndex({ type: 'persistent', fields: ['toolKey'], unique: false });
+  const agentRunCallsCollection = targetDb.collection('agentRunCalls');
+  if (await agentRunCallsCollection.exists()) {
+    for (const index of await agentRunCallsCollection.indexes()) {
+      const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+      if (fields.length === 1 && fields[0] === 'toolKey') await agentRunCallsCollection.dropIndex(index.id);
+    }
+  }
 
   // Agents are registry-only: the agent document's own scopeKey declares its
   // home scope and no scope-assignment linking collection is maintained. A

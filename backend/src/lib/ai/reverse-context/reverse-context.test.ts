@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import { buildKnowledgePack } from './knowledge-pack';
-import { ArtifactReadGrantError, executeArtifactReadTool, runArtifactReadTool } from './artifact-read';
+import { executeArtifactReadTool, runArtifactReadTool } from './artifact-read';
 import { ReverseContextCompiler } from './compiler';
 import { createNodeResolver, type SearchableDocument } from './resolver-factory';
 import { NodeContextNotFoundError, NodeResolverRegistry } from './resolver';
@@ -12,10 +12,6 @@ import { scopeSchema } from '@/lib/ai/scopes';
 import { agentSchema } from '@/lib/db/agents.node';
 import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
-import { toolSchema } from '@/lib/db/tools.node';
-import { actionSchema } from '@/lib/db/actions.node';
-import { agentToolSchema } from '@/lib/db/agent-tools.node';
-import { toolActionSchema } from '@/lib/db/tool-actions.node';
 import type { AgentRuntimeDataSource } from '@/lib/ai/agents';
 
 function setup() {
@@ -87,22 +83,17 @@ describe('reverse context compiler', () => {
     await expect(executeArtifactReadTool({ organizationKey: f.organizationKey, scopeKey: newId(), agentKey: f.agentKey, nodeType: 'skill', nodeKey: f.automaticKey }, f.registry)).rejects.toBeInstanceOf(NodeContextNotFoundError);
   });
 
-  test('requires the persisted artifact.read tool/action grant at the callable boundary', async () => {
+  test('requires a matching persisted agent context at the callable boundary', async () => {
     const f = setup(); const now = '2026-07-16T00:00:00.000Z';
     const organization = organizationSchema.parse({ key: f.organizationKey, name: 'Vorinthex', createdAt: now, updatedAt: now });
     const scope = scopeSchema.parse({ key: f.scopeKey, organizationKey: f.organizationKey, slug: 'platform', name: 'Platform', summary: 'Platform scope', description: 'Platform scope', position: 2 });
     const agent = agentSchema.parse({ key: f.agentKey, slug: 'reader', name: 'Reader', title: 'Researcher', scopeKey: f.scopeKey });
     const skill = skillSchema.parse({ key: newId(), slug: 'researcher', name: 'Research', title: 'Researcher', definition: 'Read sources.' });
-    const tool = toolSchema.parse({ key: newId(), slug: 'artifact.read', name: 'Read Artifact', description: 'Read authorized artifacts.' });
-    const action = actionSchema.parse({ key: newId(), slug: 'artifact.read', name: 'Read Artifact', description: 'Read one artifact.', objective: 'Read safely.', inputDescription: 'Reference.', outputDescription: 'Knowledge block.', handlerKey: 'artifact.read' });
-    const runtimeData = (granted: boolean): AgentRuntimeDataSource => ({
+    const runtimeData: AgentRuntimeDataSource = {
       async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; }, async getOrganization(key) { return key === organization.key ? organization : null; },
       async listAgentSkills() { return [agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 })]; }, async getSkill(key) { return key === skill.key ? skill : null; },
-      async listAgentTools() { return granted ? [agentToolSchema.parse({ key: newId(), agentKey: agent.key, toolKey: tool.key })] : []; }, async getTool(key) { return key === tool.key ? tool : null; },
-      async listToolActions() { return [toolActionSchema.parse({ key: newId(), toolKey: tool.key, actionKey: action.key, priority: 100, enabled: true })]; }, async getAction(key) { return key === action.key ? action : null; },
-    });
+    };
     const input = { organizationKey: f.organizationKey, scopeKey: f.scopeKey, agentKey: f.agentKey, nodeType: 'skill', nodeKey: f.automaticKey };
-    await expect(runArtifactReadTool(input, { registry: f.registry, runtimeData: runtimeData(false) })).rejects.toBeInstanceOf(ArtifactReadGrantError);
-    expect((await runArtifactReadTool(input, { registry: f.registry, runtimeData: runtimeData(true) })).content).toContain('Best vector match.');
+    expect((await runArtifactReadTool(input, { registry: f.registry, runtimeData })).content).toContain('Best vector match.');
   });
 });

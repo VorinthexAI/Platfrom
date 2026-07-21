@@ -47,7 +47,7 @@ Add a new Manager, Task, or Role as data by writing to a company graph through t
 
 ## Security
 
-Every mode call is constrained by three layers: `allowed_modes` controls which tools an agent can use, `allowed_member_ids` controls which original human may access an agent even through delegation, and `allowed_app_ids` filters every data read at the database query level before model reasoning can see it.
+Every execution is constrained by direct action authorization, original-human access checks, and database-level data filtering before model reasoning can see it.
 
 Authentication sessions use backend-issued cookie policy metadata. Ordinary
 users and members receive a seven-day access token and one-year absolute

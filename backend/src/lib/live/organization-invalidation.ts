@@ -35,12 +35,11 @@ const subjectFields: ReadonlyArray<readonly [key: string, type: string]> = [
   ['userOrganizationKey', 'userOrganizations'],
   ['organizationProviderKey', 'organizationProviders'],
   ['providerKey', 'providers'],
-  ['toolKey', 'tools'],
   ['actionKey', 'actions'],
   ['modelKey', 'models'],
 ];
 
-const runtimePrefixes = ['agent.', 'step.', 'tool.', 'model.', 'artifact.', 'guardrail.'] as const;
+const runtimePrefixes = ['agent.', 'step.', 'model.', 'artifact.', 'guardrail.'] as const;
 const mutationSuffixes = [
   '.create', '.update', '.add', '.move', '.archive', '.restore', '.remove',
   '.grant', '.revoke', '.sync', '.enable', '.disable', '.activate', '.suspend',

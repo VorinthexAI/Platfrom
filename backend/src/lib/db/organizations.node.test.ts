@@ -6,7 +6,6 @@ import { organizationSchema } from './organizations.node';
 import { skillSchema } from './skills.node';
 import { agentSchema } from './agents.node';
 import { agentSkillSchema } from './agent-skills.node';
-import { agentToolSchema } from './agent-tools.node';
 import { authChallengeSchema } from './auth-challenges.node';
 import { capabilitySchema } from './capabilities.node';
 import { eventSchema } from './events.node';
@@ -31,8 +30,6 @@ import { userWaitlistLeaderboardChangeSchema } from './user-waitlist-leaderboard
 import { visitorSchema } from './visitors.node';
 import { visitorSessionSchema } from './visitor-sessions.node';
 import { voiceSchema } from './voices.node';
-import { toolSchema } from './tools.node';
-import { toolActionSchema } from './tool-actions.node';
 
 const baseOrganization = {
   key: 'org_root',
@@ -109,7 +106,6 @@ describe('no node field mentions the retired platform or team nodes', () => {
     actions: actionSchema,
     agents: agentSchema,
     agentSkills: agentSkillSchema,
-    agentTools: agentToolSchema,
     authChallenges: authChallengeSchema,
     capabilities: capabilitySchema,
     events: eventSchema,
@@ -127,8 +123,6 @@ describe('no node field mentions the retired platform or team nodes', () => {
     providers: providerObjectSchema,
     products: productSchema,
     subscriptions: subscriptionSchema,
-    toolActions: toolActionSchema,
-    tools: toolSchema,
     skills: skillSchema,
     userEntitlements: userEntitlementSchema,
     userOrganizations: userOrganizationSchema,

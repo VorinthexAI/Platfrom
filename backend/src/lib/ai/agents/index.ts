@@ -28,14 +28,6 @@ export {
   type AgentSkillInsert,
 } from '@/lib/db/agent-skills.node';
 export {
-  agentToolSchema,
-  getAgentToolById,
-  getAgentToolByPair,
-  listAgentToolsByAgentKey,
-  type AgentTool,
-  type AgentToolInsert,
-} from '@/lib/db/agent-tools.node';
-export {
   loadAgentRuntime,
   compileAgentContext,
   compileAgentRuntimeContext,
@@ -46,7 +38,6 @@ export {
   type CompileAgentRuntimeOptions,
   type CompileAgentContextOptions,
   type AgentContext,
-  type AgentPermission,
   type AgentKnowledge,
   type AgentSourcePolicy,
 } from './runtime';
@@ -62,14 +53,12 @@ export {
   createAgentService,
   createAgentInputSchema,
   attachAgentSkillInputSchema,
-  grantAgentToolInputSchema,
   AgentReferenceNotFoundError,
   DuplicateAgentSlugError,
   DuplicateAgentLinkError,
   type AgentServiceDataSource,
   type CreateAgentInput,
   type AttachAgentSkillInput,
-  type GrantAgentToolInput,
 } from './service';
 export {
   createSkillService,

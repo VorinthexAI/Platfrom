@@ -9,7 +9,6 @@ export const AGENT_ARCHITECTURE = {
   registries: {
     agents: 'agents',
     skills: 'skills',
-    tools: 'tools',
     actions: 'actions',
     models: 'models',
     providers: 'providers',
@@ -21,8 +20,6 @@ export const AGENT_ARCHITECTURE = {
     scopeAgents: 'scopeAgents',
     agentMembers: 'agentMembers',
     agentSkills: 'agentSkills',
-    agentTools: 'agentTools',
-    toolActions: 'toolActions',
     modelActions: 'modelActions',
     modelProviders: 'modelProviders',
     agentRunSources: 'agentRunSources',
@@ -33,14 +30,12 @@ export const AGENT_ARCHITECTURE = {
       'scope',
       'agent',
       'skills',
-      'tools',
       'knowledge',
-      'permissions',
       'guardrails',
       'currentTask',
     ],
   },
-  execution: ['tool', 'action', 'router', 'model', 'provider'],
+  execution: ['action', 'router', 'model', 'provider'],
   response: 'response',
   artifactViews: {
     definitions: 'artifacts',
@@ -59,7 +54,6 @@ export const AGENT_ARCHITECTURE = {
 
 export const AGENT_EXECUTION_SEQUENCE = [
   'agentContext',
-  'tool',
   'action',
   'router',
   'model',

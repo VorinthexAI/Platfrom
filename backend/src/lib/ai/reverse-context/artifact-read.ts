@@ -34,7 +34,7 @@ export async function executeArtifactReadTool(rawInput: z.input<typeof artifactR
   return artifactReadToolOutputSchema.parse(block);
 }
 
-/** Public callable boundary: verifies persisted tool/action ownership before lazy loading. */
+/** Public callable boundary: verifies the agent context before lazy loading. */
 export async function runArtifactReadTool(
   rawInput: z.input<typeof artifactReadToolInputSchema>,
   options: { registry: NodeResolverRegistry; runtimeData?: AgentRuntimeDataSource },
@@ -42,7 +42,5 @@ export async function runArtifactReadTool(
   const input = artifactReadToolInputSchema.parse(rawInput);
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey || runtime.scope.key !== input.scopeKey) throw new ArtifactReadGrantError('agent context does not match organization and scope');
-  const grant = runtime.tools.find(({ tool }) => tool.slug === 'artifact.read');
-  if (!grant || grant.actions.length === 0) throw new ArtifactReadGrantError('agent is not granted artifact.read');
   return executeArtifactReadTool(input, options.registry);
 }

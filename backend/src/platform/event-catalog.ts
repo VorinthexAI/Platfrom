@@ -52,7 +52,6 @@ export const providerEventSlugs = [
 export const runtimeEventSlugs = [
   'agent.started', 'agent.completed', 'agent.failed',
   'step.started', 'step.completed', 'step.failed',
-  'tool.called', 'tool.completed', 'tool.failed',
   'model.called', 'model.completed', 'model.failed',
   'artifact.created', 'artifact.updated', 'artifact.deleted', 'artifact.resolved', 'artifact.used', 'guardrail.blocked',
 ] as const;
@@ -81,9 +80,6 @@ export const runtimeEventDataSchema = z.object({
   agentKey: z.string().cuid().optional(),
   agentSlug: z.string().trim().min(1).max(120).optional(),
   agentName: z.string().trim().min(1).max(120).optional(),
-  toolKey: z.string().cuid().optional(),
-  toolSlug: z.string().trim().min(1).max(160).optional(),
-  toolName: z.string().trim().min(1).max(100).optional(),
   actionKey: z.string().cuid().optional(),
   actionSlug: z.string().trim().min(1).max(160).optional(),
   actionName: z.string().trim().min(1).max(100).optional(),

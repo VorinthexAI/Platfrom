@@ -10,7 +10,6 @@ import { getDefaultAgentArtifactRepository, type AgentArtifactRepository } from 
 import type { RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
 import type { AgentMemoryRepository } from '@/lib/ai/agent-memories';
 import type { ArtifactResolverRegistry, SourcePermissionResolver } from '@/lib/ai/artifact-resolvers';
-import { getTool as getToolHandler } from '@/lib/ai/tools';
 import { executeRoute, selectRoute, ProviderExecutionError, type RouteAttemptTelemetry, type RouterDependencies } from '@/lib/ai/router';
 import type { ProviderExecuteResponse } from '@/lib/ai/providers';
 import { modelSlugSchema } from '@/lib/db/models.node';
@@ -26,8 +25,7 @@ import { validateAgentOutput, validateProviderResponse } from './validation';
 export const runStoredAgentToolParamsSchema = z.object({
   organizationKey: organizationKeySchema,
   agentKey: z.string().cuid(),
-  toolKey: z.string().cuid(),
-  actionKey: z.string().cuid().optional(),
+  actionSlug: z.string().trim().min(1).max(160),
   stepSlug: z.string().trim().min(1).max(160).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   metadata: agentOutputMetadataSchema,
   input: z.unknown(),
@@ -94,22 +92,13 @@ function runtimeEventReason(error: unknown) {
   return (error instanceof Error ? error.message : String(error)).trim().slice(0, 500) || 'Unknown runtime error';
 }
 
-/** Secure persisted-agent entry point. No client-supplied relation key is trusted without loading its DB link. */
+/** Secure persisted-agent entry point. Provider routing is selected by a direct action slug. */
 export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAgentToolParams, options: RunStoredAgentToolOptions = {}): Promise<StoredAgentRunResult<TOutput>> {
   const parsed = runStoredAgentToolParamsSchema.safeParse(params);
   if (!parsed.success) throw new InvalidRunRequestError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   const request = parsed.data;
   const recordEvent = options.events ?? recordRuntimeEvent;
-  const registeredRuntime = await loadAgentRuntime(request.agentKey, options.runtimeData, {
-    onGuardrailBlocked: async ({ scopeId, agentKey, toolKey, reason }) => {
-      try {
-        await recordEvent({ scopeId, userId: null, slug: 'guardrail.blocked', data: { agentKey, toolKey, reason } });
-      } catch (error) {
-        console.warn('failed to record agent runtime guardrail event', { agentKey, toolKey, error: error instanceof Error ? error.message : String(error) });
-      }
-    },
-  });
-  const runtime = registeredRuntime;
+  const runtime = await loadAgentRuntime(request.agentKey, options.runtimeData);
   if (runtime.scope.organizationKey !== runtime.organization.key) throw new InvalidRunRequestError('execution scope belongs to another organization');
   const emit = async (slug: RuntimeEventSlug, data: RuntimeEventData, userId: string | null = null) => {
     try {
@@ -147,22 +136,11 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
     return { executed: false, run, step: null, calls: [], response: null };
   }
 
-  const granted = runtime.tools.find(({ tool }) => tool.key === request.toolKey);
-  if (!granted) {
-    await emit('guardrail.blocked', { agentKey: runtime.agent.key, toolKey: request.toolKey, reason: 'Tool not allowed' }, eventUserId);
-    throw new InvalidRunRequestError(`tool ${request.toolKey} is not granted to agent ${request.agentKey}`);
-  }
-  getToolHandler(granted.tool.slug);
-  const selected = request.actionKey ? granted.actions.find(({ action }) => action.key === request.actionKey) : granted.actions[0];
-  if (!selected) {
-    await emit('guardrail.blocked', { agentKey: runtime.agent.key, toolKey: request.toolKey, actionKey: request.actionKey, reason: 'Action not allowed' }, eventUserId);
-    throw new InvalidRunRequestError(`action is not enabled for tool ${request.toolKey}`);
-  }
   const primarySkill = runtime.skills[0]!;
   const agentContext = await compileAgentContext(runtime, { currentTask: request.currentTask, sources: request.sources, variables: options.variables, memories: options.memories, artifactResolvers: options.artifactResolvers, canUseSource: options.canUseSource, reverseContextCompiler: options.reverseContextCompiler, knowledgeNodeTypes: options.knowledgeNodeTypes, knowledgeTokenBudget: options.knowledgeTokenBudget });
   const systemPrompt = compileAgentRuntimeContext(agentContext, { outputSchema: request.outputSchema });
   const input = injectSystemPrompt(request.input, systemPrompt);
-  const routeActionSlug = options.reasoningActionSlug ?? selected.action.slug;
+  const routeActionSlug = options.reasoningActionSlug ?? request.actionSlug;
   const routeInput = request.providerSlug
     ? { mode: 'fixed' as const, organizationKey: request.organizationKey, actionSlug: routeActionSlug, modelSlug: request.modelSlug!, providerSlug: request.providerSlug }
     : request.modelSlug
@@ -186,8 +164,6 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   }
 
   const executedStep = preparedSteps.at(-1)!;
-  await emit('tool.called', { runKey: run.key, invocationKey: executedStep.key, stepKey: executedStep.key, agentKey: runtime.agent.key, agentSlug: runtime.agent.slug, agentName: runtime.agent.name, toolKey: request.toolKey, toolSlug: granted.tool.slug, toolName: granted.tool.name, actionKey: selected.action.key, actionSlug: selected.action.slug, actionName: selected.action.name, status: 'called' }, eventUserId);
-
   let response: ProviderExecuteResponse<TOutput>;
   let responseMetadata: ReturnType<typeof validateAgentOutput>;
   try {
@@ -200,7 +176,7 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       signal: options.signal,
       onAttemptStart: async (attempt) => {
         const callKey = newId();
-        await emit('model.called', { runKey: run.key, stepKey: executedStep.key, callKey, agentKey: runtime.agent.key, toolKey: request.toolKey, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, status: 'called' }, eventUserId);
+        await emit('model.called', { runKey: run.key, stepKey: executedStep.key, callKey, agentKey: runtime.agent.key, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, status: 'called' }, eventUserId);
         return callKey;
       },
       onAttempt: async (attempt) => {
@@ -222,10 +198,10 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       recordArtifactCreated: ({ nodeType, nodeKey }) => emit('artifact.created', { runKey: run.key, agentKey: runtime.agent.key, nodeType, nodeKey, status: 'created' }, eventUserId),
     });
   } catch (error) {
-    await persistExecution({ run, runs, steps, calls, runtime, request, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, toolActionKey: selected.action.key, status: finalStatus(error), reason: request.metadata.reason, eventReason: runtimeEventReason(error), score: request.metadata.score, startedAtMs, emit, eventUserId });
+    await persistExecution({ run, runs, steps, calls, runtime, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, status: finalStatus(error), reason: request.metadata.reason, eventReason: runtimeEventReason(error), score: request.metadata.score, startedAtMs, emit, eventUserId });
     throw error;
   }
-  const persisted = await persistExecution({ run, runs, steps, calls, runtime, request, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, toolActionKey: selected.action.key, status: responseMetadata.status === 'accepted' ? 'completed' : 'rejected', reason: responseMetadata.reason, eventReason: responseMetadata.reason, score: responseMetadata.score, startedAtMs, emit, eventUserId });
+  const persisted = await persistExecution({ run, runs, steps, calls, runtime, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, status: responseMetadata.status === 'accepted' ? 'completed' : 'rejected', reason: responseMetadata.reason, eventReason: responseMetadata.reason, score: responseMetadata.score, startedAtMs, emit, eventUserId });
   return { executed: true, ...persisted, response };
 }
 
@@ -250,8 +226,8 @@ export function normalizeStructuredProviderResponse<TOutput>(response: ProviderE
 
 async function persistExecution(input: {
   run: AgentRun; runs: AgentRunRepository; steps: AgentRunStepRepository; calls: AgentRunCallRepository;
-  runtime: Awaited<ReturnType<typeof loadAgentRuntime>>; request: z.infer<typeof runStoredAgentToolParamsSchema>;
-  attempts: readonly RouteAttemptTelemetry[]; preparedSteps: readonly { key: string; stepSlug: string }[]; primarySkillKey: string; toolActionKey: string; status: 'completed' | 'rejected' | 'failed' | 'cancelled' | 'timeout';
+  runtime: Awaited<ReturnType<typeof loadAgentRuntime>>;
+  attempts: readonly RouteAttemptTelemetry[]; preparedSteps: readonly { key: string; stepSlug: string }[]; primarySkillKey: string; status: 'completed' | 'rejected' | 'failed' | 'cancelled' | 'timeout';
   reason: string; eventReason: string; score: number; startedAtMs: number; eventUserId: string | null;
   emit: (slug: RuntimeEventSlug, data: RuntimeEventData, userId?: string | null) => Promise<void>;
 }) {
@@ -265,13 +241,9 @@ async function persistExecution(input: {
     await input.emit(stepStatus === 'completed' ? 'step.completed' : 'step.failed', { runKey: input.run.key, stepKey: prepared.key, agentKey: input.runtime.agent.key, status: stepStatus, reason: stepStatus === 'failed' ? input.eventReason : undefined, elapsedMs: endedAtMs - stepStartedAtMs }, input.eventUserId);
   }
   const step = persistedSteps.at(-1)!;
-  const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ key: attempt.callKey, agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, toolKey: input.request.toolKey, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
+  const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ key: attempt.callKey, agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
   const run = await input.runs.updateRun(input.run.key, { status: input.status, reason: input.reason, score: input.score, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
   const terminalCall = persistedCalls.at(-1);
-  const terminalGrant = input.runtime.tools.find(({ tool }) => tool.key === input.request.toolKey);
-  const terminalAction = terminalGrant?.actions.find(({ action }) => action.key === input.toolActionKey);
-  const terminalData = { runKey: run.key, invocationKey: step.key, stepKey: step.key, callKey: terminalCall?.key, agentKey: input.runtime.agent.key, agentSlug: input.runtime.agent.slug, agentName: input.runtime.agent.name, toolKey: input.request.toolKey, toolSlug: terminalGrant?.tool.slug, toolName: terminalGrant?.tool.name, actionKey: input.toolActionKey, actionSlug: terminalAction?.action.slug, actionName: terminalAction?.action.name, status: input.status, reason: input.status === 'completed' ? undefined : input.eventReason, elapsedMs: endedAtMs - input.startedAtMs };
-  await input.emit(input.status === 'completed' ? 'tool.completed' : 'tool.failed', terminalData, input.eventUserId);
   await input.emit(input.status === 'completed' ? 'agent.completed' : 'agent.failed', { runKey: run.key, agentKey: input.runtime.agent.key, status: input.status, reason: input.status === 'completed' ? undefined : input.eventReason, elapsedMs: endedAtMs - input.startedAtMs }, input.eventUserId);
   return { run, step, calls: persistedCalls };
 }

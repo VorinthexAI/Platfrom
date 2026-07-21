@@ -6,10 +6,7 @@ import { getAllModelActionsChunked, listModelActionsPage, upsertModelActionByKey
 import { getAllModelProvidersChunked, listModelProvidersPage, upsertModelProviderByKey } from './model-providers.node';
 import { getAllAgentsChunked, listAgentsPage, upsertAgentByKey } from './agents.node';
 import { getAllSkillsChunked, listSkillsPage, upsertSkillByKey } from './skills.node';
-import { getAllToolsChunked, listToolsPage, upsertToolByKey } from './tools.node';
-import { getAllToolActionsChunked, listToolActionsPage, upsertToolActionByKey } from './tool-actions.node';
 import { getAllAgentSkillsChunked, listAgentSkillsPage, upsertAgentSkillByKey } from './agent-skills.node';
-import { getAllAgentToolsChunked, listAgentToolsPage, upsertAgentToolByKey } from './agent-tools.node';
 import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSessionByKey } from './visitor-sessions.node';
 import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChallengeByKey } from './auth-challenges.node';
@@ -58,7 +55,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   actions: { listPage: listActionsPage, getAllChunked: getAllActionsChunked, upsertByKey: upsertActionByKey },
   agents: { listPage: listAgentsPage, getAllChunked: getAllAgentsChunked, upsertByKey: upsertAgentByKey },
   agentSkills: { listPage: listAgentSkillsPage, getAllChunked: getAllAgentSkillsChunked, upsertByKey: upsertAgentSkillByKey },
-  agentTools: { listPage: listAgentToolsPage, getAllChunked: getAllAgentToolsChunked, upsertByKey: upsertAgentToolByKey },
   agentMembers: { listPage: listAgentMembersPage, getAllChunked: getAllAgentMembersChunked, upsertByKey: upsertAgentMemberByKey },
   authChallenges: { listPage: listAuthChallengesPage, getAllChunked: getAllAuthChallengesChunked, upsertByKey: upsertAuthChallengeByKey },
   capabilities: { listPage: listCapabilitiesPage, getAllChunked: getAllCapabilitiesChunked, upsertByKey: upsertCapabilityByKey },
@@ -79,8 +75,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   subscriptions: { listPage: listSubscriptionsPage, getAllChunked: getAllSubscriptionsChunked, upsertByKey: upsertSubscriptionByKey },
   skills: { listPage: listSkillsPage, getAllChunked: getAllSkillsChunked, upsertByKey: upsertSkillByKey },
   scopeAgents: { listPage: listScopeAgentsPage, getAllChunked: getAllScopeAgentsChunked, upsertByKey: upsertScopeAgentByKey },
-  toolActions: { listPage: listToolActionsPage, getAllChunked: getAllToolActionsChunked, upsertByKey: upsertToolActionByKey },
-  tools: { listPage: listToolsPage, getAllChunked: getAllToolsChunked, upsertByKey: upsertToolByKey },
   userEntitlements: { listPage: listUserEntitlementsPage, getAllChunked: getAllUserEntitlementsChunked, upsertByKey: upsertUserEntitlementByKey },
   userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
   userOrganizations: { listPage: listUserOrganizationsPage, getAllChunked: getAllUserOrganizationsChunked, upsertByKey: upsertUserOrganizationByKey },

@@ -1,7 +1,7 @@
 /**
  * Vorinthex AI execution layer and agent framework — public API.
  *
- * Execution chain: Agent → Tool → Action → Router → Model → Provider
+ * Execution chain: Agent → Action → Router → Model → Provider
  * → Response → Validation → agentRuns.
  * See ./README.md for the architecture overview.
  */
@@ -15,7 +15,6 @@ export * from './organization-credentials';
 export * from './router';
 export * from './scopes';
 export * from './guardrails';
-export * from './tools';
 export * from './domain-tools';
 export * from './agents';
 export * from './agent-runs';

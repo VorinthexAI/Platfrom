@@ -1,14 +1,10 @@
 import { AiError } from '@/lib/ai/shared/result';
 import { getDefaultScopeRepository, type Scope } from '@/lib/ai/scopes';
-import { getActionById, type Action } from '@/lib/db/actions.node';
 import { agentSchema, getAgentById, type Agent } from '@/lib/db/agents.node';
 import { listAgentSkillsByAgentKey, type AgentSkill } from '@/lib/db/agent-skills.node';
-import { listAgentToolsByAgentKey, type AgentTool } from '@/lib/db/agent-tools.node';
 import { getSkillById, type Skill } from '@/lib/db/skills.node';
-import { listToolActionsByToolKey, type ToolAction } from '@/lib/db/tool-actions.node';
-import { getToolById, type Tool } from '@/lib/db/tools.node';
 import { getOrganizationById, type Organization } from '@/lib/db/organizations.node';
-import { assertToolAllowedByGuardrails, type Guardrail } from '@/lib/ai/guardrails';
+import type { Guardrail } from '@/lib/ai/guardrails';
 import { getDefaultRuntimeVariableRepository, type RuntimeVariableRepository } from '@/lib/ai/runtime-variables';
 import { getDefaultAgentMemoryRepository, type AgentMemory, type AgentMemoryRepository } from '@/lib/ai/agent-memories';
 import { defaultArtifactResolverRegistry, resolveArtifactSources, type ArtifactReference, type ArtifactResolverRegistry, type SourcePermissionResolver } from '@/lib/ai/artifact-resolvers';
@@ -27,17 +23,11 @@ export class AgentRuntimeInvalidError extends AiError {
 }
 
 export interface LoadedAgentSkill { relation: AgentSkill; skill: Skill }
-export interface LoadedAgentTool {
-  relation: AgentTool;
-  tool: Tool;
-  actions: Array<{ relation: ToolAction; action: Action }>;
-}
 export interface AgentRuntimeContext {
   organization: Organization;
   agent: Agent;
   scope: Scope;
   skills: LoadedAgentSkill[];
-  tools: LoadedAgentTool[];
 }
 export interface AgentRuntimeDataSource {
   getAgent(key: string): Promise<Agent | null>;
@@ -45,10 +35,6 @@ export interface AgentRuntimeDataSource {
   getOrganization(key: string): Promise<Organization | null>;
   listAgentSkills(agentKey: string): Promise<AgentSkill[]>;
   getSkill(key: string): Promise<Skill | null>;
-  listAgentTools(agentKey: string): Promise<AgentTool[]>;
-  getTool(key: string): Promise<Tool | null>;
-  listToolActions(toolKey: string): Promise<ToolAction[]>;
-  getAction(key: string): Promise<Action | null>;
 }
 const defaultDataSource: AgentRuntimeDataSource = {
   getAgent: getAgentById,
@@ -56,18 +42,10 @@ const defaultDataSource: AgentRuntimeDataSource = {
   getOrganization: getOrganizationById,
   listAgentSkills: listAgentSkillsByAgentKey,
   getSkill: getSkillById,
-  listAgentTools: listAgentToolsByAgentKey,
-  getTool: getToolById,
-  listToolActions: listToolActionsByToolKey,
-  getAction: getActionById,
 };
 
-export interface LoadAgentRuntimeOptions {
-  onGuardrailBlocked?: (input: { scopeId: string; agentKey: string; toolKey: string; reason: string }) => void | Promise<void>;
-}
-
-/** Loads the complete persisted authorization and competence graph for one agent. */
-export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDataSource = defaultDataSource, options: LoadAgentRuntimeOptions = {}): Promise<AgentRuntimeContext> {
+/** Loads the persisted identity and competence graph for one agent. */
+export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDataSource = defaultDataSource): Promise<AgentRuntimeContext> {
   const validAgentKey = agentSchema.shape.key.parse(agentKey);
   const agent = await source.getAgent(validAgentKey);
   if (!agent) throw new AgentRuntimeNotFoundError('Agent', validAgentKey);
@@ -87,36 +65,7 @@ export async function loadAgentRuntime(agentKey: string, source: AgentRuntimeDat
   skills.sort((left, right) => right.relation.priority - left.relation.priority || left.relation.key.localeCompare(right.relation.key));
   if (skills.length === 0) throw new AgentRuntimeInvalidError(`agent ${agent.key} has no skills`);
 
-  const toolRelations = await source.listAgentTools(agent.key);
-  const tools = await Promise.all(toolRelations.map(async (relation) => {
-    const tool = await source.getTool(relation.toolKey);
-    if (!tool) throw new AgentRuntimeNotFoundError('Tool', relation.toolKey);
-    if (!tool.enabled) throw new AgentRuntimeInvalidError(`agent ${agent.key} is linked to disabled tool ${tool.key}`);
-    try {
-      assertToolAllowedByGuardrails(agent.key, [{ scopeId: scope.key }], { id: tool.slug, scopeId: tool.scopeKey });
-    } catch (error) {
-      await options.onGuardrailBlocked?.({ scopeId: scope.key, agentKey: agent.key, toolKey: tool.key, reason: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500) });
-      throw error;
-    }
-    const actionRelations = (await source.listToolActions(tool.key)).filter((link) => link.enabled);
-    actionRelations.sort((left, right) => right.priority - left.priority || left.key.localeCompare(right.key));
-    const actions = await Promise.all(actionRelations.map(async (actionRelation) => {
-      const action = await source.getAction(actionRelation.actionKey);
-      if (!action) throw new AgentRuntimeNotFoundError('Action', actionRelation.actionKey);
-      if (!action.enabled) throw new AgentRuntimeInvalidError(`tool ${tool.key} uses disabled action ${action.key}`);
-      return { relation: actionRelation, action };
-    }));
-    if (actions.length === 0) throw new AgentRuntimeInvalidError(`tool ${tool.key} has no enabled actions`);
-    return { relation, tool, actions };
-  }));
-  return { organization, agent, scope, skills, tools };
-}
-
-export interface AgentPermission {
-  toolKey: string;
-  toolSlug: string;
-  actionKeys: readonly string[];
-  actionSlugs: readonly string[];
+  return { organization, agent, scope, skills };
 }
 export interface AgentSourcePolicy {
   requestedExplorationRate: number;
@@ -133,7 +82,6 @@ export interface AgentContext extends AgentRuntimeContext {
   memories: readonly AgentMemory[];
   artifacts: readonly ArtifactReference[];
   knowledge: AgentKnowledge;
-  permissions: readonly AgentPermission[];
   guardrails: readonly Guardrail[];
   sourcePolicy: AgentSourcePolicy;
   currentTask: string;
@@ -165,11 +113,10 @@ export async function compileAgentContext(runtime: AgentRuntimeContext, options:
   const variables: Record<string, unknown> = {};
   for (const variable of loadedVariables) variables[variable.name] = variable.value;
   const memories = loadedMemories.filter((memory) => memory.organizationKey === runtime.organization.key && memory.scopeKey === runtime.scope.key);
-  const permissions = runtime.tools.map(({ tool, actions }) => ({ toolKey: tool.key, toolSlug: tool.slug, actionKeys: actions.map(({ action }) => action.key), actionSlugs: actions.map(({ action }) => action.slug) }));
   const guardrails = [{ scopeId: runtime.scope.key }];
   const sourceCount = artifacts.length;
   const knowledge = { pack: knowledgePack, sources: artifacts, memories };
-  return { ...runtime, variables, memories, artifacts, knowledge, permissions, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
+  return { ...runtime, variables, memories, artifacts, knowledge, guardrails, sourcePolicy: { requestedExplorationRate: runtime.agent.explorationRate, effectiveExplorationRate: sourceCount === 0 ? 1 : runtime.agent.explorationRate, sourceCount }, currentTask };
 }
 
 export interface CompileAgentRuntimeOptions {
@@ -184,18 +131,15 @@ export interface CompileAgentRuntimeOptions {
 /** Renders the structured context into the provider's system instructions. */
 export function compileAgentRuntimeContext(context: AgentContext, options: CompileAgentRuntimeOptions = {}): string {
   const skillSections = context.skills.flatMap(({ relation, skill }) => [`### ${skill.title} (${skill.name}, priority ${relation.priority})`, skill.definition.trim()]);
-  const toolLines = context.tools.map(({ tool, actions }) => `- ${tool.slug} — ${tool.name}: ${tool.description} [${actions.map(({ action }) => action.slug).join(', ')}]`);
   return [
     `# ${context.agent.name} — ${context.agent.title}`,
     '', '## Organization', `${context.organization.name} (${context.organization.key})`,
     '', '## Scope context', `${context.scope.name}: ${context.scope.description}`,
     '', '## Skills', ...skillSections,
-    '', '## Available tools', ...toolLines,
     '', '## Variables', JSON.stringify(context.variables),
     '', '## Memories', JSON.stringify(context.memories.map(({ content, memoryType, importance }) => ({ content, memoryType, importance }))),
     '', '## Artifact sources', JSON.stringify(context.artifacts),
     '', '## Knowledge', JSON.stringify(context.knowledge),
-    '', '## Permissions', JSON.stringify(context.permissions),
     '', '## Guardrails', JSON.stringify(context.guardrails),
     '', '## Source policy', JSON.stringify(context.sourcePolicy),
     '', '## Output schema',

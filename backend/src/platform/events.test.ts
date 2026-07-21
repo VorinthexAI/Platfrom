@@ -30,7 +30,6 @@ describe('event catalog', () => {
     expect(runtimeEventSlugs).toEqual([
       'agent.started', 'agent.completed', 'agent.failed',
       'step.started', 'step.completed', 'step.failed',
-      'tool.called', 'tool.completed', 'tool.failed',
       'model.called', 'model.completed', 'model.failed',
       'artifact.created', 'artifact.updated', 'artifact.deleted', 'artifact.resolved', 'artifact.used', 'guardrail.blocked',
     ]);

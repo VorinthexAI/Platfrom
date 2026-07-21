@@ -8,7 +8,6 @@ export const agentRunCallSchema = z.object({
   agentRunKey: z.string().cuid(),
   agentRunStepKey: z.string().cuid().nullable(),
   skillKey: z.string().cuid(),
-  toolKey: z.string().cuid().nullable(),
   actionKey: z.string().cuid(),
   modelKey: z.string().cuid(),
   providerKey: z.string().cuid(),

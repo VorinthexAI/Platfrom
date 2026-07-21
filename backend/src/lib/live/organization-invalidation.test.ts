@@ -21,18 +21,6 @@ describe('organization invalidation projection', () => {
     expect(JSON.stringify(event)).not.toContain('outputTokens');
   });
 
-  test('uses a run as the thin subject for tool lifecycle events', () => {
-    expect(projectOrganizationInvalidation({
-      scopeId: scopeKey,
-      slug: 'tool.completed',
-      data: { runKey: artifactKey, toolName: 'Secret tool name', status: 'completed' },
-    })).toEqual({
-      slug: 'tool.completed',
-      scopeKey,
-      resource: { type: 'agentRuns', key: artifactKey },
-    });
-  });
-
   test('projects organization-provider events to their provider-link identity', () => {
     expect(projectOrganizationInvalidation({
       scopeId: scopeKey,
@@ -62,7 +50,7 @@ describe('organization invalidation projection', () => {
   });
 
   test('streams runtime activity and mutations but excludes analytics and reads', () => {
-    expect(isOrganizationInvalidationSlug('tool.called')).toBe(true);
+    expect(isOrganizationInvalidationSlug('model.called')).toBe(true);
     expect(isOrganizationInvalidationSlug('scope.agent.add')).toBe(true);
     expect(isOrganizationInvalidationSlug('organization.update')).toBe(true);
     expect(isOrganizationInvalidationSlug('organization.provider.usage')).toBe(true);
