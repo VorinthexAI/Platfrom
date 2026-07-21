@@ -9,7 +9,7 @@ import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import ffmpegPath from 'ffmpeg-static';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const REGION = process.env.BEDROCK_REGION;
+const REGION = process.env.BEDROCK_REGION ?? 'eu-north-1';
 const MODEL_ID = 'amazon.nova-2-sonic-v1:0';
 
 const ORCHESTRATORS = [
@@ -20,7 +20,6 @@ const ORCHESTRATORS = [
   ['ledger-cfo', 'matthew'], ['mercury-cro', 'matthew'], ['sentinel-ciso', 'matthew'], ['themis-clo', 'tiffany'],
 ] as const;
 
-if (!REGION) throw new Error('BEDROCK_REGION is required.');
 if (!ffmpegPath) throw new Error('ffmpeg-static did not provide an executable path.');
 
 const accessKeyId = process.env.BEDROCK_AWS_ACCESS_KEY_ID;
@@ -29,7 +28,7 @@ if (!accessKeyId || !secretAccessKey) throw new Error('BEDROCK_AWS_ACCESS_KEY_ID
 
 const client = new BedrockRuntimeClient({
   region: REGION,
-  credentials: { accessKeyId, secretAccessKey, sessionToken: process.env.BEDROCK_AWS_SESSION_TOKEN },
+  credentials: { accessKeyId, secretAccessKey },
   endpoint: `https://bedrock-runtime.${REGION}.amazonaws.com`,
   requestHandler: new NodeHttp2Handler({ requestTimeout: 300_000, sessionTimeout: 300_000 }),
 });

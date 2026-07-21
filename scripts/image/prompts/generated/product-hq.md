@@ -1,6 +1,6 @@
 # HQ Logo Prompt
 
-Create a premium sibling product logo for HQ. It should feel like it belongs beside the Vorinthex master logo: a centered chrome emblem, circular or orbital silhouette, obsidian negative space, sharp engineered geometry, and no text. Encode this product idea abstractly: Your organization, in sync.
+Create a premium headquarters signal beacon logo: one tall, centered chrome relay tower rising from a dark glass base, with two or three restrained concentric coordination rings radiating outward. It must read as communication, alignment, and a shared operating center, not a cube, building, shield, or generic app icon. Use an elegant orbital silhouette, precise engineered geometry, obsidian negative space, and no text.
 
 Keep the whole family visually consistent with the existing Vorinthex AI logo:
 - obsidian black base

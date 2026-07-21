@@ -38,6 +38,9 @@ function targets(): GalaxyLogoTarget[] {
 
 function symbolDirection(entity: GalaxyEntity): string {
   if (entity.type === "product") {
+    if (entity.slug === "hq") {
+      return "Create a premium headquarters signal beacon logo: one tall, centered chrome relay tower rising from a dark glass base, with two or three restrained concentric coordination rings radiating outward. It must read as communication, alignment, and a shared operating center, not a cube, building, shield, or generic app icon. Use an elegant orbital silhouette, precise engineered geometry, obsidian negative space, and no text.";
+    }
     return `Create a premium sibling product logo for ${entity.name}. It should feel like it belongs beside the Vorinthex master logo: a centered chrome emblem, circular or orbital silhouette, obsidian negative space, sharp engineered geometry, and no text. Encode this product idea abstractly: ${entity.tagline ?? entity.shortDescription}.`;
   }
   if (entity.type === "capability") {
@@ -86,9 +89,10 @@ export async function generateGalaxyAssets(): Promise<void> {
   let skipped = 0;
   let failed = 0;
 
+  const refresh = new Set(process.argv.slice(2));
   for (const target of targets()) {
     const existing = await context.registry.getAsset(target.assetSlug);
-    if (existing?.versions.length) {
+    if (existing?.versions.length && !refresh.has(target.entity.slug)) {
       skipped += 1;
       console.log(chalk.gray(`Skipping ${target.assetSlug}; already has ${existing.versions.length} version(s).`));
       continue;

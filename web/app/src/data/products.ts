@@ -8,7 +8,7 @@ import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
  */
 
 export type ProductStatus = "active" | "coming-soon";
-export type ProductKey = "core" | "hq" | "command" | "studio" | "launch";
+export type ProductKey = "core" | "hq" | "command" | "studio" | "launch" | "replica" | "pilot";
 
 export interface SeoMeta {
   title: string;

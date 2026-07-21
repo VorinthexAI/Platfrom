@@ -23,7 +23,7 @@ const nexus: GalaxyEntity = {
   name: "Nexus",
   shortDescription: "The Source of Intelligence.",
   longDescription:
-    "The Nexus is the heart of the Vorinthex AI galaxy, the intelligence that Core, HQ, Command, Studio, and Launch all orbit.",
+    "The Nexus is the heart of the Vorinthex AI galaxy, the intelligence that Core, HQ, Command, Studio, Launch, Replica, and Pilot all orbit.",
   tagline: "The Source of Intelligence",
   isLive: true,
   visibility: "live",
@@ -49,7 +49,7 @@ const nexus: GalaxyEntity = {
       {
         question: "What is Vorinthex AI?",
         answer:
-          "Vorinthex AI is the Nexus of Intelligence: a premium ecosystem of AI products built around personal intelligence, organization, orchestration, creation, and deployment. Its products are Core, HQ, Command, Studio, and Launch.",
+          "Vorinthex AI is the Nexus of Intelligence: a premium ecosystem of AI products built around personal intelligence, organization, orchestration, creation, deployment, exploration, and learning. Its products are Core, HQ, Command, Studio, Launch, Replica, and Pilot.",
       },
     ],
     llmsText:
@@ -62,7 +62,7 @@ const nexus: GalaxyEntity = {
     primaryCta: "Join",
     secondaryCta: "Already hunting? Sign in",
   },
-  children: ["product.core", "product.hq", "product.command", "product.studio", "product.launch"],
+  children: ["product.core", "product.hq", "product.command", "product.studio", "product.launch", "product.replica", "product.pilot"],
 };
 
 /* -------------------------------------------------------------------- */
@@ -419,6 +419,155 @@ const launch: GalaxyEntity = {
     primaryCta: "Join Hunt",
     statusNote:
       "Launch joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
+  },
+  children: [],
+};
+
+const replica: GalaxyEntity = {
+  id: "product.replica",
+  slug: "replica",
+  type: "product",
+  parentId: "nexus.star",
+  name: "Replica",
+  shortDescription:
+    "A sandbox for experiencing a product before you connect.",
+  longDescription:
+    "Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.",
+  tagline: "Experience Before You Connect",
+  label: "Product Sandbox",
+  isLive: false,
+  visibility: "teaser",
+  launchDate: "TBD",
+  statusLabel: "Coming Soon",
+  logo: { src: "", alt: "Replica", kind: "procedural", iconKey: "replica" },
+  visual: {
+    celestialKind: "planet",
+    orbitLevel: 5,
+    orbitRadius: 15,
+    orbitSpeed: 0.03,
+    initialAngle: 0.9,
+    size: 0.76,
+    materialPreset: "locked-crystal-planet",
+    accent: "glass",
+  },
+  routes: {
+    path: "/replica",
+    subdomains: ["replica.vorinthex.com"],
+    canonical: "/replica",
+  },
+  seo: {
+    title: "Replica | Experience Before You Connect",
+    description:
+      "Replica is the Vorinthex sandbox for experiencing a product before you connect.",
+    indexable: true,
+    schemaType: "SoftwareApplication",
+  },
+  aeo: {
+    summary:
+      "Replica is the Vorinthex product sandbox for experiencing a product before you connect.",
+    questions: [
+      {
+        question: "What is Replica by Vorinthex AI?",
+        answer:
+          "Replica is an upcoming Vorinthex AI sandbox that lets people experience a product before they connect.",
+      },
+      {
+        question: "What does Experience Before You Connect mean?",
+        answer:
+          "Experience Before You Connect is Replica's approach: explore a product in a sandbox before deciding to connect.",
+      },
+    ],
+    llmsText: "Product sandbox for experiencing a product before you connect.",
+  },
+  content: {
+    eyebrow: "Product Sandbox",
+    headline: "Experience before you connect.",
+    subheadline: "Explore the product first, then decide what comes next.",
+    body: "Replica gives you a sandbox to experience a product before you connect, so you can explore with clarity before making the connection.",
+    bullets: [
+      "Explore a product in a dedicated sandbox.",
+      "Experience its value before you connect.",
+      "Decide what comes next with clarity.",
+    ],
+    drawerLine: "Experience a product before you connect.",
+    primaryCta: "Join Hunt",
+    secondaryCta: "Explore Replica",
+    statusNote:
+      "Replica joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
+  },
+  children: [],
+};
+
+const pilot: GalaxyEntity = {
+  id: "product.pilot",
+  slug: "pilot",
+  type: "product",
+  parentId: "nexus.star",
+  name: "Pilot",
+  shortDescription: "A learning platform for the AI era.",
+  longDescription:
+    "Pilot is the Vorinthex learning platform for the AI era, built to help people develop the understanding and practical fluency they need to move forward.",
+  tagline: "Learn the AI Era",
+  label: "AI Learning Platform",
+  isLive: false,
+  visibility: "teaser",
+  launchDate: "TBD",
+  statusLabel: "Coming Soon",
+  logo: { src: "", alt: "Pilot", kind: "procedural", iconKey: "pilot" },
+  visual: {
+    celestialKind: "planet",
+    orbitLevel: 6,
+    orbitRadius: 17,
+    orbitSpeed: 0.025,
+    initialAngle: 2.2,
+    size: 0.74,
+    materialPreset: "locked-crystal-planet",
+    accent: "silver",
+  },
+  routes: {
+    path: "/pilot",
+    subdomains: ["pilot.vorinthex.com"],
+    canonical: "/pilot",
+  },
+  seo: {
+    title: "Pilot | Learn the AI Era",
+    description:
+      "Pilot is the Vorinthex learning platform for building practical understanding in the AI era.",
+    indexable: true,
+    schemaType: "SoftwareApplication",
+  },
+  aeo: {
+    summary:
+      "Pilot is the Vorinthex learning platform for people building understanding and practical fluency in the AI era.",
+    questions: [
+      {
+        question: "What is Pilot by Vorinthex AI?",
+        answer:
+          "Pilot is an upcoming learning platform from Vorinthex AI for people who want to learn and navigate the AI era.",
+      },
+      {
+        question: "Who is Pilot for?",
+        answer:
+          "Pilot is for people who want to build their understanding and practical fluency for the AI era.",
+      },
+    ],
+    llmsText: "Learning platform for building practical fluency in the AI era.",
+  },
+  content: {
+    eyebrow: "AI Learning Platform",
+    headline: "Learn the AI era.",
+    subheadline: "Build the understanding to move forward with AI.",
+    body: "Pilot is a learning platform for the AI era, helping people build understanding and practical fluency as AI changes how we live and work.",
+    bullets: [
+      "Build understanding for the AI era.",
+      "Develop practical AI fluency.",
+      "Learn how to move forward with AI.",
+    ],
+    drawerLine: "Build practical fluency for the AI era.",
+    primaryCta: "Join Hunt",
+    secondaryCta: "Explore Pilot",
+    statusNote:
+      "Pilot joins the Nexus after Core. Waitlist members get first access as each orbit unlocks.",
   },
   children: [],
 };
@@ -1286,7 +1435,7 @@ export const VORINTHEX_GALAXY_REGISTRY = {
     },
   },
   nexus,
-  products: { core, hq, command, studio, launch },
+  products: { core, hq, command, studio, launch, replica, pilot },
   capabilities: { archive, gallery, signal, compass, ascend },
   orchestrators: Object.fromEntries(
     orchestrators.map((o) => [o.slug, o]),

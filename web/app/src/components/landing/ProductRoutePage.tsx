@@ -9,7 +9,7 @@ import {
 import { LandingPage } from "./LandingPage";
 import { ProductDetail } from "./DeepLinkDetail";
 
-/** Shared implementation for the /core, /command, /studio, /launch aliases. */
+/** Shared implementation for product routes. */
 export function productMetadata(key: ProductKey): Metadata {
   return buildMetadataFromEntity(productByKey.get(key)!.entity);
 }

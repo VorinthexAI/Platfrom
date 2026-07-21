@@ -995,3 +995,67 @@ Notes: Open Graph and Twitter preview cards for hq.vorinthex.com.
 Asset: HQ Social Cards
 Action: Generated v1
 Notes: Generated Open Graph and Twitter cards for hq.vorinthex.com.
+## 2026-07-21 15:21
+Asset: HQ
+Action: Generated v2
+Notes: Generated from galaxy registry entity product.hq
+Paths:
+- solid: assets/product/product-hq/v2/solid-1024.png
+- transparent: assets/product/product-hq/v2/transparent-1024.png
+- solid svg: assets/product/product-hq/v2/solid-1024.svg
+- transparent svg: assets/product/product-hq/v2/transparent-1024.svg
+## 2026-07-21 15:21
+Asset: Replica
+Action: Created asset
+Notes: Replica is the Vorinthex sandbox for experiencing a product before you connect, giving you a clear place to explore what it can do first.
+## 2026-07-21 15:22
+Asset: Replica
+Action: Generated v1
+Notes: Generated from galaxy registry entity product.replica
+Paths:
+- solid: assets/product/product-replica/v1/solid-1024.png
+- transparent: assets/product/product-replica/v1/transparent-1024.png
+- solid svg: assets/product/product-replica/v1/solid-1024.svg
+- transparent svg: assets/product/product-replica/v1/transparent-1024.svg
+## 2026-07-21 15:22
+Asset: Pilot
+Action: Created asset
+Notes: Pilot is the Vorinthex learning platform for the AI era, built to help people develop the understanding and practical fluency they need to move forward.
+## 2026-07-21 15:23
+Asset: Pilot
+Action: Generated v1
+Notes: Generated from galaxy registry entity product.pilot
+Paths:
+- solid: assets/product/product-pilot/v1/solid-1024.png
+- transparent: assets/product/product-pilot/v1/transparent-1024.png
+- solid svg: assets/product/product-pilot/v1/solid-1024.svg
+- transparent svg: assets/product/product-pilot/v1/transparent-1024.svg
+## 2026-07-21 15:24
+Asset: HQ
+Action: Generated v3
+Notes: Generated from galaxy registry entity product.hq
+Paths:
+- solid: assets/product/product-hq/v3/solid-1024.png
+- transparent: assets/product/product-hq/v3/transparent-1024.png
+- solid svg: assets/product/product-hq/v3/solid-1024.svg
+- transparent svg: assets/product/product-hq/v3/transparent-1024.svg
+## 2026-07-21 15:26
+Asset: HQ Social Cards
+Action: Generated v2
+Notes: Generated Open Graph and Twitter cards for hq.vorinthex.com.
+## 2026-07-21 15:27
+Asset: Replica Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for replica.vorinthex.com.
+## 2026-07-21 15:33
+Asset: Replica Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for replica.vorinthex.com.
+## 2026-07-21 15:33
+Asset: Pilot Social Cards
+Action: Created asset
+Notes: Open Graph and Twitter preview cards for pilot.vorinthex.com.
+## 2026-07-21 15:33
+Asset: Pilot Social Cards
+Action: Generated v1
+Notes: Generated Open Graph and Twitter cards for pilot.vorinthex.com.

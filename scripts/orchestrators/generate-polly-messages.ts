@@ -1,9 +1,10 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PollyClient, SynthesizeSpeechCommand } from '@aws-sdk/client-polly';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
+const PUBLIC_AUDIO_DIR = join(ROOT, '../../web/app/public/audio/entities');
 const REGION = process.env.POLLY_REGION ?? 'us-east-1';
 
 // Polly's generative voices provide the closest static-TTS counterparts to
@@ -22,7 +23,7 @@ if (!accessKeyId || !secretAccessKey) throw new Error('BEDROCK_AWS_ACCESS_KEY_ID
 
 const client = new PollyClient({
   region: REGION,
-  credentials: { accessKeyId, secretAccessKey, sessionToken: process.env.BEDROCK_AWS_SESSION_TOKEN },
+  credentials: { accessKeyId, secretAccessKey },
   endpoint: `https://polly.${REGION}.amazonaws.com`,
 });
 
@@ -40,7 +41,10 @@ async function generate(folder: string, voiceId: 'Matthew' | 'Tiffany'): Promise
     VoiceId: voiceId,
   }));
   if (!response.AudioStream) throw new Error(`Polly returned no audio for ${folder}`);
-  await writeFile(join(directory, 'message.mp3'), await response.AudioStream.transformToByteArray());
+  const audio = await response.AudioStream.transformToByteArray();
+  await writeFile(join(directory, 'message.mp3'), audio);
+  await mkdir(PUBLIC_AUDIO_DIR, { recursive: true });
+  await writeFile(join(PUBLIC_AUDIO_DIR, `orchestrator-${folder.replace(/-.+$/, '')}-message.mp3`), audio);
   console.log(`Generated ${folder}/message.mp3 with ${voiceId}`);
 }
 

@@ -147,6 +147,18 @@ export function ProductDetail({ product }: { product: ProductPlanetData }) {
         <p className="mt-6 max-w-2xl text-base leading-relaxed text-silver-300">
           {product.description}
         </p>
+        {product.entity.content?.bullets ? (
+          <ul className="mt-8 grid gap-3 sm:grid-cols-3" role="list">
+            {product.entity.content.bullets.map((bullet) => (
+              <li
+                key={bullet}
+                className="rounded-2xl border border-white/[0.08] bg-white/[0.02] px-5 py-4 text-[0.8rem] leading-relaxed text-silver-500"
+              >
+                {bullet}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="mt-8">
           <OpenModalButton
             modal="waitlist"
