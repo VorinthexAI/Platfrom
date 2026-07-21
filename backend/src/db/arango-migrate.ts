@@ -995,11 +995,12 @@ async function main() {
     const existingCursor = await targetDb.query<{ _key: string }>(
       `
         FOR scope IN scopes
-          FILTER scope.organizationKey == @organizationKey && scope.slug == @slug
+          FILTER (scope.organizationKey == @organizationKey && scope.slug == @slug)
+            || scope._key == @seedKey
           LIMIT 1
           RETURN { _key: scope._key }
       `,
-      { organizationKey: rootOrganizationId, slug: seed.slug },
+      { organizationKey: rootOrganizationId, slug: seed.slug, seedKey: seed.key },
     );
     const existing = await existingCursor.next();
     const scopeKey = existing?._key ?? seed.key;
