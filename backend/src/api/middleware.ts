@@ -18,12 +18,7 @@ function getClientIp(c: Parameters<MiddlewareHandler>[0]) {
 function getRequestApiKey(c: Parameters<MiddlewareHandler>[0]) {
   return c.req.header('x-vorinthex-api-key')
     ?? c.req.header('x-api-key')
-    ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '')
-    // A browser's native WebSocket API cannot set custom headers on the
-    // handshake, so the orchestrator chat socket accepts the same key via
-    // a query param instead. Scoped to this one route only — every other
-    // endpoint still requires the header.
-    ?? (c.req.path === '/api/v1/orchestrators/chat/stream' ? c.req.query('api_key') : undefined);
+    ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
 }
 
 function getBearerToken(c: Parameters<MiddlewareHandler>[0]) {
@@ -106,10 +101,8 @@ function querySchemaForPath(path: string) {
       explorer_id: z.string().optional(),
     });
   }
-  if (apiPath === '/orchestrators/chat/stream') {
-    // A browser WebSocket handshake can't carry a header, so the API key
-    // rides in here instead — see getRequestApiKey.
-    return strictObject({ api_key: z.string().optional() });
+  if (apiPath === '/orchestrators/chat') {
+    return strictObject({ orchestrator_id: z.string().cuid() });
   }
   return strictObject({});
 }
