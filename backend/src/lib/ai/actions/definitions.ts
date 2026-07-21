@@ -11,6 +11,7 @@ const none = (): ActionDefinition => ({ id: '' as ActionId, modelPolicy: 'config
 const definitions: Record<ActionId, ActionDefinition> = {
   ask: { id: 'ask', modelPolicy: 'required', models: [model('amazon.nova-2-lite', 100), model('amazon.nova-pro', 90), model('amazon.nova-premier', 80)] },
   chat: { id: 'chat', modelPolicy: 'required', models: [model('amazon.nova-pro', 100), model('amazon.nova-2-lite', 90), model('amazon.nova-premier', 80)] },
+  'orchestrator-chat': { id: 'orchestrator-chat', modelPolicy: 'required', models: [model('amazon.nova-2-sonic', 100)] },
   reason: { id: 'reason', modelPolicy: 'required', models: [model('amazon.nova-pro', 100), model('amazon.nova-premier', 90), model('amazon.nova-2-lite', 80)] },
   'deep-reason': { id: 'deep-reason', modelPolicy: 'required', models: [model('amazon.nova-premier', 100), model('amazon.nova-pro', 90)] },
   embed: { id: 'embed', modelPolicy: 'required', models: [model('amazon.titan-embed-text-v2', 100)] },
