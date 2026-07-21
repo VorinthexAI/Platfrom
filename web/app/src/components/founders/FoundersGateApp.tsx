@@ -59,7 +59,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [selectedEntityId, setSelectedEntityId] = useState(NEXUS_HQ_ENTITY_ID);
   const [enteredEntityId, setEnteredEntityId] = useState<string | null>(null);
-  const [transitDestination, setTransitDestination] = useState<string | null>(NEXUS_HQ_TRANSIT_DESTINATION);
+  const [transitDestination, setTransitDestination] = useState<string | null>(null);
   const scopeRequestRef = useRef(0);
 
   const playVoice = useAudioStore((state) => state.playVoice);
@@ -113,6 +113,9 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
         if (cancelled) return;
         setAccount(loadedAccount);
         setOrganizations(loadedOrganizations);
+        setSelectedEntityId(NEXUS_HQ_ENTITY_ID);
+        setEnteredEntityId(NEXUS_HQ_ENTITY_ID);
+        setTransitDestination(`Entering ${NEXUS_HQ_TRANSIT_DESTINATION} deck`);
         const stored = window.localStorage.getItem(ORGANIZATION_STORAGE_KEY);
         const initialKey = loadedOrganizations.find((organization) => organization.key === stored)?.key
           ?? loadedOrganizations[0]?.key

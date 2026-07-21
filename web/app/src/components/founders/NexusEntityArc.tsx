@@ -30,7 +30,16 @@ const CAPABILITIES = (CORE.children ?? [])
 const ENTITY_LAYERS: Array<{ name: string; entities: GalaxyEntity[] }> = [
   { name: "Core", entities: [CORE] },
   { name: "Capabilities", entities: CAPABILITIES },
-  { name: "Products", entities: [VORINTHEX_GALAXY_REGISTRY.products.launch, VORINTHEX_GALAXY_REGISTRY.products.studio] },
+  {
+    name: "Products",
+    entities: [
+      VORINTHEX_GALAXY_REGISTRY.products.hq,
+      VORINTHEX_GALAXY_REGISTRY.products.launch,
+      VORINTHEX_GALAXY_REGISTRY.products.studio,
+      VORINTHEX_GALAXY_REGISTRY.products.replica,
+      VORINTHEX_GALAXY_REGISTRY.products.pilot,
+    ],
+  },
   { name: "Atlas", entities: [VORINTHEX_GALAXY_REGISTRY.orchestrators.atlas] },
   { name: "Orchestrators Tier 1", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 1) },
   { name: "Orchestrators Tier 2", entities: ORCHESTRATORS.filter((entity) => orchestratorDepth(entity) === 2) },
