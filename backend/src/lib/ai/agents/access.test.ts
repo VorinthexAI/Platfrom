@@ -76,19 +76,4 @@ describe('agent execution access', () => {
     await expect(authorizeAgentExecution(f.runtime, { kind: 'member', userOrganizationKey: f.userOrganization.key }, { ...f.data, async evaluateAgentAccess() { return { allowed: false, reason: 'ACTION_DENIED' }; } })).rejects.toThrow('ACTION_DENIED');
   });
 
-  test('allows active members to invoke only the canonical Beacon orchestration boundary', async () => {
-    const f = fixture();
-    const viewerMembership = userOrganizationSchema.parse({ ...f.userOrganization, orgRole: 'viewer' });
-    const beaconRuntime = { ...f.runtime, agent: { ...f.runtime.agent, slug: 'beacon', name: 'Beacon', title: 'AI Coordinator' } };
-    const resolved = await authorizeAgentExecution(beaconRuntime, { kind: 'member', userOrganizationKey: viewerMembership.key }, { ...f.data, async getUserOrganization() { return viewerMembership; }, async getScopeAgent() { throw new Error('Beacon orchestration must not depend on a target scopeAgent relation'); } }, { serviceDelegation: { agentSlug: 'beacon', requiredOrganizationRole: null } });
-    expect(resolved).toMatchObject({ kind: 'member', userOrganization: { orgRole: 'viewer' }, scopeMember: null });
-  });
-
-  test('preserves legacy membership keys through Beacon delegation', async () => {
-    const f = fixture();
-    const legacyMembership = userOrganizationSchema.parse({ ...f.userOrganization, key: 'legacy-membership-key', orgRole: 'owner' });
-    const beaconRuntime = { ...f.runtime, agent: { ...f.runtime.agent, slug: 'beacon', name: 'Beacon', title: 'AI Coordinator' } };
-    const resolved = await authorizeAgentExecution(beaconRuntime, { kind: 'member', userOrganizationKey: legacyMembership.key }, { ...f.data, async getUserOrganization(key) { return key === legacyMembership.key ? legacyMembership : null; } }, { serviceDelegation: { agentSlug: 'beacon', requiredOrganizationRole: null } });
-    expect(resolved).toMatchObject({ kind: 'member', userOrganization: { key: 'legacy-membership-key' } });
-  });
 });

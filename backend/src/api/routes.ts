@@ -25,7 +25,6 @@ import { createPaymentCheckout, handlePolarWebhook, listUserEntitlements, POLAR_
 import { requestWaitlistVerification, verifyWaitlistEmail } from './waitlist';
 import { recordPlatformClientEvent } from './platform-events';
 import {
-  askFoundersBeacon,
   getFoundersAccount,
   listFoundersOrganizationProviders,
   listFoundersOrganizationScopes,
@@ -443,7 +442,6 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
   app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
   app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
-  app.post('/founders/beacon/ask', askFoundersBeacon);
   app.get('/founders/artifacts', listFounderArtifacts);
   app.post('/founders/artifacts', createFounderArtifact);
   app.get('/nexus/events/stream', streamNexusOrganizationInvalidations);

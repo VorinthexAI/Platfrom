@@ -21,7 +21,7 @@ type FoundersGatePhase =
  * The Nexus — inside the star. One continuous chamber for the whole
  * founders-gate journey: email gate followed by MFA setup or verification,
  * all in one centered card floating over the sun's own burning surface.
- * Authenticated founders continue directly to the Beacon interface.
+ * Authenticated founders continue directly to the Nexus interface.
  */
 export function NexusGate() {
   const router = useRouter();
@@ -127,7 +127,6 @@ export function NexusGate() {
             selectedId={nexusEntityId}
             onSelect={() => undefined}
             onEnter={() => undefined}
-            delegation={null}
             muted={false}
           />
         </div>

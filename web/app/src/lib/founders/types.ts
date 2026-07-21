@@ -28,22 +28,6 @@ export type OrganizationProvider = {
   credentialsConfigured: boolean;
 };
 
-export type BeaconStatus =
-  | "idle"
-  | "connecting"
-  | "streaming"
-  | "completed"
-  | "failed"
-  | "cancelled";
-
-export type BeaconToolActivity = {
-  invocationId: string;
-  phase: "started" | "completed" | "failed";
-  agent: { slug: string; name: string };
-  tool: { slug: string; name: string };
-  action: { slug: string; name: string };
-  elapsedMs?: number;
-};
 
 export type ArtifactValue = string | number | boolean | null | ArtifactValue[] | { [key: string]: ArtifactValue };
 export type ArtifactLayout = "tree" | "cluster" | "galaxy" | "timeline" | "hierarchy" | "radial" | "force" | "grid" | "flow" | "orbit" | "layered" | "manual";

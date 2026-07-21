@@ -74,10 +74,6 @@ export class DuplicateAgentLinkError extends Error {
   }
 }
 
-export class RestrictedAgentToolGrantError extends Error {
-  constructor(public readonly toolSlug: string, detail = `${toolSlug} may only be granted to the canonical Beacon agent`) { super(detail); this.name = 'RestrictedAgentToolGrantError'; }
-}
-
 export function createAgentService(source: AgentServiceDataSource = createDefaultAgentServiceDataSource()) {
   async function requireAgent(key: string) {
     const agent = await source.findAgentByKey(key);

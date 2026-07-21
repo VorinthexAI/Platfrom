@@ -1,5 +1,4 @@
 import type { Context } from 'hono';
-import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import {
   FoundersAccessError,
@@ -10,11 +9,6 @@ import {
   requireScopeAccess,
   type FoundersGateAccess,
 } from '@/lib/founders/access';
-import {
-  BEACON_ASK_MAX_MESSAGE_LENGTH,
-  streamFoundersBeaconAsk,
-} from '@/lib/ai/agents/beacon/ask';
-import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError } from '@/lib/ai/router';
 import { getDefaultOrganizationCredentialsRepository } from '@/lib/ai/organization-credentials';
 import { getDefaultOrganizationProviderRepository } from '@/lib/ai/organization-providers';
 import { getProviderBySlug } from '@/lib/db/providers.node';
@@ -47,12 +41,6 @@ import { getOrchestratorById } from '@/lib/db/orchestrators.node';
 
 export const foundersOrganizationKeyParamSchema = z.string().trim().min(1).max(160);
 
-export const foundersBeaconAskSchema = strictObject({
-  organizationKey: foundersOrganizationKeyParamSchema,
-  scopeKey: z.string().cuid(),
-  message: z.string().trim().min(1).max(BEACON_ASK_MAX_MESSAGE_LENGTH),
-});
-
 
 export const foundersProviderCredentialsBodySchema = strictObject({ credentials: z.unknown() });
 export const foundersProviderCredentialsSchemas: Record<ProviderSlug, z.ZodTypeAny> = {
@@ -71,7 +59,6 @@ function parseFounderProviderCredentials(provider: ProviderSlug, credentials: un
   return foundersProviderCredentialsSchemas[provider].parse(credentials);
 }
 
-const BEACON_ASK_RATE_LIMIT_PER_MINUTE = 12;
 
 export type FounderContext = FoundersGateAccess & { identityType: 'user' | 'member' | 'superAdmin' };
 
@@ -200,78 +187,4 @@ export async function upsertFoundersOrganizationProvider(c: Context) {
   } catch (error) {
     return forbidden(c, error);
   }
-}
-
-async function askRateLimited(userKey: string): Promise<boolean> {
-  if (process.env.RATE_LIMIT_ENABLED !== 'true') return false;
-  const { redisConnection } = await import('@/lib/redis');
-  const windowSeconds = 60;
-  const bucket = Math.floor(Date.now() / (windowSeconds * 1000));
-  const key = `rate-limit:founders-beacon:${userKey}:${bucket}`;
-  const count = await redisConnection.incr(key);
-  if (count === 1) await redisConnection.expire(key, windowSeconds + 10);
-  return count > BEACON_ASK_RATE_LIMIT_PER_MINUTE;
-}
-
-/**
- * POST /founders/beacon/ask — SSE stream of one isolated Beacon run.
- * Events: response.started, tool.started/completed/failed, response.delta
- * {text}, response.completed, response.failed {error}. Tool events expose
- * only public identity and timing, never arguments, output, keys, or reasons.
- */
-export async function askFoundersBeacon(c: Context) {
-  const auth = await requireFounder(c);
-  if ('error' in auth) return auth.error;
-  const body = await parseJson(c, foundersBeaconAskSchema);
-
-  let organizationAccess;
-  let scopeAccess;
-  try {
-    organizationAccess = await requireOrganizationAccess(auth.founder.user.key, body.organizationKey);
-    scopeAccess = await requireScopeAccess(organizationAccess.membership, body.scopeKey);
-  } catch (error) {
-    return forbidden(c, error);
-  }
-
-  if (await askRateLimited(auth.founder.user.key)) {
-    return c.json({ error: 'rate limit exceeded' }, 429);
-  }
-
-  const { organization, membership } = organizationAccess;
-  const { scope } = scopeAccess;
-  const user = auth.founder.user;
-
-  return streamSSE(c, async (stream) => {
-    const controller = new AbortController();
-    stream.onAbort(() => controller.abort());
-    const events = streamFoundersBeaconAsk(
-      { organization, scope, membership, user, message: body.message },
-      { signal: controller.signal },
-    );
-    try {
-      for await (const event of events) {
-        if (event.type === 'started') {
-          await stream.writeSSE({ event: 'response.started', data: '{}' });
-        } else if (event.type === 'delta') {
-          await stream.writeSSE({ event: 'response.delta', data: JSON.stringify({ text: event.text }) });
-        } else if (event.type === 'completed') {
-          await stream.writeSSE({ event: 'response.completed', data: '{}' });
-        }
-      }
-    } catch (error) {
-      // Log the technical detail server-side; the browser gets a safe line.
-      console.warn('founders beacon ask failed', {
-        userKey: user.key,
-        organizationKey: organization.key,
-        scopeKey: scope.key,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      const unavailable = error instanceof NoEligibleRouteError
-        || error instanceof ProviderNotEnabledForOrganizationError;
-      const message = unavailable
-        ? 'Beacon is not available in this scope.'
-        : 'Beacon could not complete the response.';
-      await stream.writeSSE({ event: 'response.failed', data: JSON.stringify({ error: message }) }).catch(() => {});
-    }
-  });
 }

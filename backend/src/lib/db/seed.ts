@@ -1397,7 +1397,7 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
   const rootOrganization = await getRootOrganization();
-  if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'Beacon');
+  if (!rootOrganization) throw new SeedReferenceError('organization', 'root', 'core seed');
   const scopes = getDefaultScopeRepository();
   const organizationScopes = [...await scopes.listScopes(rootOrganization.key)];
   const scopesBySlug = new Map(organizationScopes.map((scope) => [scope.slug, scope]));

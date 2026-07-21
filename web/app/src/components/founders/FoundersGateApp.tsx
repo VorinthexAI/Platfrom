@@ -13,12 +13,8 @@ import {
 } from "@/lib/founders/client";
 import { selectDefaultScope } from "@/lib/founders/scope-selection";
 import type { AccessibleOrganizationOption, AccessibleScopeOption, FoundersAccount } from "@/lib/founders/types";
-import { useBeaconStream } from "@/lib/founders/use-beacon-stream";
-import { BeaconToolActivityFeed } from "./BeaconToolActivityFeed";
-import { SafeMarkdown } from "@/lib/founders/markdown";
 import { AccountFooter } from "./AccountFooter";
 import { ArtifactWorkspace } from "./ArtifactWorkspace";
-import { BeaconInputIsland } from "./BeaconInputIsland";
 import { ContextSelector } from "./ContextSelector";
 import { FoundersBackdrop } from "./FoundersBackdrop";
 import { AccountModal } from "./AccountModal";
@@ -42,10 +38,10 @@ interface FoundersGateAppProps {
 }
 
 /**
- * Founders Gate V1: select an organization, select a scope, ask Beacon,
- * watch the response stream. The interface stays almost empty — the sun
- * texture is the surface, and only the selectors, dropdowns, and the input
- * island carry contained obsidian surfaces. The backend independently
+ * Founders Gate V1: select an organization and scope, then explore the
+ * assigned orchestration surface. The interface stays almost empty — the sun
+ * texture is the surface, and only selectors and dropdowns carry contained
+ * obsidian surfaces. The backend independently
  * enforces every access rule; this guard is presentation only.
  */
 export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
@@ -65,8 +61,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [transitDestination, setTransitDestination] = useState<string | null>("Nexus command station");
   const scopeRequestRef = useRef(0);
 
-  const beacon = useBeaconStream();
-  const { reset: resetBeacon, cancel: cancelBeacon } = beacon;
   const playVoice = useAudioStore((state) => state.playVoice);
   const stopVoice = useAudioStore((state) => state.stopVoice);
   const startAmbient = useAudioStore((state) => state.startAmbient);
@@ -153,13 +147,11 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   }, [loadScopes, onUnauthorized]);
 
   const changeOrganization = useCallback((nextKey: string) => {
-    cancelBeacon();
-    resetBeacon();
     setArtifactSheetOpen(false);
     window.localStorage.setItem(ORGANIZATION_STORAGE_KEY, nextKey);
     setOrganizationKey(nextKey);
     void loadScopes(nextKey);
-  }, [cancelBeacon, resetBeacon, loadScopes]);
+  }, [loadScopes]);
 
   const changeScope = useCallback((nextKey: string) => {
     if (organizationKey) window.localStorage.setItem(scopeStorageKey(organizationKey), nextKey);
@@ -178,34 +170,21 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
     hint: organization.alias,
   })), [organizations]);
 
-  const beaconDisabled = !organizationKey || !scopeKey;
   const selectedEntity = getEntityById(selectedEntityId) ?? VORINTHEX_GALAXY_REGISTRY.products.core;
   const enteredEntity = enteredEntityId
     ? getEntityById(enteredEntityId) ?? null
     : null;
-  const hasBeaconOutput = Boolean(beacon.response || beacon.error || beacon.tools.length > 0);
-  const activeDelegation = beacon.tools.at(-1) ?? null;
-
-  const submit = useCallback((message: string) => {
-    if (!organizationKey || !scopeKey) return;
-    void beacon.ask({ organizationKey, scopeKey, message });
-  }, [beacon, organizationKey, scopeKey]);
-
   const enterEntity = useCallback((entity: GalaxyEntity) => {
-    cancelBeacon();
-    resetBeacon();
     stopVoice();
     setSelectedEntityId(entity.id);
     setEnteredEntityId(entity.id);
     setTransitDestination(`Entering ${entity.name} deck`);
-  }, [cancelBeacon, resetBeacon, stopVoice]);
+  }, [stopVoice]);
 
   const leaveEntity = useCallback(() => {
-    cancelBeacon();
-    resetBeacon();
     stopVoice();
     setEnteredEntityId(null);
-  }, [cancelBeacon, resetBeacon, stopVoice]);
+  }, [stopVoice]);
 
   const completeTransit = useCallback(() => setTransitDestination(null), []);
 
@@ -272,7 +251,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                   selectedId={selectedEntity.id}
                   onSelect={(entity) => setSelectedEntityId(entity.id)}
                   onEnter={enterEntity}
-                  delegation={activeDelegation}
                   muted={false}
                 />
                 </div>
@@ -284,16 +262,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
             {enteredEntity ? (
               <div className="scrollbar-hide pointer-events-none relative z-10 h-full overflow-y-auto px-4 sm:px-8">
                 <div className="mx-auto w-full max-w-[820px] pt-24 pb-64 sm:pt-28">
-                  {hasBeaconOutput ? (
-                  <article className="pointer-events-auto" aria-live="polite" aria-busy={beacon.status === "streaming" || beacon.status === "connecting"}>
-                    <BeaconToolActivityFeed tools={beacon.tools} status={beacon.status} />
-                    {beacon.response ? <SafeMarkdown markdown={beacon.response} /> : null}
-                    {beacon.error ? <p className="text-base leading-relaxed text-silver-100">{beacon.error}</p> : null}
-                    {beacon.status === "streaming" || beacon.status === "connecting" ? (
-                      <span aria-hidden className="mt-1 ml-0.5 inline-block h-4 w-[2px] bg-silver-100 motion-safe:animate-pulse" />
-                    ) : null}
-                  </article>
-                ) : null}
                 </div>
               </div>
             ) : null}
@@ -302,13 +270,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
           {enteredEntity ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 px-4 sm:px-8">
             <div className="pointer-events-auto mx-auto w-full max-w-[820px]">
-              <BeaconInputIsland
-                status={beacon.status}
-                disabled={beaconDisabled}
-                assistantName={enteredEntity.name}
-                onSubmit={submit}
-                onCancel={cancelBeacon}
-              />
               <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
                 <Button variant="secondary" onClick={() => playVoice(entityAudioUrl(enteredEntity.type, enteredEntity.slug))}>
                   Play Briefing

@@ -7,7 +7,6 @@ import { useReducedMotion } from "framer-motion";
 import * as THREE from "three";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
-import type { BeaconToolActivity } from "@/lib/founders/types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import NexusBrainCore from "./NexusBrainCore";
 
@@ -520,11 +519,10 @@ function CameraRig({ selectedId, paused }: { selectedId: string; paused: boolean
   return null;
 }
 
-function LivingStation({ selectedId, paused, muted, delegation, onSelect, onEnter }: {
+function LivingStation({ selectedId, paused, muted, onSelect, onEnter }: {
   selectedId: string;
   paused: boolean;
   muted: boolean;
-  delegation: BeaconToolActivity | null;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
 }) {
@@ -537,8 +535,6 @@ function LivingStation({ selectedId, paused, muted, delegation, onSelect, onEnte
   const nodeObjects = useRef(new Map<string, THREE.Object3D>());
   const metalTexture = useBrushedMetalTexture();
   const branch = useMemo(() => activeBranch(selectedId), [selectedId]);
-  const delegatedSlug = delegation?.agent.slug.split(".").at(-1) ?? null;
-  const delegatedNode = delegatedSlug ? NODE_BY_SLUG.get(delegatedSlug) : null;
 
   useEffect(() => {
     const node = NODE_BY_ID.get(selectedId);
@@ -662,16 +658,6 @@ function LivingStation({ selectedId, paused, muted, delegation, onSelect, onEnte
           />
         );
       })}
-      {delegatedNode && delegatedNode.entity.id !== selectedId ? (
-        <DynamicEnergyConduit
-          fromId={selectedId}
-          toId={delegatedNode.entity.id}
-          nodeObjects={nodeObjects}
-          active
-          paused={paused}
-          reverse={delegation?.phase === "completed"}
-        />
-      ) : null}
     </group>
   );
 }
@@ -680,7 +666,6 @@ interface OrchestratorHierarchyProps {
   selectedId: string;
   onSelect: (entity: GalaxyEntity) => void;
   onEnter: (entity: GalaxyEntity) => void;
-  delegation: BeaconToolActivity | null;
   muted: boolean;
 }
 

@@ -27,7 +27,7 @@ import {
 } from './access-engine';
 
 type Input = Record<string, any>;
-const sensitiveAgent = (agent: AgentRecord) => agent.slug === 'beacon' || agent.slug.startsWith('system-');
+const sensitiveAgent = (agent: AgentRecord) => agent.slug.startsWith('system-');
 
 function human(context: DomainToolContext) {
   if (context.principal.kind !== 'member') throw new DomainToolExecutionError('human_principal_required', 'A human organization member must initiate this operation');

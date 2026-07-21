@@ -131,7 +131,7 @@ export async function evaluateAgentAccess(context: DomainToolContext, input: { s
   const scopeAgent = await getScopeAgent(scopeDecision.scope.key, agent.key);
   if (!scopeAgent) return { ...base, allowed: false, reason: 'AGENT_NOT_IN_SCOPE', scopeAgent: null, agent };
   if (scopeAgent.status !== 'active') return { ...base, allowed: false, reason: 'SCOPE_AGENT_ARCHIVED', scopeAgent, agent };
-  if ((agent.slug === 'beacon' || agent.slug.startsWith('system-')) && scopeDecision.effectiveRole !== 'owner') return { ...base, allowed: false, reason: 'SYSTEM_AGENT_POLICY_DENIED', scopeAgent, agent };
+  if (agent.slug.startsWith('system-') && scopeDecision.effectiveRole !== 'owner') return { ...base, allowed: false, reason: 'SYSTEM_AGENT_POLICY_DENIED', scopeAgent, agent };
   if (input.action === 'manage') return { ...base, allowed: rankAccessRole(scopeDecision.effectiveRole) >= accessRoleRank.admin, reason: rankAccessRole(scopeDecision.effectiveRole) >= accessRoleRank.admin ? 'ALLOWED' : 'ACTION_DENIED', scopeAgent, agent };
   const membershipKey = scopeDecision.organizationDecision.membership!.key;
   const cursor = await db.query<{ source: 'inherited' | 'explicit' }>('FOR grant IN agentMembers FILTER grant.scopeAgentKey == @scopeAgentKey && grant.userOrganizationKey == @membershipKey RETURN { source: grant.source }', { scopeAgentKey: scopeAgent.key, membershipKey });
