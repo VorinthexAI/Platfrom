@@ -56,6 +56,7 @@ const STATION_NODES: StationNode[] = [
   { entity: CORE, layer: 0 },
   ...CAPABILITIES.map((entity) => ({ entity, layer: 1, parentId: CORE.id! })),
   { entity: VORINTHEX_GALAXY_REGISTRY.products.hq, layer: 2, parentId: CORE.id! },
+  { entity: VORINTHEX_GALAXY_REGISTRY.products.command, layer: 2, parentId: CORE.id! },
   { entity: VORINTHEX_GALAXY_REGISTRY.products.launch, layer: 2, parentId: CORE.id! },
   { entity: VORINTHEX_GALAXY_REGISTRY.products.studio, layer: 2, parentId: CORE.id! },
   { entity: VORINTHEX_GALAXY_REGISTRY.products.replica, layer: 2, parentId: CORE.id! },
