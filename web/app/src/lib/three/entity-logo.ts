@@ -10,6 +10,9 @@ import * as THREE from "three";
 const cache = new Map<string, THREE.Texture>();
 
 export function entityLogoUrl(type: string, slug: string): string {
+  if (type === "product" && ["hq", "replica", "pilot"].includes(slug)) {
+    return `/logos/entities/${type}-${slug}-transparent.png`;
+  }
   return `/logos/entities/${type}-${slug}.png`;
 }
 

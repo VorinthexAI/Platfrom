@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { entityAudioUrl, useAudioStore } from "@/lib/audio/audio-store";
-import { getEntityById } from "@/lib/galaxy/registry-helpers";
-import { ORBIT_STEPS, useGalaxyStore } from "@/lib/galaxy-store";
+import { useAudioStore } from "@/lib/audio/audio-store";
 
 /**
  * Conducts the galaxy's soundtrack (no UI of its own):
@@ -11,12 +9,9 @@ import { ORBIT_STEPS, useGalaxyStore } from "@/lib/galaxy-store";
  *   button starts it (via the store's toggleMission), and it never loops;
  * - the master-brand ambient bed starts on the very first interaction
  *   (scroll, tap, click, or key) and loops subtly forever;
- * - every voiced world (product, orchestrator, capability) speaks its
- *   line the moment its biome is entered, ducking the ambient while it
- *   talks and pausing for the mission; leaving the biome cuts it off.
+ * - entity briefings are always user-initiated, so entering a biome never
+ *   interrupts the normal ambient bed.
  */
-
-const VOICED_TYPES = new Set(["product", "orchestrator", "capability"]);
 
 const FIRST_INTERACTION_EVENTS = [
   "pointerdown",
@@ -27,12 +22,6 @@ const FIRST_INTERACTION_EVENTS = [
 ] as const;
 
 export function AudioConductor() {
-  const mode = useGalaxyStore((s) => s.mode);
-  const step = useGalaxyStore((s) => s.step);
-  const visitPhase = useGalaxyStore((s) => s.visitPhase);
-  const visitSeed = useGalaxyStore((s) => s.visitSeed);
-  const playVoice = useAudioStore((s) => s.playVoice);
-  const stopVoice = useAudioStore((s) => s.stopVoice);
   const resumePending = useAudioStore((s) => s.resumePending);
   const startAmbient = useAudioStore((s) => s.startAmbient);
   const ambientStarted = useAudioStore((s) => s.ambientStarted);
@@ -55,20 +44,6 @@ export function AudioConductor() {
       }
     };
   }, [ambientStarted, startAmbient, resumePending]);
-
-  // Each voiced world speaks on biome entry; leaving cuts it off.
-  const inside = mode === "system" && step > 0 && visitPhase === "inside";
-  const entityId = inside ? (ORBIT_STEPS[step]?.entityId ?? null) : null;
-  useEffect(() => {
-    if (!entityId) {
-      stopVoice();
-      return;
-    }
-    const entity = getEntityById(entityId);
-    if (!entity || !VOICED_TYPES.has(entity.type)) return;
-    playVoice(entityAudioUrl(entity.type, entity.slug));
-    // visitSeed keys the replay: re-entering the same world speaks again.
-  }, [entityId, visitSeed, playVoice, stopVoice]);
 
   return null;
 }
