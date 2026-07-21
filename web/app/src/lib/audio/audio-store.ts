@@ -203,6 +203,14 @@ export const useAudioStore = create<AudioState>((set, get) => {
       voiceQueuedBehindMission = src;
       return;
     }
+    const normalizedSrc = new URL(src, window.location.href).href;
+    if (voice && !voice.paused && voice.src === normalizedSrc) {
+      voice.pause();
+      voice.currentTime = 0;
+      set({ pendingVoiceSrc: null });
+      settleAmbientVolume();
+      return;
+    }
     const audio = voiceElement();
     audio.src = src;
     audio.currentTime = 0;

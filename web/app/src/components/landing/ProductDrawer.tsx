@@ -31,8 +31,10 @@ export function ProductDrawer() {
   const setStep = useGalaxyStore((s) => s.setStep);
   const visitPhase = useGalaxyStore((s) => s.visitPhase);
   const reducedMotion = useReducedMotion();
+  const stopVoice = useAudioStore((s) => s.stopVoice);
 
   const closeAndLeave = () => {
+    stopVoice();
     trackCtaClick("product_drawer_close");
     setStep(0);
     syncEntityUrl("/");
