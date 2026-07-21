@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { embedText, embeddingMetadata } from '../lib/bedrock-titan';
+import { embedText } from '../lib/bedrock-titan';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -90,44 +90,6 @@ async function resolveEventUserId(input: {
 
   const emailHash = emailHashFromData(input.data);
   return emailHash ? getUserIdByEmailHash(input.targetDb, emailHash) : null;
-}
-
-async function backfillCollectionEmbeddings(targetDb: Database, spec: CollectionSpec): Promise<void> {
-  const embedKeys = spec.embedKeys ?? [];
-  if (embedKeys.length === 0) {
-    await targetDb.query(
-      `
-      FOR doc IN @@collection
-        FILTER !HAS(doc, "embedding") || doc.embedding == null || !IS_ARRAY(doc.embedding)
-        UPDATE doc WITH { embedding: [] } IN @@collection
-    `,
-      { '@collection': spec.name },
-    );
-    return;
-  }
-
-  const metadata = embeddingMetadata();
-
-  const cursor = await targetDb.query<Record<string, unknown>>(
-    `
-      FOR doc IN @@collection
-        FILTER doc.embeddingProvider != @embeddingProvider || doc.embeddingModel != @embeddingModel
-        RETURN doc
-    `,
-    { '@collection': spec.name, ...metadata },
-  );
-  const collection = targetDb.collection(spec.name);
-  const docs = await cursor.all();
-  for (const doc of docs) {
-    const key = nonEmptyString(doc._key);
-    if (!key) continue;
-    const text = buildNodeEmbedText(spec.name, key, embedKeys, doc);
-    const embedding = text ? await generateEmbedding(text) : [];
-    await collection.update(key, { embedding, ...metadata });
-  }
-  if (docs.length > 0) {
-    console.log(`Normalized embeddings for ${docs.length} ${spec.name} documents`);
-  }
 }
 
 const collections: CollectionSpec[] = [
@@ -663,7 +625,6 @@ async function main() {
         sparse: index.sparse ?? false,
       });
     }
-    if (!spec.skipEmbedding) await backfillCollectionEmbeddings(targetDb, spec);
   }
 
   // Every pre-relation agent is linked to its existing home scope. Existing
@@ -986,7 +947,6 @@ async function main() {
     if (!summary) continue;
     await targetDb.collection('scopes').update(scope._key, {
       summary,
-      embedding: await generateEmbedding(buildEmbeddingText(['summary'], { summary })!),
     });
   }
 
@@ -995,24 +955,27 @@ async function main() {
     const existingCursor = await targetDb.query<{ _key: string }>(
       `
         FOR scope IN scopes
-          FILTER scope.organizationKey == @organizationKey && scope.slug == @slug
+          FILTER (scope.organizationKey == @organizationKey && scope.slug == @slug) || scope._key == @scopeKey
+          SORT scope.organizationKey == @organizationKey && scope.slug == @slug DESC
           LIMIT 1
           RETURN { _key: scope._key }
       `,
-      { organizationKey: rootOrganizationId, slug: seed.slug },
+      { organizationKey: rootOrganizationId, slug: seed.slug, scopeKey: seed.key },
     );
     const existing = await existingCursor.next();
     const scopeKey = existing?._key ?? seed.key;
-    const embedding = await generateEmbedding(buildEmbeddingText(['summary'], seed)!);
     if (existing) {
       await targetDb.collection('scopes').update(scopeKey, {
+        organizationKey: rootOrganizationId,
+        slug: seed.slug,
         name: seed.name,
         summary: seed.summary,
         description: seed.description,
         position: seed.position,
-        embedding,
+        deletedAt: null,
       });
     } else {
+      const embedding = await generateEmbedding(buildEmbeddingText(['summary'], seed)!);
       await targetDb.collection('scopes').save({
         _key: scopeKey,
         organizationKey: rootOrganizationId,
@@ -1252,10 +1215,8 @@ async function main() {
       UPDATE u WITH { isSuperAdmin: null } IN users OPTIONS { keepNull: false }
   `);
 
-  let migratedLegacyIdentities = false;
   const membersCollection = targetDb.collection('members');
   if (await membersCollection.exists()) {
-    migratedLegacyIdentities = true;
     await targetDb.query(
       `
       FOR m IN members
@@ -1329,7 +1290,6 @@ async function main() {
 
   const superAdminsCollection = targetDb.collection('superAdmins');
   if (await superAdminsCollection.exists()) {
-    migratedLegacyIdentities = true;
     await targetDb.query(`
       FOR admin IN superAdmins
         LET existing = FIRST(FOR u IN users FILTER u.emailHash == admin.emailHash LIMIT 1 RETURN u)
@@ -1444,10 +1404,6 @@ async function main() {
         requested_mfa_reset_link_at: null
       } IN users OPTIONS { keepNull: false }
   `);
-
-  if (migratedLegacyIdentities) {
-    await backfillCollectionEmbeddings(targetDb, collections.find((spec) => spec.name === 'users')!);
-  }
 
   const usersWithEventsCursor = await targetDb.query<{
     _key: string;
