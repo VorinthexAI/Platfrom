@@ -24,7 +24,7 @@ import {
  * providers barrel.
  */
 
-export const CHAT_ACTION_IDS = new Set(['core.chat', 'core.reason']);
+export const CHAT_ACTION_IDS = new Set(['ask', 'chat', 'reason', 'deep-reason', 'web-search', 'analyze-video', 'analyze-audio']);
 
 export interface OpenAICompatibleOptions {
   /** gpt-5-era OpenAI/Azure endpoints require `max_completion_tokens`; other compatible providers use `max_tokens`. */

@@ -102,19 +102,19 @@ export async function interpretAndRunDomainTool(rawInput: z.input<typeof interpr
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey) throw new Error('agent belongs to another organization');
   await authorizeAgentExecution(runtime, input.principal, options.accessData);
-  const grants = runtime.tools.flatMap((grant) => grant.actions.flatMap(({ action }) => isDomainActionSlug(action.slug) && grant.tool.slug === action.slug ? [{ grant, action }] : []));
+  const grants = runtime.tools.flatMap((grant) => isDomainActionSlug(grant.tool.slug) && grant.actions.length > 0 ? [{ grant, action: grant.actions[0]!.action }] : []);
   if (grants.length === 0) throw new Error('agent has no granted domain tools');
-  const names = new Map(grants.map(({ action }) => [action.slug.replaceAll('.', '__'), action.slug]));
-  const decision = await selectRoute({ mode: 'auto', organizationKey: input.organizationKey, actionSlug: 'core.reason' }, options);
+  const names = new Map(grants.map(({ grant }) => [grant.tool.slug.replaceAll('.', '__'), grant.tool.slug]));
+  const decision = await selectRoute({ mode: 'auto', organizationKey: input.organizationKey, actionSlug: 'reason' }, options);
   const response = await executeRoute<unknown, ChatOutput>({ decision, adapters: options.adapters, input: {
     messages: [{ role: 'user', content: input.request }],
     system: 'Choose exactly one granted tool. Never invent identifiers or permissions. Return a tool call only.',
-    tools: grants.map(({ action }) => ({ name: action.slug.replaceAll('.', '__'), description: action.description, inputSchema: domainToolJsonSchemas[action.slug] ?? {} })),
+    tools: grants.map(({ grant }) => ({ name: grant.tool.slug.replaceAll('.', '__'), description: grant.tool.description, inputSchema: domainToolJsonSchemas[grant.tool.slug as keyof typeof domainToolJsonSchemas] ?? {} })),
   } });
   if (response.output.toolCalls.length !== 1) throw new Error(`expected exactly one domain tool call, received ${response.output.toolCalls.length}`);
   const call = response.output.toolCalls[0]!; const actionSlug = names.get(call.name);
   if (!actionSlug) throw new Error(`model selected ungranted domain tool ${call.name}`);
-  const selected = grants.find(({ action }) => action.slug === actionSlug)!;
+  const selected = grants.find(({ grant }) => grant.tool.slug === actionSlug)!;
   const output = await runDomainAgentTool({ organizationKey: input.organizationKey, agentKey: input.agentKey, toolKey: selected.grant.tool.key, actionKey: selected.action.key, principal: input.principal, input: call.arguments }, options);
   return { model: { actionSlug: decision.actionSlug, modelSlug: decision.modelSlug, providerSlug: decision.providerSlug, usage: response.usage }, toolCall: { id: call.id, actionSlug, arguments: call.arguments }, output };
 }

@@ -7,7 +7,8 @@ import { validateGenesisManifest, type ValidateGenesisManifestOptions, type Vali
 import { persistGenesisManifest, type GenesisTransactionGateway, type PersistGenesisManifestResult } from './persistence';
 
 export const CREATE_AGENT_TOOL_SLUG = 'agent.create' as const;
-export const CREATE_AGENT_ACTION_SLUG = 'agent.create' as const;
+/** Agent creation is a tool; its persistence primitive is generic insert. */
+export const CREATE_AGENT_ACTION_SLUG = 'insert' as const;
 
 export const createAgentToolInputSchema = z.object({
   organizationKey: organizationKeySchema,
@@ -55,7 +56,7 @@ function assertExecutionGuardrails(input: z.infer<typeof createAgentToolInputSch
   }
   const grant = context.tools.find(({ tool }) => tool.slug === CREATE_AGENT_TOOL_SLUG);
   if (context.tools.length !== 1 || !grant || grant.actions.length !== 1 || grant.actions[0]?.action.slug !== CREATE_AGENT_ACTION_SLUG) {
-    throw new CreateAgentToolGuardrailError('Genesis must own only agent.create mapped only to agent.create');
+    throw new CreateAgentToolGuardrailError('Genesis must own only agent.create mapped to insert');
   }
 }
 

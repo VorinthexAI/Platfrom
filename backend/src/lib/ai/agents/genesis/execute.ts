@@ -32,7 +32,7 @@ export const GENESIS_OUTPUT_SCHEMA_DESCRIPTION = JSON.stringify({
   note: 'Must satisfy the strict Genesis creation manifest schema exported by the backend.',
 });
 
-/** Reasons through core.reason, then invokes Genesis's sole agent.create capability. */
+/** Reasons through the generic runtime, then invokes Genesis's agent.create tool. */
 export async function createAgentFromGenesis(input: GenesisRunInput, options: ExecuteGenesisOptions = {}): Promise<GenesisCreationResult> {
   const parsed = genesisRunInputSchema.parse(input);
   const artifactResolvers = options.artifactResolvers ?? new ArtifactResolverRegistry();
@@ -40,7 +40,7 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
   const createGrant = context.tools.find(({ tool }) => tool.slug === CREATE_AGENT_TOOL_SLUG);
   const createAction = createGrant?.actions.find(({ action }) => action.slug === CREATE_AGENT_ACTION_SLUG);
   if (context.tools.length !== 1 || !createGrant || createGrant.actions.length !== 1 || !createAction) {
-    throw new GenesisRuntimeConfigurationError('Genesis must expose only agent.create mapped only to agent.create');
+    throw new GenesisRuntimeConfigurationError('Genesis must expose only agent.create mapped to insert');
   }
 
   const outcome: { validated?: ValidatedGenesisManifest; created?: PersistGenesisManifestResult; toolOutput?: CreateAgentToolOutput } = {};
@@ -63,7 +63,6 @@ export async function createAgentFromGenesis(input: GenesisRunInput, options: Ex
     principal: options.principal ?? { kind: 'system' },
     artifactResolvers,
     allowRejectedOutput: true,
-    reasoningActionSlug: 'core.reason',
     stepSlugs: GENESIS_STEP_SLUGS,
     beforeFinalize: async ({ run, response, recordArtifactCreated }) => {
       const toolInput = createAgentToolInputSchema.parse({ organizationKey: parsed.organizationKey, scopeKey: parsed.scopeKey, agentRunKey: run.key, manifest: genesisCreationManifestSchema.parse(response.output) });

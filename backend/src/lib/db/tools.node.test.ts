@@ -32,9 +32,9 @@ describe('tool persistence schemas', () => {
     expect(toolActionSeedSchema.parse({
       key: newId(),
       toolSlug: 'ask.answer',
-      actionSlug: 'core.chat',
+      actionSlug: 'chat',
       priority: 100,
       enabled: true,
-    }).actionSlug).toBe('core.chat');
+    }).actionSlug).toBe('chat');
   });
 });

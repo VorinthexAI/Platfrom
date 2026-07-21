@@ -5,7 +5,8 @@ import { actionSchema, actionSlugSchema } from './actions.node';
 
 describe('action node schema', () => {
   test('uses the AI action registry as its slug source of truth', () => {
-    expect(actionSlugSchema.options).toEqual([...ACTION_SLUGS]);
+    expect(actionSlugSchema.parse('core.chat')).toBe('chat');
+    expect(actionSlugSchema.parse('read')).toBe('read');
   });
 
   test('parses a persisted action and applies node defaults', () => {

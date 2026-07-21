@@ -22,7 +22,7 @@ const organization = organizationSchema.parse({ key: keys.organization, name: 'V
 const backend = skillSchema.parse({ key: keys.backend, slug: 'backend-developer', name: 'Backend Engineering', title: 'Backend Developer', definition: 'Build reliable backend services.' });
 const devops = skillSchema.parse({ key: keys.devops, slug: 'devops-engineer', name: 'DevOps', title: 'DevOps Engineer', definition: 'Operate reliable infrastructure.' });
 const tool = toolSchema.parse({ key: keys.tool, slug: 'reason.solve', name: 'Reason', description: 'Solve hard engineering problems.' });
-const action = actionSchema.parse({ key: keys.action, slug: 'core.reason', name: 'Reason', description: 'Reason through a problem.', objective: 'Solve it.', inputDescription: 'A problem.', outputDescription: 'A solution.', handlerKey: 'core.reason' });
+const action = actionSchema.parse({ key: keys.action, slug: 'reason', name: 'Reason', description: 'Reason through a problem.', objective: 'Solve it.', inputDescription: 'A problem.', outputDescription: 'A solution.', handlerKey: 'reason' });
 function source(): AgentRuntimeDataSource {
   return {
     async getAgent(key) { return key === agent.key ? agent : null; }, async getScope(key) { return key === scope.key ? scope : null; },
@@ -37,7 +37,7 @@ describe('persisted agent runtime', () => {
   test('loads skills by descending priority and tools through explicit permissions', async () => {
     const runtime = await loadAgentRuntime(agent.key, source());
     expect(runtime.skills.map(({ skill }) => skill.slug)).toEqual(['backend-developer', 'devops-engineer']);
-    expect(runtime.tools[0]?.actions[0]?.action.slug).toBe('core.reason');
+    expect(runtime.tools[0]?.actions[0]?.action.slug).toBe('reason');
   });
   test('compiles identity, effective scope guardrail, skills, permissions, schema and task', async () => {
     const runtime = await loadAgentRuntime(agent.key, source());
@@ -49,7 +49,7 @@ describe('persisted agent runtime', () => {
     expect(compiled).toContain('# Forge — Backend Developer');
     expect(compiled).toContain(JSON.stringify({ scopeId: scope.key }));
     expect(compiled).toContain('reason.solve');
-    expect(compiled).toContain('core.reason');
+    expect(compiled).toContain('reason');
     expect(compiled).toContain('at most ten words');
     expect(compiled).toContain('release.channel');
     expect(compiled).toContain('Prefer reversible migrations.');

@@ -17,7 +17,7 @@ export function createAwsPollyProvider(config: AwsPollyProviderConfig): Provider
     id: PROVIDER_ID,
     name: 'AWS Polly',
     async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
-      if (request.actionId !== 'core.speak') throw unsupportedAction(PROVIDER_ID, request.actionId);
+    if (request.actionId !== 'generate-speech') throw unsupportedAction(PROVIDER_ID, request.actionId);
       try {
         const input = speechInputSchema.parse(request.input);
         const host = `polly.${parsed.region}.amazonaws.com`;
