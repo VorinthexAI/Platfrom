@@ -1,4 +1,4 @@
-import { mkdir, rename, stat } from "node:fs/promises";
+import { mkdir, rename } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import ffmpegStatic from "ffmpeg-static";
@@ -42,14 +42,11 @@ async function main(): Promise<void> {
 
 async function encodePcmToMp3(inputPath: string, outputPath: string): Promise<void> {
   const tempPath = `${outputPath}.${crypto.randomUUID()}.tmp.mp3`;
-  const sourceDuration = (await stat(inputPath)).size / (24_000 * 2);
-  const tempo = sourceDuration / BRIEFING_DURATION_SECONDS;
   await new Promise<void>((resolve, reject) => {
     const command = ffmpegStatic || "ffmpeg";
     const child = spawn(command, [
-      "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", inputPath,
-       "-filter:a", buildTempoFilter(tempo),
-      "-codec:a", "libmp3lame", "-q:a", "2", tempPath,
+       "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", inputPath,
+       "-codec:a", "libmp3lame", "-q:a", "2", tempPath,
     ], { stdio: "inherit", shell: command === "ffmpeg" && process.platform === "win32" });
     child.on("error", reject);
     child.on("close", async (code) => {
@@ -61,21 +58,6 @@ async function encodePcmToMp3(inputPath: string, outputPath: string): Promise<vo
       resolve();
     });
   });
-}
-
-function buildTempoFilter(tempo: number): string {
-  const filters: string[] = [];
-  let remaining = tempo;
-  while (remaining < 0.5) {
-    filters.push("atempo=0.5");
-    remaining /= 0.5;
-  }
-  while (remaining > 2) {
-    filters.push("atempo=2");
-    remaining /= 2;
-  }
-  filters.push(`atempo=${remaining.toFixed(6)}`);
-  return filters.join(",");
 }
 
 main().catch((error) => {
