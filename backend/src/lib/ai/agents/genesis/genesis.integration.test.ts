@@ -66,7 +66,8 @@ describe('Genesis end-to-end runtime', () => {
     expect(adapterRequests[0]).toMatchObject({ modelId: model.slug, externalModelId: 'gpt-5.4-mini', actionId: 'insert' });
     expect(runsStore[0]?.status).toBe('completed'); expect(stepsStore.map((step) => step.stepSlug)).toEqual([...GENESIS_STEP_SLUGS]);
     expect(runsStore[0]).toMatchObject({ principalType: 'member', userOrganizationKey: membership.key });
-    expect(callsStore[0]).toMatchObject({ toolKey: f.createTool.key, actionKey: f.reasonAction.key, modelKey: model.key, providerKey: provider.key, totalTokens: 30 });
+    // The provider route and persisted tool call share the tool's insert primitive.
+    expect(callsStore[0]).toMatchObject({ toolKey: f.createTool.key, actionKey: f.createAction.key, modelKey: model.key, providerKey: provider.key, totalTokens: 30 });
     expect(sourcesStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key });
     expect(artifactsStore[0]).toMatchObject({ nodeType: 'skill', nodeKey: f.backend.key, relation: 'source' });
     expect(checksStore[0]?.candidateNodeType).toBe('agent');
