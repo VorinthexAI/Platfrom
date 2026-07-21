@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useAudioStore } from "@/lib/audio/audio-store";
+import { useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
  * Conducts the galaxy's soundtrack (no UI of its own):
@@ -25,6 +26,9 @@ export function AudioConductor() {
   const resumePending = useAudioStore((s) => s.resumePending);
   const startAmbient = useAudioStore((s) => s.startAmbient);
   const ambientStarted = useAudioStore((s) => s.ambientStarted);
+  const stopForegroundAudio = useAudioStore((s) => s.stopForegroundAudio);
+  const mode = useGalaxyStore((s) => s.mode);
+  const step = useGalaxyStore((s) => s.step);
 
   // The first gesture starts the ambient bed and releases whatever
   // autoplay held back. Listeners stay attached until a gesture the
@@ -44,6 +48,12 @@ export function AudioConductor() {
       }
     };
   }, [ambientStarted, startAmbient, resumePending]);
+
+  // Foreground audio belongs to the current biome. Scrolling or leaving the
+  // system must not let a briefing continue over the next destination.
+  useEffect(() => {
+    stopForegroundAudio();
+  }, [mode, step, stopForegroundAudio]);
 
   return null;
 }

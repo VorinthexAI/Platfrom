@@ -91,6 +91,7 @@ interface AudioState {
   startAmbient: () => void;
   playVoice: (src: string) => void;
   stopVoice: () => void;
+  stopForegroundAudio: () => void;
   pauseVoice: () => void;
   resumeVoice: () => void;
   resumePending: () => void;
@@ -231,6 +232,16 @@ export const useAudioStore = create<AudioState>((set, get) => {
     voiceHeldForMission = false;
     voiceQueuedBehindMission = null;
     set({ pendingVoiceSrc: null });
+  },
+
+  stopForegroundAudio: () => {
+    if (mission && !mission.paused) mission.pause();
+    if (mission) mission.currentTime = 0;
+    if (voice && !voice.paused) voice.pause();
+    voiceHeldForMission = false;
+    voiceQueuedBehindMission = null;
+    set({ missionPlaying: false, pendingVoiceSrc: null });
+    settleAmbientVolume();
   },
 
   pauseVoice: () => {
