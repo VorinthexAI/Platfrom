@@ -15,10 +15,10 @@ describe('action registry', () => {
 
   test('contains only generic runtime primitives with explicit model policies', () => {
     expect(ACTION_SLUGS).toEqual([
-      'ask', 'chat', 'orchestrator-chat', 'reason', 'deep-reason', 'embed', 'speak', 'transcribe', 'web-search',
+      'ask', 'chat', 'reason', 'deep-reason', 'embed', 'speak', 'transcribe', 'web-search',
       'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
       'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
-      'generate-speech', 'analyze-audio', 'generate-music',
+      'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
       .toEqual(['traverse', 'read', 'insert', 'upsert', 'update', 'delete']);
