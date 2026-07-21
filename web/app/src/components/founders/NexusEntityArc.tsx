@@ -59,6 +59,7 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
   const layerIndex = Math.max(0, ENTITY_LAYERS.findIndex((layer) => layer.entities.some((entity) => entity.id === selectedEntityId)));
   const layer = ENTITY_LAYERS[layerIndex];
   const selectedIndex = Math.max(0, layer.entities.findIndex((entity) => entity.id === selectedEntityId));
+  const canNavigateEntities = layer.entities.length > 1;
   const outerLayer = ENTITY_LAYERS[(layerIndex + 1) % ENTITY_LAYERS.length];
   const arcEntities = layer.entities
     .map((entity, index) => {
@@ -72,6 +73,7 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
   useEffect(() => {
     const handleTab = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Tab") return;
+      if (!canNavigateEntities) return;
       event.preventDefault();
       const wrapped = (selectedIndex + (event.shiftKey ? -1 : 1) + layer.entities.length) % layer.entities.length;
       const entity = layer.entities[wrapped];
@@ -80,7 +82,7 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
     };
     window.addEventListener("keydown", handleTab);
     return () => window.removeEventListener("keydown", handleTab);
-  }, [layer, onSelect, selectedIndex]);
+  }, [canNavigateEntities, layer, onSelect, selectedIndex]);
 
   function selectEntity(index: number) {
     const wrapped = (index + layer.entities.length) % layer.entities.length;
@@ -171,8 +173,8 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
         })}
       </div>
       <div className="absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2">
-        <button type="button" onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronLeftIcon size="sm" /></button>
-        <button type="button" onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronRightIcon size="sm" /></button>
+        <button type="button" disabled={!canNavigateEntities} onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white disabled:opacity-35 disabled:hover:text-silver-300"><ChevronLeftIcon size="sm" /></button>
+        <button type="button" disabled={!canNavigateEntities} onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white disabled:opacity-35 disabled:hover:text-silver-300"><ChevronRightIcon size="sm" /></button>
       </div>
     </section>
   );
