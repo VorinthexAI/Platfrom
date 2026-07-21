@@ -455,7 +455,6 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
 
 function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolean }) {
   const dust = useRef<THREE.Points>(null);
-  const drones = useRef<THREE.Group>(null);
   const dustPositions = useMemo(() => {
     const values = new Float32Array(700 * 3);
     for (let index = 0; index < 700; index += 1) {
@@ -468,10 +467,9 @@ function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolea
     return values;
   }, []);
 
-  useFrame(({ clock }, delta) => {
+  useFrame((_, delta) => {
     if (paused) return;
     if (dust.current) dust.current.rotation.y += delta * 0.0015;
-    if (drones.current) drones.current.rotation.y = clock.elapsedTime * 0.035;
   });
 
   return (
@@ -480,18 +478,6 @@ function EnvironmentActivity({ paused, muted }: { paused: boolean; muted: boolea
         <bufferGeometry><bufferAttribute attach="attributes-position" args={[dustPositions, 3]} /></bufferGeometry>
         <pointsMaterial color="#9b6a45" size={0.026} transparent opacity={muted ? 0.12 : 0.34} sizeAttenuation depthWrite={false} />
       </points>
-      <group ref={drones}>
-        {[0, 1, 2, 3, 4].map((index) => {
-          const angle = index * 1.256;
-          const radius = 7.8 + (index % 2) * 1.3;
-          return (
-            <group key={index} position={[Math.cos(angle) * radius, 1.2 + index * 0.18, Math.sin(angle) * radius]} rotation={[0, -angle, 0]}>
-              <mesh><coneGeometry args={[0.08, 0.32, 5]} /><meshStandardMaterial color="#aeb6bc" metalness={1} roughness={0.2} /></mesh>
-              <pointLight color="#ff8124" intensity={0.7} distance={1.5} />
-            </group>
-          );
-        })}
-      </group>
     </group>
   );
 }
