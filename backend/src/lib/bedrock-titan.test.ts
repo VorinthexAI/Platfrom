@@ -42,6 +42,21 @@ describe('static Bedrock Titan embeddings', () => {
     expect(embeddingMetadata()).toEqual({ embeddingProvider: 'aws-bedrock', embeddingModel: 'amazon.titan-embed-text-v2' });
   });
 
+  test('retries throttled requests before failing', async () => {
+    process.env.AWS_REGION = 'us-east-1';
+    process.env.AWS_ACCESS_KEY_ID = 'key';
+    process.env.AWS_SECRET_ACCESS_KEY = 'secret';
+    let requests = 0;
+    globalThis.fetch = (async () => {
+      requests += 1;
+      if (requests === 1) return new Response('throttled', { status: 429, headers: { 'retry-after': '0' } });
+      return new Response(JSON.stringify({ embedding: [0.5, 0.5] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(embedText({ text: 'retry me' })).resolves.toEqual([0.5, 0.5]);
+    expect(requests).toBe(2);
+  });
+
   test('chunks long documents and returns one normalized aggregate vector', async () => {
     process.env.AWS_REGION = 'us-east-1';
     process.env.AWS_ACCESS_KEY_ID = 'key';

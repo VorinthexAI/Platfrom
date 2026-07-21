@@ -5,7 +5,7 @@ export const EMBEDDING_PROVIDER_ID = 'aws-bedrock' as const;
 export const EMBEDDING_MODEL = 'amazon.titan-embed-text-v2';
 export const BEDROCK_EMBEDDING_MODEL_ID = 'amazon.titan-embed-text-v2:0';
 export const EMBEDDING_CHUNK_CHARACTERS = 4_000;
-const THROTTLE_RETRY_DELAYS_MS = [500, 1_000, 2_000];
+const THROTTLE_RETRY_DELAYS_MS = [1_000, 3_000, 10_000, 30_000, 60_000];
 
 const embedInputSchema = z.object({ text: z.string().min(1) }).strict();
 const titanEmbeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1) }).passthrough();
@@ -38,19 +38,29 @@ export async function embedText(input: z.infer<typeof embedInputSchema>): Promis
   const path = `/model/${BEDROCK_EMBEDDING_MODEL_ID}/invoke`;
   // Bedrock URI-encodes the model separator while validating SigV4.
   const canonicalPath = `/model/${encodeURIComponent(BEDROCK_EMBEDDING_MODEL_ID)}/invoke`;
-  const embeddings = await Promise.all(chunks.map(async (inputText) => {
+  const embeddings: number[][] = [];
+  for (const inputText of chunks) {
     const body = JSON.stringify({ inputText });
     const signed = signAwsRequest(credentials, 'bedrock', host, canonicalPath, body, { 'content-type': 'application/json', accept: 'application/json' });
+    let embedding: number[] | null = null;
     for (const retryDelay of [...THROTTLE_RETRY_DELAYS_MS, null]) {
       const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body });
-      if (response.ok) return titanEmbeddingResponseSchema.parse(await response.json()).embedding;
+      if (response.ok) {
+        embedding = titanEmbeddingResponseSchema.parse(await response.json()).embedding;
+        break;
+      }
       if (response.status !== 429 || retryDelay === null) {
         throw new Error(`AWS Bedrock Titan embedding request failed with status ${response.status}.`);
       }
-      await new Promise((resolve) => setTimeout(resolve, retryDelay));
+      const retryAfter = Number(response.headers.get('retry-after'));
+      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1_000
+        : retryDelay;
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
-    throw new Error('AWS Bedrock Titan embedding request retry loop ended unexpectedly.');
-  }));
+    if (!embedding) throw new Error('AWS Bedrock Titan embedding request retry loop ended unexpectedly.');
+    embeddings.push(embedding);
+  }
 
   if (embeddings.length === 1) return embeddings[0]!;
   const dimensions = embeddings[0]!.length;
