@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { tokenUsage, ZERO_TOKEN_USAGE } from '@/lib/ai/shared/usage';
-import { awsCredentialsSchema, signAwsRequest } from './aws-sigv4';
+import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
 import {
@@ -64,8 +64,8 @@ async function embed(config: AwsBedrockProviderConfig, request: ProviderEmbedReq
   } catch (error) { throw normalizeProviderError(PROVIDER_ID, error); }
 }
 
-export function createAwsBedrockProvider(config: AwsBedrockProviderConfig): ProviderAdapter {
-  const parsed = awsBedrockProviderConfigSchema.parse(config);
+export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConfig>, env?: AwsCredentialEnvironment): ProviderAdapter {
+  const parsed = resolveAwsCredentials(config, env);
   return {
     id: PROVIDER_ID,
     name: 'AWS Bedrock',

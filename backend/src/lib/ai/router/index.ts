@@ -22,4 +22,5 @@ export {
   type RouteAttemptFailure,
 } from './errors';
 export { selectRoute } from './select-route';
+export { STATIC_PROVIDER_ROUTES, isStaticProviderRoute, createStaticProviderAdapter } from './static-routes';
 export { executeRoute, executeAction, executeCoreChat, streamRoute, type ExecuteRouteOptions, type ExecuteActionOptions, type RouteAttemptTelemetry } from './execute-route';

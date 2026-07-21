@@ -8,6 +8,24 @@ export const awsCredentialsSchema = z.object({
 }).strict();
 export type AwsCredentials = z.infer<typeof awsCredentialsSchema>;
 
+export interface AwsCredentialEnvironment extends Record<string, string | undefined> {
+  AWS_REGION?: string;
+  AWS_DEFAULT_REGION?: string;
+  AWS_ACCESS_KEY_ID?: string;
+  AWS_SECRET_ACCESS_KEY?: string;
+}
+
+export function resolveAwsCredentials(
+  credentials?: Partial<AwsCredentials>,
+  env: AwsCredentialEnvironment = process.env,
+): AwsCredentials {
+  return awsCredentialsSchema.parse({
+    region: credentials?.region ?? env.AWS_REGION ?? env.AWS_DEFAULT_REGION,
+    accessKeyId: credentials?.accessKeyId ?? env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: credentials?.secretAccessKey ?? env.AWS_SECRET_ACCESS_KEY,
+  });
+}
+
 function hmac(key: Buffer | string, data: string): Buffer {
   return createHmac('sha256', key).update(data, 'utf8').digest();
 }

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { newId } from '@/lib/ids';
 import { s3, S3_BUCKET } from '@/lib/s3';
 import { ZERO_TOKEN_USAGE } from '@/lib/ai/shared/usage';
-import { awsCredentialsSchema, signAwsRequest } from './aws-sigv4';
+import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import { unsupportedAction } from './openai-compatible';
 import { resolveRequestSignal, transcribeInputSchema, type ProviderAdapter, type ProviderExecuteRequest, type ProviderExecuteResponse, type ProviderFactory, type TranscriptionOutput } from './types';
@@ -18,8 +18,8 @@ const transcriptSchema = z.object({ results: z.object({ transcripts: z.array(z.o
 
 const sleep = (milliseconds: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => { const timeout = setTimeout(resolve, milliseconds); signal?.addEventListener('abort', () => { clearTimeout(timeout); reject(signal.reason); }, { once: true }); });
 
-export function createAwsTranscribeProvider(config: AwsTranscribeProviderConfig): ProviderAdapter {
-  const parsed = awsTranscribeProviderConfigSchema.parse(config);
+export function createAwsTranscribeProvider(config?: Partial<AwsTranscribeProviderConfig>, env?: AwsCredentialEnvironment): ProviderAdapter {
+  const parsed = resolveAwsCredentials(config, env);
   return {
     id: PROVIDER_ID,
     name: 'AWS Transcribe',
