@@ -1059,16 +1059,3 @@ Notes: Open Graph and Twitter preview cards for pilot.vorinthex.com.
 Asset: Pilot Social Cards
 Action: Generated v1
 Notes: Generated Open Graph and Twitter cards for pilot.vorinthex.com.
-## 2026-07-21 16:18
-Asset: Replica
-Action: Generated v2
-Notes: Generated from galaxy registry entity product.replica
-Paths:
-- solid: assets/product/product-replica/v2/solid-1024.png
-- transparent: assets/product/product-replica/v2/transparent-1024.png
-- solid svg: assets/product/product-replica/v2/solid-1024.svg
-- transparent svg: assets/product/product-replica/v2/transparent-1024.svg
-## 2026-07-21 16:19
-Asset: Replica Social Cards
-Action: Generated v2
-Notes: Generated Open Graph and Twitter cards for replica.vorinthex.com.

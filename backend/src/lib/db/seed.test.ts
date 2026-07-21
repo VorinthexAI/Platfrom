@@ -103,8 +103,8 @@ describe('model and routing relation seeds', () => {
       'amazon.titan-embed-text-v2',
       'aws.transcribe-standard',
     ]);
-    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
-      .toEqual(['amazon.nova-2-sonic']);
+    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'chat').map(({ modelSlug }) => modelSlug))
+      .toEqual(['amazon.nova-pro', 'amazon.nova-2-lite', 'amazon.nova-premier']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([

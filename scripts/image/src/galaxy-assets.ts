@@ -41,9 +41,6 @@ function symbolDirection(entity: GalaxyEntity): string {
     if (entity.slug === "hq") {
       return "Create a premium headquarters signal beacon logo: one tall, centered chrome relay tower rising from a dark glass base, with two or three restrained concentric coordination rings radiating outward. It must read as communication, alignment, and a shared operating center, not a cube, building, shield, or generic app icon. Use an elegant orbital silhouette, precise engineered geometry, obsidian negative space, and no text.";
     }
-    if (entity.slug === "replica") {
-      return "Create a premium test chamber logo: a single circular chrome aperture framing one small suspended sphere in a dark glass interior. The sphere should feel precisely contained, as though inside a controlled simulation chamber. Use a clean engineered silhouette, restrained inner light, obsidian negative space, and no text. Do not use mirrors, portals, cubes, shields, brains, buildings, people, or generic app icon geometry.";
-    }
     return `Create a premium sibling product logo for ${entity.name}. It should feel like it belongs beside the Vorinthex master logo: a centered chrome emblem, circular or orbital silhouette, obsidian negative space, sharp engineered geometry, and no text. Encode this product idea abstractly: ${entity.tagline ?? entity.shortDescription}.`;
   }
   if (entity.type === "capability") {

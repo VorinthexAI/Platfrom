@@ -19,7 +19,7 @@ export type CoreChatToolDefinition = z.infer<typeof coreChatToolDefinitionSchema
 
 /** Provider-neutral multimodal input for the `core.chat` action. */
 export const coreChatInputSchema = z.object({
-  organizationProviderKey: z.string().min(1).optional(),
+  organizationProviderKey: z.string().min(1),
   messages: z.array(coreChatMessageSchema).min(1),
   systemPrompt: z.string().min(1).optional(),
   tools: z.array(coreChatToolDefinitionSchema).optional(),

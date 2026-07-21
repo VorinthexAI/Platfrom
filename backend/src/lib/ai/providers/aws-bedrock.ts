@@ -1,6 +1,3 @@
-import { BedrockRuntimeClient, InvokeModelWithBidirectionalStreamCommand } from '@aws-sdk/client-bedrock-runtime';
-import { NodeHttp2Handler } from '@smithy/node-http-handler';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { tokenUsage, ZERO_TOKEN_USAGE } from '@/lib/ai/shared/usage';
 import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
@@ -93,61 +90,6 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
         const output: ChatOutput = { text: (result.output.message?.content ?? []).map((block) => block.text ?? '').join(''), toolCalls: [], stopReason: result.stopReason ?? null };
         return { output: output as TOutput, usage: tokenUsage(result.usage?.inputTokens, result.usage?.outputTokens, result.usage?.totalTokens), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
       } catch (error) { throw normalizeProviderError(PROVIDER_ID, error); }
-    },
-    async *stream<TInput>(request: ProviderExecuteRequest<TInput>) {
-      if (request.actionId !== 'orchestrator-chat' || !request.externalModelId.includes('nova-2-sonic')) {
-        throw unsupportedAction(PROVIDER_ID, 'stream');
-      }
-      const input = chatInputSchema.parse(request.input);
-      const client = new BedrockRuntimeClient({
-        region: parsed.region,
-        credentials: { accessKeyId: parsed.accessKeyId, secretAccessKey: parsed.secretAccessKey },
-        endpoint: `https://bedrock-runtime.${parsed.region}.amazonaws.com`,
-        requestHandler: new NodeHttp2Handler({ requestTimeout: request.timeoutMs ?? 300_000, sessionTimeout: request.timeoutMs ?? 300_000 }),
-      });
-      const promptName = randomUUID();
-      const systemContentName = randomUUID();
-      const userContentName = randomUUID();
-      const systemText = [
-        ...(input.systemPrompt ? [input.systemPrompt] : []),
-        ...input.messages.filter((message) => message.role === 'system').flatMap((message) => message.content.filter((part) => part.type === 'text').map((part) => part.text)),
-      ].join('\n');
-      const userText = input.messages.filter((message) => message.role !== 'system').flatMap((message) => message.content.filter((part) => part.type === 'text').map((part) => part.text)).join('\n');
-      const events = [
-        { event: { sessionStart: { inferenceConfiguration: { maxTokens: input.options?.maxTokens ?? 2_000, temperature: input.options?.temperature ?? 0.2, topP: 0.9 } } } },
-        { event: { promptStart: { promptName, textOutputConfiguration: { mediaType: 'text/plain' }, audioOutputConfiguration: { audioType: 'SPEECH', encoding: 'base64', mediaType: 'audio/lpcm', sampleRateHertz: 24_000, sampleSizeBits: 16, channelCount: 1, voiceId: input.options?.voiceKey ?? 'matthew' } } } },
-        ...(systemText ? [
-          { event: { contentStart: { promptName, contentName: systemContentName, type: 'TEXT', interactive: false, role: 'SYSTEM', textInputConfiguration: { mediaType: 'text/plain' } } } },
-          { event: { textInput: { promptName, contentName: systemContentName, content: systemText } } },
-          { event: { contentEnd: { promptName, contentName: systemContentName } } },
-        ] : []),
-        { event: { contentStart: { promptName, contentName: userContentName, type: 'TEXT', interactive: true, role: 'USER', textInputConfiguration: { mediaType: 'text/plain' } } } },
-        { event: { textInput: { promptName, contentName: userContentName, content: userText } } },
-        { event: { contentEnd: { promptName, contentName: userContentName } } },
-        { event: { promptEnd: { promptName } } },
-        { event: { sessionEnd: {} } },
-      ];
-      const body = {
-        async *[Symbol.asyncIterator]() {
-          for (const event of events) yield { chunk: { bytes: new TextEncoder().encode(JSON.stringify(event)) } };
-        },
-      };
-      try {
-        const response = await client.send(new InvokeModelWithBidirectionalStreamCommand({ modelId: request.externalModelId, body: body as never }), { abortSignal: resolveRequestSignal(request) });
-        for await (const item of response.body ?? []) {
-          const bytes = item.chunk?.bytes;
-          if (!bytes) continue;
-          const payload = JSON.parse(new TextDecoder().decode(bytes)) as { event?: { textOutput?: { content?: string }; contentEnd?: { type?: string } } };
-          const text = payload.event?.textOutput?.content;
-          if (text) yield { type: 'text-delta' as const, text };
-        }
-        yield { type: 'usage' as const, usage: ZERO_TOKEN_USAGE };
-        yield { type: 'done' as const };
-      } catch (error) {
-        throw normalizeProviderError(PROVIDER_ID, error);
-      } finally {
-        client.destroy();
-      }
     },
     embed(request) { return embed(parsed, request); },
   };
