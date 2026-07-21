@@ -1244,7 +1244,10 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   const scopesBySlug = new Map(organizationScopes.map((scope) => [scope.slug, scope]));
   const actualKeysBySeedKey = new Map<string, string>();
   for (const seed of SEEDED_SCOPES) {
-    let existing = scopesBySlug.get(seed.slug);
+    // Legacy scope rows can be omitted from the organization listing while
+    // still occupying their deterministic seed key. Reuse that row instead
+    // of attempting a duplicate insert during deployment.
+    let existing = scopesBySlug.get(seed.slug) ?? await scopes.getScopeByKey(seed.key);
     if (existing) {
       if (existing.name !== seed.name || existing.summary !== seed.summary || existing.description !== seed.description || existing.position !== seed.position || existing.level !== seed.level) {
         existing = await scopes.updateScope(existing.key, { name: seed.name, summary: seed.summary, description: seed.description, position: seed.position, level: seed.level });
