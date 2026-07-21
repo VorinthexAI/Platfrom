@@ -123,7 +123,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
         if (assignedEntity?.type === "orchestrator") {
           setSelectedEntityId(assignedEntity.id);
           setEnteredEntityId(assignedEntity.id);
-          setTransitDestination(`${assignedEntity.name} station interior`);
+          setTransitDestination(`Entering ${assignedEntity.name} deck`);
         }
         const stored = window.localStorage.getItem(ORGANIZATION_STORAGE_KEY);
         const initialKey = loadedOrganizations.find((organization) => organization.key === stored)?.key
@@ -196,7 +196,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
     stopVoice();
     setSelectedEntityId(entity.id);
     setEnteredEntityId(entity.id);
-    setTransitDestination(`${entity.name} station interior`);
+    setTransitDestination(`Entering ${entity.name} deck`);
   }, [cancelBeacon, resetBeacon, stopVoice]);
 
   const leaveEntity = useCallback(() => {
