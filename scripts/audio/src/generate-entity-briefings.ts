@@ -48,7 +48,7 @@ async function encodePcmToMp3(inputPath: string, outputPath: string): Promise<vo
     const command = ffmpegStatic || "ffmpeg";
     const child = spawn(command, [
       "-y", "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", inputPath,
-      "-filter:a", `atempo=${tempo.toFixed(6)}`,
+       "-filter:a", buildTempoFilter(tempo),
       "-codec:a", "libmp3lame", "-q:a", "2", tempPath,
     ], { stdio: "inherit", shell: command === "ffmpeg" && process.platform === "win32" });
     child.on("error", reject);
@@ -61,6 +61,21 @@ async function encodePcmToMp3(inputPath: string, outputPath: string): Promise<vo
       resolve();
     });
   });
+}
+
+function buildTempoFilter(tempo: number): string {
+  const filters: string[] = [];
+  let remaining = tempo;
+  while (remaining < 0.5) {
+    filters.push("atempo=0.5");
+    remaining /= 0.5;
+  }
+  while (remaining > 2) {
+    filters.push("atempo=2");
+    remaining /= 2;
+  }
+  filters.push(`atempo=${remaining.toFixed(6)}`);
+  return filters.join(",");
 }
 
 main().catch((error) => {
