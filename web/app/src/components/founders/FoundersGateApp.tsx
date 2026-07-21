@@ -24,6 +24,7 @@ import { getEntityById } from "@/lib/galaxy/registry-helpers";
 import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { NexusTransit } from "./NexusTransit";
 import { NexusEntityArc } from "./NexusEntityArc";
+import { NEXUS_HQ_ENTITY_ID, NEXUS_HQ_TRANSIT_DESTINATION } from "@/lib/founders/nexus-landing";
 
 const OrchestratorHierarchy = dynamic(() => import("./OrchestratorHierarchy"), { ssr: false });
 const OrchestratorCommandDeck = dynamic(() => import("./OrchestratorCommandDeck"), { ssr: false });
@@ -56,9 +57,9 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [artifactSheetOpen, setArtifactSheetOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [selectedEntityId, setSelectedEntityId] = useState("product.core");
+  const [selectedEntityId, setSelectedEntityId] = useState(NEXUS_HQ_ENTITY_ID);
   const [enteredEntityId, setEnteredEntityId] = useState<string | null>(null);
-  const [transitDestination, setTransitDestination] = useState<string | null>("Nexus command station");
+  const [transitDestination, setTransitDestination] = useState<string | null>(NEXUS_HQ_TRANSIT_DESTINATION);
   const scopeRequestRef = useRef(0);
 
   const playVoice = useAudioStore((state) => state.playVoice);
@@ -112,14 +113,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
         if (cancelled) return;
         setAccount(loadedAccount);
         setOrganizations(loadedOrganizations);
-        const assignedEntity = loadedAccount.rootMembership.orchestrator
-          ? getEntityById(`orchestrator.${loadedAccount.rootMembership.orchestrator.slug}`)
-          : null;
-        if (assignedEntity?.type === "orchestrator") {
-          setSelectedEntityId(assignedEntity.id);
-          setEnteredEntityId(assignedEntity.id);
-          setTransitDestination(`Entering ${assignedEntity.name} deck`);
-        }
         const stored = window.localStorage.getItem(ORGANIZATION_STORAGE_KEY);
         const initialKey = loadedOrganizations.find((organization) => organization.key === stored)?.key
           ?? loadedOrganizations[0]?.key
