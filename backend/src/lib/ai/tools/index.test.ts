@@ -18,10 +18,6 @@ describe('tool handler registry', () => {
     expect(() => getTool('nope.missing')).toThrow(UnknownToolError);
   });
 
-  test('registers core.delegate as a local Beacon-only boundary', () => {
-    expect(getTool('core.delegate')).toMatchObject({ id: 'core.delegate', name: 'Delegate', scopeId: null });
-  });
-
   test('registers the complete organization member tool surface', () => {
     expect(TOOL_IDS.filter((id) => id.startsWith('organization.member.'))).toEqual([
       'organization.member.list',

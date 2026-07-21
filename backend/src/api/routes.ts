@@ -26,7 +26,6 @@ import { requestWaitlistVerification, verifyWaitlistEmail } from './waitlist';
 import { recordPlatformClientEvent } from './platform-events';
 import {
   askFoundersBeacon,
-  delegateFoundersBeacon,
   getFoundersAccount,
   listFoundersOrganizationProviders,
   listFoundersOrganizationScopes,
@@ -445,7 +444,6 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
   app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
   app.post('/founders/beacon/ask', askFoundersBeacon);
-  app.post('/founders/beacon/delegate', delegateFoundersBeacon);
   app.get('/founders/artifacts', listFounderArtifacts);
   app.post('/founders/artifacts', createFounderArtifact);
   app.get('/nexus/events/stream', streamNexusOrganizationInvalidations);

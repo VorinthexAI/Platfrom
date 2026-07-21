@@ -33,8 +33,8 @@ Before context compilation, the execution entry point requires a trusted
 server-side principal. Member execution resolves an active `userOrganizations`
 document, its user, and the matching `scopeMembers` document. All three must
 belong to the agent's organization and scope. This identity is never accepted
-inside the client request body. Trusted internal workflows such as Genesis use
-an explicit system principal instead.
+inside the client request body. Trusted internal workflows use an explicit
+system principal instead.
 
 `AgentContext` contains:
 
@@ -127,20 +127,6 @@ models may interpret intent but can never perform database mutations directly.
 Mutations use Arango stream transactions and emit both domain audit events and
 the normal tool lifecycle events.
 
-`core.delegate` is also a local action with no `modelActions` row. Only the
-canonical Beacon agent is seeded with that tool, generic agent services and
-Genesis reject attempts to grant it elsewhere, and Beacon's seed reconciles
-away every direct `ask.answer` or `reason.solve` grant. Beacon may use the
-existing `core.reason` model route only inside `core.delegate` to produce a
-strict Zod-validated allowlist decision; model prose is never returned to the
-user. The current allowlist contains only Genesis for `agent.create`. Every
-other intent returns the server-owned `NO_ELIGIBLE_DELEGATE` result without a
-direct-answer fallback. The Genesis handler accepts only an
-owner-authorized request for the server-resolved Genesis identity. The
-`POST /founders/beacon/delegate` boundary re-resolves organization and scope,
-records a Beacon tool run, then executes Genesis with the initiating human's
-membership preserved in the Genesis run ledger.
-
 `scopeAgents` is the authoritative lifecycle and minimum-role link between a
 scope and an existing agent definition. `agentMembers` stores inherited and
 explicit grants separately. Every AgentRun reloads these relations and requires
@@ -194,43 +180,6 @@ from the loaded `scopeAgents` relation, never from a client request.
 Legacy run documents that cannot supply trustworthy foreign keys or token
 usage are retained in `agentRunsLegacy`; they are never fabricated into the
 new call ledger.
-
-## Genesis agent creation
-
-Genesis is the only manually seeded agent. It lives in the `agent-builder`
-scope, has the single `Agent Architect` skill at priority 100, and is granted
-only the local `agent.create` tool mapped only to the `agent.create` action.
-Reasoning still uses the persisted `core.reason` route to GPT-5.4 Mini through
-an OpenAI provider enabled for the organization, but Reason Tool is not granted
-to Genesis. The canonical,
-version-controlled seed inputs are `agents/genesis/seed/genesis.seed.json` and
-`agents/genesis/seed/agent-architect.skill.md`.
-
-`createAgentFromGenesis` compiles a fresh `AgentContext`, presents the complete
-organization-owned agent/skill/tool catalog plus explicit sources, and requires
-a strict creation manifest. A trusted Beacon delegation may supply a separately
-authorized target organization and scope while Genesis retains its immutable
-service identity and tool grants. Genesis proposes only; the backend reparses the
-manifest, then invokes the local `agent.create` handler. That handler reparses
-the complete input, verifies the exact Genesis capability guardrails, resolves
-references, enforces scope and tool permissions, applies
-Reuse -> Extend -> Create, embeds candidates, and runs novelty checks before
-any domain write. Agent similarity uses review/reject thresholds 0.85/0.95;
-skills use 0.80/0.90, with at most five comparisons for each.
-
-Accepted manifests are written through one Arango stream transaction covering
-`agents`, `skills`, `agentSkills`, `agentTools`, `agentArtifacts`, and the
-declared novelty-check collection. Skill documents are created before their
-links, all keys and embeddings are backend-owned, and a failed link aborts the
-whole creation transaction. Rejected manifests remain auditable runs but do not
-create configuration. The run ledger uses twelve stable Genesis step slugs and
-records explicit sources, reused dependencies, and created results as artifact
-provenance.
-
-The handler's write allow-list is exactly `agents`, `skills`, `agentSkills`,
-`agentTools`, `agentArtifacts`, and `agentArtifactChecks`. It cannot create
-tools, actions, models, providers, provider grants, or arbitrary documents.
-Seed reconciliation removes every other persisted Genesis tool grant.
 
 ## Provider configuration
 

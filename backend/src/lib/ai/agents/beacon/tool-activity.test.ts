@@ -12,14 +12,14 @@ describe('Beacon tool activity projection', () => {
       data: {
         invocationKey,
         runKey: newId(),
-        agentKey: newId(), agentSlug: 'genesis', agentName: 'Genesis',
-        toolKey: newId(), toolSlug: 'agent.create', toolName: 'Create agent',
-        actionKey: newId(), actionSlug: 'agent.create', actionName: 'Create agent',
+        agentKey: newId(), agentSlug: 'beacon', agentName: 'Beacon',
+        toolKey: newId(), toolSlug: 'artifact.create', toolName: 'Create artifact',
+        actionKey: newId(), actionSlug: 'artifact.create', actionName: 'Create artifact',
       },
     };
     const started = project({ ...base, slug: 'tool.called', data: { ...base.data, status: 'called' } });
     const completed = project({ ...base, slug: 'tool.completed', data: { ...base.data, status: 'completed', elapsedMs: 42 } });
-    expect(started).toMatchObject({ invocationId: 'tool-1', phase: 'started', agent: { slug: 'genesis' }, tool: { slug: 'agent.create' } });
+    expect(started).toMatchObject({ invocationId: 'tool-1', phase: 'started', agent: { slug: 'beacon' }, tool: { slug: 'artifact.create' } });
     expect(completed).toMatchObject({ invocationId: 'tool-1', phase: 'completed', elapsedMs: 42 });
     expect(JSON.stringify(completed)).not.toContain(invocationKey);
     expect(JSON.stringify(completed)).not.toContain('Key');

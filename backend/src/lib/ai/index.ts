@@ -29,4 +29,3 @@ export * from './reverse-context';
 export * from './runtime-variables';
 export * from './agent-memories';
 export * from './pipeline';
-export * from './agents/genesis';
