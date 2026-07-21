@@ -48,7 +48,7 @@ import { joinPresence, leavePresence, presenceBeat, streamPresence } from './pre
 import { unsubscribeFromUpdates } from './updates';
 import { hashUserEmail } from './users';
 import { listNodes } from './nodes';
-import { orchestratorChatSocket, postOrchestratorChat } from './orchestrators';
+import { postOrchestratorChat } from './orchestrators';
 import {
   attachCurrentMindCapability,
   createSystemCapability,
@@ -435,7 +435,6 @@ export function registerRoutes(app: Hono) {
   app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
 
   app.post('/orchestrators/chat', postOrchestratorChat);
-  app.get('/orchestrators/chat/stream', orchestratorChatSocket);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);
