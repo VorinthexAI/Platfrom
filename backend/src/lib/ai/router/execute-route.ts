@@ -24,7 +24,7 @@ export interface ExecuteRouteOptions<TInput> {
 async function resolveAdapter(decision: RouteDecision, adapters: ExecuteRouteOptions<unknown>['adapters'], credentials: ExecuteRouteOptions<unknown>['credentials']): Promise<ProviderAdapter | undefined> {
   const injected = adapters?.[decision.providerSlug];
   if (injected) return injected;
-  if (decision.credentialSource === 'environment') return createStaticProviderAdapter(decision);
+  if (decision.credentialSource === 'environment') return createStaticProviderAdapter(decision.providerSlug);
   const encryptedRepository = credentials ?? getDefaultOrganizationCredentialsRepository();
   const organizationCredentials = await encryptedRepository.getCredentials(decision.organizationKey, decision.orgProviderKey);
   if (!organizationCredentials) return undefined;

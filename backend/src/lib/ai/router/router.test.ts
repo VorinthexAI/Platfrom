@@ -76,7 +76,7 @@ describe('priority-only persisted router', () => {
     await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'chat', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps)).rejects.toBeInstanceOf(ProviderNotEnabledForOrganizationError);
   });
 
-  test('routes only the static Titan embed tuple without an organization provider', async () => {
+  test('routes every action supported by a static AWS provider without an organization provider', async () => {
     const embed = action('embed');
     const reason = action('reason');
     const titan = model('amazon.titan-embed-text-v2');
@@ -95,13 +95,12 @@ describe('priority-only persisted router', () => {
       async listOrganizationProviderKeys() { return []; },
     };
 
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'embed' }, { data })).resolves.toMatchObject({
-      actionSlug: 'embed',
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'reason' }, { data })).resolves.toMatchObject({
+      actionSlug: 'reason',
       modelSlug: 'amazon.titan-embed-text-v2',
       providerSlug: 'aws-bedrock',
       credentialSource: 'environment',
     });
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'reason' }, { data })).rejects.toBeInstanceOf(NoEligibleRouteError);
   });
 
   test('model and fixed modes never silently change their requested route', async () => {

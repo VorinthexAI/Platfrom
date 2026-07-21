@@ -6,7 +6,7 @@ import { listEnabledModelProvidersByModelKey } from '@/lib/db/model-providers.no
 import { getProviderById, getProviderBySlug } from '@/lib/db/providers.node';
 import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError, RouteValidationError, UnknownModelError, UnknownProviderError } from './errors';
 import { routeRequestSchema, type RouteRequestInput } from './route-request';
-import { isStaticProviderRoute } from './static-routes';
+import { isStaticProvider } from './static-routes';
 import type { RouteDecision, RouterDataSource, RouterDependencies } from './types';
 
 const defaultDataSource: RouterDataSource = {
@@ -41,12 +41,8 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
   }
 
   const allowedProviderKeys = new Set(await data.listOrganizationProviderKeys(request.organizationKey));
-  const selectedStaticRoute = selectedModel && selectedProvider && !request.organizationProviderKey && isStaticProviderRoute({
-    actionSlug: action.slug,
-    modelSlug: selectedModel.slug,
-    providerSlug: selectedProvider.slug,
-  });
-  if (selectedProvider && !allowedProviderKeys.has(selectedProvider.key) && !selectedStaticRoute) {
+  const selectedStaticProvider = selectedProvider && !request.organizationProviderKey && isStaticProvider(selectedProvider.slug);
+  if (selectedProvider && !allowedProviderKeys.has(selectedProvider.key) && !selectedStaticProvider) {
     throw new ProviderNotEnabledForOrganizationError(request.organizationKey, selectedProvider.slug);
   }
 
@@ -67,8 +63,8 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
     for (const modelProvider of modelProviders) {
       const provider = selectedProvider?.key === modelProvider.providerKey ? selectedProvider : await data.getProviderByKey(modelProvider.providerKey);
       if (!provider) continue;
-      const staticRoute = !request.organizationProviderKey && isStaticProviderRoute({ actionSlug: action.slug, modelSlug: model.slug, providerSlug: provider.slug });
-      if (!staticRoute && !allowedProviderKeys.has(modelProvider.providerKey)) continue;
+      const staticProvider = !request.organizationProviderKey && isStaticProvider(provider.slug);
+      if (!staticProvider && !allowedProviderKeys.has(modelProvider.providerKey)) continue;
       return {
         organizationKey: request.organizationKey,
         actionKey: action.key,
@@ -78,7 +74,7 @@ export async function selectRoute(input: RouteRequestInput, deps: RouterDependen
         providerKey: provider.key,
         providerSlug: provider.slug,
         providerModelId: modelProvider.providerModelId,
-        ...(staticRoute
+        ...(staticProvider
           ? { credentialSource: 'environment' as const }
           : { credentialSource: 'organization' as const, orgProviderKey: request.organizationProviderKey ?? provider.key }),
       };

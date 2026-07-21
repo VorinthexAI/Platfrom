@@ -1,31 +1,22 @@
 import { createAwsBedrockProvider } from '@/lib/ai/providers/aws-bedrock';
-import { resolveAwsCredentials } from '@/lib/ai/providers/aws-sigv4';
+import { createAwsPollyProvider } from '@/lib/ai/providers/aws-polly';
+import { createAwsTranscribeProvider } from '@/lib/ai/providers/aws-transcribe';
 import type { ProviderAdapter, ProviderId } from '@/lib/ai/providers/types';
 
-interface StaticProviderRoute {
-  actionSlug: string;
-  modelSlug: string;
-  providerSlug: ProviderId;
+export const STATIC_PROVIDER_IDS = ['aws-bedrock', 'aws-polly', 'aws-transcribe'] as const satisfies readonly ProviderId[];
+
+export function isStaticProvider(providerSlug: ProviderId): boolean {
+  return STATIC_PROVIDER_IDS.includes(providerSlug as (typeof STATIC_PROVIDER_IDS)[number]);
 }
 
-export const STATIC_PROVIDER_ROUTES: readonly StaticProviderRoute[] = [{
-  actionSlug: 'embed',
-  modelSlug: 'amazon.titan-embed-text-v2',
-  providerSlug: 'aws-bedrock',
-}];
-
-export function isStaticProviderRoute(route: StaticProviderRoute): boolean {
-  return STATIC_PROVIDER_ROUTES.some((candidate) =>
-    candidate.actionSlug === route.actionSlug
-    && candidate.modelSlug === route.modelSlug
-    && candidate.providerSlug === route.providerSlug);
-}
-
-export function createStaticProviderAdapter(route: StaticProviderRoute): ProviderAdapter | undefined {
-  if (!isStaticProviderRoute(route)) return undefined;
+export function createStaticProviderAdapter(providerSlug: ProviderId): ProviderAdapter | undefined {
+  if (!isStaticProvider(providerSlug)) return undefined;
   try {
-    resolveAwsCredentials();
-    return createAwsBedrockProvider();
+    switch (providerSlug) {
+      case 'aws-bedrock': return createAwsBedrockProvider();
+      case 'aws-polly': return createAwsPollyProvider();
+      case 'aws-transcribe': return createAwsTranscribeProvider();
+    }
   } catch {
     return undefined;
   }
