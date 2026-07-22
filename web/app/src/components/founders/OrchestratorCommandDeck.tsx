@@ -4,6 +4,8 @@ import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import { Billboard, Environment, Html, Lightformer, PerspectiveCamera, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
+import { Button } from "@vorinthex/shared/ui/components";
+import { ChevronLeftIcon, ChevronRightIcon } from "@vorinthex/shared/ui/icons";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
@@ -29,10 +31,10 @@ interface ScopeNode {
 }
 
 const SCOPE_LAYERS: Record<ScopeLayer, { radius: number; speed: number }> = {
-  Nexus: { radius: 1.45, speed: 0.1 },
-  Products: { radius: 2.55, speed: 0.16 },
-  Capabilities: { radius: 3.75, speed: 0.23 },
-  Orchestrators: { radius: 4.95, speed: 0.31 },
+  Nexus: { radius: 2.15, speed: 0.1 },
+  Products: { radius: 3.25, speed: 0.16 },
+  Capabilities: { radius: 4.45, speed: 0.23 },
+  Orchestrators: { radius: 5.65, speed: 0.31 },
 };
 
 const scopeNodes: ScopeNode[] = [
@@ -508,23 +510,23 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   });
 
   return (
-    <group ref={medallion} position={[0, 2.35, -2.55]} renderOrder={30}>
+    <group ref={medallion} position={[0, 2.35, -2.1]} renderOrder={60}>
       <Billboard>
-        <mesh position={[0, 0, -0.08]}>
+        <mesh position={[0, 0, -0.08]} renderOrder={60}>
           <circleGeometry args={[0.88, 48]} />
-          <meshPhysicalMaterial color="#080b0d" metalness={0.96} roughness={0.2} clearcoat={0.7} />
+          <meshPhysicalMaterial color="#080b0d" metalness={0.96} roughness={0.2} clearcoat={0.7} transparent opacity={1} depthTest={false} depthWrite={false} />
         </mesh>
-        <mesh position={[0, 0, -0.04]} renderOrder={40}>
+        <mesh position={[0, 0, -0.04]} renderOrder={61}>
           <ringGeometry args={[0.88, 1.02, 48]} />
-          <meshPhysicalMaterial color="#9b704b" emissive="#6d2c0b" emissiveIntensity={0.85} metalness={0.92} roughness={0.16} clearcoat={0.8} />
+          <meshPhysicalMaterial color="#9b704b" emissive="#6d2c0b" emissiveIntensity={0.85} metalness={0.92} roughness={0.16} clearcoat={0.8} transparent opacity={1} depthTest={false} depthWrite={false} />
         </mesh>
-        <mesh position={[0, 0, 0.01]} renderOrder={41}>
+        <mesh position={[0, 0, 0.01]} renderOrder={62}>
           <planeGeometry args={[1.35, 1.35]} />
-          <meshBasicMaterial map={texture} color="#ffe1b7" transparent alphaTest={0.02} opacity={0.92} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial map={texture} color="#ffe1b7" transparent alphaTest={0.02} opacity={0.92} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
-        <mesh ref={scan} position={[0, 0, -0.02]} renderOrder={42}>
+        <mesh ref={scan} position={[0, 0, -0.02]} renderOrder={63}>
           <ringGeometry args={[1.14, 1.17, 6]} />
-          <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.62} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.62} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
       </Billboard>
        <mesh position={[0, -1.3, 0]} renderOrder={40}>
@@ -573,7 +575,7 @@ function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: Sco
       <Billboard>
         <mesh renderOrder={selected ? 30 : 21}>
           <planeGeometry args={[selected ? 0.72 : 0.46, selected ? 0.72 : 0.46]} />
-          <meshBasicMaterial map={texture} color="#fff4dc" transparent alphaTest={0.02} opacity={selected ? 1 : 0.72} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial map={texture} color="#fff4dc" transparent alphaTest={0.02} opacity={selected ? 1 : 0.72} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
         {selected ? <pointLight color={HOT_AMBER} intensity={1.2} distance={2.2} /> : null}
         <Html center position={[0, -0.56, 0]} distanceFactor={7} style={{ pointerEvents: "none" }}>
@@ -588,18 +590,12 @@ function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: Sco
 }
 
 function ScopeOrbitalSystem({ selectedId, reducedMotion, onSelect }: { selectedId: string; reducedMotion: boolean; onSelect: (id: string) => void }) {
+  const selectedNode = scopeNodeById.get(selectedId);
+  const selectedParent = selectedNode?.parentId ? scopeNodeById.get(selectedNode.parentId) : undefined;
+
   return (
     <group>
-      {Object.entries(SCOPE_LAYERS).map(([layer, { radius }]) => (
-          <mesh key={layer} position={[0, 2.35, -2.42]} rotation={[0, 0, 0]} renderOrder={5}>
-            <ringGeometry args={[radius - 0.012, radius + 0.012, 96]} />
-           <meshBasicMaterial color={layer === "Nexus" ? HOT_AMBER : "#49636e"} transparent opacity={0.34} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
-        </mesh>
-      ))}
-      {scopeNodes.map((node) => {
-        const parent = node.parentId ? scopeNodeById.get(node.parentId) : undefined;
-        return parent ? <ScopeConnection key={`link-${node.entity.id}`} node={node} parent={parent} reducedMotion={reducedMotion} /> : null;
-      })}
+      {selectedNode && selectedParent ? <ScopeConnection node={selectedNode} parent={selectedParent} reducedMotion={reducedMotion} /> : null}
       {scopeNodes.map((node) => <ScopeOrbitNode key={node.entity.id} node={node} selected={node.entity.id === selectedId} reducedMotion={reducedMotion} onSelect={onSelect} />)}
     </group>
   );
@@ -648,7 +644,9 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
   const selectedScopeIndex = scopeNodes.findIndex((node) => node.entity.id === selectedScope.entity.id);
   const stepScope = (direction: -1 | 1) => {
     const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
-    setSelectedScopeId(scopeNodes[nextIndex]!.entity.id);
+    const scope = scopeNodes[nextIndex]!.entity;
+    setSelectedScopeId(scope.id);
+    props.onScopeRoute?.(scope);
   };
   const sceneProps = {
     entity,
@@ -685,9 +683,8 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
       <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-start gap-1 text-slate-100 sm:inset-x-7 sm:top-6">
         <div className="relative pointer-events-auto">
           <button type="button" onClick={() => setPickerOpen((open) => !open)} aria-expanded={pickerOpen}
-            className="min-w-52 rounded-full border border-white/15 bg-black/65 px-4 py-2 text-left shadow-xl backdrop-blur-xl">
-            <span className="block font-mono text-[8px] uppercase tracking-[0.22em] text-[#ffba72]">{selectedScope.layer}</span>
-            <span className="mt-1 block truncate font-mono text-sm font-semibold uppercase tracking-[0.16em]">{selectedScope.entity.name}</span>
+            className="flex h-11 min-w-52 items-center rounded-xl border border-white/15 bg-[#080b0d]/90 px-4 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
+            <span className="block truncate font-mono text-xs font-semibold uppercase tracking-[0.16em]">{selectedScope.entity.name}</span>
           </button>
           {pickerOpen ? (
             <div className="absolute top-[calc(100%+0.5rem)] left-0 w-72 rounded-2xl border border-white/15 bg-[#080b0d]/95 p-2 shadow-2xl backdrop-blur-2xl">
@@ -696,17 +693,17 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
               <div className="max-h-64 overflow-y-auto">
                 {filteredScopes.map((node) => (
                   <button key={node.entity.id} type="button" onClick={() => { sceneProps.onSelectScope(node.entity.id); setPickerOpen(false); }}
-                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400 transition-colors hover:bg-white/[0.07] hover:text-white">
-                    <span>{node.entity.name}</span><span className="text-[8px] text-silver-700">{node.layer}</span>
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400 transition-colors hover:bg-white/[0.07] hover:text-white">
+                    <span>{node.entity.name}</span>
                   </button>
                 ))}
               </div>
             </div>
           ) : null}
         </div>
-        <div className="pointer-events-auto flex overflow-hidden rounded-full border border-white/15 bg-black/55 backdrop-blur-md">
-          <button type="button" onClick={() => { const id = scopeNodes[(selectedScopeIndex - 1 + scopeNodes.length) % scopeNodes.length]!.entity.id; stepScope(-1); sceneProps.onSelectScope(id); }} aria-label="Previous scope" className="flex h-10 w-10 items-center justify-center text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">‹</button>
-          <button type="button" onClick={() => { const id = scopeNodes[(selectedScopeIndex + 1) % scopeNodes.length]!.entity.id; stepScope(1); sceneProps.onSelectScope(id); }} aria-label="Next scope" className="flex h-10 w-10 items-center justify-center border-l border-white/10 text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">›</button>
+        <div className="pointer-events-auto flex gap-1.5">
+          <Button type="button" variant="secondary" onClick={() => stepScope(-1)} aria-label="Previous scope" className="!h-11 !min-h-0 !w-11 !rounded-xl !p-0"><ChevronLeftIcon size="sm" /></Button>
+          <Button type="button" variant="secondary" onClick={() => stepScope(1)} aria-label="Next scope" className="!h-11 !min-h-0 !w-11 !rounded-xl !p-0"><ChevronRightIcon size="sm" /></Button>
         </div>
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
