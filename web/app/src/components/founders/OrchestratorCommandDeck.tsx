@@ -1,14 +1,13 @@
 "use client";
 
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Billboard, Environment, Html, Lightformer, PerspectiveCamera, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
-import { Button } from "@vorinthex/shared/ui/components";
-import { ChevronLeftIcon, ChevronRightIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
+import HqCommunicationOverlay from "./HqCommunicationOverlay";
 
 const AMBER = "#d98432";
 const HOT_AMBER = "#ffb35f";
@@ -87,8 +86,6 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
   const current = useRef({ yaw: 0, pitch: 0 });
   const velocity = useRef({ yaw: 0, pitch: 0 });
   const lastInteraction = useRef(0);
-  const distance = useRef(0);
-  const desiredDistance = useRef(0);
   const { gl, size } = useThree();
   const compact = size.width < 680;
 
@@ -119,23 +116,15 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
       lastInteraction.current = performance.now();
       if (element.hasPointerCapture(event.pointerId)) element.releasePointerCapture(event.pointerId);
     };
-    const wheel = (event: WheelEvent) => {
-      event.preventDefault();
-      desiredDistance.current = THREE.MathUtils.clamp(desiredDistance.current + event.deltaY * 0.006, 0, compact ? 5.8 : 4.8);
-      lastInteraction.current = performance.now();
-    };
-
     element.addEventListener("pointerdown", pointerDown);
     element.addEventListener("pointermove", pointerMove);
     element.addEventListener("pointerup", pointerUp);
     element.addEventListener("pointercancel", pointerUp);
-    element.addEventListener("wheel", wheel, { passive: false });
     return () => {
       element.removeEventListener("pointerdown", pointerDown);
       element.removeEventListener("pointermove", pointerMove);
       element.removeEventListener("pointerup", pointerUp);
       element.removeEventListener("pointercancel", pointerUp);
-      element.removeEventListener("wheel", wheel);
     };
   }, [compact, gl]);
 
@@ -157,9 +146,8 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
 
     current.current.yaw = THREE.MathUtils.damp(current.current.yaw, desired.current.yaw, 9, delta);
     current.current.pitch = THREE.MathUtils.damp(current.current.pitch, desired.current.pitch, 9, delta);
-    distance.current = THREE.MathUtils.damp(distance.current, desiredDistance.current, 7, delta);
     camera.current.rotation.set(0.04 + current.current.pitch, current.current.yaw, 0, "YXZ");
-    camera.current.position.z = (compact ? 16.5 : 15.2) + distance.current;
+    camera.current.position.z = compact ? 16.5 : 15.2;
   });
 
   return (
@@ -703,7 +691,7 @@ function ScopeEnergyConnection({ source, target, reducedMotion }: { source: Scop
   );
 }
 
-function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: ScopeNode; selected: boolean; reducedMotion: boolean; onSelect: (id: string) => void }) {
+function ScopeOrbitNode({ node, selected, reducedMotion }: { node: ScopeNode; selected: boolean; reducedMotion: boolean }) {
   const group = useRef<THREE.Group>(null);
   const texture = useTexture(entityLogoUrl(node.entity.type, node.entity.slug));
 
@@ -713,14 +701,14 @@ function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: Sco
   });
 
   return (
-    <group ref={group} renderOrder={20} onClick={(event) => { event.stopPropagation(); onSelect(node.entity.id); }}>
+    <group ref={group} renderOrder={20}>
       <Billboard>
         <mesh renderOrder={selected ? 30 : 21}>
           <planeGeometry args={[selected ? 0.72 : 0.46, selected ? 0.72 : 0.46]} />
           <meshBasicMaterial map={texture} color="#fff4dc" transparent alphaTest={0.02} opacity={selected ? 1 : 0.72} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
         {selected ? <pointLight color={HOT_AMBER} intensity={1.2} distance={2.2} /> : null}
-        <Html center position={[0, -0.56, 0]} distanceFactor={7} style={{ pointerEvents: "none" }}>
+        <Html center position={[0, -0.56, 0]} distanceFactor={7} zIndexRange={[0, 0]} style={{ pointerEvents: "none" }}>
           <div className={`w-20 text-center font-mono uppercase tracking-[0.14em] ${selected ? "text-[#ffe2b6]" : "text-slate-300"}`}>
             <p className="text-[7px] opacity-70">{node.layer === "Nexus" ? "Nexus" : node.layer.slice(0, -1)}</p>
             <p className="mt-0.5 text-[9px] font-semibold">{node.entity.name}</p>
@@ -731,21 +719,29 @@ function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: Sco
   );
 }
 
-function ScopeOrbitalSystem({ selectedId, reducedMotion, onSelect }: { selectedId: string; reducedMotion: boolean; onSelect: (id: string) => void }) {
+function ScopeOrbitalSystem({ selectedId, reducedMotion }: { selectedId: string; reducedMotion: boolean }) {
   const selectedNode = scopeNodeById.get(selectedId);
   const linkedScopes = useMemo(() => selectedNode ? linkedScopesFor(selectedNode) : [], [selectedNode]);
 
   return (
     <group>
+      {(Object.keys(SCOPE_LAYERS) as ScopeLayer[]).map((layer) => {
+        const radius = SCOPE_LAYERS[layer].radius;
+        return (
+          <mesh key={layer} position={[0, 2.35, -2.38]} scale={[radius, radius * 0.62, 1]} renderOrder={1}>
+            <ringGeometry args={[0.997, 1, 128]} />
+            <meshBasicMaterial color="#aeb6bc" transparent opacity={layer === "Nexus" ? 0.16 : 0.09} depthWrite={false} toneMapped={false} />
+          </mesh>
+        );
+      })}
       {selectedNode ? linkedScopes.map((target) => <ScopeEnergyConnection key={target.entity.id} source={selectedNode} target={target} reducedMotion={reducedMotion} />) : null}
-      {scopeNodes.map((node) => <ScopeOrbitNode key={node.entity.id} node={node} selected={node.entity.id === selectedId} reducedMotion={reducedMotion} onSelect={onSelect} />)}
+      {scopeNodes.map((node) => <ScopeOrbitNode key={node.entity.id} node={node} selected={node.entity.id === selectedId} reducedMotion={reducedMotion} />)}
     </group>
   );
 }
 
 interface CommandDeckSceneProps extends OrchestratorCommandDeckProps {
   selectedScopeId: string;
-  onSelectScope: (id: string) => void;
 }
 
 function CommandDeckScene(props: CommandDeckSceneProps) {
@@ -774,105 +770,20 @@ function CommandDeckScene(props: CommandDeckSceneProps) {
       <Console position={[3.45, 0.75, -2.25]} rotation={[0, -0.28, 0]} />
       <Console position={[0, 0.68, -3.25]} />
       <IdentityMedallion {...props} />
-      <ScopeOrbitalSystem selectedId={props.selectedScopeId} reducedMotion={props.reducedMotion} onSelect={props.onSelectScope} />
+      <ScopeOrbitalSystem selectedId={props.selectedScopeId} reducedMotion={props.reducedMotion} />
     </>
   );
 }
 
 export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckProps) {
   const { entity, onScopeRoute } = props;
-  const [selectedScopeId, setSelectedScopeId] = useState(VORINTHEX_GALAXY_REGISTRY.nexus.id);
-  const selectedScope = scopeNodeById.get(selectedScopeId) ?? scopeNodes[0]!;
-  const selectedScopeIndex = scopeNodes.findIndex((node) => node.entity.id === selectedScope.entity.id);
-  const stepScope = (direction: -1 | 1) => {
-    const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
-    const scope = scopeNodes[nextIndex]!.entity;
-    setSelectedScopeId(scope.id);
-    onScopeRoute?.(scope);
-  };
+  const [selectedScopeId, setSelectedScopeId] = useState(entity.id);
   const sceneProps = {
     entity,
     reducedMotion: props.reducedMotion,
     selectedScopeId,
-    onSelectScope: (id: string) => {
-      setSelectedScopeId(id);
-      const scope = scopeNodeById.get(id)?.entity;
-      if (scope) onScopeRoute?.(scope);
-    },
   };
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [activeScopeIndex, setActiveScopeIndex] = useState(0);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  const pickerTriggerRef = useRef<HTMLButtonElement>(null);
-  const pickerInputRef = useRef<HTMLInputElement>(null);
-  const scopeOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const filteredScopes = scopeNodes.filter((node) =>
-    `${node.entity.name} ${node.layer}`.toLowerCase().includes(query.toLowerCase()),
-  );
-  const instruction = `Drag to look around the ${entity.name} Nexus command deck. Use the mouse wheel to zoom.`;
-
-  useEffect(() => {
-    const handleTab = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Tab" || event.defaultPrevented || pickerOpen) return;
-      event.preventDefault();
-      const direction = event.shiftKey ? -1 : 1;
-      const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
-      const scope = scopeNodes[nextIndex]!.entity;
-      setSelectedScopeId(scope.id);
-      onScopeRoute?.(scope);
-    };
-    window.addEventListener("keydown", handleTab);
-    return () => window.removeEventListener("keydown", handleTab);
-  }, [onScopeRoute, pickerOpen, selectedScopeIndex]);
-
-  useEffect(() => {
-    if (!pickerOpen) return;
-    const dismissPicker = (event: PointerEvent) => {
-      if (!pickerRef.current?.contains(event.target as Node)) {
-        setPickerOpen(false);
-        setQuery("");
-      }
-    };
-    document.addEventListener("pointerdown", dismissPicker);
-    return () => document.removeEventListener("pointerdown", dismissPicker);
-  }, [pickerOpen]);
-
-  useEffect(() => {
-    if (pickerOpen) scopeOptionRefs.current[activeScopeIndex]?.scrollIntoView({ block: "nearest" });
-  }, [activeScopeIndex, pickerOpen]);
-
-  const closePicker = (restoreFocus = false) => {
-    setPickerOpen(false);
-    setQuery("");
-    if (restoreFocus) pickerTriggerRef.current?.focus();
-  };
-
-  const selectFilteredScope = (index: number) => {
-    const node = filteredScopes[index];
-    if (!node) return;
-    sceneProps.onSelectScope(node.entity.id);
-    closePicker();
-  };
-
-  const handlePickerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closePicker(true);
-      return;
-    }
-    if (filteredScopes.length === 0) return;
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const direction = event.key === "ArrowDown" ? 1 : -1;
-      setActiveScopeIndex((index) => (index + direction + filteredScopes.length) % filteredScopes.length);
-      return;
-    }
-    if (event.key === "Enter") {
-      event.preventDefault();
-      selectFilteredScope(activeScopeIndex);
-    }
-  };
+  const instruction = `${entity.name} Nexus command deck with ambient scope orbits.`;
 
   return (
     <div className="relative h-full min-h-[360px] w-full overflow-hidden bg-black/70" aria-label={`${entity.name} Nexus command deck`}>
@@ -881,7 +792,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
         shadows
          camera={{ position: [0, 2.45, 15.2], fov: 47, near: 0.1, far: 100 }}
         gl={{ alpha: true, antialias: true, stencil: true, powerPreference: "high-performance" }}
-        className="!absolute !inset-0 !touch-none"
+        className="!absolute !inset-0"
         aria-label={instruction}
         role="img"
       >
@@ -889,49 +800,13 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
-      <div ref={pickerRef} className="pointer-events-auto absolute top-4 left-4 z-10 flex w-fit items-start gap-1.5 text-slate-100 sm:top-6 sm:left-7">
-          <button ref={pickerTriggerRef} type="button" onClick={() => {
-            if (pickerOpen) closePicker();
-            else {
-              setQuery("");
-              setActiveScopeIndex(selectedScopeIndex);
-              setPickerOpen(true);
-            }
-          }} aria-expanded={pickerOpen} aria-haspopup="listbox"
-            className="flex h-9 w-44 items-center rounded-lg border border-white/15 bg-[#080b0d]/90 px-3 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
-            <span className="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400">{selectedScope.entity.name}</span>
-          </button>
-          {pickerOpen ? (
-            <div className="absolute inset-x-0 top-[calc(100%+0.5rem)] rounded-2xl border border-white/15 bg-[#080b0d]/95 p-2 shadow-2xl backdrop-blur-2xl">
-              <div className="relative mb-2">
-                <input ref={pickerInputRef} autoFocus role="combobox" aria-expanded="true" aria-controls="scope-picker-options" aria-activedescendant={filteredScopes[activeScopeIndex] ? `scope-option-${filteredScopes[activeScopeIndex].entity.id}` : undefined}
-                  value={query} onChange={(event) => { setQuery(event.target.value); setActiveScopeIndex(0); }} onKeyDown={handlePickerKeyDown} placeholder="Search scopes..."
-                  className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2 pr-9 pl-3 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-white/25" />
-                {query ? (
-                  <button type="button" aria-label="Clear scope search" onClick={() => { setQuery(""); setActiveScopeIndex(0); pickerInputRef.current?.focus(); }}
-                    className="absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-silver-500 transition-colors hover:bg-white/[0.07] hover:text-white">
-                    <CloseIcon size="sm" />
-                  </button>
-                ) : null}
-              </div>
-              <div id="scope-picker-options" role="listbox" className="scrollbar-hide max-h-64 overflow-y-auto">
-                {filteredScopes.map((node, index) => (
-                  <button ref={(element) => { scopeOptionRefs.current[index] = element; }} id={`scope-option-${node.entity.id}`} role="option" aria-selected={index === activeScopeIndex}
-                    key={node.entity.id} type="button" onMouseEnter={() => setActiveScopeIndex(index)} onClick={() => selectFilteredScope(index)}
-                    className={`flex w-full items-center rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${index === activeScopeIndex ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}>
-                    <span>{node.entity.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        <div className="pointer-events-auto flex gap-1.5">
-          <Button type="button" variant="secondary" onClick={() => stepScope(-1)} aria-label="Previous scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronLeftIcon size="sm" /></Button>
-          <Button type="button" variant="secondary" onClick={() => stepScope(1)} aria-label="Next scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronRightIcon size="sm" /></Button>
-        </div>
-      </div>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:radial-gradient(rgba(255,255,255,0.7)_0.5px,transparent_0.7px)] [background-size:3px_3px]" />
+      <HqCommunicationOverlay selectedScopeId={selectedScopeId} onScopeChange={(id) => {
+        setSelectedScopeId(id);
+        const scope = scopeNodeById.get(id)?.entity;
+        if (scope) onScopeRoute?.(scope);
+      }} />
     </div>
   );
 }
