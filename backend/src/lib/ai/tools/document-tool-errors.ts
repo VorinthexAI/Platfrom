@@ -1,15 +1,15 @@
 import { z } from 'zod';
 
-export const ARCHIVE_ERROR_CODES = [
-  'ARCHIVE_UNAUTHORIZED',
-  'ARCHIVE_FORBIDDEN',
-  'ARCHIVE_NOT_FOUND',
-  'ARCHIVE_CONFLICT',
-  'ARCHIVE_INVALID_INPUT',
-  'ARCHIVE_BATCH_PARTIAL_FAILURE',
+export const DOCUMENT_ERROR_CODES = [
+  'DOCUMENT_UNAUTHORIZED',
+  'DOCUMENT_FORBIDDEN',
+  'DOCUMENT_NOT_FOUND',
+  'DOCUMENT_CONFLICT',
+  'DOCUMENT_INVALID_INPUT',
+  'DOCUMENT_BATCH_PARTIAL_FAILURE',
   'FOLDER_CYCLE_DETECTED',
   'FOLDER_NOT_EMPTY',
-  'FOLDER_ARCHIVED',
+  'FOLDER_DOCUMENTD',
   'FOLDER_MOVE_FORBIDDEN',
   'DOCUMENT_UNSUPPORTED_TYPE',
   'DOCUMENT_INVALID_MIME_TYPE',
@@ -18,20 +18,20 @@ export const ARCHIVE_ERROR_CODES = [
   'DOCUMENT_EXTRACTION_FAILED',
   'DOCUMENT_EMBEDDING_FAILED',
   'DOCUMENT_INSERT_FAILED',
-  'DOCUMENT_ARCHIVED',
+  'DOCUMENT_DOCUMENTD',
   'DOCUMENT_VERSION_CONFLICT',
   'DOCUMENT_SHARE_INVALID',
   'DOCUMENT_SPEECH_FAILED',
-  'ARCHIVE_SEARCH_INVALID_SOURCE',
-  'ARCHIVE_SEARCH_NO_ACCESSIBLE_SOURCES',
-  'ARCHIVE_SEARCH_EMBEDDING_FAILED',
+  'DOCUMENT_SEARCH_INVALID_SOURCE',
+  'DOCUMENT_SEARCH_NO_ACCESSIBLE_SOURCES',
+  'DOCUMENT_SEARCH_EMBEDDING_FAILED',
 ] as const;
 
-export const archiveErrorCodeSchema = z.enum(ARCHIVE_ERROR_CODES);
-export type ArchiveErrorCode = z.infer<typeof archiveErrorCodeSchema>;
+export const documentErrorCodeSchema = z.enum(DOCUMENT_ERROR_CODES);
+export type DocumentErrorCode = z.infer<typeof documentErrorCodeSchema>;
 
-export const archiveErrorSchema = z.object({
-  code: archiveErrorCodeSchema,
+export const documentErrorSchema = z.object({
+  code: documentErrorCodeSchema,
   message: z.string().trim().min(1),
   tool: z.string().trim().min(1),
   action: z.string().trim().min(1).optional(),
@@ -40,24 +40,24 @@ export const archiveErrorSchema = z.object({
   cause: z.string().trim().min(1).optional(),
 }).strict();
 
-export type ArchiveErrorShape = z.infer<typeof archiveErrorSchema>;
+export type DocumentErrorShape = z.infer<typeof documentErrorSchema>;
 
-export class ArchiveError extends Error {
-  readonly code: ArchiveErrorCode;
+export class DocumentError extends Error {
+  readonly code: DocumentErrorCode;
   readonly tool: string;
   readonly action?: string;
   readonly retryable: boolean;
   readonly resourceKey?: string;
   override readonly cause?: unknown;
 
-  constructor(code: ArchiveErrorCode, message: string, tool: string, options: {
+  constructor(code: DocumentErrorCode, message: string, tool: string, options: {
     action?: string;
     retryable?: boolean;
     resourceKey?: string;
     cause?: unknown;
   } = {}) {
     super(message, { cause: options.cause });
-    this.name = 'ArchiveError';
+    this.name = 'DocumentError';
     this.code = code;
     this.tool = tool;
     this.action = options.action;
@@ -65,8 +65,8 @@ export class ArchiveError extends Error {
     this.resourceKey = options.resourceKey;
   }
 
-  toJSON(): ArchiveErrorShape {
-    return archiveErrorSchema.parse({
+  toJSON(): DocumentErrorShape {
+    return documentErrorSchema.parse({
       code: this.code,
       message: this.message,
       tool: this.tool,

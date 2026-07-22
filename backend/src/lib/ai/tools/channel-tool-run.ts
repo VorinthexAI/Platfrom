@@ -5,28 +5,28 @@ import { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organiza
 import { newId } from '@/lib/ids';
 import { recordRuntimeEvent, type RuntimeEventRecorder, type RuntimeEventSlug } from '@/platform/events';
 import type { DomainToolContext } from '@/lib/ai/domain-tools/execute';
-import { chorusToolNameSchema } from './registry';
-import { runChorusTool, type ChorusToolDependencies } from './runtime';
+import { channelToolNameSchema } from './channel-tool-registry';
+import { runChannelTool, type ChannelToolDependencies } from './channel-tool-runtime';
 
-export const runChorusAgentToolInputSchema = z.object({
+export const runChannelAgentToolInputSchema = z.object({
   organizationKey: z.string().trim().min(1),
   agentKey: z.string().cuid(),
-  tool: chorusToolNameSchema,
+  tool: channelToolNameSchema,
   input: z.unknown(),
 }).strict();
 
-export interface RunChorusAgentToolOptions extends ChorusToolDependencies {
+export interface RunChannelAgentToolOptions extends ChannelToolDependencies {
   authenticatedUserKey: string;
   runtimeData?: AgentRuntimeDataSource;
   accessData?: ExecutionAccessDataSource;
   events?: RuntimeEventRecorder;
   resolveMembership?: typeof getUserOrganizationByOrganizationAndUser;
-  executeTool?: typeof runChorusTool;
+  executeTool?: typeof runChannelTool;
 }
 
-/** Authenticated human boundary for invoking a registered Chorus tool. */
-export async function runChorusAgentTool(rawInput: z.input<typeof runChorusAgentToolInputSchema>, options: RunChorusAgentToolOptions) {
-  const input = runChorusAgentToolInputSchema.parse(rawInput);
+/** Authenticated human boundary for invoking a registered Channel tool. */
+export async function runChannelAgentTool(rawInput: z.input<typeof runChannelAgentToolInputSchema>, options: RunChannelAgentToolOptions) {
+  const input = runChannelAgentToolInputSchema.parse(rawInput);
   const authenticatedUserKey = z.string().trim().min(1).parse(options.authenticatedUserKey);
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey || runtime.scope.organizationKey !== input.organizationKey) {
@@ -51,7 +51,7 @@ export async function runChorusAgentTool(rawInput: z.input<typeof runChorusAgent
   await emit('agent.started', 'started');
   try {
     const context: DomainToolContext = { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal };
-    const output = await (options.executeTool ?? runChorusTool)(input.tool, input.input, context, { execute: options.execute });
+    const output = await (options.executeTool ?? runChannelTool)(input.tool, input.input, context, { execute: options.execute });
     await emit('agent.completed', 'completed', Math.round(performance.now() - startedAt));
     return output;
   } catch (error) {

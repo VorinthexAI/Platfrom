@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatOutput, ProviderExecuteResponse } from '@/lib/ai/providers';
 import { ask } from './ask';
-import { ARCHIVE_TOOL_NAMES, CHORUS_TOOL_NAMES, TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
+import { DOCUMENT_TOOL_NAMES, CHANNEL_TOOL_NAMES, TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
 
 const response: ProviderExecuteResponse<ChatOutput> = {
   output: { text: 'A useful answer.', toolCalls: [], stopReason: 'stop' },
@@ -13,7 +13,7 @@ const response: ProviderExecuteResponse<ChatOutput> = {
 
 describe('orchestrator chat tool', () => {
   test('exposes the registered tools', () => {
-    expect(TOOL_NAMES).toEqual(['orchestrator.chat', ...ARCHIVE_TOOL_NAMES, ...CHORUS_TOOL_NAMES]);
+    expect(TOOL_NAMES).toEqual(['orchestrator.chat', ...DOCUMENT_TOOL_NAMES, ...CHANNEL_TOOL_NAMES]);
   });
 
   test('sanitizes input and invokes the shared chat action', async () => {
@@ -47,9 +47,9 @@ describe('orchestrator chat tool', () => {
     })).rejects.toThrow();
   });
 
-  test('requires archive context for document processing and every Archive tool', async () => {
-    await expect(runTool('document.processing', '', {} as never)).rejects.toThrow('requires archiveContext');
-    await expect(runTool('folder.find', '', { folderKeys: [] } as never)).rejects.toThrow('requires archiveContext');
+  test('requires document context for document processing and every Document tool', async () => {
+    await expect(runTool('document.processing', '', {} as never)).rejects.toThrow('requires documentContext');
+    await expect(runTool('folder.find', '', { folderKeys: [] } as never)).rejects.toThrow('requires documentContext');
   });
 
   test('streams chat action chunks through the unified tool', async () => {

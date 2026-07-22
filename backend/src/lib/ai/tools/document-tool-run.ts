@@ -5,41 +5,41 @@ import { getUserOrganizationByOrganizationAndUser } from '@/lib/db/user-organiza
 import { newId } from '@/lib/ids';
 import { recordRuntimeEvent, type RuntimeEventRecorder, type RuntimeEventSlug } from '@/platform/events';
 import type { DomainToolContext } from '@/lib/ai/domain-tools/execute';
-import { ArchiveError } from './errors';
-import { archiveToolNameSchema } from './registry';
-import { runArchiveTool } from './runtime';
+import { DocumentError } from './document-tool-errors';
+import { documentToolNameSchema } from './document-tool-registry';
+import { runDocumentTool } from './document-tool-runtime';
 
-export const runArchiveAgentToolInputSchema = z.object({
+export const runDocumentAgentToolInputSchema = z.object({
   organizationKey: z.string().trim().min(1),
   agentKey: z.string().cuid(),
-  tool: archiveToolNameSchema,
+  tool: documentToolNameSchema,
   input: z.unknown(),
 }).strict();
 
-export interface RunArchiveAgentToolOptions {
+export interface RunDocumentAgentToolOptions {
   authenticatedUserKey: string;
   runtimeData?: AgentRuntimeDataSource;
   accessData?: ExecutionAccessDataSource;
   events?: RuntimeEventRecorder;
   resolveMembership?: typeof getUserOrganizationByOrganizationAndUser;
-  execute?: typeof runArchiveTool;
+  execute?: typeof runDocumentTool;
 }
 
-/** Authenticated human boundary for invoking a registered Archive tool. */
-export async function runArchiveAgentTool(rawInput: z.input<typeof runArchiveAgentToolInputSchema>, options: RunArchiveAgentToolOptions) {
-  const input = runArchiveAgentToolInputSchema.parse(rawInput);
+/** Authenticated human boundary for invoking a registered Document tool. */
+export async function runDocumentAgentTool(rawInput: z.input<typeof runDocumentAgentToolInputSchema>, options: RunDocumentAgentToolOptions) {
+  const input = runDocumentAgentToolInputSchema.parse(rawInput);
   const authenticatedUserKey = z.string().trim().min(1).parse(options.authenticatedUserKey);
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey || runtime.scope.organizationKey !== input.organizationKey) {
-    throw new ArchiveError('ARCHIVE_FORBIDDEN', 'Agent does not belong to the requested organization.', input.tool, { action: 'authorization' });
+    throw new DocumentError('DOCUMENT_FORBIDDEN', 'Agent does not belong to the requested organization.', input.tool, { action: 'authorization' });
   }
   const membership = await (options.resolveMembership ?? getUserOrganizationByOrganizationAndUser)(input.organizationKey, authenticatedUserKey);
   if (!membership || membership.userId !== authenticatedUserKey) {
-    throw new ArchiveError('ARCHIVE_FORBIDDEN', 'Active organization membership is required.', input.tool, { action: 'authorization' });
+    throw new DocumentError('DOCUMENT_FORBIDDEN', 'Active organization membership is required.', input.tool, { action: 'authorization' });
   }
   const principal = await authorizeAgentExecution(runtime, { kind: 'member', userOrganizationKey: membership.key }, options.accessData);
   if (principal.kind !== 'member' || principal.user.key !== authenticatedUserKey) {
-    throw new ArchiveError('ARCHIVE_FORBIDDEN', 'Authenticated user does not match the resolved principal.', input.tool, { action: 'authorization' });
+    throw new DocumentError('DOCUMENT_FORBIDDEN', 'Authenticated user does not match the resolved principal.', input.tool, { action: 'authorization' });
   }
 
   const invocationKey = newId();
@@ -57,7 +57,7 @@ export async function runArchiveAgentTool(rawInput: z.input<typeof runArchiveAge
   await emit('agent.started', 'started');
   try {
     const context: DomainToolContext = { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal };
-    const output = await (options.execute ?? runArchiveTool)(input.tool, input.input, context);
+    const output = await (options.execute ?? runDocumentTool)(input.tool, input.input, context);
     await emit('agent.completed', 'completed', Math.round(performance.now() - startedAt));
     return output;
   } catch (error) {

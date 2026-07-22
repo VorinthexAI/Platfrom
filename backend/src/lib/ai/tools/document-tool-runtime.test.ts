@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import type { ArchiveRepository } from './runtime';
-import { ARCHIVE_TOOL_NAMES, ArchiveError, runArchiveTool, type ArchiveIdempotencyStore } from '.';
+import type { DocumentRepository } from './document-tool-runtime';
+import { DOCUMENT_TOOL_NAMES, DocumentError, runDocumentTool, type DocumentIdempotencyStore } from '.';
 import { DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed, documentGenerateContent, documentGenerateHtml, documentGenerateJson } from '@/lib/ai/document-processing';
 
@@ -12,7 +12,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
   const folders = new Map<string, any>(), documents = new Map<string, any>(), shares = new Map<string, any>(), versions = new Map<string, any>();
   const patches: Array<Record<string, unknown>> = [];
-  const repository: ArchiveRepository = {
+  const repository: DocumentRepository = {
     async getScope(key) { return key === scopeKey ? { key, organizationKey } : null; },
     async role(key) { return key === scopeKey ? role : null; },
     async allowedScopeKeys() { return [scopeKey]; },
@@ -46,12 +46,12 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   return { repository, context, folders, documents, shares, versions, patches, scopeKey, folderKey, addDocument };
 }
 
-describe('Archive runtime', () => {
+describe('Document runtime', () => {
   test('requires a resolved human principal for every registered tool', async () => {
     const f = fixture();
-    for (const name of ARCHIVE_TOOL_NAMES) {
-      await expect(runArchiveTool(name, {}, { ...f.context, principal: { kind: 'system' } }, { repository: f.repository })).rejects.toMatchObject({
-        code: 'ARCHIVE_UNAUTHORIZED',
+    for (const name of DOCUMENT_TOOL_NAMES) {
+      await expect(runDocumentTool(name, {}, { ...f.context, principal: { kind: 'system' } }, { repository: f.repository })).rejects.toMatchObject({
+        code: 'DOCUMENT_UNAUTHORIZED',
         tool: name,
       });
     }
@@ -59,28 +59,28 @@ describe('Archive runtime', () => {
 
   test('rejects system principals and enforces write roles', async () => {
     const f = fixture('viewer');
-    await expect(runArchiveTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, { ...f.context, principal: { kind: 'system' } }, { repository: f.repository })).rejects.toMatchObject({ code: 'ARCHIVE_UNAUTHORIZED' });
-    const denied = await runArchiveTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, f.context, { repository: f.repository });
-    expect(denied.results[0]).toMatchObject({ success: false, error: { code: 'ARCHIVE_FORBIDDEN' } });
+    await expect(runDocumentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, { ...f.context, principal: { kind: 'system' } }, { repository: f.repository })).rejects.toMatchObject({ code: 'DOCUMENT_UNAUTHORIZED' });
+    const denied = await runDocumentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, f.context, { repository: f.repository });
+    expect(denied.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_FORBIDDEN' } });
   });
 
   test('preserves batch order, continues partial failures, and preflights atomic batches', async () => {
     const f = fixture('moderator'); const missing = newId();
-    const result = await runArchiveTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: missing, name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => [1] });
+    const result = await runDocumentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: missing, name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => [1] });
     expect(result.results.map((item) => [item.key, item.success])).toEqual([[f.folderKey, true], [missing, false]]);
     expect(result.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
     const before = f.folders.get(f.folderKey).name;
-    await expect(runArchiveTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Atomic' }, { folderKey: missing, name: 'Missing' }], atomic: true }, f.context, { repository: f.repository, embed: async () => [1] })).rejects.toBeInstanceOf(ArchiveError);
+    await expect(runDocumentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Atomic' }, { folderKey: missing, name: 'Missing' }], atomic: true }, f.context, { repository: f.repository, embed: async () => [1] })).rejects.toBeInstanceOf(DocumentError);
     expect(f.folders.get(f.folderKey).name).toBe(before);
   });
 
   test('detects folder cycles and document moves do not re-embed', async () => {
     const f = fixture('admin'); const child = newId();
     f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], createdAt: now, updatedAt: now });
-    const cycle = await runArchiveTool('folder.move', { moves: [{ folderKey: f.folderKey, targetParentFolderKey: child }] }, f.context, { repository: f.repository });
+    const cycle = await runDocumentTool('folder.move', { moves: [{ folderKey: f.folderKey, targetParentFolderKey: child }] }, f.context, { repository: f.repository });
     expect(cycle.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_CYCLE_DETECTED' } });
     const documentKey = f.addDocument();
-    await runArchiveTool('document.move', { moves: [{ documentKey, targetFolderKey: child }] }, f.context, { repository: f.repository });
+    await runDocumentTool('document.move', { moves: [{ documentKey, targetFolderKey: child }] }, f.context, { repository: f.repository });
     expect(f.patches.at(-1)).toMatchObject({ folderKey: child });
     expect(f.patches.at(-1)).not.toHaveProperty('embedding');
   });
@@ -92,34 +92,34 @@ describe('Archive runtime', () => {
     f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: foreignScopeKey, name: 'Foreign', embedding: [1], createdAt: now, updatedAt: now });
     const originalGetScope = f.repository.getScope;
     f.repository.getScope = async (key) => key === foreignScopeKey ? { key, organizationKey: f.context.organizationKey } : originalGetScope(key);
-    const output = await runArchiveTool('document.move', { moves: [{ documentKey: f.addDocument(), targetFolderKey }] }, f.context, { repository: f.repository });
+    const output = await runDocumentTool('document.move', { moves: [{ documentKey: f.addDocument(), targetFolderKey }] }, f.context, { repository: f.repository });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_MOVE_FORBIDDEN' } });
   });
 
   test('returns a creation-only share token and persists only hashes', async () => {
     const f = fixture('moderator'); const documentKey = f.addDocument();
-    const output = await runArchiveTool('document.share', { shares: [{ documentKey, permission: 'read', password: 'correct horse battery staple' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(7), clock: () => new Date(now) });
+    const output = await runDocumentTool('document.share', { shares: [{ documentKey, permission: 'read', password: 'correct horse battery staple' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(7), clock: () => new Date(now) });
     expect(output.results[0]?.data?.token).toHaveLength(43);
     const persisted = [...f.shares.values()][0];
     expect(persisted.tokenHash).toMatch(/^[a-f0-9]{64}$/);
     expect(persisted.passwordHash).toMatch(/^scrypt:/);
     expect(JSON.stringify(output)).not.toContain(persisted.tokenHash);
-    const listed = await runArchiveTool('document.list-shares', { documentKeys: [documentKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    const listed = await runDocumentTool('document.list-shares', { documentKeys: [documentKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
     expect(JSON.stringify(listed)).not.toContain('Hash');
     expect(JSON.stringify(listed)).not.toContain(output.results[0]?.data?.token ?? 'token');
   });
 
   test('rejects already expired shares', async () => {
     const f = fixture('moderator');
-    const output = await runArchiveTool('document.share', { shares: [{ documentKey: f.addDocument(), permission: 'read', expiresAt: '2026-07-21T00:00:00.000Z' }] }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    const output = await runDocumentTool('document.share', { shares: [{ documentKey: f.addDocument(), permission: 'read', expiresAt: '2026-07-21T00:00:00.000Z' }] }, f.context, { repository: f.repository, clock: () => new Date(now) });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SHARE_INVALID' } });
     expect(f.shares.size).toBe(0);
   });
 
-  test('maps document processing failures into Archive taxonomy and retryability', async () => {
+  test('maps document processing failures into Document taxonomy and retryability', async () => {
     const f = fixture('moderator');
     const file = { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new TextEncoder().encode('text') };
-    await expect(runArchiveTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, {
+    await expect(runDocumentTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, {
       repository: f.repository,
       processDocument: async () => { throw new DocumentProcessingError('DOCUMENT_EMBEDDING_FAILED', 'Embedding failed.', 'document-embed', { retryable: true }); },
     })).rejects.toMatchObject({ code: 'DOCUMENT_EMBEDDING_FAILED', action: 'document-embed', retryable: true });
@@ -130,7 +130,7 @@ describe('Archive runtime', () => {
     const documentKey = f.addDocument(`0123456789Visible sentence. ${'More words. '.repeat(30)} \`secret code\``);
     const spoken: string[] = [], uploaded: string[] = [];
     const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { expect(action).toBe('speak'); spoken.push(input.text); return { audio: new Uint8Array([spoken.length]), mimeType: 'audio/ogg', durationMs: 10 }; }, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
-    const ephemeral = await runArchiveTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true }, f.context, dependencies);
+    const ephemeral = await runDocumentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true }, f.context, dependencies);
     const audio = (ephemeral.results[0]?.data as { audio: Array<{ index: number; url: string; startCharacter: number; endCharacter: number }> }).audio;
     expect(audio.map((item) => item.index)).toEqual([...spoken.keys()]);
     expect(audio.every((item) => item.url.startsWith('data:audio/ogg;base64,'))).toBe(true);
@@ -138,7 +138,7 @@ describe('Archive runtime', () => {
     expect(spoken[0]).toStartWith('Notes. Visible sentence.');
     expect(spoken.join(' ')).not.toContain('secret code');
     expect(uploaded).toHaveLength(0);
-    await runArchiveTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeCode: false, persistAudio: true }, f.context, dependencies);
+    await runDocumentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeCode: false, persistAudio: true }, f.context, dependencies);
     expect(uploaded.length).toBeGreaterThan(0);
     expect(uploaded.every((key) => key.endsWith('.ogg'))).toBe(true);
     expect(f.documents.get(documentKey).speechStorageKeys).toEqual(uploaded);
@@ -149,7 +149,7 @@ describe('Archive runtime', () => {
     const documentKey = f.addDocument('Long sentence. '.repeat(80));
     const uploaded: string[] = [], deleted: string[] = [];
     let calls = 0;
-    const output = await runArchiveTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
+    const output = await runDocumentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
       repository: f.repository,
       maxSpeechChunkCharacters: 200,
       runAction: async () => {
@@ -173,9 +173,9 @@ describe('Archive runtime', () => {
   test('filters semantic search to authorized scopes and rejects unresolved projects', async () => {
     const f = fixture('viewer'); f.addDocument('Roadmap launch'); let authorized: string[] = [];
     f.repository.semanticSearch = async (input) => { authorized = input.authorizedScopeKeys; return [...f.documents.values()].map((document) => ({ score: 0.8, document })); };
-    const output = await runArchiveTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => [1] });
+    const output = await runDocumentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => [1] });
     expect(authorized).toEqual([f.scopeKey]); expect(output.results[0]?.score).toBe(0.8);
-    await expect(runArchiveTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => [1] })).rejects.toMatchObject({ code: 'ARCHIVE_SEARCH_INVALID_SOURCE' });
+    await expect(runDocumentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => [1] })).rejects.toMatchObject({ code: 'DOCUMENT_SEARCH_INVALID_SOURCE' });
   });
 
   test('search includes archived folder hierarchies only when explicitly requested', async () => {
@@ -184,9 +184,9 @@ describe('Archive runtime', () => {
     f.folders.get(f.folderKey).deletedAt = now;
     f.documents.get(documentKey).deletedAt = now;
     f.repository.semanticSearch = async () => [{ score: 0.9, document: f.documents.get(documentKey) }];
-    const activeOnly = await runArchiveTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => [1] });
+    const activeOnly = await runDocumentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => [1] });
     expect(activeOnly.results).toEqual([]);
-    const archived = await runArchiveTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', filters: { includeArchived: true } }, f.context, { repository: f.repository, embed: async () => [1] });
+    const archived = await runDocumentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', filters: { includeArchived: true } }, f.context, { repository: f.repository, embed: async () => [1] });
     expect(archived.results.map((item) => item.documentKey)).toEqual([documentKey]);
   });
 
@@ -194,7 +194,7 @@ describe('Archive runtime', () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
     const actions: string[] = [];
-    const output = await runArchiveTool('document.update', {
+    const output = await runDocumentTool('document.update', {
       updates: [{ documentKey, content: 'New body' }],
     }, f.context, {
       repository: f.repository,
@@ -212,7 +212,7 @@ describe('Archive runtime', () => {
   test('sanitizes HTML updates and persists canonical agreeing representations', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
-    const output = await runArchiveTool('document.update', {
+    const output = await runDocumentTool('document.update', {
       updates: [{ documentKey, html: '<p onclick="steal()">Safe <span>text</span></p><script>alert(1)</script><custom>drop</custom>' }],
     }, f.context, { repository: f.repository, embed: async () => [1], ingestion: { embeddingDimensions: 1 } });
     expect(output.results[0]?.success).toBe(true);
@@ -229,7 +229,7 @@ describe('Archive runtime', () => {
     const documentKey = f.addDocument('Source body');
     const embeddedNames: string[] = [];
     const storage: any = { async upload(input: any) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } };
-    const output = await runArchiveTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy' }, f.context, {
+    const output = await runDocumentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy' }, f.context, {
       repository: f.repository,
       storage,
       runAction: async (action, input) => {
@@ -258,22 +258,22 @@ describe('Archive runtime', () => {
       if (calls === 2) throw new Error('renderer failed');
       return { bytes: new TextEncoder().encode('<p>ok</p>'), mimeType: 'text/html', extension: 'html' };
     };
-    await expect(runArchiveTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport })).rejects.toMatchObject({ action: 'export', resourceKey: second });
+    await expect(runDocumentTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport })).rejects.toMatchObject({ action: 'export', resourceKey: second });
     calls = 0;
-    const output = await runArchiveTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport: async () => ({ bytes: new Uint8Array([1]), mimeType: 'text/html', extension: 'html' }) });
+    const output = await runDocumentTool('document.export', { exports: [{ documentKey: first, format: 'html' }, { documentKey: second, format: 'html' }], atomic: true }, f.context, { repository: f.repository, generateExport: async () => ({ bytes: new Uint8Array([1]), mimeType: 'text/html', extension: 'html' }) });
     expect(output.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
   });
 
-  test('archives and restores documents with a selected folder subtree', async () => {
+  test('documents and restores documents with a selected folder subtree', async () => {
     const f = fixture('moderator');
     const child = newId();
     f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], createdAt: now, updatedAt: now });
     const documentKey = f.addDocument();
     f.documents.get(documentKey).folderKey = child;
-    await runArchiveTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    await runDocumentTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
     expect(f.folders.get(child).deletedAt).toBe(now);
     expect(f.documents.get(documentKey).deletedAt).toBe(now);
-    await runArchiveTool('folder.restore', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    await runDocumentTool('folder.restore', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
     expect(f.folders.get(child).deletedAt).toBeNull();
     expect(f.documents.get(documentKey).deletedAt).toBeNull();
   });
@@ -290,13 +290,13 @@ describe('Archive runtime', () => {
     const originalDelete = f.repository.deleteDocument;
     f.repository.deleteDocument = async (key) => { calls.push('metadata'); await originalDelete(key); };
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() { calls.push('storage'); throw new Error('offline'); } };
-    const failed = await runArchiveTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const failed = await runDocumentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(failed.results[0]?.success).toBe(false);
     expect(calls).toEqual(['storage']);
     expect(f.documents.has(documentKey)).toBe(true);
     expect(f.versions.has(version.key)).toBe(true);
     storage.delete = async () => { calls.push('storage'); };
-    const deleted = await runArchiveTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const deleted = await runDocumentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(deleted.results[0]?.success).toBe(true);
     expect(calls.filter((call) => call === 'storage').length).toBe(4);
     expect(calls.at(-1)).toBe('metadata');
@@ -322,14 +322,14 @@ describe('Archive runtime', () => {
       return normalTransaction(operation);
     };
 
-    const failed = await runArchiveTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const failed = await runDocumentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(failed.results[0]?.success).toBe(false);
     expect(f.documents.get(documentKey)._internalDeletion).toMatchObject({ kind: 'document', objectKeys: [`docs/${documentKey}`] });
-    const inaccessible = await runArchiveTool('document.find', { documentKeys: [documentKey], includeArchived: true }, f.context, { repository: f.repository });
-    expect(inaccessible.results[0]).toMatchObject({ success: false, error: { code: 'ARCHIVE_NOT_FOUND' } });
+    const inaccessible = await runDocumentTool('document.find', { documentKeys: [documentKey], includeArchived: true }, f.context, { repository: f.repository });
+    expect(inaccessible.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_NOT_FOUND' } });
 
     f.repository.transaction = normalTransaction;
-    const retried = await runArchiveTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const retried = await runDocumentTool('document.delete', { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(retried.results[0]?.success).toBe(true);
     expect(f.documents.has(documentKey)).toBe(false);
     expect(deleted).toEqual([`docs/${documentKey}`, `docs/${documentKey}`]);
@@ -348,12 +348,12 @@ describe('Archive runtime', () => {
       if (transactions === 2) throw new Error('metadata commit failed');
       return normalTransaction(operation);
     };
-    const failed = await runArchiveTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const failed = await runDocumentTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(failed.results[0]?.success).toBe(false);
     expect(f.documents.get(documentKey)._internalDeletion).toMatchObject({ kind: 'version', versionKey: version.key, objectKeys: ['versions/old'] });
     expect(f.versions.has(version.key)).toBe(true);
     f.repository.transaction = normalTransaction;
-    const retried = await runArchiveTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const retried = await runDocumentTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(retried.results[0]?.success).toBe(true);
     expect(f.versions.has(version.key)).toBe(false);
     expect(f.documents.get(documentKey)._internalDeletion).toBeUndefined();
@@ -378,17 +378,17 @@ describe('Archive runtime', () => {
       if (!raced) {
         raced = true;
         const calls = await Promise.all([
-          runArchiveTool('document.share', { shares: [{ documentKey: doomedKey, permission: 'read' }] }, f.context, { repository: f.repository }),
-          runArchiveTool('document.create-version', { documentKeys: [doomedKey] }, f.context, { repository: f.repository }),
-          runArchiveTool('document.move', { moves: [{ documentKey: movableKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
-          runArchiveTool('document.copy', { copies: [{ documentKey: movableKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
+          runDocumentTool('document.share', { shares: [{ documentKey: doomedKey, permission: 'read' }] }, f.context, { repository: f.repository }),
+          runDocumentTool('document.create-version', { documentKeys: [doomedKey] }, f.context, { repository: f.repository }),
+          runDocumentTool('document.move', { moves: [{ documentKey: movableKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
+          runDocumentTool('document.copy', { copies: [{ documentKey: movableKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
         ]);
         for (const call of calls) attempted.push(call.results[0] as { success: boolean });
       }
       return originalListVersions(...args);
     };
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { throw new Error('copy must not reach storage'); }, async delete() {} };
-    const deleted = await runArchiveTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const deleted = await runDocumentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(deleted.results[0]?.success).toBe(true);
     expect(attempted).toHaveLength(4);
     expect(attempted.every((item) => item.success === false)).toBe(true);
@@ -411,12 +411,12 @@ describe('Archive runtime', () => {
     };
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
 
-    const failed = await runArchiveTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const failed = await runDocumentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(failed.results[0]?.success).toBe(false);
     expect(f.folders.get(f.folderKey)._internalDeletion.folderKeys).toEqual([f.folderKey, childKey]);
 
     f.repository.transaction = normalTransaction;
-    const retried = await runArchiveTool('folder.delete', { folderKeys: [f.folderKey], recursive: false }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    const retried = await runDocumentTool('folder.delete', { folderKeys: [f.folderKey], recursive: false }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
     expect(retried.results[0]).toMatchObject({ success: true });
     expect(f.folders.has(f.folderKey)).toBe(false);
     expect(f.folders.has(childKey)).toBe(false);
@@ -425,7 +425,7 @@ describe('Archive runtime', () => {
   test('replays completed idempotent mutations and rejects changed or pending requests', async () => {
     const f = fixture('moderator');
     const records = new Map<string, { hash: string; status: 'pending' | 'completed'; response?: unknown }>();
-    const store: ArchiveIdempotencyStore = {
+    const store: DocumentIdempotencyStore = {
       async claim(identity, hash) {
         const key = identity.idempotencyKey;
         const record = records.get(key);
@@ -438,29 +438,29 @@ describe('Archive runtime', () => {
     };
     const request = { folders: [{ scopeKey: f.scopeKey, name: 'Idempotent' }], idempotencyKey: 'same-key' };
     const dependencies = { repository: f.repository, idempotency: store, embed: async () => [1] };
-    const first = await runArchiveTool('folder.create', request, f.context, dependencies);
+    const first = await runDocumentTool('folder.create', request, f.context, dependencies);
     expect(records.get('same-key')?.response).toEqual(first);
-    const replay = await runArchiveTool('folder.create', request, f.context, dependencies);
+    const replay = await runDocumentTool('folder.create', request, f.context, dependencies);
     expect(replay).toEqual(first);
     expect([...f.folders.values()].filter((folder) => folder.name === 'Idempotent')).toHaveLength(1);
-    await expect(runArchiveTool('folder.create', { ...request, folders: [{ scopeKey: f.scopeKey, name: 'Changed' }] }, f.context, dependencies)).rejects.toMatchObject({ code: 'ARCHIVE_CONFLICT', retryable: false });
+    await expect(runDocumentTool('folder.create', { ...request, folders: [{ scopeKey: f.scopeKey, name: 'Changed' }] }, f.context, dependencies)).rejects.toMatchObject({ code: 'DOCUMENT_CONFLICT', retryable: false });
     records.set('pending-key', { hash: 'unused', status: 'pending' });
-    const pendingStore: ArchiveIdempotencyStore = { ...store, async claim() { return { status: 'pending' }; } };
-    await expect(runArchiveTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Pending' }], idempotencyKey: 'pending-key' }, f.context, { ...dependencies, idempotency: pendingStore })).rejects.toMatchObject({ code: 'ARCHIVE_CONFLICT', retryable: true });
+    const pendingStore: DocumentIdempotencyStore = { ...store, async claim() { return { status: 'pending' }; } };
+    await expect(runDocumentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Pending' }], idempotencyKey: 'pending-key' }, f.context, { ...dependencies, idempotency: pendingStore })).rejects.toMatchObject({ code: 'DOCUMENT_CONFLICT', retryable: true });
   });
 
   test('does not release or duplicate committed work when ledger completion fails', async () => {
     const f = fixture('moderator');
     let claimed = false, releases = 0;
-    const store: ArchiveIdempotencyStore = {
+    const store: DocumentIdempotencyStore = {
       async claim() { if (claimed) return { status: 'pending' }; claimed = true; return { status: 'claimed' }; },
       async complete() { throw new Error('ledger unavailable'); },
       async release() { releases += 1; },
     };
     const request = { folders: [{ scopeKey: f.scopeKey, name: 'Committed once' }], idempotencyKey: 'completion-failure' };
     const dependencies = { repository: f.repository, idempotency: store, embed: async () => [1] };
-    await expect(runArchiveTool('folder.create', request, f.context, dependencies)).rejects.toMatchObject({ retryable: true });
-    await expect(runArchiveTool('folder.create', request, f.context, dependencies)).rejects.toMatchObject({ retryable: true });
+    await expect(runDocumentTool('folder.create', request, f.context, dependencies)).rejects.toMatchObject({ retryable: true });
+    await expect(runDocumentTool('folder.create', request, f.context, dependencies)).rejects.toMatchObject({ retryable: true });
     expect(releases).toBe(0);
     expect([...f.folders.values()].filter((folder) => folder.name === 'Committed once')).toHaveLength(1);
   });
@@ -473,14 +473,14 @@ describe('Archive runtime', () => {
       seen.push(input.idempotencyKey);
       return { document: f.documents.get(f.addDocument()) };
     };
-    const ledger: ArchiveIdempotencyStore = {
+    const ledger: DocumentIdempotencyStore = {
       async claim() { return { status: 'claimed' }; },
       async complete() {},
       async release() {},
     };
-    await runArchiveTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, f.context, { repository: f.repository, processDocument, idempotency: ledger });
+    await runDocumentTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, f.context, { repository: f.repository, processDocument, idempotency: ledger });
     const otherActor = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
-    await runArchiveTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, otherActor, { repository: f.repository, processDocument, idempotency: ledger });
+    await runDocumentTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, otherActor, { repository: f.repository, processDocument, idempotency: ledger });
     expect(seen).toHaveLength(2);
     expect(seen[0]).not.toBe(seen[1]);
     expect(seen.every((key) => key !== 'caller-key')).toBe(true);
@@ -493,11 +493,11 @@ describe('Archive runtime', () => {
     f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: middle, name: 'Leaf', embedding: [1], createdAt: now, updatedAt: now });
     f.documents.get(documentKey).folderKey = leaf;
     f.documents.get(documentKey).deletedAt = now;
-    const blocked = await runArchiveTool('document.restore', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
-    expect(blocked.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_ARCHIVED' } });
+    const blocked = await runDocumentTool('document.restore', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
+    expect(blocked.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_DOCUMENTD' } });
     expect(f.documents.get(documentKey).deletedAt).toBe(now);
     f.folders.get(f.folderKey).parentFolderKey = leaf;
-    const cycle = await runArchiveTool('document.restore', { documentKeys: [documentKey], restoreAncestors: true }, f.context, { repository: f.repository });
+    const cycle = await runDocumentTool('document.restore', { documentKeys: [documentKey], restoreAncestors: true }, f.context, { repository: f.repository });
     expect(cycle.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_CYCLE_DETECTED' } });
     expect(f.documents.get(documentKey).deletedAt).toBe(now);
   });
@@ -507,7 +507,7 @@ describe('Archive runtime', () => {
     const documentKey = f.addDocument('Private source text');
     const audits: unknown[] = [];
     const events: unknown[] = [];
-    await runArchiveTool('document.summarize', { documentKeys: [documentKey] }, f.context, {
+    await runDocumentTool('document.summarize', { documentKeys: [documentKey] }, f.context, {
       repository: f.repository,
       runAction: async () => ({ text: 'Private generated summary' }),
       audit: async (event) => { audits.push(event); },
@@ -521,7 +521,7 @@ describe('Archive runtime', () => {
   });
 
   test('executes one authorized valid behavior path for every registered tool', async () => {
-    for (const name of ARCHIVE_TOOL_NAMES) {
+    for (const name of DOCUMENT_TOOL_NAMES) {
       const f = fixture('owner');
       const documentKey = f.addDocument('Source body');
       const childKey = newId();
@@ -596,7 +596,7 @@ describe('Archive runtime', () => {
       else if (name === 'document.rewrite') input = { rewrites: [{ documentKey, instruction: 'Improve clarity' }] };
       else if (name === 'scope.document.search') input = { scopeKey: f.scopeKey, query: 'source' };
       else input = { organizationKey: f.context.organizationKey, query: 'source' };
-      const output: any = await runArchiveTool(name, input, f.context, dependencies);
+      const output: any = await runDocumentTool(name, input, f.context, dependencies);
       if (output.summary) expect(output.summary.failed, name).toBe(0);
       else expect(output, name).toBeTruthy();
     }
@@ -608,17 +608,17 @@ describe('Archive runtime', () => {
         label: 'authorization',
         run: async () => {
           const f = fixture('viewer');
-          return runArchiveTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, f.context, { repository: f.repository, embed: async () => [1] });
+          return runDocumentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, f.context, { repository: f.repository, embed: async () => [1] });
         },
-        codes: ['ARCHIVE_FORBIDDEN'],
+        codes: ['DOCUMENT_FORBIDDEN'],
       },
       {
         label: 'missing resource',
         run: async () => {
           const f = fixture('viewer');
-          return runArchiveTool('document.read', { documentKeys: [newId()] }, f.context, { repository: f.repository });
+          return runDocumentTool('document.read', { documentKeys: [newId()] }, f.context, { repository: f.repository });
         },
-        codes: ['ARCHIVE_NOT_FOUND'],
+        codes: ['DOCUMENT_NOT_FOUND'],
       },
       {
         label: 'archived ancestor',
@@ -626,17 +626,17 @@ describe('Archive runtime', () => {
           const f = fixture('viewer');
           const documentKey = f.addDocument();
           f.folders.get(f.folderKey).deletedAt = now;
-          return runArchiveTool('document.read', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
+          return runDocumentTool('document.read', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
         },
-        codes: ['FOLDER_ARCHIVED'],
+        codes: ['FOLDER_DOCUMENTD'],
       },
       {
         label: 'partial ordered batch',
         run: async () => {
           const f = fixture('moderator');
-          return runArchiveTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: newId(), name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => [1] });
+          return runDocumentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: newId(), name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => [1] });
         },
-        codes: [undefined, 'ARCHIVE_NOT_FOUND'],
+        codes: [undefined, 'DOCUMENT_NOT_FOUND'],
       },
     ];
     for (const item of cases) {

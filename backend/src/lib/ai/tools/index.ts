@@ -5,11 +5,11 @@ import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
 import type { DomainToolContext } from '@/lib/ai/domain-tools/execute';
-import { ARCHIVE_TOOL_DEFINITIONS, ARCHIVE_TOOL_NAMES, isArchiveToolName, runArchiveTool, type ArchiveToolDependencies, type ArchiveToolInput, type ArchiveToolName, type ArchiveToolOutput } from './archive';
-import { CHORUS_REGISTERED_TOOL_DEFINITIONS, CHORUS_TOOL_NAMES, isChorusToolName, runChorusTool, type ChorusToolDependencies, type ChorusToolOutput } from './chorus';
-import type { ChorusToolSlug } from '@/lib/ai/chorus/tools';
+import { DOCUMENT_TOOL_DEFINITIONS, DOCUMENT_TOOL_NAMES, isDocumentToolName, runDocumentTool, type DocumentToolDependencies, type DocumentToolInput, type DocumentToolName, type DocumentToolOutput } from './document-tools';
+import { CHANNEL_REGISTERED_TOOL_DEFINITIONS, CHANNEL_TOOL_NAMES, isChannelToolName, runChannelTool, type ChannelToolDependencies, type ChannelToolOutput } from './channel-tools';
+import type { ChannelToolSlug } from '@/lib/ai/channel/tools';
 
-export const TOOL_NAMES = ['orchestrator.chat', ...ARCHIVE_TOOL_NAMES, ...CHORUS_TOOL_NAMES] as const;
+export const TOOL_NAMES = ['orchestrator.chat', ...DOCUMENT_TOOL_NAMES, ...CHANNEL_TOOL_NAMES] as const;
 export const toolNameSchema = z.enum(TOOL_NAMES);
 
 export const TOOL_DEFINITIONS = [{
@@ -21,7 +21,7 @@ export const TOOL_DEFINITIONS = [{
     additionalProperties: false,
     properties: { message: { type: 'string', maxLength: 8_000 } },
   },
-}, ...ARCHIVE_TOOL_DEFINITIONS, ...CHORUS_REGISTERED_TOOL_DEFINITIONS] as const;
+}, ...DOCUMENT_TOOL_DEFINITIONS, ...CHANNEL_REGISTERED_TOOL_DEFINITIONS] as const;
 
 export const orchestratorChatToolInputSchema = z.object({
   message: sanitizedAgentMessageSchema,
@@ -31,10 +31,10 @@ export interface ToolDependencies extends RouterDependencies, DocumentProcessing
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
-  archiveContext?: DomainToolContext;
-  archiveDependencies?: ArchiveToolDependencies;
-  chorusContext?: DomainToolContext;
-  chorusDependencies?: ChorusToolDependencies;
+  documentContext?: DomainToolContext;
+  documentDependencies?: DocumentToolDependencies;
+  channelContext?: DomainToolContext;
+  channelDependencies?: ChannelToolDependencies;
 }
 
 const chatOutputSchema = z.object({
@@ -45,25 +45,25 @@ const chatOutputSchema = z.object({
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
 export function runTool(name: 'orchestrator.chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
-export function runTool<Name extends ArchiveToolName>(name: Name, skill: string, rawInput: ArchiveToolInput<Name>, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<ArchiveToolOutput<Name>>;
-export function runTool<Name extends ChorusToolSlug>(name: Name, skill: string, rawInput: unknown, dependencies: ToolDependencies & { chorusContext: DomainToolContext }): Promise<ChorusToolOutput>;
+export function runTool<Name extends DocumentToolName>(name: Name, skill: string, rawInput: DocumentToolInput<Name>, dependencies: ToolDependencies & { documentContext: DomainToolContext }): Promise<DocumentToolOutput<Name>>;
+export function runTool<Name extends ChannelToolSlug>(name: Name, skill: string, rawInput: unknown, dependencies: ToolDependencies & { channelContext: DomainToolContext }): Promise<ChannelToolOutput>;
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = toolNameSchema.parse(name);
-  if (isArchiveToolName(toolName)) {
-    if (dependencies.archiveContext) {
-      return runArchiveTool(toolName, rawInput, dependencies.archiveContext, {
+  if (isDocumentToolName(toolName)) {
+    if (dependencies.documentContext) {
+      return runDocumentTool(toolName, rawInput, dependencies.documentContext, {
         adapters: dependencies.adapters,
         credentials: dependencies.credentials,
-        ...dependencies.archiveDependencies,
-        ingestion: { ...dependencies, ...dependencies.archiveDependencies?.ingestion },
+        ...dependencies.documentDependencies,
+        ingestion: { ...dependencies, ...dependencies.documentDependencies?.ingestion },
       });
     }
-    throw new Error(`Tool ${toolName} requires archiveContext.`);
+    throw new Error(`Tool ${toolName} requires documentContext.`);
   }
-  if (isChorusToolName(toolName)) {
-    if (dependencies.chorusContext) return runChorusTool(toolName, rawInput, dependencies.chorusContext, dependencies.chorusDependencies);
-    throw new Error(`Tool ${toolName} requires chorusContext.`);
+  if (isChannelToolName(toolName)) {
+    if (dependencies.channelContext) return runChannelTool(toolName, rawInput, dependencies.channelContext, dependencies.channelDependencies);
+    throw new Error(`Tool ${toolName} requires channelContext.`);
   }
 
   const chatInput = buildChatInput(skill, rawInput);
@@ -109,5 +109,5 @@ function buildChatInput(skill: string, rawInput: unknown): CoreChatInput {
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
-export * from './archive';
-export * from './chorus';
+export * from './document-tools';
+export * from './channel-tools';

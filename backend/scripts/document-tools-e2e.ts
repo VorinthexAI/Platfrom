@@ -66,4 +66,4 @@ if (!suppliedDatabase && env.ARANGO_DATABASE === defaults.ARANGO_DATABASE) {
   await fetch(`${env.ARANGO_URL}/_api/database/${encodeURIComponent(env.ARANGO_DATABASE)}`, { method: 'DELETE', headers: arangoHeaders });
 }
 await run('bun', ['run', 'src/db/arango-migrate.ts']);
-await run('bun', ['test', 'src/lib/ai/tools/archive/archive.e2e.test.ts']);
+await run('bun', ['test', 'src/lib/ai/tools/document-tools.e2e.test.ts']);
