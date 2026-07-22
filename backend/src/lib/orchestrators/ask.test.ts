@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatOutput, ProviderExecuteResponse } from '@/lib/ai/providers';
 import { ask } from './ask';
-import { ARCHIVE_TOOL_NAMES, TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
+import { ARCHIVE_TOOL_NAMES, CHORUS_TOOL_NAMES, TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
 
 const response: ProviderExecuteResponse<ChatOutput> = {
   output: { text: 'A useful answer.', toolCalls: [], stopReason: 'stop' },
@@ -13,7 +13,7 @@ const response: ProviderExecuteResponse<ChatOutput> = {
 
 describe('orchestrator chat tool', () => {
   test('exposes the registered tools', () => {
-    expect(TOOL_NAMES).toEqual(['orchestrator.chat', ...ARCHIVE_TOOL_NAMES]);
+    expect(TOOL_NAMES).toEqual(['orchestrator.chat', ...ARCHIVE_TOOL_NAMES, ...CHORUS_TOOL_NAMES]);
   });
 
   test('sanitizes input and invokes the shared chat action', async () => {

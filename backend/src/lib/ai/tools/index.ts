@@ -6,8 +6,10 @@ import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
 import type { DomainToolContext } from '@/lib/ai/domain-tools/execute';
 import { ARCHIVE_TOOL_DEFINITIONS, ARCHIVE_TOOL_NAMES, isArchiveToolName, runArchiveTool, type ArchiveToolDependencies, type ArchiveToolInput, type ArchiveToolName, type ArchiveToolOutput } from './archive';
+import { CHORUS_REGISTERED_TOOL_DEFINITIONS, CHORUS_TOOL_NAMES, isChorusToolName, runChorusTool, type ChorusToolDependencies, type ChorusToolOutput } from './chorus';
+import type { ChorusToolSlug } from '@/lib/ai/chorus/tools';
 
-export const TOOL_NAMES = ['orchestrator.chat', ...ARCHIVE_TOOL_NAMES] as const;
+export const TOOL_NAMES = ['orchestrator.chat', ...ARCHIVE_TOOL_NAMES, ...CHORUS_TOOL_NAMES] as const;
 export const toolNameSchema = z.enum(TOOL_NAMES);
 
 export const TOOL_DEFINITIONS = [{
@@ -19,7 +21,7 @@ export const TOOL_DEFINITIONS = [{
     additionalProperties: false,
     properties: { message: { type: 'string', maxLength: 8_000 } },
   },
-}, ...ARCHIVE_TOOL_DEFINITIONS] as const;
+}, ...ARCHIVE_TOOL_DEFINITIONS, ...CHORUS_REGISTERED_TOOL_DEFINITIONS] as const;
 
 export const orchestratorChatToolInputSchema = z.object({
   message: sanitizedAgentMessageSchema,
@@ -31,6 +33,8 @@ export interface ToolDependencies extends RouterDependencies, DocumentProcessing
   signal?: AbortSignal;
   archiveContext?: DomainToolContext;
   archiveDependencies?: ArchiveToolDependencies;
+  chorusContext?: DomainToolContext;
+  chorusDependencies?: ChorusToolDependencies;
 }
 
 const chatOutputSchema = z.object({
@@ -42,6 +46,7 @@ const chatOutputSchema = z.object({
 /** Executes one of the capabilities exposed by the unified tool registry. */
 export function runTool(name: 'orchestrator.chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
 export function runTool<Name extends ArchiveToolName>(name: Name, skill: string, rawInput: ArchiveToolInput<Name>, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<ArchiveToolOutput<Name>>;
+export function runTool<Name extends ChorusToolSlug>(name: Name, skill: string, rawInput: unknown, dependencies: ToolDependencies & { chorusContext: DomainToolContext }): Promise<ChorusToolOutput>;
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = toolNameSchema.parse(name);
@@ -55,6 +60,10 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       });
     }
     throw new Error(`Tool ${toolName} requires archiveContext.`);
+  }
+  if (isChorusToolName(toolName)) {
+    if (dependencies.chorusContext) return runChorusTool(toolName, rawInput, dependencies.chorusContext, dependencies.chorusDependencies);
+    throw new Error(`Tool ${toolName} requires chorusContext.`);
   }
 
   const chatInput = buildChatInput(skill, rawInput);
@@ -101,3 +110,4 @@ function buildChatInput(skill: string, rawInput: unknown): CoreChatInput {
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
 export * from './archive';
+export * from './chorus';
