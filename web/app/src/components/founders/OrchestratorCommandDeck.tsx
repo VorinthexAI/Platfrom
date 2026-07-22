@@ -1,11 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Billboard, Environment, Html, Lightformer, PerspectiveCamera, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { Button } from "@vorinthex/shared/ui/components";
-import { ChevronLeftIcon, ChevronRightIcon } from "@vorinthex/shared/ui/icons";
+import { ChevronLeftIcon, ChevronRightIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
@@ -660,10 +660,63 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
   };
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeScopeIndex, setActiveScopeIndex] = useState(0);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const pickerInputRef = useRef<HTMLInputElement>(null);
+  const scopeOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const filteredScopes = scopeNodes.filter((node) =>
     `${node.entity.name} ${node.layer}`.toLowerCase().includes(query.toLowerCase()),
   );
   const instruction = `Drag to look around the ${entity.name} Nexus command deck. Use the mouse wheel to zoom.`;
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const dismissPicker = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setPickerOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("pointerdown", dismissPicker);
+    return () => document.removeEventListener("pointerdown", dismissPicker);
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    if (pickerOpen) scopeOptionRefs.current[activeScopeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeScopeIndex, pickerOpen]);
+
+  const closePicker = (restoreFocus = false) => {
+    setPickerOpen(false);
+    setQuery("");
+    if (restoreFocus) pickerTriggerRef.current?.focus();
+  };
+
+  const selectFilteredScope = (index: number) => {
+    const node = filteredScopes[index];
+    if (!node) return;
+    sceneProps.onSelectScope(node.entity.id);
+    closePicker();
+  };
+
+  const handlePickerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePicker(true);
+      return;
+    }
+    if (filteredScopes.length === 0) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      setActiveScopeIndex((index) => (index + direction + filteredScopes.length) % filteredScopes.length);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      selectFilteredScope(activeScopeIndex);
+    }
+  };
 
   return (
     <div className="relative h-full min-h-[360px] w-full overflow-hidden bg-black/70" aria-label={`${entity.name} Nexus command deck`}>
@@ -680,20 +733,37 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
-      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-start gap-1 text-slate-100 sm:inset-x-7 sm:top-6">
-        <div className="relative pointer-events-auto">
-          <button type="button" onClick={() => setPickerOpen((open) => !open)} aria-expanded={pickerOpen}
-            className="flex h-11 min-w-52 items-center rounded-xl border border-white/15 bg-[#080b0d]/90 px-4 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
-            <span className="block truncate font-mono text-xs font-semibold uppercase tracking-[0.16em]">{selectedScope.entity.name}</span>
+      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-start gap-1.5 text-slate-100 sm:inset-x-7 sm:top-6">
+        <div ref={pickerRef} className="relative pointer-events-auto">
+          <button ref={pickerTriggerRef} type="button" onClick={() => {
+            if (pickerOpen) closePicker();
+            else {
+              setQuery("");
+              setActiveScopeIndex(selectedScopeIndex);
+              setPickerOpen(true);
+            }
+          }} aria-expanded={pickerOpen} aria-haspopup="listbox"
+            className="flex h-9 min-w-44 items-center rounded-lg border border-white/15 bg-[#080b0d]/90 px-3 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
+            <span className="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400">{selectedScope.entity.name}</span>
           </button>
           {pickerOpen ? (
             <div className="absolute top-[calc(100%+0.5rem)] left-0 w-72 rounded-2xl border border-white/15 bg-[#080b0d]/95 p-2 shadow-2xl backdrop-blur-2xl">
-              <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search scopes..."
-                className="mb-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-white/25" />
-              <div className="max-h-64 overflow-y-auto">
-                {filteredScopes.map((node) => (
-                  <button key={node.entity.id} type="button" onClick={() => { sceneProps.onSelectScope(node.entity.id); setPickerOpen(false); }}
-                    className="flex w-full items-center rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400 transition-colors hover:bg-white/[0.07] hover:text-white">
+              <div className="relative mb-2">
+                <input ref={pickerInputRef} autoFocus role="combobox" aria-expanded="true" aria-controls="scope-picker-options" aria-activedescendant={filteredScopes[activeScopeIndex] ? `scope-option-${filteredScopes[activeScopeIndex].entity.id}` : undefined}
+                  value={query} onChange={(event) => { setQuery(event.target.value); setActiveScopeIndex(0); }} onKeyDown={handlePickerKeyDown} placeholder="Search scopes..."
+                  className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2 pr-9 pl-3 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-white/25" />
+                {query ? (
+                  <button type="button" aria-label="Clear scope search" onClick={() => { setQuery(""); setActiveScopeIndex(0); pickerInputRef.current?.focus(); }}
+                    className="absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-silver-500 transition-colors hover:bg-white/[0.07] hover:text-white">
+                    <CloseIcon size="sm" />
+                  </button>
+                ) : null}
+              </div>
+              <div id="scope-picker-options" role="listbox" className="scrollbar-hide max-h-64 overflow-y-auto">
+                {filteredScopes.map((node, index) => (
+                  <button ref={(element) => { scopeOptionRefs.current[index] = element; }} id={`scope-option-${node.entity.id}`} role="option" aria-selected={index === activeScopeIndex}
+                    key={node.entity.id} type="button" onMouseEnter={() => setActiveScopeIndex(index)} onClick={() => selectFilteredScope(index)}
+                    className={`flex w-full items-center rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${index === activeScopeIndex ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}>
                     <span>{node.entity.name}</span>
                   </button>
                 ))}
@@ -702,8 +772,8 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           ) : null}
         </div>
         <div className="pointer-events-auto flex gap-1.5">
-          <Button type="button" variant="secondary" onClick={() => stepScope(-1)} aria-label="Previous scope" className="!h-11 !min-h-0 !w-11 !rounded-xl !p-0"><ChevronLeftIcon size="sm" /></Button>
-          <Button type="button" variant="secondary" onClick={() => stepScope(1)} aria-label="Next scope" className="!h-11 !min-h-0 !w-11 !rounded-xl !p-0"><ChevronRightIcon size="sm" /></Button>
+          <Button type="button" variant="secondary" onClick={() => stepScope(-1)} aria-label="Previous scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronLeftIcon size="sm" /></Button>
+          <Button type="button" variant="secondary" onClick={() => stepScope(1)} aria-label="Next scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronRightIcon size="sm" /></Button>
         </div>
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
