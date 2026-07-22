@@ -313,16 +313,16 @@ suite('Archive live E2E', () => {
     expect(unshared.results[0].data.share.revokedAt).toBe(now);
     expect((await call('document.list-shares', { documentKeys: [documentKey], includeRevoked: true })).results[0].data.shares[0].revokedAt).toBe(now);
     const archivedDocument = await call('document.archive', { documentKeys: [documentKey], atomic: true });
-    expect(archivedDocument.results[0].data.document.archivedAt).toBe(now);
+    expect(archivedDocument.results[0].data.document.deletedAt).toBe(now);
     await call('document.delete-version', { versionKeys: [versionTwo.key], atomic: true });
     expect(await (await db.query('RETURN DOCUMENT(documentVersions, @key) == null', { key: versionTwo.key })).next()).toBe(true);
     const restoredDocument = await call('document.restore', { documentKeys: [documentKey], atomic: true });
-    expect(restoredDocument.results[0].data.document.archivedAt).toBeUndefined();
+    expect(restoredDocument.results[0].data.document.deletedAt).toBeNull();
 
     await call('folder.archive', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
-    expect((await db.collection('documents').document(documentKey)).archivedAt).toBe(now);
+    expect((await db.collection('documents').document(documentKey)).deletedAt).toBe(now);
     await call('folder.restore', { folderKeys: [rootFolderKey], includeDescendants: true, atomic: true });
-    expect((await db.collection('documents').document(documentKey)).archivedAt).toBeUndefined();
+    expect((await db.collection('documents').document(documentKey)).deletedAt).toBeNull();
 
     await call('document.archive', { documentKeys: [copiedDocumentKey] });
     const copiedRaw = await db.collection('documents').document(copiedDocumentKey);

@@ -17,15 +17,15 @@ describe('scoped Archive persistence', () => {
     const result = await createArchivePersistence(executor).updateFolder(scopeKey, folderKey, {
       parentFolderKey: undefined,
       description: undefined,
-      archivedAt: undefined,
+      deletedAt: null,
       updatedAt: timestamp,
     });
     expect(result).toMatchObject({ key: folderKey, scopeKey, name: 'Root' });
     expect(calls[0]?.query).toContain('current._key == @key && current.scopeKey == @scopeKey');
     expect(calls[0]?.query).toContain('current._internalDeletion');
     expect(calls[0]?.query).toContain('DOCUMENT(folders, @destinationKey)');
-    expect(calls[0]?.query).toContain('keepNull: false');
-    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description', 'archivedAt'] });
+    expect(calls[0]?.query).toContain('REPLACE current WITH UNSET');
+    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description'], patch: { deletedAt: null, updatedAt: timestamp } });
   });
 
   test('returns false when a scope-bounded delete matches nothing', async () => {

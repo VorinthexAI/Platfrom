@@ -29,7 +29,7 @@ export const documentSchema = z.object({
   content: z.string().trim().min(1),
   embedding: configuredEmbeddingSchema,
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
-  archivedAt: z.string().datetime().optional(),
+  deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
     kind: z.enum(['folder', 'document', 'version']),
     owner: z.string().trim().min(1),
@@ -84,6 +84,16 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
   }
 }
 
+export async function archiveDocument(key: string): Promise<Document> {
+  const timestamp = new Date().toISOString();
+  return updateDocument(key, { deletedAt: timestamp, updatedAt: timestamp });
+}
+
+export async function restoreDocument(key: string): Promise<Document> {
+  const timestamp = new Date().toISOString();
+  return updateDocument(key, { deletedAt: null, updatedAt: timestamp });
+}
+
 /** Inserts an already embedded document without invoking the generic auto-embed path. */
 export async function insertPreparedDocument(input: Document): Promise<Document> {
   const document = documentSchema.parse(input);
@@ -97,7 +107,7 @@ export async function getDocumentInScope(scopeKey: string, documentKey: string, 
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document._key == ${documentKey} && document.scopeKey == ${scopeKey}
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-      FILTER ${includeArchived} || !HAS(document, "archivedAt") || document.archivedAt == null
+      FILTER ${includeArchived} || document.deletedAt == null
       LIMIT 1
       RETURN document
   `);
@@ -114,7 +124,7 @@ export async function listDocumentsByScope(
       FILTER document.scopeKey == ${scopeKey}
       FILTER ${options.includePendingDeletion ?? false} || !HAS(document, "_internalDeletion") || document._internalDeletion == null
       FILTER ${options.folderKey ?? null} == null || document.folderKey == ${options.folderKey ?? null}
-      FILTER ${options.includeArchived ?? false} || !HAS(document, "archivedAt") || document.archivedAt == null
+      FILTER ${options.includeArchived ?? false} || document.deletedAt == null
       SORT document.name ASC, document._key ASC
       RETURN document
   `);
@@ -135,7 +145,7 @@ export async function listDocumentsByKeysInScope(
     FOR document IN ${db.collection(DOCUMENTS_COLLECTION)}
       FILTER document.scopeKey == ${scopeKey} && document._key IN ${documentKeys}
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-      FILTER ${includeArchived} || !HAS(document, "archivedAt") || document.archivedAt == null
+      FILTER ${includeArchived} || document.deletedAt == null
       SORT POSITION(${documentKeys}, document._key) ASC
       RETURN document
   `);
@@ -189,8 +199,8 @@ export async function semanticSearchArchive(input: ArchiveSemanticSearchInput): 
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         LET folder = DOCUMENT(${db.collection('folders')}, document.folderKey)
         FILTER folder != null && folder.scopeKey == document.scopeKey
-        FILTER ${input.includeArchived ?? false} || !HAS(document, "archivedAt") || document.archivedAt == null
-        FILTER ${input.includeArchived ?? false} || !HAS(folder, "archivedAt") || folder.archivedAt == null
+        FILTER ${input.includeArchived ?? false} || document.deletedAt == null
+        FILTER ${input.includeArchived ?? false} || folder.deletedAt == null
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${documentKeys} == null || document._key IN ${documentKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
@@ -207,6 +217,7 @@ export async function semanticSearchArchive(input: ArchiveSemanticSearchInput): 
     LET versionMatches = ${sources.includes('version')} ? (
       FOR version IN ${db.collection('documentVersions')}
         FILTER version.scopeKey IN ${input.authorizedScopeKeys}
+        FILTER ${input.includeArchived ?? false} || version.deletedAt == null
         FILTER ${documentKeys} == null || version.documentKey IN ${documentKeys ?? []}
         FILTER ${createdAfter ?? null} == null || version.createdAt >= ${createdAfter ?? null}
         FILTER ${createdBefore ?? null} == null || version.createdAt <= ${createdBefore ?? null}
@@ -218,8 +229,8 @@ export async function semanticSearchArchive(input: ArchiveSemanticSearchInput): 
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         LET folder = DOCUMENT(${db.collection('folders')}, document.folderKey)
         FILTER folder != null && folder.scopeKey == document.scopeKey
-        FILTER ${input.includeArchived ?? false} || !HAS(document, "archivedAt") || document.archivedAt == null
-        FILTER ${input.includeArchived ?? false} || !HAS(folder, "archivedAt") || folder.archivedAt == null
+        FILTER ${input.includeArchived ?? false} || document.deletedAt == null
+        FILTER ${input.includeArchived ?? false} || folder.deletedAt == null
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
         FILTER ${mimeTypes} == null || document.mimeType IN ${mimeTypes ?? []}

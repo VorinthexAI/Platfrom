@@ -75,10 +75,20 @@ export async function processDocument(rawInput: DocumentProcessingInput, depende
   logger({ action: 'document.processing', status: 'started', scopeKey: input.scopeKey, folderKey: input.folderKey });
 
   const normalized = await actions.validate(input, { maxBytes: dependencies.maxBytes, logger });
+  const folder = await (dependencies.getFolder ?? (await import('@/lib/db/folders.node')).getFolderById)(normalized.folderKey);
+  if (!folder || folder.scopeKey !== normalized.scopeKey) {
+    throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The Archive folder does not exist in the requested scope.', 'document.processing');
+  }
+  if (folder.deletedAt !== null) {
+    throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The Archive folder is archived.', 'document.processing');
+  }
   const documentKey = documentKeyForRequest(normalized.scopeKey, normalized.folderKey, input.idempotencyKey);
   if (input.idempotencyKey) {
     const existing = await (dependencies.getDocument ?? (await import('@/lib/db/documents.node')).getDocumentById)(documentKey);
     if (existing) {
+      if (existing.deletedAt !== null) {
+        throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The idempotent Archive document is archived.', 'document.processing');
+      }
       logger({ action: 'document.processing', status: 'completed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, durationMs: Math.round(performance.now() - started), idempotent: true });
       return { document: existing };
     }
@@ -106,6 +116,7 @@ export async function processDocument(rawInput: DocumentProcessingInput, depende
       json,
       content,
       embedding,
+      deletedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     }, { getFolder: dependencies.getFolder, getDocument: dependencies.getDocument, insert: dependencies.insert, logger });
@@ -121,7 +132,7 @@ export async function processDocument(rawInput: DocumentProcessingInput, depende
         cause: new AggregateError([error, ownershipError], 'Insertion and ownership verification failed.'),
       });
     }
-    if (existing) {
+    if (existing && existing.deletedAt === null) {
       if (existing.storageKey !== uploaded.storageKey) {
         try {
           await deleteWithRetry(storage, uploaded.storageKey);
@@ -135,6 +146,7 @@ export async function processDocument(rawInput: DocumentProcessingInput, depende
       logger({ action: 'document.processing', status: 'completed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, durationMs: Math.round(performance.now() - started), idempotent: true });
       return { document: existing };
     }
+    if (existing && existing.deletedAt !== null && existing.storageKey === uploaded.storageKey) throw error;
     try {
       await deleteWithRetry(storage, uploaded.storageKey);
     } catch (cleanupError) {

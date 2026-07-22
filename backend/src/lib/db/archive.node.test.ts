@@ -20,10 +20,12 @@ describe('Archive node contracts', () => {
     expect(buildEmbeddingText(documentSharesEmbeddingFields, { token: 'not-embedded' })).toBeNull();
   });
 
-  test('supports archival timestamps on mutable folders and documents', () => {
-    const timestamps = { createdAt: '2026-07-22T10:00:00.000Z', updatedAt: '2026-07-22T10:00:00.000Z', archivedAt: '2026-07-22T11:00:00.000Z' };
-    expect(folderSchema.parse({ key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', name: 'Old', embedding: [], ...timestamps }).archivedAt).toBe(timestamps.archivedAt);
-    expect(documentSchema.shape.archivedAt).toBeDefined();
+  test('defaults Archive resources to active and validates lifecycle timestamps', () => {
+    for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema]) {
+      expect(schema.shape.deletedAt.parse(undefined)).toBeNull();
+      expect(schema.shape.deletedAt.parse('2026-07-22T00:00:00.000Z')).toBe('2026-07-22T00:00:00.000Z');
+      expect(() => schema.shape.deletedAt.parse('yesterday')).toThrow();
+    }
   });
 
   test('versions contain complete immutable editor snapshots', () => {

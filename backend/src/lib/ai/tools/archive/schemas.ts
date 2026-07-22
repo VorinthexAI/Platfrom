@@ -21,7 +21,7 @@ export const archiveFolderSchema = z.object({
   parentFolderKey: keySchema.optional(),
   name: nameSchema,
   description: textSchema.optional(),
-  archivedAt: dateTimeSchema.optional(),
+  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
   childrenCount: z.number().int().nonnegative().optional(),
@@ -35,6 +35,7 @@ export const archiveDocumentShareSchema = z.object({
   permission: z.enum(['read', 'comment']),
   expiresAt: dateTimeSchema.optional(),
   revokedAt: dateTimeSchema.optional(),
+  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
 }).strict();
@@ -47,6 +48,7 @@ export const archiveDocumentVersionSchema = z.object({
   label: z.string().trim().min(1).max(120).optional(),
   storageKey: textSchema.optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
+  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema.optional(),
 }).strict();
@@ -66,7 +68,7 @@ export const archiveDocumentSchema = z.object({
   extension: documentExtensionSchema,
   mimeType: textSchema,
   sizeBytes: z.number().int().positive(),
-  archivedAt: dateTimeSchema.optional(),
+  deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
 }).strict();

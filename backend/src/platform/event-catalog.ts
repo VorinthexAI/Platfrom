@@ -40,6 +40,17 @@ export const serverEventSlugs = [
   'organization.read', 'organization.update', 'organization.archive', 'organization.restore',
   'access.organization.evaluate', 'access.scope.evaluate', 'access.agent.evaluate',
   'access.organization.explain', 'access.scope.explain', 'access.agent.explain',
+  'folder.archive', 'folder.restore', 'document.archive', 'document.restore',
+  'document-version.archive', 'document-version.restore', 'document-share.archive', 'document-share.restore',
+  'project.create', 'project.find', 'project.list', 'project.update', 'project.rename',
+  'project.move', 'project.archive', 'project.restore', 'project.delete',
+  'milestone.create', 'milestone.find', 'milestone.list', 'milestone.update', 'milestone.rename',
+  'milestone.move', 'milestone.schedule', 'milestone.change-status', 'milestone.complete',
+  'milestone.reopen', 'milestone.archive', 'milestone.restore', 'milestone.delete',
+  'task.create', 'task.find', 'task.list', 'task.update', 'task.rename', 'task.move',
+  'task.reorder', 'task.change-status', 'task.complete', 'task.reopen', 'task.archive',
+  'task.restore', 'task.delete', 'task.summarize', 'task.translate', 'task.rewrite',
+  'scope.project.search', 'organization.project.search',
 ] as const;
 
 export const userEventSlugs = [

@@ -30,12 +30,12 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async deleteDocument(key) { documents.delete(key); },
     async getShare(key) { return shares.get(key) ?? null; },
     async listShares(_scopeKey, keys) { return [...shares.values()].filter((value) => keys.includes(value.documentKey)); },
-    async insertShare(value) { const share = { ...value, embedding: [] }; shares.set(share.key, share); return share; },
+    async insertShare(value) { const share = { ...value, embedding: [], deletedAt: null }; shares.set(share.key, share); return share; },
     async updateShare(key, patch) { const value = { ...shares.get(key), ...patch }; shares.set(key, value); return value; },
     async deleteShare(key) { shares.delete(key); },
     async getVersion(key) { return versions.get(key) ?? null; },
     async listVersions(_scopeKey, keys) { return [...versions.values()].filter((value) => keys.includes(value.documentKey)).sort((a, b) => b.version - a.version); },
-    async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, createdAt: now }; versions.set(version.key, version); return version; },
+    async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, deletedAt: null, createdAt: now }; versions.set(version.key, version); return version; },
     async deleteVersion(key) { versions.delete(key); },
     async semanticSearch() { return [...documents.values()].map((document) => ({ score: 0.8, document })); },
     async transaction(operation) { return operation(repository); },
@@ -181,8 +181,8 @@ describe('Archive runtime', () => {
   test('search includes archived folder hierarchies only when explicitly requested', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument('Archived roadmap');
-    f.folders.get(f.folderKey).archivedAt = now;
-    f.documents.get(documentKey).archivedAt = now;
+    f.folders.get(f.folderKey).deletedAt = now;
+    f.documents.get(documentKey).deletedAt = now;
     f.repository.semanticSearch = async () => [{ score: 0.9, document: f.documents.get(documentKey) }];
     const activeOnly = await runArchiveTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => [1] });
     expect(activeOnly.results).toEqual([]);
@@ -271,17 +271,17 @@ describe('Archive runtime', () => {
     const documentKey = f.addDocument();
     f.documents.get(documentKey).folderKey = child;
     await runArchiveTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(f.folders.get(child).archivedAt).toBe(now);
-    expect(f.documents.get(documentKey).archivedAt).toBe(now);
+    expect(f.folders.get(child).deletedAt).toBe(now);
+    expect(f.documents.get(documentKey).deletedAt).toBe(now);
     await runArchiveTool('folder.restore', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
-    expect(f.folders.get(child).archivedAt).toBeUndefined();
-    expect(f.documents.get(documentKey).archivedAt).toBeUndefined();
+    expect(f.folders.get(child).deletedAt).toBeNull();
+    expect(f.documents.get(documentKey).deletedAt).toBeNull();
   });
 
   test('deletes storage before transaction-bound document metadata and retains pointers on failure', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).archivedAt = now;
+    f.documents.get(documentKey).deletedAt = now;
     f.documents.get(documentKey).speechStorageKeys = ['speech/shared', 'speech/second'];
     const version = await f.repository.createVersion({
       scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', json, content: 'old', embedding: [1], storageKey: 'speech/shared',
@@ -306,7 +306,7 @@ describe('Archive runtime', () => {
   test('hides a pending document deletion after metadata commit failure and finishes on retry', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).archivedAt = now;
+    f.documents.get(documentKey).deletedAt = now;
     const deleted: string[] = [];
     const storage: any = {
       async upload() { return { storageKey: '' }; },
@@ -338,7 +338,7 @@ describe('Archive runtime', () => {
   test('keeps a version cleanup manifest on its document until metadata deletion commits', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
-    f.documents.get(documentKey).archivedAt = now;
+    f.documents.get(documentKey).deletedAt = now;
     const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', json, content: 'old', embedding: [1], storageKey: 'versions/old' });
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
     const normalTransaction = f.repository.transaction!;
@@ -362,11 +362,11 @@ describe('Archive runtime', () => {
   test('rejects descendant creation, sharing, versioning, move, and copy after a subtree freeze', async () => {
     const f = fixture('owner');
     const childKey = newId();
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], archivedAt: now, createdAt: now, updatedAt: now });
-    f.folders.get(f.folderKey).archivedAt = now;
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.get(f.folderKey).deletedAt = now;
     const doomedKey = f.addDocument('Doomed');
     f.documents.get(doomedKey).folderKey = childKey;
-    f.documents.get(doomedKey).archivedAt = now;
+    f.documents.get(doomedKey).deletedAt = now;
     const outsideKey = newId();
     f.folders.set(outsideKey, { key: outsideKey, scopeKey: f.scopeKey, name: 'Outside', embedding: [1], createdAt: now, updatedAt: now });
     const movableKey = f.addDocument('Movable');
@@ -464,17 +464,17 @@ describe('Archive runtime', () => {
   test('validates the full restore ancestor chain and rejects corrupt cycles before mutation', async () => {
     const f = fixture('moderator');
     const middle = newId(), leaf = newId(), documentKey = f.addDocument();
-    f.folders.set(middle, { key: middle, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Middle', archivedAt: now, embedding: [1], createdAt: now, updatedAt: now });
+    f.folders.set(middle, { key: middle, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Middle', deletedAt: now, embedding: [1], createdAt: now, updatedAt: now });
     f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: middle, name: 'Leaf', embedding: [1], createdAt: now, updatedAt: now });
     f.documents.get(documentKey).folderKey = leaf;
-    f.documents.get(documentKey).archivedAt = now;
+    f.documents.get(documentKey).deletedAt = now;
     const blocked = await runArchiveTool('document.restore', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
     expect(blocked.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_ARCHIVED' } });
-    expect(f.documents.get(documentKey).archivedAt).toBe(now);
+    expect(f.documents.get(documentKey).deletedAt).toBe(now);
     f.folders.get(f.folderKey).parentFolderKey = leaf;
     const cycle = await runArchiveTool('document.restore', { documentKeys: [documentKey], restoreAncestors: true }, f.context, { repository: f.repository });
     expect(cycle.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_CYCLE_DETECTED' } });
-    expect(f.documents.get(documentKey).archivedAt).toBe(now);
+    expect(f.documents.get(documentKey).deletedAt).toBe(now);
   });
 
   test('does not audit preview-only AI and observer payloads contain no generated content', async () => {
@@ -537,8 +537,8 @@ describe('Archive runtime', () => {
       else if (name === 'folder.rename') input = { renames: [{ folderKey: childKey, name: 'Renamed' }] };
       else if (name === 'folder.move') input = { moves: [{ folderKey: childKey, targetParentFolderKey: siblingKey }] };
       else if (name === 'folder.archive') input = { folderKeys: [childKey] };
-      else if (name === 'folder.restore') { f.folders.get(childKey).archivedAt = now; input = { folderKeys: [childKey] }; }
-      else if (name === 'folder.delete') { f.folders.get(childKey).archivedAt = now; input = { folderKeys: [childKey] }; }
+      else if (name === 'folder.restore') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
+      else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'document.processing') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { folderKey: f.folderKey };
@@ -548,8 +548,8 @@ describe('Archive runtime', () => {
       else if (name === 'document.move') input = { moves: [{ documentKey, targetFolderKey: siblingKey }] };
       else if (name === 'document.copy') input = { copies: [{ documentKey, targetFolderKey: siblingKey }] };
       else if (name === 'document.archive') input = { documentKeys: [documentKey] };
-      else if (name === 'document.restore') { f.documents.get(documentKey).archivedAt = now; input = { documentKeys: [documentKey] }; }
-      else if (name === 'document.delete') { f.documents.get(documentKey).archivedAt = now; input = { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }; }
+      else if (name === 'document.restore') { f.documents.get(documentKey).deletedAt = now; input = { documentKeys: [documentKey] }; }
+      else if (name === 'document.delete') { f.documents.get(documentKey).deletedAt = now; input = { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }; }
       else if (name === 'document.download') input = { documentKeys: [documentKey], format: 'original' };
       else if (name === 'document.export') input = { exports: [{ documentKey, format: 'txt' }] };
       else if (name === 'document.share') input = { shares: [{ documentKey, permission: 'read' }] };
@@ -565,7 +565,7 @@ describe('Archive runtime', () => {
         if (name === 'document.find-version') input = { versionKeys: [version.key] };
         else if (name === 'document.list-versions') input = { documentKeys: [documentKey] };
         else if (name === 'document.restore-version') input = { restores: [{ documentKey, versionKey: version.key }] };
-        else { current.archivedAt = now; input = { versionKeys: [version.key] }; }
+        else { current.deletedAt = now; input = { versionKeys: [version.key] }; }
       } else if (name === 'document.summarize') input = { documentKeys: [documentKey] };
       else if (name === 'document.translate') input = { documentKeys: [documentKey], targetLanguage: 'French' };
       else if (name === 'document.rewrite') input = { rewrites: [{ documentKey, instruction: 'Improve clarity' }] };
@@ -600,7 +600,7 @@ describe('Archive runtime', () => {
         run: async () => {
           const f = fixture('viewer');
           const documentKey = f.addDocument();
-          f.folders.get(f.folderKey).archivedAt = now;
+          f.folders.get(f.folderKey).deletedAt = now;
           return runArchiveTool('document.read', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
         },
         codes: ['FOLDER_ARCHIVED'],

@@ -1,11 +1,11 @@
 "use client";
 
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Billboard, Environment, Html, Lightformer, PerspectiveCamera, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { Button } from "@vorinthex/shared/ui/components";
-import { ChevronLeftIcon, ChevronRightIcon } from "@vorinthex/shared/ui/icons";
+import { ChevronLeftIcon, ChevronRightIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
@@ -33,8 +33,8 @@ interface ScopeNode {
 const SCOPE_LAYERS: Record<ScopeLayer, { radius: number; speed: number }> = {
   Nexus: { radius: 2.15, speed: 0.1 },
   Products: { radius: 3.25, speed: 0.16 },
-  Capabilities: { radius: 4.45, speed: 0.23 },
-  Orchestrators: { radius: 5.65, speed: 0.31 },
+  Orchestrators: { radius: 4.45, speed: 0.23 },
+  Capabilities: { radius: 5.65, speed: 0.31 },
 };
 
 const scopeNodes: ScopeNode[] = [
@@ -44,6 +44,41 @@ const scopeNodes: ScopeNode[] = [
   ...Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators).map((entity, position) => ({ entity, layer: "Orchestrators" as const, parentId: entity.reportsTo ?? entity.parentId, position })),
 ];
 const scopeNodeById = new Map(scopeNodes.map((node) => [node.entity.id, node]));
+const scopeCountByLayer: Record<ScopeLayer, number> = {
+  Nexus: scopeNodes.filter((node) => node.layer === "Nexus").length,
+  Products: scopeNodes.filter((node) => node.layer === "Products").length,
+  Capabilities: scopeNodes.filter((node) => node.layer === "Capabilities").length,
+  Orchestrators: scopeNodes.filter((node) => node.layer === "Orchestrators").length,
+};
+const scopeChildrenByParentId = new Map<string, ScopeNode[]>();
+for (const node of scopeNodes) {
+  if (!node.parentId) continue;
+  const children = scopeChildrenByParentId.get(node.parentId) ?? [];
+  children.push(node);
+  scopeChildrenByParentId.set(node.parentId, children);
+}
+
+function linkedScopesFor(selected: ScopeNode): ScopeNode[] {
+  const descendants: ScopeNode[] = [];
+  const pending = [...(scopeChildrenByParentId.get(selected.entity.id) ?? [])];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const node = pending.shift()!;
+    if (visited.has(node.entity.id)) continue;
+    visited.add(node.entity.id);
+    descendants.push(node);
+    pending.push(...(scopeChildrenByParentId.get(node.entity.id) ?? []));
+  }
+  if (descendants.length > 0) return descendants;
+  const parent = selected.parentId ? scopeNodeById.get(selected.parentId) : undefined;
+  return parent ? [parent] : [];
+}
+
+function connectionSeed(id: string) {
+  let seed = 0;
+  for (let index = 0; index < id.length; index += 1) seed = (seed * 31 + id.charCodeAt(index)) >>> 0;
+  return seed / 4294967295;
+}
 
 function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
   const camera = useRef<THREE.PerspectiveCamera>(null);
@@ -510,21 +545,35 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   });
 
   return (
-    <group ref={medallion} position={[0, 2.35, -2.1]} renderOrder={60}>
+    <group ref={medallion} position={[0, 2.35, -2.1]} renderOrder={1000}>
       <Billboard>
-        <mesh position={[0, 0, -0.08]} renderOrder={60}>
-          <circleGeometry args={[0.88, 48]} />
-          <meshPhysicalMaterial color="#080b0d" metalness={0.96} roughness={0.2} clearcoat={0.7} transparent opacity={1} depthTest={false} depthWrite={false} />
+        <mesh position={[0, 0, -0.1]} renderOrder={-100}>
+          <circleGeometry args={[1.02, 48]} />
+          <meshBasicMaterial
+            colorWrite={false}
+            depthTest={false}
+            depthWrite={false}
+            stencilWrite
+            stencilRef={1}
+            stencilFunc={THREE.AlwaysStencilFunc}
+            stencilFail={THREE.KeepStencilOp}
+            stencilZFail={THREE.KeepStencilOp}
+            stencilZPass={THREE.ReplaceStencilOp}
+          />
         </mesh>
-        <mesh position={[0, 0, -0.04]} renderOrder={61}>
+        <mesh position={[0, 0, -0.08]} renderOrder={1000}>
+          <circleGeometry args={[0.88, 48]} />
+          <meshBasicMaterial color="#080b0d" transparent opacity={1} depthTest={false} depthWrite={false} toneMapped={false} />
+        </mesh>
+        <mesh position={[0, 0, -0.04]} renderOrder={1001}>
           <ringGeometry args={[0.88, 1.02, 48]} />
           <meshPhysicalMaterial color="#9b704b" emissive="#6d2c0b" emissiveIntensity={0.85} metalness={0.92} roughness={0.16} clearcoat={0.8} transparent opacity={1} depthTest={false} depthWrite={false} />
         </mesh>
-        <mesh position={[0, 0, 0.01]} renderOrder={62}>
+        <mesh position={[0, 0, 0.01]} renderOrder={1002}>
           <planeGeometry args={[1.35, 1.35]} />
           <meshBasicMaterial map={texture} color="#ffe1b7" transparent alphaTest={0.02} opacity={0.92} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
-        <mesh ref={scan} position={[0, 0, -0.02]} renderOrder={63}>
+        <mesh ref={scan} position={[0, 0, -0.02]} renderOrder={1003}>
           <ringGeometry args={[1.14, 1.17, 6]} />
           <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.62} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
@@ -538,26 +587,119 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   );
 }
 
-function scopePosition(node: ScopeNode, elapsed: number): THREE.Vector3 {
+function scopePosition(node: ScopeNode, elapsed: number, target = new THREE.Vector3()): THREE.Vector3 {
   const { radius, speed } = SCOPE_LAYERS[node.layer];
-  const peers = scopeNodes.filter((candidate) => candidate.layer === node.layer);
-  const angle = node.position / peers.length * Math.PI * 2 + elapsed * speed;
-  return new THREE.Vector3(Math.cos(angle) * radius, 2.35 + Math.sin(angle) * radius * 0.62, -2.35);
+  const angle = node.position / scopeCountByLayer[node.layer] * Math.PI * 2 + elapsed * speed;
+  return target.set(Math.cos(angle) * radius, 2.35 + Math.sin(angle) * radius * 0.62, -2.35);
 }
 
-function ScopeConnection({ node, parent, reducedMotion }: { node: ScopeNode; parent: ScopeNode; reducedMotion: boolean }) {
-  const geometry = useMemo(() => new THREE.BufferGeometry(), []);
+const ENERGY_SEGMENTS = 18;
+const SPARK_COUNT = 7;
 
-  useEffect(() => () => geometry.dispose(), [geometry]);
+function ScopeEnergyConnection({ source, target, reducedMotion }: { source: ScopeNode; target: ScopeNode; reducedMotion: boolean }) {
+  const beam = useRef<THREE.Group>(null);
+  const glowMaterial = useRef<THREE.MeshBasicMaterial>(null);
+  const seed = connectionSeed(`${source.entity.id}:${target.entity.id}`);
+  const energyGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(ENERGY_SEGMENTS * 3), 3));
+    return geometry;
+  }, []);
+  const energyMaterial = useMemo(() => new THREE.LineBasicMaterial({
+    color: "#ffd29a",
+    transparent: true,
+    opacity: 0.82,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    stencilWrite: true,
+    stencilWriteMask: 0x00,
+    stencilRef: 1,
+    stencilFunc: THREE.NotEqualStencilFunc,
+    stencilFail: THREE.KeepStencilOp,
+    stencilZFail: THREE.KeepStencilOp,
+    stencilZPass: THREE.KeepStencilOp,
+    toneMapped: false,
+  }), []);
+  const energyLine = useMemo(() => {
+    const line = new THREE.Line(energyGeometry, energyMaterial);
+    line.renderOrder = 4;
+    line.frustumCulled = false;
+    return line;
+  }, [energyGeometry, energyMaterial]);
+  const sparkGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(SPARK_COUNT * 3), 3));
+    return geometry;
+  }, []);
+  const vectors = useMemo(() => ({
+    source: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    direction: new THREE.Vector3(),
+    normalizedDirection: new THREE.Vector3(),
+    midpoint: new THREE.Vector3(),
+    perpendicular: new THREE.Vector3(),
+    point: new THREE.Vector3(),
+    up: new THREE.Vector3(0, 1, 0),
+  }), []);
+
+  useEffect(() => () => {
+    energyGeometry.dispose();
+    energyMaterial.dispose();
+    sparkGeometry.dispose();
+  }, [energyGeometry, energyMaterial, sparkGeometry]);
   useFrame(({ clock }) => {
     const elapsed = reducedMotion ? 0 : clock.elapsedTime;
-    geometry.setFromPoints([scopePosition(node, elapsed), scopePosition(parent, elapsed)]);
+    const sourcePosition = scopePosition(source, elapsed, vectors.source);
+    const targetPosition = scopePosition(target, elapsed, vectors.target);
+    vectors.direction.subVectors(targetPosition, sourcePosition);
+    const length = vectors.direction.length();
+    vectors.perpendicular.set(-vectors.direction.y, vectors.direction.x, 0).normalize();
+
+    if (beam.current && length > 0) {
+      beam.current.position.copy(vectors.midpoint.addVectors(sourcePosition, targetPosition).multiplyScalar(0.5));
+      beam.current.quaternion.setFromUnitVectors(vectors.up, vectors.normalizedDirection.copy(vectors.direction).normalize());
+      beam.current.scale.set(1, length, 1);
+    }
+    if (glowMaterial.current) glowMaterial.current.opacity = 0.1 + Math.sin(elapsed * 2.8 + seed * 12) * 0.035;
+
+    const energyPositions = energyGeometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let index = 0; index < ENERGY_SEGMENTS; index += 1) {
+      const progress = index / (ENERGY_SEGMENTS - 1);
+      const taper = Math.sin(progress * Math.PI);
+      const wave = Math.sin(progress * 34 + elapsed * 5.2 + seed * 19) * 0.025 * taper;
+      vectors.point.lerpVectors(sourcePosition, targetPosition, progress).addScaledVector(vectors.perpendicular, wave);
+      energyPositions.setXYZ(index, vectors.point.x, vectors.point.y, vectors.point.z + Math.cos(progress * 25 + elapsed * 3 + seed * 9) * 0.012 * taper);
+    }
+    energyPositions.needsUpdate = true;
+
+    const sparkPositions = sparkGeometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let index = 0; index < SPARK_COUNT; index += 1) {
+      const progress = reducedMotion ? (index + 1) / (SPARK_COUNT + 1) : (elapsed * (0.18 + seed * 0.08) + index / SPARK_COUNT + seed) % 1;
+      const scatter = Math.sin(index * 9.7 + elapsed * 7 + seed * 23) * 0.045;
+      vectors.point.lerpVectors(sourcePosition, targetPosition, progress).addScaledVector(vectors.perpendicular, scatter);
+      sparkPositions.setXYZ(index, vectors.point.x, vectors.point.y, vectors.point.z + Math.cos(index * 4.1 + elapsed * 6) * 0.03);
+    }
+    sparkPositions.needsUpdate = true;
   });
 
   return (
-    <lineSegments geometry={geometry} renderOrder={4}>
-      <lineBasicMaterial color={AMBER} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
-    </lineSegments>
+    <group>
+      <group ref={beam} renderOrder={3}>
+        <mesh>
+          <cylinderGeometry args={[0.026, 0.026, 1, 6, 1, true]} />
+          <meshBasicMaterial ref={glowMaterial} color={AMBER} transparent opacity={0.12} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} stencilWrite stencilWriteMask={0x00} stencilRef={1} stencilFunc={THREE.NotEqualStencilFunc} stencilFail={THREE.KeepStencilOp} stencilZFail={THREE.KeepStencilOp} stencilZPass={THREE.KeepStencilOp} toneMapped={false} />
+        </mesh>
+        <mesh>
+          <cylinderGeometry args={[0.006, 0.006, 1, 5]} />
+          <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.58} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} stencilWrite stencilWriteMask={0x00} stencilRef={1} stencilFunc={THREE.NotEqualStencilFunc} stencilFail={THREE.KeepStencilOp} stencilZFail={THREE.KeepStencilOp} stencilZPass={THREE.KeepStencilOp} toneMapped={false} />
+        </mesh>
+      </group>
+      <primitive object={energyLine} />
+      <points geometry={sparkGeometry} renderOrder={5} frustumCulled={false}>
+        <pointsMaterial color={HOT_AMBER} size={0.075} sizeAttenuation transparent opacity={0.9} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} stencilWrite stencilWriteMask={0x00} stencilRef={1} stencilFunc={THREE.NotEqualStencilFunc} stencilFail={THREE.KeepStencilOp} stencilZFail={THREE.KeepStencilOp} stencilZPass={THREE.KeepStencilOp} toneMapped={false} />
+      </points>
+    </group>
   );
 }
 
@@ -591,11 +733,11 @@ function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: Sco
 
 function ScopeOrbitalSystem({ selectedId, reducedMotion, onSelect }: { selectedId: string; reducedMotion: boolean; onSelect: (id: string) => void }) {
   const selectedNode = scopeNodeById.get(selectedId);
-  const selectedParent = selectedNode?.parentId ? scopeNodeById.get(selectedNode.parentId) : undefined;
+  const linkedScopes = useMemo(() => selectedNode ? linkedScopesFor(selectedNode) : [], [selectedNode]);
 
   return (
     <group>
-      {selectedNode && selectedParent ? <ScopeConnection node={selectedNode} parent={selectedParent} reducedMotion={reducedMotion} /> : null}
+      {selectedNode ? linkedScopes.map((target) => <ScopeEnergyConnection key={target.entity.id} source={selectedNode} target={target} reducedMotion={reducedMotion} />) : null}
       {scopeNodes.map((node) => <ScopeOrbitNode key={node.entity.id} node={node} selected={node.entity.id === selectedId} reducedMotion={reducedMotion} onSelect={onSelect} />)}
     </group>
   );
@@ -638,7 +780,7 @@ function CommandDeckScene(props: CommandDeckSceneProps) {
 }
 
 export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckProps) {
-  const { entity } = props;
+  const { entity, onScopeRoute } = props;
   const [selectedScopeId, setSelectedScopeId] = useState(VORINTHEX_GALAXY_REGISTRY.nexus.id);
   const selectedScope = scopeNodeById.get(selectedScopeId) ?? scopeNodes[0]!;
   const selectedScopeIndex = scopeNodes.findIndex((node) => node.entity.id === selectedScope.entity.id);
@@ -646,7 +788,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
     const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
     const scope = scopeNodes[nextIndex]!.entity;
     setSelectedScopeId(scope.id);
-    props.onScopeRoute?.(scope);
+    onScopeRoute?.(scope);
   };
   const sceneProps = {
     entity,
@@ -655,15 +797,82 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
     onSelectScope: (id: string) => {
       setSelectedScopeId(id);
       const scope = scopeNodeById.get(id)?.entity;
-      if (scope) props.onScopeRoute?.(scope);
+      if (scope) onScopeRoute?.(scope);
     },
   };
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeScopeIndex, setActiveScopeIndex] = useState(0);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerTriggerRef = useRef<HTMLButtonElement>(null);
+  const pickerInputRef = useRef<HTMLInputElement>(null);
+  const scopeOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const filteredScopes = scopeNodes.filter((node) =>
     `${node.entity.name} ${node.layer}`.toLowerCase().includes(query.toLowerCase()),
   );
   const instruction = `Drag to look around the ${entity.name} Nexus command deck. Use the mouse wheel to zoom.`;
+
+  useEffect(() => {
+    const handleTab = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Tab" || event.defaultPrevented || pickerOpen) return;
+      event.preventDefault();
+      const direction = event.shiftKey ? -1 : 1;
+      const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
+      const scope = scopeNodes[nextIndex]!.entity;
+      setSelectedScopeId(scope.id);
+      onScopeRoute?.(scope);
+    };
+    window.addEventListener("keydown", handleTab);
+    return () => window.removeEventListener("keydown", handleTab);
+  }, [onScopeRoute, pickerOpen, selectedScopeIndex]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const dismissPicker = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setPickerOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("pointerdown", dismissPicker);
+    return () => document.removeEventListener("pointerdown", dismissPicker);
+  }, [pickerOpen]);
+
+  useEffect(() => {
+    if (pickerOpen) scopeOptionRefs.current[activeScopeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeScopeIndex, pickerOpen]);
+
+  const closePicker = (restoreFocus = false) => {
+    setPickerOpen(false);
+    setQuery("");
+    if (restoreFocus) pickerTriggerRef.current?.focus();
+  };
+
+  const selectFilteredScope = (index: number) => {
+    const node = filteredScopes[index];
+    if (!node) return;
+    sceneProps.onSelectScope(node.entity.id);
+    closePicker();
+  };
+
+  const handlePickerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePicker(true);
+      return;
+    }
+    if (filteredScopes.length === 0) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      setActiveScopeIndex((index) => (index + direction + filteredScopes.length) % filteredScopes.length);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      selectFilteredScope(activeScopeIndex);
+    }
+  };
 
   return (
     <div className="relative h-full min-h-[360px] w-full overflow-hidden bg-black/70" aria-label={`${entity.name} Nexus command deck`}>
@@ -671,7 +880,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
         dpr={[1, 1.35]}
         shadows
          camera={{ position: [0, 2.45, 15.2], fov: 47, near: 0.1, far: 100 }}
-        gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
+        gl={{ alpha: true, antialias: true, stencil: true, powerPreference: "high-performance" }}
         className="!absolute !inset-0 !touch-none"
         aria-label={instruction}
         role="img"
@@ -680,20 +889,37 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
-      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-start gap-1 text-slate-100 sm:inset-x-7 sm:top-6">
-        <div className="relative pointer-events-auto">
-          <button type="button" onClick={() => setPickerOpen((open) => !open)} aria-expanded={pickerOpen}
-            className="flex h-11 min-w-52 items-center rounded-xl border border-white/15 bg-[#080b0d]/90 px-4 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
-            <span className="block truncate font-mono text-xs font-semibold uppercase tracking-[0.16em]">{selectedScope.entity.name}</span>
+      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-start gap-1.5 text-slate-100 sm:inset-x-7 sm:top-6">
+        <div ref={pickerRef} className="relative pointer-events-auto">
+          <button ref={pickerTriggerRef} type="button" onClick={() => {
+            if (pickerOpen) closePicker();
+            else {
+              setQuery("");
+              setActiveScopeIndex(selectedScopeIndex);
+              setPickerOpen(true);
+            }
+          }} aria-expanded={pickerOpen} aria-haspopup="listbox"
+            className="flex h-9 min-w-44 items-center rounded-lg border border-white/15 bg-[#080b0d]/90 px-3 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
+            <span className="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400">{selectedScope.entity.name}</span>
           </button>
           {pickerOpen ? (
             <div className="absolute top-[calc(100%+0.5rem)] left-0 w-72 rounded-2xl border border-white/15 bg-[#080b0d]/95 p-2 shadow-2xl backdrop-blur-2xl">
-              <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search scopes..."
-                className="mb-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-white/25" />
-              <div className="max-h-64 overflow-y-auto">
-                {filteredScopes.map((node) => (
-                  <button key={node.entity.id} type="button" onClick={() => { sceneProps.onSelectScope(node.entity.id); setPickerOpen(false); }}
-                    className="flex w-full items-center rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400 transition-colors hover:bg-white/[0.07] hover:text-white">
+              <div className="relative mb-2">
+                <input ref={pickerInputRef} autoFocus role="combobox" aria-expanded="true" aria-controls="scope-picker-options" aria-activedescendant={filteredScopes[activeScopeIndex] ? `scope-option-${filteredScopes[activeScopeIndex].entity.id}` : undefined}
+                  value={query} onChange={(event) => { setQuery(event.target.value); setActiveScopeIndex(0); }} onKeyDown={handlePickerKeyDown} placeholder="Search scopes..."
+                  className="w-full rounded-xl border border-white/10 bg-white/[0.04] py-2 pr-9 pl-3 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-white/25" />
+                {query ? (
+                  <button type="button" aria-label="Clear scope search" onClick={() => { setQuery(""); setActiveScopeIndex(0); pickerInputRef.current?.focus(); }}
+                    className="absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-silver-500 transition-colors hover:bg-white/[0.07] hover:text-white">
+                    <CloseIcon size="sm" />
+                  </button>
+                ) : null}
+              </div>
+              <div id="scope-picker-options" role="listbox" className="scrollbar-hide max-h-64 overflow-y-auto">
+                {filteredScopes.map((node, index) => (
+                  <button ref={(element) => { scopeOptionRefs.current[index] = element; }} id={`scope-option-${node.entity.id}`} role="option" aria-selected={index === activeScopeIndex}
+                    key={node.entity.id} type="button" onMouseEnter={() => setActiveScopeIndex(index)} onClick={() => selectFilteredScope(index)}
+                    className={`flex w-full items-center rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${index === activeScopeIndex ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}>
                     <span>{node.entity.name}</span>
                   </button>
                 ))}
@@ -702,8 +928,8 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           ) : null}
         </div>
         <div className="pointer-events-auto flex gap-1.5">
-          <Button type="button" variant="secondary" onClick={() => stepScope(-1)} aria-label="Previous scope" className="!h-11 !min-h-0 !w-11 !rounded-xl !p-0"><ChevronLeftIcon size="sm" /></Button>
-          <Button type="button" variant="secondary" onClick={() => stepScope(1)} aria-label="Next scope" className="!h-11 !min-h-0 !w-11 !rounded-xl !p-0"><ChevronRightIcon size="sm" /></Button>
+          <Button type="button" variant="secondary" onClick={() => stepScope(-1)} aria-label="Previous scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronLeftIcon size="sm" /></Button>
+          <Button type="button" variant="secondary" onClick={() => stepScope(1)} aria-label="Next scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronRightIcon size="sm" /></Button>
         </div>
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />

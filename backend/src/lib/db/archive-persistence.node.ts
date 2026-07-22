@@ -11,8 +11,8 @@ export interface ArchiveQueryExecutor {
   query(query: string, bindVars?: Record<string, unknown>): Promise<QueryCursor>;
 }
 
-type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'archivedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'json' | 'content' | 'embedding' | 'speechStorageKeys' | 'archivedAt' | 'updatedAt' | '_internalDeletion';
+type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'json' | 'content' | 'embedding' | 'speechStorageKeys' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
 
@@ -54,8 +54,8 @@ async function scopedUpdate<T>(
       FILTER current._key == @key && current.scopeKey == @scopeKey
       ${ownership}
       LIMIT 1
-      UPDATE current WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null]))
-        IN @@collection OPTIONS { keepNull: false, mergeObjects: true }
+      REPLACE current WITH UNSET(MERGE(current, @patch), APPEND(@unset, ["_id", "_rev"]))
+        IN @@collection
       RETURN NEW
   `, {
     '@collection': collection,
@@ -93,8 +93,8 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       const value = await cursor.next();
       return value ? folderSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    async listFolders(scopeKey: string, includePendingDeletion = false): Promise<Folder[]> {
-      const cursor = await executor.query(`FOR folder IN folders FILTER folder.scopeKey == @scopeKey FILTER @includePending || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null RETURN folder`, { scopeKey, includePending: includePendingDeletion });
+    async listFolders(scopeKey: string, includeArchived = false, includePendingDeletion = false): Promise<Folder[]> {
+      const cursor = await executor.query(`FOR folder IN folders FILTER folder.scopeKey == @scopeKey FILTER @includeArchived || folder.deletedAt == null FILTER @includePending || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null RETURN folder`, { scopeKey, includeArchived, includePending: includePendingDeletion });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => folderSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -103,8 +103,8 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       const value = await cursor.next();
       return value ? documentSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    async listDocuments(scopeKey: string, includePendingDeletion = false): Promise<Document[]> {
-      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includePending: includePendingDeletion });
+    async listDocuments(scopeKey: string, includeArchived = false, includePendingDeletion = false): Promise<Document[]> {
+      const cursor = await executor.query(`FOR document IN documents FILTER document.scopeKey == @scopeKey FILTER @includeArchived || document.deletedAt == null FILTER @includePending || !HAS(document, "_internalDeletion") || document._internalDeletion == null RETURN document`, { scopeKey, includeArchived, includePending: includePendingDeletion });
       const values = cursor.all ? await cursor.all() : [];
       return values.map((value) => documentSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
@@ -155,7 +155,7 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       if (!created) throw new Error('Document destination is pending deletion.');
       return documentSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
-    async insertShare(share: Omit<DocumentShare, 'embedding'>): Promise<DocumentShare> {
+    async insertShare(share: Omit<DocumentShare, 'embedding' | 'deletedAt'>): Promise<DocumentShare> {
       const parsed = documentShareSchema.parse({ ...share, embedding: [] });
       const cursor = await executor.query(
         `LET document = DOCUMENT(documents, @documentKey)
@@ -171,7 +171,7 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       if (!created) throw new Error('Share owner is pending deletion.');
       return documentShareSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
-    async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'updatedAt'>): Promise<DocumentVersion> {
+    async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'updatedAt' | 'deletedAt'>): Promise<DocumentVersion> {
       const snapshot = documentVersionSchema.omit({ version: true }).parse({
         ...version,
         key: newId(),
@@ -203,7 +203,7 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
     updateDocument(scopeKey: string, key: string, patch: ScopedDocumentPatch) {
       return scopedUpdate(executor, 'documents', scopeKey, key, patch, (value) => documentSchema.parse(value));
     },
-    updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'updatedAt'>>) {
+    updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {
       return scopedUpdate(executor, 'documentShares', scopeKey, key, patch, (value) => documentShareSchema.parse(value));
     },
     async setFolderDeletion(scopeKey: string, key: string, marker: Folder['_internalDeletion'] | undefined, owner?: string) {

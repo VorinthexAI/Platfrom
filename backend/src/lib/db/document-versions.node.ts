@@ -26,6 +26,7 @@ export const documentVersionSchema = z.object({
   // Legacy uploaded versions may retain their object reference; new snapshots do not require one.
   storageKey: z.string().trim().min(1).optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
+  deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime().optional(),
 });
@@ -78,6 +79,7 @@ export async function getDocumentVersion(
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey == ${documentKey} && snapshot.version == ${version}
+      FILTER snapshot.deletedAt == null
       LIMIT 1
       RETURN snapshot
   `);
@@ -89,6 +91,7 @@ export async function listDocumentVersions(scopeKey: string, documentKey: string
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey == ${documentKey}
+      FILTER snapshot.deletedAt == null
       SORT snapshot.version DESC
       RETURN snapshot
   `);
@@ -122,6 +125,7 @@ export async function listDocumentVersionsByDocumentKeys(scopeKey: string, docum
   const cursor = await db.query(aql`
     FOR snapshot IN ${db.collection(DOCUMENT_VERSIONS_COLLECTION)}
       FILTER snapshot.scopeKey == ${scopeKey} && snapshot.documentKey IN ${documentKeys}
+      FILTER snapshot.deletedAt == null
       SORT POSITION(${documentKeys}, snapshot.documentKey) ASC, snapshot.version DESC
       RETURN snapshot
   `);
@@ -139,7 +143,7 @@ export async function deleteDocumentVersionInScope(scopeKey: string, versionKey:
   return archivePersistence.deleteVersion(scopeKey, versionKey);
 }
 
-type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'updatedAt'>;
+type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
 
 /** Exclusive collection transaction makes MAX(version)+1 monotonic under concurrent writers. */
 export async function createDocumentVersion(input: NewDocumentVersion): Promise<DocumentVersion> {
@@ -152,4 +156,20 @@ export async function createDocumentVersion(input: NewDocumentVersion): Promise<
 export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ArchiveSemanticSearchInput, 'sources'>) {
   const { semanticSearchArchive } = await import('./documents.node');
   return semanticSearchArchive({ ...input, sources: ['version'] });
+}
+
+export async function updateDocumentVersion(key: string, patch: Partial<Pick<DocumentVersion, 'deletedAt' | 'updatedAt'>>): Promise<DocumentVersion> {
+  const updated = await helpers.updateById(key, patch);
+  if (!updated) throw new Error(`Document version ${key} was not found.`);
+  return updated;
+}
+
+export async function archiveDocumentVersion(key: string): Promise<DocumentVersion> {
+  const timestamp = new Date().toISOString();
+  return updateDocumentVersion(key, { deletedAt: timestamp, updatedAt: timestamp });
+}
+
+export async function restoreDocumentVersion(key: string): Promise<DocumentVersion> {
+  const timestamp = new Date().toISOString();
+  return updateDocumentVersion(key, { deletedAt: null, updatedAt: timestamp });
 }

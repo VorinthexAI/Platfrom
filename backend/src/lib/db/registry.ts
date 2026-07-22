@@ -39,6 +39,9 @@ import { getAllFoldersChunked, listFoldersPage, upsertFolderByKey } from './fold
 import { getAllDocumentsChunked, listDocumentsPage, upsertDocumentByKey } from './documents.node';
 import { getAllDocumentVersionsChunked, listDocumentVersionsPage, upsertDocumentVersionByKey } from './document-versions.node';
 import { getAllDocumentSharesChunked, listDocumentSharesPage, upsertDocumentShareByKey } from './document-shares.node';
+import { getAllProjectsChunked, listProjectsPage, upsertProjectByKey } from './projects.node';
+import { getAllMilestonesChunked, listMilestonesPage, upsertMilestoneByKey } from './milestones.node';
+import { getAllTasksChunked, listTasksPage, upsertTaskByKey } from './tasks.node';
 
 export interface NodeAccessors {
   /** One resumable page — for stateless HTTP pagination (GET /api/v1/nodes). */
@@ -78,6 +81,9 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   documents: { listPage: listDocumentsPage, getAllChunked: getAllDocumentsChunked, upsertByKey: upsertDocumentByKey },
   documentVersions: { listPage: listDocumentVersionsPage, getAllChunked: getAllDocumentVersionsChunked, upsertByKey: upsertDocumentVersionByKey },
   documentShares: { listPage: listDocumentSharesPage, getAllChunked: getAllDocumentSharesChunked, upsertByKey: upsertDocumentShareByKey },
+  projects: { listPage: listProjectsPage, getAllChunked: getAllProjectsChunked, upsertByKey: upsertProjectByKey },
+  milestones: { listPage: listMilestonesPage, getAllChunked: getAllMilestonesChunked, upsertByKey: upsertMilestoneByKey },
+  tasks: { listPage: listTasksPage, getAllChunked: getAllTasksChunked, upsertByKey: upsertTaskByKey },
   events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked, upsertByKey: upsertEventByKey },
   intelligenceFragments: { listPage: listIntelligenceFragmentsPage, getAllChunked: getAllIntelligenceFragmentsChunked, upsertByKey: upsertIntelligenceFragmentByKey },
   mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },

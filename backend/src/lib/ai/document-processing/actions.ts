@@ -302,8 +302,12 @@ export async function documentInsert(input: Document, options: DocumentInsertDep
       if (document.embedding.length === 0) throw new Error('A document embedding is required.');
       const folder = await (options.getFolder ?? getFolderById)(document.folderKey);
       if (!folder || folder.scopeKey !== document.scopeKey) throw new Error('The Archive folder does not exist in the requested scope.');
+      if (folder.deletedAt !== null) throw new Error('The Archive folder is archived.');
       const existing = await (options.getDocument ?? getDocumentById)(document.key);
-      if (existing) return { document: existing };
+      if (existing) {
+        if (existing.deletedAt !== null) throw new Error('The idempotent Archive document is archived.');
+        return { document: existing };
+      }
       return { document: await (options.insert ?? insertPreparedDocument)(document) };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_INSERT_FAILED', 'Document insertion failed.', 'document-insert', true);

@@ -12,7 +12,7 @@ export const folderSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   embedding: z.array(z.number().finite()).default([]),
-  archivedAt: z.string().datetime().optional(),
+  deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
     kind: z.literal('folder'),
     owner: z.string().trim().min(1),
@@ -63,7 +63,7 @@ export async function getFolderInScope(scopeKey: string, folderKey: string, incl
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder._key == ${folderKey} && folder.scopeKey == ${scopeKey}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER ${includeArchived} || !HAS(folder, "archivedAt") || folder.archivedAt == null
+      FILTER ${includeArchived} || folder.deletedAt == null
       LIMIT 1
       RETURN folder
   `);
@@ -80,7 +80,7 @@ export async function listFoldersByScope(
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey == ${scopeKey}
       FILTER ${options.includePendingDeletion ?? false} || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER ${options.includeArchived ?? false} || !HAS(folder, "archivedAt") || folder.archivedAt == null
+      FILTER ${options.includeArchived ?? false} || folder.deletedAt == null
       FILTER !${hasParentBoundary} || (${options.parentFolderKey ?? null} == null
         ? (!HAS(folder, "parentFolderKey") || folder.parentFolderKey == null)
         : folder.parentFolderKey == ${options.parentFolderKey ?? null})
@@ -104,7 +104,7 @@ export async function listFolderDescendants(scopeKey: string, folderKey: string,
     FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
       FILTER folder.scopeKey == ${scopeKey}
       FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER ${includeArchived} || !HAS(folder, "archivedAt") || folder.archivedAt == null
+      FILTER ${includeArchived} || folder.deletedAt == null
       RETURN folder
   `);
   const folders = (await cursor.all()).map((folder) => folderSchema.parse(withArangoKey(folder)));
@@ -126,4 +126,14 @@ export async function listFolderDescendants(scopeKey: string, folderKey: string,
     pending.push(...(children.get(folder.key) ?? []));
   }
   return descendants;
+}
+
+export async function archiveFolder(key: string): Promise<Folder> {
+  const timestamp = new Date().toISOString();
+  return updateFolder(key, { deletedAt: timestamp, updatedAt: timestamp });
+}
+
+export async function restoreFolder(key: string): Promise<Folder> {
+  const timestamp = new Date().toISOString();
+  return updateFolder(key, { deletedAt: null, updatedAt: timestamp });
 }
