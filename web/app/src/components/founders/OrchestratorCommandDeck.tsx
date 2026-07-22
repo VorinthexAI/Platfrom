@@ -33,8 +33,8 @@ interface ScopeNode {
 const SCOPE_LAYERS: Record<ScopeLayer, { radius: number; speed: number }> = {
   Nexus: { radius: 2.15, speed: 0.1 },
   Products: { radius: 3.25, speed: 0.16 },
-  Capabilities: { radius: 4.45, speed: 0.23 },
-  Orchestrators: { radius: 5.65, speed: 0.31 },
+  Orchestrators: { radius: 4.45, speed: 0.23 },
+  Capabilities: { radius: 5.65, speed: 0.31 },
 };
 
 const scopeNodes: ScopeNode[] = [
@@ -547,6 +547,20 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   return (
     <group ref={medallion} position={[0, 2.35, -2.1]} renderOrder={1000}>
       <Billboard>
+        <mesh position={[0, 0, -0.1]} renderOrder={-100}>
+          <circleGeometry args={[1.02, 48]} />
+          <meshBasicMaterial
+            colorWrite={false}
+            depthTest={false}
+            depthWrite={false}
+            stencilWrite
+            stencilRef={1}
+            stencilFunc={THREE.AlwaysStencilFunc}
+            stencilFail={THREE.KeepStencilOp}
+            stencilZFail={THREE.KeepStencilOp}
+            stencilZPass={THREE.ReplaceStencilOp}
+          />
+        </mesh>
         <mesh position={[0, 0, -0.08]} renderOrder={1000}>
           <circleGeometry args={[0.88, 48]} />
           <meshBasicMaterial color="#080b0d" transparent opacity={1} depthTest={false} depthWrite={false} toneMapped={false} />
@@ -598,6 +612,13 @@ function ScopeEnergyConnection({ source, target, reducedMotion }: { source: Scop
     blending: THREE.AdditiveBlending,
     depthTest: false,
     depthWrite: false,
+    stencilWrite: true,
+    stencilWriteMask: 0x00,
+    stencilRef: 1,
+    stencilFunc: THREE.NotEqualStencilFunc,
+    stencilFail: THREE.KeepStencilOp,
+    stencilZFail: THREE.KeepStencilOp,
+    stencilZPass: THREE.KeepStencilOp,
     toneMapped: false,
   }), []);
   const energyLine = useMemo(() => {
@@ -667,16 +688,16 @@ function ScopeEnergyConnection({ source, target, reducedMotion }: { source: Scop
       <group ref={beam} renderOrder={3}>
         <mesh>
           <cylinderGeometry args={[0.026, 0.026, 1, 6, 1, true]} />
-          <meshBasicMaterial ref={glowMaterial} color={AMBER} transparent opacity={0.12} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial ref={glowMaterial} color={AMBER} transparent opacity={0.12} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} stencilWrite stencilWriteMask={0x00} stencilRef={1} stencilFunc={THREE.NotEqualStencilFunc} stencilFail={THREE.KeepStencilOp} stencilZFail={THREE.KeepStencilOp} stencilZPass={THREE.KeepStencilOp} toneMapped={false} />
         </mesh>
         <mesh>
           <cylinderGeometry args={[0.006, 0.006, 1, 5]} />
-          <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.58} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.58} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} stencilWrite stencilWriteMask={0x00} stencilRef={1} stencilFunc={THREE.NotEqualStencilFunc} stencilFail={THREE.KeepStencilOp} stencilZFail={THREE.KeepStencilOp} stencilZPass={THREE.KeepStencilOp} toneMapped={false} />
         </mesh>
       </group>
       <primitive object={energyLine} />
       <points geometry={sparkGeometry} renderOrder={5} frustumCulled={false}>
-        <pointsMaterial color={HOT_AMBER} size={0.075} sizeAttenuation transparent opacity={0.9} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
+        <pointsMaterial color={HOT_AMBER} size={0.075} sizeAttenuation transparent opacity={0.9} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} stencilWrite stencilWriteMask={0x00} stencilRef={1} stencilFunc={THREE.NotEqualStencilFunc} stencilFail={THREE.KeepStencilOp} stencilZFail={THREE.KeepStencilOp} stencilZPass={THREE.KeepStencilOp} toneMapped={false} />
       </points>
     </group>
   );
@@ -759,7 +780,7 @@ function CommandDeckScene(props: CommandDeckSceneProps) {
 }
 
 export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckProps) {
-  const { entity } = props;
+  const { entity, onScopeRoute } = props;
   const [selectedScopeId, setSelectedScopeId] = useState(VORINTHEX_GALAXY_REGISTRY.nexus.id);
   const selectedScope = scopeNodeById.get(selectedScopeId) ?? scopeNodes[0]!;
   const selectedScopeIndex = scopeNodes.findIndex((node) => node.entity.id === selectedScope.entity.id);
@@ -767,7 +788,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
     const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
     const scope = scopeNodes[nextIndex]!.entity;
     setSelectedScopeId(scope.id);
-    props.onScopeRoute?.(scope);
+    onScopeRoute?.(scope);
   };
   const sceneProps = {
     entity,
@@ -776,7 +797,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
     onSelectScope: (id: string) => {
       setSelectedScopeId(id);
       const scope = scopeNodeById.get(id)?.entity;
-      if (scope) props.onScopeRoute?.(scope);
+      if (scope) onScopeRoute?.(scope);
     },
   };
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -790,6 +811,20 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
     `${node.entity.name} ${node.layer}`.toLowerCase().includes(query.toLowerCase()),
   );
   const instruction = `Drag to look around the ${entity.name} Nexus command deck. Use the mouse wheel to zoom.`;
+
+  useEffect(() => {
+    const handleTab = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Tab" || event.defaultPrevented || pickerOpen) return;
+      event.preventDefault();
+      const direction = event.shiftKey ? -1 : 1;
+      const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
+      const scope = scopeNodes[nextIndex]!.entity;
+      setSelectedScopeId(scope.id);
+      onScopeRoute?.(scope);
+    };
+    window.addEventListener("keydown", handleTab);
+    return () => window.removeEventListener("keydown", handleTab);
+  }, [onScopeRoute, pickerOpen, selectedScopeIndex]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -845,7 +880,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
         dpr={[1, 1.35]}
         shadows
          camera={{ position: [0, 2.45, 15.2], fov: 47, near: 0.1, far: 100 }}
-        gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
+        gl={{ alpha: true, antialias: true, stencil: true, powerPreference: "high-performance" }}
         className="!absolute !inset-0 !touch-none"
         aria-label={instruction}
         role="img"
