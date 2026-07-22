@@ -25,6 +25,7 @@ export function OrbitRing({
       color: "#aeb6bc",
       transparent: true,
       opacity,
+      depthWrite: false,
     });
     return new THREE.Line(geometry, material);
   }, [radius, opacity]);
