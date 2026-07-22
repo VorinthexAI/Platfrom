@@ -313,7 +313,7 @@ const collections: CollectionSpec[] = [
   { name: 'messageMentions', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['participantKey', 'handledAt'] }, { fields: ['messageKey', 'participantKey'], unique: true }] },
   { name: 'messageReactions', embedKeys: ['reaction'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['reaction'] }, { fields: ['messageKey', 'reaction'] }, { fields: ['messageKey', 'participantKey', 'reaction'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['parentFolderKey'], sparse: true }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
-  { name: 'documents', embedKeys: ['content'], indexes: [{ fields: ['extension'] }, { fields: ['mimeType'] }] },
+  { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['folderKey'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
   { name: 'documentVersions', embedKeys: ['content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['documentKey'] }, { fields: ['documentKey', 'version'], unique: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'documentShares', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['documentKey'] }, { fields: ['token'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
@@ -617,17 +617,24 @@ async function main() {
       `);
     }
     if (spec.name === 'documents') {
-      await targetDb.query(`
-        FOR document IN documents
-          UPDATE document WITH {
-            html: HAS(document, "html") ? document.html : document.content,
-            json: HAS(document, "json") ? document.json : {},
-            scopeKey: null,
-            folderKey: null,
-            storageKey: null,
-            sizeBytes: null
-          } IN documents OPTIONS { keepNull: false }
+      const cursor = await targetDb.query<number>(`
+        RETURN LENGTH(
+          FOR document IN documents
+            FILTER !HAS(document, "scopeKey")
+              || !HAS(document, "folderKey")
+              || !HAS(document, "storageKey")
+              || !HAS(document, "sizeBytes")
+              || !HAS(document, "html")
+              || !HAS(document, "json")
+              || !HAS(document, "content")
+              || !HAS(document, "embedding")
+            RETURN 1
+        )
       `);
+      const incompatibleDocuments = await cursor.next() ?? 0;
+      if (incompatibleDocuments > 0) {
+        throw new Error(`Cannot migrate documents: ${incompatibleDocuments} existing row(s) lack required Archive ingestion fields.`);
+      }
     }
     const legacyIndexes = LEGACY_INDEX_FIELDS[spec.name] ?? [];
     if (legacyIndexes.length > 0) {

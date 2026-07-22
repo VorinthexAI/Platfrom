@@ -13,10 +13,10 @@ describe('Archive node contracts', () => {
 
   test('uses only semantic Archive fields to build embeddings', () => {
     expect(foldersEmbeddingFields).toEqual(['name', 'description']);
-    expect(documentsEmbeddingFields).toEqual(['content']);
+    expect(documentsEmbeddingFields).toEqual(['name', 'content']);
     expect(documentVersionsEmbeddingFields).toEqual(['content']);
     expect(documentSharesEmbeddingFields).toEqual([]);
-    expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Archive V1', html: '<p>Ship Archive V1</p>', json: { type: 'doc' } })).toBe('Ship Archive V1');
+    expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Archive V1', html: '<p>Ship Archive V1</p>', json: { type: 'doc' } })).toBe('Roadmap\n\nShip Archive V1');
     expect(buildEmbeddingText(documentSharesEmbeddingFields, { token: 'not-embedded' })).toBeNull();
   });
 });

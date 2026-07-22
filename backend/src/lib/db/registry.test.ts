@@ -80,7 +80,10 @@ describe('node registry schema contracts', () => {
     expect(documentSchema.shape).toHaveProperty('html');
     expect(documentSchema.shape).toHaveProperty('json');
     expect(documentSchema.shape).toHaveProperty('content');
-    expect(documentSchema.shape).not.toHaveProperty('scopeKey');
+    expect(documentSchema.shape).toHaveProperty('scopeKey');
+    expect(documentSchema.shape).toHaveProperty('folderKey');
+    expect(documentSchema.shape).toHaveProperty('storageKey');
+    expect(documentSchema.shape).toHaveProperty('sizeBytes');
   });
 
   test('requires exactly one channel participant identity', () => {
