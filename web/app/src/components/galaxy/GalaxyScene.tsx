@@ -3,14 +3,8 @@
 import { useEffect, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { products, type ProductPlanetData } from "@/data/products";
-import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
-import {
-  getCapabilitiesForCore,
-  getOrchestratorsForCommand,
-} from "@/lib/galaxy/registry-helpers";
 import {
   ORBIT_STEPS,
-  stepForEntity,
   stepIndexForFocus,
   syncEntityUrl,
   useGalaxyStore,
@@ -23,7 +17,6 @@ import { HyperJumpStreaks } from "./HyperJumpStreaks";
 import { IntroCosmos } from "./IntroCosmos";
 import { NexusSun } from "./NexusSun";
 import { OrbitRing } from "./OrbitRing";
-import { OrbitingEntities } from "./OrbitingEntities";
 import { ProductPlanet } from "./ProductPlanet";
 import { SpinRig } from "./SpinRig";
 import { Starfield } from "./Starfield";
@@ -34,9 +27,6 @@ import { WorldInterior } from "./WorldInterior";
 interface GalaxySceneProps {
   reducedMotion: boolean;
 }
-
-const coreCapabilityEntities = getCapabilitiesForCore();
-const commandOrchestratorEntities = getOrchestratorsForCommand();
 
 /**
  * The full solar-system canvas, rendered entirely from the galaxy registry.
@@ -80,13 +70,6 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
     }
   }
 
-  function selectChild(entity: GalaxyEntity) {
-    if (useGalaxyStore.getState().mode !== "system") return;
-    const nextStep = stepForEntity(entity);
-    setStep(nextStep);
-    syncEntityUrl(ORBIT_STEPS[nextStep]?.path ?? "/");
-  }
-
   return (
     <Canvas
       frameloop={hidden ? "never" : reducedMotion ? "demand" : "always"}
@@ -120,21 +103,7 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
             data={product}
             paused={paused}
             onSelect={selectProduct}
-          >
-            {product.key === "core" ? (
-              <OrbitingEntities
-                entities={coreCapabilityEntities}
-                paused={paused}
-                onSelect={selectChild}
-              />
-            ) : product.key === "command" ? (
-              <OrbitingEntities
-                entities={commandOrchestratorEntities}
-                paused={paused}
-                onSelect={selectChild}
-              />
-            ) : null}
-          </ProductPlanet>
+          />
         ))}
 
         <CollectibleField paused={paused} />
