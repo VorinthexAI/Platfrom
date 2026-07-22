@@ -545,21 +545,21 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   });
 
   return (
-    <group ref={medallion} position={[0, 2.35, -2.1]} renderOrder={60}>
+    <group ref={medallion} position={[0, 2.35, -2.1]} renderOrder={1000}>
       <Billboard>
-        <mesh position={[0, 0, -0.08]} renderOrder={60}>
+        <mesh position={[0, 0, -0.08]} renderOrder={1000}>
           <circleGeometry args={[0.88, 48]} />
-          <meshPhysicalMaterial color="#080b0d" metalness={0.96} roughness={0.2} clearcoat={0.7} transparent opacity={1} depthTest={false} depthWrite={false} />
+          <meshBasicMaterial color="#080b0d" transparent opacity={1} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
-        <mesh position={[0, 0, -0.04]} renderOrder={61}>
+        <mesh position={[0, 0, -0.04]} renderOrder={1001}>
           <ringGeometry args={[0.88, 1.02, 48]} />
           <meshPhysicalMaterial color="#9b704b" emissive="#6d2c0b" emissiveIntensity={0.85} metalness={0.92} roughness={0.16} clearcoat={0.8} transparent opacity={1} depthTest={false} depthWrite={false} />
         </mesh>
-        <mesh position={[0, 0, 0.01]} renderOrder={62}>
+        <mesh position={[0, 0, 0.01]} renderOrder={1002}>
           <planeGeometry args={[1.35, 1.35]} />
           <meshBasicMaterial map={texture} color="#ffe1b7" transparent alphaTest={0.02} opacity={0.92} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
-        <mesh ref={scan} position={[0, 0, -0.02]} renderOrder={63}>
+        <mesh ref={scan} position={[0, 0, -0.02]} renderOrder={1003}>
           <ringGeometry args={[1.14, 1.17, 6]} />
           <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.62} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
