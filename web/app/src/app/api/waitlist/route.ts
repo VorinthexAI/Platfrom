@@ -11,6 +11,7 @@ import { collectCollectible } from "@/lib/fragments/fragments-server";
 
 const waitlistSchema = z.strictObject({
   email: emailSchema,
+  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
   /** Treasure the visitor is collecting by joining ("Join Waitlist to collect"). */
   collectibleId: z.string().min(1).max(120).optional(),
 });
@@ -119,6 +120,7 @@ export async function POST(request: Request) {
         explorer_id: explorerId,
         ...(distinctId ? { distinct_id: distinctId } : {}),
         ...(tempEmailHash ? { temp_email_hash: tempEmailHash } : {}),
+        ...(parsed.data.countryCode ? { country_code: parsed.data.countryCode } : {}),
       }),
     });
     if (!result.ok || !result.data) {

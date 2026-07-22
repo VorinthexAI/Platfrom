@@ -11,6 +11,7 @@ import { collectCollectible } from "@/lib/fragments/fragments-server";
 
 const signinSchema = z.strictObject({
   email: emailSchema,
+  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
   /** Treasure carried into the sign-in ("Already hunting? Sign in"). */
   collectibleId: z.string().min(1).max(120).optional(),
 });
@@ -143,7 +144,7 @@ export async function POST(request: Request) {
     handoff_expires_at?: string;
   }>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: parsed.data.email }),
+    body: JSON.stringify({ email: parsed.data.email, ...(parsed.data.countryCode ? { country_code: parsed.data.countryCode } : {}) }),
   });
 
   if (!result.ok && result.status === 403 && result.data?.founders_gate_required) {
