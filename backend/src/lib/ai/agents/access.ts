@@ -45,7 +45,7 @@ const defaultAccessData: ExecutionAccessDataSource = {
   },
   async getScopeAgent(scopeKey, agentKey) { const cursor = await db.query<Record<string, unknown>>('FOR link IN scopeAgents FILTER link.scopeKey == @scopeKey && link.agentKey == @agentKey LIMIT 1 RETURN MERGE(link, { key: link._key })', { scopeKey, agentKey }); const link = await cursor.next(); return link ? scopeAgentSchema.parse(link) : null; },
   async listAgentMembers(scopeAgentKey, userOrganizationKey) { const cursor = await db.query<Record<string, unknown>>('FOR grant IN agentMembers FILTER grant.scopeAgentKey == @scopeAgentKey && grant.userOrganizationKey == @userOrganizationKey RETURN MERGE(grant, { key: grant._key })', { scopeAgentKey, userOrganizationKey }); return (await cursor.all()).map((grant) => agentMemberSchema.parse(grant)); },
-  async evaluateAgentAccess(runtime, principal) { const engine = await import('@/lib/ai/domain-tools/access-engine'); return engine.evaluateAgentAccess({ organizationKey: runtime.organization.key, runtimeScopeKey: runtime.scope.key, principal }, { scope: runtime.scope.key, agent: runtime.agent.key, member: principal.userOrganization.key, action: 'run' }); },
+  async evaluateAgentAccess(runtime, principal) { const engine = await import('@/lib/ai/tools'); return engine.evaluateAgentAccess({ organizationKey: runtime.organization.key, runtimeScopeKey: runtime.scope.key, principal }, { scope: runtime.scope.key, agent: runtime.agent.key, member: principal.userOrganization.key, action: 'run' }); },
 };
 
 export class AgentExecutionAccessError extends AiError {

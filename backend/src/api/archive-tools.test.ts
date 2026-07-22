@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
-import { ArchiveError } from '@/lib/ai/tools/archive';
+import { ArchiveError } from '@/lib/ai/tools';
 import { createArchiveToolHandler } from './archive-tools';
 import { registerRoutes } from './routes';
 import { validateQueryParams } from './middleware';

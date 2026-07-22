@@ -3,7 +3,7 @@ import { z, ZodError } from 'zod';
 import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
 import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { DEFAULT_MAX_DOCUMENT_BYTES } from '@/lib/ai/document-processing/actions';
-import { ArchiveError, archiveToolInputSchemas, archiveToolNameSchema, isArchiveMutation, runArchiveAgentTool, type ArchiveErrorCode, type RunArchiveAgentToolOptions } from '@/lib/ai/tools/archive';
+import { ArchiveError, archiveToolInputSchemas, archiveToolNameSchema, isArchiveMutation, runArchiveAgentTool, type ArchiveErrorCode, type RunArchiveAgentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
 import { parseJson, strictObject } from './validation';
 
