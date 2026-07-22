@@ -81,6 +81,7 @@ export class MomentumExecutionError extends Error {
 
 type Prepared<T> = {
   keys: MomentumAuditData;
+  scopeKeys?: string[];
   run(repository: MomentumRepository): Promise<T>;
 };
 
@@ -149,6 +150,56 @@ function safeKeys(item: Record<string, unknown>): MomentumAuditData {
   return output;
 }
 
+async function assertTransactionState(action: MomentumActionSlug, prepared: Prepared<unknown>, repository: MomentumRepository): Promise<void> {
+  const { projectKey, milestoneKey, taskKey } = prepared.keys;
+  if (action === 'project.create') return;
+  if (action === 'milestone.create') {
+    const project = requireNode(await repository.getProject(projectKey!), 'project', projectKey!);
+    if (project.scopeKey !== prepared.keys.scopeKey) throw new MomentumExecutionError('invalid_ownership', 'Project scope changed during mutation preparation.');
+    requireActive(project, 'project');
+    return;
+  }
+  if (action === 'task.create') {
+    const milestone = requireNode(await repository.getMilestone(milestoneKey!), 'milestone', milestoneKey!);
+    const project = requireNode(await repository.getProject(projectKey!), 'project', projectKey!);
+    if (milestone.projectKey !== project.key || milestone.scopeKey !== project.scopeKey || project.scopeKey !== prepared.keys.scopeKey) throw new MomentumExecutionError('invalid_ownership', 'Milestone ownership changed during mutation preparation.');
+    requireActive(project, 'project'); requireActive(milestone, 'milestone');
+    return;
+  }
+  if (action.startsWith('project.')) {
+    const project = requireNode(await repository.getProject(projectKey!), 'project', projectKey!);
+    action === 'project.restore' || action === 'project.delete' ? requireArchived(project, 'project') : requireActive(project, 'project');
+    return;
+  }
+  if (action.startsWith('milestone.')) {
+    const milestone = requireNode(await repository.getMilestone(milestoneKey!), 'milestone', milestoneKey!);
+    action === 'milestone.restore' || action === 'milestone.delete' ? requireArchived(milestone, 'milestone') : requireActive(milestone, 'milestone');
+    if (action !== 'milestone.archive' && action !== 'milestone.delete') {
+      const project = requireNode(await repository.getProject(milestone.projectKey), 'project', milestone.projectKey);
+      if (milestone.scopeKey !== project.scopeKey) throw new MomentumExecutionError('invalid_ownership', 'Milestone ownership changed during mutation preparation.');
+      requireActive(project, 'project');
+    }
+    if (action === 'milestone.move') requireActive(requireNode(await repository.getProject(projectKey!), 'project', projectKey!), 'project');
+    return;
+  }
+  if (action.startsWith('task.')) {
+    const task = requireNode(await repository.getTask(taskKey!), 'task', taskKey!);
+    action === 'task.restore' || action === 'task.delete' ? requireArchived(task, 'task') : requireActive(task, 'task');
+    if (action !== 'task.archive' && action !== 'task.delete') {
+      const project = requireNode(await repository.getProject(task.projectKey), 'project', task.projectKey);
+      const milestone = requireNode(await repository.getMilestone(task.milestoneKey), 'milestone', task.milestoneKey);
+      if (task.scopeKey !== project.scopeKey || milestone.projectKey !== project.key || milestone.scopeKey !== project.scopeKey) throw new MomentumExecutionError('invalid_ownership', 'Task ownership changed during mutation preparation.');
+      requireActive(project, 'project'); requireActive(milestone, 'milestone');
+    }
+    if (action === 'task.move') {
+      const destinationProject = requireNode(await repository.getProject(projectKey!), 'project', projectKey!);
+      const destinationMilestone = requireNode(await repository.getMilestone(milestoneKey!), 'milestone', milestoneKey!);
+      if (destinationMilestone.projectKey !== destinationProject.key || destinationMilestone.scopeKey !== destinationProject.scopeKey) throw new MomentumExecutionError('invalid_ownership', 'Destination ownership changed during mutation preparation.');
+      requireActive(destinationProject, 'project'); requireActive(destinationMilestone, 'milestone');
+    }
+  }
+}
+
 async function safeAudit(audit: MomentumExecutionDependencies['audit'], action: MomentumActionSlug, data: MomentumAuditData): Promise<void> {
   try { await audit(action, data); }
   catch (error) { console.warn('Momentum audit event failed', { action, error: error instanceof Error ? error.message : String(error) }); }
@@ -162,6 +213,17 @@ async function executeBatch<T>(
   prepare: (item: any, index: number) => Promise<Prepared<T>>,
 ): Promise<MomentumToolResult> {
   if (input.atomic) {
+    const targetField = action.startsWith('project.') && action !== 'project.create' ? 'projectKey'
+      : action.startsWith('milestone.') && action !== 'milestone.create' ? 'milestoneKey'
+        : action.startsWith('task.') && action !== 'task.create' ? 'taskKey'
+          : null;
+    const targets = targetField ? input.items.map((item) => (item as Record<string, unknown>)[targetField] as string) : [];
+    if (new Set(targets).size !== targets.length) {
+      const error = new MomentumExecutionError('atomic_duplicate_target', 'An atomic batch may target each existing resource only once.');
+      const results = input.items.map((_, index) => failure(index, error));
+      for (let index = 0; index < results.length; index += 1) await safeAudit(audit, action, { ...safeKeys(input.items[index] as Record<string, unknown>), success: false });
+      return { action, results };
+    }
     const prepared: Prepared<T>[] = [];
     const preparationFailures: MomentumItemFailure[] = [];
     for (let index = 0; index < input.items.length; index += 1) {
@@ -179,8 +241,10 @@ async function executeBatch<T>(
     }
     try {
       const values = await repository.withAtomic(async (transaction) => {
+        const scopeKeys = prepared.flatMap((item) => item.scopeKeys ?? (item.keys.scopeKey ? [item.keys.scopeKey] : []));
+        if (!await transaction.areScopesActive(scopeKeys)) throw new MomentumExecutionError('scope_archived', 'A scope was archived before the transaction committed.');
         const output: T[] = [];
-        for (const item of prepared) output.push(await item.run(transaction));
+        for (const item of prepared) { await assertTransactionState(action, item, transaction); output.push(await item.run(transaction)); }
         return output;
       });
       const results = values.map((value, index): MomentumItemSuccess<T> => ({ index, success: true, value }));
@@ -200,7 +264,12 @@ async function executeBatch<T>(
     try {
       const prepared = await prepare(input.items[index], index);
       keys = prepared.keys;
-      const value = await repository.withAtomic((transaction) => prepared.run(transaction));
+      const value = await repository.withAtomic(async (transaction) => {
+        const scopeKeys = prepared.scopeKeys ?? (prepared.keys.scopeKey ? [prepared.keys.scopeKey] : []);
+        if (!await transaction.areScopesActive(scopeKeys)) throw new MomentumExecutionError('scope_archived', 'The scope was archived before the transaction committed.');
+        await assertTransactionState(action, prepared, transaction);
+        return prepared.run(transaction);
+      });
       outcome = { index, success: true, value };
     } catch (error) {
       outcome = failure(index, error);
@@ -264,17 +333,17 @@ export async function executeMomentumTool(
   const updateProject = async (source: MomentumRepository, project: Project, patch: Partial<Project>) => {
     const next = { ...project, ...patch };
     const semantic = Object.prototype.hasOwnProperty.call(patch, 'name') || Object.prototype.hasOwnProperty.call(patch, 'description');
-    return source.updateProject(project.key, { ...patch, embedding: semantic ? await embeddingFor(next) : project.embedding, updatedAt: now() });
+    return source.updateProject(project.key, { ...patch, embedding: semantic ? await embeddingFor(next) : project.embedding, updatedAt: now() }, project.updatedAt);
   };
   const updateMilestone = async (source: MomentumRepository, milestone: Milestone, patch: Partial<Milestone>) => {
     const next = { ...milestone, ...patch };
     const semantic = Object.prototype.hasOwnProperty.call(patch, 'name') || Object.prototype.hasOwnProperty.call(patch, 'description');
-    return source.updateMilestone(milestone.key, { ...patch, embedding: semantic ? await embeddingFor(next) : milestone.embedding, updatedAt: now() });
+    return source.updateMilestone(milestone.key, { ...patch, embedding: semantic ? await embeddingFor(next) : milestone.embedding, updatedAt: now() }, milestone.updatedAt);
   };
   const updateTask = async (source: MomentumRepository, task: Task, patch: Partial<Task>) => {
     const next = { ...task, ...patch };
     const semantic = Object.prototype.hasOwnProperty.call(patch, 'title') || Object.prototype.hasOwnProperty.call(patch, 'description');
-    return source.updateTask(task.key, { ...patch, embedding: semantic ? await embeddingFor(next) : task.embedding, updatedAt: now() });
+    return source.updateTask(task.key, { ...patch, embedding: semantic ? await embeddingFor(next) : task.embedding, updatedAt: now() }, task.updatedAt);
   };
   const updateFolder = async (source: MomentumRepository, project: Project, patch: Partial<Folder>) => source.updateArchiveFolder(project.archiveFolderKey, {
     ...patch,
@@ -320,7 +389,7 @@ export async function executeMomentumTool(
   if (action === 'project.move') return executeBatch(action, input, repository, audit, async (item) => {
     const project = await projectContext(item.projectKey);
     await authorize(item.scopeKey, WRITE_ROLES);
-    return { keys: { scopeKey: item.scopeKey, projectKey: project.key, archiveFolderKey: project.archiveFolderKey }, run: async (source) => {
+    return { keys: { scopeKey: item.scopeKey, projectKey: project.key, archiveFolderKey: project.archiveFolderKey }, scopeKeys: [project.scopeKey, item.scopeKey], run: async (source) => {
       const children = await projectChildren(project.key, source);
       const updated = await updateProject(source, project, { scopeKey: item.scopeKey });
       await updateFolder(source, project, { scopeKey: item.scopeKey });
@@ -390,7 +459,7 @@ export async function executeMomentumTool(
   if (action === 'milestone.move') return executeBatch(action, input, repository, audit, async (item) => {
     const { milestone, project: oldProject } = await milestoneContext(item.milestoneKey);
     const project = await projectContext(item.projectKey);
-    return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key }, run: async (source) => {
+    return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key }, scopeKeys: [oldProject.scopeKey, project.scopeKey], run: async (source) => {
       const tasks = await source.listTasks(oldProject.key, { milestoneKey: milestone.key, includeDeleted: true });
       const updated = await updateMilestone(source, milestone, { projectKey: project.key, scopeKey: project.scopeKey, ...(item.order === undefined ? {} : { order: item.order }) });
       for (const task of tasks) await updateTask(source, task, { projectKey: project.key, scopeKey: project.scopeKey });
@@ -446,7 +515,7 @@ export async function executeMomentumTool(
   if (action === 'task.move') return executeBatch(action, input, repository, audit, async (item) => {
     const { task } = await taskContext(item.taskKey);
     const { milestone, project } = await milestoneContext(item.milestoneKey);
-    return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, taskKey: task.key }, run: (source) => updateTask(source, task, { milestoneKey: milestone.key, projectKey: project.key, scopeKey: project.scopeKey, ...(item.position === undefined ? {} : { position: item.position }) }) };
+    return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, taskKey: task.key }, scopeKeys: [task.scopeKey, project.scopeKey], run: (source) => updateTask(source, task, { milestoneKey: milestone.key, projectKey: project.key, scopeKey: project.scopeKey, ...(item.position === undefined ? {} : { position: item.position }) }) };
   });
   if (action === 'task.archive' || action === 'task.restore') return executeBatch(action, input, repository, audit, async (item) => {
     const restoring = action === 'task.restore';
@@ -468,7 +537,7 @@ export async function executeMomentumTool(
     if (!text) throw new MomentumExecutionError('empty_reason_result', 'Reasoning returned empty text.');
     const preparedEmbedding = item.persist ? await embeddingFor({ ...task, description: text }) : null;
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, taskKey: task.key }, run: async (source) => {
-      if (item.persist) await source.updateTask(task.key, { description: text, embedding: preparedEmbedding!, updatedAt: now() });
+      if (item.persist) await source.updateTask(task.key, { description: text, embedding: preparedEmbedding!, updatedAt: now() }, task.updatedAt);
       return { taskKey: task.key, text, persisted: item.persist };
     } };
   });

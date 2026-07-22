@@ -20,9 +20,12 @@ function memoryRepository() {
   let milestones = new Map<string, Milestone>();
   let tasks = new Map<string, Task>();
   let folders = new Map<string, Folder>();
-  const update = <T extends { key: string }>(map: Map<string, T>, key: string, patch: Partial<T>) => {
+  let transactionScopesActive = true;
+  let beforeAtomic: (() => void) | null = null;
+  const update = <T extends { key: string; updatedAt?: string }>(map: Map<string, T>, key: string, patch: Partial<T>, expectedUpdatedAt?: string) => {
     const current = map.get(key);
     if (!current) throw new Error(`missing ${key}`);
+    if (expectedUpdatedAt !== undefined && current.updatedAt !== expectedUpdatedAt) throw new Error(`concurrent update ${key}`);
     const next = { ...current, ...patch } as T;
     for (const [field, value] of Object.entries(next)) if (value === undefined) delete (next as Record<string, unknown>)[field];
     map.set(key, next);
@@ -31,31 +34,33 @@ function memoryRepository() {
   const repository: MomentumRepository = {
     async createProject(value) { if (projects.has(value.key)) throw new Error('duplicate project'); projects.set(value.key, structuredClone(value)); return value; },
     async getProject(key) { return structuredClone(projects.get(key) ?? null); },
-    async updateProject(key, patch: ProjectUpdate) { return structuredClone(update(projects, key, patch)); },
+    async updateProject(key, patch: ProjectUpdate, expectedUpdatedAt) { return structuredClone(update(projects, key, patch, expectedUpdatedAt)); },
     async deleteProject(key) { projects.delete(key); },
     async listProjects(owner, options) { return [...projects.values()].filter((item) => item.scopeKey === owner && (options?.includeDeleted || item.deletedAt === null)).map((item) => structuredClone(item)); },
     async listAllProjects(options) { return [...projects.values()].filter((item) => options?.includeDeleted || item.deletedAt === null).map((item) => structuredClone(item)); },
     async listProjectsByScopes(scopeKeys, options) { const allowed = new Set(scopeKeys); return [...projects.values()].filter((item) => allowed.has(item.scopeKey) && (options?.includeDeleted || item.deletedAt === null)).map((item) => structuredClone(item)); },
     async createMilestone(value) { milestones.set(value.key, structuredClone(value)); return value; },
     async getMilestone(key) { return structuredClone(milestones.get(key) ?? null); },
-    async updateMilestone(key, patch: MilestoneUpdate) { return structuredClone(update(milestones, key, patch)); },
+    async updateMilestone(key, patch: MilestoneUpdate, expectedUpdatedAt) { return structuredClone(update(milestones, key, patch, expectedUpdatedAt)); },
     async deleteMilestone(key) { milestones.delete(key); },
     async listMilestones(owner, options) { return [...milestones.values()].filter((item) => item.projectKey === owner && (options?.includeDeleted || item.deletedAt === null)).map((item) => structuredClone(item)); },
     async createTask(value) { tasks.set(value.key, structuredClone(value)); return value; },
     async getTask(key) { return structuredClone(tasks.get(key) ?? null); },
-    async updateTask(key, patch: TaskUpdate) { return structuredClone(update(tasks, key, patch)); },
+    async updateTask(key, patch: TaskUpdate, expectedUpdatedAt) { return structuredClone(update(tasks, key, patch, expectedUpdatedAt)); },
     async deleteTask(key) { tasks.delete(key); },
     async listTasks(owner, options) { return [...tasks.values()].filter((item) => item.projectKey === owner && (!options?.milestoneKey || item.milestoneKey === options.milestoneKey) && (options?.includeDeleted || item.deletedAt === null)).map((item) => structuredClone(item)); },
     async createArchiveFolder(value) { if (folders.has(value.key)) throw new Error('duplicate folder'); folders.set(value.key, structuredClone(value)); return value; },
     async updateArchiveFolder(key, patch) { return structuredClone(update(folders, key, patch)); },
     async deleteArchiveFolder(key) { folders.delete(key); },
+    async areScopesActive() { return transactionScopesActive; },
     async withAtomic(operation) {
+      beforeAtomic?.(); beforeAtomic = null;
       const snapshots = [projects, milestones, tasks, folders].map((map) => structuredClone(map));
       try { return await operation(repository); }
       catch (error) { [projects, milestones, tasks, folders] = snapshots as [Map<string, Project>, Map<string, Milestone>, Map<string, Task>, Map<string, Folder>]; throw error; }
     },
   };
-  return { repository, get projects() { return projects; }, get milestones() { return milestones; }, get tasks() { return tasks; }, get folders() { return folders; } };
+  return { repository, setTransactionScopesActive(value: boolean) { transactionScopesActive = value; }, setBeforeAtomic(value: () => void) { beforeAtomic = value; }, get projects() { return projects; }, get milestones() { return milestones; }, get tasks() { return tasks; }, get folders() { return folders; } };
 }
 
 function harness(deniedScope?: string) {
@@ -73,6 +78,8 @@ function harness(deniedScope?: string) {
   });
   return {
     repository: memory.repository,
+    setTransactionScopesActive: memory.setTransactionScopesActive,
+    setBeforeAtomic: memory.setBeforeAtomic,
     audits,
     execute,
     get projects() { return memory.projects; },
@@ -240,6 +247,16 @@ describe('Task tools', () => {
     expect(context.tasks.get(task.key)?.description).toBe('rewrite:Be concise');
     expect((rewrite.results![0] as { success: true; value: { persisted: boolean } }).value.persisted).toBe(true);
   });
+
+  test('does not persist AI output over a task changed during reasoning', async () => {
+    const context = harness();
+    const { task } = await createHierarchy(context);
+    context.setBeforeAtomic(() => { context.tasks.set(task.key, { ...context.tasks.get(task.key)!, title: 'Concurrent title', updatedAt: '2026-07-22T00:00:01.000Z' }); });
+    const result = await context.execute('task.rewrite', { items: [{ taskKey: task.key, instruction: 'Be concise', persist: true }] });
+    expect(result.results![0]).toMatchObject({ success: false });
+    expect(context.tasks.get(task.key)).toMatchObject({ title: 'Concurrent title' });
+    expect(context.tasks.get(task.key)).not.toHaveProperty('description');
+  });
 });
 
 describe('Batch, authorization, search, and domain envelope', () => {
@@ -254,6 +271,30 @@ describe('Batch, authorization, search, and domain envelope', () => {
     expect(deniedAtomic.results!.every(({ success }) => !success)).toBe(true);
     expect([...denied.projects.values()].some(({ name }) => name === 'Atomic')).toBe(false);
     expect(denied.audits.length).toBeGreaterThan(0);
+  });
+
+  test('rejects duplicate atomic targets and scopes archived at the transaction boundary', async () => {
+    const context = harness();
+    const { project } = await createHierarchy(context);
+    const duplicate = await context.execute('project.update', { items: [{ projectKey: project.key, name: 'First' }, { projectKey: project.key, description: 'Second' }], atomic: true });
+    expect(duplicate.results!.every(({ success }) => !success)).toBe(true);
+    expect((duplicate.results![0] as { success: false; error: { code: string } }).error.code).toBe('atomic_duplicate_target');
+    expect(context.projects.get(project.key)).toMatchObject({ name: 'Apollo', description: 'Moon delivery' });
+
+    context.setTransactionScopesActive(false);
+    const archivedRace = await context.execute('project.rename', { items: [{ projectKey: project.key, name: 'Blocked' }], atomic: true });
+    expect(archivedRace.results![0]).toMatchObject({ success: false, error: { code: 'scope_archived' } });
+    expect(context.projects.get(project.key)?.name).toBe('Apollo');
+  });
+
+  test('revalidates hierarchy lifecycle state after the transaction lock is acquired', async () => {
+    const context = harness();
+    const { project, milestone } = await createHierarchy(context);
+    context.setBeforeAtomic(() => { context.projects.set(project.key, { ...context.projects.get(project.key)!, deletedAt: timestamp }); });
+    const result = await context.execute('task.create', { items: [{ milestoneKey: milestone.key, title: 'Too late' }], atomic: true });
+    expect(result.results![0]).toMatchObject({ success: false, error: { code: 'project_archived' } });
+    expect([...context.tasks.values()].some(({ title }) => title === 'Too late')).toBe(false);
+    expect(context.projects.get(project.key)?.deletedAt).toBe(timestamp);
   });
 
   test('ranks semantic results, filters multiple sources, and enforces scope authorization', async () => {

@@ -55,10 +55,10 @@ async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'document
     : resource === 'documents'
       ? 'LET parent = DOCUMENT("folders", node.folderKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)'
       : 'LET parent = DOCUMENT("documents", node.documentKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)';
-  return withTransaction([resource, ...parentCollections, 'events'], async (transaction) => {
+  return withTransaction([resource, ...parentCollections, 'events', 'scopes'], async (transaction) => {
     const cursor = await transaction.query<Record<string, unknown>>(
-      `FOR node IN @@collection FILTER node._key IN @keys FILTER @restoring ? node.deletedAt != null : node.deletedAt == null ${guard} UPDATE node WITH { deletedAt: @deletedAt, updatedAt: @timestamp } IN @@collection RETURN NEW`,
-      { keys, deletedAt, timestamp, restoring: deletedAt === null, '@collection': resource },
+      `FOR node IN @@collection FILTER node._key IN @keys FILTER @restoring ? node.deletedAt != null : node.deletedAt == null LET scope = DOCUMENT("scopes", node.scopeKey) FILTER scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null ${guard} UPDATE node WITH { deletedAt: @deletedAt, updatedAt: @timestamp } IN @@collection RETURN NEW`,
+      { keys, deletedAt, timestamp, restoring: deletedAt === null, organizationKey: context.organizationKey, '@collection': resource },
     );
     const values = (await cursor.all()).map((node) => schema.parse(withArangoKey(node)) as ArchiveNode);
     if (values.length !== keys.length) throw new ArchiveLifecycleError('archive_state_changed', 'Archive lifecycle state changed before the transaction committed.');
