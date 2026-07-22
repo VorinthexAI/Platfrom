@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { listAllProducts } from '@/lib/db/products.node';
-import { getUserById } from '@/lib/db/users.node';
+import { countryCodeSchema, getUserById } from '@/lib/db/users.node';
 import {
   completeTotpSetup,
   buildOAuthAuthorizationUrl,
@@ -76,13 +76,13 @@ const oauthProviderSchema = z.enum(['google', 'apple']);
 
 export function registerRoutes(app: Hono) {
   app.post('/auth/signup', async (c) => {
-    const body = await parseJson(c, strictObject({ email: emailSchema, name: z.string().optional(), profile_url: z.string().url().optional() }));
+    const body = await parseJson(c, strictObject({ email: emailSchema, name: z.string().optional(), profile_url: z.string().url().optional(), country_code: countryCodeSchema.optional() }));
     return c.json(await createUserWithAuth(body), 201);
   });
 
   app.post('/auth/login', async (c) => {
-    const body = await parseJson(c, emailBody);
-    const result = await requestSignInEmail(body.email);
+    const body = await parseJson(c, emailBody.extend({ country_code: countryCodeSchema.optional() }));
+    const result = await requestSignInEmail(body.email, body.country_code);
     if (!result.allowed) {
       if ('foundersGateRequired' in result) {
         return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
@@ -325,8 +325,9 @@ export function registerRoutes(app: Hono) {
       explorer_id: z.string().min(8).max(80).optional(),
       distinct_id: z.string().min(8).max(80).optional(),
       temp_email_hash: tempEmailHash.optional(),
+      country_code: countryCodeSchema.optional(),
     }));
-    const result = await requestWaitlistVerification(body.email, body.explorer_id, body.distinct_id, body.temp_email_hash);
+    const result = await requestWaitlistVerification(body.email, body.explorer_id, body.distinct_id, body.temp_email_hash, undefined, body.country_code);
     const { waitlistNumber, aliasSlug, ...rest } = result;
     return c.json({ ...rest, alias_slug: aliasSlug, waitlist_number: waitlistNumber }, 201);
   });

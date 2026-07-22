@@ -12,9 +12,10 @@ import { base32 } from '@otplib/plugin-base32-scure';
 import { crypto as otpCrypto } from '@otplib/plugin-crypto-noble';
 import { generateSecret, generateURI } from 'otplib';
 import QRCode from 'qrcode';
+import { z } from 'zod';
 import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
-import { getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
+import { countryCodeSchema, getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
 import { getOrganizationById } from '@/lib/db/organizations.node';
 import { getOrchestratorById } from '@/lib/db/orchestrators.node';
 import {
@@ -716,7 +717,7 @@ async function deliverMfaResetEmail(input: { email: string; name: string; magicL
   });
 }
 
-export async function requestSignInEmail(email: string) {
+export async function requestSignInEmail(email: string, countryCode?: z.infer<typeof countryCodeSchema>) {
   const normalized = normalizeEmail(email);
   const identity = await findLoginIdentityByEmail(normalized);
   if (identity) {
@@ -798,6 +799,7 @@ export async function requestSignInEmail(email: string) {
   const user = existingUser ?? await upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
     profileUrl: null,
+    ...(countryCode ? { countryCode } : {}),
   });
 
   const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true });
@@ -935,11 +937,12 @@ export async function validateMagicLink(token: string, explorerId?: string): Pro
   };
 }
 
-export async function createUserWithAuth(input: { email: string; name?: string; profile_url?: string }) {
+export async function createUserWithAuth(input: { email: string; name?: string; profile_url?: string; country_code?: z.infer<typeof countryCodeSchema> }) {
   const normalized = normalizeEmail(input.email);
   const user = await upsertUserByEmail(normalized, {
     name: input.name ?? defaultNameFromEmail(normalized),
     profileUrl: input.profile_url ?? null,
+    ...(input.country_code ? { countryCode: input.country_code } : {}),
   });
   return { userId: user.key };
 }
