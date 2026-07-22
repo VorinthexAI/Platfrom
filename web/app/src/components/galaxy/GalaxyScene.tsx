@@ -89,7 +89,7 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
 
   return (
     <Canvas
-      frameloop={hidden || reducedMotion ? "never" : "always"}
+      frameloop={hidden ? "never" : reducedMotion ? "demand" : "always"}
       // Keep one WebGL pixel per CSS pixel without paying for full Retina DPR.
       dpr={1}
       camera={{ position: [0, 6.5, 15.5], fov: 42, near: 0.1, far: 320 }}
@@ -124,14 +124,12 @@ export default function GalaxyScene({ reducedMotion }: GalaxySceneProps) {
             {product.key === "core" ? (
               <OrbitingEntities
                 entities={coreCapabilityEntities}
-                revealForFocus="core"
                 paused={paused}
                 onSelect={selectChild}
               />
             ) : product.key === "command" ? (
               <OrbitingEntities
                 entities={commandOrchestratorEntities}
-                revealForFocus="command"
                 paused={paused}
                 onSelect={selectChild}
               />
