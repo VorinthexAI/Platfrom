@@ -666,6 +666,14 @@ async function main() {
     if (!spec.skipEmbedding) await backfillCollectionEmbeddings(targetDb, spec);
   }
 
+  // Existing users predate country tracking. Sweden is the historical fallback;
+  // new web signups provide their detected code.
+  await targetDb.query(`
+    FOR user IN users
+      FILTER !HAS(user, "countryCode") || user.countryCode == null || user.countryCode == ""
+      UPDATE user WITH { countryCode: "SE" } IN users
+  `);
+
   // Every pre-relation agent is linked to its existing home scope. Existing
   // scope memberships become inherited grants, preserving current access
   // while making the new runtime checks authoritative on the next deploy.

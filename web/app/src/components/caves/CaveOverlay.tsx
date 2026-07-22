@@ -29,6 +29,7 @@ import { formatFragments } from "@/lib/format";
 import { useFragmentsStore } from "@/lib/fragments/fragments-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import { caveLootIdentity, syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
+import { getClientCountryCode } from "@/lib/auth/country-code";
 import { galaxyPulseLine } from "@/lib/leaderboard/copy";
 import { useLeaderboardStore } from "@/lib/leaderboard/leaderboard-store";
 import {
@@ -990,11 +991,13 @@ function ExplorerSigninFlow() {
     setStatus("submitting");
     setError("");
     try {
+      const countryCode = await getClientCountryCode();
       const response = await fetch("/api/signin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: normalizedEmail,
+          ...(countryCode ? { countryCode } : {}),
           // The carried treasure is stored against this email right away,
           // so the fragment survives even an abandoned magic link.
           ...(pendingCollect ? { collectibleId: pendingCollect.id } : {}),

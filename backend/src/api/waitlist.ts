@@ -4,7 +4,8 @@ import {
   insertAuthChallenge,
   updateAuthChallenge,
 } from '@/lib/db/auth-challenges.node';
-import { getUserByEmailHash, updateUser, type User } from '@/lib/db/users.node';
+import { countryCodeSchema, getUserByEmailHash, updateUser, type User } from '@/lib/db/users.node';
+import { z } from 'zod';
 import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
@@ -143,6 +144,7 @@ export async function requestWaitlistVerification(
   distinctId?: string,
   tempEmailHash?: string,
   deps: WaitlistVerificationDeps = defaultWaitlistDeps,
+  countryCode?: z.infer<typeof countryCodeSchema>,
 ) {
   const normalized = normalizeWaitlistEmail(email);
   // Whoever already has an account is signing in, not joining — decided
@@ -151,6 +153,7 @@ export async function requestWaitlistVerification(
   const entry = await deps.upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
     is_subscribed_to_updates: true,
+    ...(countryCode ? { countryCode } : {}),
   }, { distinctId: distinctId ?? null });
   if (explorerId) {
     await deps.adoptExplorerFragments(explorerId, entry.key);

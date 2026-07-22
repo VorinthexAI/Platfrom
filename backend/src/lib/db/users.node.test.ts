@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { userSchema } from './users.node';
+import { countryCodeSchema, userSchema } from './users.node';
 
 const baseUser = {
   key: 'usr_test',
@@ -11,6 +11,12 @@ const baseUser = {
 };
 
 describe('user node schema', () => {
+  test('accepts ISO alpha-2 country codes and rejects arbitrary values', () => {
+    expect(countryCodeSchema.parse('SE')).toBe('SE');
+    expect(() => countryCodeSchema.parse('SWE')).toThrow();
+    expect(() => countryCodeSchema.parse('ZZ')).toThrow();
+  });
+
   test('keeps organization role and MFA fields off ordinary users', () => {
     const user = userSchema.parse(baseUser);
 
