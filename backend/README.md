@@ -20,6 +20,8 @@ You can still run pieces manually with `bun run dev:infra`, `bun run db:migrate:
 Docker Desktop or another ArangoDB/Redis environment must be running for migrations and DB-backed tests.
 Mailpit is included in the dev infra at `localhost:8025` with SMTP on `localhost:1025`.
 
+Run the live Archive release gate with `bun run test:e2e:archive`. It starts the required Compose services without stopping existing containers, waits on their host HTTP/TCP endpoints, recreates only the default isolated `vorinthex_archive_e2e` database, migrates it, and runs the gated test. Environment variables supplied by CI override all isolated defaults; no env file is written.
+
 ## Production
 
 Production deploys are defined in `.github/workflows/deploy.yml` and `deploy/`. The app role runs blue-green behind Caddy from `deploy/docker-compose.app.yml`; the render role runs as an ECS/Fargate service updated by task-definition revision. See `deploy/PROD-CHECKLIST.md` for required GitHub secrets, AWS SSM parameters, and deployment behavior.

@@ -62,6 +62,7 @@ import {
   updateSystemOrchestrator,
   upsertCurrentMind,
 } from './system';
+import { invokeArchiveTool } from './archive-tools';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tempEmailHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -436,6 +437,7 @@ export function registerRoutes(app: Hono) {
   app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
 
   app.post('/orchestrators/chat', postOrchestratorChat);
+  app.post('/archive/tools/:tool', invokeArchiveTool);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);

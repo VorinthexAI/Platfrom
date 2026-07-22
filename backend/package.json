@@ -17,6 +17,7 @@
     "nodes": "bun run scripts/nodes.ts",
     "check": "tsc --noEmit",
     "test": "bun test --pass-with-no-tests",
+    "test:e2e:archive": "bun run scripts/archive-e2e.ts",
     "db:migrate": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",
     "db:migrate:dev": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",
     "db:migrate:ci": "bun run src/db/arango-migrate.ts",
