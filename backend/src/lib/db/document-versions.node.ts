@@ -12,6 +12,7 @@ export const documentVersionSchema = z.object({
   sizeBytes: z.number().int().nonnegative(),
   content: z.string(),
   embedding: z.array(z.number().finite()).default([]),
+  deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -26,3 +27,13 @@ export const deleteDocumentVersion = helpers.deleteById;
 export const upsertDocumentVersionByKey = helpers.upsertByKey;
 export const getAllDocumentVersionsChunked = helpers.getAllChunked;
 export const listDocumentVersionsPage = helpers.listPage;
+
+export async function archiveDocumentVersion(key: string): Promise<DocumentVersion> {
+  const timestamp = new Date().toISOString();
+  return updateDocumentVersion(key, { deletedAt: timestamp, updatedAt: timestamp });
+}
+
+export async function restoreDocumentVersion(key: string): Promise<DocumentVersion> {
+  const timestamp = new Date().toISOString();
+  return updateDocumentVersion(key, { deletedAt: null, updatedAt: timestamp });
+}

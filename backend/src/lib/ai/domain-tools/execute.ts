@@ -7,6 +7,13 @@ import { getDefaultArtifactService } from '@/lib/artifacts/service';
 import { recordRuntimeEvent, type RuntimeEventRecorder } from '@/platform/events';
 import { domainToolInputSchemas, domainToolResultSchema, type DomainActionSlug, type DomainToolResult } from './schemas';
 import { executeAccessDomainTool, syncOrganizationAgentMembers } from './execute-access-domains';
+import { executeArchiveLifecycleTool, type ArchiveExecutionDependencies } from './execute-archive';
+import { isArchiveAction } from './archive-schemas';
+import { executeMomentumTool, type MomentumExecutionDependencies, type MomentumReasonInput } from '@/lib/ai/momentum';
+import { isMomentumAction } from '@/lib/ai/momentum/tool-schemas';
+import { coreChatInputSchema } from '@/lib/ai/actions';
+import { executeAction } from '@/lib/ai/router';
+import type { ChatOutput } from '@/lib/ai/providers';
 
 type RecordDoc = Record<string, unknown>;
 type MemberRow = { membership: RecordDoc; user: RecordDoc };
@@ -32,6 +39,9 @@ export interface DomainToolExecutionOptions {
   artifacts?: ArtifactCreator;
   domainEvents?: (context: DomainToolContext, action: DomainActionSlug, data: Record<string, unknown>) => Promise<void>;
   runtimeEvents?: RuntimeEventRecorder;
+  momentum?: Partial<Omit<MomentumExecutionDependencies, 'authorize' | 'audit'>>;
+  archive?: Partial<Omit<ArchiveExecutionDependencies, 'authorize' | 'emit'>>;
+  authorizeScope?: (scopeKey: string, roles: readonly string[]) => Promise<void>;
 }
 
 function memberPrincipal(context: DomainToolContext) {
@@ -112,6 +122,12 @@ function resolveScopes(graph: Awaited<ReturnType<typeof listScopeGraph>>, refere
 
 async function effectiveScopeRole(context: DomainToolContext, scopeKey: string) {
   const principal = memberPrincipal(context);
+  if (scopeKey !== context.runtimeScopeKey) {
+    const scopeCursor = await db.query<{ organizationKey: string; deletedAt: string | null }>('FOR scope IN scopes FILTER scope._key == @scopeKey LIMIT 1 RETURN { organizationKey: scope.organizationKey, deletedAt: scope.deletedAt }', { scopeKey });
+    const scope = await scopeCursor.next();
+    if (!scope || scope.organizationKey !== context.organizationKey) throw new DomainToolExecutionError('scope_forbidden', 'The scope does not belong to the active organization');
+    if (scope.deletedAt !== null) throw new DomainToolExecutionError('scope_archived', 'Archived scopes cannot be mutated or searched');
+  }
   if (principal.userOrganization.orgRole === 'owner') return 'owner' as const;
   if (principal.userOrganization.orgRole === 'admin') return 'admin' as const;
   const cursor = await db.query<{ members: Array<{ scopeKey: string; role: 'owner' | 'admin' | 'moderator' | 'viewer' }>; relations: Array<{ parentKey: string; childKey: string }> }>('RETURN { members: (FOR member IN scopeMembers FILTER member.userOrganizationKey == @membershipKey && member.status == "active" RETURN { scopeKey: member.scopeKey, role: member.role }), relations: (FOR relation IN scopeScopes FILTER relation.deletedAt == null RETURN { parentKey: relation.parentKey, childKey: relation.childKey }) }', { membershipKey: principal.userOrganization.key });
@@ -137,6 +153,44 @@ function result(action: DomainActionSlug, data: unknown, status: 'completed' | '
 export async function executeDomainTool(action: DomainActionSlug, rawInput: unknown, context: DomainToolContext, options: DomainToolExecutionOptions = {}): Promise<DomainToolResult> {
   const input = domainToolInputSchemas[action].parse(rawInput) as any;
   const principal = memberPrincipal(context);
+  const emit = options.domainEvents ?? emitDomainEvent;
+  const authorizeScope = options.authorizeScope ?? (async (scopeKey: string, roles: readonly string[]) => { await assertScopeRole(context, scopeKey, roles); });
+  if (isArchiveAction(action)) {
+    const data = await executeArchiveLifecycleTool(action, input, { ...context, userKey: principal.user.key }, {
+      ...options.archive,
+      authorize: authorizeScope,
+      emit: (eventAction, eventData) => emit(context, eventAction, eventData),
+    });
+    return result(action, data);
+  }
+  if (isMomentumAction(action)) {
+    const defaultReason = async (reasonInput: MomentumReasonInput) => {
+      const prompt = reasonInput.action === 'summarize'
+        ? `Summarize this task concisely.\n\nTitle: ${reasonInput.task.title}\n\n${reasonInput.task.description ?? ''}`
+        : reasonInput.action === 'translate'
+          ? `Translate this task into ${reasonInput.language}. Preserve meaning.\n\nTitle: ${reasonInput.task.title}\n\n${reasonInput.task.description ?? ''}`
+          : `Rewrite this task according to: ${reasonInput.instruction}\n\nTitle: ${reasonInput.task.title}\n\n${reasonInput.task.description ?? ''}`;
+      const response = await executeAction<ReturnType<typeof coreChatInputSchema.parse>, ChatOutput>(
+        { mode: 'auto', organizationKey: context.organizationKey, actionSlug: 'reason' },
+        coreChatInputSchema.parse({ systemPrompt: 'Return only the requested task text.', messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }] }),
+      );
+      return response.output.text;
+    };
+    const data = await executeMomentumTool(action, input, {
+      repository: options.momentum?.repository,
+      createKey: options.momentum?.createKey,
+      now: options.momentum?.now,
+      generateEmbedding: options.momentum?.generateEmbedding,
+      reason: options.momentum?.reason ?? defaultReason,
+      organizationScopeKeys: options.momentum?.organizationScopeKeys ?? (async () => {
+        const cursor = await db.query<{ key: string }>('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN { key: scope._key }', { organizationKey: context.organizationKey });
+        return (await cursor.all()).map(({ key }) => key);
+      }),
+      authorize: authorizeScope,
+      audit: (eventAction, eventData) => emit(context, eventAction, eventData as Record<string, unknown>),
+    });
+    return result(action, data);
+  }
   if (action.startsWith('scope.member.') || action.startsWith('scope.agent.') || action.startsWith('agent.member.') || action.startsWith('organization.provider.') || /^organization\.(read|update|archive|restore)$/.test(action) || action.startsWith('access.')) return executeAccessDomainTool(action, input, context);
 
   if (action === 'artifact.create') {

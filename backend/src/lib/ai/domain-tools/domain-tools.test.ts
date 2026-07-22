@@ -58,7 +58,7 @@ function fixture() {
 
 describe('domain tool schemas', () => {
   test('registers strict input schemas for every local domain action', () => {
-    expect(DOMAIN_ACTION_SLUGS).toHaveLength(51);
+    expect(DOMAIN_ACTION_SLUGS).toHaveLength(99);
     expect(domainToolJsonSchemas['artifact.create']).toMatchObject({ type: 'object', required: ['name', 'definition'], properties: { definition: { type: 'object' } } });
     expect(domainToolInputSchemas['artifact.create'].parse({ name: 'Organization', definition: organizationArtifactDefinition })).toMatchObject({ name: 'Organization', definition: { root: 'organization' } });
     expect(() => domainToolInputSchemas['artifact.create'].parse({ name: 'Organization', definition: organizationArtifactDefinition, organizationKey: newId() })).toThrow();
