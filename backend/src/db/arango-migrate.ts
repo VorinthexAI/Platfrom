@@ -16,6 +16,7 @@ import { ensureAgentMemoriesCollection } from '../lib/ai/agent-memories/indexes'
 import { ensureAgentRunSourcesCollection } from '../lib/ai/agent-run-sources/indexes';
 import { ensureAgentArtifactChecksCollection } from '../lib/ai/agent-artifact-checks/indexes';
 import { ensureRuntimeVariablesCollection } from '../lib/ai/runtime-variables/indexes';
+import { ensureChorusCollections } from '../lib/ai/chorus/indexes';
 import { organizationProviderSchema } from '../lib/ai/organization-providers/schema';
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
@@ -1052,6 +1053,7 @@ async function main() {
   await ensureAgentArtifactChecksCollection(targetDb);
   await ensureRuntimeVariablesCollection(targetDb);
   await ensureAgentMemoriesCollection(targetDb);
+  await ensureChorusCollections(targetDb);
 
 
   // Legacy scratch collection the org-migration steps below write into
