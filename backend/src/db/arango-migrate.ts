@@ -313,7 +313,7 @@ const collections: CollectionSpec[] = [
   { name: 'messageMentions', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['participantKey', 'handledAt'] }, { fields: ['messageKey', 'participantKey'], unique: true }] },
   { name: 'messageReactions', embedKeys: ['reaction'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['reaction'] }, { fields: ['messageKey', 'reaction'] }, { fields: ['messageKey', 'participantKey', 'reaction'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['parentFolderKey'], sparse: true }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
-  { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['folderKey'] }, { fields: ['storageKey'], unique: true }, { fields: ['folderKey', 'name'] }] },
+  { name: 'documents', embedKeys: ['content'], indexes: [{ fields: ['extension'] }, { fields: ['mimeType'] }] },
   { name: 'documentVersions', embedKeys: ['content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['documentKey'] }, { fields: ['documentKey', 'version'], unique: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'documentShares', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['documentKey'] }, { fields: ['token'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
@@ -614,6 +614,19 @@ async function main() {
             createdAt: null,
             updatedAt: null
           } IN agents OPTIONS { keepNull: false }
+      `);
+    }
+    if (spec.name === 'documents') {
+      await targetDb.query(`
+        FOR document IN documents
+          UPDATE document WITH {
+            html: HAS(document, "html") ? document.html : document.content,
+            json: HAS(document, "json") ? document.json : {},
+            scopeKey: null,
+            folderKey: null,
+            storageKey: null,
+            sizeBytes: null
+          } IN documents OPTIONS { keepNull: false }
       `);
     }
     const legacyIndexes = LEGACY_INDEX_FIELDS[spec.name] ?? [];
