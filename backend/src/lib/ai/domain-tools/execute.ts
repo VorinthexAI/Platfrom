@@ -126,7 +126,6 @@ async function effectiveScopeRole(context: DomainToolContext, scopeKey: string) 
     const scopeCursor = await db.query<{ organizationKey: string; deletedAt: string | null }>('FOR scope IN scopes FILTER scope._key == @scopeKey LIMIT 1 RETURN { organizationKey: scope.organizationKey, deletedAt: scope.deletedAt }', { scopeKey });
     const scope = await scopeCursor.next();
     if (!scope || scope.organizationKey !== context.organizationKey) throw new DomainToolExecutionError('scope_forbidden', 'The scope does not belong to the active organization');
-    if (scope.deletedAt !== null) throw new DomainToolExecutionError('scope_archived', 'Archived scopes cannot be mutated or searched');
   }
   if (principal.userOrganization.orgRole === 'owner') return 'owner' as const;
   if (principal.userOrganization.orgRole === 'admin') return 'admin' as const;
@@ -139,6 +138,14 @@ async function assertScopeRole(context: DomainToolContext, scopeKey: string, all
   const role = await effectiveScopeRole(context, scopeKey);
   if (!role || !allowed.includes(role)) throw new DomainToolExecutionError('scope_forbidden', `Role ${role ?? 'none'} may not perform this operation`);
   return role;
+}
+
+async function assertOperationalScope(context: DomainToolContext, scopeKey: string, allowed: readonly string[]) {
+  await assertScopeRole(context, scopeKey, allowed);
+  const scopeCursor = await db.query<{ organizationKey: string; deletedAt: string | null }>('FOR scope IN scopes FILTER scope._key == @scopeKey LIMIT 1 RETURN { organizationKey: scope.organizationKey, deletedAt: scope.deletedAt }', { scopeKey });
+  const scope = await scopeCursor.next();
+  if (!scope || scope.organizationKey !== context.organizationKey) throw new DomainToolExecutionError('scope_forbidden', 'The scope does not belong to the active organization');
+  if (scope.deletedAt !== null) throw new DomainToolExecutionError('scope_archived', 'Archived scopes cannot be mutated or searched');
 }
 
 async function emitDomainEvent(context: DomainToolContext, action: DomainActionSlug, data: Record<string, unknown>) {
@@ -154,7 +161,7 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
   const input = domainToolInputSchemas[action].parse(rawInput) as any;
   const principal = memberPrincipal(context);
   const emit = options.domainEvents ?? emitDomainEvent;
-  const authorizeScope = options.authorizeScope ?? (async (scopeKey: string, roles: readonly string[]) => { await assertScopeRole(context, scopeKey, roles); });
+  const authorizeScope = options.authorizeScope ?? (async (scopeKey: string, roles: readonly string[]) => { await assertOperationalScope(context, scopeKey, roles); });
   if (isArchiveAction(action)) {
     const data = await executeArchiveLifecycleTool(action, input, { ...context, userKey: principal.user.key }, {
       ...options.archive,
@@ -183,7 +190,7 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
       generateEmbedding: options.momentum?.generateEmbedding,
       reason: options.momentum?.reason ?? defaultReason,
       organizationScopeKeys: options.momentum?.organizationScopeKeys ?? (async () => {
-        const cursor = await db.query<{ key: string }>('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey RETURN { key: scope._key }', { organizationKey: context.organizationKey });
+        const cursor = await db.query<{ key: string }>('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey && scope.deletedAt == null RETURN { key: scope._key }', { organizationKey: context.organizationKey });
         return (await cursor.all()).map(({ key }) => key);
       }),
       authorize: authorizeScope,
