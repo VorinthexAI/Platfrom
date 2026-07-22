@@ -10,7 +10,7 @@ export {
 };
 export type { Channel, ChannelParticipant, Thread, Message, MessageMention, MessageReaction };
 
-export const chorusEmbeddingFields = {
+export const communicationEmbeddingFields = {
   channels: channelsEmbeddingFields,
   channelParticipants: channelParticipantsEmbeddingFields,
   threads: threadsEmbeddingFields,
