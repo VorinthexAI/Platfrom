@@ -35,6 +35,10 @@ import { getAllThreadsChunked, listThreadsPage, upsertThreadByKey } from './thre
 import { getAllMessagesChunked, listMessagesPage, upsertMessageByKey } from './messages.node';
 import { getAllMessageMentionsChunked, listMessageMentionsPage, upsertMessageMentionByKey } from './message-mentions.node';
 import { getAllMessageReactionsChunked, listMessageReactionsPage, upsertMessageReactionByKey } from './message-reactions.node';
+import { getAllFoldersChunked, listFoldersPage, upsertFolderByKey } from './folders.node';
+import { getAllDocumentsChunked, listDocumentsPage, upsertDocumentByKey } from './documents.node';
+import { getAllDocumentVersionsChunked, listDocumentVersionsPage, upsertDocumentVersionByKey } from './document-versions.node';
+import { getAllDocumentSharesChunked, listDocumentSharesPage, upsertDocumentShareByKey } from './document-shares.node';
 
 export interface NodeAccessors {
   /** One resumable page — for stateless HTTP pagination (GET /api/v1/nodes). */
@@ -70,6 +74,10 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   messages: { listPage: listMessagesPage, getAllChunked: getAllMessagesChunked, upsertByKey: upsertMessageByKey },
   messageMentions: { listPage: listMessageMentionsPage, getAllChunked: getAllMessageMentionsChunked, upsertByKey: upsertMessageMentionByKey },
   messageReactions: { listPage: listMessageReactionsPage, getAllChunked: getAllMessageReactionsChunked, upsertByKey: upsertMessageReactionByKey },
+  folders: { listPage: listFoldersPage, getAllChunked: getAllFoldersChunked, upsertByKey: upsertFolderByKey },
+  documents: { listPage: listDocumentsPage, getAllChunked: getAllDocumentsChunked, upsertByKey: upsertDocumentByKey },
+  documentVersions: { listPage: listDocumentVersionsPage, getAllChunked: getAllDocumentVersionsChunked, upsertByKey: upsertDocumentVersionByKey },
+  documentShares: { listPage: listDocumentSharesPage, getAllChunked: getAllDocumentSharesChunked, upsertByKey: upsertDocumentShareByKey },
   events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked, upsertByKey: upsertEventByKey },
   intelligenceFragments: { listPage: listIntelligenceFragmentsPage, getAllChunked: getAllIntelligenceFragmentsChunked, upsertByKey: upsertIntelligenceFragmentByKey },
   mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },

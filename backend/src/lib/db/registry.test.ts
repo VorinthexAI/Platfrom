@@ -10,6 +10,10 @@ import { threadSchema } from './threads.node';
 import { messageSchema } from './messages.node';
 import { messageReactionSchema } from './message-reactions.node';
 import { messageMentionSchema } from './message-mentions.node';
+import { folderSchema } from './folders.node';
+import { documentSchema } from './documents.node';
+import { documentVersionSchema } from './document-versions.node';
+import { documentShareSchema } from './document-shares.node';
 
 describe('node registry schema contracts', () => {
   test('registry serves organizations and user links, never the retired team/platform nodes', () => {
@@ -30,6 +34,10 @@ describe('node registry schema contracts', () => {
       'messages',
       'messageReactions',
       'messageMentions',
+      'folders',
+      'documents',
+      'documentVersions',
+      'documentShares',
     ]));
     expect(NODE_NAMES).not.toContain('agentTools');
     expect(NODE_NAMES).not.toContain('tools');
@@ -58,6 +66,10 @@ describe('node registry schema contracts', () => {
       messageSchema,
       messageReactionSchema,
       messageMentionSchema,
+      folderSchema,
+      documentSchema,
+      documentVersionSchema,
+      documentShareSchema,
     ]) {
       const object = schema instanceof z.ZodEffects ? schema.innerType() : schema;
       expect(object.shape).toHaveProperty('key');
