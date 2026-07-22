@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { runTool } from '@/lib/ai/tools';
+import { processDocument } from '.';
 import type { Document } from '@/lib/db/documents.node';
 import {
   documentEmbed,
@@ -234,7 +234,7 @@ describe('document.processing tool', () => {
 
   test('runs every real action in order and inserts only after embedding', async () => {
     const context = harness();
-    const result = await runTool('document.processing', '', input, { ...context, logger: quiet }) as DocumentProcessingResult;
+    const result = await processDocument(input, { ...context, logger: quiet }) as DocumentProcessingResult;
     expect(result.document.content).toBe('Body');
     expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-json', 'document-generate-content', 'document-embed', 'document-insert']);
     expect(context.calls.indexOf('document-embed')).toBeLessThan(context.calls.indexOf('document-insert'));
@@ -243,7 +243,7 @@ describe('document.processing tool', () => {
   test('stops on validation and upload failures without inserting', async () => {
     for (const step of ['validate', 'upload'] as const) {
       const context = harness(step);
-      await expect(runTool('document.processing', '', input, { ...context, logger: quiet })).rejects.toThrow();
+      await expect(processDocument(input, { ...context, logger: quiet })).rejects.toThrow();
       expect(context.calls).not.toContain('document-insert');
       expect(context.calls).not.toContain('storage-delete');
     }
@@ -252,7 +252,7 @@ describe('document.processing tool', () => {
   test('cleans S3 after every post-upload stage failure', async () => {
     for (const step of ['extract', 'generateHtml', 'generateJson', 'generateContent', 'embed', 'insert'] as const) {
       const context = harness(step);
-      await expect(runTool('document.processing', '', input, { ...context, logger: quiet })).rejects.toThrow();
+      await expect(processDocument(input, { ...context, logger: quiet })).rejects.toThrow();
       expect(context.calls.at(-1)).toBe('storage-delete');
       if (step !== 'insert') expect(context.calls).not.toContain('document-insert');
     }
@@ -260,9 +260,9 @@ describe('document.processing tool', () => {
 
   test('returns the existing document on an idempotent retry without another upload', async () => {
     const context = harness();
-    const first = await runTool('document.processing', '', input, { ...context, logger: quiet }) as DocumentProcessingResult;
+    const first = await processDocument(input, { ...context, logger: quiet }) as DocumentProcessingResult;
     const beforeRetry = context.calls.length;
-    const second = await runTool('document.processing', '', input, { ...context, logger: quiet }) as DocumentProcessingResult;
+    const second = await processDocument(input, { ...context, logger: quiet }) as DocumentProcessingResult;
     expect(second.document.key).toBe(first.document.key);
     expect(context.calls.slice(beforeRetry)).toEqual(['document-validate']);
   });
@@ -272,7 +272,7 @@ describe('document.processing tool', () => {
     const key = documentKeyForRequest(scopeKey, folderKey, input.idempotencyKey);
     let lookups = 0;
     const existing = completeDocument({ key, storageKey: `archive/${key}` });
-    const result = await runTool('document.processing', '', input, {
+    const result = await processDocument(input, {
       ...context,
       logger: quiet,
       getDocument: async () => (++lookups === 1 ? null : existing),
@@ -284,7 +284,7 @@ describe('document.processing tool', () => {
   test('retains the object when database ownership cannot be determined safely', async () => {
     const context = harness('insert');
     let lookups = 0;
-    await expect(runTool('document.processing', '', input, {
+    await expect(processDocument(input, {
       ...context,
       logger: quiet,
       getDocument: async () => {
@@ -298,6 +298,6 @@ describe('document.processing tool', () => {
   test('returns a structured error when compensating cleanup cannot complete', async () => {
     const context = harness('extract');
     context.storage.delete = async () => { throw new Error('delete failed'); };
-    await expect(runTool('document.processing', '', input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CLEANUP_FAILED', action: 'document.processing', retryable: true });
+    await expect(processDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CLEANUP_FAILED', action: 'document.processing', retryable: true });
   });
 });

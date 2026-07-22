@@ -151,6 +151,8 @@ export async function processDocument(rawInput: DocumentProcessingInput, depende
 
 export * from './actions';
 export * from './errors';
+export * from './exports';
+export * from './representation';
 export * from './schemas';
 export * from './storage';
 export * from './textract';

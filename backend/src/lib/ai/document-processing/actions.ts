@@ -8,12 +8,10 @@ import { getFolderById } from '@/lib/db/folders.node';
 import { newId } from '@/lib/ids';
 import { documentActionError, DocumentProcessingError } from './errors';
 import {
-  editorDocumentJsonSchema,
   extractionResultSchema,
   normalizedDocumentSchema,
   type DocumentActionName,
   type EditorDocumentJson,
-  type EditorNodeJson,
   type ExtractedBlock,
   type ExtractionResult,
   type NormalizedDocument,
@@ -21,6 +19,13 @@ import {
 } from './schemas';
 import { documentStorage, type DocumentStorage } from './storage';
 import { awsTextractDocumentOcr, type DocumentOcr } from './textract';
+import {
+  documentInputToHtml,
+  editorDocumentJsonToPlainText,
+  htmlToExtractedBlocks,
+  htmlToEditorDocumentJson,
+  type DocumentHtmlInput,
+} from './representation';
 
 export const DEFAULT_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 export const DEFAULT_EMBEDDING_DIMENSIONS = 1_024;
@@ -223,7 +228,7 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
       if (input.extension === 'docx') {
         if (options.extractDocx) return extractionFromText(await options.extractDocx(input.fileInput));
         const result = await mammoth.convertToHtml({ buffer: Buffer.from(input.fileInput) });
-        const blocks = extractionBlocksFromHtml(result.value);
+        const blocks = htmlToExtractedBlocks(result.value);
         const text = blocks.map((block) => block.text ?? (block.children ?? []).map((child) => child.text ?? '').join('\n')).filter(Boolean).join('\n\n');
         return extractionFromText(text, blocks, { warnings: result.messages.length });
       }
@@ -237,154 +242,30 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
   });
 }
 
-const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
-const normalizedText = (value?: string) => (value ?? '').replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-
-function blockHtml(block: ExtractedBlock): string {
-  const text = escapeHtml(normalizedText(block.text));
-  switch (block.type) {
-    case 'heading': return `<h${block.level ?? 1}>${text}</h${block.level ?? 1}>`;
-    case 'paragraph': return `<p>${text}</p>`;
-    case 'blockquote': return `<blockquote><p>${text}</p></blockquote>`;
-    case 'codeBlock': return `<pre><code>${escapeHtml(block.text ?? '')}</code></pre>`;
-    case 'horizontalRule': return '<hr>';
-    case 'bulletList': return `<ul>${(block.children ?? []).map(blockHtml).join('')}</ul>`;
-    case 'orderedList': return `<ol>${(block.children ?? []).map(blockHtml).join('')}</ol>`;
-    case 'listItem': return `<li>${text}${(block.children ?? []).map(blockHtml).join('')}</li>`;
-    case 'table': return `<table><tbody>${(block.children ?? []).map(blockHtml).join('')}</tbody></table>`;
-    case 'tableRow': return `<tr>${(block.children ?? []).map(blockHtml).join('')}</tr>`;
-    case 'tableCell': return `<td>${text}${(block.children ?? []).map(blockHtml).join('')}</td>`;
-  }
-}
-
-export async function documentGenerateHtml(input: ExtractionResult, options: { logger?: DocumentActionLogger } = {}): Promise<{ html: string }> {
+export async function documentGenerateHtml(input: DocumentHtmlInput, options: { logger?: DocumentActionLogger } = {}): Promise<{ html: string }> {
   return observed('document-generate-html', {}, options.logger ?? defaultLogger, async () => {
     try {
-      const extraction = extractionResultSchema.parse(input);
-      return { html: extraction.blocks.map(blockHtml).join('') };
+      return { html: documentInputToHtml(input) };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_HTML_GENERATION_FAILED', 'Document HTML generation failed.', 'document-generate-html');
     }
   });
 }
 
-type HtmlTree = { tag: string; attrs: Record<string, string>; children: Array<HtmlTree | string> };
-const VOID_TAGS = new Set(['hr']);
-const ALLOWED_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'strong', 'b', 'em', 'i', 'a', 'blockquote', 'pre', 'code', 'ul', 'ol', 'li', 'table', 'tbody', 'thead', 'tr', 'td', 'th', 'hr']);
-const decodeHtml = (value: string) => value.replace(/&(amp|lt|gt|quot|#39);/g, (_, entity: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[entity]!);
-
-function parseHtml(html: string): HtmlTree {
-  const safe = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
-  const root: HtmlTree = { tag: 'root', attrs: {}, children: [] };
-  const stack = [root];
-  for (const token of safe.match(/<[^>]*>|[^<]+/g) ?? []) {
-    if (!token.startsWith('<')) { stack.at(-1)!.children.push(decodeHtml(token)); continue; }
-    const closing = /^<\s*\/\s*([a-z0-9]+)\s*>$/i.exec(token);
-    if (closing) {
-      const tag = closing[1]!.toLowerCase();
-      if (!ALLOWED_TAGS.has(tag)) continue;
-      if (stack.length === 1 || stack.at(-1)!.tag !== tag) throw new Error(`Malformed HTML near closing ${tag}.`);
-      stack.pop();
-      continue;
-    }
-    const opening = /^<\s*([a-z0-9]+)([^>]*)>$/i.exec(token);
-    if (!opening) throw new Error('Malformed HTML.');
-    const tag = opening[1]!.toLowerCase();
-    if (!ALLOWED_TAGS.has(tag)) continue;
-    const attrs: Record<string, string> = {};
-    for (const match of opening[2]!.matchAll(/([a-z][a-z0-9-]*)\s*=\s*["']([^"']*)["']/gi)) attrs[match[1]!.toLowerCase()] = match[2]!;
-    const node: HtmlTree = { tag, attrs, children: [] };
-    stack.at(-1)!.children.push(node);
-    if (!VOID_TAGS.has(tag) && !/\/\s*>$/.test(token)) stack.push(node);
-  }
-  if (stack.length !== 1) throw new Error('Malformed HTML contains unclosed elements.');
-  return root;
-}
-
-function htmlTreeText(node: HtmlTree): string {
-  return node.children.map((child) => typeof child === 'string' ? child : htmlTreeText(child)).join('').replace(/\s+/g, ' ').trim();
-}
-
-function htmlTreeBlock(node: HtmlTree): ExtractedBlock[] {
-  if (/^h[1-6]$/.test(node.tag)) return [{ type: 'heading', level: Number(node.tag[1]), text: htmlTreeText(node) }];
-  if (node.tag === 'p') return [{ type: 'paragraph', text: htmlTreeText(node) }];
-  if (node.tag === 'blockquote') return [{ type: 'blockquote', text: htmlTreeText(node) }];
-  if (node.tag === 'pre') return [{ type: 'codeBlock', text: htmlTreeText(node) }];
-  if (node.tag === 'hr') return [{ type: 'horizontalRule' }];
-  if (node.tag === 'ul' || node.tag === 'ol') return [{ type: node.tag === 'ul' ? 'bulletList' : 'orderedList', children: node.children.flatMap((child) => typeof child === 'string' ? [] : htmlTreeBlock(child)) }];
-  if (node.tag === 'li') return [{ type: 'listItem', text: htmlTreeText(node) }];
-  if (node.tag === 'table') return [{ type: 'table', children: node.children.flatMap((child) => typeof child === 'string' ? [] : htmlTreeBlock(child)) }];
-  if (node.tag === 'tbody' || node.tag === 'thead') return node.children.flatMap((child) => typeof child === 'string' ? [] : htmlTreeBlock(child));
-  if (node.tag === 'tr') return [{ type: 'tableRow', children: node.children.flatMap((child) => typeof child === 'string' ? [] : htmlTreeBlock(child)) }];
-  if (node.tag === 'td' || node.tag === 'th') return [{ type: 'tableCell', text: htmlTreeText(node) }];
-  return node.children.flatMap((child) => typeof child === 'string' ? [] : htmlTreeBlock(child));
-}
-
-function extractionBlocksFromHtml(html: string): ExtractedBlock[] {
-  return parseHtml(html).children.flatMap((child) => typeof child === 'string' ? [] : htmlTreeBlock(child));
-}
-
-type Mark = NonNullable<EditorNodeJson['marks']>[number];
-function inlineNodes(children: Array<HtmlTree | string>, marks: Mark[] = []): EditorNodeJson[] {
-  const output: EditorNodeJson[] = [];
-  for (const child of children) {
-    if (typeof child === 'string') {
-      const text = child.replace(/\s+/g, ' ');
-      if (text) output.push({ type: 'text', text, ...(marks.length ? { marks } : {}) });
-      continue;
-    }
-    let nextMarks = marks;
-    if (child.tag === 'strong' || child.tag === 'b') nextMarks = [...marks, { type: 'bold' }];
-    if (child.tag === 'em' || child.tag === 'i') nextMarks = [...marks, { type: 'italic' }];
-    if (child.tag === 'a' && /^https?:\/\//i.test(child.attrs.href ?? '')) nextMarks = [...marks, { type: 'link', attrs: { href: child.attrs.href! } }];
-    output.push(...inlineNodes(child.children, nextMarks));
-  }
-  return output;
-}
-
-function blockNode(node: HtmlTree): EditorNodeJson[] {
-  if (/^h[1-6]$/.test(node.tag)) return [{ type: 'heading', attrs: { level: Number(node.tag[1]) }, content: inlineNodes(node.children) }];
-  if (node.tag === 'p') return [{ type: 'paragraph', content: inlineNodes(node.children) }];
-  if (node.tag === 'blockquote') return [{ type: 'blockquote', content: node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }];
-  if (node.tag === 'pre') return [{ type: 'codeBlock', content: [{ type: 'text', text: node.children.map((child) => typeof child === 'string' ? child : child.children.join('')).join('') }] }];
-  if (node.tag === 'hr') return [{ type: 'horizontalRule' }];
-  if (node.tag === 'ul' || node.tag === 'ol') return [{ type: node.tag === 'ul' ? 'bulletList' : 'orderedList', content: node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }];
-  if (node.tag === 'li') {
-    const nested = node.children.filter((child): child is HtmlTree => typeof child !== 'string' && (child.tag === 'ul' || child.tag === 'ol')).flatMap(blockNode);
-    const inline = node.children.filter((child) => typeof child === 'string' || !['ul', 'ol'].includes(child.tag));
-    return [{ type: 'listItem', content: [{ type: 'paragraph', content: inlineNodes(inline) }, ...nested] }];
-  }
-  if (node.tag === 'table') return [{ type: 'table', content: node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }];
-  if (node.tag === 'tbody' || node.tag === 'thead') return node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child));
-  if (node.tag === 'tr') return [{ type: 'tableRow', content: node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }];
-  if (node.tag === 'td' || node.tag === 'th') return [{ type: 'tableCell', content: [{ type: 'paragraph', content: inlineNodes(node.children) }] }];
-  return node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child));
-}
-
 export async function documentGenerateJson(input: { html: string }, options: { logger?: DocumentActionLogger } = {}): Promise<{ json: EditorDocumentJson }> {
   return observed('document-generate-json', {}, options.logger ?? defaultLogger, async () => {
     try {
-      const root = parseHtml(input.html);
-      return { json: editorDocumentJsonSchema.parse({ type: 'doc', content: root.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }) };
+      return { json: htmlToEditorDocumentJson(input.html) };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_JSON_GENERATION_FAILED', 'Document JSON generation failed.', 'document-generate-json');
     }
   });
 }
 
-function nodeText(node: EditorNodeJson): string {
-  if (node.type === 'text') return node.text ?? '';
-  const children = (node.content ?? []).map(nodeText).filter(Boolean);
-  if (node.type === 'tableRow') return children.join('\t');
-  if (node.type === 'listItem') return `- ${children.join('\n')}`;
-  return children.join(['doc', 'paragraph', 'heading', 'blockquote', 'codeBlock', 'table', 'bulletList', 'orderedList'].includes(node.type) ? '\n\n' : '');
-}
-
 export async function documentGenerateContent(input: { json: EditorDocumentJson }, options: { logger?: DocumentActionLogger } = {}): Promise<{ content: string }> {
   return observed('document-generate-content', {}, options.logger ?? defaultLogger, async () => {
     try {
-      const json = editorDocumentJsonSchema.parse(input.json);
-      return { content: nodeText(json).replace(/\n{3,}/g, '\n\n').trim() };
+      return { content: editorDocumentJsonToPlainText(input.json) };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_CONTENT_GENERATION_FAILED', 'Document content generation failed.', 'document-generate-content');
     }

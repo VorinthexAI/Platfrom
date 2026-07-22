@@ -3,9 +3,11 @@ import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions';
 import { selectRoute, streamRoute, type RouterDependencies } from '@/lib/ai/router';
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
-import { processDocument, type DocumentProcessingDependencies, type DocumentProcessingInput, type DocumentProcessingResult } from '@/lib/ai/document-processing';
+import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
+import type { DomainToolContext } from '@/lib/ai/domain-tools/execute';
+import { ARCHIVE_TOOL_DEFINITIONS, ARCHIVE_TOOL_NAMES, isArchiveToolName, runArchiveTool, type ArchiveToolDependencies, type ArchiveToolInput, type ArchiveToolName, type ArchiveToolOutput } from './archive';
 
-export const TOOL_NAMES = ['orchestrator.chat', 'document.processing'] as const;
+export const TOOL_NAMES = ['orchestrator.chat', ...ARCHIVE_TOOL_NAMES] as const;
 export const toolNameSchema = z.enum(TOOL_NAMES);
 
 export const TOOL_DEFINITIONS = [{
@@ -17,22 +19,7 @@ export const TOOL_DEFINITIONS = [{
     additionalProperties: false,
     properties: { message: { type: 'string', maxLength: 8_000 } },
   },
-}, {
-  name: 'document.processing',
-  description: 'Validate, store, extract, transform, embed, and insert an Archive document.',
-  inputSchema: {
-    type: 'object',
-    required: ['file', 'scopeKey', 'folderKey'],
-    additionalProperties: false,
-    properties: {
-      file: { type: 'object', description: 'A server-side uploaded file abstraction.' },
-      scopeKey: { type: 'string' },
-      folderKey: { type: 'string' },
-      name: { type: 'string', maxLength: 255 },
-      idempotencyKey: { type: 'string', maxLength: 200 },
-    },
-  },
-}] as const;
+}, ...ARCHIVE_TOOL_DEFINITIONS] as const;
 
 export const orchestratorChatToolInputSchema = z.object({
   message: sanitizedAgentMessageSchema,
@@ -42,6 +29,8 @@ export interface ToolDependencies extends RouterDependencies, DocumentProcessing
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
+  archiveContext?: DomainToolContext;
+  archiveDependencies?: ArchiveToolDependencies;
 }
 
 const chatOutputSchema = z.object({
@@ -52,11 +41,21 @@ const chatOutputSchema = z.object({
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
 export function runTool(name: 'orchestrator.chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
-export function runTool(name: 'document.processing', skill: string, rawInput: DocumentProcessingInput, dependencies?: ToolDependencies): Promise<DocumentProcessingResult>;
-export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string | DocumentProcessingResult>;
-export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<string | DocumentProcessingResult> {
+export function runTool<Name extends ArchiveToolName>(name: Name, skill: string, rawInput: ArchiveToolInput<Name>, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<ArchiveToolOutput<Name>>;
+export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
+export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = toolNameSchema.parse(name);
-  if (toolName === 'document.processing') return processDocument(rawInput as DocumentProcessingInput, dependencies);
+  if (isArchiveToolName(toolName)) {
+    if (dependencies.archiveContext) {
+      return runArchiveTool(toolName, rawInput, dependencies.archiveContext, {
+        adapters: dependencies.adapters,
+        credentials: dependencies.credentials,
+        ...dependencies.archiveDependencies,
+        ingestion: { ...dependencies, ...dependencies.archiveDependencies?.ingestion },
+      });
+    }
+    throw new Error(`Tool ${toolName} requires archiveContext.`);
+  }
 
   const chatInput = buildChatInput(skill, rawInput);
   if (dependencies.execute) {
@@ -101,3 +100,4 @@ function buildChatInput(skill: string, rawInput: unknown): CoreChatInput {
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
+export * from './archive';

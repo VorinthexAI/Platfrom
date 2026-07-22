@@ -16,9 +16,20 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   scopeAgents: [['agentKey']],
   organizations: [['ownerId']],
   events: [['belongsTo', 'sourceId', 'createdAt']],
+  folders: [['parentFolderKey']],
+  documents: [['folderKey']],
+  documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],
+  documentShares: [['scopeKey'], ['token']],
 };
 
-export function isLegacyIndex(collectionName: string, fields: readonly string[]): boolean {
+export const DOCUMENT_SHARE_COMMENT_LEGACY_PERMISSIONS = ['comment', 'edit'] as const;
+
+export function normalizeLegacyDocumentSharePermission(permission: unknown): 'read' | 'comment' {
+  return DOCUMENT_SHARE_COMMENT_LEGACY_PERMISSIONS.includes(permission as 'comment' | 'edit') ? 'comment' : 'read';
+}
+
+export function isLegacyIndex(collectionName: string, fields: readonly string[], desiredIndexes: readonly (readonly string[])[] = []): boolean {
+  if (desiredIndexes.some((desired) => desired.length === fields.length && desired.every((field, index) => fields[index] === field))) return false;
   return (LEGACY_INDEX_FIELDS[collectionName] ?? []).some(
     (legacy) => legacy.length === fields.length && legacy.every((field, index) => fields[index] === field),
   );

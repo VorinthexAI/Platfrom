@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatOutput, ProviderExecuteResponse } from '@/lib/ai/providers';
 import { ask } from './ask';
-import { TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
+import { ARCHIVE_TOOL_NAMES, TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
 
 const response: ProviderExecuteResponse<ChatOutput> = {
   output: { text: 'A useful answer.', toolCalls: [], stopReason: 'stop' },
@@ -13,7 +13,7 @@ const response: ProviderExecuteResponse<ChatOutput> = {
 
 describe('orchestrator chat tool', () => {
   test('exposes the registered tools', () => {
-    expect(TOOL_NAMES).toEqual(['orchestrator.chat', 'document.processing']);
+    expect(TOOL_NAMES).toEqual(['orchestrator.chat', ...ARCHIVE_TOOL_NAMES]);
   });
 
   test('sanitizes input and invokes the shared chat action', async () => {
@@ -45,6 +45,11 @@ describe('orchestrator chat tool', () => {
     await expect(runTool('database.delete', 'Atlas', { message: 'hello' }, {
       execute: async () => response,
     })).rejects.toThrow();
+  });
+
+  test('requires archive context for document processing and every Archive tool', async () => {
+    await expect(runTool('document.processing', '', {} as never)).rejects.toThrow('requires archiveContext');
+    await expect(runTool('folder.find', '', { folderKeys: [] } as never)).rejects.toThrow('requires archiveContext');
   });
 
   test('streams chat action chunks through the unified tool', async () => {

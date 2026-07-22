@@ -20,6 +20,7 @@ import { organizationProviderSchema } from '../lib/ai/organization-providers/sch
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
+import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -37,11 +38,182 @@ function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: re
 }
 
 function generateEmbedding(text: string) {
+  if (process.env.ARCHIVE_E2E === 'true') {
+    const dimensions = Number(process.env.EMBEDDING_DIMENSIONS ?? 1024);
+    const digest = Buffer.from(new Bun.CryptoHasher('sha256').update(text).digest());
+    return Promise.resolve(Array.from({ length: dimensions }, (_, index) => digest[index % digest.length]! / 255));
+  }
   return embedText({ text });
 }
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+async function runMigrationTransaction(targetDb: Database, collectionName: string, query: string, bindVars: Record<string, unknown>) {
+  const transaction = await targetDb.beginTransaction({ write: [collectionName], exclusive: [collectionName] });
+  try {
+    await transaction.step(async () => {
+      const cursor = await targetDb.query(query, bindVars);
+      await cursor.all();
+    });
+    await transaction.commit();
+  } catch (error) {
+    await transaction.abort();
+    throw error;
+  }
+}
+
+export async function migrateArchiveVersions(targetDb: Database) {
+  const dimensions = Number(process.env.EMBEDDING_DIMENSIONS);
+  const enforceDimensions = Number.isInteger(dimensions) && dimensions > 0;
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<Record<string, unknown>>(`
+      FOR snapshot IN documentVersions
+        FILTER snapshot._key > @after
+        FILTER !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
+          || !IS_OBJECT(snapshot.json) || snapshot.json.type != "doc"
+          || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
+          || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
+          || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+          || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
+        SORT snapshot._key
+        LIMIT 50
+        RETURN snapshot
+    `, { after, dimensions: enforceDimensions ? dimensions : 0 });
+    const snapshots = await cursor.all();
+    if (snapshots.length === 0) break;
+    const updates: Array<Record<string, unknown>> = [];
+    for (const snapshot of snapshots) {
+      const content = nonEmptyString(snapshot.content);
+      if (!content) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} has no nonempty historical content.`);
+      const hasHtml = nonEmptyString(snapshot.html) !== null;
+      const hasJson = snapshot.json !== null && typeof snapshot.json === 'object' && (snapshot.json as Record<string, unknown>).type === 'doc';
+      const representations = hasHtml && hasJson ? {} : legacyContentRepresentations(content);
+      let embedding = snapshot.embedding;
+      if (!Array.isArray(embedding) || embedding.length === 0 || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value)) || (enforceDimensions && embedding.length !== dimensions)) {
+        embedding = await generateEmbedding(content);
+      }
+      if (!Array.isArray(embedding) || embedding.length === 0 || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value)) || (enforceDimensions && embedding.length !== dimensions)) {
+        throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} could not produce a valid historical-content embedding.`);
+      }
+      updates.push({ _key: snapshot._key, ...representations, embedding });
+    }
+    await runMigrationTransaction(targetDb, 'documentVersions', `
+      FOR patch IN @updates
+        UPDATE patch._key WITH UNSET(patch, "_key") IN documentVersions
+    `, { updates });
+    after = String(snapshots.at(-1)!._key);
+  }
+  const verification = await targetDb.query<number>(`
+    RETURN LENGTH(FOR snapshot IN documentVersions
+      FILTER !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
+        || !IS_OBJECT(snapshot.json) || snapshot.json.type != "doc"
+        || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
+        || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
+        || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
+      RETURN 1)
+  `, { dimensions: enforceDimensions ? dimensions : 0 });
+  const invalid = await verification.next() ?? 0;
+  if (invalid > 0) throw new Error(`documentVersions migration verification failed for ${invalid} row(s).`);
+}
+
+export async function migrateArchiveShares(targetDb: Database) {
+  const invalidShare = await targetDb.query<string>(`
+    FOR share IN documentShares
+      FILTER !REGEX_TEST(share.tokenHash, "^[a-fA-F0-9]{64}$")
+      FILTER !IS_STRING(share.token) || LENGTH(share.token) == 0
+      LIMIT 1
+      RETURN share._key
+  `);
+  if (await invalidShare.next()) throw new Error('Cannot migrate documentShares: a row has neither a valid tokenHash nor a plaintext token.');
+
+  const duplicateValid = await targetDb.query<string>(`
+    FOR share IN documentShares
+      FILTER REGEX_TEST(share.tokenHash, "^[a-fA-F0-9]{64}$")
+      COLLECT hash = LOWER(share.tokenHash) WITH COUNT INTO count
+      FILTER count > 1
+      LIMIT 1
+      RETURN hash
+  `);
+  const validCollision = await duplicateValid.next();
+  if (validCollision) throw new Error(`Cannot migrate documentShares: duplicate token hash ${validCollision}.`);
+
+  const duplicateLegacy = await targetDb.query<string>(`
+    FOR share IN documentShares
+      FILTER !REGEX_TEST(share.tokenHash, "^[a-fA-F0-9]{64}$")
+      COLLECT hash = SHA256(share.token) WITH COUNT INTO count
+      FILTER count > 1
+      LIMIT 1
+      RETURN hash
+  `);
+  const legacyCollision = await duplicateLegacy.next();
+  if (legacyCollision) throw new Error(`Cannot migrate documentShares: duplicate token hash ${legacyCollision}.`);
+
+  // Keyset pages bound both the wire result and cross-set hash lookup bind variables.
+  let collisionAfter = '';
+  while (true) {
+    const page = await targetDb.query<{ key: string; hash: string }>(`
+      FOR share IN documentShares
+        FILTER share._key > @after
+        FILTER !REGEX_TEST(share.tokenHash, "^[a-fA-F0-9]{64}$")
+        SORT share._key
+        LIMIT 100
+        RETURN { key: share._key, hash: SHA256(share.token) }
+    `, { after: collisionAfter });
+    const candidates = await page.all();
+    if (candidates.length === 0) break;
+    const crossSet = await targetDb.query<string>(`
+      FOR candidate IN @candidates
+        FOR existing IN documentShares
+          FILTER REGEX_TEST(existing.tokenHash, "^[a-fA-F0-9]{64}$")
+          FILTER LOWER(existing.tokenHash) == candidate.hash
+          LIMIT 1
+          RETURN candidate.hash
+    `, { candidates });
+    const collision = await crossSet.next();
+    if (collision) throw new Error(`Cannot migrate documentShares: duplicate token hash ${collision}.`);
+    collisionAfter = candidates.at(-1)!.key;
+  }
+  const collection = targetDb.collection('documentShares');
+  for (const index of await collection.indexes()) {
+    const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+    if (fields.length === 1 && fields[0] === 'token') await collection.dropIndex(index.id);
+  }
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<Record<string, unknown>>(`
+      FOR share IN documentShares
+        FILTER share._key > @after
+        FILTER HAS(share, "token") || !REGEX_TEST(share.tokenHash, "^[a-f0-9]{64}$")
+          || share.permission == "edit" || !IS_ARRAY(share.embedding) || LENGTH(share.embedding) != 0
+        SORT share._key
+        LIMIT 100
+        RETURN share
+    `, { after });
+    const shares = await cursor.all();
+    if (shares.length === 0) break;
+    const updates = stageLegacyDocumentShares(shares);
+    await runMigrationTransaction(targetDb, 'documentShares', `
+      FOR patch IN @updates
+        UPDATE patch._key WITH MERGE(UNSET(patch, "_key"), { token: null }) IN documentShares OPTIONS { keepNull: false }
+    `, { updates });
+    after = String(shares.at(-1)!._key);
+  }
+  const verification = await targetDb.query<number>(`
+    LET malformed = LENGTH(FOR share IN documentShares
+      FILTER HAS(share, "token") || !REGEX_TEST(share.tokenHash, "^[a-f0-9]{64}$")
+      RETURN 1)
+    LET duplicates = LENGTH(FOR share IN documentShares
+      COLLECT hash = share.tokenHash WITH COUNT INTO count
+      FILTER count > 1
+      RETURN 1)
+    RETURN malformed + duplicates
+  `);
+  const invalid = await verification.next() ?? 0;
+  if (invalid > 0) throw new Error(`documentShares migration verification failed for ${invalid} hash group(s).`);
 }
 
 function emailHashFromData(data: unknown): string | null {
@@ -312,10 +484,13 @@ const collections: CollectionSpec[] = [
   { name: 'messages', embedKeys: ['content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['threadKey'], sparse: true }, { fields: ['authorParticipantKey'] }, { fields: ['replyToMessageKey'], sparse: true }, { fields: ['channelKey', 'createdAt'] }, { fields: ['threadKey', 'createdAt'], sparse: true }] },
   { name: 'messageMentions', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['participantKey', 'handledAt'] }, { fields: ['messageKey', 'participantKey'], unique: true }] },
   { name: 'messageReactions', embedKeys: ['reaction'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['reaction'] }, { fields: ['messageKey', 'reaction'] }, { fields: ['messageKey', 'participantKey', 'reaction'], unique: true }] },
-  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['parentFolderKey'], sparse: true }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
-  { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['folderKey'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
-  { name: 'documentVersions', embedKeys: ['content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['documentKey'] }, { fields: ['documentKey', 'version'], unique: true }, { fields: ['storageKey'], unique: true }] },
-  { name: 'documentShares', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['documentKey'] }, { fields: ['token'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
+  { name: 'folders', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'archivedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
+  { name: 'documents', embedKeys: ['name', 'content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'archivedAt'] }, { fields: ['scopeKey', 'folderKey', 'archivedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
+  { name: 'documentVersions', embedKeys: ['content'], indexes: [{ fields: ['scopeKey', 'documentKey', 'version'] }, { fields: ['documentKey', 'version'], unique: true }] },
+  { name: 'documentShares', embedKeys: [], indexes: [{ fields: ['scopeKey', 'documentKey', 'revokedAt'] }, { fields: ['documentKey'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
+  // Private replay ledger. Responses may contain one-time share tokens, so this
+  // collection is deliberately not registered as a generic application node.
+  { name: 'archiveIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
 ];
 
@@ -636,12 +811,18 @@ async function main() {
         throw new Error(`Cannot migrate documents: ${incompatibleDocuments} existing row(s) lack required Archive ingestion fields.`);
       }
     }
+    if (spec.name === 'documentVersions') {
+      await migrateArchiveVersions(targetDb);
+    }
+    if (spec.name === 'documentShares') {
+      await migrateArchiveShares(targetDb);
+    }
     const legacyIndexes = LEGACY_INDEX_FIELDS[spec.name] ?? [];
     if (legacyIndexes.length > 0) {
       const existingIndexes = await collection.indexes();
       for (const index of existingIndexes) {
         const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
-        if (isLegacyIndex(spec.name, fields)) {
+        if (isLegacyIndex(spec.name, fields, (spec.indexes ?? []).map((desired) => desired.fields))) {
           await collection.dropIndex(index.id);
           console.log(`Dropped legacy index ${index.id} on ${spec.name}(${fields.join(', ')})`);
         }
@@ -1966,7 +2147,9 @@ async function main() {
   systemDb.close();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -104,6 +104,7 @@ function querySchemaForPath(path: string) {
   if (apiPath === '/orchestrators/chat') {
     return strictObject({ orchestrator_id: z.string().cuid() });
   }
+  if (/^\/archive\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   return strictObject({});
 }
 
