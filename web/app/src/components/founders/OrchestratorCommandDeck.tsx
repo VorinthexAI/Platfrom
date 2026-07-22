@@ -889,8 +889,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
-      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-start gap-1.5 text-slate-100 sm:inset-x-7 sm:top-6">
-        <div ref={pickerRef} className="relative pointer-events-auto">
+      <div ref={pickerRef} className="pointer-events-auto absolute top-4 left-4 z-10 flex w-fit items-start gap-1.5 text-slate-100 sm:top-6 sm:left-7">
           <button ref={pickerTriggerRef} type="button" onClick={() => {
             if (pickerOpen) closePicker();
             else {
@@ -899,11 +898,11 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
               setPickerOpen(true);
             }
           }} aria-expanded={pickerOpen} aria-haspopup="listbox"
-            className="flex h-9 min-w-44 items-center rounded-lg border border-white/15 bg-[#080b0d]/90 px-3 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
+            className="flex h-9 w-44 items-center rounded-lg border border-white/15 bg-[#080b0d]/90 px-3 text-left shadow-xl backdrop-blur-xl transition-colors hover:border-white/30">
             <span className="block truncate font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400">{selectedScope.entity.name}</span>
           </button>
           {pickerOpen ? (
-            <div className="absolute top-[calc(100%+0.5rem)] left-0 w-72 rounded-2xl border border-white/15 bg-[#080b0d]/95 p-2 shadow-2xl backdrop-blur-2xl">
+            <div className="absolute inset-x-0 top-[calc(100%+0.5rem)] rounded-2xl border border-white/15 bg-[#080b0d]/95 p-2 shadow-2xl backdrop-blur-2xl">
               <div className="relative mb-2">
                 <input ref={pickerInputRef} autoFocus role="combobox" aria-expanded="true" aria-controls="scope-picker-options" aria-activedescendant={filteredScopes[activeScopeIndex] ? `scope-option-${filteredScopes[activeScopeIndex].entity.id}` : undefined}
                   value={query} onChange={(event) => { setQuery(event.target.value); setActiveScopeIndex(0); }} onKeyDown={handlePickerKeyDown} placeholder="Search scopes..."
@@ -926,7 +925,6 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
               </div>
             </div>
           ) : null}
-        </div>
         <div className="pointer-events-auto flex gap-1.5">
           <Button type="button" variant="secondary" onClick={() => stepScope(-1)} aria-label="Previous scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronLeftIcon size="sm" /></Button>
           <Button type="button" variant="secondary" onClick={() => stepScope(1)} aria-label="Next scope" className="!h-9 !min-h-0 !w-9 !rounded-lg !p-0"><ChevronRightIcon size="sm" /></Button>
