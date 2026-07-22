@@ -135,7 +135,7 @@ export function NexusSun({ paused }: { paused: boolean }) {
   }
 
   return (
-    <group>
+    <group renderOrder={30}>
       {/* Only the star's body claims the founders-gate hold. The ring,
           halos and lights below must stay out of the raycaster: they span
           up to ~15 world units around the sun, so letting them catch

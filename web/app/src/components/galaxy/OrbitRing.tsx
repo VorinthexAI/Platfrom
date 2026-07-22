@@ -25,9 +25,12 @@ export function OrbitRing({
       color: "#aeb6bc",
       transparent: true,
       opacity,
+      depthTest: false,
       depthWrite: false,
     });
-    return new THREE.Line(geometry, material);
+    const orbit = new THREE.Line(geometry, material);
+    orbit.renderOrder = 10;
+    return orbit;
   }, [radius, opacity]);
 
   return <primitive object={line} />;

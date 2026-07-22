@@ -69,7 +69,6 @@ const STATION_NODES: StationNode[] = [
   })),
 ];
 const NODE_BY_ID = new Map(STATION_NODES.map((node) => [node.entity.id, node]));
-const NODE_BY_SLUG = new Map(STATION_NODES.map((node) => [node.entity.slug, node]));
 
 function modulePosition(node: StationNode): [number, number, number] {
   if (node.layer === 0) return [0, LAYER_HEIGHTS[0], 0];

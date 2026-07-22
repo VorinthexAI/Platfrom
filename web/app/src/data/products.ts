@@ -47,7 +47,7 @@ function toPlanetData(entity: GalaxyEntity): ProductPlanetData {
     tagline: entity.tagline ?? entity.shortDescription,
     description: entity.shortDescription,
     status: comingSoon ? "coming-soon" : "active",
-    orbitRadius: entity.visual.orbitRadius ?? 4,
+    orbitRadius: (entity.visual.orbitRadius ?? 4) * 1.15,
     orbitSpeed: entity.visual.orbitSpeed ?? 0.05,
     initialAngle: entity.visual.initialAngle ?? 0,
     scale: entity.visual.size ?? 1,

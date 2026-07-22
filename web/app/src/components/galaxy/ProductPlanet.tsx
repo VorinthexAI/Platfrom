@@ -107,7 +107,7 @@ export function ProductPlanet({
   });
 
   return (
-    <group ref={groupRef} scale={data.scale}>
+    <group ref={groupRef} scale={data.scale} renderOrder={20}>
       <group
         onClick={(event) => {
           event.stopPropagation();
