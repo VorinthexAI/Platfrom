@@ -397,6 +397,31 @@ describe('Archive runtime', () => {
     expect(f.documents.get(movableKey).folderKey).toBe(outsideKey);
   });
 
+  test('resumes the persisted recursive folder deletion intent regardless of retry flags', async () => {
+    const f = fixture('owner');
+    const childKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.get(f.folderKey).deletedAt = now;
+    const normalTransaction = f.repository.transaction!;
+    let transactions = 0;
+    f.repository.transaction = async (operation) => {
+      transactions += 1;
+      if (transactions === 3) throw new Error('metadata commit failed');
+      return normalTransaction(operation);
+    };
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
+
+    const failed = await runArchiveTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    expect(failed.results[0]?.success).toBe(false);
+    expect(f.folders.get(f.folderKey)._internalDeletion.folderKeys).toEqual([f.folderKey, childKey]);
+
+    f.repository.transaction = normalTransaction;
+    const retried = await runArchiveTool('folder.delete', { folderKeys: [f.folderKey], recursive: false }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    expect(retried.results[0]).toMatchObject({ success: true });
+    expect(f.folders.has(f.folderKey)).toBe(false);
+    expect(f.folders.has(childKey)).toBe(false);
+  });
+
   test('replays completed idempotent mutations and rejects changed or pending requests', async () => {
     const f = fixture('moderator');
     const records = new Map<string, { hash: string; status: 'pending' | 'completed'; response?: unknown }>();

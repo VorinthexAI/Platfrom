@@ -16,6 +16,8 @@ export const folderSchema = z.object({
   _internalDeletion: z.object({
     kind: z.literal('folder'),
     owner: z.string().trim().min(1),
+    folderKeys: z.array(z.string().cuid()).optional(),
+    documentKeys: z.array(z.string().cuid()).optional(),
     objectKeys: z.array(z.string().trim().min(1)).optional(),
     startedAt: z.string().datetime(),
   }).strict().optional(),

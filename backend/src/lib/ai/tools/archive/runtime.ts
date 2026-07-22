@@ -849,7 +849,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               if (!item.deletedAt) fail('ARCHIVE_CONFLICT', 'Every recursively deleted folder must be archived.', tool, 'delete', item.key);
               if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: item.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', item.key);
             }
-            const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now(), objectKeys: [] };
+            const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now(), folderKeys: affected.map((item) => item.key), documentKeys: [], objectKeys: [] };
             for (const item of [...affected].reverse()) await mutationRepository.setFolderDeletion(item.key, marker);
             for (const item of [...affected].reverse()) await mutationRepository.deleteFolder(item.key);
             return {};
@@ -867,9 +867,16 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               if (candidate._internalDeletion) {
                 if (candidate._internalDeletion.kind !== 'folder') fail('ARCHIVE_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
                 const all = await bound.listFolders(candidate.scopeKey, true, true);
-                const frozen = input.recursive ? [candidate, ...descendants(all, key)] : [candidate];
+                const intendedFolderKeys = candidate._internalDeletion.folderKeys;
+                const frozen = intendedFolderKeys
+                  ? all.filter((item) => intendedFolderKeys.includes(item.key))
+                  : all.filter((item) => item._internalDeletion?.kind === 'folder' && item._internalDeletion.owner === candidate._internalDeletion!.owner);
                 const frozenKeys = new Set(frozen.map((item) => item.key));
-                return { root: candidate, affected: frozen, documents: (await bound.listDocuments(candidate.scopeKey, true, true)).filter((item) => frozenKeys.has(item.folderKey)) };
+                const intendedDocumentKeys = candidate._internalDeletion.documentKeys;
+                const frozenDocuments = (await bound.listDocuments(candidate.scopeKey, true, true)).filter((item) => intendedDocumentKeys
+                  ? intendedDocumentKeys.includes(item.key)
+                  : item._internalDeletion?.kind === 'folder' && item._internalDeletion.owner === candidate._internalDeletion!.owner && frozenKeys.has(item.folderKey));
+                return { root: candidate, affected: frozen, documents: frozenDocuments };
               }
               const all = await bound.listFolders(candidate.scopeKey, true, true);
               const children = descendants(all, key);
@@ -887,10 +894,11 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
                 if (!await canPermanentlyDelete({ kind: 'document', deletedAt: item.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Document retention policy denied permanent deletion.', tool, 'delete', item.key);
               }
               const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now() };
+              const folderMarker = { ...marker, folderKeys: frozen.map((item) => item.key), documentKeys: ownedDocuments.map((item) => item.key) };
               for (const item of ownedDocuments) await bound.setDocumentDeletion(item.key, marker);
-              for (const item of [...frozen].reverse()) await bound.setFolderDeletion(item.key, marker);
+              for (const item of [...frozen].reverse()) await bound.setFolderDeletion(item.key, folderMarker);
               ownsFreeze = true;
-              return { root: { ...candidate, _internalDeletion: marker }, affected: frozen, documents: ownedDocuments };
+              return { root: { ...candidate, _internalDeletion: folderMarker }, affected: frozen, documents: ownedDocuments };
             }));
             const related = await Promise.all(documents.map(async (item) => ({
               document: item,

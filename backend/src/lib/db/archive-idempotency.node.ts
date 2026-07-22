@@ -54,8 +54,7 @@ export async function claimArchiveIdempotency(
   const leaseExpiresAt = future(now, Number(process.env.ARCHIVE_IDEMPOTENCY_LEASE_MS ?? DEFAULT_LEASE_MS));
   const cursor = await db.query<Record<string, unknown>>(`
     LET existing = DOCUMENT(archiveIdempotency, @key)
-    FILTER existing == null || existing.expiresAt <= @now
-      || (existing.status == "pending" && (!HAS(existing, "leaseExpiresAt") || existing.leaseExpiresAt <= @now))
+    FILTER existing == null || (existing.status == "completed" && existing.expiresAt <= @now)
     UPSERT { _key: @key }
       INSERT MERGE(@identity, { _key: @key, requestHash: @requestHash, status: "pending", leaseOwner: @leaseOwner, leaseExpiresAt: @leaseExpiresAt, createdAt: @now, updatedAt: @now })
       UPDATE MERGE(@identity, { requestHash: @requestHash, status: "pending", leaseOwner: @leaseOwner, leaseExpiresAt: @leaseExpiresAt, responseCiphertext: null, expiresAt: null, updatedAt: @now })

@@ -24,7 +24,8 @@ describe('Archive idempotency encryption', () => {
     expect(source).toContain('responseCiphertext: @responseCiphertext');
     expect(source).not.toContain('response: @response');
     expect(source).toContain('claim.leaseOwner == @leaseOwner');
-    expect(source).toContain('!HAS(existing, "leaseExpiresAt") || existing.leaseExpiresAt <= @now');
+    expect(source).not.toContain('existing.leaseExpiresAt <= @now');
+    expect(source).toContain('existing.status == "completed" && existing.expiresAt <= @now');
     expect(source).toContain('existing.expiresAt <= @now');
   });
 });
