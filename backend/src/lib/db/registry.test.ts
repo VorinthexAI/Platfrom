@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'bun:test';
+import { z } from 'zod';
 import { NODE_NAMES, NODE_REGISTRY, registerNode } from './registry';
 import { organizationSchema } from './organizations.node';
 import { userOrganizationSchema } from './user-organization.node';
 import { userSchema } from './users.node';
+import { channelSchema } from './channels.node';
+import { channelParticipantSchema } from './channel-participants.node';
+import { threadSchema } from './threads.node';
+import { messageSchema } from './messages.node';
+import { messageReactionSchema } from './message-reactions.node';
+import { messageMentionSchema } from './message-mentions.node';
 
 describe('node registry schema contracts', () => {
   test('registry serves organizations and user links, never the retired team/platform nodes', () => {
@@ -16,6 +23,14 @@ describe('node registry schema contracts', () => {
     expect(NODE_NAMES).toContain('scopeAgents');
     expect(NODE_NAMES).toContain('agentMembers');
     expect(NODE_NAMES).toContain('skills');
+    expect(NODE_NAMES).toEqual(expect.arrayContaining([
+      'channels',
+      'channelParticipants',
+      'threads',
+      'messages',
+      'messageReactions',
+      'messageMentions',
+    ]));
     expect(NODE_NAMES).not.toContain('agentTools');
     expect(NODE_NAMES).not.toContain('tools');
     expect(NODE_NAMES).not.toContain('toolActions');
@@ -36,6 +51,31 @@ describe('node registry schema contracts', () => {
     expect(userSchema.shape).toHaveProperty('embedding');
     expect(organizationSchema.shape).toHaveProperty('embedding');
     expect(userOrganizationSchema.shape).toHaveProperty('embedding');
+    for (const schema of [
+      channelSchema,
+      channelParticipantSchema,
+      threadSchema,
+      messageSchema,
+      messageReactionSchema,
+      messageMentionSchema,
+    ]) {
+      const object = schema instanceof z.ZodEffects ? schema.innerType() : schema;
+      expect(object.shape).toHaveProperty('key');
+      expect(object.shape).toHaveProperty('scopeKey');
+      expect(object.shape).toHaveProperty('createdAt');
+      expect(object.shape).toHaveProperty('updatedAt');
+      expect(object.shape).toHaveProperty('embedding');
+    }
+  });
+
+  test('requires exactly one channel participant identity', () => {
+    const participant = {
+      key: 'cmrnlzf640000qc7k4p5zem5w', scopeKey: 'cmrnlzf640001qc7k4p5zem5w', channelKey: 'cmrnlzf640002qc7k4p5zem5w',
+      joinedAt: '2026-07-22T00:00:00.000Z', createdAt: '2026-07-22T00:00:00.000Z', updatedAt: '2026-07-22T00:00:00.000Z',
+    };
+    expect(() => channelParticipantSchema.parse(participant)).toThrow();
+    expect(() => channelParticipantSchema.parse({ ...participant, userOrganizationKey: 'cmrnlzf640003qc7k4p5zem5w', orchestratorKey: 'cmrnlzf640004qc7k4p5zem5w' })).toThrow();
+    expect(channelParticipantSchema.parse({ ...participant, userOrganizationKey: 'cmrnlzf640003qc7k4p5zem5w' }).userOrganizationKey).toBeDefined();
   });
 
   test('registers new nodes for generic consumers', () => {
