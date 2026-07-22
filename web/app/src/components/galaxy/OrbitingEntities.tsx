@@ -9,7 +9,6 @@ import { getEntityRenderState } from "@/lib/galaxy/registry-helpers";
 import { useGalaxyStore } from "@/lib/galaxy-store";
 import { getEntityLogoTexture } from "@/lib/three/entity-logo";
 import { OrbitRing } from "./OrbitRing";
-import { PlanetSurface } from "./PlanetSurface";
 
 /**
  * Registry-driven moon system: renders a product's children (Core
@@ -18,7 +17,7 @@ import { PlanetSurface } from "./PlanetSurface";
  * No floating labels — names live in the drawer and the orbit rail.
  */
 
-/** The moon's own mark, billboarded so the world sits within its logo. */
+/** Scope marks stay clean and readable; the selected mark adds its own glow. */
 function MoonLogoRing({
   entity,
   size,
@@ -32,7 +31,7 @@ function MoonLogoRing({
     () => getEntityLogoTexture(entity.type, entity.slug),
     [entity.type, entity.slug],
   );
-  const scale = size * 2.1;
+  const scale = size * 2.7;
   return (
     <Billboard>
       <mesh>
@@ -40,7 +39,8 @@ function MoonLogoRing({
         <meshBasicMaterial
           map={texture}
           transparent
-          opacity={dim ? 0.26 : 0.5}
+          opacity={dim ? 0.5 : 1}
+          blending={THREE.AdditiveBlending}
           depthWrite={false}
         />
       </mesh>
@@ -51,11 +51,10 @@ function MoonLogoRing({
 interface OrbitingBodyProps {
   entity: GalaxyEntity;
   paused: boolean;
-  visible: boolean;
   onSelect: (entity: GalaxyEntity) => void;
 }
 
-function OrbitingBody({ entity, paused, visible, onSelect }: OrbitingBodyProps) {
+function OrbitingBody({ entity, paused, onSelect }: OrbitingBodyProps) {
   const bodyRef = useRef<THREE.Group>(null);
   const angleRef = useRef(entity.visual.initialAngle ?? 0);
   const [hovered, setHovered] = useState(false);
@@ -65,7 +64,7 @@ function OrbitingBody({ entity, paused, visible, onSelect }: OrbitingBodyProps) 
   const renderState = getEntityRenderState(entity);
 
   const dormant = renderState !== "active";
-  const radius = entity.visual.orbitRadius ?? 2;
+  const radius = (entity.visual.orbitRadius ?? 2) * 1.45;
   const speed = entity.visual.orbitSpeed ?? 0.2;
   const size = entity.visual.size ?? 0.2;
 
@@ -101,17 +100,8 @@ function OrbitingBody({ entity, paused, visible, onSelect }: OrbitingBodyProps) 
         entity.visual.orbitTilt ?? 0,
       ]}
     >
-      <OrbitRing radius={radius} opacity={visible ? 0.08 : 0.03} />
+      <OrbitRing radius={radius} opacity={0.08} />
       <group ref={bodyRef}>
-        <PlanetSurface
-          entityId={entity.id}
-          radius={size * 0.62}
-          segments={32}
-          paused={paused}
-          dormant={dormant && !isFocused}
-          hovered={hovered}
-          focused={isFocused}
-        />
         <MoonLogoRing entity={entity} size={size} dim={dormant && !hovered && !isFocused} />
         {/* generous invisible hit target so small moons stay clickable */}
         <mesh
@@ -140,31 +130,22 @@ function OrbitingBody({ entity, paused, visible, onSelect }: OrbitingBodyProps) 
 
 interface OrbitingEntitiesProps {
   entities: GalaxyEntity[];
-  /** Product key whose focus reveals the moons fully. */
-  revealForFocus: string;
   paused: boolean;
   onSelect: (entity: GalaxyEntity) => void;
 }
 
 export function OrbitingEntities({
   entities,
-  revealForFocus,
   paused,
   onSelect,
 }: OrbitingEntitiesProps) {
-  const focus = useGalaxyStore((s) => s.focus);
-  const hovered = useGalaxyStore((s) => s.hovered);
-  const revealed =
-    focus === revealForFocus || (focus === null && hovered === revealForFocus);
-
   return (
     <group>
-      {revealed && entities.map((entity) => (
+      {entities.map((entity) => (
         <OrbitingBody
           key={entity.id}
           entity={entity}
           paused={paused}
-          visible
           onSelect={onSelect}
         />
       ))}

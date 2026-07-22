@@ -1,6 +1,5 @@
 "use client";
 
-import { Button } from "@vorinthex/shared/ui/components";
 import { useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
@@ -16,28 +15,12 @@ export function ScrollHint() {
   const hasExplored = useGalaxyStore((s) => s.hasExplored);
   const drawerOpen = useGalaxyStore((s) => s.drawerOpen);
   const enterBelt = useGalaxyStore((s) => s.enterBelt);
-  const exitBelt = useGalaxyStore((s) => s.exitBelt);
 
   if (mode === "cave" || mode === "jump" || mode === "intro") return null;
   // The drawer owns the bottom edge while it's open.
   if (mode === "system" && drawerOpen) return null;
 
-  if (mode === "belt") {
-    return (
-      <div className="absolute inset-x-0 bottom-10 z-20 flex flex-col items-center gap-3 px-10 sm:bottom-12">
-        <p className="text-center font-mono text-[0.55rem] tracking-[0.3em] text-silver-500 uppercase">
-          You are beyond the belt, scroll to ride it faster
-        </p>
-        <Button
-          variant="secondary"
-          onClick={exitBelt}
-          className="min-h-0 px-6 py-2.5 text-[0.6rem] uppercase"
-        >
-          Return to your solar system
-        </Button>
-      </div>
-    );
-  }
+  if (mode === "belt") return null;
 
   if (!hasExplored && step === 0) {
     return (
@@ -62,13 +45,9 @@ export function ScrollHint() {
 
   return (
     <div className="absolute inset-x-0 bottom-10 z-10 flex justify-center sm:bottom-12">
-      <Button
-        variant="primary"
-        onClick={enterBelt}
-        className="min-h-0 animate-[ember-pulse_3.2s_ease-in-out_infinite] px-6 py-2.5 text-[0.6rem]"
-      >
+      <button type="button" onClick={enterBelt} className="font-mono text-[0.55rem] tracking-[0.3em] text-silver-500 uppercase transition-colors hover:text-silver-100">
         Explore beyond our solar system
-      </Button>
+      </button>
     </div>
   );
 }
