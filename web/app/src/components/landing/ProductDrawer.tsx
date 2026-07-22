@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Button } from "@vorinthex/shared/ui/components";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import {
   getEntityById,
@@ -9,8 +10,11 @@ import {
   getStatusPrefix,
 } from "@/lib/galaxy/registry-helpers";
 import { CloseIcon } from "@/components/ui/icons";
+import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { trackCtaClick } from "@/lib/analytics";
 import {
+  entityAudioUrl,
+  orchestratorMessageUrl,
   useAudioStore,
 } from "@/lib/audio/audio-store";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
@@ -110,6 +114,7 @@ export function ProductDrawer() {
 }
 
 function EntityPanel({ entity }: { entity: GalaxyEntity }) {
+  const playVoice = useAudioStore((s) => s.playVoice);
   const state = getEntityRenderState(entity);
   const active = state === "active";
   const statusPrefix = getStatusPrefix(entity);
@@ -161,6 +166,42 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
         </p>
       </div>
 
+      <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center lg:justify-start">
+        <Button
+          variant="primary"
+          onClick={() => {
+            trackCtaClick("entity_audio", {
+              placement: "entity_drawer",
+              entity_id: entity.id,
+              entity_type: entity.type,
+              entity_slug: entity.slug,
+            });
+            playVoice(entityAudioUrl(entity.type, entity.slug));
+          }}
+          icon={<SpeakerIcon animated />}
+          className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] uppercase sm:px-6"
+        >
+          Play Briefing
+        </Button>
+        {entity.type === "orchestrator" ? (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              trackCtaClick("orchestrator_message", {
+                placement: "entity_drawer",
+                entity_id: entity.id,
+                entity_type: entity.type,
+                entity_slug: entity.slug,
+              });
+              playVoice(orchestratorMessageUrl(entity.slug));
+            }}
+            icon={<SpeakerIcon animated />}
+            className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] uppercase sm:px-6"
+          >
+            Meet {entity.name}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
