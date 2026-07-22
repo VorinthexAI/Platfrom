@@ -21,6 +21,7 @@ export const documentSchema = z.object({
   json: editorDocumentJsonSchema,
   content: z.string().trim().min(1),
   embedding: z.array(z.number().finite()).min(1),
+  deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -36,6 +37,16 @@ export const deleteDocument = helpers.deleteById;
 export const upsertDocumentByKey = helpers.upsertByKey;
 export const getAllDocumentsChunked = helpers.getAllChunked;
 export const listDocumentsPage = helpers.listPage;
+
+export async function archiveDocument(key: string): Promise<Document> {
+  const timestamp = new Date().toISOString();
+  return updateDocument(key, { deletedAt: timestamp, updatedAt: timestamp });
+}
+
+export async function restoreDocument(key: string): Promise<Document> {
+  const timestamp = new Date().toISOString();
+  return updateDocument(key, { deletedAt: null, updatedAt: timestamp });
+}
 
 /** Inserts an already embedded document without invoking the generic auto-embed path. */
 export async function insertPreparedDocument(input: Document): Promise<Document> {

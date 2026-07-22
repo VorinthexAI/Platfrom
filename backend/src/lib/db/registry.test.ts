@@ -12,6 +12,9 @@ import { messageReactionSchema } from './message-reactions.node';
 import { messageMentionSchema } from './message-mentions.node';
 import { folderSchema } from './folders.node';
 import { documentSchema } from './documents.node';
+import { projectSchema } from './projects.node';
+import { milestoneSchema } from './milestones.node';
+import { taskSchema } from './tasks.node';
 import { documentVersionSchema } from './document-versions.node';
 import { documentShareSchema } from './document-shares.node';
 
@@ -38,6 +41,9 @@ describe('node registry schema contracts', () => {
       'documents',
       'documentVersions',
       'documentShares',
+      'projects',
+      'milestones',
+      'tasks',
     ]));
     expect(NODE_NAMES).not.toContain('agentTools');
     expect(NODE_NAMES).not.toContain('tools');
@@ -84,6 +90,18 @@ describe('node registry schema contracts', () => {
     expect(documentSchema.shape).toHaveProperty('folderKey');
     expect(documentSchema.shape).toHaveProperty('storageKey');
     expect(documentSchema.shape).toHaveProperty('sizeBytes');
+    for (const schema of [projectSchema, milestoneSchema, taskSchema]) {
+      expect(schema.shape).toHaveProperty('key');
+      expect(schema.shape).toHaveProperty('scopeKey');
+      expect(schema.shape).toHaveProperty('embedding');
+      expect(schema.shape).toHaveProperty('deletedAt');
+      expect(schema.shape).toHaveProperty('createdAt');
+      expect(schema.shape).toHaveProperty('updatedAt');
+    }
+    for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema]) {
+      expect(schema.shape).toHaveProperty('deletedAt');
+      expect(schema.shape.deletedAt.parse(undefined)).toBeNull();
+    }
   });
 
   test('requires exactly one channel participant identity', () => {

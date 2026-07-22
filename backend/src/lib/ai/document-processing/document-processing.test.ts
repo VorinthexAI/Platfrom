@@ -23,6 +23,7 @@ const scopeKey = 'cmrnlzf640000qc7k4p5zem5w';
 const folderKey = 'cmrnlzf640001qc7k4p5zem5w';
 const documentKey = 'cmrnlzf640002qc7k4p5zem5w';
 const timestamp = '2026-07-22T00:00:00.000Z';
+const folder = { key: folderKey, scopeKey, name: 'Folder', embedding: [], deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const quiet = () => undefined;
 const bytes = (text: string) => new TextEncoder().encode(text);
 
@@ -75,7 +76,7 @@ const completeDocument = (overrides: Partial<Document> = {}): Document => ({
   key: documentKey, scopeKey, folderKey, name: 'Report', extension: 'txt', mimeType: 'text/plain',
   storageKey: `archive/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
   html: '<h1>Report</h1><p>Body</p>', json: editorJson, content: 'Report\n\nBody', embedding: [1, 2],
-  createdAt: timestamp, updatedAt: timestamp, ...overrides,
+  deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
 });
 
 describe('document-validate action', () => {
@@ -190,8 +191,6 @@ describe('document-embed action', () => {
 });
 
 describe('document-insert action', () => {
-  const folder = { key: folderKey, scopeKey, name: 'Folder', embedding: [], createdAt: timestamp, updatedAt: timestamp };
-
   test('inserts only a complete document with a valid folder relationship', async () => {
     let inserted: Document | undefined;
     const result = await documentInsert(completeDocument(), { logger: quiet, getFolder: async () => folder, getDocument: async () => null, insert: async (document) => { inserted = document; return document; } });
@@ -205,6 +204,11 @@ describe('document-insert action', () => {
     await expect(documentInsert({ ...completeDocument(), content: undefined } as never, dependencies)).rejects.toMatchObject({ code: 'DOCUMENT_INSERT_FAILED' });
     await expect(documentInsert(completeDocument(), { ...dependencies, getFolder: async () => null })).rejects.toMatchObject({ code: 'DOCUMENT_INSERT_FAILED' });
     await expect(documentInsert(completeDocument(), { ...dependencies, insert: async () => { throw new Error('Arango unavailable'); } })).rejects.toMatchObject({ code: 'DOCUMENT_INSERT_FAILED' });
+  });
+
+  test('rejects archived folders and archived idempotent documents', async () => {
+    await expect(documentInsert(completeDocument(), { logger: quiet, getFolder: async () => ({ ...folder, deletedAt: timestamp }), getDocument: async () => null })).rejects.toMatchObject({ code: 'DOCUMENT_INSERT_FAILED' });
+    await expect(documentInsert(completeDocument(), { logger: quiet, getFolder: async () => folder, getDocument: async () => completeDocument({ deletedAt: timestamp }) })).rejects.toMatchObject({ code: 'DOCUMENT_INSERT_FAILED' });
   });
 });
 
@@ -227,7 +231,7 @@ describe('document.processing tool', () => {
       embed: async () => { calls.push('document-embed'); fail('embed'); return { embedding: [1, 2] }; },
       insert: async (document) => { calls.push('document-insert'); fail('insert'); persisted = document; return { document }; },
     };
-    return { calls, storage, actions, get persisted() { return persisted; }, getDocument: async () => persisted };
+    return { calls, storage, actions, get persisted() { return persisted; }, getFolder: async () => folder, getDocument: async () => persisted };
   }
 
   const input = { file: fileFor('txt'), scopeKey, folderKey, idempotencyKey: 'request-1' };
@@ -265,6 +269,27 @@ describe('document.processing tool', () => {
     const second = await runTool('document.processing', '', input, { ...context, logger: quiet }) as DocumentProcessingResult;
     expect(second.document.key).toBe(first.document.key);
     expect(context.calls.slice(beforeRetry)).toEqual(['document-validate']);
+  });
+
+  test('rejects an archived document on an idempotent retry without uploading', async () => {
+    const context = harness();
+    const key = documentKeyForRequest(scopeKey, folderKey, input.idempotencyKey);
+    await expect(runTool('document.processing', '', input, {
+      ...context,
+      logger: quiet,
+      getDocument: async () => completeDocument({ key, deletedAt: timestamp }),
+    })).rejects.toMatchObject({ code: 'DOCUMENT_INSERT_FAILED' });
+    expect(context.calls).toEqual(['document-validate']);
+  });
+
+  test('rejects an archived folder before idempotency lookup or upload', async () => {
+    const context = harness();
+    await expect(runTool('document.processing', '', input, {
+      ...context,
+      logger: quiet,
+      getFolder: async () => ({ ...folder, deletedAt: timestamp }),
+    })).rejects.toMatchObject({ code: 'DOCUMENT_INSERT_FAILED' });
+    expect(context.calls).toEqual(['document-validate']);
   });
 
   test('does not delete the winning object after an ambiguous or concurrent insert failure', async () => {

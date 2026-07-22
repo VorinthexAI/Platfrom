@@ -10,6 +10,7 @@ export const folderSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   embedding: z.array(z.number().finite()).default([]),
+  deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
@@ -24,3 +25,13 @@ export const deleteFolder = helpers.deleteById;
 export const upsertFolderByKey = helpers.upsertByKey;
 export const getAllFoldersChunked = helpers.getAllChunked;
 export const listFoldersPage = helpers.listPage;
+
+export async function archiveFolder(key: string): Promise<Folder> {
+  const timestamp = new Date().toISOString();
+  return updateFolder(key, { deletedAt: timestamp, updatedAt: timestamp });
+}
+
+export async function restoreFolder(key: string): Promise<Folder> {
+  const timestamp = new Date().toISOString();
+  return updateFolder(key, { deletedAt: null, updatedAt: timestamp });
+}

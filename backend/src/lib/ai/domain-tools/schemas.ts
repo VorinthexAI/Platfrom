@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { userOrganizationRoleSchema } from '@/lib/db/user-organization.node';
 import { artifactDefinitionSchema } from '@/lib/artifacts/schema';
+import { archiveToolInputSchemas } from './archive-schemas';
+import { momentumToolInputSchemas } from '@/lib/ai/momentum/tool-schemas';
 
 const referenceSchema = z.string().trim().min(1).max(320);
 const referencesSchema = z.array(referenceSchema).min(1).max(100);
@@ -64,6 +66,8 @@ export const domainToolInputSchemas = {
   'access.organization.explain': z.object({ organization: referenceSchema.optional(), member: referenceSchema.optional(), action: z.string().trim().min(1).max(160).optional() }).strict(),
   'access.scope.explain': z.object({ scope: referenceSchema, member: referenceSchema.optional(), action: z.string().trim().min(1).max(160).optional() }).strict(),
   'access.agent.explain': z.object({ scope: referenceSchema, agent: referenceSchema, member: referenceSchema.optional(), action: z.enum(['read', 'run', 'delegate', 'manage']).default('run') }).strict(),
+  ...archiveToolInputSchemas,
+  ...momentumToolInputSchemas,
 } as const;
 
 export type DomainActionSlug = keyof typeof domainToolInputSchemas;
