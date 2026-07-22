@@ -16,6 +16,7 @@ const CHROME = "#7f898f";
 interface OrchestratorCommandDeckProps {
   entity: GalaxyEntity;
   reducedMotion: boolean;
+  onScopeRoute?: (scope: GalaxyEntity) => void;
 }
 
 type ScopeLayer = "Nexus" | "Products" | "Capabilities" | "Orchestrators";
@@ -28,10 +29,10 @@ interface ScopeNode {
 }
 
 const SCOPE_LAYERS: Record<ScopeLayer, { radius: number; speed: number }> = {
-  Nexus: { radius: 1.35, speed: 0.1 },
-  Products: { radius: 2.35, speed: 0.16 },
-  Capabilities: { radius: 3.35, speed: 0.23 },
-  Orchestrators: { radius: 4.55, speed: 0.31 },
+  Nexus: { radius: 1.6, speed: 0.1 },
+  Products: { radius: 2.9, speed: 0.16 },
+  Capabilities: { radius: 4.25, speed: 0.23 },
+  Orchestrators: { radius: 5.7, speed: 0.31 },
 };
 
 const scopeNodes: ScopeNode[] = [
@@ -121,7 +122,7 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
     current.current.pitch = THREE.MathUtils.damp(current.current.pitch, desired.current.pitch, 9, delta);
     distance.current = THREE.MathUtils.damp(distance.current, desiredDistance.current, 7, delta);
     camera.current.rotation.set(0.04 + current.current.pitch, current.current.yaw, 0, "YXZ");
-    camera.current.position.z = (compact ? 12.8 : 11.2) + distance.current;
+     camera.current.position.z = (compact ? 14 : 12.8) + distance.current;
   });
 
   return (
@@ -131,7 +132,7 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
       fov={compact ? 56 : 47}
       near={0.1}
       far={100}
-      position={[0, compact ? 2.7 : 2.45, compact ? 12.8 : 11.2]}
+       position={[0, compact ? 2.7 : 2.45, compact ? 14 : 12.8]}
       rotation={[0.04, 0, 0]}
     />
   );
@@ -507,7 +508,7 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   });
 
   return (
-    <group ref={medallion} position={[0, 2.35, -2.55]}>
+    <group ref={medallion} position={[0, 2.35, -2.55]} renderOrder={30}>
       <Billboard>
         <mesh position={[0, 0, -0.08]}>
           <circleGeometry args={[0.88, 48]} />
@@ -552,8 +553,8 @@ function ScopeConnection({ node, parent, reducedMotion }: { node: ScopeNode; par
   });
 
   return (
-    <lineSegments geometry={geometry} renderOrder={2}>
-      <lineBasicMaterial color={AMBER} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+    <lineSegments geometry={geometry} renderOrder={4}>
+      <lineBasicMaterial color={AMBER} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
     </lineSegments>
   );
 }
@@ -568,22 +569,14 @@ function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: Sco
   });
 
   return (
-    <group ref={group} onClick={(event) => { event.stopPropagation(); onSelect(node.entity.id); }}>
+    <group ref={group} renderOrder={20} onClick={(event) => { event.stopPropagation(); onSelect(node.entity.id); }}>
       <Billboard>
-        <mesh>
-          <circleGeometry args={[selected ? 0.34 : 0.24, 32]} />
-          <meshBasicMaterial color={selected ? HOT_AMBER : "#10191e"} transparent opacity={selected ? 0.94 : 0.8} toneMapped={false} />
-        </mesh>
-        <mesh position={[0, 0, 0.012]}>
-          <ringGeometry args={[selected ? 0.35 : 0.25, selected ? 0.43 : 0.31, 32]} />
-          <meshBasicMaterial color={selected ? "#fff1cf" : "#76858d"} transparent opacity={selected ? 1 : 0.62} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
-        </mesh>
-        <mesh position={[0, 0, 0.024]}>
-          <planeGeometry args={[selected ? 0.42 : 0.3, selected ? 0.42 : 0.3]} />
-          <meshBasicMaterial map={texture} color="#fff4dc" transparent alphaTest={0.02} depthWrite={false} toneMapped={false} />
+        <mesh renderOrder={selected ? 30 : 21}>
+          <planeGeometry args={[selected ? 0.72 : 0.46, selected ? 0.72 : 0.46]} />
+          <meshBasicMaterial map={texture} color="#fff4dc" transparent alphaTest={0.02} opacity={selected ? 1 : 0.72} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
         </mesh>
         {selected ? <pointLight color={HOT_AMBER} intensity={1.2} distance={2.2} /> : null}
-        <Html center position={[0, -0.42, 0]} distanceFactor={7} style={{ pointerEvents: "none" }}>
+        <Html center position={[0, -0.56, 0]} distanceFactor={7} style={{ pointerEvents: "none" }}>
           <div className={`w-20 text-center font-mono uppercase tracking-[0.14em] ${selected ? "text-[#ffe2b6]" : "text-slate-300"}`}>
             <p className="text-[7px] opacity-70">{node.layer === "Nexus" ? "Nexus" : node.layer.slice(0, -1)}</p>
             <p className="mt-0.5 text-[9px] font-semibold">{node.entity.name}</p>
@@ -598,9 +591,9 @@ function ScopeOrbitalSystem({ selectedId, reducedMotion, onSelect }: { selectedI
   return (
     <group>
       {Object.entries(SCOPE_LAYERS).map(([layer, { radius }]) => (
-        <mesh key={layer} position={[0, 2.35, -2.42]} rotation={[0, 0, 0]}>
-          <ringGeometry args={[radius - 0.012, radius + 0.012, 96]} />
-          <meshBasicMaterial color={layer === "Nexus" ? HOT_AMBER : "#49636e"} transparent opacity={0.34} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+          <mesh key={layer} position={[0, 2.35, -2.42]} rotation={[0, 0, 0]} renderOrder={5}>
+            <ringGeometry args={[radius - 0.012, radius + 0.012, 96]} />
+           <meshBasicMaterial color={layer === "Nexus" ? HOT_AMBER : "#49636e"} transparent opacity={0.34} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
         </mesh>
       ))}
       {scopeNodes.map((node) => {
@@ -657,7 +650,21 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
     const nextIndex = (selectedScopeIndex + direction + scopeNodes.length) % scopeNodes.length;
     setSelectedScopeId(scopeNodes[nextIndex]!.entity.id);
   };
-  const sceneProps = { entity, reducedMotion: props.reducedMotion, selectedScopeId, onSelectScope: setSelectedScopeId };
+  const sceneProps = {
+    entity,
+    reducedMotion: props.reducedMotion,
+    selectedScopeId,
+    onSelectScope: (id: string) => {
+      setSelectedScopeId(id);
+      const scope = scopeNodeById.get(id)?.entity;
+      if (scope) props.onScopeRoute?.(scope);
+    },
+  };
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const filteredScopes = scopeNodes.filter((node) =>
+    `${node.entity.name} ${node.layer}`.toLowerCase().includes(query.toLowerCase()),
+  );
   const instruction = `Drag to look around the ${entity.name} Nexus command deck. Use the mouse wheel to zoom.`;
 
   return (
@@ -665,7 +672,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
       <Canvas
         dpr={[1, 1.35]}
         shadows
-        camera={{ position: [0, 2.45, 11.2], fov: 47, near: 0.1, far: 100 }}
+         camera={{ position: [0, 2.45, 12.8], fov: 47, near: 0.1, far: 100 }}
         gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
         className="!absolute !inset-0 !touch-none"
         aria-label={instruction}
@@ -675,14 +682,31 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
-      <div className="pointer-events-none absolute inset-x-4 top-4 z-10 flex items-center justify-between text-slate-100 sm:inset-x-7 sm:top-6">
-        <div className="min-w-0 rounded-full border border-white/10 bg-black/45 px-3 py-2 backdrop-blur-md">
-          <p className="font-mono text-[9px] uppercase tracking-[0.22em] text-[#ffba72]">{selectedScope.layer}</p>
-          <p className="truncate font-mono text-sm font-semibold uppercase tracking-[0.16em]">{selectedScope.entity.name}</p>
+      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-between text-slate-100 sm:inset-x-7 sm:top-6">
+        <div className="relative pointer-events-auto">
+          <button type="button" onClick={() => setPickerOpen((open) => !open)} aria-expanded={pickerOpen}
+            className="min-w-52 rounded-full border border-white/15 bg-black/65 px-4 py-2 text-left shadow-xl backdrop-blur-xl">
+            <span className="block font-mono text-[8px] uppercase tracking-[0.22em] text-[#ffba72]">{selectedScope.layer}</span>
+            <span className="mt-1 block truncate font-mono text-sm font-semibold uppercase tracking-[0.16em]">{selectedScope.entity.name}</span>
+          </button>
+          {pickerOpen ? (
+            <div className="absolute top-[calc(100%+0.5rem)] left-0 w-72 rounded-2xl border border-white/15 bg-[#080b0d]/95 p-2 shadow-2xl backdrop-blur-2xl">
+              <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search scopes..."
+                className="mb-2 w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-white/25" />
+              <div className="max-h-64 overflow-y-auto">
+                {filteredScopes.map((node) => (
+                  <button key={node.entity.id} type="button" onClick={() => { sceneProps.onSelectScope(node.entity.id); setPickerOpen(false); }}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left font-mono text-[10px] uppercase tracking-[0.12em] text-silver-400 transition-colors hover:bg-white/[0.07] hover:text-white">
+                    <span>{node.entity.name}</span><span className="text-[8px] text-silver-700">{node.layer}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
         <div className="pointer-events-auto flex overflow-hidden rounded-full border border-white/15 bg-black/55 backdrop-blur-md">
-          <button type="button" onClick={() => stepScope(-1)} aria-label="Previous scope" className="flex h-10 w-10 items-center justify-center text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">‹</button>
-          <button type="button" onClick={() => stepScope(1)} aria-label="Next scope" className="flex h-10 w-10 items-center justify-center border-l border-white/10 text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">›</button>
+          <button type="button" onClick={() => { stepScope(-1); sceneProps.onSelectScope(scopeNodes[(selectedScopeIndex - 1 + scopeNodes.length) % scopeNodes.length]!.entity.id); }} aria-label="Previous scope" className="flex h-10 w-10 items-center justify-center text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">‹</button>
+          <button type="button" onClick={() => { stepScope(1); sceneProps.onSelectScope(scopeNodes[(selectedScopeIndex + 1) % scopeNodes.length]!.entity.id); }} aria-label="Next scope" className="flex h-10 w-10 items-center justify-center border-l border-white/10 text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">›</button>
         </div>
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@vorinthex/shared/ui/components";
 import { CloseIcon } from "@vorinthex/shared/ui/icons";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
@@ -21,7 +20,7 @@ import { AccountModal } from "./AccountModal";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { getEntityById } from "@/lib/galaxy/registry-helpers";
-import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
+import { useAudioStore } from "@/lib/audio/audio-store";
 import { NexusTransit } from "./NexusTransit";
 import { NexusEntityArc } from "./NexusEntityArc";
 import { NEXUS_HQ_ENTITY_ID, NEXUS_HQ_TRANSIT_DESTINATION } from "@/lib/founders/nexus-landing";
@@ -62,7 +61,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
   const [transitDestination, setTransitDestination] = useState<string | null>(null);
   const scopeRequestRef = useRef(0);
 
-  const playVoice = useAudioStore((state) => state.playVoice);
   const stopVoice = useAudioStore((state) => state.stopVoice);
   const startAmbient = useAudioStore((state) => state.startAmbient);
   const ambientStarted = useAudioStore((state) => state.ambientStarted);
@@ -116,6 +114,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
         setSelectedEntityId(NEXUS_HQ_ENTITY_ID);
         setEnteredEntityId(NEXUS_HQ_ENTITY_ID);
         setTransitDestination(`Entering ${NEXUS_HQ_TRANSIT_DESTINATION} deck`);
+        window.history.replaceState(null, "", "/nexus/deck/hq");
         const stored = window.localStorage.getItem(ORGANIZATION_STORAGE_KEY);
         const initialKey = loadedOrganizations.find((organization) => organization.key === stored)?.key
           ?? loadedOrganizations[0]?.key
@@ -175,12 +174,13 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
     setSelectedEntityId(entity.id);
     setEnteredEntityId(entity.id);
     setTransitDestination(`Entering ${entity.name} deck`);
+    window.history.replaceState(null, "", `/nexus/deck/${entity.slug}`);
   }, [stopVoice]);
 
-  const leaveEntity = useCallback(() => {
-    stopVoice();
-    setEnteredEntityId(null);
-  }, [stopVoice]);
+  const updateDeckScopeRoute = useCallback((deck: GalaxyEntity, scope: GalaxyEntity) => {
+    const suffix = scope.id === "nexus.star" || scope.id === deck.id ? "" : `/${scope.slug}`;
+    window.history.replaceState(null, "", `/nexus/deck/${deck.slug}${suffix}`);
+  }, []);
 
   const completeTransit = useCallback(() => setTransitDestination(null), []);
 
@@ -240,7 +240,11 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
           <div className="relative min-h-0 flex-1 overflow-hidden">
             <div className="absolute inset-0">
               {enteredEntity ? (
-                <OrchestratorCommandDeck entity={enteredEntity} reducedMotion={Boolean(reducedMotion)} />
+                  <OrchestratorCommandDeck
+                    entity={enteredEntity}
+                    reducedMotion={Boolean(reducedMotion)}
+                    onScopeRoute={(scope) => updateDeckScopeRoute(enteredEntity, scope)}
+                  />
               ) : (
                 <div className="mx-auto h-full min-h-[670px] max-w-[1540px] px-4 pt-2 pb-24 sm:px-8 lg:pt-4">
                 <OrchestratorHierarchy
@@ -263,25 +267,6 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
             ) : null}
           </div>
 
-          {enteredEntity ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 px-4 sm:px-8">
-            <div className="pointer-events-auto mx-auto w-full max-w-[820px]">
-              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-                <Button variant="secondary" onClick={() => playVoice(entityAudioUrl(enteredEntity.type, enteredEntity.slug))}>
-                  Play Briefing
-                </Button>
-                {enteredEntity.type === "orchestrator" ? (
-                  <Button variant="secondary" onClick={() => playVoice(orchestratorMessageUrl(enteredEntity.slug))}>
-                    Meet {enteredEntity.name}
-                  </Button>
-                ) : null}
-                <Button variant="secondary" onClick={leaveEntity}>
-                  Exit
-                </Button>
-              </div>
-            </div>
-          </div>
-          ) : null}
         </section>
       </div>
 
