@@ -29,10 +29,10 @@ interface ScopeNode {
 }
 
 const SCOPE_LAYERS: Record<ScopeLayer, { radius: number; speed: number }> = {
-  Nexus: { radius: 1.6, speed: 0.1 },
-  Products: { radius: 2.9, speed: 0.16 },
-  Capabilities: { radius: 4.25, speed: 0.23 },
-  Orchestrators: { radius: 5.7, speed: 0.31 },
+  Nexus: { radius: 1.45, speed: 0.1 },
+  Products: { radius: 2.55, speed: 0.16 },
+  Capabilities: { radius: 3.75, speed: 0.23 },
+  Orchestrators: { radius: 4.95, speed: 0.31 },
 };
 
 const scopeNodes: ScopeNode[] = [
@@ -122,7 +122,7 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
     current.current.pitch = THREE.MathUtils.damp(current.current.pitch, desired.current.pitch, 9, delta);
     distance.current = THREE.MathUtils.damp(distance.current, desiredDistance.current, 7, delta);
     camera.current.rotation.set(0.04 + current.current.pitch, current.current.yaw, 0, "YXZ");
-     camera.current.position.z = (compact ? 14 : 12.8) + distance.current;
+    camera.current.position.z = (compact ? 16.5 : 15.2) + distance.current;
   });
 
   return (
@@ -132,7 +132,7 @@ function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
       fov={compact ? 56 : 47}
       near={0.1}
       far={100}
-       position={[0, compact ? 2.7 : 2.45, compact ? 14 : 12.8]}
+      position={[0, compact ? 2.7 : 2.45, compact ? 16.5 : 15.2]}
       rotation={[0.04, 0, 0]}
     />
   );
@@ -514,24 +514,24 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
           <circleGeometry args={[0.88, 48]} />
           <meshPhysicalMaterial color="#080b0d" metalness={0.96} roughness={0.2} clearcoat={0.7} />
         </mesh>
-        <mesh position={[0, 0, -0.04]}>
+        <mesh position={[0, 0, -0.04]} renderOrder={40}>
           <ringGeometry args={[0.88, 1.02, 48]} />
           <meshPhysicalMaterial color="#9b704b" emissive="#6d2c0b" emissiveIntensity={0.85} metalness={0.92} roughness={0.16} clearcoat={0.8} />
         </mesh>
-        <mesh position={[0, 0, 0.01]}>
+        <mesh position={[0, 0, 0.01]} renderOrder={41}>
           <planeGeometry args={[1.35, 1.35]} />
           <meshBasicMaterial map={texture} color="#ffe1b7" transparent alphaTest={0.02} opacity={0.92} depthWrite={false} toneMapped={false} />
         </mesh>
-        <mesh ref={scan} position={[0, 0, -0.02]}>
+        <mesh ref={scan} position={[0, 0, -0.02]} renderOrder={42}>
           <ringGeometry args={[1.14, 1.17, 6]} />
           <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.62} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
         </mesh>
       </Billboard>
-      <mesh position={[0, -1.3, 0]}>
+       <mesh position={[0, -1.3, 0]} renderOrder={40}>
         <cylinderGeometry args={[0.05, 0.22, 1.1, 12]} />
         <meshStandardMaterial color="#8f969a" emissive="#8b3d12" emissiveIntensity={0.45} metalness={0.98} roughness={0.16} />
       </mesh>
-      <pointLight color={AMBER} intensity={1.4} distance={5} decay={2} />
+       <pointLight color={AMBER} intensity={1.4} distance={5} decay={2} />
     </group>
   );
 }
@@ -672,7 +672,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
       <Canvas
         dpr={[1, 1.35]}
         shadows
-         camera={{ position: [0, 2.45, 12.8], fov: 47, near: 0.1, far: 100 }}
+         camera={{ position: [0, 2.45, 15.2], fov: 47, near: 0.1, far: 100 }}
         gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
         className="!absolute !inset-0 !touch-none"
         aria-label={instruction}
@@ -682,7 +682,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
-      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-between text-slate-100 sm:inset-x-7 sm:top-6">
+      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-start gap-1 text-slate-100 sm:inset-x-7 sm:top-6">
         <div className="relative pointer-events-auto">
           <button type="button" onClick={() => setPickerOpen((open) => !open)} aria-expanded={pickerOpen}
             className="min-w-52 rounded-full border border-white/15 bg-black/65 px-4 py-2 text-left shadow-xl backdrop-blur-xl">
@@ -705,8 +705,8 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
           ) : null}
         </div>
         <div className="pointer-events-auto flex overflow-hidden rounded-full border border-white/15 bg-black/55 backdrop-blur-md">
-          <button type="button" onClick={() => { stepScope(-1); sceneProps.onSelectScope(scopeNodes[(selectedScopeIndex - 1 + scopeNodes.length) % scopeNodes.length]!.entity.id); }} aria-label="Previous scope" className="flex h-10 w-10 items-center justify-center text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">‹</button>
-          <button type="button" onClick={() => { stepScope(1); sceneProps.onSelectScope(scopeNodes[(selectedScopeIndex + 1) % scopeNodes.length]!.entity.id); }} aria-label="Next scope" className="flex h-10 w-10 items-center justify-center border-l border-white/10 text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">›</button>
+          <button type="button" onClick={() => { const id = scopeNodes[(selectedScopeIndex - 1 + scopeNodes.length) % scopeNodes.length]!.entity.id; stepScope(-1); sceneProps.onSelectScope(id); }} aria-label="Previous scope" className="flex h-10 w-10 items-center justify-center text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">‹</button>
+          <button type="button" onClick={() => { const id = scopeNodes[(selectedScopeIndex + 1) % scopeNodes.length]!.entity.id; stepScope(1); sceneProps.onSelectScope(id); }} aria-label="Next scope" className="flex h-10 w-10 items-center justify-center border-l border-white/10 text-lg text-slate-200 transition-colors hover:bg-white/10 hover:text-white">›</button>
         </div>
       </div>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
