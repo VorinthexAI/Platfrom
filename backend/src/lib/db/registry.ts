@@ -29,6 +29,12 @@ import { getAllVisitorsChunked, listVisitorsPage, upsertVisitorByKey } from './v
 import { getAllVoicesChunked, listVoicesPage, upsertVoiceByKey } from './voices.node';
 import { getAllScopeAgentsChunked, listScopeAgentsPage, upsertScopeAgentByKey } from './scope-agents.node';
 import { getAllAgentMembersChunked, listAgentMembersPage, upsertAgentMemberByKey } from './agent-members.node';
+import { getAllChannelsChunked, listChannelsPage, upsertChannelByKey } from './channels.node';
+import { getAllChannelParticipantsChunked, listChannelParticipantsPage, upsertChannelParticipantByKey } from './channel-participants.node';
+import { getAllThreadsChunked, listThreadsPage, upsertThreadByKey } from './threads.node';
+import { getAllMessagesChunked, listMessagesPage, upsertMessageByKey } from './messages.node';
+import { getAllMessageMentionsChunked, listMessageMentionsPage, upsertMessageMentionByKey } from './message-mentions.node';
+import { getAllMessageReactionsChunked, listMessageReactionsPage, upsertMessageReactionByKey } from './message-reactions.node';
 
 export interface NodeAccessors {
   /** One resumable page — for stateless HTTP pagination (GET /api/v1/nodes). */
@@ -58,6 +64,12 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   agentMembers: { listPage: listAgentMembersPage, getAllChunked: getAllAgentMembersChunked, upsertByKey: upsertAgentMemberByKey },
   authChallenges: { listPage: listAuthChallengesPage, getAllChunked: getAllAuthChallengesChunked, upsertByKey: upsertAuthChallengeByKey },
   capabilities: { listPage: listCapabilitiesPage, getAllChunked: getAllCapabilitiesChunked, upsertByKey: upsertCapabilityByKey },
+  channels: { listPage: listChannelsPage, getAllChunked: getAllChannelsChunked, upsertByKey: upsertChannelByKey },
+  channelParticipants: { listPage: listChannelParticipantsPage, getAllChunked: getAllChannelParticipantsChunked, upsertByKey: upsertChannelParticipantByKey },
+  threads: { listPage: listThreadsPage, getAllChunked: getAllThreadsChunked, upsertByKey: upsertThreadByKey },
+  messages: { listPage: listMessagesPage, getAllChunked: getAllMessagesChunked, upsertByKey: upsertMessageByKey },
+  messageMentions: { listPage: listMessageMentionsPage, getAllChunked: getAllMessageMentionsChunked, upsertByKey: upsertMessageMentionByKey },
+  messageReactions: { listPage: listMessageReactionsPage, getAllChunked: getAllMessageReactionsChunked, upsertByKey: upsertMessageReactionByKey },
   events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked, upsertByKey: upsertEventByKey },
   intelligenceFragments: { listPage: listIntelligenceFragmentsPage, getAllChunked: getAllIntelligenceFragmentsChunked, upsertByKey: upsertIntelligenceFragmentByKey },
   mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },
