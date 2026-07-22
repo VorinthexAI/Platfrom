@@ -44,6 +44,41 @@ const scopeNodes: ScopeNode[] = [
   ...Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators).map((entity, position) => ({ entity, layer: "Orchestrators" as const, parentId: entity.reportsTo ?? entity.parentId, position })),
 ];
 const scopeNodeById = new Map(scopeNodes.map((node) => [node.entity.id, node]));
+const scopeCountByLayer: Record<ScopeLayer, number> = {
+  Nexus: scopeNodes.filter((node) => node.layer === "Nexus").length,
+  Products: scopeNodes.filter((node) => node.layer === "Products").length,
+  Capabilities: scopeNodes.filter((node) => node.layer === "Capabilities").length,
+  Orchestrators: scopeNodes.filter((node) => node.layer === "Orchestrators").length,
+};
+const scopeChildrenByParentId = new Map<string, ScopeNode[]>();
+for (const node of scopeNodes) {
+  if (!node.parentId) continue;
+  const children = scopeChildrenByParentId.get(node.parentId) ?? [];
+  children.push(node);
+  scopeChildrenByParentId.set(node.parentId, children);
+}
+
+function linkedScopesFor(selected: ScopeNode): ScopeNode[] {
+  const descendants: ScopeNode[] = [];
+  const pending = [...(scopeChildrenByParentId.get(selected.entity.id) ?? [])];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const node = pending.shift()!;
+    if (visited.has(node.entity.id)) continue;
+    visited.add(node.entity.id);
+    descendants.push(node);
+    pending.push(...(scopeChildrenByParentId.get(node.entity.id) ?? []));
+  }
+  if (descendants.length > 0) return descendants;
+  const parent = selected.parentId ? scopeNodeById.get(selected.parentId) : undefined;
+  return parent ? [parent] : [];
+}
+
+function connectionSeed(id: string) {
+  let seed = 0;
+  for (let index = 0; index < id.length; index += 1) seed = (seed * 31 + id.charCodeAt(index)) >>> 0;
+  return seed / 4294967295;
+}
 
 function CameraDrift({ reducedMotion }: { reducedMotion: boolean }) {
   const camera = useRef<THREE.PerspectiveCamera>(null);
@@ -538,26 +573,112 @@ function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckPro
   );
 }
 
-function scopePosition(node: ScopeNode, elapsed: number): THREE.Vector3 {
+function scopePosition(node: ScopeNode, elapsed: number, target = new THREE.Vector3()): THREE.Vector3 {
   const { radius, speed } = SCOPE_LAYERS[node.layer];
-  const peers = scopeNodes.filter((candidate) => candidate.layer === node.layer);
-  const angle = node.position / peers.length * Math.PI * 2 + elapsed * speed;
-  return new THREE.Vector3(Math.cos(angle) * radius, 2.35 + Math.sin(angle) * radius * 0.62, -2.35);
+  const angle = node.position / scopeCountByLayer[node.layer] * Math.PI * 2 + elapsed * speed;
+  return target.set(Math.cos(angle) * radius, 2.35 + Math.sin(angle) * radius * 0.62, -2.35);
 }
 
-function ScopeConnection({ node, parent, reducedMotion }: { node: ScopeNode; parent: ScopeNode; reducedMotion: boolean }) {
-  const geometry = useMemo(() => new THREE.BufferGeometry(), []);
+const ENERGY_SEGMENTS = 18;
+const SPARK_COUNT = 7;
 
-  useEffect(() => () => geometry.dispose(), [geometry]);
+function ScopeEnergyConnection({ source, target, reducedMotion }: { source: ScopeNode; target: ScopeNode; reducedMotion: boolean }) {
+  const beam = useRef<THREE.Group>(null);
+  const glowMaterial = useRef<THREE.MeshBasicMaterial>(null);
+  const seed = connectionSeed(`${source.entity.id}:${target.entity.id}`);
+  const energyGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(ENERGY_SEGMENTS * 3), 3));
+    return geometry;
+  }, []);
+  const energyMaterial = useMemo(() => new THREE.LineBasicMaterial({
+    color: "#ffd29a",
+    transparent: true,
+    opacity: 0.82,
+    blending: THREE.AdditiveBlending,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  }), []);
+  const energyLine = useMemo(() => {
+    const line = new THREE.Line(energyGeometry, energyMaterial);
+    line.renderOrder = 4;
+    line.frustumCulled = false;
+    return line;
+  }, [energyGeometry, energyMaterial]);
+  const sparkGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(SPARK_COUNT * 3), 3));
+    return geometry;
+  }, []);
+  const vectors = useMemo(() => ({
+    source: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    direction: new THREE.Vector3(),
+    normalizedDirection: new THREE.Vector3(),
+    midpoint: new THREE.Vector3(),
+    perpendicular: new THREE.Vector3(),
+    point: new THREE.Vector3(),
+    up: new THREE.Vector3(0, 1, 0),
+  }), []);
+
+  useEffect(() => () => {
+    energyGeometry.dispose();
+    energyMaterial.dispose();
+    sparkGeometry.dispose();
+  }, [energyGeometry, energyMaterial, sparkGeometry]);
   useFrame(({ clock }) => {
     const elapsed = reducedMotion ? 0 : clock.elapsedTime;
-    geometry.setFromPoints([scopePosition(node, elapsed), scopePosition(parent, elapsed)]);
+    const sourcePosition = scopePosition(source, elapsed, vectors.source);
+    const targetPosition = scopePosition(target, elapsed, vectors.target);
+    vectors.direction.subVectors(targetPosition, sourcePosition);
+    const length = vectors.direction.length();
+    vectors.perpendicular.set(-vectors.direction.y, vectors.direction.x, 0).normalize();
+
+    if (beam.current && length > 0) {
+      beam.current.position.copy(vectors.midpoint.addVectors(sourcePosition, targetPosition).multiplyScalar(0.5));
+      beam.current.quaternion.setFromUnitVectors(vectors.up, vectors.normalizedDirection.copy(vectors.direction).normalize());
+      beam.current.scale.set(1, length, 1);
+    }
+    if (glowMaterial.current) glowMaterial.current.opacity = 0.1 + Math.sin(elapsed * 2.8 + seed * 12) * 0.035;
+
+    const energyPositions = energyGeometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let index = 0; index < ENERGY_SEGMENTS; index += 1) {
+      const progress = index / (ENERGY_SEGMENTS - 1);
+      const taper = Math.sin(progress * Math.PI);
+      const wave = Math.sin(progress * 34 + elapsed * 5.2 + seed * 19) * 0.025 * taper;
+      vectors.point.lerpVectors(sourcePosition, targetPosition, progress).addScaledVector(vectors.perpendicular, wave);
+      energyPositions.setXYZ(index, vectors.point.x, vectors.point.y, vectors.point.z + Math.cos(progress * 25 + elapsed * 3 + seed * 9) * 0.012 * taper);
+    }
+    energyPositions.needsUpdate = true;
+
+    const sparkPositions = sparkGeometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let index = 0; index < SPARK_COUNT; index += 1) {
+      const progress = reducedMotion ? (index + 1) / (SPARK_COUNT + 1) : (elapsed * (0.18 + seed * 0.08) + index / SPARK_COUNT + seed) % 1;
+      const scatter = Math.sin(index * 9.7 + elapsed * 7 + seed * 23) * 0.045;
+      vectors.point.lerpVectors(sourcePosition, targetPosition, progress).addScaledVector(vectors.perpendicular, scatter);
+      sparkPositions.setXYZ(index, vectors.point.x, vectors.point.y, vectors.point.z + Math.cos(index * 4.1 + elapsed * 6) * 0.03);
+    }
+    sparkPositions.needsUpdate = true;
   });
 
   return (
-    <lineSegments geometry={geometry} renderOrder={4}>
-      <lineBasicMaterial color={AMBER} transparent opacity={0.42} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
-    </lineSegments>
+    <group>
+      <group ref={beam} renderOrder={3}>
+        <mesh>
+          <cylinderGeometry args={[0.026, 0.026, 1, 6, 1, true]} />
+          <meshBasicMaterial ref={glowMaterial} color={AMBER} transparent opacity={0.12} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
+        </mesh>
+        <mesh>
+          <cylinderGeometry args={[0.006, 0.006, 1, 5]} />
+          <meshBasicMaterial color={HOT_AMBER} transparent opacity={0.58} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
+        </mesh>
+      </group>
+      <primitive object={energyLine} />
+      <points geometry={sparkGeometry} renderOrder={5} frustumCulled={false}>
+        <pointsMaterial color={HOT_AMBER} size={0.075} sizeAttenuation transparent opacity={0.9} blending={THREE.AdditiveBlending} depthTest={false} depthWrite={false} toneMapped={false} />
+      </points>
+    </group>
   );
 }
 
@@ -591,11 +712,11 @@ function ScopeOrbitNode({ node, selected, reducedMotion, onSelect }: { node: Sco
 
 function ScopeOrbitalSystem({ selectedId, reducedMotion, onSelect }: { selectedId: string; reducedMotion: boolean; onSelect: (id: string) => void }) {
   const selectedNode = scopeNodeById.get(selectedId);
-  const selectedParent = selectedNode?.parentId ? scopeNodeById.get(selectedNode.parentId) : undefined;
+  const linkedScopes = useMemo(() => selectedNode ? linkedScopesFor(selectedNode) : [], [selectedNode]);
 
   return (
     <group>
-      {selectedNode && selectedParent ? <ScopeConnection node={selectedNode} parent={selectedParent} reducedMotion={reducedMotion} /> : null}
+      {selectedNode ? linkedScopes.map((target) => <ScopeEnergyConnection key={target.entity.id} source={selectedNode} target={target} reducedMotion={reducedMotion} />) : null}
       {scopeNodes.map((node) => <ScopeOrbitNode key={node.entity.id} node={node} selected={node.entity.id === selectedId} reducedMotion={reducedMotion} onSelect={onSelect} />)}
     </group>
   );
