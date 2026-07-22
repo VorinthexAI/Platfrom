@@ -33,6 +33,14 @@ const definitions: Record<ActionId, ActionDefinition> = {
   'generate-speech': { id: 'generate-speech', modelPolicy: 'required', models: [{ provider: 'aws-polly', model: 'amazon.polly-generative', priority: 100 }] },
   'analyze-audio': { id: 'analyze-audio', modelPolicy: 'required', models: [model('amazon.nova-pro', 100), model('amazon.nova-2-lite', 90)] },
   'generate-music': { ...none(), id: 'generate-music' },
+  'document-validate': { id: 'document-validate', modelPolicy: 'none', models: [] },
+  'storage-upload': { id: 'storage-upload', modelPolicy: 'none', models: [] },
+  'document-extract': { id: 'document-extract', modelPolicy: 'none', models: [] },
+  'document-generate-html': { id: 'document-generate-html', modelPolicy: 'none', models: [] },
+  'document-generate-json': { id: 'document-generate-json', modelPolicy: 'none', models: [] },
+  'document-generate-content': { id: 'document-generate-content', modelPolicy: 'none', models: [] },
+  'document-embed': { id: 'document-embed', modelPolicy: 'none', models: [] },
+  'document-insert': { id: 'document-insert', modelPolicy: 'none', models: [] },
 };
 
 export const ACTION_DEFINITIONS: readonly ActionDefinition[] = ACTION_SLUGS.map((id) => definitions[id]);

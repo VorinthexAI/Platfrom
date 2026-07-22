@@ -12,8 +12,8 @@ const response: ProviderExecuteResponse<ChatOutput> = {
 };
 
 describe('orchestrator chat tool', () => {
-  test('exposes only orchestrator.chat', () => {
-    expect(TOOL_NAMES).toEqual(['orchestrator.chat']);
+  test('exposes the registered tools', () => {
+    expect(TOOL_NAMES).toEqual(['orchestrator.chat', 'document.processing']);
   });
 
   test('sanitizes input and invokes the shared chat action', async () => {

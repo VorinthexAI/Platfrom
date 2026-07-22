@@ -95,6 +95,31 @@ resource "aws_instance" "early_app" {
   }
 }
 
+data "aws_iam_instance_profile" "early_app" {
+  name = "vorinthex-early-app-profile"
+}
+
+resource "aws_iam_role_policy" "early_app_archive_processing" {
+  name = "vorinthex-early-app-archive-processing"
+  role = data.aws_iam_instance_profile.early_app.role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = ["${module.storage.s3_bucket_arn}/archive/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection"]
+        Resource = ["*"]
+      }
+    ]
+  })
+}
+
 resource "aws_eip" "early_app" {
   domain = "vpc"
   tags   = merge(local.tags, { Name = "vorinthex-early-app-eip" })
