@@ -19,12 +19,18 @@ export class ChorusService {
 
   async listDirectChannels(actor: ChorusActor) {
     const candidates = await this.repository.listDirectCandidates(actor.organizationKey, actor.membershipKey);
-    return Promise.all(candidates.map(async (candidate) => {
-      if (!candidate.canChat) return { orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: false as const, channel: null };
+    const channels = [];
+    for (const candidate of candidates) {
+      if (!candidate.canChat) {
+        channels.push({ orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: false as const, channel: null });
+        continue;
+      }
       const access = await this.repository.ensureDirectChannel(actor.organizationKey, actor.membershipKey, candidate.orchestrator.key);
-      if (!access) return { orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: false as const, channel: null };
-      return { orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: true as const, channel: access.channel };
-    }));
+      channels.push(access
+        ? { orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: true as const, channel: access.channel }
+        : { orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: false as const, channel: null });
+    }
+    return channels;
   }
 
   async openDirectChannel(actor: ChorusActor, orchestratorKey: string) {
