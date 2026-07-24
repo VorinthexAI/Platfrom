@@ -109,6 +109,25 @@ describe('Chorus service', () => {
     expect(f.repository.participants.map((item) => item.userOrganizationKey ? 'human' : 'orchestrator').sort()).toEqual(['human', 'orchestrator']);
   });
 
+  test('provisions channel candidates sequentially to avoid competing write transactions', async () => {
+    const f = fixture();
+    const candidate = f.repository.candidate();
+    f.repository.listDirectCandidates = async () => [candidate, { ...candidate, orchestrator: { ...candidate.orchestrator, key: newId(), name: 'Nova' } }];
+    let active = 0;
+    let maximumActive = 0;
+    f.repository.ensureDirectChannel = async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return null;
+    };
+
+    await f.service.listDirectChannels(actor);
+
+    expect(maximumActive).toBe(1);
+  });
+
   test('persists both sides and returns bounded history in chronological order', async () => {
     const f = fixture(); const access = await f.service.openDirectChannel(actor, orchestratorKey);
     const user = await f.service.persistUserMessage(actor, access.channel.key, 'First');
