@@ -13,7 +13,7 @@ type ScopeMembershipCandidate = {
   scopeKey: string;
   userOrganizationKey: string;
   orgRole: string;
-  existing: { key: string; source?: 'explicit' | 'organization' } | null;
+  existing: { _key: string } | null;
 };
 
 export type ScopeMembershipReconciliation = {
@@ -48,7 +48,7 @@ export async function reconcileOrganizationScopeMemberships(
       FOR scope IN scopes
         FILTER scope.organizationKey == @organizationKey
         FILTER @scopeKeys == null || scope._key IN @scopeKeys
-        LET existing = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == scope._key && member.userOrganizationKey == membership._key LIMIT 1 RETURN KEEP(member, "_key", "source"))
+        LET existing = FIRST(FOR member IN scopeMembers FILTER member.scopeKey == scope._key && member.userOrganizationKey == membership._key LIMIT 1 RETURN KEEP(member, "_key"))
         RETURN { scopeKey: scope._key, userOrganizationKey: membership._key, orgRole: membership.orgRole, existing }
   `, {
     organizationKey,
@@ -61,7 +61,6 @@ export async function reconcileOrganizationScopeMemberships(
     scopeKey: row.scopeKey,
     userOrganizationKey: row.userOrganizationKey,
     role: scopeRoleForOrganizationRole(row.orgRole),
-    existingSource: row.existing?.source,
   }));
   const created = documents.filter((_, index) => !candidates[index]!.existing);
   if (documents.length) {
@@ -76,8 +75,17 @@ export async function reconcileOrganizationScopeMemberships(
           status: "active",
           source: "organization"
         }
-        UPDATE document.existingSource == "organization" ? { role: document.role, status: "active" } : {}
+        UPDATE {}
         IN scopeMembers
+    `, { documents });
+    await database.query(`
+      FOR document IN @documents
+        FOR member IN scopeMembers
+          FILTER member.scopeKey == document.scopeKey
+          FILTER member.userOrganizationKey == document.userOrganizationKey
+          FILTER member.source == "organization"
+          UPDATE member WITH { role: document.role, status: "active" }
+          IN scopeMembers
     `, { documents });
   }
   return { created };
