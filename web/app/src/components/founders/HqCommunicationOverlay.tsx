@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   BellIcon,
   ChevronDownIcon,
@@ -16,7 +16,7 @@ import {
 } from "@vorinthex/shared/ui/icons";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
-import { entityLogoUrl } from "@/lib/three/entity-logo";
+import { entityLogoThumbnailUrl } from "@/lib/three/entity-logo";
 
 interface HqCommunicationOverlayProps {
   selectedScopeId: string;
@@ -50,21 +50,21 @@ const orderedOrchestrators = [
   ...[1, 2, 3].flatMap((depth) => orchestrators.filter((entity) => entity.slug !== "atlas" && orchestratorDepth(entity) === depth)),
 ].filter((entity): entity is GalaxyEntity => Boolean(entity));
 
-function ScopeMark({ entity, size = 28 }: { entity: GalaxyEntity; size?: number }) {
+const ScopeMark = memo(function ScopeMark({ entity, size = 28 }: { entity: GalaxyEntity; size?: number }) {
   return (
     <span className="relative inline-flex shrink-0 overflow-hidden rounded-full border border-[var(--border-faint)] bg-obsidian-990/80" style={{ width: size, height: size }}>
-      <Image src={entityLogoUrl(entity.type, entity.slug)} alt="" fill sizes={`${size}px`} className="object-contain p-[2px] opacity-90" />
+      <Image src={entityLogoThumbnailUrl(entity.type, entity.slug)} alt="" fill sizes={`${size}px`} loading="lazy" unoptimized className="object-contain p-[2px] opacity-90" />
     </span>
   );
-}
+});
 
-function PersonMark({ slug, name, size = 34 }: { slug: string; name: string; size?: number }) {
+const PersonMark = memo(function PersonMark({ slug, name, size = 34 }: { slug: string; name: string; size?: number }) {
   return (
     <span className="relative inline-flex shrink-0 overflow-hidden rounded-full border border-[var(--border-soft)] bg-obsidian-990/85 shadow-[0_0_20px_rgba(174,182,188,0.08)]" style={{ width: size, height: size }}>
-      <Image src={entityLogoUrl("orchestrator", slug)} alt={`${name} emblem`} fill sizes={`${size}px`} className="object-contain p-[2px]" />
+      <Image src={entityLogoThumbnailUrl("orchestrator", slug)} alt={`${name} emblem`} fill sizes={`${size}px`} loading="lazy" unoptimized className="object-contain p-[2px]" />
     </span>
   );
-}
+});
 
 function IconFrame({ children, label }: { children: React.ReactNode; label?: string }) {
   return (
@@ -187,7 +187,7 @@ function ScopeSelector({ selectedScopeId, onScopeChange }: HqCommunicationOverla
   );
 }
 
-function OrchestratorRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
+const OrchestratorRail = memo(function OrchestratorRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-[var(--border-faint)] bg-obsidian-950/70 backdrop-blur-xl">
       <div className="border-b border-[var(--border-faint)] p-4">
@@ -197,13 +197,13 @@ function OrchestratorRail({ selectedScopeId, onScopeChange }: HqCommunicationOve
         <ScopeSelector selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
       </div>
 
-      <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-3.5">
+      <div className="scrollbar-hide min-h-0 flex-1 contain-content overscroll-contain overflow-y-auto p-3.5 [scrollbar-gutter:stable]">
         <div className="mb-2 flex items-center justify-between px-1.5">
           <p className="font-mono text-[9px] tracking-[0.2em] text-silver-500">Orchestrators</p>
         </div>
         <div className="space-y-0.5">
           {orderedOrchestrators.map((orchestrator) => (
-            <div key={orchestrator.id} className="flex h-9 items-center gap-2 px-2.5 text-[12px] text-silver-300">
+            <div key={orchestrator.id} className="flex h-9 items-center gap-2 px-2.5 text-[12px] text-silver-300 [contain:layout_paint]">
               <PersonMark slug={orchestrator.slug} name={orchestrator.name} size={24} />
               <span className="truncate">{orchestrator.name}</span>
             </div>
@@ -213,7 +213,7 @@ function OrchestratorRail({ selectedScopeId, onScopeChange }: HqCommunicationOve
 
     </aside>
   );
-}
+});
 
 function AttachmentCard() {
   return (

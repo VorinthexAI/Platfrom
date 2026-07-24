@@ -19,6 +19,13 @@ export function entityLogoUrl(type: string, slug: string): string {
   return `/logos/entities/${type}-${slug}.png`;
 }
 
+/** Small pre-generated assets for dense HTML UI, where full scene textures are unnecessary. */
+export function entityLogoThumbnailUrl(type: string, slug: string): string {
+  const url = entityLogoUrl(type, slug);
+  if (!url.startsWith("/logos/entities/") || !url.endsWith(".png")) return url;
+  return url.replace("/logos/entities/", "/logos/entities/thumbs/").replace(/\.png$/, ".webp");
+}
+
 export function getEntityLogoTexture(type: string, slug: string): THREE.Texture {
   const url = entityLogoUrl(type, slug);
   const cached = cache.get(url);
