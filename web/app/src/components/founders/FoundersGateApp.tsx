@@ -233,7 +233,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
 
   return (
     <main className="relative min-h-svh overflow-hidden bg-[#1c0701]">
-      <FoundersBackdrop />
+      {!enteredEntity ? <FoundersBackdrop /> : null}
 
       <div className="relative z-10 flex h-svh">
         <section className="relative flex min-w-0 flex-1 flex-col">

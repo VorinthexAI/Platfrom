@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const keySchema = z.string().trim().min(1).max(160);
 const isoTimestampSchema = z.string().datetime({ offset: true });
+const optionalKeySchema = z.preprocess((value) => value === null ? undefined : value, keySchema.optional());
 
 export const chorusChannelSchema = z.object({
   key: keySchema,
@@ -44,8 +45,8 @@ export const chorusPollSchema = z.object({
 export const chorusMessageSchema = z.object({
   key: keySchema,
   channelKey: keySchema,
-  threadKey: keySchema.optional(),
-  replyToMessageKey: keySchema.optional(),
+  threadKey: optionalKeySchema,
+  replyToMessageKey: optionalKeySchema,
   content: z.string(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
@@ -121,6 +122,19 @@ export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], str
       : message);
   }
   return markChorusStreamFailed(messages, stream.streamKey, event.error);
+}
+
+export function coalesceChorusStreamEvents(events: ChorusStreamEvent[]): ChorusStreamEvent[] {
+  const coalesced: ChorusStreamEvent[] = [];
+  for (const event of events) {
+    const previous = coalesced.at(-1);
+    if (event.type === "token" && previous?.type === "token") {
+      coalesced[coalesced.length - 1] = { type: "token", text: previous.text + event.text };
+    } else {
+      coalesced.push(event);
+    }
+  }
+  return coalesced;
 }
 
 export function mergeChorusMessageRefresh(current: ChorusDisplayMessage[], canonical: ChorusMessage[], preserveTransient: boolean): ChorusDisplayMessage[] {

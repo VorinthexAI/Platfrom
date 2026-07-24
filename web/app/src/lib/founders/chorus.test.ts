@@ -3,6 +3,7 @@ import {
   chorusChannelEntrySchema,
   chorusMessageSchema,
   chorusThreadSchema,
+  coalesceChorusStreamEvents,
   markChorusStreamFailed,
   mergeChorusMessageRefresh,
   parseChorusSseFrame,
@@ -38,6 +39,20 @@ describe("Chorus schemas", () => {
     expect(message.author.name).toBe("Atlas");
     expect(message.poll?.options).toHaveLength(2);
     expect(message.poll?.closedAt).toBeNull();
+  });
+
+  test("normalizes nullable optional message identifiers", () => {
+    const message = chorusMessageSchema.parse({
+      ...stored,
+      threadKey: null,
+      replyToMessageKey: null,
+      author: { participantKey: "participant_key", type: "user", key: "user_key", name: "Founder" },
+      reactions: [],
+      thread: null,
+      poll: null,
+    });
+    expect(message.threadKey).toBeUndefined();
+    expect(message.replyToMessageKey).toBeUndefined();
   });
 
   test("accepts archived thread projections as non-open threads", () => {
@@ -81,6 +96,19 @@ describe("Chorus stream reconciliation", () => {
     const failed = markChorusStreamFailed(optimistic, stream.streamKey, "Canonical refresh failed");
     expect(failed.every((message) => message.clientState?.state === "failed")).toBe(true);
     expect(failed[1]?.clientState?.error).toBe("Canonical refresh failed");
+  });
+
+  test("coalesces adjacent tokens without crossing lifecycle events", () => {
+    expect(coalesceChorusStreamEvents([
+      { type: "token", text: "Hel" },
+      { type: "token", text: "lo" },
+      { type: "error", error: "stopped" },
+      { type: "token", text: "Again" },
+    ])).toEqual([
+      { type: "token", text: "Hello" },
+      { type: "error", error: "stopped" },
+      { type: "token", text: "Again" },
+    ]);
   });
 });
 

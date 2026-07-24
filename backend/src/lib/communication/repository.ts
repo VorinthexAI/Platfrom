@@ -13,6 +13,7 @@ import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib
 export interface DirectOrchestratorCandidate {
   orchestrator: { key: string; name: string; role: string; skill: string };
   scopeKey: string;
+  position: number;
   canChat: boolean;
   channel: Channel | null;
 }
@@ -86,6 +87,15 @@ function parseAccess(raw: Record<string, any>): DirectChannelAccess {
   };
 }
 
+function normalizeMessageProjection(message: MessageProjection): MessageProjection {
+  const { threadKey, replyToMessageKey, ...projection } = message;
+  return {
+    ...projection,
+    ...(threadKey ? { threadKey } : {}),
+    ...(replyToMessageKey ? { replyToMessageKey } : {}),
+  };
+}
+
 async function projectPoll(pollKey: string, channelKey: string, viewerParticipantKey: string): Promise<PollProjection | null> {
   return first<PollProjection>(`
     FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey
@@ -104,12 +114,13 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         FOR scope IN scopes FILTER scope.organizationKey == @organizationKey && scope.slug == slug && scope.deletedAt == null
           LET allowed = LENGTH(FOR member IN scopeMembers FILTER member.scopeKey == scope._key && member.userOrganizationKey == @membershipKey && member.status == "active" LIMIT 1 RETURN 1) > 0
           LET channel = FIRST(FOR item IN channels FILTER item.kind == "direct" && item.directUserOrganizationKey == @membershipKey && item.directOrchestratorKey == orchestrator._key && item.scopeKey == scope._key && item.archivedAt == null LIMIT 1 RETURN item)
-          SORT orchestrator.name ASC
-          RETURN { orchestrator: KEEP(orchestrator, "_key", "name", "role", "skill"), scopeKey: scope._key, allowed, channel }
+          SORT scope.position ASC, orchestrator.name ASC, orchestrator._key ASC
+          RETURN { orchestrator: KEEP(orchestrator, "_key", "name", "role", "skill"), scopeKey: scope._key, position: scope.position, allowed, channel }
     `, { organizationKey, membershipKey });
     return (await cursor.all()).map((row) => ({
       orchestrator: { key: row.orchestrator._key, name: row.orchestrator.name, role: row.orchestrator.role, skill: row.orchestrator.skill },
       scopeKey: row.scopeKey,
+      position: row.position,
       canChat: row.allowed,
       channel: row.allowed && row.channel ? parse(channelSchema, row.channel) : null,
     }));
@@ -127,16 +138,16 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET scope = FIRST(FOR item IN scopes FILTER item.organizationKey == @organizationKey && item.slug == slug && item.deletedAt == null LIMIT 1 RETURN item)
         LET allowed = membership != null && membership.organizationId == @organizationKey && membership.status == "active" && scope != null && LENGTH(FOR member IN scopeMembers FILTER member.scopeKey == scope._key && member.userOrganizationKey == @membershipKey && member.status == "active" LIMIT 1 RETURN 1) > 0
         FILTER allowed
-        RETURN { scopeKey: scope._key, name: orchestrator.name, orchestrator: { key: orchestrator._key, name: orchestrator.name, role: orchestrator.role, skill: orchestrator.skill } }
+        RETURN { scopeKey: scope._key, position: scope.position, name: orchestrator.name, orchestrator: { key: orchestrator._key, name: orchestrator.name, role: orchestrator.role, skill: orchestrator.skill } }
       `, { organizationKey, membershipKey, orchestratorKey });
       const allowed = await accessCursor.next();
       if (!allowed) return null;
       const now = new Date().toISOString();
-      const channelDocument = toArangoDoc(channelSchema.parse({ key: newId(), scopeKey: allowed.scopeKey, kind: 'direct', directUserOrganizationKey: membershipKey, directOrchestratorKey: orchestratorKey, name: allowed.name, position: 0, createdAt: now, updatedAt: now }));
+      const channelDocument = toArangoDoc(channelSchema.parse({ key: newId(), scopeKey: allowed.scopeKey, kind: 'direct', directUserOrganizationKey: membershipKey, directOrchestratorKey: orchestratorKey, name: allowed.name, position: allowed.position, createdAt: now, updatedAt: now }));
       const channelCursor = await trx.query<Record<string, unknown>>(`
         UPSERT { kind: "direct", directUserOrganizationKey: @membershipKey, directOrchestratorKey: @orchestratorKey, scopeKey: @scopeKey }
-          INSERT @document UPDATE { archivedAt: null, updatedAt: @now } IN channels OPTIONS { keepNull: false } RETURN NEW
-      `, { membershipKey, orchestratorKey, scopeKey: allowed.scopeKey, document: channelDocument, now });
+          INSERT @document UPDATE { archivedAt: null, position: @position, updatedAt: @now } IN channels OPTIONS { keepNull: false } RETURN NEW
+      `, { membershipKey, orchestratorKey, scopeKey: allowed.scopeKey, position: allowed.position, document: channelDocument, now });
       const channelRaw = (await channelCursor.next())!;
       const channel = parse(channelSchema, channelRaw);
       const participant = async (identity: Record<string, string>, document: ChannelParticipant) => {
@@ -182,7 +193,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
           thread: thread == null ? null : { key: thread._key, status: thread.status, replyCount: LENGTH(replies), lastReplyAt: FIRST(replies) },
           poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) } }
     `, { channelKey, viewerParticipantKey, limit });
-    return (await cursor.all()).reverse();
+    return (await cursor.all()).reverse().map(normalizeMessageProjection);
   },
 
   async listThreadMessages(channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit) {
@@ -198,7 +209,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") }, reactions: [], thread: null, poll: null }
     `, { channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit });
-    return (await cursor.all()).reverse();
+    return (await cursor.all()).reverse().map(normalizeMessageProjection);
   },
 
   async listHistory(channelKey, threadKey, excludeMessageKey, limit) {

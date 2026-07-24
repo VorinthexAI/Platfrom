@@ -781,7 +781,7 @@ function DemandFrameInvalidator({ reducedMotion }: { reducedMotion: boolean }) {
 
   useEffect(() => {
     invalidate();
-    const interval = window.setInterval(invalidate, reducedMotion ? 250 : 100);
+    const interval = window.setInterval(invalidate, reducedMotion ? 1000 : 250);
     return () => window.clearInterval(interval);
   }, [invalidate, reducedMotion]);
 
