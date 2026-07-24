@@ -102,7 +102,12 @@ function querySchemaForPath(path: string) {
     });
   }
   if (apiPath === '/orchestrators/chat') {
-    return strictObject({ orchestrator_id: z.string().cuid() });
+    return strictObject({
+      orchestrator_id: z.string().cuid().optional(),
+      orchestrator_slug: z.string().trim().regex(/^[a-z]+(?:-[a-z]+)*$/).optional(),
+    }).refine((query) => Boolean(query.orchestrator_id) !== Boolean(query.orchestrator_slug), {
+      message: 'exactly one orchestrator identifier is required',
+    });
   }
   if (/^\/archive\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   return strictObject({});
