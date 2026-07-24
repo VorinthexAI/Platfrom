@@ -9,7 +9,6 @@ import {
   ChevronRightIcon,
   CloseIcon,
   FileIcon,
-  FolderIcon,
   ImageIcon,
   LinkIcon,
   MoreHorizontalIcon,
@@ -375,66 +374,6 @@ function ConversationPane() {
   );
 }
 
-function DetailRail() {
-  const pinned = ["Engineering Guidelines", "API Architecture Overview", "Sprint Planning Notes"];
-  const resources = [
-    ["Orchestration Engine Project", "Project · Momentum", "link"],
-    ["Q2 Engineering Milestone", "Milestone · Momentum", "link"],
-    ["Architecture Folder", "Folder · Archive", "folder"],
-  ];
-
-  return (
-    <aside className="hidden min-h-0 flex-col border-l border-[var(--border-faint)] bg-obsidian-950/70 backdrop-blur-xl xl:flex">
-      <div className="border-b border-[var(--border-faint)] p-5">
-        <div className="flex items-center gap-2 text-silver-100"><span className="font-display text-xl">#</span><span className="text-sm">engineering</span></div>
-        <p className="mt-5 font-mono text-[9px] uppercase tracking-[0.18em] text-silver-500">About</p>
-        <p className="mt-2 text-[11px] leading-5 text-silver-300">Engineering coordination and technical discussions.</p>
-        <p className="mt-3 font-mono text-[9px] text-silver-500">Created by Atlas · May 12, 2026</p>
-      </div>
-
-      <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto">
-        <div className="border-b border-[var(--border-faint)] p-5">
-          <div className="mb-3 flex items-center justify-between"><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-silver-500">Pinned</p><span className="font-mono text-[9px] text-silver-500">3</span></div>
-          <div className="space-y-3">
-            {pinned.map((item, index) => (
-              <div key={item} className="flex gap-2.5">
-                <IconFrame><FileIcon aria-hidden size="sm" /></IconFrame>
-                <div><p className="text-[11px] text-silver-300">{item}</p><p className="mt-0.5 font-mono text-[8px] text-silver-500">{index === 2 ? "Message · Pinned by Atlas" : "Document · Archive"}</p></div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="border-b border-[var(--border-faint)] p-5">
-          <p className="mb-3 font-mono text-[9px] uppercase tracking-[0.18em] text-silver-500">Linked resources</p>
-          <div className="space-y-3">
-            {resources.map(([name, detail, icon]) => (
-              <div key={name} className="flex gap-2.5">
-                <IconFrame>{icon === "folder" ? <FolderIcon aria-hidden size="sm" /> : <LinkIcon aria-hidden size="sm" />}</IconFrame>
-                <div><p className="text-[11px] text-silver-300">{name}</p><p className="mt-0.5 font-mono text-[8px] text-silver-500">{detail}</p></div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-5">
-          <div className="mb-3 flex items-center justify-between"><p className="font-mono text-[9px] uppercase tracking-[0.18em] text-silver-500">Active orchestrators</p><span className="font-mono text-[9px] text-silver-500">5</span></div>
-          <div className="space-y-2.5">
-            {people.slice(0, 5).map((person) => (
-              <div key={person.name} className="flex items-center gap-2.5">
-                <PersonMark slug={person.slug} name={person.name} size={26} />
-                <span className="flex-1 text-[11px] text-silver-300">{person.name}</span>
-                <span className={`h-1.5 w-1.5 rounded-full ${person.status === "idle" ? "bg-status-attention" : "bg-status-online"}`} />
-                <span className="font-mono text-[8px] text-silver-500">{person.status === "idle" ? "Idle" : "Online"}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
 export default function HqCommunicationOverlay(props: HqCommunicationOverlayProps) {
   return (
     <div className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
@@ -453,10 +392,9 @@ export default function HqCommunicationOverlay(props: HqCommunicationOverlayProp
         </div>
       </div>
 
-      <div className="hq-workspace-grid grid min-h-0 flex-1 grid-rows-[minmax(190px,34vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1 xl:grid-cols-[260px_minmax(0,1fr)_292px]">
+      <div className="hq-workspace-grid grid min-h-0 flex-1 grid-rows-[minmax(190px,34vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1">
         <ChannelRail {...props} />
         <ConversationPane />
-        <DetailRail />
       </div>
     </div>
   );
