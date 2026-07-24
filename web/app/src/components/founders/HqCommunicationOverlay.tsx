@@ -4,14 +4,12 @@ import Image from "next/image";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   BellIcon,
-  CheckIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CloseIcon,
   FileIcon,
   ImageIcon,
   LinkIcon,
-  MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
   ShareIcon,
@@ -32,25 +30,25 @@ const scopeEntities = [
   ...Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators),
 ];
 
-const channels = [
-  { name: "announcements", symbol: "◈" },
-  { name: "leadership", symbol: "✦" },
-  { name: "general", symbol: "#" },
-  { name: "engineering", symbol: "#", active: true },
-  { name: "product", symbol: "#" },
-  { name: "marketing", symbol: "#" },
-  { name: "design", symbol: "#" },
-  { name: "random", symbol: "#" },
-];
+const orchestrators = Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators);
+const orchestratorById = new Map(orchestrators.map((entity) => [entity.id, entity]));
 
-const people = [
-  { name: "Atlas", slug: "atlas", status: "online" },
-  { name: "Forge", slug: "forge", status: "online" },
-  { name: "Orbit", slug: "orbit", status: "idle" },
-  { name: "Echo", slug: "echo", status: "online" },
-  { name: "Aura", slug: "aura", status: "online" },
-  { name: "Helios", slug: "helios", status: "online" },
-] as const;
+function orchestratorDepth(entity: GalaxyEntity) {
+  let depth = 0;
+  let current = entity;
+  while (current.reportsTo) {
+    const parent = orchestratorById.get(current.reportsTo);
+    if (!parent) break;
+    depth += 1;
+    current = parent;
+  }
+  return depth;
+}
+
+const orderedOrchestrators = [
+  orchestrators.find((entity) => entity.slug === "atlas"),
+  ...[1, 2, 3].flatMap((depth) => orchestrators.filter((entity) => entity.slug !== "atlas" && orchestratorDepth(entity) === depth)),
+].filter((entity): entity is GalaxyEntity => Boolean(entity));
 
 function ScopeMark({ entity, size = 28 }: { entity: GalaxyEntity; size?: number }) {
   return (
@@ -129,12 +127,8 @@ function ScopeSelector({ selectedScopeId, onScopeChange }: HqCommunicationOverla
     }
   };
 
-  const stepScope = (direction: -1 | 1) => {
-    onScopeChange(scopeEntities[(selectedIndex + direction + scopeEntities.length) % scopeEntities.length]!.id);
-  };
-
   return (
-    <div ref={pickerRef} className="flex min-w-0 items-center gap-1.5">
+    <div ref={pickerRef} className="flex min-w-0 items-center">
       <div className="relative min-w-0 flex-1">
         <button
           ref={triggerRef}
@@ -149,10 +143,13 @@ function ScopeSelector({ selectedScopeId, onScopeChange }: HqCommunicationOverla
           }}
           aria-expanded={pickerOpen}
           aria-haspopup="listbox"
-          className="flex h-11 w-full min-w-0 items-center gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] px-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
+          className="flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] px-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
         >
-          <ScopeMark entity={selectedScope} size={28} />
-          <span className="min-w-0 truncate text-[13px] text-silver-100">{selectedScope.name}</span>
+          <span className="flex min-w-0 items-center gap-2">
+            <ScopeMark entity={selectedScope} size={28} />
+            <span className="min-w-0 truncate text-[13px] text-silver-100">{selectedScope.name}</span>
+          </span>
+          {pickerOpen ? <ChevronUpIcon aria-hidden size="sm" className="shrink-0 text-silver-500" /> : <ChevronDownIcon aria-hidden size="sm" className="shrink-0 text-silver-500" />}
         </button>
         {pickerOpen ? (
           <div className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-20 rounded-2xl border border-[var(--border-strong)] bg-obsidian-990/95 p-2 shadow-2xl backdrop-blur-2xl">
@@ -186,17 +183,11 @@ function ScopeSelector({ selectedScopeId, onScopeChange }: HqCommunicationOverla
           </div>
         ) : null}
       </div>
-      <button type="button" onClick={() => stepScope(-1)} aria-label="Previous scope" className="flex h-11 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] text-silver-300 transition-colors hover:border-[var(--border-strong)] hover:text-white">
-        <ChevronLeftIcon size="sm" />
-      </button>
-      <button type="button" onClick={() => stepScope(1)} aria-label="Next scope" className="flex h-11 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] text-silver-300 transition-colors hover:border-[var(--border-strong)] hover:text-white">
-        <ChevronRightIcon size="sm" />
-      </button>
     </div>
   );
 }
 
-function ChannelRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
+function OrchestratorRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-[var(--border-faint)] bg-obsidian-950/70 backdrop-blur-xl">
       <div className="border-b border-[var(--border-faint)] p-4">
@@ -208,47 +199,18 @@ function ChannelRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayP
 
       <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-3.5">
         <div className="mb-2 flex items-center justify-between px-1.5">
-          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-silver-500">Channels</p>
-          <PlusIcon aria-hidden size="sm" className="text-silver-500" />
+          <p className="font-mono text-[9px] tracking-[0.2em] text-silver-500">Orchestrators</p>
         </div>
-        <nav aria-label="HQ channels" className="space-y-0.5">
-          {channels.map((channel) => (
-            <div
-              key={channel.name}
-              aria-current={channel.active ? "page" : undefined}
-              className={`flex h-8 items-center gap-2 rounded-lg border px-2.5 text-[12px] ${channel.active ? "border-[var(--border-strong)] bg-[var(--panel-strong)] text-silver-50 shadow-[inset_2px_0_0_var(--silver-300)]" : "border-transparent text-silver-300"}`}
-            >
-              <span className={`w-4 text-center font-mono text-sm ${channel.active ? "text-silver-100" : "text-silver-500"}`}>{channel.symbol}</span>
-              <span>{channel.name}</span>
+        <div className="space-y-0.5">
+          {orderedOrchestrators.map((orchestrator) => (
+            <div key={orchestrator.id} className="flex h-9 items-center gap-2 px-2.5 text-[12px] text-silver-300">
+              <PersonMark slug={orchestrator.slug} name={orchestrator.name} size={24} />
+              <span className="truncate">{orchestrator.name}</span>
             </div>
           ))}
-        </nav>
-
-        <div className="mt-5 hidden sm:block">
-          <div className="mb-2 flex items-center justify-between px-1.5">
-            <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-silver-500">Direct</p>
-            <PlusIcon aria-hidden size="sm" className="text-silver-500" />
-          </div>
-          <div className="space-y-0.5">
-            {people.slice(0, 5).map((person) => (
-              <div key={person.name} className="flex h-8 items-center gap-2 px-2.5 text-[12px] text-silver-300">
-                <PersonMark slug={person.slug} name={person.name} size={23} />
-                <span className={`h-1.5 w-1.5 rounded-full ${person.status === "idle" ? "bg-status-attention" : "bg-status-online"}`} />
-                <span>{person.name}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
 
-      <div className="hidden h-16 items-center gap-2.5 border-t border-[var(--border-faint)] px-4 sm:flex">
-        <span className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[10px] text-silver-100">OS</span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[12px] font-medium text-silver-50">Oscar</p>
-          <p className="font-mono text-[9px] text-status-online">● Online</p>
-        </div>
-        <MoreHorizontalIcon aria-hidden size="sm" className="text-silver-500" />
-      </div>
     </aside>
   );
 }
@@ -261,18 +223,6 @@ function AttachmentCard() {
         <p className="text-[12px] text-silver-100">Orchestration Refactor Spec.docx</p>
         <p className="mt-0.5 font-mono text-[9px] text-silver-500">Archive · Document · 2.4 MB</p>
       </div>
-    </div>
-  );
-}
-
-function TaskCard() {
-  return (
-    <div className="mt-2.5 flex w-fit max-w-full flex-wrap items-center gap-2 rounded-xl border border-[var(--border-faint)] bg-obsidian-990/25 px-3 py-2">
-      <span className="h-4 w-4 rounded border border-[var(--border-strong)]" />
-      <span className="font-mono text-[10px] text-silver-300">TASK-126</span>
-      <span className="text-[11px] text-silver-500">Streaming Module Implementation</span>
-      <span className="rounded border border-status-attention/50 bg-status-attention/10 px-1.5 py-0.5 font-mono text-[8px] uppercase text-status-attention">In progress</span>
-      <span className="rounded border border-status-critical/50 bg-status-critical/10 px-1.5 py-0.5 font-mono text-[8px] uppercase text-status-critical">High</span>
     </div>
   );
 }
@@ -304,8 +254,8 @@ function ConversationPane() {
           </div>
         </div>
         <div className="flex items-center">
-          {people.slice(0, 4).map((person, index) => (
-            <span key={person.name} className={index > 0 ? "-ml-2" : ""}><PersonMark slug={person.slug} name={person.name} size={29} /></span>
+          {orderedOrchestrators.slice(0, 4).map((orchestrator, index) => (
+            <span key={orchestrator.id} className={index > 0 ? "-ml-2" : ""}><PersonMark slug={orchestrator.slug} name={orchestrator.name} size={29} /></span>
           ))}
           <span className="ml-2 font-mono text-[9px] text-silver-500">+18</span>
         </div>
@@ -338,18 +288,6 @@ function ConversationPane() {
         <Message name="Forge" slug="forge" time="09:44">
           <p>Agreed. I&apos;ve created a draft spec in Archive.</p>
           <AttachmentCard />
-        </Message>
-        <Message name="Orbit" slug="orbit" time="09:46">
-          <p>Let&apos;s break this down into tasks. <span className="text-silver-100">@Forge</span>, can you outline the first sprint?</p>
-          <p className="mt-2 font-mono text-[9px] text-silver-500">2 replies · Last reply 09:58</p>
-        </Message>
-        <Message name="Echo" slug="echo" time="09:58">
-          <p>I&apos;ll take the streaming module.</p>
-          <TaskCard />
-        </Message>
-        <Message name="Aura" slug="aura" time="10:02">
-          <p>Don&apos;t forget to update the interface contract.</p>
-          <span className="mt-2 inline-flex items-center gap-1 rounded-lg border border-[var(--border-faint)] bg-obsidian-990/20 px-2 py-1 font-mono text-[9px] text-silver-300"><CheckIcon aria-hidden size="sm" className="text-status-online" /> 1</span>
         </Message>
       </div>
 
@@ -393,7 +331,7 @@ export default function HqCommunicationOverlay(props: HqCommunicationOverlayProp
       </div>
 
       <div className="hq-workspace-grid grid min-h-0 flex-1 grid-rows-[minmax(190px,34vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1">
-        <ChannelRail {...props} />
+        <OrchestratorRail {...props} />
         <ConversationPane />
       </div>
     </div>
