@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ACTION_DEFINITIONS, ACTION_SLUGS, assertActionRegistryIntegrity, createDataActions } from './index';
-import { isValidActionIdFormat } from './types';
+import { ACTION_DEFINITIONS, ACTION_SLUGS, assertActionRegistryIntegrity, createDataActions, isValidActionIdFormat } from './index';
 
 describe('action registry', () => {
   test('passes the full integrity check', () => {

@@ -1,10 +1,13 @@
 "use client";
 
 import Image from "next/image";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
   BellIcon,
   CheckIcon,
-  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloseIcon,
   FileIcon,
   FolderIcon,
   ImageIcon,
@@ -74,27 +77,134 @@ function IconFrame({ children, label }: { children: React.ReactNode; label?: str
   );
 }
 
-function ChannelRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
-  const selectedScope = scopeEntities.find((scope) => scope.id === selectedScopeId) ?? scopeEntities[0]!;
+function ScopeSelector({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
+  const selectedIndex = Math.max(0, scopeEntities.findIndex((scope) => scope.id === selectedScopeId));
+  const selectedScope = scopeEntities[selectedIndex] ?? scopeEntities[0]!;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const filteredScopes = scopeEntities.filter((scope) => scope.name.toLowerCase().includes(query.toLowerCase()));
 
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const dismissPicker = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        setPickerOpen(false);
+        setQuery("");
+      }
+    };
+    document.addEventListener("pointerdown", dismissPicker);
+    return () => document.removeEventListener("pointerdown", dismissPicker);
+  }, [pickerOpen]);
+
+  const closePicker = (restoreFocus = false) => {
+    setPickerOpen(false);
+    setQuery("");
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+
+  const selectFilteredScope = (index: number) => {
+    const scope = filteredScopes[index];
+    if (!scope) return;
+    onScopeChange(scope.id);
+    closePicker();
+  };
+
+  const handlePickerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePicker(true);
+      return;
+    }
+    if (filteredScopes.length === 0) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((index) => (index + direction + filteredScopes.length) % filteredScopes.length);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      selectFilteredScope(activeIndex);
+    }
+  };
+
+  const stepScope = (direction: -1 | 1) => {
+    onScopeChange(scopeEntities[(selectedIndex + direction + scopeEntities.length) % scopeEntities.length]!.id);
+  };
+
+  return (
+    <div ref={pickerRef} className="flex min-w-0 items-center gap-1.5">
+      <div className="relative min-w-0 flex-1">
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => {
+            if (pickerOpen) closePicker();
+            else {
+              setQuery("");
+              setActiveIndex(selectedIndex);
+              setPickerOpen(true);
+            }
+          }}
+          aria-expanded={pickerOpen}
+          aria-haspopup="listbox"
+          className="flex h-11 w-full min-w-0 items-center gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] px-2.5 text-left transition-colors hover:border-[var(--border-strong)]"
+        >
+          <ScopeMark entity={selectedScope} size={28} />
+          <span className="min-w-0 truncate text-[13px] text-silver-100">{selectedScope.name}</span>
+        </button>
+        {pickerOpen ? (
+          <div className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-20 rounded-2xl border border-[var(--border-strong)] bg-obsidian-990/95 p-2 shadow-2xl backdrop-blur-2xl">
+            <div className="relative mb-2">
+              <input
+                ref={inputRef}
+                autoFocus
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="hq-scope-options"
+                value={query}
+                onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
+                onKeyDown={handlePickerKeyDown}
+                placeholder="Search scopes..."
+                className="w-full rounded-xl border border-[var(--border-faint)] bg-white/[0.04] py-2 pr-9 pl-3 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-[var(--border-strong)]"
+              />
+              {query ? (
+                <button type="button" aria-label="Clear scope search" onClick={() => { setQuery(""); setActiveIndex(0); inputRef.current?.focus(); }} className="absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-silver-500 hover:bg-white/[0.07] hover:text-white">
+                  <CloseIcon size="sm" />
+                </button>
+              ) : null}
+            </div>
+            <div id="hq-scope-options" role="listbox" className="scrollbar-hide max-h-64 overflow-y-auto">
+              {filteredScopes.length > 0 ? filteredScopes.map((scope, index) => (
+                <button key={scope.id} type="button" role="option" aria-selected={index === activeIndex} onMouseEnter={() => setActiveIndex(index)} onClick={() => selectFilteredScope(index)} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] transition-colors ${index === activeIndex ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}>
+                  <ScopeMark entity={scope} size={22} />
+                  <span className="truncate">{scope.name}</span>
+                </button>
+              )) : <p className="px-2.5 py-3 text-[11px] text-silver-500">No scopes found.</p>}
+            </div>
+          </div>
+        ) : null}
+      </div>
+      <button type="button" onClick={() => stepScope(-1)} aria-label="Previous scope" className="flex h-11 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] text-silver-300 transition-colors hover:border-[var(--border-strong)] hover:text-white">
+        <ChevronLeftIcon size="sm" />
+      </button>
+      <button type="button" onClick={() => stepScope(1)} aria-label="Next scope" className="flex h-11 w-9 shrink-0 items-center justify-center rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] text-silver-300 transition-colors hover:border-[var(--border-strong)] hover:text-white">
+        <ChevronRightIcon size="sm" />
+      </button>
+    </div>
+  );
+}
+
+function ChannelRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-[var(--border-faint)] bg-obsidian-950/70 backdrop-blur-xl">
       <div className="border-b border-[var(--border-faint)] p-4">
-        <label htmlFor="hq-scope" className="mb-2 block font-mono text-[9px] uppercase tracking-[0.2em] text-silver-500">
+        <span className="mb-2 block font-mono text-[9px] uppercase tracking-[0.2em] text-silver-500">
           Scope
-        </label>
-        <div className="relative flex h-11 items-center gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] px-2.5 focus-within:border-[var(--border-strong)]">
-          <ScopeMark entity={selectedScope} size={28} />
-          <select
-            id="hq-scope"
-            value={selectedScopeId}
-            onChange={(event) => onScopeChange(event.target.value)}
-            className="h-full min-w-0 flex-1 appearance-none bg-transparent pr-7 text-[13px] text-silver-100 outline-none focus-visible:ring-1 focus-visible:ring-silver-300 focus-visible:ring-offset-4 focus-visible:ring-offset-obsidian-950"
-          >
-            {scopeEntities.map((scope) => <option key={scope.id} value={scope.id} className="bg-obsidian-900">{scope.name}</option>)}
-          </select>
-          <ChevronDownIcon aria-hidden size="sm" className="pointer-events-none absolute right-3 text-silver-500" />
-        </div>
+        </span>
+        <ScopeSelector selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
       </div>
 
       <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-3.5">

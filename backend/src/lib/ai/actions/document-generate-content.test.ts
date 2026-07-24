@@ -1,0 +1,1 @@
+import { expect, test } from 'bun:test'; import { documentGenerateContentAction } from './document-generate-content'; test('defines document-generate-content', () => expect(documentGenerateContentAction.id).toBe('document-generate-content'));

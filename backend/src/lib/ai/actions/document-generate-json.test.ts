@@ -1,0 +1,1 @@
+import { expect, test } from 'bun:test'; import { documentGenerateJsonAction } from './document-generate-json'; test('defines document-generate-json', () => expect(documentGenerateJsonAction.id).toBe('document-generate-json'));
