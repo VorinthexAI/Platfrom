@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
-import { ArchiveError } from '@/lib/ai/tools/archive';
-import { createArchiveToolHandler } from './archive-tools';
+import { DocumentError } from '@/lib/ai/tools/document-tools';
+import { createDocumentToolHandler } from './document-tools';
 import { registerRoutes } from './routes';
 import { validateQueryParams } from './middleware';
 
 const organizationKey = newId(), agentKey = newId(), scopeKey = newId(), folderKey = newId();
-function request(dependencies: Parameters<typeof createArchiveToolHandler>[0], tool = 'folder.list', body: unknown = { organizationKey, agentKey, input: { scopeKey } }, headers: Record<string, string> = {}) {
-  const app = new Hono(); app.post('/archive/tools/:tool', createArchiveToolHandler(dependencies));
-  return app.request(`/archive/tools/${tool}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+function request(dependencies: Parameters<typeof createDocumentToolHandler>[0], tool = 'folder.list', body: unknown = { organizationKey, agentKey, input: { scopeKey } }, headers: Record<string, string> = {}) {
+  const app = new Hono(); app.post('/document/tools/:tool', createDocumentToolHandler(dependencies));
+  return app.request(`/document/tools/${tool}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
 }
 
-describe('Archive tool API', () => {
+describe('Document tool API', () => {
   test('requires an authenticated user identity', async () => {
     const unauthenticated = await request({ getIdentity: async () => null });
     expect(unauthenticated.status).toBe(401);
-    expect(await unauthenticated.json()).toMatchObject({ error: { code: 'ARCHIVE_UNAUTHORIZED' } });
+    expect(await unauthenticated.json()).toMatchObject({ error: { code: 'DOCUMENT_UNAUTHORIZED' } });
     const wrongIdentity = await request({ getIdentity: async () => ({ key: newId(), identityType: 'member' }) });
     expect(wrongIdentity.status).toBe(403);
   });
@@ -48,10 +48,10 @@ describe('Archive tool API', () => {
     expect(mismatch.status).toBe(409);
   });
 
-  test('maps structured Archive failures to HTTP statuses', async () => {
-    const cases = [['ARCHIVE_INVALID_INPUT', 400], ['ARCHIVE_FORBIDDEN', 403], ['ARCHIVE_NOT_FOUND', 404], ['ARCHIVE_CONFLICT', 409], ['DOCUMENT_PROCESSING_FAILED', 500]] as const;
+  test('maps structured Document failures to HTTP statuses', async () => {
+    const cases = [['DOCUMENT_INVALID_INPUT', 400], ['DOCUMENT_FORBIDDEN', 403], ['DOCUMENT_NOT_FOUND', 404], ['DOCUMENT_CONFLICT', 409], ['DOCUMENT_PROCESSING_FAILED', 500]] as const;
     for (const [code, status] of cases) {
-      const response = await request({ getIdentity: async () => ({ key: newId(), identityType: 'user' }), run: async () => { throw new ArchiveError(code, 'Safe failure.', 'folder.list'); } });
+      const response = await request({ getIdentity: async () => ({ key: newId(), identityType: 'user' }), run: async () => { throw new DocumentError(code, 'Safe failure.', 'folder.list'); } });
       expect(response.status).toBe(status);
       expect(await response.json()).toMatchObject({ success: false, error: { code, message: 'Safe failure.', retryable: false } });
     }
@@ -74,9 +74,9 @@ describe('Archive tool API', () => {
     app.use('*', validateQueryParams);
     app.use('*', async (c, next) => { (c as any).set('authIdentity', { key: newId(), identityType: 'user' }); await next(); });
     registerRoutes(api);
-    const registered = await app.request('/api/v1/archive/tools/not-a-tool', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-    expect(await registered.json()).toMatchObject({ error: { code: 'ARCHIVE_INVALID_INPUT' } });
-    const response = await app.request('/api/v1/archive/tools/not-a-tool?membershipKey=other', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const registered = await app.request('/api/v1/document/tools/not-a-tool', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(await registered.json()).toMatchObject({ error: { code: 'DOCUMENT_INVALID_INPUT' } });
+    const response = await app.request('/api/v1/document/tools/not-a-tool?membershipKey=other', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     expect(response.status).toBe(400);
   });
 });

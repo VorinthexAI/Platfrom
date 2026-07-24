@@ -1,15 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 
-const live = process.env.ARCHIVE_E2E === 'true';
+const live = process.env.DOCUMENT_E2E === 'true';
 const suite = live ? describe : describe.skip;
 
-suite('Archive live E2E', () => {
+suite('Document live E2E', () => {
   let db: any;
   let s3: any;
   let bucket: string;
   let newId: () => string;
-  let runArchiveTool: any;
-  let runArchiveAgentTool: any;
+  let runDocumentTool: any;
+  let runDocumentAgentTool: any;
   let toolNames: readonly string[];
   let outputSchemas: Record<string, { parse(value: unknown): unknown }>;
   let generateDocumentExport: any;
@@ -30,7 +30,7 @@ suite('Archive live E2E', () => {
     expect(process.env.ARANGO_DATABASE).not.toBe('vorinthex');
     expect(() => new URL(process.env.AWS_ENDPOINT_URL!)).not.toThrow();
     expect(process.env.EMBEDDING_DIMENSIONS).toBe('1024');
-    const [client, ids, archive, processing, exports, storage, s3Module, aws] = await Promise.all([
+    const [client, ids, document, processing, exports, storage, s3Module, aws] = await Promise.all([
       import('@/lib/db/client'),
       import('@/lib/ids'),
       import('.'),
@@ -42,10 +42,10 @@ suite('Archive live E2E', () => {
     ]);
     db = client.db;
     newId = ids.newId;
-    runArchiveTool = archive.runArchiveTool;
-    runArchiveAgentTool = archive.runArchiveAgentTool;
-    toolNames = archive.ARCHIVE_TOOL_NAMES;
-    outputSchemas = archive.archiveToolOutputSchemas;
+    runDocumentTool = document.runDocumentTool;
+    runDocumentAgentTool = document.runDocumentAgentTool;
+    toolNames = document.DOCUMENT_TOOL_NAMES;
+    outputSchemas = document.documentToolOutputSchemas;
     documentGenerateHtml = processing.documentGenerateHtml;
     documentGenerateJson = processing.documentGenerateJson;
     documentGenerateContent = processing.documentGenerateContent;
@@ -78,7 +78,7 @@ suite('Archive live E2E', () => {
       ['documentVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
-      ['archiveIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
+      ['documentIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['events', 'row.scopeId IN @scopeKeys', { scopeKeys }],
       ['agentMembers', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentSkills', 'row.agentKey IN @agentKeys', { agentKeys }],
@@ -103,9 +103,9 @@ suite('Archive live E2E', () => {
   });
 
   test('executes all 35 tools through Arango transactions and LocalStack S3', async () => {
-    const stale = await (await db.query('FOR organization IN organizations FILTER organization.name IN ["Archive E2E", "Archive outsider"] RETURN organization._key')).all();
+    const stale = await (await db.query('FOR organization IN organizations FILTER organization.name IN ["Document E2E", "Document outsider"] RETURN organization._key')).all();
     for (const organizationKey of stale) {
-      await removeObjects(`archive/${organizationKey}/`);
+      await removeObjects(`document/${organizationKey}/`);
       await cleanupOrganization(organizationKey);
     }
     const organizationKey = newId();
@@ -118,23 +118,23 @@ suite('Archive live E2E', () => {
     const agentKey = newId();
     const skillKey = newId();
     const scopeAgentKey = newId();
-    const testPrefix = `archive/${organizationKey}/`;
+    const testPrefix = `document/${organizationKey}/`;
     roots.add(organizationKey);
     roots.add(outsiderOrganizationKey);
     prefixes.add(testPrefix);
-    prefixes.add(`archive/${outsiderOrganizationKey}/`);
+    prefixes.add(`document/${outsiderOrganizationKey}/`);
 
     const save = (collection: string, value: Record<string, unknown>) => db.collection(collection).save(value);
-    await save('organizations', { _key: organizationKey, name: 'Archive E2E', is_root: false, slug: `archive-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
-    await save('organizations', { _key: outsiderOrganizationKey, name: 'Archive outsider', is_root: false, slug: `outside-${outsiderOrganizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
+    await save('organizations', { _key: organizationKey, name: 'Document E2E', is_root: false, slug: `document-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
+    await save('organizations', { _key: outsiderOrganizationKey, name: 'Document outsider', is_root: false, slug: `outside-${outsiderOrganizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
     for (const [key, organization, slug] of [[scopeKey, organizationKey, 'primary'], [secondScopeKey, organizationKey, 'project'], [outsiderScopeKey, outsiderOrganizationKey, 'outsider']] as const) {
-      await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} archive scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
+      await save('scopes', { _key: key, organizationKey: organization, slug: `${slug}-${key}`, name: slug, summary: `${slug} document scope`, description: `${slug} documents`, position: 1, level: 1, deletedAt: null, embedding: [] });
     }
-    await save('users', { _key: userKey, organizationId: organizationKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Archive Owner', createdAt: now, updatedAt: now, embedding: [] });
+    await save('users', { _key: userKey, organizationId: organizationKey, email: `${userKey}@example.test`, emailHash: userKey, countryCode: 'SE', name: 'Document Owner', createdAt: now, updatedAt: now, embedding: [] });
     await save('userOrganizations', { _key: membershipKey, organizationId: organizationKey, userId: userKey, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now, embedding: [] });
     await save('scopeMembers', { _key: newId(), scopeKey, userOrganizationKey: membershipKey, role: 'owner', status: 'active' });
-    await save('agents', { _key: agentKey, slug: `archive-e2e-${agentKey}`, name: 'Archive E2E Agent', title: 'Archive E2E Agent', scopeKey, explorationRate: 0, embedding: [] });
-    await save('skills', { _key: skillKey, slug: `archive-e2e-${skillKey}`, name: 'Archive E2E', title: 'Archive E2E', definition: 'Exercise Archive tools.', embedding: [] });
+    await save('agents', { _key: agentKey, slug: `document-e2e-${agentKey}`, name: 'Document E2E Agent', title: 'Document E2E Agent', scopeKey, explorationRate: 0, embedding: [] });
+    await save('skills', { _key: skillKey, slug: `document-e2e-${skillKey}`, name: 'Document E2E', title: 'Document E2E', definition: 'Exercise Document tools.', embedding: [] });
     await save('agentSkills', { _key: newId(), agentKey, skillKey, priority: 100 });
     await save('scopeAgents', { _key: scopeAgentKey, organizationKey, scopeKey, agentKey, position: 1, status: 'active', minimumAccessRole: 'viewer', createdByUserOrganizationKey: membershipKey, createdAt: now, updatedAt: now, embedding: [] });
     await save('agentMembers', { _key: newId(), organizationKey, scopeKey, agentKey, scopeAgentKey, userOrganizationKey: membershipKey, source: 'explicit', createdByUserOrganizationKey: membershipKey, createdAt: now, embedding: [] });
@@ -142,7 +142,7 @@ suite('Archive live E2E', () => {
     let randomSeed = 1;
     const processingOrder: string[] = [];
     const audit = async (event: any) => {
-      await save('events', { _key: newId(), scopeId: event.scopeKey, userId: event.actorKey, slug: `archive.${event.tool}.${event.success ? 'succeeded' : 'failed'}`, data: { resourceKeys: event.resourceKeys, code: event.code }, embedding: [], createdAt: now });
+      await save('events', { _key: newId(), scopeId: event.scopeKey, userId: event.actorKey, slug: `document.${event.tool}.${event.success ? 'succeeded' : 'failed'}`, data: { resourceKeys: event.resourceKeys, code: event.code }, embedding: [], createdAt: now });
     };
     const dependencies = {
       embed: async () => embedding,
@@ -154,7 +154,7 @@ suite('Archive live E2E', () => {
         },
       },
       runAction: async (action: string, input: any) => {
-        if (action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
+        if (action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic document result.` };
         if (action === 'speak') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
         if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
         if (action === 'document-generate-json') return documentGenerateJson(input, { logger: () => undefined });
@@ -181,7 +181,7 @@ suite('Archive live E2E', () => {
     const covered = new Set<string>();
     const call = async (tool: string, input: unknown, options: { expectedFailures?: number } = {}) => {
       randomSeed += 37;
-      const output = await runArchiveTool(tool, input, context, dependencies);
+      const output = await runDocumentTool(tool, input, context, dependencies);
       outputSchemas[tool]!.parse(output);
       if (output && typeof output === 'object' && 'summary' in output) {
         const expectedFailures = options.expectedFailures ?? 0;
@@ -192,10 +192,10 @@ suite('Archive live E2E', () => {
     };
 
     const eventRecorder = async (event: any) => save('events', { _key: newId(), ...event, embedding: [], createdAt: now });
-    const agentList = await runArchiveAgentTool({ organizationKey, agentKey, tool: 'folder.list', input: { scopeKey } }, {
+    const agentList = await runDocumentAgentTool({ organizationKey, agentKey, tool: 'folder.list', input: { scopeKey } }, {
       authenticatedUserKey: userKey,
       events: eventRecorder,
-      execute: ((tool: string, input: unknown, resolvedContext: unknown) => runArchiveTool(tool, input, resolvedContext, dependencies)) as any,
+      execute: ((tool: string, input: unknown, resolvedContext: unknown) => runDocumentTool(tool, input, resolvedContext, dependencies)) as any,
     });
     outputSchemas['folder.list']!.parse(agentList);
     covered.add('folder.list');
@@ -215,7 +215,7 @@ suite('Archive live E2E', () => {
     const partial = await call('folder.rename', { renames: [{ folderKey: childFolderKey, name: 'Renamed Child' }, { folderKey: newId(), name: 'Missing' }] }, { expectedFailures: 1 });
     expect(partial.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
 
-    await expect(call('folder.move', { moves: [{ folderKey: childFolderKey, targetParentFolderKey: destinationFolderKey }, { folderKey: newId(), targetParentFolderKey: rootFolderKey }], atomic: true })).rejects.toMatchObject({ code: 'ARCHIVE_NOT_FOUND' });
+    await expect(call('folder.move', { moves: [{ folderKey: childFolderKey, targetParentFolderKey: destinationFolderKey }, { folderKey: newId(), targetParentFolderKey: rootFolderKey }], atomic: true })).rejects.toMatchObject({ code: 'DOCUMENT_NOT_FOUND' });
     expect((await db.collection('folders').document(childFolderKey)).parentFolderKey).toBe(rootFolderKey);
     await call('folder.move', { moves: [{ folderKey: childFolderKey, targetParentFolderKey: destinationFolderKey }, { folderKey: rootFolderKey, targetParentFolderKey: destinationFolderKey }], atomic: true });
     expect((await db.collection('folders').document(childFolderKey)).parentFolderKey).toBe(destinationFolderKey);
@@ -223,7 +223,7 @@ suite('Archive live E2E', () => {
     expect(cycle.results[0].error.code).toBe('FOLDER_CYCLE_DETECTED');
     await call('folder.move', { moves: [{ folderKey: childFolderKey, targetParentFolderKey: rootFolderKey }, { folderKey: rootFolderKey }] });
 
-    const text = '# Archive Roadmap\n\nDeterministic source body.\n\n```ts\nsecretCode()\n```\n\nFinal paragraph.';
+    const text = '# Document Roadmap\n\nDeterministic source body.\n\n```ts\nsecretCode()\n```\n\nFinal paragraph.';
     const processed = await call('document.processing', {
       file: { filename: 'roadmap.md', mimeType: 'text/markdown', sizeBytes: new TextEncoder().encode(text).byteLength, bytes: new TextEncoder().encode(text) },
       scopeKey, folderKey: childFolderKey, idempotencyKey: `processing-${organizationKey}`,
@@ -302,7 +302,7 @@ suite('Archive live E2E', () => {
     const outsiderFolderKey = newId();
     const outsiderDocumentKey = newId();
     await save('folders', { _key: outsiderFolderKey, scopeKey: outsiderScopeKey, name: 'Private outsider', embedding, createdAt: now, updatedAt: now });
-    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `archive/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, html: '<p>roadmap</p>', json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'roadmap' }] }] }, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
+    await save('documents', { _key: outsiderDocumentKey, scopeKey: outsiderScopeKey, folderKey: outsiderFolderKey, name: 'Forbidden source', extension: 'txt', mimeType: 'text/plain', storageKey: `document/${outsiderOrganizationKey}/${outsiderScopeKey}/${outsiderDocumentKey}/original.txt`, sizeBytes: 8, html: '<p>roadmap</p>', json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'roadmap' }] }] }, content: 'roadmap', embedding, createdAt: now, updatedAt: now });
     const scopedSearch = await call('scope.document.search', { scopeKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey] }, { type: 'project', projectKeys: [secondScopeKey] }, { type: 'folder', folderKeys: [rootFolderKey], includeDescendants: true }], include: ['snippet', 'content', 'html', 'folder', 'scoreBreakdown'] });
     expect(scopedSearch.results.some((item: any) => item.documentKey === documentKey)).toBe(true);
     const organizationSearch = await call('organization.document.search', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
@@ -338,11 +338,11 @@ suite('Archive live E2E', () => {
     expect(await (await db.query('RETURN DOCUMENT(folders, @key) == null', { key: disposableKey })).next()).toBe(true);
 
     expect([...covered].sort()).toEqual([...toolNames].sort());
-    const ledger = await db.query(`FOR row IN archiveIdempotency FILTER row.organizationKey == @organizationKey RETURN row`, { organizationKey });
+    const ledger = await db.query(`FOR row IN documentIdempotency FILTER row.organizationKey == @organizationKey RETURN row`, { organizationKey });
     const claims = await ledger.all();
     expect(claims.length).toBeGreaterThan(0);
     expect(claims.every((claim: any) => claim.status === 'completed' && typeof claim.responseCiphertext === 'string' && !('response' in claim))).toBe(true);
-    const auditCursor = await db.query(`FOR event IN events FILTER event.scopeId == @scopeKey && STARTS_WITH(event.slug, "archive.") RETURN event`, { scopeKey });
+    const auditCursor = await db.query(`FOR event IN events FILTER event.scopeId == @scopeKey && STARTS_WITH(event.slug, "document.") RETURN event`, { scopeKey });
     expect((await auditCursor.all()).length).toBeGreaterThanOrEqual(toolNames.length);
 
     await removeObjects(testPrefix);
@@ -352,8 +352,8 @@ suite('Archive live E2E', () => {
 
   test('migrates plaintext shares and legacy versions in a fresh database', async () => {
     const { Database } = await import('arangojs');
-    const { migrateArchiveShares, migrateArchiveVersions } = await import('@/db/arango-migrate');
-    const temporaryName = `archive_e2e_${newId().replaceAll('-', '')}`;
+    const { migrateArchiveShares: migrateDocumentShares, migrateArchiveVersions: migrateDocumentVersions } = await import('@/db/arango-migrate');
+    const temporaryName = `document_e2e_${newId().replaceAll('-', '')}`;
     const root = new Database({ url: process.env.ARANGO_URL!, auth: { username: process.env.ARANGO_USERNAME!, password: process.env.ARANGO_ROOT_PASSWORD! } });
     await root.createDatabase(temporaryName);
     const temporary = root.database(temporaryName);
@@ -367,10 +367,10 @@ suite('Archive live E2E', () => {
       const legacyDocumentKey = newId();
       await temporary.collection('documentVersions').import(versionKeys.map((key, index) => ({ _key: key, documentKey: legacyDocumentKey, version: index + 1, content: `Historical paragraph ${index}\n\nSecond block`, embedding })));
 
-      await migrateArchiveShares(temporary);
-      await migrateArchiveVersions(temporary);
-      await migrateArchiveShares(temporary);
-      await migrateArchiveVersions(temporary);
+      await migrateDocumentShares(temporary);
+      await migrateDocumentVersions(temporary);
+      await migrateDocumentShares(temporary);
+      await migrateDocumentVersions(temporary);
       await temporary.collection('documentShares').ensureIndex({ type: 'persistent', fields: ['tokenHash'], unique: true });
       await temporary.collection('documentVersions').ensureIndex({ type: 'persistent', fields: ['documentKey', 'version'], unique: true });
 

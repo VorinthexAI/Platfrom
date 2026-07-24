@@ -12,16 +12,16 @@ import { documentVersionSchema, type DocumentVersion } from '@/lib/db/document-v
 import { DocumentProcessingError } from '@/lib/ai/document-processing/errors';
 import { editorDocumentJsonSchema } from '@/lib/ai/document-processing/schemas';
 import type { generateDocumentExport } from '@/lib/ai/document-processing/exports';
-import type { ArchiveToolName, ArchiveToolOutput } from './schemas';
-import { ArchiveError, type ArchiveErrorCode } from './errors';
-import { archiveToolInputSchemas, archiveToolOutputSchemas, isArchiveToolName } from './registry';
+import type { DocumentToolName, DocumentToolOutput } from './document-tool-contracts';
+import { DocumentError, type DocumentErrorCode } from './document-tool-errors';
+import { documentToolInputSchemas, documentToolOutputSchemas, isDocumentToolName } from './document-tool-registry';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-json' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup' | 'audit';
   status: 'started' | 'succeeded' | 'failed';
-  tool: ArchiveToolName;
+  tool: DocumentToolName;
   invocationKey: string;
   action?: string;
   resourceKey?: string;
@@ -30,13 +30,13 @@ type SafeEvent = {
   durationMs?: number;
 };
 
-export interface ArchiveIdempotencyStore {
+export interface DocumentIdempotencyStore {
   claim(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string, now: string): Promise<{ status: 'claimed' } | { status: 'pending' } | { status: 'conflict' } | { status: 'replay'; response: unknown }>;
   complete(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string, response: unknown, now: string): Promise<void>;
   release(identity: { organizationKey: string; actorKey: string; tool: string; idempotencyKey: string }, requestHash: string, leaseOwner: string): Promise<void>;
 }
 
-export interface ArchiveRepository {
+export interface DocumentRepository {
   getScope(scopeKey: string): Promise<{ key: string; organizationKey: string; deletedAt?: string | null } | null>;
   role(scopeKey: string, membershipKey: string): Promise<Role | null>;
   allowedScopeKeys(organizationKey: string, membershipKey: string): Promise<string[]>;
@@ -62,18 +62,18 @@ export interface ArchiveRepository {
   createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'updatedAt' | 'deletedAt'>): Promise<DocumentVersion>;
   deleteVersion(key: string): Promise<void>;
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document }>>;
-  transaction?<T>(operation: (repository: ArchiveRepository) => Promise<T>): Promise<T>;
+  transaction?<T>(operation: (repository: DocumentRepository) => Promise<T>): Promise<T>;
 }
 
-export interface ArchiveActionResult { text?: string; audio?: Uint8Array; mimeType?: string; durationMs?: number; html?: string; json?: Document['json']; content?: string; embedding?: number[] }
-export interface ArchiveToolDependencies extends RouterDependencies {
-  repository?: ArchiveRepository;
+export interface DocumentActionResult { text?: string; audio?: Uint8Array; mimeType?: string; durationMs?: number; html?: string; json?: Document['json']; content?: string; embedding?: number[] }
+export interface DocumentToolDependencies extends RouterDependencies {
+  repository?: DocumentRepository;
   storage?: DocumentObjectStorage;
   processDocument?: (input: DocumentProcessingInput, dependencies?: DocumentProcessingDependencies) => Promise<{ document: Document }>;
-  runAction?: (action: Action, input: Record<string, unknown>, context: DomainToolContext) => Promise<ArchiveActionResult>;
+  runAction?: (action: Action, input: Record<string, unknown>, context: DomainToolContext) => Promise<DocumentActionResult>;
   embed?: (text: string) => Promise<number[]>;
   observer?: (event: SafeEvent) => void | Promise<void>;
-  audit?: (event: { tool: ArchiveToolName; success: boolean; organizationKey: string; scopeKey: string; actorKey: string; resourceKeys: string[]; code?: string }) => Promise<void>;
+  audit?: (event: { tool: DocumentToolName; success: boolean; organizationKey: string; scopeKey: string; actorKey: string; resourceKeys: string[]; code?: string }) => Promise<void>;
   clock?: () => Date;
   id?: () => string;
   random?: (size: number) => Uint8Array;
@@ -81,38 +81,38 @@ export interface ArchiveToolDependencies extends RouterDependencies {
   projectScopeKeys?: (projectKeys: string[], organizationKey: string) => Promise<Record<string, string>>;
   maxSpeechChunkCharacters?: number;
   ingestion?: DocumentProcessingDependencies;
-  idempotency?: ArchiveIdempotencyStore;
+  idempotency?: DocumentIdempotencyStore;
   maxDownloadBytes?: number;
   generateExport?: typeof generateDocumentExport;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const scrypt = promisify(nodeScrypt);
-const MUTATIONS = new Set<ArchiveToolName>([
+const MUTATIONS = new Set<DocumentToolName>([
   'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.processing', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
 ]);
 
-function fail(code: ArchiveErrorCode, message: string, tool: ArchiveToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
-  throw new ArchiveError(code, message, tool, { action, resourceKey, cause, retryable });
+function fail(code: DocumentErrorCode, message: string, tool: DocumentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
+  throw new DocumentError(code, message, tool, { action, resourceKey, cause, retryable });
 }
 
-function mappedError(error: unknown, tool: ArchiveToolName, action?: string, resourceKey?: string): ArchiveError {
-  if (error instanceof ArchiveError) return error;
+function mappedError(error: unknown, tool: DocumentToolName, action?: string, resourceKey?: string): DocumentError {
+  if (error instanceof DocumentError) return error;
   if (error instanceof DocumentProcessingError) {
-    const codeByAction: Partial<Record<string, ArchiveErrorCode>> = {
+    const codeByAction: Partial<Record<string, DocumentErrorCode>> = {
       'document-validate': error.code === 'DOCUMENT_TOO_LARGE' ? 'DOCUMENT_TOO_LARGE' : error.code === 'DOCUMENT_INVALID_MIME_TYPE' ? 'DOCUMENT_INVALID_MIME_TYPE' : 'DOCUMENT_UNSUPPORTED_TYPE',
       'document-extract': 'DOCUMENT_EXTRACTION_FAILED',
       'document-embed': 'DOCUMENT_EMBEDDING_FAILED',
       'document-insert': 'DOCUMENT_INSERT_FAILED',
     };
-    return new ArchiveError(codeByAction[error.action] ?? 'DOCUMENT_PROCESSING_FAILED', error.message, tool, {
+    return new DocumentError(codeByAction[error.action] ?? 'DOCUMENT_PROCESSING_FAILED', error.message, tool, {
       action: error.action,
       resourceKey,
       retryable: error.retryable,
     });
   }
   const validation = error && typeof error === 'object' && ('issues' in error || ('name' in error && error.name === 'ZodError'));
-  return new ArchiveError(validation ? 'ARCHIVE_INVALID_INPUT' : 'ARCHIVE_CONFLICT', validation ? 'Archive tool input or output was invalid.' : 'Archive operation failed.', tool, { action, resourceKey, cause: error, retryable: !validation });
+  return new DocumentError(validation ? 'DOCUMENT_INVALID_INPUT' : 'DOCUMENT_CONFLICT', validation ? 'Document tool input or output was invalid.' : 'Document operation failed.', tool, { action, resourceKey, cause: error, retryable: !validation });
 }
 
 function folderView(folder: Folder) {
@@ -135,8 +135,8 @@ function versionView(version: DocumentVersion, include: string[] = []) {
   return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('json') ? { json } : {}), ...(include.includes('content') ? { content } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
 }
 
-async function productionRepository(): Promise<ArchiveRepository> {
-  const [documents, client, scopes, archive] = await Promise.all([
+async function productionRepository(): Promise<DocumentRepository> {
+  const [documents, client, scopes, document] = await Promise.all([
     import('@/lib/db/documents.node'),
     import('@/lib/db/client'),
     import('@/lib/ai/scopes/repository'),
@@ -177,8 +177,8 @@ async function productionRepository(): Promise<ArchiveRepository> {
     return data.scopes.filter((key) => accessible.has(key));
   };
 
-  type Persistence = ReturnType<typeof archive.createArchivePersistence>;
-  const makeRepository = (persistence: Persistence): ArchiveRepository => ({
+  type Persistence = ReturnType<typeof document.createArchivePersistence>;
+  const makeRepository = (persistence: Persistence): DocumentRepository => ({
     async getScope(key) { return scopeRepository.getScopeByKey(key); },
     role,
     allowedScopeKeys,
@@ -249,26 +249,26 @@ async function productionRepository(): Promise<ArchiveRepository> {
       if (!current || !await persistence.deleteVersion(current.scopeKey, key)) throw new Error('Version was not found for scoped deletion.');
     },
     semanticSearch: documents.semanticSearchDocuments,
-    transaction: (operation) => archive.withArchivePersistenceTransaction((bound) => operation(makeRepository(bound))),
+    transaction: (operation) => document.withArchivePersistenceTransaction((bound) => operation(makeRepository(bound))),
   });
-  return makeRepository(archive.archivePersistence);
+  return makeRepository(document.archivePersistence);
 }
 
 interface RuntimeDefaults {
-  repository: ArchiveRepository;
+  repository: DocumentRepository;
   storage: DocumentObjectStorage;
-  processDocument: NonNullable<ArchiveToolDependencies['processDocument']>;
+  processDocument: NonNullable<DocumentToolDependencies['processDocument']>;
   id: () => string;
   clock: () => Date;
   random: (size: number) => Uint8Array;
   embed: (text: string) => Promise<number[]>;
-  runAction: NonNullable<ArchiveToolDependencies['runAction']>;
-  idempotency: ArchiveIdempotencyStore;
-  audit: NonNullable<ArchiveToolDependencies['audit']>;
+  runAction: NonNullable<DocumentToolDependencies['runAction']>;
+  idempotency: DocumentIdempotencyStore;
+  audit: NonNullable<DocumentToolDependencies['audit']>;
   generateExport: typeof generateDocumentExport;
 }
 
-async function defaults(deps: ArchiveToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
+async function defaults(deps: DocumentToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
   const [{ newId }, storage, processing, titan, router, ledger, events, exports] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
@@ -284,12 +284,12 @@ async function defaults(deps: ArchiveToolDependencies, context: DomainToolContex
     repository: deps.repository ?? await productionRepository(), storage: deps.storage ?? storage.documentStorage,
     processDocument: deps.processDocument ?? processing.processDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
     embed: embedding,
-    runAction: deps.runAction ?? (async (action: Action, input: Record<string, unknown>): Promise<ArchiveActionResult> => {
-      if (action === 'document-generate-html') return processing.documentGenerateHtml(input as never) as Promise<ArchiveActionResult>;
-      if (action === 'document-generate-json') return processing.documentGenerateJson(input as never) as Promise<ArchiveActionResult>;
-      if (action === 'document-generate-content') return processing.documentGenerateContent(input as never) as Promise<ArchiveActionResult>;
-      if (action === 'document-embed') return processing.documentEmbed(input as never, { embed: ({ text }) => embedding(text), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ArchiveActionResult>;
-      const response = await router.executeAction<Record<string, unknown>, ArchiveActionResult>({ mode: 'auto', organizationKey: context.organizationKey, actionSlug: action as never }, input, deps);
+    runAction: deps.runAction ?? (async (action: Action, input: Record<string, unknown>): Promise<DocumentActionResult> => {
+      if (action === 'document-generate-html') return processing.documentGenerateHtml(input as never) as Promise<DocumentActionResult>;
+      if (action === 'document-generate-json') return processing.documentGenerateJson(input as never) as Promise<DocumentActionResult>;
+      if (action === 'document-generate-content') return processing.documentGenerateContent(input as never) as Promise<DocumentActionResult>;
+      if (action === 'document-embed') return processing.documentEmbed(input as never, { embed: ({ text }) => embedding(text), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<DocumentActionResult>;
+      const response = await router.executeAction<Record<string, unknown>, DocumentActionResult>({ mode: 'auto', organizationKey: context.organizationKey, actionSlug: action as never }, input, deps);
       return response.output;
     }),
     idempotency: deps.idempotency ?? {
@@ -302,7 +302,7 @@ async function defaults(deps: ArchiveToolDependencies, context: DomainToolContex
         key: newId(),
         scopeId: audit.scopeKey,
         userId: audit.actorKey,
-        slug: `archive.${audit.tool}.${audit.success ? 'succeeded' : 'failed'}`,
+        slug: `document.${audit.tool}.${audit.success ? 'succeeded' : 'failed'}`,
         data: { resourceKeys: audit.resourceKeys, ...(audit.code ? { code: audit.code } : {}) },
         createdAt: new Date().toISOString(),
       });
@@ -311,18 +311,18 @@ async function defaults(deps: ArchiveToolDependencies, context: DomainToolContex
   };
 }
 
-function principal(context: DomainToolContext, tool: ArchiveToolName) {
-  if (context.principal.kind !== 'member') fail('ARCHIVE_UNAUTHORIZED', 'A resolved human principal is required.', tool, 'authorization');
+function principal(context: DomainToolContext, tool: DocumentToolName) {
+  if (context.principal.kind !== 'member') fail('DOCUMENT_UNAUTHORIZED', 'A resolved human principal is required.', tool, 'authorization');
   const member = context.principal;
-  if (member.userOrganization.organizationId !== context.organizationKey || member.userOrganization.status !== 'active') fail('ARCHIVE_FORBIDDEN', 'Active membership in the requested organization is required.', tool, 'authorization');
+  if (member.userOrganization.organizationId !== context.organizationKey || member.userOrganization.status !== 'active') fail('DOCUMENT_FORBIDDEN', 'Active membership in the requested organization is required.', tool, 'authorization');
   return member;
 }
 
-async function observe(deps: ArchiveToolDependencies, event: SafeEvent) { try { await deps.observer?.(event); } catch { /* Telemetry cannot alter behavior. */ } }
+async function observe(deps: DocumentToolDependencies, event: SafeEvent) { try { await deps.observer?.(event); } catch { /* Telemetry cannot alter behavior. */ } }
 
-async function batch<T>(tool: ArchiveToolName, items: Array<{ key: string; run: (repository: ArchiveRepository) => Promise<T>; preflight?: () => Promise<void> }>, atomic: boolean, initialRepository: ArchiveRepository) {
+async function batch<T>(tool: DocumentToolName, items: Array<{ key: string; run: (repository: DocumentRepository) => Promise<T>; preflight?: () => Promise<void> }>, atomic: boolean, initialRepository: DocumentRepository) {
   let repo = initialRepository;
-  if (atomic && !repo.transaction) fail('ARCHIVE_CONFLICT', 'Atomic mode is unavailable for this operation.', tool, 'transaction');
+  if (atomic && !repo.transaction) fail('DOCUMENT_CONFLICT', 'Atomic mode is unavailable for this operation.', tool, 'transaction');
   if (atomic) for (const item of items) await item.preflight?.();
   const execute = async () => {
     const results: unknown[] = [];
@@ -371,7 +371,7 @@ async function fingerprintInput(input: unknown): Promise<string> {
   return createHash('sha256').update(JSON.stringify(await normalize(input))).digest('hex');
 }
 
-export function isArchiveMutation(tool: ArchiveToolName, input: any): boolean {
+export function isDocumentMutation(tool: DocumentToolName, input: any): boolean {
   if (tool === 'document.read') return input.mode === 'audio' && input.persistAudio === true;
   if (tool === 'document.summarize') return input.persist === true;
   if (tool === 'document.translate') return input.mode !== 'preview';
@@ -428,14 +428,14 @@ function audioExtension(mimeType: string): string | null {
 
 async function hashPassword(password: string, random: (size: number) => Uint8Array) { const salt = Buffer.from(random(16)); const hash = await scrypt(password, salt, 32) as Buffer; return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`; }
 
-export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, rawInput: unknown, context: DomainToolContext, dependencies: ArchiveToolDependencies = {}): Promise<ArchiveToolOutput<Name>> {
-  if (!isArchiveToolName(name)) throw new ArchiveError('ARCHIVE_INVALID_INPUT', 'Unknown Archive tool.', String(name), { action: 'parse' });
+export async function runDocumentTool<Name extends DocumentToolName>(name: Name, rawInput: unknown, context: DomainToolContext, dependencies: DocumentToolDependencies = {}): Promise<DocumentToolOutput<Name>> {
+  if (!isDocumentToolName(name)) throw new DocumentError('DOCUMENT_INVALID_INPUT', 'Unknown Document tool.', String(name), { action: 'parse' });
   const tool = name; const member = principal(context, tool); let input: any;
-  try { input = archiveToolInputSchemas[tool].parse(rawInput); } catch (error) { throw mappedError(error, tool, 'parse'); }
+  try { input = documentToolInputSchemas[tool].parse(rawInput); } catch (error) { throw mappedError(error, tool, 'parse'); }
   const d = await defaults(dependencies, context);
   const canPermanentlyDelete = dependencies.canPermanentlyDelete ?? ((candidate: { deletedAt?: string | null }) => {
-    if (process.env.ARCHIVE_PERMANENT_DELETE_ENABLED !== 'true' || !candidate.deletedAt) return false;
-    const configuredDays = Number(process.env.ARCHIVE_RETENTION_DAYS ?? 30);
+    if (process.env.DOCUMENT_PERMANENT_DELETE_ENABLED !== 'true' || !candidate.deletedAt) return false;
+    const configuredDays = Number(process.env.DOCUMENT_RETENTION_DAYS ?? 30);
     const retentionDays = Number.isFinite(configuredDays) && configuredDays >= 0 ? configuredDays : 30;
     return d.clock().getTime() - new Date(candidate.deletedAt).getTime() >= retentionDays * 86_400_000;
   });
@@ -444,11 +444,11 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
   const now = () => d.clock().toISOString();
   const event = (type: SafeEvent['type'], status: SafeEvent['status'], action?: string, resourceKey?: string, scopeKey?: string, durationMs?: number) => observe(dependencies, { type, status, tool, invocationKey, action, resourceKey, scopeKey, durationMs });
   await event('action', 'started', 'tool', undefined, context.runtimeScopeKey);
-  const observeRepository = (target: ArchiveRepository): ArchiveRepository => new Proxy(target, {
+  const observeRepository = (target: DocumentRepository): DocumentRepository => new Proxy(target, {
     get(repository, property, receiver) {
       const value = Reflect.get(repository, property, receiver);
       if (property === 'transaction' && typeof value === 'function') {
-        return (operation: (bound: ArchiveRepository) => Promise<unknown>) => value.call(repository, (bound: ArchiveRepository) => operation(observeRepository(bound)));
+        return (operation: (bound: DocumentRepository) => Promise<unknown>) => value.call(repository, (bound: DocumentRepository) => operation(observeRepository(bound)));
       }
       if (typeof value !== 'function') return value;
       return async (...args: unknown[]) => {
@@ -508,7 +508,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
   const deleteStorageKeys = async (keys: Array<string | undefined>, resourceKey: string, scopeKey: string) => {
     for (const storageKey of new Set(keys.filter((key): key is string => typeof key === 'string' && key.length > 0))) {
       try { await storageOperation('delete', resourceKey, scopeKey, () => d.storage.delete(storageKey)); }
-      catch (error) { throw new ArchiveError('ARCHIVE_CONFLICT', 'Storage deletion failed; metadata pointers were retained for retry.', tool, { action: 'storage', resourceKey, cause: error, retryable: true }); }
+      catch (error) { throw new DocumentError('DOCUMENT_CONFLICT', 'Storage deletion failed; metadata pointers were retained for retry.', tool, { action: 'storage', resourceKey, cause: error, retryable: true }); }
     }
   };
   const roleFor = async (scopeKey: string, minimum: Role, resourceKey?: string) => {
@@ -516,10 +516,10 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
     await event('authorization', 'started', minimum, resourceKey, scopeKey);
     try {
       const scope = await repo.getScope(scopeKey);
-      if (!scope || scope.organizationKey !== context.organizationKey) fail('ARCHIVE_NOT_FOUND', 'Scope was not found in this organization.', tool, 'resolution', resourceKey);
-      if (scope.deletedAt) fail('ARCHIVE_FORBIDDEN', 'Archived scopes cannot be mutated or searched.', tool, 'authorization', resourceKey);
+      if (!scope || scope.organizationKey !== context.organizationKey) fail('DOCUMENT_NOT_FOUND', 'Scope was not found in this organization.', tool, 'resolution', resourceKey);
+      if (scope.deletedAt) fail('DOCUMENT_FORBIDDEN', 'Archived scopes cannot be mutated or searched.', tool, 'authorization', resourceKey);
       const role: Role | null = member.userOrganization.orgRole === 'owner' || member.userOrganization.orgRole === 'admin' ? member.userOrganization.orgRole : await repo.role(scopeKey, member.userOrganization.key);
-      if (!role || rank[role] < rank[minimum]) fail('ARCHIVE_FORBIDDEN', 'The principal lacks the required scope role.', tool, 'authorization', resourceKey);
+      if (!role || rank[role] < rank[minimum]) fail('DOCUMENT_FORBIDDEN', 'The principal lacks the required scope role.', tool, 'authorization', resourceKey);
       await event('authorization', 'succeeded', minimum, resourceKey, scopeKey, Math.round(performance.now() - started));
       return role;
     } catch (error) {
@@ -529,10 +529,10 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
   };
   const folder = async (key: string, minimum: Role = 'viewer', archived = true, pendingDeletion = false) => {
     const value = await repo.getFolder(key);
-    if (!value) fail('ARCHIVE_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+    if (!value) fail('DOCUMENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
     await roleFor(value.scopeKey, minimum, key);
-    if (!pendingDeletion && value._internalDeletion) fail('ARCHIVE_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
-    if (!archived && value.deletedAt) fail('FOLDER_ARCHIVED', 'Folder is archived.', tool, 'read', key);
+    if (!pendingDeletion && value._internalDeletion) fail('DOCUMENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+    if (!archived && value.deletedAt) fail('FOLDER_DOCUMENTD', 'Folder is archived.', tool, 'read', key);
     return value;
   };
   const folderAncestors = async (parentKey: string | undefined, scopeKey: string, minimum: Role): Promise<Folder[]> => {
@@ -543,8 +543,8 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       if (visited.has(currentKey)) fail('FOLDER_CYCLE_DETECTED', 'The folder hierarchy contains a cycle.', tool, 'resolution', currentKey);
       visited.add(currentKey);
       const current = await repo.getFolder(currentKey);
-      if (!current || current.scopeKey !== scopeKey) fail('ARCHIVE_CONFLICT', 'Folder ancestor left the requested scope.', tool, 'resolution', currentKey);
-      if (current._internalDeletion) fail('ARCHIVE_NOT_FOUND', 'Folder was not found.', tool, 'read', currentKey);
+      if (!current || current.scopeKey !== scopeKey) fail('DOCUMENT_CONFLICT', 'Folder ancestor left the requested scope.', tool, 'resolution', currentKey);
+      if (current._internalDeletion) fail('DOCUMENT_NOT_FOUND', 'Folder was not found.', tool, 'read', currentKey);
       await roleFor(current.scopeKey, minimum, current.key);
       ancestors.push(current);
       currentKey = current.parentFolderKey;
@@ -553,19 +553,19 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
   };
   const document = async (key: string, minimum: Role = 'viewer', archived = true, pendingDeletion = false) => {
     const value = await repo.getDocument(key);
-    if (!value) fail('ARCHIVE_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+    if (!value) fail('DOCUMENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
     await roleFor(value.scopeKey, minimum, key);
-    if (!pendingDeletion && value._internalDeletion) fail('ARCHIVE_NOT_FOUND', 'Document was not found.', tool, 'read', key);
-    if (!archived && value.deletedAt) fail('DOCUMENT_ARCHIVED', 'Document is archived.', tool, 'read', key);
+    if (!pendingDeletion && value._internalDeletion) fail('DOCUMENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+    if (!archived && value.deletedAt) fail('DOCUMENT_DOCUMENTD', 'Document is archived.', tool, 'read', key);
     let parentKey: string | undefined = value.folderKey;
     const visited = new Set<string>();
     while (parentKey) {
       if (visited.has(parentKey)) fail('FOLDER_CYCLE_DETECTED', 'The document folder hierarchy contains a cycle.', tool, 'resolution', parentKey);
       visited.add(parentKey);
       const parent = await repo.getFolder(parentKey);
-      if (!parent || parent.scopeKey !== value.scopeKey) fail('ARCHIVE_CONFLICT', 'Document folder resolution failed.', tool, 'resolution', key);
-      if (!pendingDeletion && parent._internalDeletion) fail('ARCHIVE_NOT_FOUND', 'Document was not found.', tool, 'read', key);
-      if (!archived && parent.deletedAt) fail('FOLDER_ARCHIVED', 'The containing folder hierarchy is archived.', tool, 'read', parent.key);
+      if (!parent || parent.scopeKey !== value.scopeKey) fail('DOCUMENT_CONFLICT', 'Document folder resolution failed.', tool, 'resolution', key);
+      if (!pendingDeletion && parent._internalDeletion) fail('DOCUMENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+      if (!archived && parent.deletedAt) fail('FOLDER_DOCUMENTD', 'The containing folder hierarchy is archived.', tool, 'read', parent.key);
       parentKey = parent.parentFolderKey;
     }
     return value;
@@ -588,7 +588,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
   const generated = async (doc: Document, instruction: string, deep = false) => {
     const slug = deep ? 'deep-reason' : 'reason';
     const output = await action(slug, { instruction, content: doc.content, title: doc.name }, doc.key, doc.scopeKey);
-    if (!output.text?.trim()) fail('ARCHIVE_CONFLICT', 'The generation action returned invalid output.', tool, slug, doc.key);
+    if (!output.text?.trim()) fail('DOCUMENT_CONFLICT', 'The generation action returned invalid output.', tool, slug, doc.key);
     return output.text.trim();
   };
   const representations = async (
@@ -629,14 +629,14 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         await repo.updateDocument(source.key, { ...transformed, updatedAt: now() });
       } catch (error) {
         try { await repo.deleteVersion(backup.key); }
-        catch (cleanupError) { throw new ArchiveError('ARCHIVE_CONFLICT', 'AI replacement failed and backup compensation requires retry.', tool, { action: 'cleanup', resourceKey: source.key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
+        catch (cleanupError) { throw new DocumentError('DOCUMENT_CONFLICT', 'AI replacement failed and backup compensation requires retry.', tool, { action: 'cleanup', resourceKey: source.key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
         throw error;
       }
       return source.key;
     }
     const key = d.id();
     const bytes = new TextEncoder().encode(transformed.content);
-    const storageKey = `archive/${context.organizationKey}/${source.scopeKey}/${key}/derived.txt`;
+    const storageKey = `document/${context.organizationKey}/${source.scopeKey}/${key}/derived.txt`;
     await storageOperation('upload', key, source.scopeKey, () => d.storage.upload({ key: storageKey, bytes, mimeType: 'text/plain' }));
     try {
       const timestamp = now();
@@ -656,11 +656,11 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       return key;
     } catch (error) {
       try { await storageOperation('delete', key, source.scopeKey, () => d.storage.delete(storageKey)); }
-      catch (cleanupError) { throw new ArchiveError('ARCHIVE_CONFLICT', 'Generated document insertion failed and storage cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
+      catch (cleanupError) { throw new DocumentError('DOCUMENT_CONFLICT', 'Generated document insertion failed and storage cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
       throw error;
     }
   };
-  const mutation = isArchiveMutation(tool, input);
+  const mutation = isDocumentMutation(tool, input);
   const idempotencyIdentity = mutation && input.idempotencyKey ? {
     organizationKey: context.organizationKey,
     actorKey: member.user.key,
@@ -672,9 +672,9 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
   let executionCompleted = false;
   if (idempotencyIdentity && requestHash) {
     const claim = await d.idempotency.claim(idempotencyIdentity, requestHash, invocationKey, now());
-    if (claim.status === 'replay') return archiveToolOutputSchemas[tool].parse(claim.response) as ArchiveToolOutput<Name>;
-    if (claim.status === 'conflict') fail('ARCHIVE_CONFLICT', 'Idempotency key was already used with a different request.', tool, 'idempotency');
-    if (claim.status === 'pending') throw new ArchiveError('ARCHIVE_CONFLICT', 'An invocation with this idempotency key is still pending.', tool, { action: 'idempotency', retryable: true });
+    if (claim.status === 'replay') return documentToolOutputSchemas[tool].parse(claim.response) as DocumentToolOutput<Name>;
+    if (claim.status === 'conflict') fail('DOCUMENT_CONFLICT', 'Idempotency key was already used with a different request.', tool, 'idempotency');
+    if (claim.status === 'pending') throw new DocumentError('DOCUMENT_CONFLICT', 'An invocation with this idempotency key is still pending.', tool, { action: 'idempotency', retryable: true });
     ownsIdempotencyClaim = true;
   }
   let resourceKeys: string[] = []; let result: unknown;
@@ -712,7 +712,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         key,
         run: async () => {
           const current = await folder(key);
-          if (current.deletedAt && !input.includeArchived) fail('ARCHIVE_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+          if (current.deletedAt && !input.includeArchived) fail('DOCUMENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
           const allFolders = await foldersIn(current.scopeKey);
           const allDocuments = await repo.listDocuments(current.scopeKey, true);
           return {
@@ -728,7 +728,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       await roleFor(input.scopeKey, 'viewer');
       if (input.parentFolderKey) {
         await folder(input.parentFolderKey, 'viewer', input.includeArchived ?? false);
-        if (!input.includeArchived && !await activeFolderHierarchy(input.parentFolderKey, input.scopeKey)) fail('FOLDER_ARCHIVED', 'Folder hierarchy is archived.', tool, 'read', input.parentFolderKey);
+        if (!input.includeArchived && !await activeFolderHierarchy(input.parentFolderKey, input.scopeKey)) fail('FOLDER_DOCUMENTD', 'Folder hierarchy is archived.', tool, 'read', input.parentFolderKey);
       }
       const values = (await foldersIn(input.scopeKey))
         .filter((item) => item.parentFolderKey === input.parentFolderKey && (input.includeArchived || !item.deletedAt));
@@ -746,12 +746,12 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       };
     } else if (['folder.update', 'folder.rename'].includes(tool)) {
       const items = tool === 'folder.update' ? input.updates : input.renames;
-      if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic folder metadata updates are unavailable because embedding is an external side effect.', tool, 'embed');
+      if (input.atomic) fail('DOCUMENT_CONFLICT', 'Atomic folder metadata updates are unavailable because embedding is an external side effect.', tool, 'embed');
       resourceKeys = items.map((item: any) => item.folderKey);
       result = await batch(tool, items.map((item: any) => ({
         key: item.folderKey,
         preflight: async () => { await folder(item.folderKey, 'moderator', false); },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const current = await folder(item.folderKey, 'moderator', false);
           const name = item.name ?? current.name;
           const description = item.description === null ? undefined : item.description ?? current.description;
@@ -777,7 +777,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           const all = await foldersIn(source.scopeKey);
           if (target.key === source.key || descendants(all, source.key).some((child) => child.key === target.key)) fail('FOLDER_CYCLE_DETECTED', 'Folder move would create a cycle.', tool, 'update', source.key);
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const source = await folder(item.folderKey, 'admin', false);
           const moved = await mutationRepository.updateFolder(source.key, {
             parentFolderKey: item.targetParentFolderKey,
@@ -795,10 +795,10 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           const root = await folder(key, 'moderator');
           if (restore) {
             const ancestors = await folderAncestors(root.parentFolderKey, root.scopeKey, 'moderator');
-            if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
+            if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_DOCUMENTD', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
           }
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const root = await folder(key, 'moderator');
           const allFolders = await foldersIn(root.scopeKey);
           const children = descendants(allFolders, key);
@@ -806,7 +806,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
             fail('FOLDER_NOT_EMPTY', 'Folder has active descendants.', tool, 'update', key);
           }
           const ancestors = restore ? await folderAncestors(root.parentFolderKey, root.scopeKey, 'moderator') : [];
-          if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
+          if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_DOCUMENTD', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
           const affectedFolders = [root, ...(input.includeDescendants ? children : [])];
           const affectedFolderKeys = new Set(affectedFolders.map((item) => item.key));
           const affectedDocuments = (await repo.listDocuments(root.scopeKey, true))
@@ -831,30 +831,30 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         key,
         preflight: async () => {
           const root = await folder(key, 'owner', true, true);
-          if (!root.deletedAt) fail('ARCHIVE_CONFLICT', 'Folder must be archived before permanent deletion.', tool, 'delete', key);
-          if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: root.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', key);
+          if (!root.deletedAt) fail('DOCUMENT_CONFLICT', 'Folder must be archived before permanent deletion.', tool, 'delete', key);
+          if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: root.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', key);
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           if (input.atomic) {
             const candidate = await mutationRepository.getFolder(key);
-            if (!candidate) fail('ARCHIVE_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+            if (!candidate) fail('DOCUMENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
             const all = await mutationRepository.listFolders(candidate.scopeKey, true, true);
             const children = descendants(all, key);
             const affected = input.recursive ? [candidate, ...children] : [candidate];
             const affectedKeys = new Set(affected.map((item) => item.key));
             const documents = (await mutationRepository.listDocuments(candidate.scopeKey, true, true)).filter((item) => affectedKeys.has(item.folderKey));
             if (!input.recursive && children.length > 0) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
-            if (documents.length > 0) fail('ARCHIVE_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
+            if (documents.length > 0) fail('DOCUMENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
             for (const item of affected) {
-              if (!item.deletedAt) fail('ARCHIVE_CONFLICT', 'Every recursively deleted folder must be archived.', tool, 'delete', item.key);
-              if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: item.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', item.key);
+              if (!item.deletedAt) fail('DOCUMENT_CONFLICT', 'Every recursively deleted folder must be archived.', tool, 'delete', item.key);
+              if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: item.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', item.key);
             }
             const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now(), folderKeys: affected.map((item) => item.key), documentKeys: [], objectKeys: [] };
             for (const item of [...affected].reverse()) await mutationRepository.setFolderDeletion(item.key, marker);
             for (const item of [...affected].reverse()) await mutationRepository.deleteFolder(item.key);
             return {};
           }
-          if (!repo.transaction) fail('ARCHIVE_CONFLICT', 'Transaction-bound deletion marking is unavailable.', tool, 'transaction', key);
+          if (!repo.transaction) fail('DOCUMENT_CONFLICT', 'Transaction-bound deletion marking is unavailable.', tool, 'transaction', key);
           let ownsFreeze = false;
           let storageStarted = false;
           let root: Folder;
@@ -863,9 +863,9 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           try {
             ({ root, affected, documents } = await repo.transaction(async (bound) => {
               const candidate = await bound.getFolder(key);
-              if (!candidate) fail('ARCHIVE_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
+              if (!candidate) fail('DOCUMENT_NOT_FOUND', 'Folder was not found.', tool, 'read', key);
               if (candidate._internalDeletion) {
-                if (candidate._internalDeletion.kind !== 'folder') fail('ARCHIVE_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
+                if (candidate._internalDeletion.kind !== 'folder') fail('DOCUMENT_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
                 const all = await bound.listFolders(candidate.scopeKey, true, true);
                 const intendedFolderKeys = candidate._internalDeletion.folderKeys;
                 const frozen = intendedFolderKeys
@@ -884,14 +884,14 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               const frozenKeys = new Set(frozen.map((item) => item.key));
               const ownedDocuments = (await bound.listDocuments(candidate.scopeKey, true, true)).filter((item) => frozenKeys.has(item.folderKey));
               if (!input.recursive && (children.length > 0 || ownedDocuments.length > 0)) fail('FOLDER_NOT_EMPTY', 'Folder is not empty.', tool, 'delete', key);
-              if (ownedDocuments.length > 0 && input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
+              if (ownedDocuments.length > 0 && input.atomic) fail('DOCUMENT_CONFLICT', 'Atomic folder deletion is unavailable when storage objects are involved.', tool, 'storage', key);
               for (const item of frozen) {
-                if (!item.deletedAt) fail('ARCHIVE_CONFLICT', 'Every recursively deleted folder must be archived.', tool, 'delete', item.key);
-                if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: item.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', item.key);
+                if (!item.deletedAt) fail('DOCUMENT_CONFLICT', 'Every recursively deleted folder must be archived.', tool, 'delete', item.key);
+                if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: item.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', item.key);
               }
               for (const item of ownedDocuments) {
-                if (!item.deletedAt) fail('ARCHIVE_CONFLICT', 'Every recursively deleted document must be archived.', tool, 'delete', item.key);
-                if (!await canPermanentlyDelete({ kind: 'document', deletedAt: item.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Document retention policy denied permanent deletion.', tool, 'delete', item.key);
+                if (!item.deletedAt) fail('DOCUMENT_CONFLICT', 'Every recursively deleted document must be archived.', tool, 'delete', item.key);
+                if (!await canPermanentlyDelete({ kind: 'document', deletedAt: item.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Document retention policy denied permanent deletion.', tool, 'delete', item.key);
               }
               const marker = { kind: 'folder' as const, owner: invocationKey, startedAt: now() };
               const folderMarker = { ...marker, folderKeys: frozen.map((item) => item.key), documentKeys: ownedDocuments.map((item) => item.key) };
@@ -906,18 +906,18 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               shares: await repo.listShares(item.scopeKey, [item.key], { includeArchived: true, includeExpired: true, includeRevoked: true }),
             })));
             for (const item of related) for (const version of item.versions) {
-              if (!await canPermanentlyDelete({ kind: 'version', deletedAt: item.document.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
+              if (!await canPermanentlyDelete({ kind: 'version', deletedAt: item.document.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
             const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? []), ...item.versions.map((version) => version.storageKey)]).filter((item): item is string => Boolean(item)))];
             const manifest = root._internalDeletion?.objectKeys ? root._internalDeletion : { ...root._internalDeletion!, objectKeys: inventoriedKeys };
             if (!root._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setFolderDeletion(root.key, manifest, root._internalDeletion!.owner));
-              if (!persisted) fail('ARCHIVE_CONFLICT', 'Folder deletion manifest ownership changed.', tool, 'transaction', key);
+              if (!persisted) fail('DOCUMENT_CONFLICT', 'Folder deletion manifest ownership changed.', tool, 'transaction', key);
               root = persisted;
             }
             storageStarted = true;
             await deleteStorageKeys(manifest.objectKeys ?? [], root.key, root.scopeKey);
-          const removeMetadata = async (bound: ArchiveRepository) => {
+          const removeMetadata = async (bound: DocumentRepository) => {
             for (const item of related) {
               for (const version of item.versions) await bound.deleteVersion(version.key);
               for (const share of item.shares) await bound.deleteShare(share.key);
@@ -940,7 +940,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       resourceKeys = [input.folderKey];
       await roleFor(input.scopeKey, 'moderator');
       const parent = await folder(input.folderKey, 'moderator', false);
-      if (parent.scopeKey !== input.scopeKey) fail('ARCHIVE_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', parent.key);
+      if (parent.scopeKey !== input.scopeKey) fail('DOCUMENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', parent.key);
       const processingLogger = dependencies.ingestion?.logger;
       const processingInput = input.idempotencyKey ? {
         ...input,
@@ -962,7 +962,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         key,
         run: async () => {
           const current = await document(key);
-          if (current.deletedAt && !input.includeArchived) fail('ARCHIVE_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+          if (current.deletedAt && !input.includeArchived) fail('DOCUMENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
           const include: string[] = input.include ?? [];
           const latest = include.includes('latestVersion') ? (await repo.listVersions(current.scopeKey, [current.key]))[0] : undefined;
           const parent = include.includes('folder') ? await repo.getFolder(current.folderKey) : undefined;
@@ -982,7 +982,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       })), false, repo);
     } else if (tool === 'document.list') {
       const parent = await folder(input.folderKey, 'viewer', input.includeArchived ?? false);
-      if (!input.includeArchived && !await activeFolderHierarchy(parent.key, parent.scopeKey)) fail('FOLDER_ARCHIVED', 'Folder hierarchy is archived.', tool, 'read', parent.key);
+      if (!input.includeArchived && !await activeFolderHierarchy(parent.key, parent.scopeKey)) fail('FOLDER_DOCUMENTD', 'Folder hierarchy is archived.', tool, 'read', parent.key);
       const values = (await repo.listDocuments(parent.scopeKey, input.includeArchived))
         .filter((item) => !item._internalDeletion && item.folderKey === parent.key && (!input.extensions || input.extensions.includes(item.extension)));
       const sort = input.sort ?? { field: 'name', direction: 'asc' };
@@ -995,7 +995,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       };
     } else if (tool === 'document.read') {
       resourceKeys = input.documentKeys;
-      if (input.atomic && input.mode === 'audio') fail('ARCHIVE_CONFLICT', 'Atomic audio generation is impossible because speech is an external side effect.', tool, 'speak');
+      if (input.atomic && input.mode === 'audio') fail('DOCUMENT_CONFLICT', 'Atomic audio generation is impossible because speech is an external side effect.', tool, 'speak');
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
@@ -1028,7 +1028,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               if (input.persistAudio) {
                 const extension = audioExtension(mimeType);
                 if (!extension) fail('DOCUMENT_SPEECH_FAILED', 'Speech MIME type cannot be persisted safely.', tool, 'speak', key);
-                const storageKey = `archive/${context.organizationKey}/${current.scopeKey}/${key}/speech/${invocationKey}/${String(index).padStart(4, '0')}.${extension}`;
+                const storageKey = `document/${context.organizationKey}/${current.scopeKey}/${key}/speech/${invocationKey}/${String(index).padStart(4, '0')}.${extension}`;
                 await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: storageKey, bytes, mimeType }));
                 uploaded.push(storageKey);
                 audio.push({ ...item, storageKey });
@@ -1049,19 +1049,19 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey)); }
               catch (cleanupError) { cleanupErrors.push(cleanupError); await event('cleanup', 'failed', 'storage-delete', key, current.scopeKey); }
             }
-            if (cleanupErrors.length) throw new ArchiveError('ARCHIVE_CONFLICT', 'Speech generation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, ...cleanupErrors]), retryable: true });
+            if (cleanupErrors.length) throw new DocumentError('DOCUMENT_CONFLICT', 'Speech generation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, ...cleanupErrors]), retryable: true });
             throw error;
           }
           return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
         },
       })), input.atomic, repo);
     } else if (tool === 'document.update') {
-      if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic document updates are unavailable because transformation and embedding actions are external side effects.', tool, 'document-embed');
+      if (input.atomic) fail('DOCUMENT_CONFLICT', 'Atomic document updates are unavailable because transformation and embedding actions are external side effects.', tool, 'document-embed');
       resourceKeys = input.updates.map((item: any) => item.documentKey);
       const updates = input.updates.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const current = await document(item.documentKey, 'moderator', false);
           const transformed = await representations(item, current.name, current.key, current.scopeKey);
           let backup: DocumentVersion | undefined;
@@ -1081,7 +1081,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           } catch (error) {
             if (backup) {
               try { await mutationRepository.deleteVersion(backup.key); }
-              catch (cleanupError) { throw new ArchiveError('ARCHIVE_CONFLICT', 'Document update failed and version compensation requires retry.', tool, { action: 'cleanup', resourceKey: current.key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
+              catch (cleanupError) { throw new DocumentError('DOCUMENT_CONFLICT', 'Document update failed and version compensation requires retry.', tool, { action: 'cleanup', resourceKey: current.key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
             }
             throw error;
           }
@@ -1089,12 +1089,12 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       }));
       result = await batch(tool, updates, input.atomic, repo);
     } else if (tool === 'document.rename') {
-      if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic document rename is unavailable because embedding is an external side effect.', tool, 'document-embed');
+      if (input.atomic) fail('DOCUMENT_CONFLICT', 'Atomic document rename is unavailable because embedding is an external side effect.', tool, 'document-embed');
       resourceKeys = input.renames.map((item: any) => item.documentKey);
       result = await batch(tool, input.renames.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const current = await document(item.documentKey, 'moderator', false);
           const embedded = await action('document-embed', { name: item.name, content: current.content }, current.key, current.scopeKey);
           const embedding = z.array(z.number().finite()).min(1).parse(embedded.embedding);
@@ -1111,14 +1111,14 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           const target = await folder(item.targetFolderKey, 'admin', false);
           if (source.scopeKey !== target.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Cross-scope document moves are not supported.', tool, 'update', source.key);
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const current = await document(item.documentKey, 'admin', false);
           const moved = await mutationRepository.updateDocument(current.key, { folderKey: item.targetFolderKey, updatedAt: now() });
           return { document: documentView(moved) };
         },
       })), input.atomic, repo);
     } else if (tool === 'document.copy') {
-      if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic copy is unavailable because storage copy cannot be rolled back transactionally.', tool, 'storage');
+      if (input.atomic) fail('DOCUMENT_CONFLICT', 'Atomic copy is unavailable because storage copy cannot be rolled back transactionally.', tool, 'storage');
       resourceKeys = input.copies.map((item: any) => item.documentKey);
       result = await batch(tool, input.copies.map((item: any) => ({
         key: item.documentKey,
@@ -1127,7 +1127,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           const target = await folder(item.targetFolderKey, 'moderator', false);
           const key = d.id();
           const name = item.newName ?? source.name;
-          const storageKey = `archive/${context.organizationKey}/${target.scopeKey}/${key}/original.${source.extension}`;
+          const storageKey = `document/${context.organizationKey}/${target.scopeKey}/${key}/original.${source.extension}`;
           const insertedVersionKeys: string[] = [];
           const insertedShareKeys: string[] = [];
           let insertedDocument = false;
@@ -1194,7 +1194,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               if (insertedDocument) await repo.deleteDocument(key);
               await storageOperation('delete', key, target.scopeKey, () => d.storage.delete(storageKey));
             } catch (cleanupError) {
-              throw new ArchiveError('ARCHIVE_CONFLICT', 'Document copy failed and compensation requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true });
+              throw new DocumentError('DOCUMENT_CONFLICT', 'Document copy failed and compensation requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true });
             }
             throw error;
           }
@@ -1209,13 +1209,13 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           const current = await document(key, 'moderator');
           if (restore) {
             const ancestors = await folderAncestors(current.folderKey, current.scopeKey, 'moderator');
-            if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived containing hierarchy first.', tool, 'update', key);
+            if (!input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_DOCUMENTD', 'Restore the archived containing hierarchy first.', tool, 'update', key);
           }
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const currentDocument = await document(key, 'moderator');
           const ancestors = restore ? await folderAncestors(currentDocument.folderKey, currentDocument.scopeKey, 'moderator') : [];
-          if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived containing hierarchy first.', tool, 'update', key);
+          if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_DOCUMENTD', 'Restore the archived containing hierarchy first.', tool, 'update', key);
           if (restore && input.restoreAncestors) for (const ancestor of ancestors) {
             await mutationRepository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: now() });
           }
@@ -1224,45 +1224,45 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'document.delete') {
-      if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic deletion is unavailable because storage deletion cannot be rolled back.', tool, 'storage');
+      if (input.atomic) fail('DOCUMENT_CONFLICT', 'Atomic deletion is unavailable because storage deletion cannot be rolled back.', tool, 'storage');
       resourceKeys = input.documentKeys;
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => {
           const current = await document(key, 'owner', true, true);
-          if (!current.deletedAt) fail('ARCHIVE_CONFLICT', 'Document must be archived before permanent deletion.', tool, 'delete', key);
-          if (!await canPermanentlyDelete({ kind: 'document', deletedAt: current.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Document retention policy denied permanent deletion.', tool, 'delete', key);
+          if (!current.deletedAt) fail('DOCUMENT_CONFLICT', 'Document must be archived before permanent deletion.', tool, 'delete', key);
+          if (!await canPermanentlyDelete({ kind: 'document', deletedAt: current.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Document retention policy denied permanent deletion.', tool, 'delete', key);
         },
         run: async () => {
-          if (!repo.transaction) fail('ARCHIVE_CONFLICT', 'Transaction-bound metadata deletion is unavailable.', tool, 'transaction', key);
+          if (!repo.transaction) fail('DOCUMENT_CONFLICT', 'Transaction-bound metadata deletion is unavailable.', tool, 'transaction', key);
           let ownsFreeze = false;
           let storageStarted = false;
           let current = await repo.transaction(async (bound) => {
             const candidate = await bound.getDocument(key);
-            if (!candidate) fail('ARCHIVE_NOT_FOUND', 'Document was not found.', tool, 'read', key);
+            if (!candidate) fail('DOCUMENT_NOT_FOUND', 'Document was not found.', tool, 'read', key);
             if (candidate._internalDeletion) {
-              if (candidate._internalDeletion.kind !== 'document') fail('ARCHIVE_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
+              if (candidate._internalDeletion.kind !== 'document') fail('DOCUMENT_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
               return candidate;
             }
             const marker = { kind: 'document' as const, owner: invocationKey, startedAt: now() };
             const frozen = await bound.setDocumentDeletion(key, marker);
-            if (!frozen) fail('ARCHIVE_CONFLICT', 'Document could not be frozen for deletion.', tool, 'transaction', key);
+            if (!frozen) fail('DOCUMENT_CONFLICT', 'Document could not be frozen for deletion.', tool, 'transaction', key);
             ownsFreeze = true;
             return frozen;
           });
           try {
             const versions = await repo.listVersions(current.scopeKey, [key], true);
             const shares = await repo.listShares(current.scopeKey, [key], { includeArchived: true, includeExpired: true, includeRevoked: true });
-            if (versions.length > 0 && !input.deleteVersions) fail('ARCHIVE_CONFLICT', 'Document has retained versions.', tool, 'delete', key);
-            if (shares.length > 0 && !input.deleteShares) fail('ARCHIVE_CONFLICT', 'Document has retained shares.', tool, 'delete', key);
+            if (versions.length > 0 && !input.deleteVersions) fail('DOCUMENT_CONFLICT', 'Document has retained versions.', tool, 'delete', key);
+            if (shares.length > 0 && !input.deleteShares) fail('DOCUMENT_CONFLICT', 'Document has retained shares.', tool, 'delete', key);
             for (const version of versions) {
-              if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
+              if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
             const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? []), ...versions.map((version) => version.storageKey)].filter((item): item is string => Boolean(item)))];
             const deletion = current._internalDeletion?.objectKeys ? current._internalDeletion : { ...current._internalDeletion!, objectKeys: inventoriedKeys };
             if (!current._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setDocumentDeletion(key, deletion, current._internalDeletion!.owner));
-              if (!persisted) fail('ARCHIVE_CONFLICT', 'Document deletion manifest ownership changed.', tool, 'transaction', key);
+              if (!persisted) fail('DOCUMENT_CONFLICT', 'Document deletion manifest ownership changed.', tool, 'transaction', key);
               current = persisted;
             }
             storageStarted = true;
@@ -1325,7 +1325,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         result = { results, summary: { requested: results.length, succeeded: results.length, failed: 0 } };
       } else result = await batch(tool, fileOperations, false, repo);
     } else if (tool === 'document.share') {
-      if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic share creation is unavailable because secure randomness cannot be rolled back.', tool, 'insert');
+      if (input.atomic) fail('DOCUMENT_CONFLICT', 'Atomic share creation is unavailable because secure randomness cannot be rolled back.', tool, 'insert');
       resourceKeys = input.shares.map((item: any) => item.documentKey);
       result = await batch(tool, input.shares.map((item: any) => ({
         key: item.documentKey,
@@ -1359,20 +1359,20 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         preflight: async () => {
           if (input.shareKeys) {
             const share = await repo.getShare(key);
-            if (!share) fail('ARCHIVE_NOT_FOUND', 'Share was not found.', tool, 'read', key);
+            if (!share) fail('DOCUMENT_NOT_FOUND', 'Share was not found.', tool, 'read', key);
             await document(share.documentKey, 'viewer');
             await roleFor(share.scopeKey, 'moderator', key);
           } else {
             const current = await document(key, 'moderator');
             const shares = await repo.listShares(current.scopeKey, [key], { includeExpired: true, includeRevoked: true });
-            if (shares.length === 0) fail('ARCHIVE_NOT_FOUND', 'Document has no shares to revoke.', tool, 'read', key);
+            if (shares.length === 0) fail('DOCUMENT_NOT_FOUND', 'Document has no shares to revoke.', tool, 'read', key);
           }
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const timestamp = now();
           if (input.shareKeys) {
             const share = await repo.getShare(key);
-            if (!share) fail('ARCHIVE_NOT_FOUND', 'Share was not found.', tool, 'read', key);
+            if (!share) fail('DOCUMENT_NOT_FOUND', 'Share was not found.', tool, 'read', key);
             await document(share.documentKey, 'viewer');
             return { share: shareView(await mutationRepository.updateShare(key, { revokedAt: timestamp, updatedAt: timestamp })) };
           }
@@ -1398,7 +1398,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => { await document(key, 'moderator', false); },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const current = await document(key, 'moderator', false);
           const version = await mutationRepository.createVersion({
             scopeKey: current.scopeKey,
@@ -1418,7 +1418,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         key,
         run: async () => {
           const version = await repo.getVersion(key);
-          if (!version || version.deletedAt) fail('ARCHIVE_NOT_FOUND', 'Version was not found.', tool, 'read', key);
+          if (!version || version.deletedAt) fail('DOCUMENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
           await document(version.documentKey, 'viewer');
           await roleFor(version.scopeKey, 'viewer', key);
           return { version: versionView(version, input.include) };
@@ -1452,7 +1452,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
             fail('DOCUMENT_VERSION_CONFLICT', 'A complete version belonging to the document is required.', tool, 'read', item.versionKey);
           }
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const current = await document(item.documentKey, 'moderator', false);
           const version = documentVersionSchema.parse(await repo.getVersion(item.versionKey));
           let backup: DocumentVersion | undefined;
@@ -1487,33 +1487,33 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         key,
         preflight: async () => {
           const version = await repo.getVersion(key);
-          if (!version) fail('ARCHIVE_NOT_FOUND', 'Version was not found.', tool, 'read', key);
+          if (!version) fail('DOCUMENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
           const current = await document(version.documentKey, 'owner', true, true);
-          if (current._internalDeletion && (current._internalDeletion.kind !== 'version' || current._internalDeletion.versionKey !== key)) fail('ARCHIVE_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
-          if (!current.deletedAt) fail('ARCHIVE_CONFLICT', 'The document must be archived before deleting a version.', tool, 'delete', key);
-          if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('ARCHIVE_FORBIDDEN', 'Version deletion is disabled by retention policy.', tool, 'delete', key);
-          if (input.atomic && version.storageKey) fail('ARCHIVE_CONFLICT', 'Atomic version deletion is unavailable when a storage object is involved.', tool, 'storage', key);
+          if (current._internalDeletion && (current._internalDeletion.kind !== 'version' || current._internalDeletion.versionKey !== key)) fail('DOCUMENT_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
+          if (!current.deletedAt) fail('DOCUMENT_CONFLICT', 'The document must be archived before deleting a version.', tool, 'delete', key);
+          if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('DOCUMENT_FORBIDDEN', 'Version deletion is disabled by retention policy.', tool, 'delete', key);
+          if (input.atomic && version.storageKey) fail('DOCUMENT_CONFLICT', 'Atomic version deletion is unavailable when a storage object is involved.', tool, 'storage', key);
         },
-        run: async (mutationRepository: ArchiveRepository) => {
+        run: async (mutationRepository: DocumentRepository) => {
           const selected = await repo.getVersion(key);
-          if (!selected) fail('ARCHIVE_NOT_FOUND', 'Version was not found.', tool, 'read', key);
+          if (!selected) fail('DOCUMENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
           if (input.atomic && !selected.storageKey) {
             await mutationRepository.deleteVersion(key);
             return {};
           }
-          if (!repo.transaction) fail('ARCHIVE_CONFLICT', 'Transaction-bound version deletion is unavailable.', tool, 'transaction', key);
+          if (!repo.transaction) fail('DOCUMENT_CONFLICT', 'Transaction-bound version deletion is unavailable.', tool, 'transaction', key);
           const { version, current } = await repo.transaction(async (bound) => {
             const version = await bound.getVersion(key);
-            if (!version) fail('ARCHIVE_NOT_FOUND', 'Version was not found.', tool, 'read', key);
+            if (!version) fail('DOCUMENT_NOT_FOUND', 'Version was not found.', tool, 'read', key);
             const current = await bound.getDocument(version.documentKey);
-            if (!current) fail('ARCHIVE_NOT_FOUND', 'Version owner was not found.', tool, 'read', version.documentKey);
+            if (!current) fail('DOCUMENT_NOT_FOUND', 'Version owner was not found.', tool, 'read', version.documentKey);
             if (current._internalDeletion) {
-              if (current._internalDeletion.kind !== 'version' || current._internalDeletion.versionKey !== key) fail('ARCHIVE_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
+              if (current._internalDeletion.kind !== 'version' || current._internalDeletion.versionKey !== key) fail('DOCUMENT_CONFLICT', 'A different deletion is already pending.', tool, 'delete', key);
               return { version, current };
             }
             const marker = { kind: 'version' as const, owner: invocationKey, objectKeys: version.storageKey ? [version.storageKey] : [], startedAt: now(), versionKey: key };
             const frozen = await bound.setDocumentDeletion(current.key, marker);
-            if (!frozen) fail('ARCHIVE_CONFLICT', 'Version owner could not be frozen.', tool, 'transaction', key);
+            if (!frozen) fail('DOCUMENT_CONFLICT', 'Version owner could not be frozen.', tool, 'transaction', key);
             return { version, current: frozen };
           });
           await deleteStorageKeys(current._internalDeletion!.objectKeys ?? [], key, version.scopeKey);
@@ -1531,7 +1531,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           documentKey,
           mode: tool === 'document.translate' ? input.mode : input.persist ? 'copy' : 'preview',
         }));
-      if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('ARCHIVE_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'reason');
+      if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('DOCUMENT_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'reason');
       resourceKeys = items.map((item: any) => item.documentKey);
 
       if (tool === 'document.summarize' && input.combine) {
@@ -1578,7 +1578,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       }
     } else {
       const organizationSearch = tool === 'organization.document.search';
-      if (organizationSearch && input.organizationKey !== context.organizationKey) fail('ARCHIVE_FORBIDDEN', 'Organization key does not match the execution context.', tool, 'authorization');
+      if (organizationSearch && input.organizationKey !== context.organizationKey) fail('DOCUMENT_FORBIDDEN', 'Organization key does not match the execution context.', tool, 'authorization');
       const includeArchived = input.filters?.includeArchived === true;
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
       if (!organizationSearch) await roleFor(input.scopeKey, 'viewer');
@@ -1588,7 +1588,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         const mapping: Record<string, string> = {};
         for (const key of projectKeys) {
           const scope = await repo.getScope(key);
-          if (!scope || scope.organizationKey !== context.organizationKey) fail('ARCHIVE_SEARCH_INVALID_SOURCE', 'Project key does not identify a scope in this organization.', tool, 'resolution', key);
+          if (!scope || scope.organizationKey !== context.organizationKey) fail('DOCUMENT_SEARCH_INVALID_SOURCE', 'Project key does not identify a scope in this organization.', tool, 'resolution', key);
           mapping[key] = key;
         }
         return mapping;
@@ -1614,7 +1614,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         } else {
           for (const key of source.folderKeys) {
             const current = await folder(key, 'viewer', includeArchived);
-            if (!includeArchived && !await activeFolderHierarchy(key, current.scopeKey)) fail('FOLDER_ARCHIVED', 'Search folder hierarchy is archived.', tool, 'resolution', key);
+            if (!includeArchived && !await activeFolderHierarchy(key, current.scopeKey)) fail('FOLDER_DOCUMENTD', 'Search folder hierarchy is archived.', tool, 'resolution', key);
             const children = source.includeDescendants ? descendants(await foldersIn(current.scopeKey), key) : [];
             const folderKeys = [key, ...children.filter((item) => includeArchived || !item.deletedAt).map((item) => item.key)];
             resolvedSources.push({ type: 'folder', key, scopeKeys: [current.scopeKey], folderKeys });
@@ -1623,7 +1623,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       }
       let embedding: number[];
       try { embedding = await embed(input.query); }
-      catch (error) { fail('ARCHIVE_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
+      catch (error) { fail('DOCUMENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
       const candidates = new Map<string, { score: number; document: Document; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
       for (const source of resolvedSources) {
         const scopeKeys = source.scopeKeys.filter((key) => allowed.includes(key) && filterScopeKeys.has(key));
@@ -1653,7 +1653,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           if (!previous || match.score > previous.score) candidates.set(match.document.key, { ...match, source: { type: source.type, key: source.key } });
         }
       }
-      if (resolvedSources.length === 0 || candidates.size === 0 && !resolvedSources.some((source) => source.scopeKeys.some((key) => allowed.includes(key)))) fail('ARCHIVE_SEARCH_NO_ACCESSIBLE_SOURCES', 'No accessible Archive search source remains.', tool, 'authorization');
+      if (resolvedSources.length === 0 || candidates.size === 0 && !resolvedSources.some((source) => source.scopeKeys.some((key) => allowed.includes(key)))) fail('DOCUMENT_SEARCH_NO_ACCESSIBLE_SOURCES', 'No accessible Document search source remains.', tool, 'authorization');
       const ranked = [...candidates.values()].sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key));
       const totalCandidates = ranked.length;
       const selected = ranked.slice(0, input.topK ?? 20);
@@ -1680,10 +1680,10 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         totalCandidates,
       };
     }
-    const parsed = archiveToolOutputSchemas[tool].parse(result) as ArchiveToolOutput<Name>;
+    const parsed = documentToolOutputSchemas[tool].parse(result) as DocumentToolOutput<Name>;
     executionCompleted = true;
     if (idempotencyIdentity && requestHash && ownsIdempotencyClaim) await d.idempotency.complete(idempotencyIdentity, requestHash, invocationKey, parsed, now());
-    if (mutation) { const success = !(parsed && typeof parsed === 'object' && 'summary' in parsed && (parsed as { summary?: { failed?: number } }).summary?.failed); try { await d.audit({ tool, success, organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey, actorKey: member.user.key, resourceKeys: resourceKeys.filter((key) => key !== 'new'), ...(!success ? { code: 'ARCHIVE_BATCH_PARTIAL_FAILURE' } : {}) }); } catch { await event('audit', 'failed'); } }
+    if (mutation) { const success = !(parsed && typeof parsed === 'object' && 'summary' in parsed && (parsed as { summary?: { failed?: number } }).summary?.failed); try { await d.audit({ tool, success, organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey, actorKey: member.user.key, resourceKeys: resourceKeys.filter((key) => key !== 'new'), ...(!success ? { code: 'DOCUMENT_BATCH_PARTIAL_FAILURE' } : {}) }); } catch { await event('audit', 'failed'); } }
     await event('action', 'succeeded', 'tool', undefined, context.runtimeScopeKey, Math.round(performance.now() - invocationStarted));
     return parsed;
   } catch (error) {
