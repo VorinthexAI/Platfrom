@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Billboard, Environment, Html, Lightformer, PerspectiveCamera, useTexture } from "@react-three/drei";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
@@ -778,11 +778,16 @@ function CommandDeckScene(props: CommandDeckSceneProps) {
 export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckProps) {
   const { entity, onScopeRoute } = props;
   const [selectedScopeId, setSelectedScopeId] = useState(entity.id);
-  const sceneProps = {
+  const sceneProps = useMemo(() => ({
     entity,
     reducedMotion: props.reducedMotion,
     selectedScopeId,
-  };
+  }), [entity, props.reducedMotion, selectedScopeId]);
+  const handleScopeChange = useCallback((id: string) => {
+    setSelectedScopeId(id);
+    const scope = scopeNodeById.get(id)?.entity;
+    if (scope) onScopeRoute?.(scope);
+  }, [onScopeRoute]);
   const instruction = `${entity.name} Nexus command deck with ambient scope orbits.`;
 
   return (
@@ -802,11 +807,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
       </Canvas>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:radial-gradient(rgba(255,255,255,0.7)_0.5px,transparent_0.7px)] [background-size:3px_3px]" />
-      <HqCommunicationOverlay selectedScopeId={selectedScopeId} onScopeChange={(id) => {
-        setSelectedScopeId(id);
-        const scope = scopeNodeById.get(id)?.entity;
-        if (scope) onScopeRoute?.(scope);
-      }} />
+      <HqCommunicationOverlay selectedScopeId={selectedScopeId} onScopeChange={handleScopeChange} />
     </div>
   );
 }
