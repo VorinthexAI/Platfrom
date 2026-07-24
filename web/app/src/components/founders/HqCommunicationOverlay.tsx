@@ -1,20 +1,17 @@
 "use client";
 
 import Image from "next/image";
-import { memo, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import {
   BellIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   CloseIcon,
-  FileIcon,
-  ImageIcon,
-  LinkIcon,
-  PlusIcon,
   SearchIcon,
   ShareIcon,
 } from "@vorinthex/shared/ui/icons";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
+import { appendThreadMessages, streamOrchestratorChat, updateThreadMessage, type OrchestratorChatMessage, type OrchestratorChatThreads } from "@/lib/founders/orchestrator-chat";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoThumbnailUrl } from "@/lib/three/entity-logo";
 
@@ -187,7 +184,12 @@ function ScopeSelector({ selectedScopeId, onScopeChange }: HqCommunicationOverla
   );
 }
 
-const OrchestratorRail = memo(function OrchestratorRail({ selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
+interface OrchestratorRailProps extends HqCommunicationOverlayProps {
+  selectedOrchestratorSlug: string;
+  onSelectOrchestrator: (orchestrator: GalaxyEntity) => void;
+}
+
+const OrchestratorRail = memo(function OrchestratorRail({ selectedScopeId, onScopeChange, selectedOrchestratorSlug, onSelectOrchestrator }: OrchestratorRailProps) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-[var(--border-faint)] bg-obsidian-950/70 backdrop-blur-xl">
       <div className="border-b border-[var(--border-faint)] p-4">
@@ -203,10 +205,10 @@ const OrchestratorRail = memo(function OrchestratorRail({ selectedScopeId, onSco
         </div>
         <div className="space-y-0.5">
           {orderedOrchestrators.map((orchestrator) => (
-            <div key={orchestrator.id} className="flex h-9 items-center gap-2 px-2.5 text-[12px] text-silver-300 [contain:layout_paint]">
+            <button key={orchestrator.id} type="button" aria-current={orchestrator.slug === selectedOrchestratorSlug ? "page" : undefined} onClick={() => onSelectOrchestrator(orchestrator)} className={`flex h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-[12px] transition-colors [contain:layout_paint] ${orchestrator.slug === selectedOrchestratorSlug ? "bg-[var(--panel-strong)] text-silver-50" : "text-silver-300 hover:bg-white/[0.04] hover:text-silver-100"}`}>
               <PersonMark slug={orchestrator.slug} name={orchestrator.name} size={24} />
               <span className="truncate">{orchestrator.name}</span>
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -215,104 +217,133 @@ const OrchestratorRail = memo(function OrchestratorRail({ selectedScopeId, onSco
   );
 });
 
-function AttachmentCard() {
-  return (
-    <div className="mt-2.5 flex w-fit items-center gap-3 rounded-xl border border-[var(--border-faint)] bg-obsidian-990/25 p-2.5 pr-5">
-      <IconFrame><FileIcon aria-hidden size="md" /></IconFrame>
-      <div>
-        <p className="text-[12px] text-silver-100">Orchestration Refactor Spec.docx</p>
-        <p className="mt-0.5 font-mono text-[9px] text-silver-500">Archive · Document · 2.4 MB</p>
-      </div>
-    </div>
-  );
-}
-
-function Message({ name, slug, time, children }: { name: string; slug: string; time: string; children: React.ReactNode }) {
+function Message({ message, orchestrator }: { message: OrchestratorChatMessage; orchestrator: GalaxyEntity }) {
   return (
     <article className="group flex gap-3 px-1 py-3">
-      <PersonMark slug={slug} name={name} size={38} />
+      {message.role === "assistant" ? <PersonMark slug={orchestrator.slug} name={orchestrator.name} size={38} /> : (
+        <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[8px] text-silver-200">YOU</span>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <h3 className="text-[13px] font-medium text-silver-50">{name}</h3>
-          <time className="font-mono text-[9px] text-silver-500">{time}</time>
+          <h3 className="text-[13px] font-medium text-silver-50">{message.role === "assistant" ? orchestrator.name : "You"}</h3>
         </div>
-        <div className="mt-1 text-[12px] leading-5 text-silver-300">{children}</div>
+        <p className={`mt-1 whitespace-pre-wrap text-[12px] leading-5 ${message.failed ? "text-status-critical" : "text-silver-300"}`}>
+          {message.text || <span className="animate-pulse text-silver-500">Thinking...</span>}
+        </p>
       </div>
     </article>
   );
 }
 
-function ConversationPane() {
+interface ConversationPaneProps {
+  orchestrator: GalaxyEntity;
+  messages: OrchestratorChatMessage[];
+  draft: string;
+  streaming: boolean;
+  error: string | null;
+  onDraftChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}
+
+function ConversationPane({ orchestrator, messages, draft, streaming, error, onDraftChange, onSubmit }: ConversationPaneProps) {
+  const messagesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages]);
+
   return (
     <section className="relative flex min-h-0 min-w-0 flex-col bg-obsidian-990/55 backdrop-blur-[3px]">
       <div className="flex min-h-[78px] items-center justify-between gap-4 border-b border-[var(--border-faint)] px-5 py-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="font-display text-3xl text-silver-100">#</span>
+          <PersonMark slug={orchestrator.slug} name={orchestrator.name} size={34} />
           <div className="min-w-0">
-            <h1 className="truncate font-display text-lg tracking-[0.04em] text-silver-50">engineering</h1>
-            <p className="mt-0.5 hidden truncate text-[10px] text-silver-500 sm:block">Engineering coordination and technical discussions.</p>
+            <h1 className="truncate font-display text-lg tracking-[0.04em] text-silver-50">{orchestrator.name}</h1>
+            <p className="mt-0.5 hidden truncate text-[10px] text-silver-500 sm:block">{orchestrator.fullTitle ?? orchestrator.role ?? "Vorinthex orchestrator"}</p>
           </div>
-        </div>
-        <div className="flex items-center">
-          {orderedOrchestrators.slice(0, 4).map((orchestrator, index) => (
-            <span key={orchestrator.id} className={index > 0 ? "-ml-2" : ""}><PersonMark slug={orchestrator.slug} name={orchestrator.name} size={29} /></span>
-          ))}
-          <span className="ml-2 font-mono text-[9px] text-silver-500">+18</span>
         </div>
       </div>
 
-      <div className="flex h-11 items-end gap-6 border-b border-[var(--border-faint)] px-5 sm:px-6">
-        {[
-          ["Messages", true],
-          ["Threads", false],
-          ["Pins", false],
-          ["Files", false],
-        ].map(([label, active]) => (
-          <span key={String(label)} className={`flex h-full items-center border-b text-[11px] ${active ? "border-silver-300 text-silver-100" : "border-transparent text-silver-500"}`}>{label}</span>
-        ))}
+      <div className="flex h-11 items-center border-b border-[var(--border-faint)] px-5 text-[11px] text-silver-400 sm:px-6">
+        Messages
       </div>
 
-      <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto px-4 py-2 sm:px-6">
-        <div className="my-1 flex items-center gap-3">
-          <span className="h-px flex-1 bg-[var(--border-faint)]" />
-          <span className="rounded-full border border-[var(--border-faint)] bg-obsidian-990/25 px-3 py-1 font-mono text-[8px] uppercase tracking-[0.16em] text-silver-500">Today</span>
-          <span className="h-px flex-1 bg-[var(--border-faint)]" />
-        </div>
-        <Message name="Atlas" slug="atlas" time="09:42">
-          <p>We should refactor the orchestration layer to support multi-agent streaming. What are your thoughts?</p>
-          <div className="mt-2 flex gap-1.5">
-            <span className="rounded-lg border border-[var(--border-faint)] bg-obsidian-990/20 px-2 py-1 font-mono text-[9px] text-silver-300">△ 3</span>
-            <span className="rounded-lg border border-[var(--border-faint)] bg-obsidian-990/20 px-2 py-1 font-mono text-[9px] text-silver-300">✦ 2</span>
+      <div ref={messagesRef} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto px-4 py-2 sm:px-6" aria-live="polite">
+        {messages.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-center">
+            <div>
+              <PersonMark slug={orchestrator.slug} name={orchestrator.name} size={48} />
+              <p className="mt-3 text-sm text-silver-200">Start a conversation with {orchestrator.name}.</p>
+              <p className="mt-1 text-[11px] text-silver-500">Ask anything, including a simple hello.</p>
+            </div>
           </div>
-        </Message>
-        <Message name="Forge" slug="forge" time="09:44">
-          <p>Agreed. I&apos;ve created a draft spec in Archive.</p>
-          <AttachmentCard />
-        </Message>
+        ) : messages.map((message) => <Message key={message.id} message={message} orchestrator={orchestrator} />)}
       </div>
 
       <div className="p-3 sm:p-4">
-        <div className="rounded-xl border border-[var(--border-soft)] bg-obsidian-900/70 p-3 shadow-[0_16px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl">
-          <p className="text-[11px] text-silver-500">Message #engineering</p>
-          <div className="mt-3 flex items-center justify-between gap-3 text-silver-500">
-            <div className="flex items-center gap-3">
-              <PlusIcon aria-hidden size="sm" />
-              <LinkIcon aria-hidden size="sm" />
-              <ImageIcon aria-hidden size="sm" />
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="font-mono text-sm">@</span>
+        <form onSubmit={onSubmit} className="rounded-xl border border-[var(--border-soft)] bg-obsidian-900/70 p-3 shadow-[0_16px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl focus-within:border-[var(--border-strong)]">
+          <textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }} rows={2} maxLength={8_000} placeholder={`Message ${orchestrator.name}`} aria-label={`Message ${orchestrator.name}`} className="block w-full resize-none bg-transparent text-[12px] leading-5 text-silver-100 outline-none placeholder:text-silver-500" />
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className={`text-[10px] ${error ? "text-status-critical" : "text-silver-600"}`}>{error ?? (streaming ? `${orchestrator.name} is responding...` : "Enter to send · Shift+Enter for a new line")}</span>
+            <button type="submit" disabled={streaming || !draft.trim()} aria-label={`Send message to ${orchestrator.name}`} className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--gradient-chrome)] text-obsidian-990 transition-opacity disabled:cursor-not-allowed disabled:opacity-35">
               <ShareIcon aria-hidden size="sm" />
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--gradient-chrome)] text-obsidian-990">›</span>
-            </div>
+            </button>
           </div>
-        </div>
+        </form>
       </div>
     </section>
   );
 }
 
 export default function HqCommunicationOverlay(props: HqCommunicationOverlayProps) {
+  const [selectedOrchestratorSlug, setSelectedOrchestratorSlug] = useState("atlas");
+  const [threads, setThreads] = useState<OrchestratorChatThreads>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [streaming, setStreaming] = useState<Record<string, boolean>>({});
+  const [errors, setErrors] = useState<Record<string, string | null>>({});
+  const controllers = useRef(new Map<string, AbortController>());
+  const selectedOrchestrator = orchestratorById.get(`orchestrator.${selectedOrchestratorSlug}`) ?? orderedOrchestrators[0]!;
+
+  useEffect(() => () => {
+    for (const controller of controllers.current.values()) controller.abort();
+  }, []);
+
+  const submitMessage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const slug = selectedOrchestrator.slug;
+    const text = (drafts[slug] ?? "").trim();
+    if (!text || streaming[slug]) return;
+    const requestId = crypto.randomUUID();
+    const responseId = crypto.randomUUID();
+    setThreads((current) => appendThreadMessages(current, slug,
+      { id: requestId, role: "user", text },
+      { id: responseId, role: "assistant", text: "" },
+    ));
+    setDrafts((current) => ({ ...current, [slug]: "" }));
+    setErrors((current) => ({ ...current, [slug]: null }));
+    setStreaming((current) => ({ ...current, [slug]: true }));
+    const controller = new AbortController();
+    controllers.current.set(slug, controller);
+    try {
+      await streamOrchestratorChat(slug, text, (streamEvent) => {
+        if (streamEvent.type !== "token") return;
+        setThreads((current) => updateThreadMessage(current, slug, responseId, (message) => ({ ...message, text: message.text + streamEvent.text })));
+      }, controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : "Chat failed";
+      setErrors((current) => ({ ...current, [slug]: message }));
+      setThreads((current) => updateThreadMessage(current, slug, responseId, (entry) => ({ ...entry, failed: true, text: entry.text || message })));
+    } finally {
+      controllers.current.delete(slug);
+      setStreaming((current) => ({ ...current, [slug]: false }));
+    }
+  };
+
   return (
     <div className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
       <div className="flex h-12 shrink-0 items-center border border-[var(--border-faint)] bg-obsidian-990/65 px-3 shadow-[0_10px_50px_rgba(0,0,0,0.28)] backdrop-blur-lg sm:h-14 sm:px-4">
@@ -321,7 +352,7 @@ export default function HqCommunicationOverlay(props: HqCommunicationOverlayProp
           <span className="hidden font-display text-[11px] tracking-[0.16em] text-silver-300 sm:block">VORINTHEX</span>
         </div>
         <div className="ml-3 flex min-w-0 flex-1 items-center gap-2 font-mono text-[9px] uppercase tracking-[0.13em] text-silver-500 sm:ml-0">
-          <span className="text-silver-300">HQ</span><span>/</span><span className="hidden sm:inline">Vorinthex HQ</span><span className="hidden sm:inline">/</span><span className="truncate text-silver-500">#engineering</span>
+          <span className="text-silver-300">HQ</span><span>/</span><span className="hidden sm:inline">Vorinthex HQ</span><span className="hidden sm:inline">/</span><span className="truncate text-silver-500">{selectedOrchestrator.name}</span>
         </div>
         <div className="hidden items-center gap-2 lg:flex">
           <div className="flex h-8 w-44 items-center gap-2 rounded-lg border border-[var(--border-faint)] bg-obsidian-990/20 px-3 text-silver-500"><SearchIcon aria-hidden size="sm" /><span className="text-[10px]">Search HQ</span></div>
@@ -331,8 +362,19 @@ export default function HqCommunicationOverlay(props: HqCommunicationOverlayProp
       </div>
 
       <div className="hq-workspace-grid grid min-h-0 flex-1 grid-rows-[minmax(190px,34vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1">
-        <OrchestratorRail {...props} />
-        <ConversationPane />
+        <OrchestratorRail {...props} selectedOrchestratorSlug={selectedOrchestratorSlug} onSelectOrchestrator={(orchestrator) => {
+          setSelectedOrchestratorSlug(orchestrator.slug);
+          props.onScopeChange(orchestrator.id);
+        }} />
+        <ConversationPane
+          orchestrator={selectedOrchestrator}
+          messages={threads[selectedOrchestrator.slug] ?? []}
+          draft={drafts[selectedOrchestrator.slug] ?? ""}
+          streaming={Boolean(streaming[selectedOrchestrator.slug])}
+          error={errors[selectedOrchestrator.slug] ?? null}
+          onDraftChange={(value) => setDrafts((current) => ({ ...current, [selectedOrchestrator.slug]: value }))}
+          onSubmit={submitMessage}
+        />
       </div>
     </div>
   );
