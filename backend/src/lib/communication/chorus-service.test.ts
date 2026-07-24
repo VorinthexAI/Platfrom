@@ -30,7 +30,7 @@ class MemoryRepository implements CommunicationRepository {
   reactions = new Map<string, boolean>();
 
   candidate(): DirectOrchestratorCandidate {
-    return { orchestrator: { key: orchestratorKey, name: 'Atlas', role: 'CEO', skill: 'Lead.' }, scopeKey, canChat: this.allowed, channel: this.channels[0] ?? null };
+    return { orchestrator: { key: orchestratorKey, name: 'Atlas', role: 'CEO', skill: 'Lead.' }, scopeKey, position: 1, canChat: this.allowed, channel: this.channels[0] ?? null };
   }
   async listDirectCandidates() { return [this.candidate()]; }
   async ensureDirectChannel() {

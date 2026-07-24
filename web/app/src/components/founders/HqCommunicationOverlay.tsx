@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import * as Dialog from "@radix-ui/react-dialog";
-import { memo, useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type WheelEvent as ReactWheelEvent } from "react";
 import { ChevronUpIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
@@ -11,6 +11,7 @@ import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoThumbnailUrl } from "@/lib/three/entity-logo";
 import {
   closeChorusPoll,
+  coalesceChorusStreamEvents,
   createChorusPoll,
   createChorusThread,
   listChorusChannels,
@@ -331,6 +332,8 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
   const currentOrganization = useRef(organizationKey);
   const activeChannel = useRef<string | null>(null);
   const messagesPane = useRef<HTMLDivElement>(null);
+  const messagesContent = useRef<HTMLDivElement>(null);
+  const edgeBounce = useRef<Animation | null>(null);
   const shouldFollowMessages = useRef(true);
   const stopVoice = useAudioStore((state) => state.stopVoice);
   const playVoice = useAudioStore((state) => state.playVoice);
@@ -389,6 +392,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
 
   useEffect(() => { void loadChannels(); }, [loadChannels]);
   useEffect(() => () => { for (const controller of controllers.current.values()) controller.abort(); }, []);
+  useEffect(() => () => edgeBounce.current?.cancel(), []);
 
   const selected = channels.find((entry) => entry.orchestrator.key === selectedKey) ?? null;
   const channelKey = selected?.channel?.key ?? null;
@@ -441,7 +445,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
     const controller = new AbortController(); controllers.current.set(`stream:${channelKey}`, controller);
     const eventBatcher = createFrameBatcher<ChorusStreamEvent>((events) => {
       if (organizationGeneration.current !== generation || currentOrganization.current !== organizationKey) return;
-      setMessages((current) => ({ ...current, [channelKey]: events.reduce((channelMessages, streamEvent) => reconcileChorusStreamEvent(channelMessages, stream, streamEvent), current[channelKey] ?? []) }));
+      setMessages((current) => ({ ...current, [channelKey]: coalesceChorusStreamEvents(events).reduce((channelMessages, streamEvent) => reconcileChorusStreamEvent(channelMessages, stream, streamEvent), current[channelKey] ?? []) }));
     });
     try {
       await streamChorusMessage(organizationKey, channelKey, content, (streamEvent) => {
@@ -507,6 +511,19 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
   };
 
   const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
+  const handleMessagesWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    const pane = event.currentTarget;
+    if (event.deltaY < 0) shouldFollowMessages.current = false;
+    const atTop = pane.scrollTop <= 0;
+    const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 1;
+    if ((!atTop || event.deltaY >= 0) && (!atBottom || event.deltaY <= 0)) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || edgeBounce.current?.playState === "running") return;
+    const distance = event.deltaY < 0 ? 8 : -8;
+    edgeBounce.current = messagesContent.current?.animate(
+      [{ transform: "translateY(0)" }, { transform: `translateY(${distance}px)` }, { transform: "translateY(0)" }],
+      { duration: 220, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+    ) ?? null;
+  }, []);
   return (
     <div data-scope-id={selectedScopeId} className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
       <header className="flex h-12 shrink-0 items-center border border-[var(--border-faint)] bg-obsidian-990/90 px-3 sm:h-14 sm:px-4">
@@ -521,7 +538,8 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
             {selected ? <PersonMark entry={selected} size={34} /> : null}<div className="min-w-0"><h1 className="truncate font-display text-base text-silver-50">{selected?.orchestrator.name ?? "Chorus"}</h1><p className="truncate text-[9px] text-silver-500">{selected?.orchestrator.role ?? "Select a channel"}</p></div>
             {selectedVoiceSrc && selected ? <button type="button" aria-pressed={voicePlayingSrc === selectedVoiceSrc} aria-label={`${voicePlayingSrc === selectedVoiceSrc ? "Stop" : "Play"} Meet ${selected.orchestrator.name}`} onClick={() => playVoice(selectedVoiceSrc)} className={`ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border focus-visible:outline-2 ${voicePlayingSrc === selectedVoiceSrc ? "border-silver-300 bg-white/10 text-silver-50" : "border-[var(--border-soft)] text-silver-400 hover:border-silver-500 hover:text-silver-100"}`}><SpeakerIcon animated={voicePlayingSrc === selectedVoiceSrc} /></button> : null}
           </div>
-          <div ref={messagesPane} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = pane.scrollHeight - pane.scrollTop - pane.clientHeight < 96; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] sm:px-6" aria-live="polite" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
+          <div ref={messagesPane} onWheel={handleMessagesWheel} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
+            <div ref={messagesContent} className="min-h-full">
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
             {selected?.canChat && channelKey && !messagesLoading[channelKey] && visibleMessages.length === 0 ? <div className="flex h-full items-center justify-center text-center"><p className="text-[12px] text-silver-400">Start a persisted conversation with {selected.orchestrator.name}.</p></div> : null}
@@ -533,6 +551,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
                 : [...item.reactions, { reaction, count: 1, viewerReacted: true }];
               return { ...item, reactions };
             }) }))} />) : null}
+            </div>
           </div>
           <MessageComposer organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={submitComposerMessage} />
         </section>
