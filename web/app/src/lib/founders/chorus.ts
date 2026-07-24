@@ -187,6 +187,23 @@ export async function listChorusMessages(organizationKey: string, channelKey: st
   return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages?limit=200`, z.object({ messages: z.array(chorusMessageSchema) }).strict(), { signal })).messages;
 }
 
+export async function clearChorusChannel(organizationKey: string, channelKey: string) {
+  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages`, z.object({ cleared: z.number().int().nonnegative() }).strict(), { method: "DELETE" });
+}
+
+export function plainChorusText(content: string): string {
+  return content
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/(?:\*\*|__)(.*?)(?:\*\*|__)/g, "$1")
+    .replace(/(?:\*|_)(.*?)(?:\*|_)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export async function mutateChorusReaction(organizationKey: string, channelKey: string, messageKey: string, reaction: string, operation: "add" | "remove" | "toggle" = "toggle") {
   return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}/reactions`, z.object({ active: z.boolean() }).strict(), { method: "POST", body: JSON.stringify({ reaction, operation }) });
 }

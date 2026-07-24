@@ -7,6 +7,7 @@ describe('orchestrator chat tool', () => {
       async execute(organizationKey, input) {
         expect(organizationKey).toBe('nexus');
         expect(input.messages[0]?.content[0]).toEqual({ type: 'text', text: 'hello' });
+        expect(input.options?.maxTokens).toBe(300);
         return { output: { text: 'Answer', toolCalls: [], stopReason: 'stop' } } as never;
       },
     })).resolves.toBe('Answer');

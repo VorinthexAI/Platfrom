@@ -18,6 +18,7 @@ const pollBody = strictObject({ messageKey: key, question: z.string().trim().min
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Poll options must be unique' });
 });
 const voteBody = strictObject({ optionKey: key });
+const CHORUS_RESPONSE_INSTRUCTION = `Reply with only a concise plain-text summary of the answer. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 120 words.`;
 export const chorusMessageListQuerySchema = strictObject({ limit: z.coerce.number().int().min(1).max(200).default(100) });
 
 export interface ChorusApiDependencies {
@@ -90,6 +91,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
     listChannels: (c: Context) => run(c, async (resolved) => ({ channels: (await dependencies.service.listDirectChannels(resolved)).map(({ orchestrator, channel, ...item }) => ({ ...item, orchestrator: { key: orchestrator.key, name: orchestrator.name, role: orchestrator.role }, channel: channel ? channelSummary(channel) : null })) })),
     openChannel: (c: Context) => run(c, async (resolved) => ({ channel: channelSummary((await dependencies.service.openDirectChannel(resolved, key.parse(c.req.param('orchestratorKey')))).channel) })),
     listMessages: (c: Context) => run(c, async (resolved) => ({ messages: await dependencies.service.listMessages(resolved, key.parse(c.req.param('channelKey')), parseQuery(c, chorusMessageListQuerySchema).limit) })),
+    clearChannel: (c: Context) => run(c, async (resolved) => ({ cleared: await dependencies.service.clearChannel(resolved, key.parse(c.req.param('channelKey'))) })),
     postMessage: async (c: Context) => {
       const resolved = await actor(c);
       if (resolved instanceof Response) return resolved;
@@ -101,7 +103,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       try {
         const { access, message } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
         const history = await dependencies.service.history(access, body.threadKey, message.key);
-        const provider = dependencies.stream(access.orchestrator.skill, { message: body.content, history }, { organizationKey: resolved.organizationKey, signal: c.req.raw.signal });
+        const provider = dependencies.stream(`${access.orchestrator.skill}\n\n${CHORUS_RESPONSE_INSTRUCTION}`, { message: body.content, history }, { organizationKey: resolved.organizationKey, signal: c.req.raw.signal });
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
           let content = '';

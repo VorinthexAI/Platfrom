@@ -3,6 +3,7 @@ import {
   chorusChannelEntrySchema,
   chorusMessageSchema,
   chorusThreadSchema,
+  plainChorusText,
   coalesceChorusStreamEvents,
   markChorusStreamFailed,
   mergeChorusMessageRefresh,
@@ -145,5 +146,11 @@ describe("Chorus SSE client", () => {
       throw init?.signal?.reason ?? new DOMException("Aborted", "AbortError");
     }) as unknown as typeof fetch;
     await expect(streamChorusMessage("org", "channel", "hello", () => {}, controller.signal)).rejects.toThrow();
+  });
+});
+
+describe("Chorus message presentation", () => {
+  test("renders markdown-shaped replies as plain text", () => {
+    expect(plainChorusText("### Summary\n1. **Choose** the `[safe](https://example.com)` option.\n- `Act` now.")).toBe("Summary\nChoose the safe option.\nAct now.");
   });
 });

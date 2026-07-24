@@ -50,6 +50,11 @@ export class ChorusService {
     return this.repository.listMessages(channelKey, access.humanParticipant.key, limit);
   }
 
+  async clearChannel(actor: ChorusActor, channelKey: string) {
+    await this.requireChannel(actor, channelKey);
+    return this.repository.clearChannel(channelKey, this.now());
+  }
+
   async persistUserMessage(actor: ChorusActor, channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) {
     const access = await this.requireChannel(actor, channelKey);
     await this.validateReply(channelKey, threadKey, replyToMessageKey);

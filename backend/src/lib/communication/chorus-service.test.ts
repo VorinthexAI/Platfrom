@@ -57,6 +57,7 @@ class MemoryRepository implements CommunicationRepository {
     return { key: message.key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt, author: { participantKey: message.authorParticipantKey, type: human ? 'user' : 'orchestrator', key: human ? membershipKey : orchestratorKey, name: human ? 'Founder' : 'Atlas' }, reactions: [], thread: null, poll: null };
   }
   async listMessages(channelKey: string, _viewer: string, limit: number) { return this.messages.filter((item) => item.channelKey === channelKey && !item.threadKey && !item.deletedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-limit).map((item) => this.projection(item)); }
+  async clearChannel(channelKey: string, updatedAt: string) { let cleared = 0; for (const message of this.messages) { if (message.channelKey === channelKey && !message.deletedAt) { message.deletedAt = updatedAt; message.updatedAt = updatedAt; cleared += 1; } } return cleared; }
   async listThreadMessages(channelKey: string, threadKey: string, rootMessageKey: string, _viewer: string, limit: number) { return this.messages.filter((item) => item.channelKey === channelKey && !item.deletedAt && (item.key === rootMessageKey || item.threadKey === threadKey)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-limit).map((item) => this.projection(item)); }
   async listHistory(channelKey: string, threadKey: string | undefined, excludeMessageKey: string | undefined, limit: number) { const thread = threadKey ? this.threads.find((item) => item.key === threadKey) : null; return this.messages.filter((item) => item.channelKey === channelKey && !item.deletedAt && item.key !== excludeMessageKey && (threadKey ? item.threadKey === threadKey || item.key === thread?.rootMessageKey : !item.threadKey)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-limit).map((item) => ({ role: item.authorParticipantKey === this.participants[0]?.key ? 'user' as const : 'assistant' as const, content: item.content })); }
   async getMessage(messageKey: string) { return this.messages.find((item) => item.key === messageKey && !item.deletedAt) ?? null; }
@@ -135,6 +136,15 @@ describe('Chorus service', () => {
     expect((await f.service.listMessages(actor, access.channel.key)).map((item) => item.content)).toEqual(['First', 'Second']);
     expect(await f.service.history(access)).toEqual([{ role: 'user', content: 'First' }, { role: 'assistant', content: 'Second' }]);
     expect(user.message.authorParticipantKey).toBe(access.humanParticipant.key);
+  });
+
+  test('clears an authorized channel from message lists and history', async () => {
+    const f = fixture(); const access = await f.service.openDirectChannel(actor, orchestratorKey);
+    await f.service.persistUserMessage(actor, access.channel.key, 'Remove me');
+    await f.service.persistOrchestratorMessage(access, 'Remove me too');
+    expect(await f.service.clearChannel(actor, access.channel.key)).toBe(2);
+    expect(await f.service.listMessages(actor, access.channel.key)).toEqual([]);
+    expect(await f.service.history(access)).toEqual([]);
   });
 
   test('denies cross-channel message identifiers and keeps reactions unique/toggleable', async () => {

@@ -2,8 +2,8 @@
 
 import Image from "next/image";
 import * as Dialog from "@radix-ui/react-dialog";
-import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type WheelEvent as ReactWheelEvent } from "react";
-import { ChevronUpIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
@@ -11,6 +11,7 @@ import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoThumbnailUrl } from "@/lib/three/entity-logo";
 import {
   closeChorusPoll,
+  clearChorusChannel,
   coalesceChorusStreamEvents,
   createChorusPoll,
   createChorusThread,
@@ -22,6 +23,7 @@ import {
   readChorusThread,
   replyChorusThread,
   resolveChorusThread,
+  plainChorusText,
   reconcileChorusStreamEvent,
   streamChorusMessage,
   voteChorusPoll,
@@ -40,9 +42,16 @@ interface HqCommunicationOverlayProps {
 }
 
 const registryOrchestrators = Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators);
+const scopeEntities = [
+  VORINTHEX_GALAXY_REGISTRY.nexus,
+  ...Object.values(VORINTHEX_GALAXY_REGISTRY.products),
+  ...Object.values(VORINTHEX_GALAXY_REGISTRY.capabilities),
+  ...registryOrchestrators,
+];
 const normalizeName = (name: string) => name.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]/g, "");
 const registryByName = new Map(registryOrchestrators.map((entity) => [normalizeName(entity.name), entity]));
 const REACTIONS = ["ack", "approve", "insight", "question"] as const;
+const MESSAGE_ACTIONS_ENABLED = false;
 
 function entityFor(entry: ChorusChannelEntry): GalaxyEntity | null {
   return registryByName.get(normalizeName(entry.orchestrator.name)) ?? null;
@@ -66,6 +75,65 @@ function Timestamp({ value }: { value: string }) {
   return <time dateTime={value} title={value} className="font-mono text-[9px] text-silver-600">{label}</time>;
 }
 
+function ScopeMark({ entity, size = 28 }: { entity: GalaxyEntity; size?: number }) {
+  return <span className="relative inline-flex shrink-0 overflow-hidden rounded-full border border-[var(--border-faint)] bg-obsidian-990/80" style={{ width: size, height: size }}><Image src={entityLogoThumbnailUrl(entity.type, entity.slug)} alt="" fill sizes={`${size}px`} unoptimized className="object-contain p-[2px] opacity-90" /></span>;
+}
+
+function ScopeSelector({ selectedScopeId, onScopeChange }: Pick<HqCommunicationOverlayProps, "selectedScopeId" | "onScopeChange">) {
+  const selectedIndex = Math.max(0, scopeEntities.findIndex((scope) => scope.id === selectedScopeId));
+  const selectedScope = scopeEntities[selectedIndex] ?? scopeEntities[0]!;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const filteredScopes = scopeEntities.filter((scope) => scope.name.toLowerCase().includes(query.toLowerCase()));
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const dismissPicker = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) { setPickerOpen(false); setQuery(""); }
+    };
+    document.addEventListener("pointerdown", dismissPicker);
+    return () => document.removeEventListener("pointerdown", dismissPicker);
+  }, [pickerOpen]);
+
+  const closePicker = (restoreFocus = false) => {
+    setPickerOpen(false); setQuery("");
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+  const selectFilteredScope = (index: number) => {
+    const scope = filteredScopes[index];
+    if (!scope) return;
+    onScopeChange(scope.id); closePicker();
+  };
+  const handlePickerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") { event.preventDefault(); closePicker(true); return; }
+    if (!filteredScopes.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((index) => (index + direction + filteredScopes.length) % filteredScopes.length);
+    } else if (event.key === "Enter") { event.preventDefault(); selectFilteredScope(activeIndex); }
+  };
+
+  return <div ref={pickerRef} className="relative min-w-0">
+    <button ref={triggerRef} type="button" onClick={() => { if (pickerOpen) closePicker(); else { setQuery(""); setActiveIndex(selectedIndex); setPickerOpen(true); } }} aria-expanded={pickerOpen} aria-haspopup="listbox" className="flex h-11 w-full min-w-0 items-center justify-between gap-2 rounded-xl border border-[var(--border-faint)] bg-[var(--panel)] px-2.5 text-left transition-colors hover:border-[var(--border-strong)]">
+      <span className="flex min-w-0 items-center gap-2"><ScopeMark entity={selectedScope} /><span className="truncate text-[13px] text-silver-100">{selectedScope.name}</span></span>
+      {pickerOpen ? <ChevronUpIcon aria-hidden size="sm" className="shrink-0 text-silver-500" /> : <ChevronDownIcon aria-hidden size="sm" className="shrink-0 text-silver-500" />}
+    </button>
+    {pickerOpen ? <div className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-30 rounded-2xl border border-[var(--border-strong)] bg-obsidian-990/95 p-2 shadow-2xl backdrop-blur-2xl">
+      <div className="relative mb-2"><input ref={inputRef} autoFocus role="combobox" aria-expanded="true" aria-controls="hq-scope-options" value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={handlePickerKeyDown} placeholder="Search scopes..." className="w-full rounded-xl border border-[var(--border-faint)] bg-white/[0.04] py-2 pr-9 pl-3 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-[var(--border-strong)]" />
+        {query ? <button type="button" aria-label="Clear scope search" onClick={() => { setQuery(""); setActiveIndex(0); inputRef.current?.focus(); }} className="absolute top-1/2 right-2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-silver-500 hover:bg-white/[0.07] hover:text-white"><CloseIcon size="sm" /></button> : null}
+      </div>
+      <div id="hq-scope-options" role="listbox" className="scrollbar-hide max-h-64 overflow-y-auto overscroll-contain [touch-action:pan-y]">
+        {filteredScopes.length ? filteredScopes.map((scope, index) => <button key={scope.id} type="button" role="option" aria-selected={index === activeIndex} onMouseEnter={() => setActiveIndex(index)} onClick={() => selectFilteredScope(index)} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] transition-colors ${index === activeIndex ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}><ScopeMark entity={scope} size={22} /><span className="truncate">{scope.name}</span></button>) : <p className="px-2.5 py-3 text-[11px] text-silver-500">No scopes found.</p>}
+      </div>
+    </div> : null}
+  </div>;
+}
+
 interface RailProps {
   channels: ChorusChannelEntry[];
   selectedKey: string | null;
@@ -73,11 +141,14 @@ interface RailProps {
   error: string | null;
   onRetry: () => void;
   onSelect: (entry: ChorusChannelEntry) => void;
+  selectedScopeId: string;
+  onScopeChange: (id: string) => void;
 }
 
-const OrchestratorRail = memo(function OrchestratorRail({ channels, selectedKey, loading, error, onRetry, onSelect }: RailProps) {
+const OrchestratorRail = memo(function OrchestratorRail({ channels, selectedKey, loading, error, onRetry, onSelect, selectedScopeId, onScopeChange }: RailProps) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-[var(--border-faint)] bg-obsidian-950/90 [contain:layout_paint]">
+      <div className="border-b border-[var(--border-faint)] p-4"><span className="mb-2 block font-mono text-[9px] uppercase tracking-[0.2em] text-silver-500">Scope</span><ScopeSelector selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} /></div>
       <div className="border-b border-[var(--border-faint)] px-4 py-3">
         <span className="font-mono text-[9px] tracking-[0.2em] text-silver-500">Channels</span>
       </div>
@@ -164,14 +235,14 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
     finally { await onRefresh().catch(() => {}); onBusy(false); }
   };
   return (
-    <article className="group flex gap-3 px-1 py-3">
-      {message.author.type === "orchestrator" ? <PersonMark entry={entry} size={36} /> : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[8px] text-silver-200">YOU</span>}
+    <article className="group flex gap-3 px-1 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_84px]">
+      {message.author.type === "orchestrator" ? <PersonMark entry={entry} size={36} /> : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[8px] text-silver-200">You</span>}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} /></div>
-        <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300">{message.content || (message.clientState?.state === "failed" ? <span className="text-status-critical">No response was received.</span> : <span className="animate-pulse text-silver-500">Thinking...</span>)}</p>
+        <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300">{message.content ? plainChorusText(message.content) : message.clientState?.state === "failed" ? <span className="text-status-critical">No response was received.</span> : <span className="animate-pulse text-silver-500">Thinking...</span>}</p>
         {message.clientState ? <p role={message.clientState.state === "failed" ? "alert" : "status"} className={`mt-1 font-mono text-[8px] uppercase ${message.clientState.state === "failed" ? "text-status-critical" : "text-silver-600"}`}>{message.clientState.state === "failed" ? message.clientState.error ?? "Message reconciliation failed" : message.author.type === "user" ? "Sending" : "Response pending"}</p> : null}
-        {interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
-        {interactive ? <div className="mt-1.5 flex flex-wrap items-center gap-1 opacity-80 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        {MESSAGE_ACTIONS_ENABLED && interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
+        {MESSAGE_ACTIONS_ENABLED && interactive ? <div className="mt-1.5 flex flex-wrap items-center gap-1 opacity-80 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           {REACTIONS.map((reaction) => {
             const aggregate = message.reactions.find((item) => item.reaction === reaction);
             return <button key={reaction} type="button" disabled={busy} aria-label={`${aggregate?.viewerReacted ? "Remove" : "Add"} ${reaction} reaction`} aria-pressed={aggregate?.viewerReacted ?? false} onClick={() => void react(reaction)} className={`rounded-full border px-2 py-0.5 font-mono text-[8px] focus-visible:outline-2 disabled:opacity-40 ${aggregate?.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-500"}`}>{reaction}{aggregate ? ` ${aggregate.count}` : ""}</button>;
@@ -325,6 +396,8 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
   const [busyMessage, setBusyMessage] = useState<string | null>(null);
   const [pollMessage, setPollMessage] = useState<ChorusMessage | null>(null);
   const [threadState, setThreadState] = useState<{ thread: ChorusThread; messages: ChorusMessage[]; loading: boolean; error: string | null } | null>(null);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const controllers = useRef(new Map<string, AbortController>());
   const messageRequests = useRef(new Map<string, number>());
   const organizationGeneration = useRef(0);
@@ -332,8 +405,6 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
   const currentOrganization = useRef(organizationKey);
   const activeChannel = useRef<string | null>(null);
   const messagesPane = useRef<HTMLDivElement>(null);
-  const messagesContent = useRef<HTMLDivElement>(null);
-  const edgeBounce = useRef<Animation | null>(null);
   const shouldFollowMessages = useRef(true);
   const stopVoice = useAudioStore((state) => state.stopVoice);
   const playVoice = useAudioStore((state) => state.playVoice);
@@ -348,7 +419,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
     controllers.current.clear();
     messageRequests.current.clear();
     activeChannel.current = null;
-    setChannels([]); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setThreadState(null); setPollMessage(null); setBusyMessage(null);
+    setChannels([]); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setThreadState(null); setPollMessage(null); setBusyMessage(null); setClearOpen(false);
     setChannelsLoading(true); setChannelsError(null);
     const controller = new AbortController();
     controllers.current.get("channels")?.abort(); controllers.current.set("channels", controller);
@@ -392,7 +463,6 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
 
   useEffect(() => { void loadChannels(); }, [loadChannels]);
   useEffect(() => () => { for (const controller of controllers.current.values()) controller.abort(); }, []);
-  useEffect(() => () => edgeBounce.current?.cancel(), []);
 
   const selected = channels.find((entry) => entry.orchestrator.key === selectedKey) ?? null;
   const channelKey = selected?.channel?.key ?? null;
@@ -423,7 +493,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
     threadGeneration.current += 1;
     controllers.current.get("thread")?.abort();
     activeChannel.current = entry.channel?.key ?? null;
-    setSelectedKey(entry.orchestrator.key); setPollMessage(null); setThreadState(null);
+    setSelectedKey(entry.orchestrator.key); setPollMessage(null); setThreadState(null); setClearOpen(false);
     const entity = entityFor(entry); if (entity) onScopeChange(entity.id);
     if (entry.orchestrator.key === selectedKey && entry.canChat && entry.channel) void refreshMessages(entry.channel.key).catch(() => {});
   }, [onScopeChange, refreshMessages, selectedKey]);
@@ -511,38 +581,42 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
   };
 
   const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
-  const handleMessagesWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    const pane = event.currentTarget;
-    if (event.deltaY < 0) shouldFollowMessages.current = false;
-    const atTop = pane.scrollTop <= 0;
-    const atBottom = pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 1;
-    if ((!atTop || event.deltaY >= 0) && (!atBottom || event.deltaY <= 0)) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || edgeBounce.current?.playState === "running") return;
-    const distance = event.deltaY < 0 ? 8 : -8;
-    edgeBounce.current = messagesContent.current?.animate(
-      [{ transform: "translateY(0)" }, { transform: `translateY(${distance}px)` }, { transform: "translateY(0)" }],
-      { duration: 220, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
-    ) ?? null;
-  }, []);
+  const clearSelectedChannel = async () => {
+    if (!channelKey || clearing || streaming[channelKey]) return;
+    const requestChannel = channelKey;
+    setClearing(true);
+    setErrors((current) => ({ ...current, [requestChannel]: null }));
+    controllers.current.get(`messages:${requestChannel}`)?.abort();
+    messageRequests.current.set(requestChannel, (messageRequests.current.get(requestChannel) ?? 0) + 1);
+    try {
+      await clearChorusChannel(organizationKey, requestChannel);
+      if (activeChannel.current === requestChannel) {
+        setMessages((current) => ({ ...current, [requestChannel]: [] }));
+        setClearOpen(false);
+      }
+    } catch (error) {
+      if (activeChannel.current === requestChannel) setErrors((current) => ({ ...current, [requestChannel]: error instanceof Error ? error.message : "Channel could not be cleared" }));
+    } finally {
+      setClearing(false);
+    }
+  };
   return (
     <div data-scope-id={selectedScopeId} className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
       <header className="flex h-12 shrink-0 items-center border border-[var(--border-faint)] bg-obsidian-990/90 px-3 sm:h-14 sm:px-4">
         <Image src="/logos/vorinthex-mark.png" alt="Vorinthex" width={23} height={23} className="opacity-90" />
         <div className="ml-3 min-w-0 flex-1 font-mono text-[9px] uppercase tracking-[0.13em] text-silver-500"><span className="text-silver-300">HQ</span><span className="mx-2">/</span><span className="truncate">{selected?.orchestrator.name ?? "Chorus"}</span></div>
-        <span className="font-mono text-[8px] uppercase tracking-[0.16em] text-silver-600">Persistent comms</span>
       </header>
       <div className="relative grid min-h-0 flex-1 grid-rows-[minmax(150px,30vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1">
-        <OrchestratorRail channels={channels} selectedKey={selectedKey} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} />
+        <OrchestratorRail channels={channels} selectedKey={selectedKey} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
         <section className="flex min-h-0 min-w-0 flex-col bg-obsidian-990/90 [contain:layout_paint]">
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--border-faint)] px-5">
             {selected ? <PersonMark entry={selected} size={34} /> : null}<div className="min-w-0"><h1 className="truncate font-display text-base text-silver-50">{selected?.orchestrator.name ?? "Chorus"}</h1><p className="truncate text-[9px] text-silver-500">{selected?.orchestrator.role ?? "Select a channel"}</p></div>
             {selectedVoiceSrc && selected ? <button type="button" aria-pressed={voicePlayingSrc === selectedVoiceSrc} aria-label={`${voicePlayingSrc === selectedVoiceSrc ? "Stop" : "Play"} Meet ${selected.orchestrator.name}`} onClick={() => playVoice(selectedVoiceSrc)} className={`ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border focus-visible:outline-2 ${voicePlayingSrc === selectedVoiceSrc ? "border-silver-300 bg-white/10 text-silver-50" : "border-[var(--border-soft)] text-silver-400 hover:border-silver-500 hover:text-silver-100"}`}><SpeakerIcon animated={voicePlayingSrc === selectedVoiceSrc} /></button> : null}
+            {selected?.canChat && channelKey ? <button type="button" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto rounded-lg border border-[var(--border-soft)] px-3 py-1.5 text-[10px] text-silver-300 transition-colors hover:border-silver-500 hover:text-silver-50 focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-40">Clear channel</button> : null}
           </div>
-          <div ref={messagesPane} onWheel={handleMessagesWheel} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
-            <div ref={messagesContent} className="min-h-full">
+          <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
-            {selected?.canChat && channelKey && !messagesLoading[channelKey] && visibleMessages.length === 0 ? <div className="flex h-full items-center justify-center text-center"><p className="text-[12px] text-silver-400">Start a persisted conversation with {selected.orchestrator.name}.</p></div> : null}
             {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
               if (item.key !== messageKey) return item;
               const existing = item.reactions.find((entry) => entry.reaction === reaction);
@@ -551,10 +625,19 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
                 : [...item.reactions, { reaction, count: 1, viewerReacted: true }];
               return { ...item, reactions };
             }) }))} />) : null}
-            </div>
           </div>
           <MessageComposer organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={submitComposerMessage} />
         </section>
+        <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" />
+            <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-[min(92vw,390px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[var(--border-strong)] bg-obsidian-950 p-5 shadow-2xl" aria-describedby="clear-channel-description">
+              <Dialog.Title className="text-sm text-silver-50">Clear this channel?</Dialog.Title>
+              <Dialog.Description id="clear-channel-description" className="mt-2 text-[11px] leading-5 text-silver-400">This removes every message in your channel with {selected?.orchestrator.name ?? "this orchestrator"}.</Dialog.Description>
+              <div className="mt-5 flex justify-end gap-2"><Dialog.Close type="button" disabled={clearing} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-[10px] text-silver-300 disabled:opacity-40">Cancel</Dialog.Close><button type="button" disabled={clearing} onClick={() => void clearSelectedChannel()} className="rounded-lg bg-silver-200 px-3 py-2 text-[10px] text-obsidian-990 disabled:opacity-40">{clearing ? "Clearing..." : "Clear channel"}</button></div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
         {pollMessage && channelKey ? <PollComposer message={pollMessage} busy={busyMessage === pollMessage.key} error={errors[channelKey] ?? null} onCancel={() => setPollMessage(null)} onCreate={async (question, options, allowMultiple) => {
           const requestChannel = channelKey;
           const requestOrganization = organizationKey;
