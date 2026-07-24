@@ -46,3 +46,4 @@ async function proxy(request: Request, context: ChorusContext) {
 
 export const GET = proxy;
 export const POST = proxy;
+export const DELETE = proxy;

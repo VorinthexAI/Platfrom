@@ -11,20 +11,23 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const persisted: string[] = [];
   const assistantCalls: unknown[][] = [];
   const historyCalls: unknown[][] = [];
+  const streamSkills: string[] = [];
   const access = { channel: { key: channelKey }, orchestrator: { skill: 'Lead.' } };
   const service = {
     async persistUserMessage() { persisted.push('user'); return { access, message: { key: newId(), content: 'hello' } }; },
     async history(...args: unknown[]) { historyCalls.push(args); return []; },
     async persistOrchestratorMessage(...args: unknown[]) { assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), content: args[1] as string, threadKey: args[2] as string, replyToMessageKey: args[3] as string }; },
+    async clearChannel() { return 2; },
   };
   const handlers = createChorusHandlers({
     service: service as never,
     resolveActor: async (c) => options.authenticated === false ? c.json({ error: 'authentication required' }, 401) : options.forbidden ? c.json({ error: 'founders gate access required' }, 403) : actor,
-    stream: async function* () { yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; },
+    stream: async function* (skill) { streamSkills.push(skill); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; },
   });
   const app = new Hono();
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.postMessage);
-  return { app, persisted, assistantCalls, historyCalls };
+  app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.clearChannel);
+  return { app, persisted, assistantCalls, historyCalls, streamSkills };
 }
 
 describe('Chorus SSE API', () => {
@@ -36,7 +39,7 @@ describe('Chorus SSE API', () => {
   });
 
   test('streams tokens and persists user then assistant messages', async () => {
-    const { app, persisted, assistantCalls, historyCalls } = appFor();
+    const { app, persisted, assistantCalls, historyCalls, streamSkills } = appFor();
     const threadKey = newId();
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello', threadKey }) });
     const text = await response.text();
@@ -45,6 +48,14 @@ describe('Chorus SSE API', () => {
     expect(persisted).toEqual(['user', 'assistant']);
     expect(historyCalls[0]?.slice(1)).toEqual([threadKey, expect.any(String)]);
     expect(assistantCalls[0]?.slice(1)).toEqual(['Hi there', threadKey, expect.any(String)]);
+    expect(streamSkills[0]).toContain('concise plain-text summary');
+  });
+
+  test('clears an authorized channel', async () => {
+    const { app } = appFor();
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'DELETE' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cleared: 2 });
   });
 
   test('keeps founder-gate denial distinct from authentication denial', async () => {
