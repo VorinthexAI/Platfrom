@@ -1,8 +1,7 @@
-import { BedrockRuntimeClient, InvokeModelWithBidirectionalStreamCommand } from '@aws-sdk/client-bedrock-runtime';
-import { NodeHttp2Handler } from '@smithy/node-http-handler';
-import { randomUUID } from 'node:crypto';
+import { BedrockRuntimeClient, ConverseStreamCommand, type ConverseStreamCommandInput, type ConverseStreamCommandOutput, type ConverseStreamOutput } from '@aws-sdk/client-bedrock-runtime';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { z } from 'zod';
-import { tokenUsage, ZERO_TOKEN_USAGE } from '@/lib/ai/shared/usage';
+import { tokenUsage } from '@/lib/ai/shared/usage';
 import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import { CHAT_ACTION_IDS, unsupportedAction } from './openai-compatible';
@@ -19,6 +18,7 @@ import {
   type ProviderExecuteRequest,
   type ProviderExecuteResponse,
   type ProviderFactory,
+  type ProviderStreamChunk,
 } from './types';
 
 export const awsBedrockProviderConfigSchema = awsCredentialsSchema;
@@ -27,26 +27,48 @@ export const awsBedrockCredentialsSchema = awsBedrockProviderConfigSchema;
 export type AwsBedrockCredentials = AwsBedrockProviderConfig;
 
 const PROVIDER_ID = 'aws-bedrock' as const;
+const BEDROCK_TEXT_MODEL_IDS = new Set([
+  'amazon.nova-premier-v1:0',
+  'amazon.nova-pro-v1:0',
+  'amazon.nova-2-lite-v1:0',
+]);
 const converseResponseSchema = z.object({ output: z.object({ message: z.object({ content: z.array(z.object({ text: z.string().optional() }).passthrough()).optional() }).passthrough().optional() }), usage: z.object({ inputTokens: z.number().optional(), outputTokens: z.number().optional(), totalTokens: z.number().optional() }).passthrough().optional(), stopReason: z.string().optional() });
 const embeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1), inputTextTokenCount: z.number().optional() }).passthrough();
 
-function buildConverseBody(input: ChatInput): string {
-  const messages: Array<{ role: 'user' | 'assistant'; content: Array<{ text: string }> }> = [];
+function buildConverseInput(input: ChatInput): Omit<ConverseStreamCommandInput, 'modelId'> {
+  const messages: NonNullable<ConverseStreamCommandInput['messages']> = [];
   const systemParts: string[] = input.systemPrompt ? [input.systemPrompt] : [];
+  if (input.tools?.length) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support core.chat tools');
   for (const message of input.messages) {
-    if (message.role === 'system') { systemParts.push(message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n')); continue; }
-    if (message.role === 'tool') throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support core.chat tool-result messages');
     const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
     if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support non-text core.chat content');
+    if (message.role === 'system') { systemParts.push(text); continue; }
+    if (message.role === 'tool') throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support core.chat tool-result messages');
     messages.push({ role: message.role, content: [{ text }] });
   }
-  const body: Record<string, unknown> = { messages };
-  if (systemParts.length > 0) body.system = systemParts.map((text) => ({ text }));
-  const inferenceConfig: Record<string, unknown> = {};
+  const request: Omit<ConverseStreamCommandInput, 'modelId'> = { messages };
+  if (systemParts.length > 0) request.system = systemParts.map((text) => ({ text }));
+  const inferenceConfig: NonNullable<ConverseStreamCommandInput['inferenceConfig']> = {};
   if (input.options?.maxTokens !== undefined) inferenceConfig.maxTokens = input.options.maxTokens;
   if (input.options?.temperature !== undefined) inferenceConfig.temperature = Math.min(input.options.temperature, 1);
-  if (Object.keys(inferenceConfig).length > 0) body.inferenceConfig = inferenceConfig;
-  return JSON.stringify(body);
+  if (Object.keys(inferenceConfig).length > 0) request.inferenceConfig = inferenceConfig;
+  return request;
+}
+
+type BedrockStreamClient = {
+  send(command: ConverseStreamCommand, options?: { abortSignal?: AbortSignal }): Promise<ConverseStreamCommandOutput>;
+  destroy(): void;
+};
+
+type BedrockStreamClientFactory = (requestTimeout: number) => BedrockStreamClient;
+
+function streamException(event: ConverseStreamOutput): ProviderError | undefined {
+  if (event.validationException) return new ProviderError(PROVIDER_ID, 'invalid_input', 'aws-bedrock stream rejected the request', { cause: event.validationException });
+  if (event.throttlingException) return new ProviderError(PROVIDER_ID, 'rate_limited', 'aws-bedrock stream was rate limited', { cause: event.throttlingException });
+  const unavailable = event.internalServerException ?? event.modelStreamErrorException ?? event.serviceUnavailableException;
+  if (unavailable) return new ProviderError(PROVIDER_ID, 'provider_unavailable', 'aws-bedrock stream failed', { cause: unavailable });
+  if (event.$unknown) return new ProviderError(PROVIDER_ID, 'response_invalid', 'aws-bedrock returned an unknown stream event');
+  return undefined;
 }
 
 async function invoke(config: AwsBedrockProviderConfig, externalModelId: string, body: string, signal?: AbortSignal): Promise<unknown> {
@@ -67,8 +89,14 @@ async function embed(config: AwsBedrockProviderConfig, request: ProviderEmbedReq
   } catch (error) { throw normalizeProviderError(PROVIDER_ID, error); }
 }
 
-export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConfig>, env?: AwsCredentialEnvironment): ProviderAdapter {
+export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConfig>, env?: AwsCredentialEnvironment, createStreamClient?: BedrockStreamClientFactory): ProviderAdapter {
   const parsed = resolveAwsCredentials(config, env);
+  const streamClientFactory = createStreamClient ?? ((requestTimeout) => new BedrockRuntimeClient({
+    region: parsed.region,
+    credentials: { accessKeyId: parsed.accessKeyId, secretAccessKey: parsed.secretAccessKey },
+    endpoint: `https://bedrock-runtime.${parsed.region}.amazonaws.com`,
+    requestHandler: new NodeHttpHandler({ requestTimeout, connectionTimeout: requestTimeout }),
+  }));
   return {
     id: PROVIDER_ID,
     name: 'AWS Bedrock',
@@ -84,7 +112,7 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
         const input = chatInputSchema.parse(request.input);
         const host = `bedrock-runtime.${parsed.region}.amazonaws.com`;
         const path = `/model/${encodeURIComponent(request.externalModelId)}/converse`;
-        const body = buildConverseBody(input);
+        const body = JSON.stringify(buildConverseInput(input));
         const signed = signAwsRequest(parsed, 'bedrock', host, path, body, { 'content-type': 'application/json' });
         const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body, signal: resolveRequestSignal(request) });
         if (!response.ok) throw new ProviderError(PROVIDER_ID, providerErrorCodeForStatus(response.status), `aws-bedrock request failed with status ${response.status}`, { status: response.status });
@@ -94,59 +122,30 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
         return { output: output as TOutput, usage: tokenUsage(result.usage?.inputTokens, result.usage?.outputTokens, result.usage?.totalTokens), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
       } catch (error) { throw normalizeProviderError(PROVIDER_ID, error); }
     },
-    async *stream<TInput>(request: ProviderExecuteRequest<TInput>) {
-      if (request.actionId !== 'orchestrator-chat' || !request.externalModelId.includes('nova-2-sonic')) {
-        throw unsupportedAction(PROVIDER_ID, 'stream');
-      }
-      const input = chatInputSchema.parse(request.input);
-      const client = new BedrockRuntimeClient({
-        region: parsed.region,
-        credentials: { accessKeyId: parsed.accessKeyId, secretAccessKey: parsed.secretAccessKey },
-        endpoint: `https://bedrock-runtime.${parsed.region}.amazonaws.com`,
-        requestHandler: new NodeHttp2Handler({ requestTimeout: request.timeoutMs ?? 300_000, sessionTimeout: request.timeoutMs ?? 300_000 }),
-      });
-      const promptName = randomUUID();
-      const systemContentName = randomUUID();
-      const userContentName = randomUUID();
-      const systemText = [
-        ...(input.systemPrompt ? [input.systemPrompt] : []),
-        ...input.messages.filter((message) => message.role === 'system').flatMap((message) => message.content.filter((part) => part.type === 'text').map((part) => part.text)),
-      ].join('\n');
-      const userText = input.messages.filter((message) => message.role !== 'system').flatMap((message) => message.content.filter((part) => part.type === 'text').map((part) => part.text)).join('\n');
-      const events = [
-        { event: { sessionStart: { inferenceConfiguration: { maxTokens: input.options?.maxTokens ?? 2_000, temperature: input.options?.temperature ?? 0.2, topP: 0.9 } } } },
-        { event: { promptStart: { promptName, textOutputConfiguration: { mediaType: 'text/plain' }, audioOutputConfiguration: { audioType: 'SPEECH', encoding: 'base64', mediaType: 'audio/lpcm', sampleRateHertz: 24_000, sampleSizeBits: 16, channelCount: 1, voiceId: input.options?.voiceKey ?? 'matthew' } } } },
-        ...(systemText ? [
-          { event: { contentStart: { promptName, contentName: systemContentName, type: 'TEXT', interactive: false, role: 'SYSTEM', textInputConfiguration: { mediaType: 'text/plain' } } } },
-          { event: { textInput: { promptName, contentName: systemContentName, content: systemText } } },
-          { event: { contentEnd: { promptName, contentName: systemContentName } } },
-        ] : []),
-        { event: { contentStart: { promptName, contentName: userContentName, type: 'TEXT', interactive: true, role: 'USER', textInputConfiguration: { mediaType: 'text/plain' } } } },
-        { event: { textInput: { promptName, contentName: userContentName, content: userText } } },
-        { event: { contentEnd: { promptName, contentName: userContentName } } },
-        { event: { promptEnd: { promptName } } },
-        { event: { sessionEnd: {} } },
-      ];
-      const body = {
-        async *[Symbol.asyncIterator]() {
-          for (const event of events) yield { chunk: { bytes: new TextEncoder().encode(JSON.stringify(event)) } };
-        },
-      };
+    async *stream<TInput>(request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
+      let client: BedrockStreamClient | undefined;
       try {
-        const response = await client.send(new InvokeModelWithBidirectionalStreamCommand({ modelId: request.externalModelId, body: body as never }), { abortSignal: resolveRequestSignal(request) });
-        for await (const item of response.body ?? []) {
-          const bytes = item.chunk?.bytes;
-          if (!bytes) continue;
-          const payload = JSON.parse(new TextDecoder().decode(bytes)) as { event?: { textOutput?: { content?: string }; contentEnd?: { type?: string } } };
-          const text = payload.event?.textOutput?.content;
+        if (!CHAT_ACTION_IDS.has(request.actionId) || !BEDROCK_TEXT_MODEL_IDS.has(request.externalModelId)) throw unsupportedAction(PROVIDER_ID, 'stream');
+        const input = chatInputSchema.parse(request.input);
+        client = streamClientFactory(request.timeoutMs ?? 300_000);
+        const response = await client.send(new ConverseStreamCommand({ modelId: request.externalModelId, ...buildConverseInput(input) }), { abortSignal: resolveRequestSignal(request) });
+        if (!response.stream) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'aws-bedrock returned no event stream');
+        let sawText = false;
+        for await (const event of response.stream) {
+          const exception = streamException(event);
+          if (exception) throw exception;
+          const text = event.contentBlockDelta?.delta?.text;
           if (text) yield { type: 'text-delta' as const, text };
+          if (text) sawText = true;
+          const usage = event.metadata?.usage;
+          if (usage) yield { type: 'usage', usage: tokenUsage(usage.inputTokens, usage.outputTokens, usage.totalTokens) };
         }
-        yield { type: 'usage' as const, usage: ZERO_TOKEN_USAGE };
-        yield { type: 'done' as const };
+        if (!sawText) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'aws-bedrock returned an empty text stream');
+        yield { type: 'done' };
       } catch (error) {
         throw normalizeProviderError(PROVIDER_ID, error);
       } finally {
-        client.destroy();
+        client?.destroy();
       }
     },
     embed(request) { return embed(parsed, request); },

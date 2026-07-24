@@ -109,6 +109,9 @@ function querySchemaForPath(path: string) {
       message: 'exactly one orchestrator identifier is required',
     });
   }
+  if (/^\/founders\/organizations\/[^/]+\/chorus\/channels\/[^/]+\/messages$/.test(apiPath)) {
+    return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
+  }
   if (/^\/archive\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
   return strictObject({});
 }

@@ -13,6 +13,9 @@ describe('communication referential validation', () => {
       messages: ['content'],
       messageMentions: [],
       messageReactions: ['reaction'],
+      polls: ['question'],
+      pollOptions: ['text'],
+      pollVotes: [],
     });
   });
 

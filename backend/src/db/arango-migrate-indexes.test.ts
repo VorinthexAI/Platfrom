@@ -19,6 +19,13 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['documentKey', 'version']])).toBe(true);
   });
+  test('declares sparse direct-channel identity uniqueness and poll vote uniqueness', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain("{ fields: ['directUserOrganizationKey', 'directOrchestratorKey'], unique: true, sparse: true }");
+    expect(source).toContain("{ fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }");
+    expect(source).toContain("fields[0] === 'scopeKey' && fields[1] === 'name'");
+    expect(source).toContain('Dropped obsolete unique channel-name index');
+  });
   test('derives deterministic historical representations from version content', () => {
     expect(legacyContentRepresentations('First <line>\n\nSecond')).toEqual({
       html: '<p>First &lt;line&gt;</p><p>Second</p>',
@@ -74,5 +81,23 @@ describe('Arango migration indexes', () => {
     for (let offset = 0; offset < shares.length; offset += 100) staged.push(...stageLegacyDocumentShares(shares.slice(offset, offset + 100)));
     expect(staged.map((share) => share._key)).toEqual(shares.map((share) => share._key));
     expect(new Set(staged.map((share) => share.tokenHash))).toHaveLength(205);
+  });
+
+  test('reconciles scope memberships after canonical userOrganizations migration', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const canonicalCopy = source.indexOf('Copied user_organization -> userOrganizations');
+    const scopeReconciliation = source.indexOf('reconcileOrganizationScopeMemberships(organization.key');
+    const agentReconciliation = source.indexOf('reconcileOrganizationInheritedAgentMemberships(organization.key');
+    expect(canonicalCopy).toBeGreaterThan(-1);
+    expect(scopeReconciliation).toBeGreaterThan(canonicalCopy);
+    expect(agentReconciliation).toBeGreaterThan(scopeReconciliation);
+  });
+
+  test('marks legacy scope memberships explicit before organization reconciliation', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const sourceMigration = source.indexOf('source: "explicit"');
+    const reconciliation = source.indexOf('reconcileOrganizationScopeMemberships(organization.key');
+    expect(sourceMigration).toBeGreaterThan(-1);
+    expect(reconciliation).toBeGreaterThan(sourceMigration);
   });
 });

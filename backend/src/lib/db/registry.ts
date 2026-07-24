@@ -35,6 +35,9 @@ import { getAllThreadsChunked, listThreadsPage, upsertThreadByKey } from './thre
 import { getAllMessagesChunked, listMessagesPage, upsertMessageByKey } from './messages.node';
 import { getAllMessageMentionsChunked, listMessageMentionsPage, upsertMessageMentionByKey } from './message-mentions.node';
 import { getAllMessageReactionsChunked, listMessageReactionsPage, upsertMessageReactionByKey } from './message-reactions.node';
+import { getAllPollsChunked, listPollsPage, upsertPollByKey } from './polls.node';
+import { getAllPollOptionsChunked, listPollOptionsPage, upsertPollOptionByKey } from './poll-options.node';
+import { getAllPollVotesChunked, listPollVotesPage, upsertPollVoteByKey } from './poll-votes.node';
 import { getAllFoldersChunked, listFoldersPage, upsertFolderByKey } from './folders.node';
 import { getAllDocumentsChunked, listDocumentsPage, upsertDocumentByKey } from './documents.node';
 import { getAllDocumentVersionsChunked, listDocumentVersionsPage, upsertDocumentVersionByKey } from './document-versions.node';
@@ -77,6 +80,9 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   messages: { listPage: listMessagesPage, getAllChunked: getAllMessagesChunked, upsertByKey: upsertMessageByKey },
   messageMentions: { listPage: listMessageMentionsPage, getAllChunked: getAllMessageMentionsChunked, upsertByKey: upsertMessageMentionByKey },
   messageReactions: { listPage: listMessageReactionsPage, getAllChunked: getAllMessageReactionsChunked, upsertByKey: upsertMessageReactionByKey },
+  polls: { listPage: listPollsPage, getAllChunked: getAllPollsChunked, upsertByKey: upsertPollByKey },
+  pollOptions: { listPage: listPollOptionsPage, getAllChunked: getAllPollOptionsChunked, upsertByKey: upsertPollOptionByKey },
+  pollVotes: { listPage: listPollVotesPage, getAllChunked: getAllPollVotesChunked, upsertByKey: upsertPollVoteByKey },
   folders: { listPage: listFoldersPage, getAllChunked: getAllFoldersChunked, upsertByKey: upsertFolderByKey },
   documents: { listPage: listDocumentsPage, getAllChunked: getAllDocumentsChunked, upsertByKey: upsertDocumentByKey },
   documentVersions: { listPage: listDocumentVersionsPage, getAllChunked: getAllDocumentVersionsChunked, upsertByKey: upsertDocumentVersionByKey },

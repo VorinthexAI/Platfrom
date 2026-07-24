@@ -41,7 +41,7 @@ export async function postOrchestratorChat(c: Context) {
   const orchestrator = await resolveChatOrchestrator(query);
   if (!orchestrator) return c.json({ error: 'orchestrator not found' }, 404);
   trackPlatformEvent({ slug: 'orchestrator.chat.started', data: { orchestratorId: orchestrator.key } });
-  const stream = streamTool('orchestrator.chat', orchestrator.skill, { message }, { signal: c.req.raw.signal });
+  const stream = streamTool('chat', orchestrator.skill, { message }, { signal: c.req.raw.signal });
   return streamSSE(c, async (sse) => {
     await sse.writeSSE({ event: 'start', data: JSON.stringify({ orchestrator_id: orchestrator.key }) });
     try {

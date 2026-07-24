@@ -14,6 +14,7 @@ import { getProductByProductId, insertProduct, updateProduct, type Product } fro
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
+import { reconcileOrganizationInheritedAgentMemberships, reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 
@@ -34,8 +35,16 @@ export interface AiRuntimeSeedUpserters {
   action(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult>;
   provider(seed: (typeof SEEDED_PROVIDERS)[number]): Promise<SeedResult>;
   model(seed: (typeof SEEDED_MODELS)[number]): Promise<SeedResult>;
+  reconcileObsoleteModelActions(): Promise<SeedResult[]>;
   modelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]): Promise<SeedResult>;
   modelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult>;
+}
+
+export interface ObsoleteModelActionReconciliationStore {
+  getModelBySlug(slug: string): Promise<{ key: string } | null>;
+  getActionBySlug(slug: string): Promise<{ key: string } | null>;
+  getModelActionByPair(modelKey: string, actionKey: string): Promise<{ key: string; enabled: boolean } | null>;
+  updateModelAction(key: string, patch: { enabled: boolean }): Promise<unknown>;
 }
 
 const now = () => new Date().toISOString();
@@ -1056,6 +1065,26 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
   return { collection: 'modelActions', key: existing.key, status: 'updated' };
 }
 
+/** Retires model-action pairs previously owned by the seed without touching custom routes. */
+export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelActionReconciliationStore = {
+  getModelBySlug,
+  getActionBySlug,
+  getModelActionByPair,
+  updateModelAction,
+}): Promise<SeedResult[]> {
+  const [model, action] = await Promise.all([
+    store.getModelBySlug('amazon.nova-2-sonic'),
+    store.getActionBySlug('orchestrator-chat'),
+  ]);
+  if (!model || !action) return [];
+
+  const existing = await store.getModelActionByPair(model.key, action.key);
+  if (!existing?.enabled) return [];
+
+  await store.updateModelAction(existing.key, { enabled: false });
+  return [{ collection: 'modelActions', key: existing.key, status: 'updated' }];
+}
+
 async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult> {
   const parsed = modelProviderSeedSchema.parse(seed);
   const model = await getModelBySlug(parsed.modelSlug);
@@ -1208,6 +1237,7 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   action: upsertSeedAction,
   provider: upsertSeedProvider,
   model: upsertSeedModel,
+  reconcileObsoleteModelActions: reconcileObsoleteSeededModelActions,
   modelAction: upsertSeedModelAction,
   modelProvider: upsertSeedModelProvider,
 }): Promise<SeedResult[]> {
@@ -1215,6 +1245,7 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
   for (const seed of SEEDED_ACTIONS) results.push(await upserters.action(seed));
   for (const seed of SEEDED_PROVIDERS) results.push(await upserters.provider(seed));
   for (const seed of SEEDED_MODELS) results.push(await upserters.model(seed));
+  results.push(...await upserters.reconcileObsoleteModelActions());
   for (const seed of SEEDED_MODEL_ACTIONS) results.push(await upserters.modelAction(seed));
   for (const seed of SEEDED_MODEL_PROVIDERS) results.push(await upserters.modelProvider(seed));
   return results;
@@ -1298,6 +1329,10 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
     results.push({ collection: 'scopeScopes', key: relation.key, status: 'created' });
   }
 
+  const membershipReconciliation = await reconcileOrganizationScopeMemberships(rootOrganization.key);
+  results.push(...membershipReconciliation.created.map(({ key }) => ({ collection: 'scopeMembers', key, status: 'created' as const })));
+  const agentMembershipReconciliation = await reconcileOrganizationInheritedAgentMemberships(rootOrganization.key);
+  results.push(...agentMembershipReconciliation.created.map(({ key }) => ({ collection: 'agentMembers', key, status: 'created' as const })));
 
   for (const product of SEEDED_PRODUCTS) {
     results.push(await upsertSeedProduct(product));

@@ -32,6 +32,7 @@ export interface ToolDependencies extends RouterDependencies, DocumentProcessing
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
+  organizationKey?: string;
   archiveContext?: DomainToolContext;
   archiveDependencies?: ArchiveToolDependencies;
   domainDependencies?: DomainToolExecutionOptions;
@@ -44,7 +45,7 @@ const chatOutputSchema = z.object({
 }).strict();
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
-export function runTool(name: 'orchestrator.chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
+export function runTool(name: 'chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
 export function runTool<Name extends ArchiveToolName>(name: Name, skill: string, rawInput: ArchiveToolInput<Name>, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<ArchiveToolOutput<Name>>;
 export function runTool<Name extends DomainActionSlug>(name: Name, skill: string, rawInput: unknown, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<unknown>;
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
