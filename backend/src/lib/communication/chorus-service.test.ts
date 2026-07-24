@@ -12,8 +12,8 @@ import type { CommunicationRepository, DirectChannelAccess, DirectOrchestratorCa
 
 const now = '2026-07-24T12:00:00.000Z';
 const organizationKey = 'root-org';
-const membershipKey = newId();
-const orchestratorKey = newId();
+const membershipKey = 'membership_root-founder';
+const orchestratorKey = 'orchestrator_atlas';
 const scopeKey = newId();
 const actor = { organizationKey, membershipKey };
 
