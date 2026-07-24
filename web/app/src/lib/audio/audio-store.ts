@@ -2,6 +2,8 @@
 
 import { create } from "zustand";
 import { trackLandingEvent } from "@/lib/analytics";
+import { createPlaybackGeneration } from "./playback-generation";
+import { voiceToggleAction } from "./voice-toggle";
 
 /**
  * The galaxy's sound has three channels:
@@ -34,6 +36,13 @@ const VOICE_VOLUME = 0.9;
 let ambient: HTMLAudioElement | null = null;
 let mission: HTMLAudioElement | null = null;
 let voice: HTMLAudioElement | null = null;
+let voiceRequestedSrc: string | null = null;
+const missionPlayback = createPlaybackGeneration();
+let missionRequested = false;
+let removeMissionEnded: (() => void) | null = null;
+const voicePlayback = createPlaybackGeneration();
+let voiceGeneration = 0;
+let removeVoiceListeners: (() => void) | null = null;
 
 /** The biome voice line the mission interrupted; resumed when it ends. */
 let voiceHeldForMission = false;
@@ -60,32 +69,49 @@ function ambientElement(): HTMLAudioElement {
   return ambient;
 }
 
-function missionElement(): HTMLAudioElement {
-  if (!mission) {
-    mission = new Audio(MISSION_AUDIO_SRC);
-    mission.loop = false;
-    mission.preload = "auto";
-    mission.volume = MISSION_VOLUME;
-  }
-  return mission;
+function createMissionElement(): HTMLAudioElement {
+  const audio = new Audio(MISSION_AUDIO_SRC);
+  audio.loop = false;
+  audio.preload = "auto";
+  audio.volume = MISSION_VOLUME;
+  return audio;
 }
 
-function voiceElement(): HTMLAudioElement {
-  if (!voice) {
-    voice = new Audio();
-    voice.preload = "auto";
-    voice.volume = VOICE_VOLUME;
-    voice.addEventListener("play", settleAmbientVolume);
-    voice.addEventListener("ended", settleAmbientVolume);
-    voice.addEventListener("pause", settleAmbientVolume);
+function invalidateVoicePlayback(resetPosition: boolean) {
+  voicePlayback.invalidate();
+  removeVoiceListeners?.();
+  removeVoiceListeners = null;
+  if (voice) {
+    voice.pause();
+    if (resetPosition) voice.currentTime = 0;
   }
-  return voice;
+}
+
+function createVoiceElement(src: string, generation: number): HTMLAudioElement {
+  const audio = new Audio();
+  audio.preload = "auto";
+  audio.volume = VOICE_VOLUME;
+  audio.src = src;
+
+  const isCurrent = () => voicePlayback.isCurrent(generation) && voice === audio;
+  const onEnded = () => {
+    if (!isCurrent()) return;
+    voiceRequestedSrc = null;
+    useAudioStore.setState({ voicePlayingSrc: null });
+    settleAmbientVolume();
+  };
+  audio.addEventListener("ended", onEnded);
+  removeVoiceListeners = () => {
+    audio.removeEventListener("ended", onEnded);
+  };
+  return audio;
 }
 
 interface AudioState {
   missionPlaying: boolean;
   ambientStarted: boolean;
   pendingVoiceSrc: string | null;
+  voicePlayingSrc: string | null;
   /** Tap once → hear once; tap mid-voice → cancel. */
   toggleMission: () => void;
   startAmbient: () => void;
@@ -100,13 +126,26 @@ interface AudioState {
 export const useAudioStore = create<AudioState>((set, get) => {
   /** Start the mission voice from the top; pauses/queues the biome voice. */
   const startMission = (onBlocked?: () => void) => {
-    const audio = missionElement();
+    if (mission) mission.pause();
+    const audio = createMissionElement();
+    mission = audio;
+    const generation = missionPlayback.begin();
+    missionRequested = true;
+    removeMissionEnded?.();
+    removeMissionEnded = null;
 
     // A biome voice mid-line steps aside and continues afterwards — and a
     // voice that autoplay held back gets its turn after the mission.
     if (voice && !voice.paused) {
       voiceHeldForMission = true;
       voice.pause();
+      set({ voicePlayingSrc: null });
+      settleAmbientVolume();
+    } else if (voiceRequestedSrc) {
+      voiceQueuedBehindMission = voiceRequestedSrc;
+      invalidateVoicePlayback(true);
+      voiceRequestedSrc = null;
+      set({ pendingVoiceSrc: null, voicePlayingSrc: null });
     }
     const pendingSrc = get().pendingVoiceSrc;
     if (pendingSrc) {
@@ -115,7 +154,10 @@ export const useAudioStore = create<AudioState>((set, get) => {
     }
 
     const finish = () => {
+      if (!missionPlayback.isCurrent(generation)) return;
       audio.removeEventListener("ended", finish);
+      removeMissionEnded = null;
+      missionRequested = false;
       set({ missionPlaying: false });
       if (voiceHeldForMission) {
         voiceHeldForMission = false;
@@ -128,11 +170,16 @@ export const useAudioStore = create<AudioState>((set, get) => {
       settleAmbientVolume();
     };
     audio.addEventListener("ended", finish);
+    removeMissionEnded = () => audio.removeEventListener("ended", finish);
 
     audio.currentTime = 0;
     audio
       .play()
       .then(() => {
+        if (!missionPlayback.isCurrent(generation)) {
+          audio.pause();
+          return;
+        }
         set({ missionPlaying: true });
         settleAmbientVolume();
         trackLandingEvent({
@@ -141,11 +188,19 @@ export const useAudioStore = create<AudioState>((set, get) => {
         });
       })
       .catch(() => {
+        if (!missionPlayback.isCurrent(generation)) return;
         audio.removeEventListener("ended", finish);
+        removeMissionEnded = null;
+        missionRequested = false;
         if (voiceHeldForMission) {
           voiceHeldForMission = false;
           get().resumeVoice();
+        } else if (voiceQueuedBehindMission) {
+          const queued = voiceQueuedBehindMission;
+          voiceQueuedBehindMission = null;
+          get().playVoice(queued);
         }
+        settleAmbientVolume();
         onBlocked?.();
       });
   };
@@ -154,12 +209,16 @@ export const useAudioStore = create<AudioState>((set, get) => {
   missionPlaying: false,
   ambientStarted: false,
   pendingVoiceSrc: null,
+  voicePlayingSrc: null,
 
   toggleMission: () => {
-    const audio = missionElement();
-
-    if (!audio.paused) {
+    if (missionRequested && mission) {
+      const audio = mission;
       // Tap mid-voice: cancel outright and hand the floor back.
+      missionPlayback.invalidate();
+      missionRequested = false;
+      removeMissionEnded?.();
+      removeMissionEnded = null;
       audio.pause();
       audio.currentTime = 0;
       set({ missionPlaying: false });
@@ -200,57 +259,100 @@ export const useAudioStore = create<AudioState>((set, get) => {
 
   playVoice: (src) => {
     // The mission voice has the floor; the biome line waits its turn.
-    if (mission && !mission.paused) {
+    if (missionRequested) {
+      if (voiceHeldForMission) {
+        invalidateVoicePlayback(true);
+        voiceRequestedSrc = null;
+        voiceHeldForMission = false;
+      }
       voiceQueuedBehindMission = src;
+      set({ pendingVoiceSrc: null, voicePlayingSrc: null });
       return;
     }
-    const normalizedSrc = new URL(src, window.location.href).href;
-    if (voice && !voice.paused && voice.src === normalizedSrc) {
-      voice.pause();
-      voice.currentTime = 0;
-      set({ pendingVoiceSrc: null });
+    if (voiceToggleAction(get().voicePlayingSrc ?? voiceRequestedSrc, src) === "stop") {
+      invalidateVoicePlayback(true);
+      voiceRequestedSrc = null;
+      set({ pendingVoiceSrc: null, voicePlayingSrc: null });
       settleAmbientVolume();
       return;
     }
-    const audio = voiceElement();
-    audio.src = src;
-    audio.currentTime = 0;
+    invalidateVoicePlayback(true);
+    const generation = voicePlayback.begin();
+    voiceGeneration = generation;
+    voiceRequestedSrc = src;
+    const audio = createVoiceElement(src, generation);
+    voice = audio;
     audio
       .play()
       .then(() => {
-        set({ pendingVoiceSrc: null });
+        if (!voicePlayback.isCurrent(generation) || voice !== audio) {
+          audio.pause();
+          return;
+        }
+        set({
+          pendingVoiceSrc: null,
+          voicePlayingSrc: voiceHeldForMission ? null : src,
+        });
+        settleAmbientVolume();
         trackLandingEvent({
           slug: "landing.audio_played",
           metadata: { audio_kind: "voice", src },
         });
       })
-      .catch(() => set({ pendingVoiceSrc: src }));
+      .catch(() => {
+        if (!voicePlayback.isCurrent(generation) || voice !== audio) return;
+        voiceRequestedSrc = null;
+        set({ pendingVoiceSrc: src, voicePlayingSrc: null });
+        settleAmbientVolume();
+      });
   },
 
   stopVoice: () => {
-    if (voice && !voice.paused) voice.pause();
+    invalidateVoicePlayback(true);
+    voiceRequestedSrc = null;
     voiceHeldForMission = false;
     voiceQueuedBehindMission = null;
-    set({ pendingVoiceSrc: null });
+    set({ pendingVoiceSrc: null, voicePlayingSrc: null });
   },
 
   stopForegroundAudio: () => {
+    missionPlayback.invalidate();
+    missionRequested = false;
+    removeMissionEnded?.();
+    removeMissionEnded = null;
     if (mission && !mission.paused) mission.pause();
     if (mission) mission.currentTime = 0;
-    if (voice && !voice.paused) voice.pause();
+    invalidateVoicePlayback(true);
+    voiceRequestedSrc = null;
     voiceHeldForMission = false;
     voiceQueuedBehindMission = null;
-    set({ missionPlaying: false, pendingVoiceSrc: null });
+    set({ missionPlaying: false, pendingVoiceSrc: null, voicePlayingSrc: null });
     settleAmbientVolume();
   },
 
   pauseVoice: () => {
     if (voice && !voice.paused) voice.pause();
+    set({ voicePlayingSrc: null });
+    settleAmbientVolume();
   },
 
   resumeVoice: () => {
     if (voice && voice.paused && voice.src && voice.currentTime > 0 && !voice.ended) {
-      voice.play().catch(() => {});
+      const audio = voice;
+      const src = voiceRequestedSrc;
+      const generation = voiceGeneration;
+      audio.play().then(() => {
+        if (!voicePlayback.isCurrent(generation) || voice !== audio || !src) {
+          audio.pause();
+          return;
+        }
+        set({ pendingVoiceSrc: null, voicePlayingSrc: src });
+        settleAmbientVolume();
+      }).catch(() => {
+        if (!voicePlayback.isCurrent(generation) || voice !== audio || !src) return;
+        set({ pendingVoiceSrc: src, voicePlayingSrc: null });
+        settleAmbientVolume();
+      });
     }
   },
 

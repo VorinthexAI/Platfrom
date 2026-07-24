@@ -10,6 +10,9 @@ import { threadSchema } from './threads.node';
 import { messageSchema } from './messages.node';
 import { messageReactionSchema } from './message-reactions.node';
 import { messageMentionSchema } from './message-mentions.node';
+import { pollSchema } from './polls.node';
+import { pollOptionSchema } from './poll-options.node';
+import { pollVoteSchema } from './poll-votes.node';
 import { folderSchema } from './folders.node';
 import { documentSchema } from './documents.node';
 import { projectSchema } from './projects.node';
@@ -37,6 +40,9 @@ describe('node registry schema contracts', () => {
       'messages',
       'messageReactions',
       'messageMentions',
+      'polls',
+      'pollOptions',
+      'pollVotes',
       'folders',
       'documents',
       'documentVersions',
@@ -72,6 +78,9 @@ describe('node registry schema contracts', () => {
       messageSchema,
       messageReactionSchema,
       messageMentionSchema,
+      pollSchema,
+      pollOptionSchema,
+      pollVoteSchema,
       folderSchema,
       documentVersionSchema,
       documentShareSchema,

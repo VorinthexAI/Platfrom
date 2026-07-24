@@ -16,6 +16,7 @@ const CHROME = "#7f898f";
 
 interface OrchestratorCommandDeckProps {
   entity: GalaxyEntity;
+  organizationKey: string;
   reducedMotion: boolean;
   onScopeRoute?: (scope: GalaxyEntity) => void;
 }
@@ -521,7 +522,7 @@ function Console({ position, rotation = [0, 0, 0] }: { position: [number, number
   );
 }
 
-function IdentityMedallion({ entity, reducedMotion }: OrchestratorCommandDeckProps) {
+function IdentityMedallion({ entity, reducedMotion }: Pick<OrchestratorCommandDeckProps, "entity" | "reducedMotion">) {
   const texture = useTexture(entityLogoUrl(entity.type, entity.slug));
   const medallion = useRef<THREE.Group>(null);
   const scan = useRef<THREE.Mesh>(null);
@@ -740,7 +741,7 @@ function ScopeOrbitalSystem({ selectedId, reducedMotion }: { selectedId: string;
   );
 }
 
-interface CommandDeckSceneProps extends OrchestratorCommandDeckProps {
+interface CommandDeckSceneProps extends Pick<OrchestratorCommandDeckProps, "entity" | "reducedMotion"> {
   selectedScopeId: string;
 }
 
@@ -775,6 +776,18 @@ function CommandDeckScene(props: CommandDeckSceneProps) {
   );
 }
 
+function DemandFrameInvalidator({ reducedMotion }: { reducedMotion: boolean }) {
+  const invalidate = useThree((state) => state.invalidate);
+
+  useEffect(() => {
+    invalidate();
+    const interval = window.setInterval(invalidate, reducedMotion ? 250 : 100);
+    return () => window.clearInterval(interval);
+  }, [invalidate, reducedMotion]);
+
+  return null;
+}
+
 export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckProps) {
   const { entity, onScopeRoute } = props;
   const [selectedScopeId, setSelectedScopeId] = useState(entity.id);
@@ -793,7 +806,8 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
   return (
     <div className="relative h-full min-h-[360px] w-full overflow-hidden bg-black/70" aria-label={`${entity.name} Nexus command deck`}>
       <Canvas
-        dpr={[1, 1.35]}
+        dpr={[1, 1.15]}
+        frameloop="demand"
         shadows
          camera={{ position: [0, 2.45, 15.2], fov: 47, near: 0.1, far: 100 }}
         gl={{ alpha: true, antialias: true, stencil: true, powerPreference: "high-performance" }}
@@ -801,13 +815,14 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
         aria-label={instruction}
         role="img"
       >
+        <DemandFrameInvalidator reducedMotion={props.reducedMotion} />
         <Suspense fallback={null}>
           <CommandDeckScene {...sceneProps} />
         </Suspense>
       </Canvas>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:radial-gradient(rgba(255,255,255,0.7)_0.5px,transparent_0.7px)] [background-size:3px_3px]" />
-      <HqCommunicationOverlay selectedScopeId={selectedScopeId} onScopeChange={handleScopeChange} />
+      <HqCommunicationOverlay organizationKey={props.organizationKey} selectedScopeId={selectedScopeId} onScopeChange={handleScopeChange} />
     </div>
   );
 }

@@ -63,6 +63,7 @@ import {
   upsertCurrentMind,
 } from './system';
 import { invokeArchiveTool } from './archive-tools';
+import { chorusHandlers } from './chorus';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tempEmailHash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -444,6 +445,20 @@ export function registerRoutes(app: Hono) {
   app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
   app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
   app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
+  app.get('/founders/organizations/:organizationKey/chorus/channels', chorusHandlers.listChannels);
+  app.post('/founders/organizations/:organizationKey/chorus/orchestrators/:orchestratorKey/open', chorusHandlers.openChannel);
+  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', chorusHandlers.listMessages);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', chorusHandlers.postMessage);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/reactions', chorusHandlers.react);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads', chorusHandlers.createThread);
+  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey', chorusHandlers.readThread);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey/replies', chorusHandlers.replyThread);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey/resolve', chorusHandlers.resolveThread);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey/archive', chorusHandlers.archiveThread);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls', chorusHandlers.createPoll);
+  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey', chorusHandlers.readPoll);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey/votes', chorusHandlers.votePoll);
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey/close', chorusHandlers.closePoll);
   app.get('/founders/artifacts', listFounderArtifacts);
   app.post('/founders/artifacts', createFounderArtifact);
   app.get('/nexus/events/stream', streamNexusOrganizationInvalidations);

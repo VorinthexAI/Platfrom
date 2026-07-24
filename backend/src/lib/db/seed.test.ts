@@ -7,7 +7,7 @@ import { voiceSchema } from './voices.node';
 import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
-import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_VOICES, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_VOICES, reconcileObsoleteSeededModelActions, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
 
 describe('scope seeds', () => {
   test('place products and their Core capability and Command orchestrator children in the Nexus hierarchy', () => {
@@ -44,6 +44,16 @@ describe('scope seeds', () => {
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'hq')).toMatchObject({ name: 'HQ', key: 'cmrnlzf640005qc7kefvra0bn' });
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'archive')).toMatchObject({ summary: 'Capture notes, ideas, research, labels, folders, semantic search, and knowledge graph connections.', description: 'Archive lets you capture, organize, semantically search, and connect your notes through folders, labels, backlinks, and graph traversal.' });
     expect(SEEDED_SCOPES.find(({ slug }) => slug === 'atlas')).toMatchObject({ summary: 'Vision, leadership, direction, executive strategy, and company wide decisions.', description: 'Vision, leadership, direction, executive strategy, and company wide decisions.' });
+  });
+
+  test('reconciles memberships only after scopes and hierarchy relations exist', async () => {
+    const source = await Bun.file(join(import.meta.dir, 'seed.ts')).text();
+    const relationCreation = source.indexOf('scopes.addScopeRelation(parent.key, child.key)');
+    const membershipReconciliation = source.indexOf('reconcileOrganizationScopeMemberships(rootOrganization.key)');
+    const productSeeding = source.indexOf('for (const product of SEEDED_PRODUCTS)');
+    expect(relationCreation).toBeGreaterThan(-1);
+    expect(membershipReconciliation).toBeGreaterThan(relationCreation);
+    expect(membershipReconciliation).toBeLessThan(productSeeding);
   });
 });
 
@@ -103,7 +113,7 @@ describe('model and routing relation seeds', () => {
       'aws.transcribe-standard',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
-      .toEqual(['amazon.nova-2-sonic']);
+      .toEqual(['amazon.nova-pro', 'amazon.nova-2-lite']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
@@ -174,6 +184,7 @@ describe('AI runtime seed orchestration', () => {
       action: upsert('actions'),
       provider: upsert('providers'),
       model: upsert('models'),
+      reconcileObsoleteModelActions: async () => [],
       modelAction: upsert('modelActions'),
       modelProvider: upsert('modelProviders'),
     };
@@ -185,5 +196,49 @@ describe('AI runtime seed orchestration', () => {
     expect(second.map(({ collection, key }) => `${collection}:${key}`))
       .toEqual(first.map(({ collection, key }) => `${collection}:${key}`));
     expect(persisted.size).toBe(first.length);
+  });
+
+  test('disables only the obsolete Sonic orchestrator chat binding before upserting desired routes', async () => {
+    const routes = new Map([
+      ['sonic-key:chat-key', { key: 'stale-binding-key', priority: 100, enabled: true }],
+      ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
+      ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
+    ]);
+    const modelKeys = new Map([['amazon.nova-2-sonic', 'sonic-key'], ['amazon.nova-pro', 'pro-key'], ['amazon.nova-2-lite', 'lite-key'], ['custom.model', 'custom-key']]);
+    const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key']]);
+    let reconciliationUpdates = 0;
+    const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
+    const upserters: AiRuntimeSeedUpserters = {
+      action: noop('actions'),
+      provider: noop('providers'),
+      model: noop('models'),
+      reconcileObsoleteModelActions: () => reconcileObsoleteSeededModelActions({
+        getModelBySlug: async (slug) => modelKeys.has(slug) ? { key: modelKeys.get(slug)! } : null,
+        getActionBySlug: async (slug) => actionKeys.has(slug) ? { key: actionKeys.get(slug)! } : null,
+        getModelActionByPair: async (modelKey, actionKey) => routes.get(`${modelKey}:${actionKey}`) ?? null,
+        updateModelAction: async (key, patch) => {
+          const route = [...routes.values()].find((candidate) => candidate.key === key)!;
+          route.enabled = patch.enabled;
+          reconciliationUpdates++;
+        },
+      }),
+      modelAction: async (seed) => {
+        const modelKey = modelKeys.get(seed.modelSlug) ?? seed.modelSlug;
+        const actionKey = actionKeys.get(seed.actionSlug) ?? seed.actionSlug;
+        routes.set(`${modelKey}:${actionKey}`, { key: seed.key, priority: seed.priority, enabled: seed.enabled });
+        return { collection: 'modelActions', key: seed.key, status: 'updated' };
+      },
+      modelProvider: noop('modelProviders'),
+    };
+
+    await seedAiRuntimeNodes(upserters);
+    await seedAiRuntimeNodes(upserters);
+
+    expect(routes.get('sonic-key:chat-key')?.enabled).toBe(false);
+    expect(routes.get('pro-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('lite-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('sonic-key:speak-key')?.enabled).toBe(true);
+    expect(routes.get('custom-key:chat-key')?.enabled).toBe(true);
+    expect(reconciliationUpdates).toBe(1);
   });
 });

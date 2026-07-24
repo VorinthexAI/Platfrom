@@ -25,4 +25,5 @@ export async function ensureScopeMembersCollection(database: ScopesSetupDatabase
   await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey'], unique: false });
   await collection.ensureIndex({ type: 'persistent', fields: ['userOrganizationKey'], unique: false });
   await collection.ensureIndex({ type: 'persistent', fields: ['scopeKey', 'status'], unique: false });
+  await collection.ensureIndex({ type: 'persistent', fields: ['userOrganizationKey', 'source'], unique: false });
 }

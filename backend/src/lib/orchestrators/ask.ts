@@ -9,5 +9,5 @@ export type AskDependencies = ToolDependencies;
 
 /** Runs an orchestrator request through its only exposed tool. */
 export async function ask({ skill, message }: AskInput, dependencies: AskDependencies = {}): Promise<string> {
-  return runTool('orchestrator.chat', skill, { message }, dependencies);
+  return runTool('chat', skill, { message }, dependencies);
 }

@@ -266,7 +266,7 @@ async function executeAgentMember(action: DomainActionSlug, input: Input, contex
 }
 
 async function directScopeMemberships(scopeKey: string) {
-  const cursor = await db.query<{ key: string; scopeKey: string; userOrganizationKey: string; role: AccessRole; status: 'active' | 'suspended' }>('FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey RETURN MERGE(member, { key: member._key })', { scopeKey });
+  const cursor = await db.query<{ key: string; scopeKey: string; userOrganizationKey: string; role: AccessRole; status: 'active' | 'suspended'; source: 'explicit' }>('FOR member IN scopeMembers FILTER member.scopeKey == @scopeKey && (member.source == "explicit" || !HAS(member, "source")) RETURN MERGE(member, { key: member._key, source: "explicit" })', { scopeKey });
   return cursor.all();
 }
 
@@ -346,15 +346,18 @@ async function executeScopeMember(action: DomainActionSlug, input: Input, contex
     if (rankAccessRole(input.role) > actorRank) throw new DomainToolExecutionError('role_escalation', 'Cannot grant above the initiating role');
     if (targets.some((target) => target.status !== 'active')) throw new DomainToolExecutionError('membership_suspended', 'Only active organization members may be added to a scope');
     if (targetRelations.some(({ relation }) => relation)) throw new DomainToolExecutionError('scope_member_duplicate', 'A direct scope membership already exists; activate or update it instead');
-    const documents = targets.map((target) => ({ _key: newId(), scopeKey, userOrganizationKey: target.key, role: input.role, status: 'active' }));
-    await withTransaction(['scopeMembers'], async (trx) => { await trx.query('FOR document IN @documents INSERT document INTO scopeMembers', { documents }); });
+    const documents = targets.map((target) => ({ _key: newId(), scopeKey, userOrganizationKey: target.key, role: input.role, status: 'active', source: 'explicit' }));
+    await withTransaction(['scopeMembers'], async (trx) => { await trx.query('FOR document IN @documents UPSERT { scopeKey: document.scopeKey, userOrganizationKey: document.userOrganizationKey } INSERT document UPDATE { role: document.role, status: "active", source: "explicit" } IN scopeMembers', { documents }); });
   } else {
     if (targetRelations.some(({ relation }) => !relation)) throw new DomainToolExecutionError('scope_member_not_found', 'Every target must have a direct scope membership');
     const keys = targetRelations.map(({ relation }) => relation!.key);
     if (action === 'scope.member.role.update') { if (rankAccessRole(input.role) > actorRank) throw new DomainToolExecutionError('role_escalation', 'Cannot grant above the initiating role'); await withTransaction(['scopeMembers'], async (trx) => { await trx.query('FOR member IN scopeMembers FILTER member._key IN @keys UPDATE member WITH { role: @role } IN scopeMembers', { keys, role: input.role }); }); }
     if (action === 'scope.member.activate') await withTransaction(['scopeMembers'], async (trx) => { await trx.query('FOR member IN scopeMembers FILTER member._key IN @keys UPDATE member WITH { status: "active" } IN scopeMembers', { keys }); });
     if (action === 'scope.member.suspend') await withTransaction(['scopeMembers'], async (trx) => { await trx.query('FOR member IN scopeMembers FILTER member._key IN @keys UPDATE member WITH { status: "suspended" } IN scopeMembers', { keys }); });
-    if (action === 'scope.member.remove') await withTransaction(['scopeMembers'], async (trx) => { await trx.query('FOR member IN scopeMembers FILTER member._key IN @keys REMOVE member IN scopeMembers', { keys }); });
+    if (action === 'scope.member.remove') {
+      const organizationRows = targetRelations.map(({ target, relation }) => ({ key: relation!.key, role: target.orgRole === 'owner' || target.orgRole === 'admin' || target.orgRole === 'moderator' ? target.orgRole : 'viewer' }));
+      await withTransaction(['scopeMembers'], async (trx) => { await trx.query('FOR document IN @documents UPDATE document.key WITH { role: document.role, status: "active", source: "organization" } IN scopeMembers', { documents: organizationRows }); });
+    }
   }
   const sync = await syncOrganizationAgentMembers(context);
   await audit(context, action, { scopeKey, userOrganizationKeys: targets.map((target) => target.key), changedAt: timestamp });

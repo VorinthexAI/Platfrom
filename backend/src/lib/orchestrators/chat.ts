@@ -18,5 +18,5 @@ export async function askOrchestrator(orchestratorId: string, message: string, d
 export async function* streamOrchestrator(orchestratorId: string, message: string, dependencies?: ToolDependencies) {
   const orchestrator = await getOrchestratorById(orchestratorId);
   if (!orchestrator) throw new OrchestratorNotFoundError(orchestratorId);
-  yield* streamTool('orchestrator.chat', orchestrator.skill, { message }, dependencies);
+  yield* streamTool('chat', orchestrator.skill, { message }, dependencies);
 }

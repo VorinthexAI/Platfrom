@@ -239,9 +239,10 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
         <section className="relative flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1 overflow-hidden">
             <div className="absolute inset-0">
-              {enteredEntity ? (
+              {enteredEntity && organizationKey ? (
                   <OrchestratorCommandDeck
                     entity={enteredEntity}
+                    organizationKey={organizationKey}
                     reducedMotion={Boolean(reducedMotion)}
                     onScopeRoute={(scope) => updateDeckScopeRoute(enteredEntity, scope)}
                   />

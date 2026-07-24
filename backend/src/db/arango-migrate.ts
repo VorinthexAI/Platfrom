@@ -6,6 +6,7 @@ import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
 import { ensureOrganizationCredentialsCollection } from '../lib/ai/organization-credentials/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
+import { reconcileOrganizationInheritedAgentMemberships, reconcileOrganizationScopeMemberships } from '../lib/ai/scopes/membership-invariant';
 import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
 import { ensureAgentRunStepsCollection } from '../lib/ai/agent-run-steps/indexes';
 import { ensureAgentRunCallsCollection } from '../lib/ai/agent-run-calls/indexes';
@@ -479,12 +480,15 @@ const collections: CollectionSpec[] = [
   // Embedding policy: only human text is embedded — ids, enums, and
   // timestamps are queryable with plain filters and are never embed text.
   { name: 'scopes', embedKeys: ['name', 'slug', 'description'] },
-  { name: 'channels', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'position'] }, { fields: ['scopeKey', 'name'], unique: true }] },
+  { name: 'channels', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'position'] }, { fields: ['scopeKey', 'name'] }, { fields: ['directUserOrganizationKey', 'directOrchestratorKey'], unique: true, sparse: true }] },
   { name: 'channelParticipants', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['userOrganizationKey'], sparse: true }, { fields: ['orchestratorKey'], sparse: true }, { fields: ['channelKey', 'userOrganizationKey'], unique: true, sparse: true }, { fields: ['channelKey', 'orchestratorKey'], unique: true, sparse: true }] },
   { name: 'threads', embedKeys: ['title'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['rootMessageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'messages', embedKeys: ['content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['threadKey'], sparse: true }, { fields: ['authorParticipantKey'] }, { fields: ['replyToMessageKey'], sparse: true }, { fields: ['channelKey', 'createdAt'] }, { fields: ['threadKey', 'createdAt'], sparse: true }] },
   { name: 'messageMentions', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['participantKey', 'handledAt'] }, { fields: ['messageKey', 'participantKey'], unique: true }] },
   { name: 'messageReactions', embedKeys: ['reaction'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'] }, { fields: ['participantKey'] }, { fields: ['reaction'] }, { fields: ['messageKey', 'reaction'] }, { fields: ['messageKey', 'participantKey', 'reaction'], unique: true }] },
+  { name: 'polls', embedKeys: ['question'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['messageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
+  { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
+  { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
   { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
   { name: 'documentVersions', embedKeys: ['content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
@@ -663,6 +667,7 @@ async function main() {
   await ensureScopeScopesCollection(targetDb);
   await ensureScopeMembersCollection(targetDb);
   await targetDb.query(`FOR member IN scopeMembers FILTER !HAS(member, "status") UPDATE member WITH { status: "active" } IN scopeMembers`);
+  await targetDb.query(`FOR member IN scopeMembers FILTER !HAS(member, "source") UPDATE member WITH { source: "explicit" } IN scopeMembers`);
 
   // Migrate the former DAG links into a strict tree. Legacy keys were not
   // domain CUIDs, so each copied relation receives a fresh key.
@@ -835,6 +840,15 @@ async function main() {
         if (isLegacyIndex(spec.name, fields, (spec.indexes ?? []).map((desired) => desired.fields))) {
           await collection.dropIndex(index.id);
           console.log(`Dropped legacy index ${index.id} on ${spec.name}(${fields.join(', ')})`);
+        }
+      }
+    }
+    if (spec.name === 'channels') {
+      for (const index of await collection.indexes()) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+        if (fields.length === 2 && fields[0] === 'scopeKey' && fields[1] === 'name' && 'unique' in index && index.unique === true) {
+          await collection.dropIndex(index.id);
+          console.log(`Dropped obsolete unique channel-name index ${index.id}`);
         }
       }
     }
@@ -2051,6 +2065,23 @@ async function main() {
     `);
     console.log('Copied user_organization -> userOrganizations');
   }
+
+  // Canonical memberships are now available. Materialize every active
+  // organization member into every organization scope without changing any
+  // direct scope role or suspension that was already assigned explicitly.
+  const organizationCursor = await targetDb.query<{ key: string }>(`
+    FOR organization IN organizations
+      RETURN { key: organization._key }
+  `);
+  let reconciledScopeMemberships = 0;
+  let reconciledAgentMemberships = 0;
+  for (const organization of await organizationCursor.all()) {
+    const reconciliation = await reconcileOrganizationScopeMemberships(organization.key, {}, targetDb);
+    reconciledScopeMemberships += reconciliation.created.length;
+    const agentReconciliation = await reconcileOrganizationInheritedAgentMemberships(organization.key, targetDb);
+    reconciledAgentMemberships += agentReconciliation.created.length;
+  }
+  console.log(`Reconciled ${reconciledScopeMemberships} organization scope memberships and ${reconciledAgentMemberships} inherited agent grants`);
 
   // Invitations are no longer part of organization membership. Strip the
   // retired field from every live document so the production database and

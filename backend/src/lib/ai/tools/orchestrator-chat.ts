@@ -7,12 +7,14 @@ import { sanitizedAgentMessageSchema } from './input-sanitizer';
 
 export const orchestratorChatToolInputSchema = z.object({
   message: sanitizedAgentMessageSchema,
+  history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: sanitizedAgentMessageSchema }).strict()).max(40).optional(),
 }).strict();
 
 export interface OrchestratorChatToolDependencies extends RouterDependencies, DocumentProcessingDependencies {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
+  organizationKey?: string;
 }
 
 const chatOutputSchema = z.object({
@@ -22,10 +24,10 @@ const chatOutputSchema = z.object({
 }).strict();
 
 export const orchestratorChatTool = {
-  name: 'orchestrator.chat',
+  name: 'chat',
   inputSchema: orchestratorChatToolInputSchema,
   providerDefinition: {
-    name: 'orchestrator.chat',
+    name: 'chat',
     description: 'Answer the user through the orchestrator chat action.',
     inputSchema: {
       type: 'object',
@@ -37,7 +39,7 @@ export const orchestratorChatTool = {
   async execute(skill: string, rawInput: unknown, dependencies: OrchestratorChatToolDependencies = {}): Promise<string> {
     const chatInput = buildChatInput(skill, rawInput);
     if (dependencies.execute) {
-      const response = await dependencies.execute('nexus', chatInput);
+      const response = await dependencies.execute(dependencies.organizationKey ?? 'nexus', chatInput);
       return chatOutputSchema.parse(response.output).text;
     }
     let text = '';
@@ -48,7 +50,7 @@ export const orchestratorChatTool = {
   },
   async *stream(skill: string, rawInput: unknown, dependencies: OrchestratorChatToolDependencies = {}): AsyncIterable<ProviderStreamChunk> {
     const chatInput = buildChatInput(skill, rawInput);
-    const organizationKey = 'nexus';
+    const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
       yield* dependencies.stream(organizationKey, chatInput);
       return;
@@ -70,7 +72,10 @@ function buildChatInput(skill: string, rawInput: unknown): CoreChatInput {
   const parsedSkill = z.string().trim().min(1).parse(skill);
   return coreChatInputSchema.parse({
     systemPrompt: parsedSkill,
-    messages: [{ role: 'user', content: [{ type: 'text', text: input.message }] }],
+    messages: [
+      ...(input.history ?? []).map(({ role, content }) => ({ role, content: [{ type: 'text' as const, text: content }] })),
+      ...((input.history?.at(-1)?.role === 'user' && input.history.at(-1)?.content === input.message) ? [] : [{ role: 'user' as const, content: [{ type: 'text' as const, text: input.message }] }]),
+    ],
     options: { maxTokens: 2_000 },
   });
 }

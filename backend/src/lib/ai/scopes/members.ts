@@ -67,6 +67,7 @@ export function createScopeMemberRepository(database: ScopesDatabase = db): Scop
         scopeKey,
         userOrganizationKey,
         role: scopeMemberRoleSchema.parse(role),
+        source: 'explicit',
       });
 
       let scope;

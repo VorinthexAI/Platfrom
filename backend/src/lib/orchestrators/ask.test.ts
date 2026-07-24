@@ -13,7 +13,7 @@ const response: ProviderExecuteResponse<ChatOutput> = {
 
 describe('orchestrator chat tool', () => {
   test('exposes the unified registered tools', () => {
-    expect(TOOL_NAMES).toContain('orchestrator.chat');
+    expect(TOOL_NAMES).toContain('chat');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(ARCHIVE_TOOL_NAMES));
     expect(TOOL_NAMES).toContain('scope.list');
   });
@@ -38,7 +38,7 @@ describe('orchestrator chat tool', () => {
   });
 
   test('does not allow unknown tool input fields', async () => {
-    await expect(runTool('orchestrator.chat', 'Atlas', { message: 'hello', tool: 'delete' } as never, {
+    await expect(runTool('chat', 'Atlas', { message: 'hello', tool: 'delete' } as never, {
       execute: async () => response,
     })).rejects.toThrow();
   });
@@ -56,7 +56,7 @@ describe('orchestrator chat tool', () => {
 
   test('streams chat action chunks through the unified tool', async () => {
     const chunks = [];
-    for await (const chunk of streamTool('orchestrator.chat', 'Atlas', { message: 'hello 😀' }, {
+    for await (const chunk of streamTool('chat', 'Atlas', { message: 'hello 😀' }, {
       stream: async function* (_organizationKey, input) {
         expect(input.messages[0]!.content[0]!.type).toBe('text');
         yield { type: 'text-delta', text: 'Hello' };

@@ -17,13 +17,24 @@ export async function closeDb() {
 }
 
 export async function withTransaction<T>(
-  collections: string[],
+  collections: string[] | { read?: string[]; write: string[] },
   fn: (trx: Awaited<ReturnType<typeof db.beginTransaction>> & { query: typeof db.query }) => Promise<T>,
 ): Promise<T> {
-  const trx = await db.beginTransaction({ write: collections, exclusive: collections });
+  return withDatabaseTransaction(db, collections, fn);
+}
+
+export async function withDatabaseTransaction<T>(
+  database: Database,
+  collections: string[] | { read?: string[]; write: string[] },
+  fn: (trx: Awaited<ReturnType<typeof database.beginTransaction>> & { query: typeof database.query }) => Promise<T>,
+): Promise<T> {
+  const declaration = Array.isArray(collections)
+    ? { write: collections, exclusive: collections }
+    : { read: collections.read, write: collections.write, exclusive: collections.write };
+  const trx = await database.beginTransaction(declaration);
   try {
     const transaction = Object.assign(trx, {
-      query: ((query: Parameters<typeof db.query>[0], bindVars?: Parameters<typeof db.query>[1]) => trx.step(() => db.query(query as never, bindVars))) as typeof db.query,
+      query: ((query: Parameters<typeof database.query>[0], bindVars?: Parameters<typeof database.query>[1]) => trx.step(() => database.query(query as never, bindVars))) as typeof database.query,
     });
     const result = await fn(transaction);
     await trx.commit();
