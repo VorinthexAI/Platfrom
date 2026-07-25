@@ -4,6 +4,7 @@ import Image from "next/image";
 import * as Dialog from "@radix-ui/react-dialog";
 import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
+import { Button } from "@vorinthex/shared/ui";
 import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
 import { orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
@@ -37,6 +38,8 @@ import { createFrameBatcher } from "@/lib/founders/frame-batcher";
 
 interface HqCommunicationOverlayProps {
   organizationKey: string;
+  userName: string;
+  countryCode: string;
   selectedScopeId: string;
   onScopeChange: (id: string) => void;
 }
@@ -70,8 +73,17 @@ const PersonMark = memo(function PersonMark({ entry, size = 34 }: { entry: Choru
   );
 });
 
-function Timestamp({ value }: { value: string }) {
-  const label = `${value.slice(11, 16)} UTC`;
+const COUNTRY_TIME_ZONES: Record<string, string> = {
+  AU: "Australia/Sydney", BR: "America/Sao_Paulo", CA: "America/Toronto", CN: "Asia/Shanghai", DE: "Europe/Berlin",
+  DK: "Europe/Copenhagen", ES: "Europe/Madrid", FI: "Europe/Helsinki", FR: "Europe/Paris", GB: "Europe/London",
+  IN: "Asia/Kolkata", IT: "Europe/Rome", JP: "Asia/Tokyo", KR: "Asia/Seoul", NL: "Europe/Amsterdam", NO: "Europe/Oslo",
+  NZ: "Pacific/Auckland", PL: "Europe/Warsaw", PT: "Europe/Lisbon", SE: "Europe/Stockholm", SG: "Asia/Singapore",
+  US: "America/New_York",
+};
+
+function Timestamp({ value, countryCode }: { value: string; countryCode: string }) {
+  const timeZone = COUNTRY_TIME_ZONES[countryCode] ?? "UTC";
+  const label = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone, timeZoneName: "short" }).format(new Date(value));
   return <time dateTime={value} title={value} className="font-mono text-[9px] text-silver-600">{label}</time>;
 }
 
@@ -222,9 +234,11 @@ interface MessageViewProps {
   onCreatePoll: (message: ChorusMessage) => void;
   onError: (error: string | null) => void;
   onOptimisticReaction: (messageKey: string, reaction: string) => void;
+  userName: string;
+  countryCode: string;
 }
 
-const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction }: MessageViewProps) {
+const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode }: MessageViewProps) {
   const channelKey = entry.channel!.key;
   const interactive = !message.clientState;
   const react = async (reaction: string) => {
@@ -236,9 +250,9 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
   };
   return (
     <article className="group flex gap-3 px-1 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_84px]">
-      {message.author.type === "orchestrator" ? <PersonMark entry={entry} size={36} /> : <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[8px] text-silver-200">You</span>}
+      {message.author.type === "orchestrator" ? <PersonMark entry={entry} size={36} /> : <span aria-label={userName} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[11px] text-silver-200">{userName.trim().charAt(0).toUpperCase() || "?"}</span>}
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} /></div>
+        <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} countryCode={countryCode} /></div>
         <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300">{message.content ? plainChorusText(message.content) : message.clientState?.state === "failed" ? <span className="text-status-critical">No response was received.</span> : <span className="animate-pulse text-silver-500">Thinking...</span>}</p>
         {message.clientState ? <p role={message.clientState.state === "failed" ? "alert" : "status"} className={`mt-1 font-mono text-[8px] uppercase ${message.clientState.state === "failed" ? "text-status-critical" : "text-silver-600"}`}>{message.clientState.state === "failed" ? message.clientState.error ?? "Message reconciliation failed" : message.author.type === "user" ? "Sending" : "Response pending"}</p> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
@@ -284,6 +298,7 @@ function PollComposer({ message, onCancel, onCreate, busy, error }: { message: C
 
 interface ThreadPanelProps {
   entry: ChorusChannelEntry;
+  countryCode: string;
   thread: ChorusThread;
   messages: ChorusMessage[];
   loading: boolean;
@@ -293,7 +308,7 @@ interface ThreadPanelProps {
   onResolve: () => Promise<void>;
 }
 
-function ThreadPanel({ entry, thread, messages, loading, error, onClose, onReply, onResolve }: ThreadPanelProps) {
+function ThreadPanel({ entry, countryCode, thread, messages, loading, error, onClose, onReply, onResolve }: ThreadPanelProps) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent) => { event.preventDefault(); if (!draft.trim() || busy) return; setBusy(true); try { await onReply(draft.trim()); setDraft(""); } catch { /* The parent renders the request error and the draft stays intact. */ } finally { setBusy(false); } };
@@ -304,7 +319,7 @@ function ThreadPanel({ entry, thread, messages, loading, error, onClose, onReply
         <Dialog.Content className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-[var(--border-strong)] bg-obsidian-950/98 shadow-2xl sm:w-[420px]" aria-describedby={undefined}>
       <header className="flex h-14 items-center justify-between border-b border-[var(--border-faint)] px-4"><div><Dialog.Title className="text-xs text-silver-100">{thread.title ?? "Thread"}</Dialog.Title><span className="font-mono text-[8px] uppercase text-silver-500">{thread.status}</span></div><Dialog.Close type="button" aria-label="Close thread panel" className="rounded focus-visible:outline-2"><CloseIcon size="sm" /></Dialog.Close></header>
       <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-4" aria-live="polite">
-        {loading ? <p className="animate-pulse text-[11px] text-silver-500">Loading thread...</p> : messages.map((message) => <div key={message.key} className="border-b border-[var(--border-faint)] py-3"><div className="flex items-center gap-2 text-[10px] text-silver-400">{message.author.type === "orchestrator" ? entry.orchestrator.name : "You"}<Timestamp value={message.createdAt} /></div><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-silver-200">{message.content}</p></div>)}
+         {loading ? <p className="animate-pulse text-[11px] text-silver-500">Loading thread...</p> : messages.map((message) => <div key={message.key} className="border-b border-[var(--border-faint)] py-3"><div className="flex items-center gap-2 text-[10px] text-silver-400">{message.author.type === "orchestrator" ? entry.orchestrator.name : "You"}<Timestamp value={message.createdAt} countryCode={countryCode} /></div><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-silver-200">{message.content}</p></div>)}
         {error ? <p role="alert" className="mt-2 text-[10px] text-status-critical">{error}</p> : null}
       </div>
       <div className="border-t border-[var(--border-faint)] p-3">
@@ -384,7 +399,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   );
 });
 
-export default function HqCommunicationOverlay({ organizationKey, selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
+export default function HqCommunicationOverlay({ organizationKey, userName, countryCode, selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
   const [channels, setChannels] = useState<ChorusChannelEntry[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(true);
   const [channelsError, setChannelsError] = useState<string | null>(null);
@@ -617,7 +632,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
           <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
-            {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
+             {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
               if (item.key !== messageKey) return item;
               const existing = item.reactions.find((entry) => entry.reaction === reaction);
               const reactions = existing
@@ -634,7 +649,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
             <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-[min(92vw,390px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[var(--border-strong)] bg-obsidian-950 p-5 shadow-2xl" aria-describedby="clear-channel-description">
               <Dialog.Title className="text-sm text-silver-50">Clear this channel?</Dialog.Title>
               <Dialog.Description id="clear-channel-description" className="mt-2 text-[11px] leading-5 text-silver-400">This removes every message in your channel with {selected?.orchestrator.name ?? "this orchestrator"}.</Dialog.Description>
-              <div className="mt-5 flex justify-end gap-2"><Dialog.Close type="button" disabled={clearing} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-[10px] text-silver-300 disabled:opacity-40">Cancel</Dialog.Close><button type="button" disabled={clearing} onClick={() => void clearSelectedChannel()} className="rounded-lg bg-silver-200 px-3 py-2 text-[10px] text-obsidian-990 disabled:opacity-40">{clearing ? "Clearing..." : "Clear channel"}</button></div>
+               <div className="mt-5 flex justify-end gap-2"><Dialog.Close type="button" disabled={clearing} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-[10px] text-silver-300 disabled:opacity-40">Cancel</Dialog.Close><Button type="button" variant="primary" loading={clearing} onClick={() => void clearSelectedChannel()}>{clearing ? "Clearing..." : "Clear channel"}</Button></div>
             </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
@@ -654,7 +669,7 @@ export default function HqCommunicationOverlay({ organizationKey, selectedScopeI
             if (organizationGeneration.current === generation) setBusyMessage(null);
           }
         }} /> : null}
-        {selected && channelKey && threadState ? <ThreadPanel entry={selected} {...threadState} onClose={() => {
+         {selected && channelKey && threadState ? <ThreadPanel entry={selected} countryCode={countryCode} {...threadState} onClose={() => {
           threadGeneration.current += 1;
           controllers.current.get("thread")?.abort();
           controllers.current.get("thread-refresh")?.abort();
