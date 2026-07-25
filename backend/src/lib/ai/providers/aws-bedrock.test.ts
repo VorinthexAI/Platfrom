@@ -21,8 +21,8 @@ async function streamError(stream: AsyncIterable<unknown>): Promise<ProviderErro
 
 const streamRequest = {
   actionId: 'orchestrator-chat' as const,
-  modelId: 'amazon.nova-pro',
-  externalModelId: 'amazon.nova-pro-v1:0',
+  modelId: 'amazon.nova-2-sonic',
+  externalModelId: 'amazon.nova-2-sonic-v1:0',
   input: {
     systemPrompt: 'Primary system prompt',
     messages: [
@@ -83,7 +83,7 @@ describe('AWS Bedrock provider', () => {
 
     expect(command).toBeInstanceOf(ConverseStreamCommand);
     expect(command!.input).toEqual({
-      modelId: 'amazon.nova-pro-v1:0',
+      modelId: 'amazon.nova-2-sonic-v1:0',
       messages: [
         { role: 'user', content: [{ text: 'Hello' }] },
         { role: 'assistant', content: [{ text: 'Hi' }] },
@@ -116,7 +116,7 @@ describe('AWS Bedrock provider', () => {
     );
 
     for (const request of [
-      { ...streamRequest, externalModelId: 'amazon.nova-2-sonic-v1:0' },
+      { ...streamRequest, externalModelId: 'openai.gpt-5.6-luna' },
       { ...streamRequest, actionId: 'embed' as const },
     ]) {
       const error = await streamError(adapter.stream!(request));

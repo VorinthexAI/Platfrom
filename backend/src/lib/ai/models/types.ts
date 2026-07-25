@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
 export const MODEL_SLUGS = [
-  'amazon.nova-premier',
-  'amazon.nova-pro',
-  'amazon.nova-2-lite',
+  'openai.gpt-5.6-sol',
+  'openai.gpt-5.6-terra',
+  'openai.gpt-5.6-luna',
   'amazon.nova-2-sonic',
   'amazon.polly-generative',
   'amazon.titan-embed-text-v2',

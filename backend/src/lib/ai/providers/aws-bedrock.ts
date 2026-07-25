@@ -28,9 +28,7 @@ export type AwsBedrockCredentials = AwsBedrockProviderConfig;
 
 const PROVIDER_ID = 'aws-bedrock' as const;
 const BEDROCK_TEXT_MODEL_IDS = new Set([
-  'amazon.nova-premier-v1:0',
-  'amazon.nova-pro-v1:0',
-  'amazon.nova-2-lite-v1:0',
+  'amazon.nova-2-sonic-v1:0',
 ]);
 const converseResponseSchema = z.object({ output: z.object({ message: z.object({ content: z.array(z.object({ text: z.string().optional() }).passthrough()).optional() }).passthrough().optional() }), usage: z.object({ inputTokens: z.number().optional(), outputTokens: z.number().optional(), totalTokens: z.number().optional() }).passthrough().optional(), stopReason: z.string().optional() });
 const embeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1), inputTextTokenCount: z.number().optional() }).passthrough();

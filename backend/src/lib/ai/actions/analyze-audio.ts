@@ -1,2 +1,2 @@
 import type { ActionDefinition } from './types';
-export const analyzeAudioAction: ActionDefinition = { id: 'analyze-audio', modelPolicy: 'required', models: [{ provider: 'aws-bedrock', model: 'amazon.nova-pro', priority: 100 }, { provider: 'aws-bedrock', model: 'amazon.nova-2-lite', priority: 90 }] };
+export const analyzeAudioAction: ActionDefinition = { id: 'analyze-audio', modelPolicy: 'required', models: [{ provider: 'aws-bedrock-mantle', model: 'openai.gpt-5.6-terra', priority: 100 }, { provider: 'aws-bedrock-mantle', model: 'openai.gpt-5.6-luna', priority: 90 }] };
