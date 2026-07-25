@@ -743,6 +743,20 @@ function ScopeOrbitalSystem({ selectedId, reducedMotion }: { selectedId: string;
   );
 }
 
+// The deck uses demand rendering to avoid an idle render loop, so explicitly
+// invalidate it while the orbital system and scan effects are animating.
+function DemandFrameInvalidator({ reducedMotion }: { reducedMotion: boolean }) {
+  const invalidate = useThree((state) => state.invalidate);
+
+  useEffect(() => {
+    invalidate();
+    const interval = window.setInterval(invalidate, reducedMotion ? 1000 : 250);
+    return () => window.clearInterval(interval);
+  }, [invalidate, reducedMotion]);
+
+  return null;
+}
+
 interface CommandDeckSceneProps extends Pick<OrchestratorCommandDeckProps, "entity" | "reducedMotion"> {
   selectedScopeId: string;
 }
@@ -805,6 +819,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
         aria-label={instruction}
         role="img"
       >
+        <DemandFrameInvalidator reducedMotion={props.reducedMotion} />
         <Suspense fallback={null}>
           <CommandDeckScene {...sceneProps} />
         </Suspense>
