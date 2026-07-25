@@ -743,20 +743,6 @@ function ScopeOrbitalSystem({ selectedId, reducedMotion }: { selectedId: string;
   );
 }
 
-// The deck uses demand rendering to avoid an idle render loop, so explicitly
-// invalidate it while the orbital system and scan effects are animating.
-function DemandFrameInvalidator({ reducedMotion }: { reducedMotion: boolean }) {
-  const invalidate = useThree((state) => state.invalidate);
-
-  useEffect(() => {
-    invalidate();
-    const interval = window.setInterval(invalidate, reducedMotion ? 1000 : 250);
-    return () => window.clearInterval(interval);
-  }, [invalidate, reducedMotion]);
-
-  return null;
-}
-
 interface CommandDeckSceneProps extends Pick<OrchestratorCommandDeckProps, "entity" | "reducedMotion"> {
   selectedScopeId: string;
 }
@@ -811,7 +797,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
     <div className="relative h-full min-h-[360px] w-full overflow-hidden bg-black/70" aria-label={`${entity.name} Nexus command deck`}>
       <Canvas
         dpr={[1, 1.15]}
-        frameloop="demand"
+        frameloop={props.reducedMotion ? "demand" : "always"}
         shadows
          camera={{ position: [0, 2.45, 15.2], fov: 47, near: 0.1, far: 100 }}
         gl={{ alpha: true, antialias: true, stencil: true, powerPreference: "high-performance" }}
@@ -819,7 +805,6 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
         aria-label={instruction}
         role="img"
       >
-        <DemandFrameInvalidator reducedMotion={props.reducedMotion} />
         <Suspense fallback={null}>
           <CommandDeckScene {...sceneProps} />
         </Suspense>
