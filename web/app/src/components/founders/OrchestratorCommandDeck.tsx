@@ -17,6 +17,8 @@ const CHROME = "#7f898f";
 interface OrchestratorCommandDeckProps {
   entity: GalaxyEntity;
   organizationKey: string;
+  userName: string;
+  countryCode: string;
   reducedMotion: boolean;
   onScopeRoute?: (scope: GalaxyEntity) => void;
 }
@@ -809,7 +811,7 @@ export default function OrchestratorCommandDeck(props: OrchestratorCommandDeckPr
       </Canvas>
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_42%,transparent_20%,rgba(0,0,0,0.66)_100%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.045] [background-image:radial-gradient(rgba(255,255,255,0.7)_0.5px,transparent_0.7px)] [background-size:3px_3px]" />
-      <HqCommunicationOverlay organizationKey={props.organizationKey} selectedScopeId={selectedScopeId} onScopeChange={handleScopeChange} />
+      <HqCommunicationOverlay organizationKey={props.organizationKey} userName={props.userName} countryCode={props.countryCode} selectedScopeId={selectedScopeId} onScopeChange={handleScopeChange} />
     </div>
   );
 }

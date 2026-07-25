@@ -98,6 +98,7 @@ export async function getFoundersAccount(c: Context) {
       name: user.name,
       alias: user.alias,
       email: user.email,
+      countryCode: user.countryCode,
     },
     rootOrganization: {
       key: rootOrganization.key,

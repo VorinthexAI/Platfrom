@@ -243,6 +243,8 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                   <OrchestratorCommandDeck
                     entity={enteredEntity}
                     organizationKey={organizationKey}
+                    userName={account?.user.name ?? account?.user.alias ?? account?.user.email ?? "User"}
+                    countryCode={account?.user.countryCode ?? "SE"}
                     reducedMotion={Boolean(reducedMotion)}
                     onScopeRoute={(scope) => updateDeckScopeRoute(enteredEntity, scope)}
                   />
