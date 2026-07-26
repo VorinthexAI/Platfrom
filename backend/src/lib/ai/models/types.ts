@@ -4,7 +4,7 @@ export const MODEL_SLUGS = [
   'openai.gpt-5.6-sol',
   'openai.gpt-5.6-terra',
   'openai.gpt-5.6-luna',
-  'amazon.nova-2-sonic',
+  'openai.gpt-realtime-2',
   'amazon.polly-generative',
   'amazon.titan-embed-text-v2',
   'aws.transcribe-standard',

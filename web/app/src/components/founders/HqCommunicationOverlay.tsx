@@ -161,9 +161,6 @@ const OrchestratorRail = memo(function OrchestratorRail({ channels, selectedKey,
   return (
     <aside className="flex min-h-0 flex-col border-r border-[var(--border-faint)] bg-obsidian-950/90 [contain:layout_paint]">
       <div className="border-b border-[var(--border-faint)] p-4"><span className="mb-2 block font-mono text-[9px] uppercase tracking-[0.2em] text-silver-500">Scope</span><ScopeSelector selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} /></div>
-      <div className="border-b border-[var(--border-faint)] px-4 py-3">
-        <span className="font-mono text-[9px] tracking-[0.2em] text-silver-500">Channels</span>
-      </div>
       <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [contain:content]">
         {loading ? <div aria-label="Loading channels" className="space-y-2">{[0, 1, 2, 3].map((item) => <div key={item} className="h-10 animate-pulse rounded-lg bg-white/[0.04]" />)}</div> : null}
         {error ? <div role="alert" className="rounded-xl border border-status-critical/30 p-3 text-[11px] text-status-critical"><p>{error}</p><button type="button" onClick={onRetry} className="mt-2 rounded-md border border-current px-2 py-1 focus-visible:outline-2">Retry</button></div> : null}

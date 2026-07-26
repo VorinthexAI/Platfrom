@@ -602,11 +602,11 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
-    key: 'cmnova2sonicmodel00000001',
-    slug: 'amazon.nova-2-sonic',
-    name: 'Amazon Nova 2 Sonic',
-    description: 'Amazon Nova model for real-time text and voice chat, orchestrator dialogue, and low-latency calls.',
-    supportedUseCases: 'Real-time text and voice chat, orchestrator dialogue, and low-latency conversational AI.',
+    key: 'cmgptrealtime2model0000001',
+    slug: 'openai.gpt-realtime-2',
+    name: 'OpenAI GPT Realtime 2',
+    description: 'OpenAI realtime model for natural speech-to-speech conversations, orchestrator dialogue, and low-latency calls.',
+    supportedUseCases: 'Real-time text and voice chat, orchestrator dialogue, speech synthesis, transcription, and low-latency conversational AI.',
     enabled: true,
   },
   {
@@ -636,13 +636,6 @@ export const SEEDED_MODELS = [
 ] as const;
 
 const LEGACY_SEEDED_MODEL_ACTIONS = [
-  {
-    key: 'cmnova2sonicaction0000001',
-    modelSlug: 'amazon.nova-2-sonic',
-    actionSlug: 'core.chat',
-    priority: 100,
-    enabled: true,
-  },
   {
     key: 'cmtitanembedv2action0000001',
     modelSlug: 'amazon.titan-embed-text-v2',
@@ -693,10 +686,10 @@ export const SEEDED_MODEL_PROVIDERS = [
     enabled: true,
   },
   {
-    key: 'cmnova2sonicroute00000001',
-    modelSlug: 'amazon.nova-2-sonic',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'amazon.nova-2-sonic-v1:0',
+    key: 'cmgptrealtime2route0000001',
+    modelSlug: 'openai.gpt-realtime-2',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-realtime-2',
     enabled: true,
   },
   {
@@ -899,31 +892,31 @@ type SeededOrchestratorSource = {
 type SeededVoice = Pick<Voice, 'provider' | 'model' | 'modelLabel' | 'voice' | 'label' | 'language' | 'format'>;
 
 export const SEEDED_ORCHESTRATOR_SOURCES: SeededOrchestratorSource[] = [
-  ['Atlas', 'CEO', 'Matthew'],
-  ['Metis', 'CIO', 'Matthew'],
-  ['Echo', 'CKO', 'Matthew'],
-  ['Matrix', 'CDO', 'Matthew'],
-  ['Hermes', 'COO', 'Matthew'],
-  ['Harmony', 'CHRO', 'Tiffany'],
-  ['Phoenix', 'CGO', 'Matthew'],
-  ['Iris', 'CCO', 'Tiffany'],
-  ['Orbit', 'CMO', 'Tiffany'],
-  ['Apollo', 'CSO', 'Matthew'],
-  ['Athena', 'CPO', 'Tiffany'],
-  ['Forge', 'CTO', 'Matthew'],
-  ['Aura', 'CXO', 'Tiffany'],
-  ['Pillar', 'CQO', 'Matthew'],
-  ['Helios', 'CAIO', 'Matthew'],
-  ['Vulcan', 'CAO', 'Matthew'],
-  ['Ledger', 'CFO', 'Matthew'],
-  ['Mercury', 'CRO', 'Matthew'],
-  ['Sentinel', 'CISO', 'Matthew'],
-  ['Themis', 'CLO', 'Tiffany'],
+  ['Atlas', 'CEO', 'cedar'],
+  ['Metis', 'CIO', 'cedar'],
+  ['Echo', 'CKO', 'cedar'],
+  ['Matrix', 'CDO', 'cedar'],
+  ['Hermes', 'COO', 'cedar'],
+  ['Harmony', 'CHRO', 'marin'],
+  ['Phoenix', 'CGO', 'cedar'],
+  ['Iris', 'CCO', 'marin'],
+  ['Orbit', 'CMO', 'marin'],
+  ['Apollo', 'CSO', 'cedar'],
+  ['Athena', 'CPO', 'marin'],
+  ['Forge', 'CTO', 'cedar'],
+  ['Aura', 'CXO', 'marin'],
+  ['Pillar', 'CQO', 'cedar'],
+  ['Helios', 'CAIO', 'cedar'],
+  ['Vulcan', 'CAO', 'cedar'],
+  ['Ledger', 'CFO', 'cedar'],
+  ['Mercury', 'CRO', 'cedar'],
+  ['Sentinel', 'CISO', 'cedar'],
+  ['Themis', 'CLO', 'marin'],
 ].map(([name, role, voice]) => ({
   name,
   role,
-  provider: 'aws-bedrock',
-  model: 'amazon.nova-2-sonic-v1:0',
+  provider: 'openai',
+  model: 'gpt-realtime-2',
   voice,
   skill: SEEDED_ORCHESTRATOR_SKILLS[name as keyof typeof SEEDED_ORCHESTRATOR_SKILLS],
 }));
@@ -938,20 +931,20 @@ const SEEDED_FOUNDER_ORCHESTRATORS = {
 
 export const SEEDED_VOICES: SeededVoice[] = [
   {
-    provider: 'aws-bedrock',
-    model: 'amazon.nova-2-sonic-v1:0',
-    modelLabel: 'Amazon Nova 2 Sonic',
-    voice: 'Tiffany',
-    label: 'Lyra',
+    provider: 'openai',
+    model: 'gpt-realtime-2',
+    modelLabel: 'OpenAI GPT Realtime 2',
+    voice: 'marin',
+    label: 'Marin',
     language: 'en-US',
     format: 'mp3',
   },
   {
-    provider: 'aws-bedrock',
-    model: 'amazon.nova-2-sonic-v1:0',
-    modelLabel: 'Amazon Nova 2 Sonic',
-    voice: 'Matthew',
-    label: 'Orion',
+    provider: 'openai',
+    model: 'gpt-realtime-2',
+    modelLabel: 'OpenAI GPT Realtime 2',
+    voice: 'cedar',
+    label: 'Cedar',
     language: 'en-US',
     format: 'mp3',
   },
@@ -963,6 +956,51 @@ async function migrateRetiredCoreAskAction(): Promise<void> {
     FOR action IN ${db.collection('actions')}
       FILTER action.slug == ${'core.ask'}
       UPDATE action WITH { slug: 'core.chat', handlerKey: 'core.chat' } IN ${db.collection('actions')}
+  `);
+}
+
+/** Rewrites the previously seeded Sonic graph in place so production keeps stable references. */
+async function migrateRetiredNovaSonicModel(): Promise<void> {
+  await db.query(aql`
+    FOR model IN ${db.collection('models')}
+      FILTER model.slug == ${'amazon.nova-2-sonic'}
+      UPDATE model WITH {
+        slug: ${'openai.gpt-realtime-2'},
+        name: ${'OpenAI GPT Realtime 2'},
+        description: ${'OpenAI realtime model for natural speech-to-speech conversations, orchestrator dialogue, and low-latency calls.'},
+        supportedUseCases: ${'Real-time text and voice chat, orchestrator dialogue, speech synthesis, transcription, and low-latency conversational AI.'}
+      } IN ${db.collection('models')}
+  `);
+  await db.query(aql`
+    LET openAi = FIRST(
+      FOR provider IN ${db.collection('providers')}
+        FILTER provider.slug == ${'openai'}
+        RETURN provider
+    )
+    LET bedrock = FIRST(
+      FOR provider IN ${db.collection('providers')}
+        FILTER provider.slug == ${'aws-bedrock'}
+        RETURN provider
+    )
+    FOR model IN ${db.collection('models')}
+      FILTER model.slug == ${'openai.gpt-realtime-2'}
+      FOR route IN ${db.collection('modelProviders')}
+        FILTER openAi != null AND bedrock != null AND route.modelKey == model.key AND route.providerKey == bedrock.key
+        UPDATE route WITH { providerKey: openAi.key, providerModelId: ${'gpt-realtime-2'}, enabled: true } IN ${db.collection('modelProviders')}
+  `);
+  await db.query(aql`
+    FOR voice IN ${db.collection('voices')}
+      FILTER voice.provider == ${'aws-bedrock'} AND voice.model == ${'amazon.nova-2-sonic-v1:0'}
+      LET replacement = voice.voice == ${'Tiffany'} ? { voice: ${'marin'}, label: ${'Marin'} } : voice.voice == ${'Matthew'} ? { voice: ${'cedar'}, label: ${'Cedar'} } : null
+      FILTER replacement != null
+      UPDATE voice WITH {
+        provider: ${'openai'},
+        model: ${'gpt-realtime-2'},
+        modelLabel: ${'OpenAI GPT Realtime 2'},
+        voice: replacement.voice,
+        label: replacement.label,
+        updatedAt: ${now()}
+      } IN ${db.collection('voices')}
   `);
 }
 
@@ -1090,7 +1128,7 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
   }
 
   const [model, action] = await Promise.all([
-    store.getModelBySlug('amazon.nova-2-sonic'),
+    store.getModelBySlug('openai.gpt-realtime-2'),
     store.getActionBySlug('orchestrator-chat'),
   ]);
   if (!model || !action) return results;
@@ -1271,6 +1309,7 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
 
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   await migrateRetiredCoreAskAction();
+  await migrateRetiredNovaSonicModel();
   const results = await seedAiRuntimeNodes();
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));

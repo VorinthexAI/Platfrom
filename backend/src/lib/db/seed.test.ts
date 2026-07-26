@@ -102,12 +102,12 @@ describe('provider seeds', () => {
 });
 
 describe('model and routing relation seeds', () => {
-  test('seed the AWS model components through their service providers', () => {
+  test('seed model components through their service providers', () => {
     expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual([
       'openai.gpt-5.6-sol',
       'openai.gpt-5.6-terra',
       'openai.gpt-5.6-luna',
-      'amazon.nova-2-sonic',
+      'openai.gpt-realtime-2',
       'amazon.polly-generative',
       'amazon.titan-embed-text-v2',
       'aws.transcribe-standard',
@@ -120,7 +120,7 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:true',
       'openai.gpt-5.6-terra:aws-bedrock-mantle:openai.gpt-5.6-terra:true',
       'openai.gpt-5.6-luna:aws-bedrock-mantle:openai.gpt-5.6-luna:true',
-      'amazon.nova-2-sonic:aws-bedrock:amazon.nova-2-sonic-v1:0:true',
+      'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
       'amazon.polly-generative:aws-polly:generative:true',
       'aws.transcribe-standard:aws-transcribe:standard:true',
@@ -129,11 +129,11 @@ describe('model and routing relation seeds', () => {
 });
 
 describe('voice seeds', () => {
-  test('seed Amazon Nova 2 Sonic US-English voices', () => {
+  test('seed OpenAI GPT Realtime 2 US-English voices', () => {
     expect(SEEDED_VOICES).toHaveLength(2);
     expect(SEEDED_VOICES).toEqual([
-      expect.objectContaining({ provider: 'aws-bedrock', model: 'amazon.nova-2-sonic-v1:0', voice: 'Tiffany', label: 'Lyra', language: 'en-US', format: 'mp3' }),
-      expect.objectContaining({ provider: 'aws-bedrock', model: 'amazon.nova-2-sonic-v1:0', voice: 'Matthew', label: 'Orion', language: 'en-US', format: 'mp3' }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-realtime-2', voice: 'marin', label: 'Marin', language: 'en-US', format: 'mp3' }),
+      expect.objectContaining({ provider: 'openai', model: 'gpt-realtime-2', voice: 'cedar', label: 'Cedar', language: 'en-US', format: 'mp3' }),
     ]);
     for (const seed of SEEDED_VOICES) {
       expect(voiceSchema.parse({ key: 'cmrnlzf640000qc7k4p5zem5w', ...seed, createdAt: '2026-07-19T00:00:00.000Z', updatedAt: '2026-07-19T00:00:00.000Z' }).embedding).toEqual([]);
@@ -142,7 +142,7 @@ describe('voice seeds', () => {
 });
 
 describe('orchestrator seeds', () => {
-  test('seed exactly the 20 executive orchestrator sources with their assigned Nova voices', () => {
+  test('seed exactly the 20 executive orchestrator sources with their assigned OpenAI voices', () => {
     expect(SEEDED_ORCHESTRATOR_SOURCES).toHaveLength(20);
     expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ name, role }) => `${name}:${role}`)).toEqual([
       'Atlas:CEO', 'Metis:CIO', 'Echo:CKO', 'Matrix:CDO', 'Hermes:COO',
@@ -151,10 +151,10 @@ describe('orchestrator seeds', () => {
       'Vulcan:CAO', 'Ledger:CFO', 'Mercury:CRO', 'Sentinel:CISO', 'Themis:CLO',
     ]);
     expect(Object.fromEntries(SEEDED_ORCHESTRATOR_SOURCES.map(({ name, voice }) => [name, voice]))).toEqual({
-      Atlas: 'Matthew', Metis: 'Matthew', Echo: 'Matthew', Matrix: 'Matthew', Hermes: 'Matthew', Harmony: 'Tiffany',
-      Phoenix: 'Matthew', Iris: 'Tiffany', Orbit: 'Tiffany', Apollo: 'Matthew', Athena: 'Tiffany', Forge: 'Matthew',
-      Aura: 'Tiffany', Pillar: 'Matthew', Helios: 'Matthew', Vulcan: 'Matthew', Ledger: 'Matthew', Mercury: 'Matthew',
-      Sentinel: 'Matthew', Themis: 'Tiffany',
+      Atlas: 'cedar', Metis: 'cedar', Echo: 'cedar', Matrix: 'cedar', Hermes: 'cedar', Harmony: 'marin',
+      Phoenix: 'cedar', Iris: 'marin', Orbit: 'marin', Apollo: 'cedar', Athena: 'marin', Forge: 'cedar',
+      Aura: 'marin', Pillar: 'cedar', Helios: 'cedar', Vulcan: 'cedar', Ledger: 'cedar', Mercury: 'cedar',
+      Sentinel: 'cedar', Themis: 'marin',
     });
   });
 
@@ -198,13 +198,13 @@ describe('AI runtime seed orchestration', () => {
     expect(persisted.size).toBe(first.length);
   });
 
-  test('disables only the obsolete Sonic orchestrator chat binding before upserting desired routes', async () => {
+  test('disables only the obsolete realtime orchestrator chat binding before upserting desired routes', async () => {
     const routes = new Map([
       ['sonic-key:chat-key', { key: 'stale-binding-key', priority: 100, enabled: true }],
       ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
       ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
     ]);
-    const modelKeys = new Map([['amazon.nova-2-sonic', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['custom.model', 'custom-key']]);
+    const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['custom.model', 'custom-key']]);
     const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key']]);
     let reconciliationUpdates = 0;
     const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
