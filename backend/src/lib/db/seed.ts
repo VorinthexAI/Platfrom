@@ -577,13 +577,14 @@ export const SEEDED_PROVIDERS = [
 ] as const;
 
 export const SEEDED_MODELS = [
+  // Keep GPT-5.6 registered but disabled until AWS grants this account Mantle inference access.
   {
     key: 'cmgpt56solmodel0000001',
     slug: 'openai.gpt-5.6-sol',
     name: 'OpenAI GPT-5.6 Sol',
     description: 'OpenAI frontier reasoning model for deepest analysis, final reviews, and high-risk decisions through Bedrock Mantle.',
     supportedUseCases: 'Deep analysis, final review, high-risk decisions, strategic reasoning, and complex agent execution.',
-    enabled: true,
+    enabled: false,
   },
   {
     key: 'cmgpt56terramodel00001',
@@ -591,13 +592,37 @@ export const SEEDED_MODELS = [
     name: 'OpenAI GPT-5.6 Terra',
     description: 'OpenAI balanced production model for feature development, coding, tool use, and iterative execution through Bedrock Mantle.',
     supportedUseCases: 'Feature development, coding, tool use, iterative workflows, and general-purpose agent execution.',
-    enabled: true,
+    enabled: false,
   },
   {
     key: 'cmgpt56lunamodel0000001',
     slug: 'openai.gpt-5.6-luna',
     name: 'OpenAI GPT-5.6 Luna',
     description: 'OpenAI fast, economical model for agent steps, routing, classification, and simpler tasks through Bedrock Mantle.',
+    supportedUseCases: 'Fast agent steps, routing, classification, extraction, and lightweight task execution.',
+    enabled: false,
+  },
+  {
+    key: 'cmnovapremiermodel0000001',
+    slug: 'amazon.nova-premier',
+    name: 'Amazon Nova Premier',
+    description: 'Intended temporary replacement for GPT-5.6 Sol once AWS restores access to this legacy model.',
+    supportedUseCases: 'Deep analysis, final review, high-risk decisions, strategic reasoning, and complex agent execution.',
+    enabled: false,
+  },
+  {
+    key: 'cmnovapromodel00000000001',
+    slug: 'amazon.nova-pro',
+    name: 'Amazon Nova Pro',
+    description: 'Temporary replacement for GPT-5.6 Terra and Sol-class work while Mantle access is pending.',
+    supportedUseCases: 'Feature development, coding, tool use, iterative workflows, general-purpose agent execution, and deep reasoning.',
+    enabled: true,
+  },
+  {
+    key: 'cmnovalitemodel000000001',
+    slug: 'amazon.nova-lite',
+    name: 'Amazon Nova Lite',
+    description: 'Temporary replacement for GPT-5.6 Luna while Mantle access is pending.',
     supportedUseCases: 'Fast agent steps, routing, classification, extraction, and lightweight task execution.',
     enabled: true,
   },
@@ -664,25 +689,47 @@ export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition, acti
 );
 
 export const SEEDED_MODEL_PROVIDERS = [
+  // Preserve the intended Mantle routes so they can be re-enabled after AWS grants GPT-5.6 access.
   {
     key: 'cmgpt56solroute00000001',
     modelSlug: 'openai.gpt-5.6-sol',
     providerSlug: 'aws-bedrock-mantle',
     providerModelId: 'openai.gpt-5.6-sol',
-    enabled: true,
+    enabled: false,
   },
   {
     key: 'cmgpt56terraroute000001',
     modelSlug: 'openai.gpt-5.6-terra',
     providerSlug: 'aws-bedrock-mantle',
     providerModelId: 'openai.gpt-5.6-terra',
-    enabled: true,
+    enabled: false,
   },
   {
     key: 'cmgpt56lunaroute0000001',
     modelSlug: 'openai.gpt-5.6-luna',
     providerSlug: 'aws-bedrock-mantle',
     providerModelId: 'openai.gpt-5.6-luna',
+    enabled: false,
+  },
+  {
+    key: 'cmnovapremierroute0000001',
+    modelSlug: 'amazon.nova-premier',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'us.amazon.nova-premier-v1:0',
+    enabled: false,
+  },
+  {
+    key: 'cmnovaproroute0000000001',
+    modelSlug: 'amazon.nova-pro',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'us.amazon.nova-pro-v1:0',
+    enabled: true,
+  },
+  {
+    key: 'cmnovaliteroute000000001',
+    modelSlug: 'amazon.nova-lite',
+    providerSlug: 'aws-bedrock',
+    providerModelId: 'us.amazon.nova-lite-v1:0',
     enabled: true,
   },
   {
@@ -1112,7 +1159,7 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
   updateModelAction,
 }): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
-  for (const modelSlug of ['amazon.nova-premier', 'amazon.nova-pro', 'amazon.nova-2-lite']) {
+  for (const modelSlug of ['openai.gpt-5.6-sol', 'openai.gpt-5.6-terra', 'openai.gpt-5.6-luna']) {
     const model = await store.getModelBySlug(modelSlug);
     if (!model) continue;
     await store.updateModel(model.key, { enabled: false });

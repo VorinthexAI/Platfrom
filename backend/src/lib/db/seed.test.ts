@@ -107,19 +107,25 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-5.6-sol',
       'openai.gpt-5.6-terra',
       'openai.gpt-5.6-luna',
+      'amazon.nova-premier',
+      'amazon.nova-pro',
+      'amazon.nova-lite',
       'openai.gpt-realtime-2',
       'amazon.polly-generative',
       'amazon.titan-embed-text-v2',
       'aws.transcribe-standard',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
-      .toEqual(['openai.gpt-5.6-terra', 'openai.gpt-5.6-luna']);
+      .toEqual(['amazon.nova-pro', 'amazon.nova-lite']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
-      'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:true',
-      'openai.gpt-5.6-terra:aws-bedrock-mantle:openai.gpt-5.6-terra:true',
-      'openai.gpt-5.6-luna:aws-bedrock-mantle:openai.gpt-5.6-luna:true',
+      'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:false',
+      'openai.gpt-5.6-terra:aws-bedrock-mantle:openai.gpt-5.6-terra:false',
+      'openai.gpt-5.6-luna:aws-bedrock-mantle:openai.gpt-5.6-luna:false',
+      'amazon.nova-premier:aws-bedrock:us.amazon.nova-premier-v1:0:false',
+      'amazon.nova-pro:aws-bedrock:us.amazon.nova-pro-v1:0:true',
+      'amazon.nova-lite:aws-bedrock:us.amazon.nova-lite-v1:0:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
       'amazon.polly-generative:aws-polly:generative:true',
@@ -198,13 +204,13 @@ describe('AI runtime seed orchestration', () => {
     expect(persisted.size).toBe(first.length);
   });
 
-  test('disables only the obsolete realtime orchestrator chat binding before upserting desired routes', async () => {
+  test('disables obsolete orchestrator bindings before upserting desired Nova routes', async () => {
     const routes = new Map([
       ['sonic-key:chat-key', { key: 'stale-binding-key', priority: 100, enabled: true }],
       ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
       ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
     ]);
-    const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['custom.model', 'custom-key']]);
+    const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['amazon.nova-pro', 'nova-pro-key'], ['amazon.nova-lite', 'nova-lite-key'], ['custom.model', 'custom-key']]);
     const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key']]);
     let reconciliationUpdates = 0;
     const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
@@ -236,17 +242,17 @@ describe('AI runtime seed orchestration', () => {
     await seedAiRuntimeNodes(upserters);
 
     expect(routes.get('sonic-key:chat-key')?.enabled).toBe(false);
-    expect(routes.get('terra-key:chat-key')?.enabled).toBe(true);
-    expect(routes.get('luna-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('nova-pro-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('nova-lite-key:chat-key')?.enabled).toBe(true);
     expect(routes.get('sonic-key:speak-key')?.enabled).toBe(true);
     expect(routes.get('custom-key:chat-key')?.enabled).toBe(true);
     expect(reconciliationUpdates).toBe(1);
   });
 
-  test('disables legacy Nova models and their seeded routes during migration', async () => {
-    const models = new Map([['amazon.nova-pro', { key: 'legacy-pro', enabled: true }]]);
+  test('disables blocked GPT-5.6 models and their seeded routes during migration', async () => {
+    const models = new Map([['openai.gpt-5.6-terra', { key: 'blocked-terra', enabled: true }]]);
     const actions = new Map([['chat', 'chat-key']]);
-    const routes = new Map([['legacy-pro:chat-key', { key: 'legacy-route', enabled: true }]]);
+    const routes = new Map([['blocked-terra:chat-key', { key: 'blocked-route', enabled: true }]]);
 
     const results = await reconcileObsoleteSeededModelActions({
       getModelBySlug: async (slug) => models.get(slug) ?? null,
@@ -262,8 +268,8 @@ describe('AI runtime seed orchestration', () => {
       },
     });
 
-    expect(models.get('amazon.nova-pro')?.enabled).toBe(false);
-    expect(routes.get('legacy-pro:chat-key')?.enabled).toBe(false);
-    expect(results.map(({ collection, key }) => `${collection}:${key}`)).toEqual(['models:legacy-pro', 'modelActions:legacy-route']);
+    expect(models.get('openai.gpt-5.6-terra')?.enabled).toBe(false);
+    expect(routes.get('blocked-terra:chat-key')?.enabled).toBe(false);
+    expect(results.map(({ collection, key }) => `${collection}:${key}`)).toEqual(['models:blocked-terra', 'modelActions:blocked-route']);
   });
 });
