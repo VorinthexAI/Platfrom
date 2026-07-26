@@ -117,9 +117,9 @@ describe('model and routing relation seeds', () => {
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
-      'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:true',
-      'openai.gpt-5.6-terra:aws-bedrock-mantle:openai.gpt-5.6-terra:true',
-      'openai.gpt-5.6-luna:aws-bedrock-mantle:openai.gpt-5.6-luna:true',
+      'openai.gpt-5.6-sol:openai:gpt-5.6-sol:true',
+      'openai.gpt-5.6-terra:openai:gpt-5.6-terra:true',
+      'openai.gpt-5.6-luna:openai:gpt-5.6-luna:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
       'amazon.polly-generative:aws-polly:generative:true',

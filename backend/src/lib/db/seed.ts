@@ -6,7 +6,7 @@ import { getProviderBySlug, insertProvider, updateProvider, type Provider } from
 import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
 import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { isArangoUniqueConstraintError } from './base';
-import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
+import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
 import { getUserByEmail } from './users.node';
@@ -581,7 +581,7 @@ export const SEEDED_MODELS = [
     key: 'cmgpt56solmodel0000001',
     slug: 'openai.gpt-5.6-sol',
     name: 'OpenAI GPT-5.6 Sol',
-    description: 'OpenAI frontier reasoning model for deepest analysis, final reviews, and high-risk decisions through Bedrock Mantle.',
+    description: 'OpenAI frontier reasoning model for deepest analysis, final reviews, and high-risk decisions.',
     supportedUseCases: 'Deep analysis, final review, high-risk decisions, strategic reasoning, and complex agent execution.',
     enabled: true,
   },
@@ -589,7 +589,7 @@ export const SEEDED_MODELS = [
     key: 'cmgpt56terramodel00001',
     slug: 'openai.gpt-5.6-terra',
     name: 'OpenAI GPT-5.6 Terra',
-    description: 'OpenAI balanced production model for feature development, coding, tool use, and iterative execution through Bedrock Mantle.',
+    description: 'OpenAI balanced production model for feature development, coding, tool use, and iterative execution.',
     supportedUseCases: 'Feature development, coding, tool use, iterative workflows, and general-purpose agent execution.',
     enabled: true,
   },
@@ -597,7 +597,7 @@ export const SEEDED_MODELS = [
     key: 'cmgpt56lunamodel0000001',
     slug: 'openai.gpt-5.6-luna',
     name: 'OpenAI GPT-5.6 Luna',
-    description: 'OpenAI fast, economical model for agent steps, routing, classification, and simpler tasks through Bedrock Mantle.',
+    description: 'OpenAI fast, economical model for agent steps, routing, classification, and simpler tasks.',
     supportedUseCases: 'Fast agent steps, routing, classification, extraction, and lightweight task execution.',
     enabled: true,
   },
@@ -667,22 +667,22 @@ export const SEEDED_MODEL_PROVIDERS = [
   {
     key: 'cmgpt56solroute00000001',
     modelSlug: 'openai.gpt-5.6-sol',
-    providerSlug: 'aws-bedrock-mantle',
-    providerModelId: 'openai.gpt-5.6-sol',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-5.6-sol',
     enabled: true,
   },
   {
     key: 'cmgpt56terraroute000001',
     modelSlug: 'openai.gpt-5.6-terra',
-    providerSlug: 'aws-bedrock-mantle',
-    providerModelId: 'openai.gpt-5.6-terra',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-5.6-terra',
     enabled: true,
   },
   {
     key: 'cmgpt56lunaroute0000001',
     modelSlug: 'openai.gpt-5.6-luna',
-    providerSlug: 'aws-bedrock-mantle',
-    providerModelId: 'openai.gpt-5.6-luna',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-5.6-luna',
     enabled: true,
   },
   {
@@ -1004,6 +1004,31 @@ async function migrateRetiredNovaSonicModel(): Promise<void> {
   `);
 }
 
+/** Moves GPT-5.6 routes off Mantle when the account has access through OpenAI instead. */
+async function migrateUnavailableMantleRoutes(): Promise<void> {
+  await db.query(aql`
+    LET openAi = FIRST(
+      FOR provider IN ${db.collection('providers')}
+        FILTER provider.slug == ${'openai'}
+        RETURN provider
+    )
+    LET mantle = FIRST(
+      FOR provider IN ${db.collection('providers')}
+        FILTER provider.slug == ${'aws-bedrock-mantle'}
+        RETURN provider
+    )
+    FOR model IN ${db.collection('models')}
+      FILTER model.slug IN ${['openai.gpt-5.6-sol', 'openai.gpt-5.6-terra', 'openai.gpt-5.6-luna']}
+      FOR route IN ${db.collection('modelProviders')}
+        FILTER openAi != null AND mantle != null AND route.modelKey == model.key AND route.providerKey == mantle.key
+        UPDATE route WITH {
+          providerKey: openAi.key,
+          providerModelId: SUBSTRING(model.slug, LENGTH(${'openai.'})),
+          enabled: true
+        } IN ${db.collection('modelProviders')}
+  `);
+}
+
 async function upsertSeedAction(seed: (typeof SEEDED_ACTIONS)[number]): Promise<SeedResult> {
   const existingBySlug = await getActionBySlug(seed.slug);
   const existingByKey = await getActionById(seed.key);
@@ -1148,7 +1173,7 @@ async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[num
   const provider = await getProviderBySlug(parsed.providerSlug);
   if (!provider) throw new SeedReferenceError('provider', parsed.providerSlug, 'modelProvider');
 
-  const existing = await getModelProviderByPair(model.key, provider.key);
+  const existing = await getModelProviderByPair(model.key, provider.key) ?? await getModelProviderById(parsed.key);
   if (!existing) {
     await insertModelProvider({
       key: parsed.key,
@@ -1161,6 +1186,8 @@ async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[num
   }
 
   await updateModelProvider(existing.key, {
+    modelKey: model.key,
+    providerKey: provider.key,
     providerModelId: parsed.providerModelId,
     enabled: parsed.enabled,
   });
@@ -1310,6 +1337,7 @@ export async function seedAiRuntimeNodes(upserters: AiRuntimeSeedUpserters = {
 export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   await migrateRetiredCoreAskAction();
   await migrateRetiredNovaSonicModel();
+  await migrateUnavailableMantleRoutes();
   const results = await seedAiRuntimeNodes();
 
   results.push(await upsertSeedOrganization(SEEDED_ORGANIZATION));
