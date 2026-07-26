@@ -3,6 +3,8 @@ import {
   chorusChannelEntrySchema,
   chorusMessageSchema,
   chorusThreadSchema,
+  plainChorusText,
+  coalesceChorusStreamEvents,
   markChorusStreamFailed,
   mergeChorusMessageRefresh,
   parseChorusSseFrame,
@@ -38,6 +40,20 @@ describe("Chorus schemas", () => {
     expect(message.author.name).toBe("Atlas");
     expect(message.poll?.options).toHaveLength(2);
     expect(message.poll?.closedAt).toBeNull();
+  });
+
+  test("normalizes nullable optional message identifiers", () => {
+    const message = chorusMessageSchema.parse({
+      ...stored,
+      threadKey: null,
+      replyToMessageKey: null,
+      author: { participantKey: "participant_key", type: "user", key: "user_key", name: "Founder" },
+      reactions: [],
+      thread: null,
+      poll: null,
+    });
+    expect(message.threadKey).toBeUndefined();
+    expect(message.replyToMessageKey).toBeUndefined();
   });
 
   test("accepts archived thread projections as non-open threads", () => {
@@ -82,6 +98,19 @@ describe("Chorus stream reconciliation", () => {
     expect(failed.every((message) => message.clientState?.state === "failed")).toBe(true);
     expect(failed[1]?.clientState?.error).toBe("Canonical refresh failed");
   });
+
+  test("coalesces adjacent tokens without crossing lifecycle events", () => {
+    expect(coalesceChorusStreamEvents([
+      { type: "token", text: "Hel" },
+      { type: "token", text: "lo" },
+      { type: "error", error: "stopped" },
+      { type: "token", text: "Again" },
+    ])).toEqual([
+      { type: "token", text: "Hello" },
+      { type: "error", error: "stopped" },
+      { type: "token", text: "Again" },
+    ]);
+  });
 });
 
 describe("Chorus SSE client", () => {
@@ -117,5 +146,11 @@ describe("Chorus SSE client", () => {
       throw init?.signal?.reason ?? new DOMException("Aborted", "AbortError");
     }) as unknown as typeof fetch;
     await expect(streamChorusMessage("org", "channel", "hello", () => {}, controller.signal)).rejects.toThrow();
+  });
+});
+
+describe("Chorus message presentation", () => {
+  test("renders markdown-shaped replies as plain text", () => {
+    expect(plainChorusText("### Summary\n1. **Choose** the `[safe](https://example.com)` option.\n- `Act` now.")).toBe("Summary\nChoose the safe option.\nAct now.");
   });
 });

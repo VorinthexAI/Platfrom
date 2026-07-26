@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { MODEL_SLUGS, modelSlugSchema } from './index';
 describe('logical model slugs', () => {
-  test('declares the Amazon model components', () => {
+  test('declares the supported model components', () => {
     expect(MODEL_SLUGS).toEqual([
-      'amazon.nova-premier',
-      'amazon.nova-pro',
-      'amazon.nova-2-lite',
+      'openai.gpt-5.6-sol',
+      'openai.gpt-5.6-terra',
+      'openai.gpt-5.6-luna',
       'openai.gpt-realtime-2',
       'amazon.polly-generative',
       'amazon.titan-embed-text-v2',

@@ -76,6 +76,6 @@ function buildChatInput(skill: string, rawInput: unknown): CoreChatInput {
       ...(input.history ?? []).map(({ role, content }) => ({ role, content: [{ type: 'text' as const, text: content }] })),
       ...((input.history?.at(-1)?.role === 'user' && input.history.at(-1)?.content === input.message) ? [] : [{ role: 'user' as const, content: [{ type: 'text' as const, text: input.message }] }]),
     ],
-    options: { maxTokens: 2_000 },
+    options: { maxTokens: 300 },
   });
 }

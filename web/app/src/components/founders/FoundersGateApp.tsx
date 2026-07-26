@@ -233,7 +233,7 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
 
   return (
     <main className="relative min-h-svh overflow-hidden bg-[#1c0701]">
-      <FoundersBackdrop />
+      {!enteredEntity ? <FoundersBackdrop /> : null}
 
       <div className="relative z-10 flex h-svh">
         <section className="relative flex min-w-0 flex-1 flex-col">
@@ -243,6 +243,8 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
                   <OrchestratorCommandDeck
                     entity={enteredEntity}
                     organizationKey={organizationKey}
+                    userName={account?.user.name ?? account?.user.alias ?? account?.user.email ?? "User"}
+                    countryCode={account?.user.countryCode ?? "SE"}
                     reducedMotion={Boolean(reducedMotion)}
                     onScopeRoute={(scope) => updateDeckScopeRoute(enteredEntity, scope)}
                   />

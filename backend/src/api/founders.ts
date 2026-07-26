@@ -16,6 +16,7 @@ import {
   PROVIDER_SLUGS,
   anthropicCredentialsSchema,
   awsBedrockCredentialsSchema,
+  awsBedrockMantleCredentialsSchema,
   awsPollyCredentialsSchema,
   awsTranscribeCredentialsSchema,
   azureAIFoundryCredentialsSchema,
@@ -50,6 +51,7 @@ export const foundersProviderCredentialsSchemas: Record<ProviderSlug, z.ZodTypeA
   'google-vertex': googleVertexCredentialsSchema,
   'azure-ai-foundry': azureAIFoundryCredentialsSchema,
   'aws-bedrock': awsBedrockCredentialsSchema,
+  'aws-bedrock-mantle': awsBedrockMantleCredentialsSchema,
   'aws-polly': awsPollyCredentialsSchema,
   'aws-transcribe': awsTranscribeCredentialsSchema,
   openrouter: openRouterCredentialsSchema,
@@ -98,6 +100,7 @@ export async function getFoundersAccount(c: Context) {
       name: user.name,
       alias: user.alias,
       email: user.email,
+      countryCode: user.countryCode,
     },
     rootOrganization: {
       key: rootOrganization.key,

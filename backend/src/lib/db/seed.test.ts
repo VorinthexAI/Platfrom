@@ -85,7 +85,7 @@ describe('provider seeds', () => {
   test('seed every supported provider while keeping its slug registered', () => {
     const slugs = SEEDED_PROVIDERS.map((provider) => provider.slug);
 
-    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'aws-polly', 'aws-transcribe', 'google-vertex', 'azure-ai-foundry', 'xai']);
+    expect(slugs).toEqual(['openai', 'openrouter', 'anthropic', 'aws-bedrock', 'aws-bedrock-mantle', 'aws-polly', 'aws-transcribe', 'google-vertex', 'azure-ai-foundry', 'xai']);
     expect(slugs.every((slug) => PROVIDER_SLUGS.includes(slug))).toBe(true);
     expect(new Set(slugs).size).toBe(slugs.length);
     expect(new Set(SEEDED_PROVIDERS.map((provider) => provider.key)).size).toBe(SEEDED_PROVIDERS.length);
@@ -104,22 +104,22 @@ describe('provider seeds', () => {
 describe('model and routing relation seeds', () => {
   test('seed model components through their service providers', () => {
     expect(SEEDED_MODELS.map(({ slug }) => slug)).toEqual([
-      'amazon.nova-premier',
-      'amazon.nova-pro',
-      'amazon.nova-2-lite',
+      'openai.gpt-5.6-sol',
+      'openai.gpt-5.6-terra',
+      'openai.gpt-5.6-luna',
       'openai.gpt-realtime-2',
       'amazon.polly-generative',
       'amazon.titan-embed-text-v2',
       'aws.transcribe-standard',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
-      .toEqual(['amazon.nova-pro', 'amazon.nova-2-lite']);
+      .toEqual(['openai.gpt-5.6-terra', 'openai.gpt-5.6-luna']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
-      'amazon.nova-premier:aws-bedrock:amazon.nova-premier-v1:0:true',
-      'amazon.nova-pro:aws-bedrock:amazon.nova-pro-v1:0:true',
-      'amazon.nova-2-lite:aws-bedrock:amazon.nova-2-lite-v1:0:true',
+      'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:true',
+      'openai.gpt-5.6-terra:aws-bedrock-mantle:openai.gpt-5.6-terra:true',
+      'openai.gpt-5.6-luna:aws-bedrock-mantle:openai.gpt-5.6-luna:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
       'amazon.polly-generative:aws-polly:generative:true',
@@ -204,7 +204,7 @@ describe('AI runtime seed orchestration', () => {
       ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
       ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
     ]);
-    const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['amazon.nova-pro', 'pro-key'], ['amazon.nova-2-lite', 'lite-key'], ['custom.model', 'custom-key']]);
+    const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['custom.model', 'custom-key']]);
     const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key']]);
     let reconciliationUpdates = 0;
     const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
@@ -214,6 +214,7 @@ describe('AI runtime seed orchestration', () => {
       model: noop('models'),
       reconcileObsoleteModelActions: () => reconcileObsoleteSeededModelActions({
         getModelBySlug: async (slug) => modelKeys.has(slug) ? { key: modelKeys.get(slug)! } : null,
+        updateModel: async () => ({ collection: 'models', key: 'updated-model', status: 'updated' }),
         getActionBySlug: async (slug) => actionKeys.has(slug) ? { key: actionKeys.get(slug)! } : null,
         getModelActionByPair: async (modelKey, actionKey) => routes.get(`${modelKey}:${actionKey}`) ?? null,
         updateModelAction: async (key, patch) => {
@@ -235,10 +236,34 @@ describe('AI runtime seed orchestration', () => {
     await seedAiRuntimeNodes(upserters);
 
     expect(routes.get('sonic-key:chat-key')?.enabled).toBe(false);
-    expect(routes.get('pro-key:chat-key')?.enabled).toBe(true);
-    expect(routes.get('lite-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('terra-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('luna-key:chat-key')?.enabled).toBe(true);
     expect(routes.get('sonic-key:speak-key')?.enabled).toBe(true);
     expect(routes.get('custom-key:chat-key')?.enabled).toBe(true);
     expect(reconciliationUpdates).toBe(1);
+  });
+
+  test('disables legacy Nova models and their seeded routes during migration', async () => {
+    const models = new Map([['amazon.nova-pro', { key: 'legacy-pro', enabled: true }]]);
+    const actions = new Map([['chat', 'chat-key']]);
+    const routes = new Map([['legacy-pro:chat-key', { key: 'legacy-route', enabled: true }]]);
+
+    const results = await reconcileObsoleteSeededModelActions({
+      getModelBySlug: async (slug) => models.get(slug) ?? null,
+      updateModel: async (key, patch) => {
+        const model = [...models.values()].find((candidate) => candidate.key === key)!;
+        model.enabled = patch.enabled;
+      },
+      getActionBySlug: async (slug) => actions.has(slug) ? { key: actions.get(slug)! } : null,
+      getModelActionByPair: async (modelKey, actionKey) => routes.get(`${modelKey}:${actionKey}`) ?? null,
+      updateModelAction: async (key, patch) => {
+        const route = [...routes.values()].find((candidate) => candidate.key === key)!;
+        route.enabled = patch.enabled;
+      },
+    });
+
+    expect(models.get('amazon.nova-pro')?.enabled).toBe(false);
+    expect(routes.get('legacy-pro:chat-key')?.enabled).toBe(false);
+    expect(results.map(({ collection, key }) => `${collection}:${key}`)).toEqual(['models:legacy-pro', 'modelActions:legacy-route']);
   });
 });

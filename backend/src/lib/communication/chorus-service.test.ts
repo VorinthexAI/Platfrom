@@ -12,8 +12,8 @@ import type { CommunicationRepository, DirectChannelAccess, DirectOrchestratorCa
 
 const now = '2026-07-24T12:00:00.000Z';
 const organizationKey = 'root-org';
-const membershipKey = newId();
-const orchestratorKey = newId();
+const membershipKey = 'membership_root-founder';
+const orchestratorKey = 'orchestrator_atlas';
 const scopeKey = newId();
 const actor = { organizationKey, membershipKey };
 
@@ -30,7 +30,7 @@ class MemoryRepository implements CommunicationRepository {
   reactions = new Map<string, boolean>();
 
   candidate(): DirectOrchestratorCandidate {
-    return { orchestrator: { key: orchestratorKey, name: 'Atlas', role: 'CEO', skill: 'Lead.' }, scopeKey, canChat: this.allowed, channel: this.channels[0] ?? null };
+    return { orchestrator: { key: orchestratorKey, name: 'Atlas', role: 'CEO', skill: 'Lead.' }, scopeKey, position: 1, canChat: this.allowed, channel: this.channels[0] ?? null };
   }
   async listDirectCandidates() { return [this.candidate()]; }
   async ensureDirectChannel() {
@@ -57,6 +57,7 @@ class MemoryRepository implements CommunicationRepository {
     return { key: message.key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt, author: { participantKey: message.authorParticipantKey, type: human ? 'user' : 'orchestrator', key: human ? membershipKey : orchestratorKey, name: human ? 'Founder' : 'Atlas' }, reactions: [], thread: null, poll: null };
   }
   async listMessages(channelKey: string, _viewer: string, limit: number) { return this.messages.filter((item) => item.channelKey === channelKey && !item.threadKey && !item.deletedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-limit).map((item) => this.projection(item)); }
+  async clearChannel(channelKey: string, updatedAt: string) { let cleared = 0; for (const message of this.messages) { if (message.channelKey === channelKey && !message.deletedAt) { message.deletedAt = updatedAt; message.updatedAt = updatedAt; cleared += 1; } } return cleared; }
   async listThreadMessages(channelKey: string, threadKey: string, rootMessageKey: string, _viewer: string, limit: number) { return this.messages.filter((item) => item.channelKey === channelKey && !item.deletedAt && (item.key === rootMessageKey || item.threadKey === threadKey)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-limit).map((item) => this.projection(item)); }
   async listHistory(channelKey: string, threadKey: string | undefined, excludeMessageKey: string | undefined, limit: number) { const thread = threadKey ? this.threads.find((item) => item.key === threadKey) : null; return this.messages.filter((item) => item.channelKey === channelKey && !item.deletedAt && item.key !== excludeMessageKey && (threadKey ? item.threadKey === threadKey || item.key === thread?.rootMessageKey : !item.threadKey)).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-limit).map((item) => ({ role: item.authorParticipantKey === this.participants[0]?.key ? 'user' as const : 'assistant' as const, content: item.content })); }
   async getMessage(messageKey: string) { return this.messages.find((item) => item.key === messageKey && !item.deletedAt) ?? null; }
@@ -109,6 +110,25 @@ describe('Chorus service', () => {
     expect(f.repository.participants.map((item) => item.userOrganizationKey ? 'human' : 'orchestrator').sort()).toEqual(['human', 'orchestrator']);
   });
 
+  test('provisions channel candidates sequentially to avoid competing write transactions', async () => {
+    const f = fixture();
+    const candidate = f.repository.candidate();
+    f.repository.listDirectCandidates = async () => [candidate, { ...candidate, orchestrator: { ...candidate.orchestrator, key: newId(), name: 'Nova' } }];
+    let active = 0;
+    let maximumActive = 0;
+    f.repository.ensureDirectChannel = async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return null;
+    };
+
+    await f.service.listDirectChannels(actor);
+
+    expect(maximumActive).toBe(1);
+  });
+
   test('persists both sides and returns bounded history in chronological order', async () => {
     const f = fixture(); const access = await f.service.openDirectChannel(actor, orchestratorKey);
     const user = await f.service.persistUserMessage(actor, access.channel.key, 'First');
@@ -116,6 +136,15 @@ describe('Chorus service', () => {
     expect((await f.service.listMessages(actor, access.channel.key)).map((item) => item.content)).toEqual(['First', 'Second']);
     expect(await f.service.history(access)).toEqual([{ role: 'user', content: 'First' }, { role: 'assistant', content: 'Second' }]);
     expect(user.message.authorParticipantKey).toBe(access.humanParticipant.key);
+  });
+
+  test('clears an authorized channel from message lists and history', async () => {
+    const f = fixture(); const access = await f.service.openDirectChannel(actor, orchestratorKey);
+    await f.service.persistUserMessage(actor, access.channel.key, 'Remove me');
+    await f.service.persistOrchestratorMessage(access, 'Remove me too');
+    expect(await f.service.clearChannel(actor, access.channel.key)).toBe(2);
+    expect(await f.service.listMessages(actor, access.channel.key)).toEqual([]);
+    expect(await f.service.history(access)).toEqual([]);
   });
 
   test('denies cross-channel message identifiers and keeps reactions unique/toggleable', async () => {

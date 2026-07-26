@@ -42,6 +42,7 @@ export interface AiRuntimeSeedUpserters {
 
 export interface ObsoleteModelActionReconciliationStore {
   getModelBySlug(slug: string): Promise<{ key: string } | null>;
+  updateModel(key: string, patch: { enabled: boolean }): Promise<unknown>;
   getActionBySlug(slug: string): Promise<{ key: string } | null>;
   getModelActionByPair(modelKey: string, actionKey: string): Promise<{ key: string; enabled: boolean } | null>;
   updateModelAction(key: string, patch: { enabled: boolean }): Promise<unknown>;
@@ -538,6 +539,12 @@ export const SEEDED_PROVIDERS = [
     handlerKey: 'aws-bedrock',
   },
   {
+    key: 'cmrl6mtn60014a1b23aushlt0',
+    slug: 'aws-bedrock-mantle',
+    name: 'AWS Bedrock Mantle',
+    handlerKey: 'aws-bedrock-mantle',
+  },
+  {
     key: 'cmrl6mtn60012a1b23aushlt0',
     slug: 'aws-polly',
     name: 'AWS Polly',
@@ -571,26 +578,26 @@ export const SEEDED_PROVIDERS = [
 
 export const SEEDED_MODELS = [
   {
-    key: 'cmnovapremiermodel0000001',
-    slug: 'amazon.nova-premier',
-    name: 'Amazon Nova Premier',
-    description: 'Amazon Nova model for the deepest analysis, final reviews, and high-risk decisions.',
+    key: 'cmgpt56solmodel0000001',
+    slug: 'openai.gpt-5.6-sol',
+    name: 'OpenAI GPT-5.6 Sol',
+    description: 'OpenAI frontier reasoning model for deepest analysis, final reviews, and high-risk decisions through Bedrock Mantle.',
     supportedUseCases: 'Deep analysis, final review, high-risk decisions, strategic reasoning, and complex agent execution.',
     enabled: true,
   },
   {
-    key: 'cmnovapromodel00000000001',
-    slug: 'amazon.nova-pro',
-    name: 'Amazon Nova Pro',
-    description: 'Amazon Nova model for building features, coding, tool use, and iterative execution.',
+    key: 'cmgpt56terramodel00001',
+    slug: 'openai.gpt-5.6-terra',
+    name: 'OpenAI GPT-5.6 Terra',
+    description: 'OpenAI balanced production model for feature development, coding, tool use, and iterative execution through Bedrock Mantle.',
     supportedUseCases: 'Feature development, coding, tool use, iterative workflows, and general-purpose agent execution.',
     enabled: true,
   },
   {
-    key: 'cmnova2litemodel00000001',
-    slug: 'amazon.nova-2-lite',
-    name: 'Amazon Nova 2 Lite',
-    description: 'Amazon Nova model for fast, economical agent steps, routing, classification, and simpler tasks.',
+    key: 'cmgpt56lunamodel0000001',
+    slug: 'openai.gpt-5.6-luna',
+    name: 'OpenAI GPT-5.6 Luna',
+    description: 'OpenAI fast, economical model for agent steps, routing, classification, and simpler tasks through Bedrock Mantle.',
     supportedUseCases: 'Fast agent steps, routing, classification, extraction, and lightweight task execution.',
     enabled: true,
   },
@@ -643,13 +650,6 @@ const LEGACY_SEEDED_MODEL_ACTIONS = [
     priority: 100,
     enabled: true,
   },
-  {
-    key: 'cmawstranscribeaction00001',
-    modelSlug: 'aws.transcribe-standard',
-    actionSlug: 'core.transcribe',
-    priority: 100,
-    enabled: true,
-  },
 ] as const;
 
 /** Model bindings are owned by actions and selected by descending priority. */
@@ -665,24 +665,24 @@ export const SEEDED_MODEL_ACTIONS = ACTION_DEFINITIONS.flatMap((definition, acti
 
 export const SEEDED_MODEL_PROVIDERS = [
   {
-    key: 'cmnovapremierroute0000001',
-    modelSlug: 'amazon.nova-premier',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'amazon.nova-premier-v1:0',
+    key: 'cmgpt56solroute00000001',
+    modelSlug: 'openai.gpt-5.6-sol',
+    providerSlug: 'aws-bedrock-mantle',
+    providerModelId: 'openai.gpt-5.6-sol',
     enabled: true,
   },
   {
-    key: 'cmnovaproroute0000000001',
-    modelSlug: 'amazon.nova-pro',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'amazon.nova-pro-v1:0',
+    key: 'cmgpt56terraroute000001',
+    modelSlug: 'openai.gpt-5.6-terra',
+    providerSlug: 'aws-bedrock-mantle',
+    providerModelId: 'openai.gpt-5.6-terra',
     enabled: true,
   },
   {
-    key: 'cmnova2literoute00000001',
-    modelSlug: 'amazon.nova-2-lite',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'amazon.nova-2-lite-v1:0',
+    key: 'cmgpt56lunaroute0000001',
+    modelSlug: 'openai.gpt-5.6-luna',
+    providerSlug: 'aws-bedrock-mantle',
+    providerModelId: 'openai.gpt-5.6-luna',
     enabled: true,
   },
   {
@@ -1106,21 +1106,39 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
 /** Retires model-action pairs previously owned by the seed without touching custom routes. */
 export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelActionReconciliationStore = {
   getModelBySlug,
+  updateModel: updatePersistedModel,
   getActionBySlug,
   getModelActionByPair,
   updateModelAction,
 }): Promise<SeedResult[]> {
+  const results: SeedResult[] = [];
+  for (const modelSlug of ['amazon.nova-premier', 'amazon.nova-pro', 'amazon.nova-2-lite']) {
+    const model = await store.getModelBySlug(modelSlug);
+    if (!model) continue;
+    await store.updateModel(model.key, { enabled: false });
+    results.push({ collection: 'models', key: model.key, status: 'updated' });
+    for (const actionDefinition of ACTION_DEFINITIONS) {
+      const action = await store.getActionBySlug(actionDefinition.id);
+      if (!action) continue;
+      const existing = await store.getModelActionByPair(model.key, action.key);
+      if (!existing?.enabled) continue;
+      await store.updateModelAction(existing.key, { enabled: false });
+      results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
+    }
+  }
+
   const [model, action] = await Promise.all([
     store.getModelBySlug('openai.gpt-realtime-2'),
     store.getActionBySlug('orchestrator-chat'),
   ]);
-  if (!model || !action) return [];
+  if (!model || !action) return results;
 
   const existing = await store.getModelActionByPair(model.key, action.key);
-  if (!existing?.enabled) return [];
+  if (!existing?.enabled) return results;
 
   await store.updateModelAction(existing.key, { enabled: false });
-  return [{ collection: 'modelActions', key: existing.key, status: 'updated' }];
+  results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
+  return results;
 }
 
 async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[number]): Promise<SeedResult> {

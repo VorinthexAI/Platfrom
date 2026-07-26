@@ -27,11 +27,6 @@ export const awsBedrockCredentialsSchema = awsBedrockProviderConfigSchema;
 export type AwsBedrockCredentials = AwsBedrockProviderConfig;
 
 const PROVIDER_ID = 'aws-bedrock' as const;
-const BEDROCK_TEXT_MODEL_IDS = new Set([
-  'amazon.nova-premier-v1:0',
-  'amazon.nova-pro-v1:0',
-  'amazon.nova-2-lite-v1:0',
-]);
 const converseResponseSchema = z.object({ output: z.object({ message: z.object({ content: z.array(z.object({ text: z.string().optional() }).passthrough()).optional() }).passthrough().optional() }), usage: z.object({ inputTokens: z.number().optional(), outputTokens: z.number().optional(), totalTokens: z.number().optional() }).passthrough().optional(), stopReason: z.string().optional() });
 const embeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1), inputTextTokenCount: z.number().optional() }).passthrough();
 
@@ -125,7 +120,7 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
     async *stream<TInput>(request: ProviderExecuteRequest<TInput>): AsyncIterable<ProviderStreamChunk> {
       let client: BedrockStreamClient | undefined;
       try {
-        if (!CHAT_ACTION_IDS.has(request.actionId) || !BEDROCK_TEXT_MODEL_IDS.has(request.externalModelId)) throw unsupportedAction(PROVIDER_ID, 'stream');
+        if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, 'stream');
         const input = chatInputSchema.parse(request.input);
         client = streamClientFactory(request.timeoutMs ?? 300_000);
         const response = await client.send(new ConverseStreamCommand({ modelId: request.externalModelId, ...buildConverseInput(input) }), { abortSignal: resolveRequestSignal(request) });

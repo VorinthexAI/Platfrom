@@ -1,9 +1,10 @@
 const key = /^[A-Za-z0-9_-]{1,160}$/;
 
-const patterns: Array<{ method: "GET" | "POST"; pattern: RegExp }> = [
+const patterns: Array<{ method: "GET" | "POST" | "DELETE"; pattern: RegExp }> = [
   { method: "GET", pattern: /^channels$/ },
   { method: "POST", pattern: /^orchestrators\/([A-Za-z0-9_-]{1,160})\/open$/ },
   { method: "GET", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages$/ },
+  { method: "DELETE", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages$/ },
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages$/ },
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages\/([A-Za-z0-9_-]{1,160})\/reactions$/ },
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/threads$/ },

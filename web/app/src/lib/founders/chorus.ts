@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const keySchema = z.string().trim().min(1).max(160);
 const isoTimestampSchema = z.string().datetime({ offset: true });
+const optionalKeySchema = z.preprocess((value) => value === null ? undefined : value, keySchema.optional());
 
 export const chorusChannelSchema = z.object({
   key: keySchema,
@@ -44,8 +45,8 @@ export const chorusPollSchema = z.object({
 export const chorusMessageSchema = z.object({
   key: keySchema,
   channelKey: keySchema,
-  threadKey: keySchema.optional(),
-  replyToMessageKey: keySchema.optional(),
+  threadKey: optionalKeySchema,
+  replyToMessageKey: optionalKeySchema,
   content: z.string(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
@@ -123,6 +124,19 @@ export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], str
   return markChorusStreamFailed(messages, stream.streamKey, event.error);
 }
 
+export function coalesceChorusStreamEvents(events: ChorusStreamEvent[]): ChorusStreamEvent[] {
+  const coalesced: ChorusStreamEvent[] = [];
+  for (const event of events) {
+    const previous = coalesced.at(-1);
+    if (event.type === "token" && previous?.type === "token") {
+      coalesced[coalesced.length - 1] = { type: "token", text: previous.text + event.text };
+    } else {
+      coalesced.push(event);
+    }
+  }
+  return coalesced;
+}
+
 export function mergeChorusMessageRefresh(current: ChorusDisplayMessage[], canonical: ChorusMessage[], preserveTransient: boolean): ChorusDisplayMessage[] {
   if (!preserveTransient) return canonical;
   const canonicalKeys = new Set(canonical.map((message) => message.key));
@@ -171,6 +185,23 @@ export async function openChorusChannel(organizationKey: string, orchestratorKey
 
 export async function listChorusMessages(organizationKey: string, channelKey: string, signal?: AbortSignal) {
   return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages?limit=200`, z.object({ messages: z.array(chorusMessageSchema) }).strict(), { signal })).messages;
+}
+
+export async function clearChorusChannel(organizationKey: string, channelKey: string) {
+  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages`, z.object({ cleared: z.number().int().nonnegative() }).strict(), { method: "DELETE" });
+}
+
+export function plainChorusText(content: string): string {
+  return content
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/(?:\*\*|__)(.*?)(?:\*\*|__)/g, "$1")
+    .replace(/(?:\*|_)(.*?)(?:\*|_)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export async function mutateChorusReaction(organizationKey: string, channelKey: string, messageKey: string, reaction: string, operation: "add" | "remove" | "toggle" = "toggle") {

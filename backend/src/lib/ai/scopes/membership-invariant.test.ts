@@ -12,13 +12,21 @@ function fakeDatabase(input: {
   scopeMembers?: ScopeMembership[];
 }) {
   const scopeMembers = [...(input.scopeMembers ?? [])];
+  const queries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
   const database = {
-    async query<T>(_query: string, bindVars: Record<string, unknown> = {}) {
-      if (Array.isArray(bindVars.documents)) {
+    async query<T>(query: string, bindVars: Record<string, unknown> = {}) {
+      queries.push({ query, bindVars });
+      if (query.includes('UPSERT { scopeKey: document.scopeKey')) {
         for (const document of bindVars.documents as ScopeMembership[]) {
           const existing = scopeMembers.find((row) => row.scopeKey === document.scopeKey && row.userOrganizationKey === document.userOrganizationKey);
           if (!existing) scopeMembers.push({ ...document, status: 'active', source: 'organization' });
-          else if (existing.source === 'organization') Object.assign(existing, { role: document.role, status: 'active' });
+        }
+        return { all: async () => [] as T[] };
+      }
+      if (query.includes('FILTER member.source == "organization"')) {
+        for (const document of bindVars.documents as ScopeMembership[]) {
+          const existing = scopeMembers.find((row) => row.scopeKey === document.scopeKey && row.userOrganizationKey === document.userOrganizationKey);
+          if (existing?.source === 'organization') Object.assign(existing, { role: document.role, status: 'active' });
         }
         return { all: async () => [] as T[] };
       }
@@ -33,12 +41,12 @@ function fakeDatabase(input: {
           .filter((scope) => scopeKeys === null || scopeKeys.includes(scope.key))
           .map((scope) => {
             const existing = scopeMembers.find((row) => row.scopeKey === scope.key && row.userOrganizationKey === membership.key);
-            return { scopeKey: scope.key, userOrganizationKey: membership.key, orgRole: membership.orgRole, existing: existing ? { key: existing.key, source: existing.source } : null };
+            return { scopeKey: scope.key, userOrganizationKey: membership.key, orgRole: membership.orgRole, existing: existing ? { _key: existing.key } : null };
           }));
       return { all: async () => missing as T[] };
     },
   };
-  return { database, scopeMembers };
+  return { database, scopeMembers, queries };
 }
 
 describe('organization scope membership invariant', () => {
@@ -113,6 +121,24 @@ describe('organization scope membership invariant', () => {
     const rerun = await reconcileOrganizationScopeMemberships(organizationKey, {}, fixture.database);
     expect(rerun.created).toEqual([]);
     expect(fixture.scopeMembers).toHaveLength(4);
+  });
+
+  test('uses separate parse-safe insert and organization refresh queries', async () => {
+    const organizationKey = newId();
+    const membership = { key: newId(), organizationId: organizationKey, orgRole: 'admin', status: 'active' };
+    const scope = { key: newId(), organizationKey };
+    const fixture = fakeDatabase({ memberships: [membership], scopes: [scope] });
+
+    await reconcileOrganizationScopeMemberships(organizationKey, {}, fixture.database);
+
+    const modificationQueries = fixture.queries.slice(1).map(({ query }) => query);
+    expect(modificationQueries).toHaveLength(2);
+    expect(modificationQueries[0]).toContain('UPSERT { scopeKey: document.scopeKey, userOrganizationKey: document.userOrganizationKey }');
+    expect(modificationQueries[0]).toContain('UPDATE {}');
+    expect(modificationQueries[0]).not.toMatch(/UPDATE\s+[^\n]*\?/);
+    expect(modificationQueries[1]).toContain('FILTER member.source == "organization"');
+    expect(modificationQueries[1]).toContain('UPDATE member WITH { role: document.role, status: "active" }');
+    expect(modificationQueries[1]).not.toContain('UPSERT');
   });
 
   test('demotes and reactivates organization rows without changing explicit rows', async () => {

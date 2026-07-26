@@ -35,6 +35,18 @@ describe('Arango communication repository structure', () => {
     expect(source.match(/NOT_NULL\(user\.name, user\.alias, user\.email, "Member"\)/g)).toHaveLength(2);
   });
 
+  test('orders and positions direct channels from their orchestrator scopes', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source).toContain('SORT scope.position ASC, orchestrator.name ASC, orchestrator._key ASC');
+    expect(source).toContain('position: allowed.position');
+    expect(source).toContain('UPDATE { archivedAt: null, position: @position, updatedAt: @now }');
+  });
+
+  test('omits null optional identifiers from message projections', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source.match(/\.map\(normalizeMessageProjection\)/g)).toHaveLength(2);
+  });
+
   test('persists a new reaction in the validated message scope', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('RETURN { scopeKey: message.scopeKey, existingKey:');
