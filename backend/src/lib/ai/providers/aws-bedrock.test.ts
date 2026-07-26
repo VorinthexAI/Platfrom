@@ -107,7 +107,7 @@ describe('AWS Bedrock provider', () => {
     expect(destroyed).toBe(true);
   });
 
-  test('rejects Sonic and non-chat actions before creating a stream client', async () => {
+  test('rejects unsupported models and non-chat actions before creating a stream client', async () => {
     let clientsCreated = 0;
     const adapter = createAwsBedrockProvider(
       { region: 'us-east-1', accessKeyId: 'key', secretAccessKey: 'secret' },
@@ -116,7 +116,7 @@ describe('AWS Bedrock provider', () => {
     );
 
     for (const request of [
-      { ...streamRequest, externalModelId: 'amazon.nova-2-sonic-v1:0' },
+      { ...streamRequest, externalModelId: 'unsupported-model' },
       { ...streamRequest, actionId: 'embed' as const },
     ]) {
       const error = await streamError(adapter.stream!(request));

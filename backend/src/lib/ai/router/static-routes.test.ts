@@ -1,15 +1,29 @@
 import { describe, expect, test } from 'bun:test';
-import { createStaticProviderAdapter, isStaticProvider, resolveStaticBedrockEnvironment, STATIC_PROVIDER_IDS } from './static-routes';
+import { createStaticProviderAdapter, isStaticProvider, resolveStaticBedrockEnvironment, resolveStaticOpenAIConfig, STATIC_PROVIDER_IDS } from './static-routes';
 
 describe('static provider routes', () => {
-  test('registers each environment-backed AWS provider', () => {
-    expect(STATIC_PROVIDER_IDS).toEqual(['aws-bedrock', 'aws-polly', 'aws-transcribe']);
+  test('registers each environment-backed provider', () => {
+    expect(STATIC_PROVIDER_IDS).toEqual(['openai', 'aws-bedrock', 'aws-polly', 'aws-transcribe']);
     expect(isStaticProvider('aws-bedrock')).toBe(true);
-    expect(isStaticProvider('openai')).toBe(false);
+    expect(isStaticProvider('openai')).toBe(true);
   });
 
   test('does not create an adapter for a non-static provider', () => {
-    expect(createStaticProviderAdapter('openai')).toBeUndefined();
+    expect(createStaticProviderAdapter('anthropic')).toBeUndefined();
+  });
+
+  test('resolves the static OpenAI configuration from environment variables', () => {
+    expect(resolveStaticOpenAIConfig({
+      OPENAI_API_KEY: 'key',
+      OPENAI_BASE_URL: 'https://example.com/v1',
+      OPENAI_ORGANIZATION: 'org',
+      OPENAI_PROJECT: 'project',
+    })).toEqual({
+      apiKey: 'key',
+      baseUrl: 'https://example.com/v1',
+      organization: 'org',
+      project: 'project',
+    });
   });
 
   test('prefers dedicated Bedrock configuration over generic AWS configuration', () => {

@@ -4,7 +4,7 @@ export const MODEL_SLUGS = [
   'amazon.nova-premier',
   'amazon.nova-pro',
   'amazon.nova-2-lite',
-  'amazon.nova-2-sonic',
+  'openai.gpt-realtime-2',
   'amazon.polly-generative',
   'amazon.titan-embed-text-v2',
   'aws.transcribe-standard',

@@ -1,10 +1,11 @@
 import { createAwsBedrockProvider } from '@/lib/ai/providers/aws-bedrock';
 import { createAwsPollyProvider } from '@/lib/ai/providers/aws-polly';
 import { createAwsTranscribeProvider } from '@/lib/ai/providers/aws-transcribe';
+import { createOpenAIProvider, type OpenAIProviderConfig } from '@/lib/ai/providers/openai';
 import type { AwsCredentialEnvironment } from '@/lib/ai/providers/aws-sigv4';
 import type { ProviderAdapter, ProviderId } from '@/lib/ai/providers/types';
 
-export const STATIC_PROVIDER_IDS = ['aws-bedrock', 'aws-polly', 'aws-transcribe'] as const satisfies readonly ProviderId[];
+export const STATIC_PROVIDER_IDS = ['openai', 'aws-bedrock', 'aws-polly', 'aws-transcribe'] as const satisfies readonly ProviderId[];
 
 export function isStaticProvider(providerSlug: ProviderId): boolean {
   return STATIC_PROVIDER_IDS.includes(providerSlug as (typeof STATIC_PROVIDER_IDS)[number]);
@@ -14,6 +15,22 @@ interface StaticBedrockEnvironment extends AwsCredentialEnvironment {
   BEDROCK_REGION?: string;
   BEDROCK_AWS_ACCESS_KEY_ID?: string;
   BEDROCK_AWS_SECRET_ACCESS_KEY?: string;
+}
+
+interface StaticOpenAIEnvironment {
+  OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+  OPENAI_ORGANIZATION?: string;
+  OPENAI_PROJECT?: string;
+}
+
+export function resolveStaticOpenAIConfig(env: StaticOpenAIEnvironment): OpenAIProviderConfig {
+  return {
+    apiKey: env.OPENAI_API_KEY ?? '',
+    ...(env.OPENAI_BASE_URL ? { baseUrl: env.OPENAI_BASE_URL } : {}),
+    ...(env.OPENAI_ORGANIZATION ? { organization: env.OPENAI_ORGANIZATION } : {}),
+    ...(env.OPENAI_PROJECT ? { project: env.OPENAI_PROJECT } : {}),
+  };
 }
 
 export function resolveStaticBedrockEnvironment(env: StaticBedrockEnvironment): AwsCredentialEnvironment {
@@ -29,6 +46,12 @@ export function createStaticProviderAdapter(providerSlug: ProviderId): ProviderA
   if (!isStaticProvider(providerSlug)) return undefined;
   try {
     switch (providerSlug) {
+      case 'openai': return createOpenAIProvider(resolveStaticOpenAIConfig({
+        OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+        OPENAI_BASE_URL: process.env.OPENAI_BASE_URL,
+        OPENAI_ORGANIZATION: process.env.OPENAI_ORGANIZATION,
+        OPENAI_PROJECT: process.env.OPENAI_PROJECT,
+      }));
       case 'aws-bedrock': return createAwsBedrockProvider(undefined, resolveStaticBedrockEnvironment(process.env));
       case 'aws-polly': return createAwsPollyProvider();
       case 'aws-transcribe': return createAwsTranscribeProvider();

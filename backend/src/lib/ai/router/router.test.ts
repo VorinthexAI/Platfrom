@@ -8,7 +8,7 @@ import { providerSchema, type Provider } from '@/lib/db/providers.node';
 import type { ProviderAdapter } from '@/lib/ai/providers';
 import { selectRoute } from './select-route';
 import type { RouterDataSource, RouterDependencies } from './types';
-import { NoEligibleRouteError, ProviderNotEnabledForOrganizationError } from './errors';
+import { NoEligibleRouteError } from './errors';
 
 const organizationKey = newId();
 function action(slug: Action['slug']): Action { return actionSchema.parse({ key: newId(), slug, name: slug, description: 'Action description', objective: 'Execute action', inputDescription: 'Input', outputDescription: 'Output', handlerKey: slug, enabled: true }); }
@@ -70,10 +70,10 @@ describe('priority-only persisted router', () => {
     expect((await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'chat' }, tied)).modelKey).toBe(expected);
   });
 
-  test('never bypasses organizationProviders, including fixed mode', async () => {
+  test('uses environment-backed OpenAI without organization credentials', async () => {
     const deps = fixture({ allowed: [] });
-    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'chat' }, deps)).rejects.toBeInstanceOf(NoEligibleRouteError);
-    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'chat', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps)).rejects.toBeInstanceOf(ProviderNotEnabledForOrganizationError);
+    await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'chat' }, deps)).resolves.toMatchObject({ providerSlug: 'openai', credentialSource: 'environment' });
+    await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'chat', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps)).resolves.toMatchObject({ providerSlug: 'openai', credentialSource: 'environment' });
   });
 
   test('routes every action supported by a static AWS provider without an organization provider', async () => {
