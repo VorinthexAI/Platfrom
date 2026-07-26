@@ -28,7 +28,7 @@ describe('action registry', () => {
         'document-generate-json', 'document-generate-content', 'document-embed', 'document-insert',
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
-      .toEqual(['openai.gpt-5.6-terra', 'openai.gpt-5.6-luna', 'openai.gpt-5.6-sol']);
+      .toEqual(['amazon.nova-pro', 'amazon.nova-lite']);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {
