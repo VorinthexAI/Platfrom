@@ -17,7 +17,7 @@ export const chorusChannelSchema = z.object({
   updatedAt: isoTimestampSchema,
 }).strict();
 
-export const chorusMentionSchema = z.object({ participantKey: keySchema, type: z.enum(["user", "orchestrator", "everyone"]), key: keySchema, name: z.string().trim().min(1), role: z.string().optional() }).strict();
+export const chorusMentionSchema = z.object({ participantKey: keySchema, type: z.enum(["user", "orchestrator", "everyone"]), key: keySchema, name: z.string().trim().min(1), role: z.string().optional(), mentionCount: z.number().int().nonnegative() }).strict();
 export const chorusChannelEntrySchema = z.object({
   orchestrator: z.object({ key: keySchema, name: z.string().trim().min(1), role: z.string() }).strict(),
   scopeKey: keySchema,
