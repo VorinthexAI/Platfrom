@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import * as Dialog from "@radix-ui/react-dialog";
-import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import { Button } from "@vorinthex/shared/ui";
 import { useAudioStore } from "@/lib/audio/audio-store";
@@ -18,12 +18,12 @@ import {
   deleteChorusMessage,
   listChorusChannels,
   listChorusMessages,
+  listChorusThreads,
   markChorusStreamFailed,
   mergeChorusMessageRefresh,
   mutateChorusReaction,
   readChorusThread,
   replyChorusThread,
-  resolveChorusThread,
   plainChorusText,
   reconcileChorusStreamEvent,
   streamChorusMessage,
@@ -33,9 +33,11 @@ import {
   type ChorusMessage,
   type ChorusMention,
   type ChorusThread,
+  type ChorusThreadListItem,
   type ChorusStreamEvent,
 } from "@/lib/founders/chorus";
 import { createFrameBatcher } from "@/lib/founders/frame-batcher";
+import { filterChorusReactions } from "@/lib/founders/chorus-reactions";
 
 interface HqCommunicationOverlayProps {
   organizationKey: string;
@@ -54,7 +56,6 @@ const scopeEntities = [
 ];
 const normalizeName = (name: string) => name.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]/g, "");
 const registryByName = new Map(registryOrchestrators.map((entity) => [normalizeName(entity.name), entity]));
-const REACTION_CATALOG = Array.from("😀😃😄😁😆🥹😂🤣😊😇🙂🙃😉😍🥰😘😎🤓🫡🤔🫠😴😭😡🤯🥳😱👀👍👎👏🙌🫶🤝🙏💪🔥❤️🧡💛💚💙💜🖤🤍💯💥✨⭐🌟🎉🎊🚀✅❌⚡💡📌📎📣🔔🎯🏆🥇📈📉💰💬🧠🛠️🧪🔒🌍");
 const MESSAGE_ACTIONS_ENABLED = true;
 
 function OrchestratorMark({ name, size = 36 }: { name: string; size?: number }) {
@@ -230,6 +231,17 @@ function MessageContent({ content, mentions }: { content: string; mentions: Chor
   return <>{plainChorusText(content).split(/(@[a-z0-9_-]+)/gi).map((part, index) => names.has(part.slice(1).toLocaleLowerCase()) ? <strong key={index} className="font-semibold text-silver-50">{part}</strong> : part)}</>;
 }
 
+function toggleOptimisticReaction(messages: ChorusMessage[], messageKey: string, reaction: string): ChorusMessage[] {
+  return messages.map((message) => {
+    if (message.key !== messageKey) return message;
+    const existing = message.reactions.find((item) => item.reaction === reaction);
+    const reactions = existing
+      ? message.reactions.map((item) => item.reaction === reaction ? { ...item, count: item.count + (item.viewerReacted ? -1 : 1), viewerReacted: !item.viewerReacted } : item).filter((item) => item.count > 0)
+      : [...message.reactions, { reaction, count: 1, viewerReacted: true }];
+    return { ...message, reactions };
+  });
+}
+
 const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions, onOpenActions }: MessageViewProps) {
   const channelKey = entry.channel!.key;
   const interactive = !message.clientState;
@@ -254,7 +266,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
           {message.poll ? <button type="button" onClick={() => onCreatePoll(message)} className="rounded-md border border-[var(--border-soft)] px-2 py-0.5 text-[9px] text-silver-300">1 poll</button> : null}
         </div> : null}
       </div>
-      {MESSAGE_ACTIONS_ENABLED && interactive ? <button type="button" aria-label="Message actions" onClick={() => onOpenActions(message)} className="absolute top-3 right-1 hidden h-8 min-w-8 rounded-lg border border-[var(--border-soft)] px-2 text-sm text-silver-200 group-hover:flex group-hover:items-center group-hover:justify-center focus-visible:flex focus-visible:items-center focus-visible:justify-center">...</button> : null}
+      {MESSAGE_ACTIONS_ENABLED && interactive ? <button type="button" aria-label="Message actions" onClick={() => onOpenActions(message)} className="absolute top-3 right-1 hidden h-8 w-9 items-center justify-center rounded-lg border border-[var(--border-soft)] text-xl leading-none text-silver-200 group-hover:flex focus-visible:flex">⋯</button> : null}
     </article>
   );
 }, (previous, next) => previous.entry === next.entry
@@ -272,49 +284,14 @@ function PollComposer({ message, onCancel, onCreate, busy, error }: { message: C
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/65" />
         <Dialog.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-5 shadow-2xl sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
-    <form onSubmit={(event) => { event.preventDefault(); void onCreate(question.trim(), validOptions, allowMultiple); }} aria-label={`Create poll for message: ${message.content.slice(0, 40)}`}>
+    <form onSubmit={(event) => { event.preventDefault(); void onCreate(question.trim(), validOptions, allowMultiple); }} aria-label={`Create poll for message: ${message.content.slice(0, 40)}`} className="flex min-h-0 flex-1 flex-col">
       <div className="flex justify-between"><Dialog.Title className="text-xs text-silver-100">Create poll</Dialog.Title><Dialog.Close type="button" disabled={busy} aria-label="Cancel poll creation"><CloseIcon size="sm" /></Dialog.Close></div>
        <input autoFocus value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={500} placeholder="Question" aria-label="Poll question" className="mt-5 w-full rounded-md border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-[11px] text-white outline-none focus:border-silver-500" />
        <div className="mt-3 space-y-3">{options.map((option, index) => <input key={index} value={option} onChange={(event) => setOptions((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} maxLength={200} placeholder={`Option ${index + 1}`} aria-label={`Poll option ${index + 1}`} className="w-full rounded-md border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-[11px] text-white outline-none focus:border-silver-500" />)}</div>
-      <div className="mt-2 flex items-center justify-between"><label className="text-[10px] text-silver-400"><input type="checkbox" checked={allowMultiple} onChange={(event) => setAllowMultiple(event.target.checked)} className="mr-1" />Multiple choices</label>{options.length < 6 ? <button type="button" onClick={() => setOptions((current) => [...current, ""])} className="text-[9px] text-silver-400 underline">Add option</button> : null}</div>
+       <div className="mt-4 flex items-center justify-between"><label className="flex items-center gap-2 text-[10px] text-silver-400"><input type="checkbox" checked={allowMultiple} onChange={(event) => setAllowMultiple(event.target.checked)} />Multiple choices</label>{options.length < 10 ? <button type="button" onClick={() => setOptions((current) => [...current, ""])} className="text-[10px] text-silver-500 hover:text-silver-200">Add option</button> : null}</div>
       {error ? <p role="alert" className="mt-2 text-[10px] text-status-critical">{error}</p> : null}
-       <div className="mt-auto flex gap-2 pt-5"><button type="submit" disabled={busy || !question.trim() || validOptions.length < 2 || new Set(validOptions.map((option) => option.toLowerCase())).size !== validOptions.length} className="flex-1 rounded-md bg-silver-200 px-3 py-2 text-[10px] text-obsidian-990 disabled:opacity-35">Create</button><button type="button" onClick={onCancel} className="flex-1 rounded-md border border-[var(--border-soft)] px-3 py-2 text-[10px] text-silver-200">Close</button></div>
+       <div className="mt-auto border-t border-[var(--border-faint)] pt-4"><div className="flex gap-2"><button type="submit" disabled={busy || !question.trim() || validOptions.length < 2 || new Set(validOptions.map((option) => option.toLowerCase())).size !== validOptions.length} className="flex-1 rounded-md bg-silver-200 px-3 py-2 text-[10px] text-obsidian-990 disabled:opacity-35">Create</button><button type="button" onClick={onCancel} className="flex-1 rounded-md border border-[var(--border-soft)] px-3 py-2 text-[10px] text-silver-200">Close</button></div></div>
     </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
-
-interface ThreadPanelProps {
-  entry: ChorusChannelEntry;
-  countryCode: string;
-  thread: ChorusThread;
-  messages: ChorusMessage[];
-  loading: boolean;
-  error: string | null;
-  onClose: () => void;
-  onReply: (content: string) => Promise<void>;
-  onResolve: () => Promise<void>;
-}
-
-function ThreadPanel({ entry, countryCode, thread, messages, loading, error, onClose, onReply, onResolve }: ThreadPanelProps) {
-  const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const submit = async (event: FormEvent) => { event.preventDefault(); if (!draft.trim() || busy) return; setBusy(true); try { await onReply(draft.trim()); setDraft(""); } catch { /* The parent renders the request error and the draft stays intact. */ } finally { setBusy(false); } };
-  return (
-    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/55" />
-        <Dialog.Content className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l border-[var(--border-strong)] bg-obsidian-950/98 shadow-2xl sm:w-[420px]" aria-describedby={undefined}>
-      <header className="flex h-14 items-center justify-between border-b border-[var(--border-faint)] px-4"><div><Dialog.Title className="text-xs text-silver-100">{thread.title ?? "Thread"}</Dialog.Title><span className="font-mono text-[8px] uppercase text-silver-500">{thread.status}</span></div><Dialog.Close type="button" aria-label="Close thread panel" className="rounded focus-visible:outline-2"><CloseIcon size="sm" /></Dialog.Close></header>
-      <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto p-4" aria-live="polite">
-         {loading ? <p className="animate-pulse text-[11px] text-silver-500">Loading thread...</p> : messages.map((message) => <div key={message.key} className="border-b border-[var(--border-faint)] py-3"><div className="flex items-center gap-2 text-[10px] text-silver-400">{message.author.type === "orchestrator" ? entry.orchestrator.name : "You"}<Timestamp value={message.createdAt} countryCode={countryCode} /></div><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-silver-200">{message.content}</p></div>)}
-        {error ? <p role="alert" className="mt-2 text-[10px] text-status-critical">{error}</p> : null}
-      </div>
-      <div className="border-t border-[var(--border-faint)] p-3">
-        {thread.status === "open" ? <form onSubmit={submit}><textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} rows={2} maxLength={8000} aria-label="Thread reply" placeholder="Reply to thread" className="w-full resize-none rounded-lg border border-[var(--border-faint)] bg-white/[0.04] p-2 text-[11px] text-white outline-none focus:border-silver-500" /><div className="mt-2 flex justify-between"><button type="button" disabled={busy} onClick={() => { setBusy(true); void onResolve().catch(() => {}).finally(() => setBusy(false)); }} className="text-[9px] text-silver-400 underline disabled:opacity-40">Resolve thread</button><button type="submit" disabled={busy || !draft.trim()} className="rounded bg-silver-200 px-3 py-1 text-[10px] text-obsidian-990 disabled:opacity-35">Reply</button></div></form> : <p className="text-[10px] text-silver-500">This thread is {thread.status} and cannot receive replies.</p>}
-      </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -423,7 +400,14 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const [actionMessage, setActionMessage] = useState<ChorusMessage | null>(null);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [reactionQuery, setReactionQuery] = useState("");
+  const deferredReactionQuery = useDeferredValue(reactionQuery);
+  const filteredReactions = filterChorusReactions(deferredReactionQuery);
   const [threadState, setThreadState] = useState<{ thread: ChorusThread; messages: ChorusMessage[]; loading: boolean; error: string | null } | null>(null);
+  const [threadSheetOpen, setThreadSheetOpen] = useState(false);
+  const [threadItems, setThreadItems] = useState<ChorusThreadListItem[]>([]);
+  const [threadRoot, setThreadRoot] = useState<ChorusMessage | null>(null);
+  const [newThreadOpen, setNewThreadOpen] = useState(false);
+  const [newThreadTitle, setNewThreadTitle] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const controllers = useRef(new Map<string, AbortController>());
@@ -569,22 +553,28 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   }, [channelKey, organizationKey, refreshMessages, selected, streaming]);
   const submitComposerMessage = useCallback((content: string) => { void submitMessage(content); }, [submitMessage]);
 
-  const openThread = async (message: ChorusMessage) => {
-    if (!channelKey) return;
+  const openThread = async (message: ChorusMessage, requestedThreadKey = message.thread?.key) => {
+    if (!channelKey || !requestedThreadKey) return;
     const generation = ++threadGeneration.current;
     const requestOrganization = organizationKey;
     const controller = new AbortController();
     controllers.current.get("thread")?.abort(); controllers.current.set("thread", controller);
     setErrors((current) => ({ ...current, [channelKey]: null }));
     try {
-      const thread = message.thread ? { key: message.thread.key } : await createChorusThread(organizationKey, channelKey, message.key, undefined, controller.signal);
-      const placeholder = "rootMessageKey" in thread ? thread : { key: thread.key, channelKey, rootMessageKey: message.key, status: message.thread?.status ?? "open", createdAt: message.createdAt, updatedAt: message.updatedAt };
+      const thread = { key: requestedThreadKey };
+      const placeholder = { key: thread.key, channelKey, title: "Thread", rootMessageKey: message.key, status: message.thread?.status ?? "open", createdAt: message.createdAt, updatedAt: message.updatedAt } as ChorusThread;
       if (controller.signal.aborted || threadGeneration.current !== generation || activeChannel.current !== channelKey || currentOrganization.current !== requestOrganization) return;
       setThreadState({ thread: placeholder, messages: [message], loading: true, error: null });
       const loaded = await readChorusThread(organizationKey, channelKey, thread.key, controller.signal);
       if (!controller.signal.aborted && threadGeneration.current === generation && activeChannel.current === channelKey && currentOrganization.current === requestOrganization) setThreadState({ ...loaded, loading: false, error: null });
       await refreshMessages(channelKey).catch(() => {});
     } catch (error) { if (!controller.signal.aborted && threadGeneration.current === generation) setErrors((current) => ({ ...current, [channelKey]: error instanceof Error ? error.message : "Thread could not open" })); }
+  };
+
+  const openThreadSheet = async (message: ChorusMessage) => {
+    if (!channelKey) return;
+    setThreadRoot(message); setNewThreadOpen(false); setNewThreadTitle(""); setThreadSheetOpen(true); setActionMessage(null);
+    setThreadItems(await listChorusThreads(organizationKey, channelKey).catch(() => []));
   };
 
   const refreshThread = async () => {
@@ -604,6 +594,11 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   };
 
   const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
+  const displayedMessages = threadState?.messages ?? visibleMessages;
+  const optimisticallyToggleReaction = (messageKey: string, reaction: string) => {
+    if (channelKey) setMessages((current) => ({ ...current, [channelKey]: toggleOptimisticReaction(current[channelKey] ?? [], messageKey, reaction) }));
+    setThreadState((current) => current ? { ...current, messages: toggleOptimisticReaction(current.messages, messageKey, reaction) } : current);
+  };
   const clearSelectedChannel = async () => {
     if (!channelKey || clearing || streaming[channelKey]) return;
     const requestChannel = channelKey;
@@ -633,22 +628,16 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
         <OrchestratorRail channels={channels} selectedKey={selectedKey} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
         <section className="flex min-h-0 min-w-0 flex-col bg-obsidian-990/90 [contain:layout_paint]">
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--border-faint)] px-5">
-            <div className="min-w-0"><h1 className="truncate font-display text-base text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1></div>
+            {threadState ? <button type="button" aria-label="Back to channel" onClick={() => setThreadState(null)} className="rounded-lg border border-[var(--border-soft)] px-2 py-1 text-xs text-silver-200">Back</button> : null}
+            <div className="min-w-0"><h1 className="truncate font-display text-base text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1>{threadState ? <p className="truncate text-[10px] text-silver-500">{threadState.thread.title}</p> : null}</div>
             {selected?.canChat && channelKey ? <button type="button" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto rounded-lg border border-[var(--border-soft)] px-3 py-1.5 text-[10px] text-silver-300 transition-colors hover:border-silver-500 hover:text-silver-50 focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-40">Clear channel</button> : null}
           </div>
           <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
-               {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
-              if (item.key !== messageKey) return item;
-              const existing = item.reactions.find((entry) => entry.reaction === reaction);
-              const reactions = existing
-                ? item.reactions.map((entry) => entry.reaction === reaction ? { ...entry, count: entry.count + (entry.viewerReacted ? -1 : 1), viewerReacted: !entry.viewerReacted } : entry).filter((entry) => entry.count > 0)
-                : [...item.reactions, { reaction, count: 1, viewerReacted: true }];
-              return { ...item, reactions };
-            }) }))} />) : null}
+               {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallyToggleReaction} />) : null}
           </div>
-          <MessageComposer organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={submitComposerMessage} mentions={mentions} />
+          <MessageComposer organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={threadState && channelKey ? (content) => { void replyChorusThread(organizationKey, channelKey, threadState.thread.key, content).then(() => refreshThread()); } : submitComposerMessage} mentions={mentions} />
         </section>
         <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
           <Dialog.Portal>
@@ -677,48 +666,18 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
           }
         }} /> : null}
         <Dialog.Root open={Boolean(actionMessage)} onOpenChange={(open) => { if (!open) setActionMessage(null); }}>
-          <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[360px] sm:rounded-none" aria-describedby={undefined}>
-            <Dialog.Title className="text-sm text-silver-50">Message actions</Dialog.Title>
-            <div className="mt-4 grid gap-2"><button type="button" onClick={() => { if (actionMessage) void openThread(actionMessage); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Thread</button><button type="button" onClick={() => { setPollMessage(actionMessage); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Poll</button><button type="button" onClick={() => setReactionPickerOpen(true)} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">React</button><button type="button" onClick={() => { if (!actionMessage || !channelKey) return; void deleteChorusMessage(organizationKey, channelKey, actionMessage.key).then(() => refreshMessages(channelKey)); setActionMessage(null); }} className="rounded-lg border border-status-critical/40 px-3 py-2 text-left text-xs text-status-critical">Delete message</button></div>
-            <div className="mt-5 flex gap-2"><button type="button" onClick={() => setPollMessage(actionMessage)} className="flex-1 rounded-lg bg-[var(--gradient-chrome)] px-3 py-2 text-xs text-obsidian-990">New</button><Dialog.Close className="flex-1 rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></div>
+          <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[360px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
+            <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Message actions</Dialog.Title><Dialog.Close aria-label="Close message actions" className="flex h-8 w-8 items-center justify-center rounded-lg text-silver-400"><CloseIcon size="sm" /></Dialog.Close></div>
+            <div className="mt-4 grid gap-2"><button type="button" onClick={() => { if (actionMessage) void openThreadSheet(actionMessage); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Threads</button><button type="button" onClick={() => { setPollMessage(actionMessage); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Poll</button><button type="button" onClick={() => setReactionPickerOpen(true)} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">React</button><button type="button" onClick={() => { if (!actionMessage || !channelKey) return; void deleteChorusMessage(organizationKey, channelKey, actionMessage.key).then(() => refreshMessages(channelKey)); setActionMessage(null); }} className="rounded-lg border border-status-critical/40 px-3 py-2 text-left text-xs text-status-critical">Delete message</button></div>
+            <div className="mt-auto border-t border-[var(--border-faint)] pt-4"><Dialog.Close className="w-full rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></div>
           </Dialog.Content></Dialog.Portal>
         </Dialog.Root>
-        <Dialog.Root open={reactionPickerOpen} onOpenChange={setReactionPickerOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[360px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><input autoFocus value={reactionQuery} onChange={(event) => setReactionQuery(event.target.value)} placeholder="Search reactions" className="mt-3 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><div className="scrollbar-hide mt-3 grid min-h-0 flex-1 grid-cols-5 gap-2 overflow-y-auto">{REACTION_CATALOG.filter((reaction) => reaction.includes(reactionQuery)).map((reaction, index) => <button key={`${reaction}-${index}`} type="button" onClick={() => { if (!actionMessage || !channelKey) return; void mutateChorusReaction(organizationKey, channelKey, actionMessage.key, reaction).then(() => refreshMessages(channelKey)); setReactionPickerOpen(false); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] py-2 text-lg">{reaction}</button>)}</div><Dialog.Close className="mt-auto w-full rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>
-         {selected && channelKey && threadState ? <ThreadPanel entry={selected} countryCode={countryCode} {...threadState} onClose={() => {
-          threadGeneration.current += 1;
-          controllers.current.get("thread")?.abort();
-          controllers.current.get("thread-refresh")?.abort();
-          controllers.current.get("thread-mutation")?.abort();
-          setThreadState(null);
-        }} onReply={async (content) => {
-          const requestThread = threadState.thread.key;
-          const generation = threadGeneration.current;
-          const controller = new AbortController();
-          controllers.current.get("thread-mutation")?.abort(); controllers.current.set("thread-mutation", controller);
-          try {
-            await replyChorusThread(organizationKey, channelKey, requestThread, content, undefined, controller.signal);
-          } catch (error) {
-            if (!controller.signal.aborted && threadGeneration.current === generation) setThreadState((current) => current?.thread.key === requestThread ? { ...current, error: error instanceof Error ? error.message : "Reply could not be sent" } : current);
-            throw error;
-          }
-          if (controller.signal.aborted || threadGeneration.current !== generation || activeChannel.current !== channelKey) return;
-          const refreshes = await Promise.allSettled([refreshThread(), refreshMessages(channelKey)]);
-          if (refreshes.some((result) => result.status === "rejected") && threadGeneration.current === generation) setThreadState((current) => current?.thread.key === requestThread ? { ...current, error: "Reply sent, but the thread could not be refreshed." } : current);
-        }} onResolve={async () => {
-          const requestThread = threadState.thread.key;
-          const generation = threadGeneration.current;
-          const controller = new AbortController();
-          controllers.current.get("thread-mutation")?.abort(); controllers.current.set("thread-mutation", controller);
-          try {
-            await resolveChorusThread(organizationKey, channelKey, requestThread, controller.signal);
-          } catch (error) {
-            if (!controller.signal.aborted && threadGeneration.current === generation) setThreadState((current) => current?.thread.key === requestThread ? { ...current, error: error instanceof Error ? error.message : "Thread could not resolve" } : current);
-            throw error;
-          }
-          if (controller.signal.aborted || threadGeneration.current !== generation || activeChannel.current !== channelKey) return;
-          const refreshes = await Promise.allSettled([refreshThread(), refreshMessages(channelKey)]);
-          if (refreshes.some((result) => result.status === "rejected") && threadGeneration.current === generation) setThreadState((current) => current?.thread.key === requestThread ? { ...current, error: "Thread resolved, but its canonical state could not be refreshed." } : current);
-        }} /> : null}
+        <Dialog.Root open={reactionPickerOpen} onOpenChange={setReactionPickerOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[380px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><Dialog.Close aria-label="Close reactions" className="flex h-8 w-8 items-center justify-center rounded-lg text-silver-400 hover:bg-white/[0.05]"><CloseIcon size="sm" /></Dialog.Close></div><input autoFocus value={reactionQuery} onChange={(event) => setReactionQuery(event.target.value)} placeholder="Search reactions" className="mt-4 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><div className="scrollbar-hide mt-4 grid min-h-0 flex-1 grid-cols-5 content-start gap-2 overflow-y-auto pr-1">{filteredReactions.map(({ emoji, name }) => <button key={emoji} type="button" aria-label={name} title={name} onClick={() => { if (!actionMessage || !channelKey) return; optimisticallyToggleReaction(actionMessage.key, emoji); void mutateChorusReaction(organizationKey, channelKey, actionMessage.key, emoji).then(() => threadState ? refreshThread() : refreshMessages(channelKey)); setReactionPickerOpen(false); setActionMessage(null); }} className="flex h-11 items-center justify-center rounded-lg border border-[var(--border-soft)] text-lg">{emoji}</button>)}</div><div className="mt-5 border-t border-[var(--border-faint)] pt-4"><Dialog.Close className="w-full rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></div></Dialog.Content></Dialog.Portal></Dialog.Root>
+        <Dialog.Root open={threadSheetOpen} onOpenChange={setThreadSheetOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[400px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
+          <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Threads</Dialog.Title><Dialog.Close aria-label="Close threads" className="flex h-8 w-8 items-center justify-center rounded-lg text-silver-400"><CloseIcon size="sm" /></Dialog.Close></div>
+          <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">{newThreadOpen ? <div><label className="text-[10px] text-silver-400" htmlFor="thread-title">Thread name</label><input id="thread-title" autoFocus maxLength={50} value={newThreadTitle} onChange={(event) => setNewThreadTitle(event.target.value)} placeholder="Name this thread" className="mt-2 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><p className="mt-2 text-right font-mono text-[9px] text-silver-600">{newThreadTitle.length}/50</p></div> : threadItems.length ? threadItems.map((thread) => <button key={thread.key} type="button" onClick={() => { const root = visibleMessages.find((message) => message.key === thread.rootMessageKey); if (root) void openThread(root, thread.key); setThreadSheetOpen(false); }} className="block w-full rounded-lg border border-[var(--border-soft)] p-3 text-left"><span className="block text-xs text-silver-100">{thread.title}</span><span className="mt-1 block truncate text-[10px] text-silver-500">{thread.rootContent}</span><span className="mt-1 block text-[9px] text-silver-600">{thread.replyCount} replies</span></button>) : <p className="py-8 text-center text-xs text-silver-500">No threads yet.</p>}</div>
+          <div className="mt-5 border-t border-[var(--border-faint)] pt-4"><div className="flex gap-2">{newThreadOpen ? <button type="button" disabled={!threadRoot || !channelKey || !newThreadTitle.trim()} onClick={() => { if (!threadRoot || !channelKey) return; void createChorusThread(organizationKey, channelKey, threadRoot.key, newThreadTitle.trim()).then((thread) => { setThreadSheetOpen(false); setNewThreadOpen(false); void openThread(threadRoot, thread.key); void refreshMessages(channelKey); }); }} className="flex-1 rounded-lg bg-[var(--gradient-chrome)] px-3 py-2 text-xs text-obsidian-990 disabled:opacity-35">Create</button> : <button type="button" onClick={() => setNewThreadOpen(true)} className="flex-1 rounded-lg bg-[var(--gradient-chrome)] px-3 py-2 text-xs text-obsidian-990">New</button>}<Dialog.Close className="flex-1 rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></div></div>
+        </Dialog.Content></Dialog.Portal></Dialog.Root>
       </div>
     </div>
   );

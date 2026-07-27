@@ -72,7 +72,12 @@ export class ChorusService {
     return result;
   }
 
-  async createThread(actor: ChorusActor, channelKey: string, rootMessageKey: string, title?: string) {
+  async listThreads(actor: ChorusActor, channelKey: string) {
+    await this.requireChannel(actor, channelKey);
+    return this.repository.listThreads(channelKey);
+  }
+
+  async createThread(actor: ChorusActor, channelKey: string, rootMessageKey: string, title: string) {
     const access = await this.requireChannel(actor, channelKey);
     const root = await this.requireMessage(channelKey, rootMessageKey);
     if (root.threadKey) throw new ChorusError('conflict', 'thread replies cannot be thread roots');

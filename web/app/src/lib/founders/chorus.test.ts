@@ -56,7 +56,7 @@ describe("Chorus schemas", () => {
   });
 
   test("accepts archived thread projections as non-open threads", () => {
-    const archived = chorusThreadSchema.parse({ key: "thread_key", channelKey: "channel_key", rootMessageKey: "message_key", status: "archived", createdAt: timestamp, updatedAt: timestamp });
+    const archived = chorusThreadSchema.parse({ key: "thread_key", channelKey: "channel_key", title: "Archived thread", rootMessageKey: "message_key", status: "archived", createdAt: timestamp, updatedAt: timestamp });
     const message = chorusMessageSchema.parse({
       ...stored,
       author: { participantKey: "participant_key", type: "user", key: "user_key", name: "User" },

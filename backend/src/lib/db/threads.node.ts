@@ -6,7 +6,7 @@ export const threadSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
   channelKey: z.string().cuid(),
-  title: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).max(50),
   rootMessageKey: z.string().cuid(),
   status: z.enum(['open', 'resolved', 'archived']).default('open'),
   createdAt: z.string().datetime(),

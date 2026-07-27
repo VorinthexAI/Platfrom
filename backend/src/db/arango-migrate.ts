@@ -2170,6 +2170,8 @@ async function main() {
   }
   console.log('Normalized founder aliases, orchestrator links, and Nexus access');
 
+  await targetDb.query('FOR thread IN threads FILTER !HAS(thread, "title") || thread.title == null || TRIM(thread.title) == "" UPDATE thread WITH { title: "Thread" } IN threads');
+
   // Retire the private per-orchestrator conversations. Their messages and all
   // dependent communication records must disappear with the channels so they
   // cannot be read through the shared #general channel implementation.
