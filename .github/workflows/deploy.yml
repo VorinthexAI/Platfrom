@@ -478,6 +478,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.COMMIT_SHA }}
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --linker=hoisted
       - uses: ./.github/actions/load-environments-json
         with:
           git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
@@ -576,6 +579,51 @@ jobs:
           rm -f /tmp/graph-db.env
       - name: Start ArangoDB
         run: ssh graphdbbox "cd ~/vorinthex-db && docker compose up -d --remove-orphans"
+      - name: Open SSH tunnel to ArangoDB
+        run: ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
+      - name: Wait for ArangoDB
+        run: |
+          for i in $(seq 1 60); do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8529/_api/version || true)
+            if [ "$status" != "000" ]; then
+              echo "ArangoDB is reachable through the retained SSH tunnel (HTTP $status)."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::ArangoDB did not become reachable through the SSH tunnel within 120 seconds."
+          exit 1
+      - name: Fetch ArangoDB credentials from SSM
+        run: |
+          creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
+          arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
+          arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
+          polar_access_token=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v')
+          polar_server=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_SERVER")) | .v')
+          bedrock_aws_access_key_id=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_ACCESS_KEY_ID")) | .v')
+          bedrock_aws_secret_access_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_SECRET_ACCESS_KEY")) | .v')
+          test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
+          test -n "$polar_access_token" || { echo "::error::POLAR_ACCESS_TOKEN not found under $SSM_PATH"; exit 1; }
+          test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH"; exit 1; }
+          test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH"; exit 1; }
+          echo "::add-mask::$arango_password"
+          echo "::add-mask::$polar_access_token"
+          echo "::add-mask::$bedrock_aws_access_key_id"
+          echo "::add-mask::$bedrock_aws_secret_access_key"
+          echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
+          echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
+          echo "POLAR_ACCESS_TOKEN=$polar_access_token" >> "$GITHUB_ENV"
+          echo "POLAR_SERVER=${polar_server:-production}" >> "$GITHUB_ENV"
+          echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
+          echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
+      - name: Apply migrations, seed nodes, and sync Polar products
+        env:
+          ARANGO_URL: http://127.0.0.1:8529
+          ARANGO_USERNAME: root
+        run: |
+          bun run --cwd backend db:migrate:ci
+          bun run --cwd backend seed.ts
+          bun run --cwd backend polar:sync
       - name: Close SSH ingress for this runner
         if: always()
         run: |
@@ -633,6 +681,10 @@ jobs:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH ingress for this runner
+        # Migration now runs in backend-db while that job's verified SSH
+        # connection is still open. Keep this legacy marker job successful for
+        # downstream dependency compatibility without opening a second tunnel.
+        if: ${{ false }}
         run: |
           set -euo pipefail
           test -n "${{ env.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID is not set in .github/environments.json."; exit 1; }
@@ -661,6 +713,7 @@ jobs:
           echo "::error::Port 22 on the graph-db host is still unreachable 90s after authorizing ${RUNNER_IP}/32. Check the SG and instance state."
           exit 1
       - name: Open SSH tunnel to ArangoDB
+        if: ${{ false }}
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
           EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("﻿").strip())')"
@@ -697,6 +750,7 @@ jobs:
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
       - name: Fetch ArangoDB credentials from SSM
+        if: ${{ false }}
         run: |
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
@@ -720,6 +774,7 @@ jobs:
           echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
       - name: Apply migrations, seed nodes, and sync Polar products
+        if: ${{ false }}
         working-directory: .
         env:
           ARANGO_URL: http://127.0.0.1:8529
