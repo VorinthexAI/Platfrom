@@ -11,6 +11,7 @@ import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoThumbnailUrl } from "@/lib/three/entity-logo";
 import {
   closeChorusPoll,
+  buildChorusMentionRows,
   clearChorusChannel,
   coalesceChorusStreamEvents,
   createChorusPoll,
@@ -326,10 +327,8 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   const captureGeneration = useRef(0);
   const transcription = useRef<AbortController | null>(null);
   const query = /(?:^|\s)@([\w-]*)$/.exec(draft)?.[1] ?? "";
-  const ordered = [...mentions].sort((left, right) => right.mentionCount - left.mentionCount || left.name.localeCompare(right.name));
+  const { ordered, orchestrators, people } = buildChorusMentionRows(mentions);
   const visible = ordered.filter((mention) => !query || mention.name.toLocaleLowerCase().startsWith(query.toLocaleLowerCase()));
-  const orchestrators = visible.filter((mention) => mention.type === "orchestrator");
-  const people = [...visible.filter((mention) => mention.type === "everyone"), ...visible.filter((mention) => mention.type === "user")];
   useEffect(() => () => { captureGeneration.current += 1; capture.current?.cancel(); transcription.current?.abort(); }, []);
 
   const submit = (event: FormEvent) => {
@@ -393,7 +392,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
     : "Select a channel";
 
   return (
-    <div className="shrink-0 p-3 sm:p-4">
+    <div className="shrink-0 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
       <form onSubmit={submit} className="rounded-xl border border-[var(--border-soft)] bg-obsidian-900/90 p-3 focus-within:border-[var(--border-strong)]">
         <textarea
           value={draft}
@@ -434,7 +433,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           </div>
         </div>
       </form>
-      <div className="mt-2 grid min-w-0 grid-rows-2 gap-1.5 overflow-hidden">
+      <div className="mt-2 grid min-w-0 grid-rows-[minmax(24px,auto)_minmax(24px,auto)] gap-1.5 overflow-hidden">
         <div aria-label="Orchestrator mentions" className="scrollbar-hide flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{orchestrators.map((mention) => <button key={`orchestrator:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[var(--gradient-chrome)] px-2 py-1 font-mono text-[10px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}</div>
         <div aria-label="Organization member mentions" className="scrollbar-hide flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{people.map((mention) => <button key={`${mention.type}:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md border border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</button>)}</div>
       </div>

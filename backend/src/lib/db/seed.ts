@@ -16,6 +16,7 @@ import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orc
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { reconcileOrganizationInheritedAgentMemberships, reconcileOrganizationScopeMemberships } from '@/lib/ai/scopes/membership-invariant';
 import { SEEDED_ORCHESTRATOR_SKILLS } from '@/lib/orchestrators/seeded-skills';
+import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import { ACTION_DEFINITIONS } from '@/lib/ai/actions';
 
 export type SeedResult = {
@@ -1457,6 +1458,18 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   `, { key: newId(), organizationKey: rootOrganization.key, scopeKey: hqScope.key, now: now() });
   const general = (await generalCursor.next())!;
   results.push({ collection: 'channels', key: general.key, status: 'updated' });
+  const orchestratorCursor = await db.query<{ key: string }>('FOR orchestrator IN orchestrators FILTER orchestrator.name IN @names SORT orchestrator.name ASC, orchestrator._key ASC RETURN { key: orchestrator._key }', { names: CANONICAL_ORCHESTRATOR_NAMES });
+  for (const orchestrator of await orchestratorCursor.all()) {
+    const participantKey = newId();
+    const participantCursor = await db.query<{ key: string }>(`
+      UPSERT { channelKey: @channelKey, orchestratorKey: @orchestratorKey }
+        INSERT { _key: @key, scopeKey: @scopeKey, channelKey: @channelKey, orchestratorKey: @orchestratorKey, joinedAt: @now, createdAt: @now, updatedAt: @now, embedding: [] }
+        UPDATE { scopeKey: @scopeKey, updatedAt: @now } IN channelParticipants
+        RETURN { key: NEW._key }
+    `, { key: participantKey, scopeKey: hqScope.key, channelKey: general.key, orchestratorKey: orchestrator.key, now: now() });
+    const participant = (await participantCursor.next())!;
+    results.push({ collection: 'channelParticipants', key: participant.key, status: participant.key === participantKey ? 'created' : 'updated' });
+  }
   results.push(...await assignSeededFounderOrchestrators(rootOrganization.key));
 
   return results;

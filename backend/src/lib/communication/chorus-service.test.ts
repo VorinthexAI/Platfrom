@@ -64,4 +64,11 @@ describe('Chorus service', () => {
     expect(f.usage[0]).toEqual(expect.arrayContaining(['everyone', result.orchestrators[0]!.key]));
     expect(result.orchestrators.map((orchestrator) => orchestrator.name)).toEqual(['Atlas']);
   });
+
+  test('keeps hidden duplicate-label members in @everyone delivery', async () => {
+    const f = fixture();
+    f.access.mentions.push({ participantKey: newId(), type: 'user', key: newId(), name: 'Founder', mentionCount: 0 });
+    await f.service.persistUserMessage(actor, f.channel.key, '@everyone standup');
+    expect(f.mentions).toHaveLength(3);
+  });
 });
