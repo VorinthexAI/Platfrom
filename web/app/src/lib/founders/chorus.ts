@@ -191,6 +191,10 @@ export async function clearChorusChannel(organizationKey: string, channelKey: st
   return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages`, z.object({ cleared: z.number().int().nonnegative() }).strict(), { method: "DELETE" });
 }
 
+export function deleteChorusMessage(organizationKey: string, channelKey: string, messageKey: string) {
+  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}`, z.object({ deleted: z.literal(true) }).strict(), { method: "DELETE" });
+}
+
 export function plainChorusText(content: string): string {
   return content
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")

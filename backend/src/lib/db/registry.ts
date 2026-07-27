@@ -35,6 +35,7 @@ import { getAllThreadsChunked, listThreadsPage, upsertThreadByKey } from './thre
 import { getAllMessagesChunked, listMessagesPage, upsertMessageByKey } from './messages.node';
 import { getAllMessageMentionsChunked, listMessageMentionsPage, upsertMessageMentionByKey } from './message-mentions.node';
 import { getAllUserMentionsChunked, listUserMentionsPage, upsertUserMentionByKey } from './user-mentions.node';
+import { getAllUserReactionsChunked, listUserReactionsPage, upsertUserReactionByKey } from './user-reactions.node';
 import { getAllMessageReactionsChunked, listMessageReactionsPage, upsertMessageReactionByKey } from './message-reactions.node';
 import { getAllPollsChunked, listPollsPage, upsertPollByKey } from './polls.node';
 import { getAllPollOptionsChunked, listPollOptionsPage, upsertPollOptionByKey } from './poll-options.node';
@@ -81,6 +82,7 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   messages: { listPage: listMessagesPage, getAllChunked: getAllMessagesChunked, upsertByKey: upsertMessageByKey },
   messageMentions: { listPage: listMessageMentionsPage, getAllChunked: getAllMessageMentionsChunked, upsertByKey: upsertMessageMentionByKey },
   userMentions: { listPage: listUserMentionsPage, getAllChunked: getAllUserMentionsChunked, upsertByKey: upsertUserMentionByKey },
+  userReactions: { listPage: listUserReactionsPage, getAllChunked: getAllUserReactionsChunked, upsertByKey: upsertUserReactionByKey },
   messageReactions: { listPage: listMessageReactionsPage, getAllChunked: getAllMessageReactionsChunked, upsertByKey: upsertMessageReactionByKey },
   polls: { listPage: listPollsPage, getAllChunked: getAllPollsChunked, upsertByKey: upsertPollByKey },
   pollOptions: { listPage: listPollOptionsPage, getAllChunked: getAllPollOptionsChunked, upsertByKey: upsertPollOptionByKey },
