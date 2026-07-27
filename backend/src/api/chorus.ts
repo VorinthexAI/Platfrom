@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { sanitizeAgentInput, streamTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
+import { getDefaultScopeRepository } from '@/lib/ai/scopes';
 import { requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
 import { ChorusError, ChorusService, type ChorusActor } from '@/lib/communication';
 import { requireFounder } from './founders';
@@ -25,6 +26,7 @@ export interface ChorusApiDependencies {
   service: ChorusService;
   resolveActor(c: Context, requestedOrganizationKey: string): Promise<ChorusActor | Response>;
   stream(skill: string, input: { message: string }, dependencies: ToolDependencies): AsyncIterable<{ type: string; text?: string }>;
+  listScopes(organizationKey: string): Promise<readonly { name: string; description: string | null }[]>;
 }
 
 const defaultDependencies: ChorusApiDependencies = {
@@ -41,6 +43,7 @@ const defaultDependencies: ChorusApiDependencies = {
     }
   },
   stream: (skill, input, dependencies) => streamTool('chat', skill, input, dependencies),
+  listScopes: (organizationKey) => getDefaultScopeRepository().listScopes(organizationKey),
 };
 
 function statusFor(error: ChorusError): 403 | 404 | 409 {
@@ -67,6 +70,13 @@ function boundedAssistantContent(content: string): string {
     bounded += character;
   }
   return bounded;
+}
+
+function scopeContext(scopes: readonly { name: string; description: string | null }[]): string {
+  const descriptions = scopes
+    .filter((scope) => scope.description?.trim())
+    .map((scope) => `${scope.name}: ${scope.description!.trim()}`);
+  return descriptions.length ? `## Organization scopes\n${descriptions.join('\n')}` : '';
 }
 
 export function createChorusHandlers(dependencies: ChorusApiDependencies = defaultDependencies) {
@@ -104,6 +114,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       let streamStarted = false;
       try {
         const { access, message, orchestrators } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
+        const context = scopeContext(await dependencies.listScopes(resolved.organizationKey));
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
           let content = '';
@@ -114,7 +125,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               return;
             }
             for (const orchestrator of orchestrators) {
-              const provider = dependencies.stream(`${orchestrator.skill}\n\n${CHORUS_RESPONSE_INSTRUCTION}`, { message: body.content }, { organizationKey: resolved.organizationKey, signal: c.req.raw.signal });
+              const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, { organizationKey: resolved.organizationKey, signal: c.req.raw.signal });
               let response = '';
               for await (const chunk of provider) {
                 if (chunk.type === 'text-delta' && chunk.text) {

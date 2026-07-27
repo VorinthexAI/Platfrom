@@ -23,6 +23,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
     service: service as never,
     resolveActor: async (c) => options.authenticated === false ? c.json({ error: 'authentication required' }, 401) : options.forbidden ? c.json({ error: 'founders gate access required' }, 403) : actor,
     stream: async function* (skill, input) { streamSkills.push(skill); streamInputs.push(input); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; },
+    listScopes: async () => [{ name: 'HQ', description: 'The organization workspace.' }, { name: 'Ignored', description: null }],
   });
   const app = new Hono();
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.postMessage);
@@ -49,6 +50,8 @@ describe('Chorus SSE API', () => {
     expect(streamInputs).toEqual([{ message: 'hello' }]);
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(streamSkills[0]).toContain('concise plain-text summary');
+    expect(streamSkills[0]).toContain('## Organization scopes\nHQ: The organization workspace.');
+    expect(streamSkills[0]).not.toContain('Ignored');
   });
 
   test('clears an authorized channel', async () => {
