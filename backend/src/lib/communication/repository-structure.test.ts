@@ -42,6 +42,13 @@ describe('Arango communication repository structure', () => {
     expect(source).toContain('FOR orchestrator IN orchestrators SORT orchestrator.name ASC');
   });
 
+  test('deduplicates organization members and lists orchestrators independently', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source.match(/COLLECT userKey = membership\.userId/g)).toHaveLength(2);
+    expect(source).toContain('LET agents = (FOR orchestrator IN orchestrators');
+    expect(source).not.toContain('FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey != null');
+  });
+
   test('omits null optional identifiers from message projections', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source.match(/\.map\(normalizeMessageProjection\)/g)).toHaveLength(2);

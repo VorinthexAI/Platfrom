@@ -316,7 +316,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   const ordered = [...mentions].sort((left, right) => right.mentionCount - left.mentionCount || left.name.localeCompare(right.name));
   const visible = ordered.filter((mention) => !query || mention.name.toLocaleLowerCase().startsWith(query.toLocaleLowerCase()));
   const orchestrators = visible.filter((mention) => mention.type === "orchestrator");
-  const people = visible.filter((mention) => mention.type !== "orchestrator");
+  const people = [...visible.filter((mention) => mention.type === "everyone"), ...visible.filter((mention) => mention.type === "user")];
   const draftKey = channelKey ? `${organizationKey}:${channelKey}` : null;
 
   useEffect(() => {
@@ -377,9 +377,9 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           </button>
         </div>
       </form>
-      <div className="mt-2 space-y-1.5 overflow-hidden">
-        <div className="scrollbar-hide flex gap-1.5 overflow-x-auto pb-1">{orchestrators.map((mention) => <button key={mention.participantKey} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[var(--gradient-chrome)] px-2 py-1 font-mono text-[10px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}</div>
-        <div className="scrollbar-hide flex gap-1.5 overflow-x-auto pb-1">{people.map((mention) => <button key={mention.participantKey} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md border border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</button>)}</div>
+      <div className="mt-2 grid min-w-0 grid-rows-2 gap-1.5 overflow-hidden">
+        <div aria-label="Orchestrator mentions" className="scrollbar-hide flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{orchestrators.map((mention) => <button key={`orchestrator:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[var(--gradient-chrome)] px-2 py-1 font-mono text-[10px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}</div>
+        <div aria-label="Organization member mentions" className="scrollbar-hide flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{people.map((mention) => <button key={`${mention.type}:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md border border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</button>)}</div>
       </div>
     </div>
   );
