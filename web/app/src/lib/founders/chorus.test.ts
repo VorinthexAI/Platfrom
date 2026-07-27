@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chorusChannelEntrySchema,
+  buildChorusMentionRows,
   chorusMessageSchema,
   chorusThreadSchema,
   plainChorusText,
@@ -66,6 +67,25 @@ describe("Chorus schemas", () => {
     });
     expect(archived.status).toBe("archived");
     expect(message.thread?.status).toBe("archived");
+  });
+});
+
+describe("Chorus mention rows", () => {
+  test("keeps orchestrators separate and everyone first while collapsing duplicate labels", () => {
+    const mentions = [
+      { participantKey: "user-a", type: "user" as const, key: "user-a", name: "Oscar", mentionCount: 1 },
+      { participantKey: "agent-atlas", type: "orchestrator" as const, key: "atlas", name: "Atlas", role: "CEO", mentionCount: 2 },
+      { participantKey: "everyone", type: "everyone" as const, key: "everyone", name: "everyone", mentionCount: 0 },
+      { participantKey: "user-b", type: "user" as const, key: "user-b", name: " oscar ", mentionCount: 0 },
+    ];
+    const rows = buildChorusMentionRows(mentions);
+    expect(rows.orchestrators.map(({ name }) => name)).toEqual(["Atlas"]);
+    expect(rows.people.map(({ name }) => name)).toEqual(["everyone", "Oscar"]);
+  });
+
+  test("retains all twenty unique orchestrators in the permanent top row", () => {
+    const mentions = Array.from({ length: 20 }, (_, index) => ({ participantKey: `participant-${index}`, type: "orchestrator" as const, key: `agent-${index}`, name: `Agent ${index}`, role: "Executive", mentionCount: index }));
+    expect(buildChorusMentionRows(mentions).orchestrators).toHaveLength(20);
   });
 });
 

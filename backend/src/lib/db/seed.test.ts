@@ -8,6 +8,7 @@ import { scopeSchema, scopeScopeSchema } from '@/lib/ai/scopes';
 import { newId } from '@/lib/ids';
 import { join } from 'node:path';
 import { NEXUS_SCOPE_KEY, SEEDED_ACTIONS, SEEDED_MODELS, SEEDED_MODEL_ACTIONS, SEEDED_MODEL_PROVIDERS, SEEDED_ORCHESTRATOR_SOURCES, SEEDED_PROVIDERS, SEEDED_SCOPES, SEEDED_VOICES, reconcileObsoleteSeededModelActions, seedAiRuntimeNodes, type AiRuntimeSeedUpserters, type SeedResult } from './seed';
+import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 
 describe('scope seeds', () => {
   test('place products and their Core capability and Command orchestrator children in the Nexus hierarchy', () => {
@@ -151,6 +152,7 @@ describe('voice seeds', () => {
 describe('orchestrator seeds', () => {
   test('seed exactly the 20 executive orchestrator sources with their assigned OpenAI voices', () => {
     expect(SEEDED_ORCHESTRATOR_SOURCES).toHaveLength(20);
+    expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ name }) => name)).toEqual([...CANONICAL_ORCHESTRATOR_NAMES]);
     expect(SEEDED_ORCHESTRATOR_SOURCES.map(({ name, role }) => `${name}:${role}`)).toEqual([
       'Atlas:CEO', 'Metis:CIO', 'Echo:CKO', 'Matrix:CDO', 'Hermes:COO',
       'Harmony:CHRO', 'Phoenix:CGO', 'Iris:CCO', 'Orbit:CMO', 'Apollo:CSO',
@@ -175,6 +177,12 @@ describe('orchestrator seeds', () => {
   test('uses embedded skill snapshots at runtime', async () => {
     const seedSource = await Bun.file(join(import.meta.dir, 'seed.ts')).text();
     expect(seedSource).toContain('SEEDED_ORCHESTRATOR_SKILLS');
+  });
+
+  test('reconciles every orchestrator into the general Chorus channel', async () => {
+    const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
+    expect(source).toContain('UPSERT { channelKey: @channelKey, orchestratorKey: @orchestratorKey }');
+    expect(source).toContain("collection: 'channelParticipants'");
   });
 });
 

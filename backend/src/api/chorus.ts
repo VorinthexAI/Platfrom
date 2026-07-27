@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { sanitizeAgentInput, streamTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
 import { executeAction } from '@/lib/ai/router';
 import type { SpeechOutput, TranscriptionOutput } from '@/lib/ai/providers';
+import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
 import { getDefaultScopeRepository } from '@/lib/ai/scopes';
 import { requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
 import { ChorusError, ChorusService, type ChorusActor } from '@/lib/communication';
@@ -114,7 +115,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
   return {
     listChannels: (c: Context) => run(c, async (resolved) => {
       const access = await dependencies.service.generalChannel(resolved);
-      return { channels: [channelSummary(access.channel)], mentions: access.mentions.map(({ participantKey, type, key: mentionKey, name, role, mentionCount }) => ({ participantKey, type, key: mentionKey, name, role, mentionCount })) };
+      return { channels: [channelSummary(access.channel)], mentions: dedupeMentionCandidates(access.mentions).map(({ participantKey, type, key: mentionKey, name, role, mentionCount }) => ({ participantKey, type, key: mentionKey, name, role, mentionCount })) };
     }),
     transcribe: (c: Context) => run(c, async (resolved) => {
       const body = await parseJson(c, transcriptionBody);

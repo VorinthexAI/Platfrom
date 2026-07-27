@@ -107,6 +107,26 @@ export interface ChorusOptimisticStream {
   assistantKey: string;
 }
 
+export function buildChorusMentionRows(mentions: readonly ChorusMention[]) {
+  const unique = (candidates: ChorusMention[]) => {
+    const seen = new Set<string>();
+    return candidates.filter((mention) => {
+      const identity = mention.name.normalize("NFKC").trim().toLowerCase();
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
+  };
+  const ranked = [...mentions].sort((left, right) => right.mentionCount - left.mentionCount || left.name.localeCompare(right.name));
+  const orchestrators = unique(ranked.filter((mention) => mention.type === "orchestrator"));
+  const people = unique([...ranked.filter((mention) => mention.type === "everyone"), ...ranked.filter((mention) => mention.type === "user")]);
+  return {
+    ordered: [...orchestrators, ...people],
+    orchestrators,
+    people,
+  };
+}
+
 export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], stream: ChorusOptimisticStream, event: ChorusStreamEvent): ChorusDisplayMessage[] {
   if (event.type === "token") {
     return messages.map((message) => message.key === stream.assistantKey
