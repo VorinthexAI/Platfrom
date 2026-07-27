@@ -100,7 +100,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
   return {
     listChannels: (c: Context) => run(c, async (resolved) => {
       const access = await dependencies.service.generalChannel(resolved);
-      return { channels: [channelSummary(access.channel)], mentions: access.mentions.map(({ participantKey, type, key: mentionKey, name, role }) => ({ participantKey, type, key: mentionKey, name, role })) };
+      return { channels: [channelSummary(access.channel)], mentions: access.mentions.map(({ participantKey, type, key: mentionKey, name, role, mentionCount }) => ({ participantKey, type, key: mentionKey, name, role, mentionCount })) };
     }),
     listMessages: (c: Context) => run(c, async (resolved) => ({ messages: await dependencies.service.listMessages(resolved, key.parse(c.req.param('channelKey')), parseQuery(c, chorusMessageListQuerySchema).limit) })),
     clearChannel: (c: Context) => run(c, async (resolved) => ({ cleared: await dependencies.service.clearChannel(resolved, key.parse(c.req.param('channelKey'))) })),

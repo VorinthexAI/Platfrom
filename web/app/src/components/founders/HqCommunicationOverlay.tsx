@@ -5,8 +5,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
 import { Button } from "@vorinthex/shared/ui";
-import { SpeakerIcon } from "@/components/ui/SpeakerIcon";
-import { orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
+import { useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoThumbnailUrl } from "@/lib/three/entity-logo";
@@ -57,22 +56,10 @@ const registryByName = new Map(registryOrchestrators.map((entity) => [normalizeN
 const REACTIONS = ["ack", "approve", "insight", "question"] as const;
 const MESSAGE_ACTIONS_ENABLED = false;
 
-function entityFor(entry: ChorusChannelEntry): GalaxyEntity | null {
-  return registryByName.get(normalizeName(entry.orchestrator.name)) ?? null;
+function OrchestratorMark({ name, size = 36 }: { name: string; size?: number }) {
+  const entity = registryByName.get(normalizeName(name));
+  return entity ? <span className="relative inline-flex shrink-0 overflow-hidden rounded-full border border-[var(--border-soft)] bg-obsidian-990/85" style={{ width: size, height: size }}><Image src={entityLogoThumbnailUrl("orchestrator", entity.slug)} alt={`${name} emblem`} fill sizes={`${size}px`} unoptimized className="object-contain p-[2px]" /></span> : <span aria-hidden className="flex shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-900 font-mono text-[9px] text-silver-300" style={{ width: size, height: size }}>{name.slice(0, 2).toUpperCase()}</span>;
 }
-
-const PersonMark = memo(function PersonMark({ entry, size = 34 }: { entry: ChorusChannelEntry; size?: number }) {
-  const entity = entityFor(entry);
-  return entity ? (
-    <span className="relative inline-flex shrink-0 overflow-hidden rounded-full border border-[var(--border-soft)] bg-obsidian-990/85" style={{ width: size, height: size }}>
-      <Image src={entityLogoThumbnailUrl("orchestrator", entity.slug)} alt={`${entry.orchestrator.name} emblem`} fill sizes={`${size}px`} unoptimized className="object-contain p-[2px]" />
-    </span>
-  ) : (
-    <span aria-hidden className="flex shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-900 font-mono text-[9px] text-silver-300" style={{ width: size, height: size }}>
-      {entry.orchestrator.name.slice(0, 2).toUpperCase()}
-    </span>
-  );
-});
 
 const COUNTRY_TIME_ZONES: Record<string, string> = {
   AU: "Australia/Sydney", BR: "America/Sao_Paulo", CA: "America/Toronto", CN: "Asia/Shanghai", DE: "Europe/Berlin",
@@ -171,8 +158,7 @@ const OrchestratorRail = memo(function OrchestratorRail({ channels, selectedKey,
             const selected = entry.orchestrator.key === selectedKey;
             return (
               <button key={entry.orchestrator.key} type="button" aria-current={selected ? "page" : undefined} aria-label={`${entry.orchestrator.name}${entry.canChat ? "" : ", chat unavailable"}`} onClick={() => onSelect(entry)} className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-silver-300 ${selected ? "bg-[var(--panel-strong)] text-silver-50" : "text-silver-300 hover:bg-white/[0.04]"} ${entry.canChat ? "" : "opacity-55"}`}>
-                <PersonMark entry={entry} size={25} />
-                <span className="min-w-0 flex-1 truncate text-[12px]">{entry.orchestrator.name}</span>
+                <span aria-hidden className="font-mono text-[12px] text-silver-500">#</span><span className="min-w-0 flex-1 truncate text-[12px] lowercase">{entry.channel?.name}</span>
                 {!entry.canChat ? <span aria-hidden title="Chat unavailable" className="text-[10px]">LOCK</span> : null}
               </button>
             );
@@ -254,7 +240,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
   };
   return (
     <article className="group flex gap-3 px-1 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_84px]">
-      {message.author.type === "orchestrator" ? <PersonMark entry={entry} size={36} /> : <span aria-label={userName} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[11px] text-silver-200">{userName.trim().charAt(0).toUpperCase() || "?"}</span>}
+      {message.author.type === "orchestrator" ? <OrchestratorMark name={message.author.name} size={36} /> : <span aria-label={userName} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[11px] text-silver-200">{userName.trim().charAt(0).toUpperCase() || "?"}</span>}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} countryCode={countryCode} /></div>
         <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300">{message.content ? <MessageContent content={message.content} mentions={mentions} /> : message.clientState?.state === "failed" ? <span className="text-status-critical">No response was received.</span> : <span className="animate-pulse text-silver-500">Thinking...</span>}</p>
@@ -349,7 +335,11 @@ interface MessageComposerProps {
 const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, error, onSubmit, mentions }: MessageComposerProps) {
   const channelDrafts = useRef(new Map<string, string>());
   const [draft, setDraft] = useState("");
-  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const query = /(?:^|\s)@([\w-]*)$/.exec(draft)?.[1] ?? "";
+  const ordered = [...mentions].sort((left, right) => right.mentionCount - left.mentionCount || left.name.localeCompare(right.name));
+  const visible = ordered.filter((mention) => !query || mention.name.toLocaleLowerCase().startsWith(query.toLocaleLowerCase()));
+  const orchestrators = visible.filter((mention) => mention.type === "orchestrator");
+  const people = visible.filter((mention) => mention.type !== "orchestrator");
   const draftKey = channelKey ? `${organizationKey}:${channelKey}` : null;
 
   useEffect(() => {
@@ -365,8 +355,12 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
     onSubmit(content);
   };
 
+  const insertMention = (name: string) => {
+    const next = /@([\w-]*)$/.test(draft) ? draft.replace(/@([\w-]*)$/, `@${name} `) : `${draft}${draft && !/\s$/.test(draft) ? " " : ""}@${name} `;
+    setDraft(next); if (draftKey) channelDrafts.current.set(draftKey, next);
+  };
   const placeholder = orchestratorName
-    ? canChat ? `Ask ${orchestratorName}...` : `Chat permission required for ${orchestratorName}`
+    ? canChat ? "Message #general..." : `Chat permission required for ${orchestratorName}`
     : "Select a channel";
 
   return (
@@ -377,17 +371,12 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           onChange={(event) => {
             const value = event.target.value;
             setDraft(value);
-            const query = /(?:^|\s)@([\w-]*)$/.exec(value)?.[1] ?? "";
-            const match = mentions.find((mention) => mention.name.toLocaleLowerCase().startsWith(query.toLocaleLowerCase()));
-            setSuggestion(match ? match.name : null);
             if (draftKey) channelDrafts.current.set(draftKey, value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Tab" && suggestion) {
+            if (event.key === "Tab" && visible[0]) {
               event.preventDefault();
-              const next = draft.replace(/@([\w-]*)$/, `@${suggestion} `);
-              setDraft(next); setSuggestion(null);
-              if (draftKey) channelDrafts.current.set(draftKey, next);
+              insertMention(visible[0].name);
               return;
             }
             if (event.key === "Enter" && !event.shiftKey) {
@@ -402,7 +391,6 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           aria-label={orchestratorName ? `Message ${orchestratorName}` : "Message"}
           className="block w-full resize-none bg-transparent text-[12px] text-silver-100 outline-none placeholder:text-silver-500 disabled:cursor-not-allowed"
         />
-        {suggestion ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { const next = draft.replace(/@([\w-]*)$/, `@${suggestion} `); setDraft(next); setSuggestion(null); if (draftKey) channelDrafts.current.set(draftKey, next); }} className="mt-1 rounded bg-white/[0.08] px-2 py-1 text-[10px] text-silver-200">@{suggestion}<span className="ml-2 text-silver-500">Tab</span></button> : null}
         <div className="mt-2 flex min-h-8 items-center justify-between gap-3">
           <span role="status" className={`text-[10px] ${error ? "text-status-critical" : "text-silver-600"}`}>
             {error ? error : streaming ? `${orchestratorName} is responding...` : !canChat && orchestratorName ? `You lack permission to chat with ${orchestratorName}.` : null}
@@ -412,6 +400,10 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           </button>
         </div>
       </form>
+      <div className="mt-2 space-y-1.5 overflow-hidden">
+        <div className="scrollbar-hide flex gap-1.5 overflow-x-auto pb-1">{orchestrators.map((mention) => <button key={mention.participantKey} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[var(--gradient-chrome)] px-2 py-1 font-mono text-[10px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}</div>
+        <div className="scrollbar-hide flex gap-1.5 overflow-x-auto pb-1">{people.map((mention) => <button key={mention.participantKey} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md border border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</button>)}</div>
+      </div>
     </div>
   );
 });
@@ -440,8 +432,6 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const messagesPane = useRef<HTMLDivElement>(null);
   const shouldFollowMessages = useRef(true);
   const stopVoice = useAudioStore((state) => state.stopVoice);
-  const playVoice = useAudioStore((state) => state.playVoice);
-  const voicePlayingSrc = useAudioStore((state) => state.voicePlayingSrc);
   currentOrganization.current = organizationKey;
 
   const loadChannels = useCallback(async () => {
@@ -500,8 +490,6 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const selected = channels.find((entry) => entry.orchestrator.key === selectedKey) ?? null;
   const channelKey = selected?.channel?.key ?? null;
   const selectedMessages = channelKey ? messages[channelKey] : undefined;
-  const selectedEntity = selected ? entityFor(selected) : null;
-  const selectedVoiceSrc = selectedEntity && selected?.canChat ? orchestratorMessageUrl(selectedEntity.slug) : null;
   activeChannel.current = channelKey;
   useEffect(() => { if (selected?.canChat && channelKey) void refreshMessages(channelKey).catch(() => {}); }, [selectedKey, channelKey, selected?.canChat, refreshMessages]);
   useEffect(() => {
@@ -520,16 +508,15 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     });
     return () => cancelAnimationFrame(frame);
   }, [selectedMessages]);
-  useEffect(() => () => stopVoice(), [organizationKey, channelKey, selectedVoiceSrc, stopVoice]);
+  useEffect(() => () => stopVoice(), [organizationKey, channelKey, stopVoice]);
 
   const selectChannel = useCallback((entry: ChorusChannelEntry) => {
     threadGeneration.current += 1;
     controllers.current.get("thread")?.abort();
     activeChannel.current = entry.channel?.key ?? null;
     setSelectedKey(entry.orchestrator.key); setPollMessage(null); setThreadState(null); setClearOpen(false);
-    const entity = entityFor(entry); if (entity) onScopeChange(entity.id);
     if (entry.orchestrator.key === selectedKey && entry.canChat && entry.channel) void refreshMessages(entry.channel.key).catch(() => {});
-  }, [onScopeChange, refreshMessages, selectedKey]);
+  }, [refreshMessages, selectedKey]);
   const retryChannels = useCallback(() => { void loadChannels(); }, [loadChannels]);
 
   const submitMessage = useCallback(async (content: string) => {
@@ -637,14 +624,13 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     <div data-scope-id={selectedScopeId} className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
       <header className="flex h-12 shrink-0 items-center border border-[var(--border-faint)] bg-obsidian-990/90 px-3 sm:h-14 sm:px-4">
         <Image src="/logos/vorinthex-mark.png" alt="Vorinthex" width={23} height={23} className="opacity-90" />
-        <div className="ml-3 min-w-0 flex-1 font-mono text-[9px] uppercase tracking-[0.13em] text-silver-500"><span className="text-silver-300">HQ</span><span className="mx-2">/</span><span className="truncate">{selected?.orchestrator.name ?? "Chorus"}</span></div>
+        <div className="ml-3 min-w-0 flex-1 font-mono text-[9px] uppercase tracking-[0.13em] text-silver-500"><span className="text-silver-300">HQ</span><span className="mx-2">/</span><span className="truncate lowercase">#{selected?.channel?.name ?? "general"}</span></div>
       </header>
       <div className="relative grid min-h-0 flex-1 grid-rows-[minmax(150px,30vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1">
         <OrchestratorRail channels={channels} selectedKey={selectedKey} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
         <section className="flex min-h-0 min-w-0 flex-col bg-obsidian-990/90 [contain:layout_paint]">
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--border-faint)] px-5">
-            {selected ? <PersonMark entry={selected} size={34} /> : null}<div className="min-w-0"><h1 className="truncate font-display text-base text-silver-50">{selected?.orchestrator.name ?? "Chorus"}</h1><p className="truncate text-[9px] text-silver-500">{selected ? entityFor(selected)?.fullTitle ?? selected.orchestrator.role : "Select a channel"}</p></div>
-            {selectedVoiceSrc && selected ? <button type="button" aria-pressed={voicePlayingSrc === selectedVoiceSrc} aria-label={`${voicePlayingSrc === selectedVoiceSrc ? "Stop" : "Play"} Meet ${selected.orchestrator.name}`} onClick={() => playVoice(selectedVoiceSrc)} className={`ml-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border focus-visible:outline-2 ${voicePlayingSrc === selectedVoiceSrc ? "border-silver-300 bg-white/10 text-silver-50" : "border-[var(--border-soft)] text-silver-400 hover:border-silver-500 hover:text-silver-100"}`}><SpeakerIcon animated={voicePlayingSrc === selectedVoiceSrc} /></button> : null}
+            <div className="min-w-0"><h1 className="truncate font-display text-base text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1><p className="truncate text-[9px] text-silver-500">Organization channel</p></div>
             {selected?.canChat && channelKey ? <button type="button" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto rounded-lg border border-[var(--border-soft)] px-3 py-1.5 text-[10px] text-silver-300 transition-colors hover:border-silver-500 hover:text-silver-50 focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-40">Clear channel</button> : null}
           </div>
           <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>

@@ -21,7 +21,7 @@ export class ChorusService {
   async generalChannel(actor: ChorusActor) {
     const access = await this.repository.ensureGeneralChannel(actor.organizationKey, actor.membershipKey);
     if (!access) throw new ChorusError('forbidden', 'organization access denied');
-    return access;
+    return await this.repository.getGeneralChannelAccess(actor.organizationKey, actor.membershipKey, access.channel.key) ?? access;
   }
 
   async requireChannel(actor: ChorusActor, channelKey: string): Promise<GeneralChannelAccess> {
@@ -46,6 +46,7 @@ export class ChorusService {
     const message = await this.repository.insertMessage(this.message(access, access.humanParticipant.key, content, threadKey, replyToMessageKey));
     const mentions = this.mentions(access, message.key, content);
     await this.repository.insertMentions(mentions.map(({ candidate, mention }) => mention));
+    await this.repository.recordUserMentions(access.viewerUserKey, [...new Set([...( /(^|[^\w])@everyone\b/i.test(content) ? ['everyone'] : []), ...mentions.map(({ candidate }) => candidate.key)])], this.now());
     return { access, message, orchestrators: mentions.filter(({ candidate }) => candidate.type === 'orchestrator').map(({ candidate }) => candidate) };
   }
 

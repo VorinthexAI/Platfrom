@@ -9,6 +9,7 @@ import { pollSchema, type Poll } from '@/lib/db/polls.node';
 import { pollOptionSchema, type PollOption } from '@/lib/db/poll-options.node';
 import { pollVoteSchema, type PollVote } from '@/lib/db/poll-votes.node';
 import { messageMentionSchema, type MessageMention } from '@/lib/db/message-mentions.node';
+import { userMentionSchema } from '@/lib/db/user-mentions.node';
 import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 
 export interface MentionCandidate {
@@ -18,11 +19,13 @@ export interface MentionCandidate {
   name: string;
   role?: string;
   skill?: string;
+  mentionCount: number;
 }
 
 export interface GeneralChannelAccess {
   channel: Channel;
   humanParticipant: ChannelParticipant;
+  viewerUserKey: string;
   mentions: MentionCandidate[];
 }
 
@@ -61,6 +64,7 @@ export interface CommunicationRepository {
   getMessage(messageKey: string): Promise<Message | null>;
   insertMessage(message: Message): Promise<Message>;
   insertMentions(mentions: MessageMention[]): Promise<void>;
+  recordUserMentions(userKey: string, sourceIds: string[], now: string): Promise<void>;
   mutateReaction(input: { mode: 'add' | 'remove' | 'toggle'; channelKey: string; messageKey: string; participantKey: string; reaction: string; now: string }): Promise<{ active: boolean } | null>;
   createThread(thread: Thread): Promise<Thread>;
   getThread(threadKey: string): Promise<Thread | null>;
@@ -84,6 +88,7 @@ function parseAccess(raw: Record<string, any>): GeneralChannelAccess {
   return {
     channel: parse(channelSchema, raw.channel),
     humanParticipant: parse(channelParticipantSchema, raw.humanParticipant),
+    viewerUserKey: raw.viewerUserKey,
     mentions: raw.mentions,
   };
 }
@@ -136,8 +141,8 @@ export const arangoCommunicationRepository: CommunicationRepository = {
       };
       const human = await participant({ channelKey: channel.key, userOrganizationKey: membershipKey }, channelParticipantSchema.parse({ key: newId(), scopeKey: allowed.scopeKey, channelKey: channel.key, userOrganizationKey: membershipKey, joinedAt: now, createdAt: now, updatedAt: now }));
       const candidates = await trx.query<Record<string, any>>(`
-        LET people = (FOR member IN userOrganizations FILTER member.organizationId == @organizationKey && member.status == "active" LET user = DOCUMENT(users, member.userId) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) RETURN { membershipKey: member._key, participantKey: participant == null ? null : participant._key, type: "user", key: user._key, name: NOT_NULL(user.name, user.alias, user.email, "Member") })
-        LET agents = (FOR orchestrator IN orchestrators SORT orchestrator.name ASC RETURN { participantKey: FIRST(FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey == orchestrator._key LIMIT 1 RETURN participant._key), type: "orchestrator", key: orchestrator._key, name: orchestrator.name, role: orchestrator.role, skill: orchestrator.skill })
+        LET people = (FOR member IN userOrganizations FILTER member.organizationId == @organizationKey && member.status == "active" LET user = DOCUMENT(users, member.userId) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) RETURN { membershipKey: member._key, participantKey: participant == null ? null : participant._key, type: "user", key: user._key, name: NOT_NULL(user.name, user.alias, user.email, "Member"), mentionCount: 0 })
+        LET agents = (FOR orchestrator IN orchestrators SORT orchestrator.name ASC RETURN { participantKey: FIRST(FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey == orchestrator._key LIMIT 1 RETURN participant._key), type: "orchestrator", key: orchestrator._key, name: orchestrator.name, role: orchestrator.role, skill: orchestrator.skill, mentionCount: 0 })
         RETURN { people, agents }
       `, { organizationKey, channelKey: channel.key });
       const identities = await candidates.next() ?? { people: [], agents: [] };
@@ -151,7 +156,9 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         const created = await participant({ channelKey: channel.key, orchestratorKey: agent.key }, channelParticipantSchema.parse({ key: newId(), scopeKey: allowed.scopeKey, channelKey: channel.key, orchestratorKey: agent.key, joinedAt: now, createdAt: now, updatedAt: now }));
         agent.participantKey = created.key;
       }
-      return { channel, humanParticipant: human, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone' }, ...identities.people.map(({ membershipKey: _membershipKey, ...person }: Record<string, any>) => person), ...identities.agents] };
+      const viewer = await trx.query<{ userKey: string }>('LET membership = DOCUMENT(userOrganizations, @membershipKey) RETURN { userKey: membership.userId }', { membershipKey });
+      const viewerUserKey = (await viewer.next())!.userKey;
+      return { channel, humanParticipant: human, viewerUserKey, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 }, ...identities.people.map(({ membershipKey: _membershipKey, ...person }: Record<string, any>) => person), ...identities.agents] };
     });
   },
 
@@ -162,9 +169,11 @@ export const arangoCommunicationRepository: CommunicationRepository = {
       LET human = FIRST(FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.userOrganizationKey == @membershipKey LIMIT 1 RETURN participant)
       LET allowed = channel != null && channel.kind == "group" && channel.name == "general" && channel.organizationKey == @organizationKey && channel.archivedAt == null && membership != null && membership.organizationId == @organizationKey && membership.status == "active"
       FILTER allowed && human != null
-      LET people = (FOR member IN userOrganizations FILTER member.organizationId == @organizationKey && member.status == "active" LET user = DOCUMENT(users, member.userId) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) FILTER participant != null RETURN { participantKey: participant._key, type: "user", key: user._key, name: NOT_NULL(user.name, user.alias, user.email, "Member") })
-      LET agents = (FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey != null LET orchestrator = DOCUMENT(orchestrators, participant.orchestratorKey) FILTER orchestrator != null SORT orchestrator.name ASC RETURN { participantKey: participant._key, type: "orchestrator", key: orchestrator._key, name: orchestrator.name, role: orchestrator.role, skill: orchestrator.skill })
-      RETURN { channel, humanParticipant: human, mentions: APPEND([{ participantKey: "everyone", type: "everyone", key: "everyone", name: "everyone" }], APPEND(people, agents)) }
+      LET viewerUserKey = membership.userId
+      LET people = (FOR member IN userOrganizations FILTER member.organizationId == @organizationKey && member.status == "active" LET user = DOCUMENT(users, member.userId) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) FILTER participant != null LET usage = FIRST(FOR item IN userMentions FILTER item.userKey == viewerUserKey && item.sourceId == user._key LIMIT 1 RETURN item.count) RETURN { participantKey: participant._key, type: "user", key: user._key, name: NOT_NULL(user.name, user.alias, user.email, "Member"), mentionCount: NOT_NULL(usage, 0) })
+      LET agents = (FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey != null LET orchestrator = DOCUMENT(orchestrators, participant.orchestratorKey) FILTER orchestrator != null LET usage = FIRST(FOR item IN userMentions FILTER item.userKey == viewerUserKey && item.sourceId == orchestrator._key LIMIT 1 RETURN item.count) SORT orchestrator.name ASC RETURN { participantKey: participant._key, type: "orchestrator", key: orchestrator._key, name: orchestrator.name, role: orchestrator.role, skill: orchestrator.skill, mentionCount: NOT_NULL(usage, 0) })
+      LET everyoneUsage = FIRST(FOR item IN userMentions FILTER item.userKey == viewerUserKey && item.sourceId == "everyone" LIMIT 1 RETURN item.count)
+      RETURN { channel, humanParticipant: human, viewerUserKey, mentions: APPEND([{ participantKey: "everyone", type: "everyone", key: "everyone", name: "everyone", mentionCount: NOT_NULL(everyoneUsage, 0) }], APPEND(people, agents)) }
     `, { organizationKey, membershipKey, channelKey });
     return raw ? parseAccess(raw) : null;
   },
@@ -242,6 +251,10 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   async insertMentions(mentions) {
     if (!mentions.length) return;
     await db.query('FOR mention IN @mentions UPSERT { messageKey: mention._key, participantKey: mention.participantKey } INSERT mention UPDATE { updatedAt: mention.updatedAt } IN messageMentions', { mentions: mentions.map((mention) => toArangoDoc(messageMentionSchema.parse(mention))) });
+  },
+  async recordUserMentions(userKey, sourceIds, now) {
+    if (!sourceIds.length) return;
+    await db.query('FOR sourceId IN @sourceIds UPSERT { userKey: @userKey, sourceId } INSERT MERGE(@document, { sourceId }) UPDATE { count: OLD.count + 1, updatedAt: @now } IN userMentions', { userKey, sourceIds, now, document: toArangoDoc(userMentionSchema.parse({ key: newId(), userKey, sourceId: 'pending', count: 1, createdAt: now, updatedAt: now })) });
   },
 
   async mutateReaction(input) {
