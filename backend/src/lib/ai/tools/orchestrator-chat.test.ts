@@ -12,5 +12,6 @@ describe('orchestrator chat tool', () => {
       },
     })).resolves.toBe('Answer');
     await expect(orchestratorChatTool.execute('Atlas', { message: '' }, { execute: async () => ({}) as never })).rejects.toThrow();
+    await expect(orchestratorChatTool.execute('Atlas', { message: 'new', history: [{ role: 'user', content: 'old' }] }, { execute: async () => ({}) as never })).rejects.toThrow();
   });
 });

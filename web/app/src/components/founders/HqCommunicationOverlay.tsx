@@ -31,6 +31,7 @@ import {
   type ChorusChannelEntry,
   type ChorusDisplayMessage,
   type ChorusMessage,
+  type ChorusMention,
   type ChorusThread,
   type ChorusStreamEvent,
 } from "@/lib/founders/chorus";
@@ -233,9 +234,15 @@ interface MessageViewProps {
   onOptimisticReaction: (messageKey: string, reaction: string) => void;
   userName: string;
   countryCode: string;
+  mentions: ChorusMention[];
 }
 
-const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode }: MessageViewProps) {
+function MessageContent({ content, mentions }: { content: string; mentions: ChorusMention[] }) {
+  const names = new Set(mentions.map((mention) => mention.name.toLocaleLowerCase()));
+  return <>{plainChorusText(content).split(/(@[a-z0-9_-]+)/gi).map((part, index) => names.has(part.slice(1).toLocaleLowerCase()) ? <strong key={index} className="font-semibold text-silver-50">{part}</strong> : part)}</>;
+}
+
+const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions }: MessageViewProps) {
   const channelKey = entry.channel!.key;
   const interactive = !message.clientState;
   const react = async (reaction: string) => {
@@ -250,7 +257,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
       {message.author.type === "orchestrator" ? <PersonMark entry={entry} size={36} /> : <span aria-label={userName} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[11px] text-silver-200">{userName.trim().charAt(0).toUpperCase() || "?"}</span>}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} countryCode={countryCode} /></div>
-        <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300">{message.content ? plainChorusText(message.content) : message.clientState?.state === "failed" ? <span className="text-status-critical">No response was received.</span> : <span className="animate-pulse text-silver-500">Thinking...</span>}</p>
+        <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300">{message.content ? <MessageContent content={message.content} mentions={mentions} /> : message.clientState?.state === "failed" ? <span className="text-status-critical">No response was received.</span> : <span className="animate-pulse text-silver-500">Thinking...</span>}</p>
         {message.clientState ? <p role={message.clientState.state === "failed" ? "alert" : "status"} className={`mt-1 font-mono text-[8px] uppercase ${message.clientState.state === "failed" ? "text-status-critical" : "text-silver-600"}`}>{message.clientState.state === "failed" ? message.clientState.error ?? "Message reconciliation failed" : message.author.type === "user" ? "Sending" : "Response pending"}</p> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <div className="mt-1.5 flex flex-wrap items-center gap-1 opacity-80 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
@@ -336,11 +343,13 @@ interface MessageComposerProps {
   streaming: boolean;
   error: string | null;
   onSubmit: (content: string) => void;
+  mentions: ChorusMention[];
 }
 
-const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, error, onSubmit }: MessageComposerProps) {
+const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, error, onSubmit, mentions }: MessageComposerProps) {
   const channelDrafts = useRef(new Map<string, string>());
   const [draft, setDraft] = useState("");
+  const [suggestion, setSuggestion] = useState<string | null>(null);
   const draftKey = channelKey ? `${organizationKey}:${channelKey}` : null;
 
   useEffect(() => {
@@ -368,9 +377,19 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           onChange={(event) => {
             const value = event.target.value;
             setDraft(value);
+            const query = /(?:^|\s)@([\w-]*)$/.exec(value)?.[1] ?? "";
+            const match = mentions.find((mention) => mention.name.toLocaleLowerCase().startsWith(query.toLocaleLowerCase()));
+            setSuggestion(match ? match.name : null);
             if (draftKey) channelDrafts.current.set(draftKey, value);
           }}
           onKeyDown={(event) => {
+            if (event.key === "Tab" && suggestion) {
+              event.preventDefault();
+              const next = draft.replace(/@([\w-]*)$/, `@${suggestion} `);
+              setDraft(next); setSuggestion(null);
+              if (draftKey) channelDrafts.current.set(draftKey, next);
+              return;
+            }
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               event.currentTarget.form?.requestSubmit();
@@ -383,6 +402,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           aria-label={orchestratorName ? `Message ${orchestratorName}` : "Message"}
           className="block w-full resize-none bg-transparent text-[12px] text-silver-100 outline-none placeholder:text-silver-500 disabled:cursor-not-allowed"
         />
+        {suggestion ? <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { const next = draft.replace(/@([\w-]*)$/, `@${suggestion} `); setDraft(next); setSuggestion(null); if (draftKey) channelDrafts.current.set(draftKey, next); }} className="mt-1 rounded bg-white/[0.08] px-2 py-1 text-[10px] text-silver-200">@{suggestion}<span className="ml-2 text-silver-500">Tab</span></button> : null}
         <div className="mt-2 flex min-h-8 items-center justify-between gap-3">
           <span role="status" className={`text-[10px] ${error ? "text-status-critical" : "text-silver-600"}`}>
             {error ? error : streaming ? `${orchestratorName} is responding...` : !canChat && orchestratorName ? `You lack permission to chat with ${orchestratorName}.` : null}
@@ -398,6 +418,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
 
 export default function HqCommunicationOverlay({ organizationKey, userName, countryCode, selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
   const [channels, setChannels] = useState<ChorusChannelEntry[]>([]);
+  const [mentions, setMentions] = useState<ChorusMention[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(true);
   const [channelsError, setChannelsError] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -438,8 +459,8 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     try {
       const loaded = await listChorusChannels(organizationKey, controller.signal);
       if (controller.signal.aborted || organizationGeneration.current !== generation || currentOrganization.current !== organizationKey) return;
-      setChannels(loaded);
-      setSelectedKey((current) => loaded.some((entry) => entry.orchestrator.key === current) ? current : (loaded.find((entry) => normalizeName(entry.orchestrator.name) === "atlas") ?? loaded[0])?.orchestrator.key ?? null);
+      setChannels(loaded.channels); setMentions(loaded.mentions);
+      setSelectedKey((current) => loaded.channels.some((entry) => entry.orchestrator.key === current) ? current : loaded.channels[0]?.orchestrator.key ?? null);
     } catch (error) { if (!controller.signal.aborted && organizationGeneration.current === generation) setChannelsError(error instanceof Error ? error.message : "Channels could not load"); }
     finally { if (!controller.signal.aborted && organizationGeneration.current === generation) setChannelsLoading(false); }
   }, [organizationKey]);
@@ -629,7 +650,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
           <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
-             {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
+              {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
               if (item.key !== messageKey) return item;
               const existing = item.reactions.find((entry) => entry.reaction === reaction);
               const reactions = existing
@@ -638,7 +659,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
               return { ...item, reactions };
             }) }))} />) : null}
           </div>
-          <MessageComposer organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={submitComposerMessage} />
+          <MessageComposer organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={submitComposerMessage} mentions={mentions} />
         </section>
         <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
           <Dialog.Portal>

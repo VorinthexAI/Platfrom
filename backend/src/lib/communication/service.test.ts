@@ -21,7 +21,7 @@ describe('communication referential validation', () => {
 
   test('rejects a message authored by a participant from another channel', async () => {
     const scopeKey = newId();
-    const channel = channelSchema.parse({ key: newId(), scopeKey, name: 'engineering', position: 0, createdAt: now, updatedAt: now });
+    const channel = channelSchema.parse({ key: newId(), organizationKey: newId(), scopeKey, name: 'engineering', position: 0, createdAt: now, updatedAt: now });
     const participant = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: newId(), userOrganizationKey: newId(), joinedAt: now, createdAt: now, updatedAt: now });
     const message = messageSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, authorParticipantKey: participant.key, content: 'Hello', createdAt: now, updatedAt: now });
     const lookup: CommunicationLookup = {

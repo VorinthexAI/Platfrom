@@ -22,9 +22,9 @@ describe('Arango communication repository structure', () => {
     expect(source).not.toMatch(/REMOVE existing IN messageReactions[\s\S]{0,400}INSERT .*messageReactions/);
   });
 
-  test('declares read and write collections for direct channels, reactions, and votes', async () => {
+  test('declares read and write collections for the shared channel, reactions, and votes', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source).toContain("read: ['userOrganizations', 'orchestrators', 'scopes', 'scopeMembers']");
+    expect(source).toContain("read: ['userOrganizations', 'orchestrators', 'scopes', 'users']");
     expect(source).toContain("write: ['channels', 'channelParticipants']");
     expect(source).toContain("{ read: ['messages', 'channelParticipants'], write: ['messageReactions'] }");
     expect(source).toContain("{ read: ['pollOptions'], write: ['polls', 'pollVotes'] }");
@@ -32,14 +32,14 @@ describe('Arango communication repository structure', () => {
 
   test('projects a stable founder display name', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source.match(/NOT_NULL\(user\.name, user\.alias, user\.email, "Member"\)/g)).toHaveLength(2);
+    expect(source.match(/NOT_NULL\(user\.name, user\.alias, user\.email, "Member"\)/g)).toHaveLength(4);
   });
 
-  test('orders and positions direct channels from their orchestrator scopes', async () => {
+  test('uses one organization-scoped general channel', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source).toContain('SORT scope.position ASC, orchestrator.name ASC, orchestrator._key ASC');
-    expect(source).toContain('position: allowed.position');
-    expect(source).toContain('UPDATE { archivedAt: null, position: @position, updatedAt: @now }');
+    expect(source).toContain('UPSERT { organizationKey: @organizationKey, kind: "group", name: "general" }');
+    expect(source).toContain("name: 'general'");
+    expect(source).toContain('FOR orchestrator IN orchestrators SORT orchestrator.name ASC');
   });
 
   test('omits null optional identifiers from message projections', async () => {

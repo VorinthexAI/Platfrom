@@ -24,7 +24,7 @@ export const chorusMessageListQuerySchema = strictObject({ limit: z.coerce.numbe
 export interface ChorusApiDependencies {
   service: ChorusService;
   resolveActor(c: Context, requestedOrganizationKey: string): Promise<ChorusActor | Response>;
-  stream(skill: string, input: { message: string; history: Array<{ role: 'user' | 'assistant'; content: string }> }, dependencies: ToolDependencies): AsyncIterable<{ type: string; text?: string }>;
+  stream(skill: string, input: { message: string }, dependencies: ToolDependencies): AsyncIterable<{ type: string; text?: string }>;
 }
 
 const defaultDependencies: ChorusApiDependencies = {
@@ -47,8 +47,8 @@ function statusFor(error: ChorusError): 403 | 404 | 409 {
   return error.code === 'forbidden' ? 403 : error.code === 'not_found' ? 404 : 409;
 }
 
-function channelSummary(channel: { key: string; scopeKey: string; kind: string; name: string; description?: string; position: number; createdAt: string; updatedAt: string; archivedAt?: string; directOrchestratorKey?: string }) {
-  return { key: channel.key, scopeKey: channel.scopeKey, kind: channel.kind, name: channel.name, description: channel.description, position: channel.position, directOrchestratorKey: channel.directOrchestratorKey, archivedAt: channel.archivedAt, createdAt: channel.createdAt, updatedAt: channel.updatedAt };
+function channelSummary(channel: { key: string; organizationKey: string; scopeKey: string; kind: string; name: string; description?: string; position: number; createdAt: string; updatedAt: string; archivedAt?: string }) {
+  return { key: channel.key, organizationKey: channel.organizationKey, scopeKey: channel.scopeKey, kind: channel.kind, name: channel.name, description: channel.description, position: channel.position, archivedAt: channel.archivedAt, createdAt: channel.createdAt, updatedAt: channel.updatedAt };
 }
 
 function storedMessage(message: { key: string; channelKey: string; threadKey?: string; replyToMessageKey?: string; content: string; createdAt: string; updatedAt: string }) {
@@ -88,8 +88,10 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
   };
 
   return {
-    listChannels: (c: Context) => run(c, async (resolved) => ({ channels: (await dependencies.service.listDirectChannels(resolved)).map(({ orchestrator, channel, ...item }) => ({ ...item, orchestrator: { key: orchestrator.key, name: orchestrator.name, role: orchestrator.role }, channel: channel ? channelSummary(channel) : null })) })),
-    openChannel: (c: Context) => run(c, async (resolved) => ({ channel: channelSummary((await dependencies.service.openDirectChannel(resolved, key.parse(c.req.param('orchestratorKey')))).channel) })),
+    listChannels: (c: Context) => run(c, async (resolved) => {
+      const access = await dependencies.service.generalChannel(resolved);
+      return { channels: [channelSummary(access.channel)], mentions: access.mentions.map(({ participantKey, type, key: mentionKey, name, role }) => ({ participantKey, type, key: mentionKey, name, role })) };
+    }),
     listMessages: (c: Context) => run(c, async (resolved) => ({ messages: await dependencies.service.listMessages(resolved, key.parse(c.req.param('channelKey')), parseQuery(c, chorusMessageListQuerySchema).limit) })),
     clearChannel: (c: Context) => run(c, async (resolved) => ({ cleared: await dependencies.service.clearChannel(resolved, key.parse(c.req.param('channelKey'))) })),
     postMessage: async (c: Context) => {
@@ -101,24 +103,31 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       activeChannels.add(channelKey);
       let streamStarted = false;
       try {
-        const { access, message } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
-        const history = await dependencies.service.history(access, body.threadKey, message.key);
-        const provider = dependencies.stream(`${access.orchestrator.skill}\n\n${CHORUS_RESPONSE_INSTRUCTION}`, { message: body.content, history }, { organizationKey: resolved.organizationKey, signal: c.req.raw.signal });
+        const { access, message, orchestrators } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
           let content = '';
           try {
             await sse.writeSSE({ event: 'start', data: JSON.stringify({ channelKey, userMessage: storedMessage(message) }) });
-            for await (const chunk of provider) {
-              if (chunk.type === 'text-delta' && chunk.text) {
-                content += chunk.text;
-                await sse.writeSSE({ event: 'token', data: JSON.stringify({ text: chunk.text }) });
-              }
+            if (!orchestrators.length) {
+              await sse.writeSSE({ event: 'done', data: JSON.stringify({ message: storedMessage(message) }) });
+              return;
             }
-            const storedContent = boundedAssistantContent(content);
-            if (!storedContent) throw new Error('orchestrator returned no valid content');
-            const assistantMessage = await dependencies.service.persistOrchestratorMessage(access, storedContent, body.threadKey, message.key);
-            await sse.writeSSE({ event: 'done', data: JSON.stringify({ message: storedMessage(assistantMessage) }) });
+            for (const orchestrator of orchestrators) {
+              const provider = dependencies.stream(`${orchestrator.skill}\n\n${CHORUS_RESPONSE_INSTRUCTION}`, { message: body.content }, { organizationKey: resolved.organizationKey, signal: c.req.raw.signal });
+              let response = '';
+              for await (const chunk of provider) {
+                if (chunk.type === 'text-delta' && chunk.text) {
+                  response += chunk.text;
+                  await sse.writeSSE({ event: 'token', data: JSON.stringify({ text: `${response.length === chunk.text.length && orchestrators.length > 1 ? `${orchestrator.name}: ` : ''}${chunk.text}` }) });
+                }
+              }
+              const storedContent = boundedAssistantContent(response);
+              if (!storedContent) throw new Error('orchestrator returned no valid content');
+              content = storedContent;
+              const assistantMessage = await dependencies.service.persistOrchestratorMessage(access, orchestrator, storedContent, body.threadKey, message.key);
+              await sse.writeSSE({ event: 'done', data: JSON.stringify({ message: storedMessage(assistantMessage) }) });
+            }
           } catch (error) {
             console.error('chorus stream failed', { channelKey, error });
             await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'orchestrator stream failed' }) });
