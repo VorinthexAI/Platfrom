@@ -65,7 +65,7 @@ export const chorusMessageSchema = z.object({
 export const chorusThreadSchema = z.object({
   key: keySchema,
   channelKey: keySchema,
-  title: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).max(50),
   rootMessageKey: keySchema,
   status: z.enum(["open", "resolved", "archived"]),
   createdAt: isoTimestampSchema,
@@ -212,8 +212,14 @@ export async function mutateChorusReaction(organizationKey: string, channelKey: 
   return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}/reactions`, z.object({ active: z.boolean() }).strict(), { method: "POST", body: JSON.stringify({ reaction, operation }) });
 }
 
-export async function createChorusThread(organizationKey: string, channelKey: string, rootMessageKey: string, title?: string, signal?: AbortSignal) {
-  return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads`, z.object({ thread: chorusThreadSchema }).strict(), { method: "POST", body: JSON.stringify({ rootMessageKey, ...(title ? { title } : {}) }), signal })).thread;
+export async function createChorusThread(organizationKey: string, channelKey: string, rootMessageKey: string, title: string, signal?: AbortSignal) {
+  return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads`, z.object({ thread: chorusThreadSchema }).strict(), { method: "POST", body: JSON.stringify({ rootMessageKey, title }), signal })).thread;
+}
+
+export const chorusThreadListItemSchema = z.object({ key: keySchema, channelKey: keySchema, title: z.string().trim().min(1).max(50), rootMessageKey: keySchema, rootContent: z.string(), status: z.enum(["open", "resolved", "archived"]), replyCount: z.number().int().nonnegative(), updatedAt: isoTimestampSchema }).strict();
+export type ChorusThreadListItem = z.infer<typeof chorusThreadListItemSchema>;
+export async function listChorusThreads(organizationKey: string, channelKey: string, signal?: AbortSignal) {
+  return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads`, z.object({ threads: z.array(chorusThreadListItemSchema) }).strict(), { signal })).threads;
 }
 
 export async function readChorusThread(organizationKey: string, channelKey: string, threadKey: string, signal?: AbortSignal) {

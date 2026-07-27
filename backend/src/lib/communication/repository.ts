@@ -52,6 +52,7 @@ export interface MessageProjection {
   thread: { key: string; status: Thread['status']; replyCount: number; lastReplyAt: string | null } | null;
   poll: PollProjection | null;
 }
+export interface ThreadProjection { key: string; channelKey: string; title: string; rootMessageKey: string; rootContent: string; status: Thread['status']; replyCount: number; updatedAt: string }
 
 export class CommunicationConflictError extends Error {}
 
@@ -62,6 +63,7 @@ export interface CommunicationRepository {
   clearChannel(channelKey: string, now: string): Promise<number>;
   deleteMessage(channelKey: string, messageKey: string, membershipKey: string, now: string): Promise<boolean>;
   listThreadMessages(channelKey: string, threadKey: string, rootMessageKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
+  listThreads(channelKey: string): Promise<ThreadProjection[]>;
   listHistory(channelKey: string, threadKey: string | undefined, excludeMessageKey: string | undefined, limit: number): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>;
   getMessage(messageKey: string): Promise<Message | null>;
   insertMessage(message: Message): Promise<Message>;
@@ -240,6 +242,16 @@ export const arangoCommunicationRepository: CommunicationRepository = {
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") }, reactions: [], thread: null, poll: null }
     `, { channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit });
     return (await cursor.all()).reverse().map(normalizeMessageProjection);
+  },
+  async listThreads(channelKey) {
+    const cursor = await db.query<ThreadProjection>(`
+      FOR thread IN threads FILTER thread.channelKey == @channelKey && thread.status != "archived"
+        LET root = DOCUMENT(messages, thread.rootMessageKey)
+        LET replyCount = LENGTH(FOR message IN messages FILTER message.threadKey == thread._key && message.deletedAt == null RETURN 1)
+        SORT thread.updatedAt DESC, thread._key DESC
+        RETURN { key: thread._key, channelKey: thread.channelKey, title: thread.title, rootMessageKey: thread.rootMessageKey, rootContent: root.content, status: thread.status, replyCount, updatedAt: thread.updatedAt }
+    `, { channelKey });
+    return cursor.all();
   },
 
   async listHistory(channelKey, threadKey, excludeMessageKey, limit) {

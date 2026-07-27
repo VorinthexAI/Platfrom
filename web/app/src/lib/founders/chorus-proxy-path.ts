@@ -8,6 +8,7 @@ const patterns: Array<{ method: "GET" | "POST" | "DELETE"; pattern: RegExp }> = 
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages$/ },
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages\/([A-Za-z0-9_-]{1,160})\/reactions$/ },
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/threads$/ },
+  { method: "GET", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/threads$/ },
   { method: "GET", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/threads\/([A-Za-z0-9_-]{1,160})$/ },
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/threads\/([A-Za-z0-9_-]{1,160})\/replies$/ },
   { method: "POST", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/threads\/([A-Za-z0-9_-]{1,160})\/resolve$/ },

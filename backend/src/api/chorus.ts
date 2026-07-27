@@ -12,7 +12,7 @@ const key = z.string().cuid();
 const organizationKey = z.string().trim().min(1).max(160);
 const messageBody = strictObject({ content: sanitizedAgentMessageSchema, threadKey: key.optional(), replyToMessageKey: key.optional() });
 const reactionBody = strictObject({ reaction: z.string().trim().min(1).max(64), operation: z.enum(['add', 'remove', 'toggle']).default('toggle') });
-const threadBody = strictObject({ rootMessageKey: key, title: z.string().trim().min(1).max(200).optional() });
+const threadBody = strictObject({ rootMessageKey: key, title: z.string().trim().min(1).max(50) });
 const replyBody = strictObject({ content: sanitizedAgentMessageSchema, replyToMessageKey: key.optional() });
 const pollBody = strictObject({ messageKey: key, question: z.string().trim().min(1).max(500), options: z.array(z.string().trim().min(1).max(200)).min(2).max(20), allowMultiple: z.boolean().default(false) }).superRefine((poll, ctx) => {
   const normalized = poll.options.map((option) => option.toLocaleLowerCase());
@@ -162,6 +162,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       const body = await parseJson(c, threadBody);
       return { thread: threadProjection(await dependencies.service.createThread(resolved, key.parse(c.req.param('channelKey')), body.rootMessageKey, body.title)) };
     }, true),
+    listThreads: (c: Context) => run(c, async (resolved) => ({ threads: await dependencies.service.listThreads(resolved, key.parse(c.req.param('channelKey'))) })),
     readThread: (c: Context) => run(c, async (resolved) => { const result = await dependencies.service.readThread(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('threadKey'))); return { thread: threadProjection(result.thread), messages: result.messages }; }),
     replyThread: (c: Context) => run(c, async (resolved) => {
       const body = await parseJson(c, replyBody);
