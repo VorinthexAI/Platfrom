@@ -52,6 +52,7 @@ export * from "./icons/search/search.mobile";
 export * from "./icons/settings/settings.mobile";
 export * from "./icons/share/share.mobile";
 export * from "./icons/signal/signal.mobile";
+export * from "./icons/soundwave/soundwave.mobile";
 export * from "./icons/sort/sort.mobile";
 export * from "./icons/star/star.mobile";
 export * from "./icons/trash/trash.mobile";

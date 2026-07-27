@@ -24,7 +24,8 @@
     "backend:nodes": "bun run --cwd backend nodes",
     "backend:reset": "bun run --cwd backend reset",
     "backend:create-super-admin": "bun run --cwd backend create:super-admin",
-    "orchestrators:messages": "bun run scripts/orchestrators/generate-openai-messages.ts"
+    "orchestrators:messages": "bun run scripts/orchestrators/generate-openai-messages.ts",
+    "hunt:briefing": "bun run scripts/audio/generate-hunt-briefing.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",

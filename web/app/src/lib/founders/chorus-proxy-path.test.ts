@@ -4,6 +4,8 @@ import { validateChorusProxyPath } from "./chorus-proxy-path";
 describe("Chorus proxy endpoint grammar", () => {
   test("accepts only known method/path combinations", () => {
     expect(validateChorusProxyPath("GET", "org_key", ["channels"])).toBe("channels");
+    expect(validateChorusProxyPath("POST", "org_key", ["transcriptions"])).toBe("transcriptions");
+    expect(validateChorusProxyPath("POST", "org_key", ["speech"])).toBe("speech");
     expect(validateChorusProxyPath("POST", "org_key", ["channels", "channel_1", "polls", "poll_1", "votes"])).toBe("channels/channel_1/polls/poll_1/votes");
     expect(validateChorusProxyPath("POST", "org_key", ["channels", "channel_1", "threads", "thread_1", "archive"])).toBe("channels/channel_1/threads/thread_1/archive");
     expect(validateChorusProxyPath("GET", "org_key", ["channels", "channel_1", "messages"], new URLSearchParams("limit=100"))).toBe("channels/channel_1/messages");

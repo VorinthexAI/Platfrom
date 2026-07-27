@@ -54,8 +54,8 @@ export * from './icons/chat-bubble';
 export * from './icons/archive';
 export * from './icons/gallery';
 export * from './icons/signal';
+export * from './icons/soundwave';
 export * from './icons/compass';
 export * from './icons/ascend';
 export * from './icons/brain';
 export * from './icons/fragment';
-

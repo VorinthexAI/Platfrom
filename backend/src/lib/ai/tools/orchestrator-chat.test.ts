@@ -20,4 +20,11 @@ describe('orchestrator chat tool', () => {
     await orchestratorChatTool.execute('Atlas', { message: 'Explain the plan' }, { execute: async (_organizationKey, input) => { calls.push(input); return { output: { text: 'Answer', toolCalls: [], stopReason: null } } as never; } });
     expect(calls[0]).toMatchObject({ options: { maxTokens: 1_200 } });
   });
+
+  test('pins the chat tool to the static OpenAI Realtime 2 route', async () => {
+    const source = await Bun.file(new URL('./orchestrator-chat.ts', import.meta.url)).text();
+    expect(source).toContain("mode: 'fixed'");
+    expect(source).toContain("modelSlug: 'openai.gpt-realtime-2'");
+    expect(source).toContain("providerSlug: 'openai'");
+  });
 });

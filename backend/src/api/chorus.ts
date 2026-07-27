@@ -2,6 +2,8 @@ import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 import { sanitizeAgentInput, streamTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
+import { executeAction } from '@/lib/ai/router';
+import type { SpeechOutput, TranscriptionOutput } from '@/lib/ai/providers';
 import { getDefaultScopeRepository } from '@/lib/ai/scopes';
 import { requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
 import { ChorusError, ChorusService, type ChorusActor } from '@/lib/communication';
@@ -19,6 +21,14 @@ const pollBody = strictObject({ messageKey: key, question: z.string().trim().min
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Poll options must be unique' });
 });
 const voteBody = strictObject({ optionKey: key });
+const transcriptionBody = strictObject({
+  audioBase64: z.string().min(1).max(4_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  mimeType: z.literal('audio/pcm'),
+}).superRefine((input, ctx) => {
+  const bytes = Buffer.from(input.audioBase64, 'base64').byteLength;
+  if (bytes < 960 || bytes > 2_880_000) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['audioBase64'], message: 'Audio must be between 20ms and 60 seconds' });
+});
+const speechBody = strictObject({ text: z.string().trim().min(1).max(8_000) });
 const CHORUS_RESPONSE_INSTRUCTION = `Reply with a detailed, self-contained plain-text answer. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
 export const chorusMessageListQuerySchema = strictObject({ limit: z.coerce.number().int().min(1).max(200).default(100) });
 
@@ -27,6 +37,8 @@ export interface ChorusApiDependencies {
   resolveActor(c: Context, requestedOrganizationKey: string): Promise<ChorusActor | Response>;
   stream(skill: string, input: { message: string }, dependencies: ToolDependencies): AsyncIterable<{ type: string; text?: string }>;
   listScopes(organizationKey: string): Promise<readonly { name: string; description: string | null }[]>;
+  transcribe(organizationKey: string, audioBase64: string, prompt: string, signal: AbortSignal): Promise<TranscriptionOutput>;
+  speak(organizationKey: string, text: string, signal: AbortSignal): Promise<SpeechOutput>;
 }
 
 const defaultDependencies: ChorusApiDependencies = {
@@ -44,6 +56,8 @@ const defaultDependencies: ChorusApiDependencies = {
   },
   stream: (skill, input, dependencies) => streamTool('chat', skill, input, dependencies),
   listScopes: (organizationKey) => getDefaultScopeRepository().listScopes(organizationKey),
+  transcribe: async (organizationKey, audioBase64, prompt, signal) => (await executeAction<unknown, TranscriptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'transcribe', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { audioBase64, mimeType: 'audio/pcm', prompt }, { signal, timeoutMs: 90_000 })).output,
+  speak: async (organizationKey, text, signal) => (await executeAction<unknown, SpeechOutput>({ mode: 'fixed', organizationKey, actionSlug: 'speak', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { text, voice: 'ash', format: 'wav' }, { signal, timeoutMs: 90_000 })).output,
 };
 
 function statusFor(error: ChorusError): 403 | 404 | 409 {
@@ -101,6 +115,16 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
     listChannels: (c: Context) => run(c, async (resolved) => {
       const access = await dependencies.service.generalChannel(resolved);
       return { channels: [channelSummary(access.channel)], mentions: access.mentions.map(({ participantKey, type, key: mentionKey, name, role, mentionCount }) => ({ participantKey, type, key: mentionKey, name, role, mentionCount })) };
+    }),
+    transcribe: (c: Context) => run(c, async (resolved) => {
+      const body = await parseJson(c, transcriptionBody);
+      const access = await dependencies.service.generalChannel(resolved);
+      const names = access.mentions.map((mention) => `@${mention.name}`).join(', ');
+      return dependencies.transcribe(resolved.organizationKey, body.audioBase64, `Valid mention names are: ${names}.`, c.req.raw.signal);
+    }),
+    speak: (c: Context) => run(c, async (resolved) => {
+      const body = await parseJson(c, speechBody);
+      return dependencies.speak(resolved.organizationKey, body.text, c.req.raw.signal);
     }),
     listMessages: (c: Context) => run(c, async (resolved) => ({ messages: await dependencies.service.listMessages(resolved, key.parse(c.req.param('channelKey')), parseQuery(c, chorusMessageListQuerySchema).limit) })),
     clearChannel: (c: Context) => run(c, async (resolved) => ({ cleared: await dependencies.service.clearChannel(resolved, key.parse(c.req.param('channelKey'))) })),

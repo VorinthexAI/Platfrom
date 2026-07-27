@@ -178,6 +178,7 @@ export const transcribeInputSchema = z
     audioBase64: z.string().min(1),
     mimeType: z.string().min(1),
     language: z.string().optional(),
+    prompt: z.string().max(4_000).optional(),
   })
   .strict();
 

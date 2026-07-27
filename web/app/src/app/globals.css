@@ -384,6 +384,11 @@ button:disabled {
   }
 }
 
+@keyframes soundwave-bar {
+  from { transform: scaleY(0.4); opacity: 0.55; }
+  to { transform: scaleY(1); opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

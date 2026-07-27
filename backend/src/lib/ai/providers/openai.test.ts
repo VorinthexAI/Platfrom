@@ -38,3 +38,15 @@ describe('OpenAI provider embeddings', () => {
     expect(response?.usage).toEqual({ inputTokens: 4, outputTokens: 0, totalTokens: 4 });
   });
 });
+
+describe('OpenAI Realtime provider', () => {
+  test('uses Realtime 2 for chat, transcription, and speech', async () => {
+    const source = await Bun.file(new URL('./openai.ts', import.meta.url)).text();
+    expect(source).toContain("OPENAI_REALTIME_MODEL = 'gpt-realtime-2'");
+    expect(source.match(/OpenAIRealtimeWebSocket\.create/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(source).toContain("request.actionId === 'speak'");
+    expect(source).toContain("voice: input.voice");
+    expect(source).not.toContain('client.audio.transcriptions.create');
+    expect(source).not.toContain('client.audio.speech.create');
+  });
+});

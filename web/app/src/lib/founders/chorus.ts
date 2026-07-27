@@ -183,6 +183,17 @@ export async function listChorusChannels(organizationKey: string, signal?: Abort
   return { channels: [chorusChannelEntrySchema.parse({ orchestrator: { key: "general", name: "General", role: "Organization channel" }, scopeKey: channel.scopeKey, canChat: true, channel })], mentions: result.mentions };
 }
 
+export async function transcribeChorusAudio(organizationKey: string, audioBase64: string, signal?: AbortSignal): Promise<string> {
+  return (await request(`${base(organizationKey)}/transcriptions`, z.object({ text: z.string().trim().min(1) }).strict(), { method: "POST", body: JSON.stringify({ audioBase64, mimeType: "audio/pcm" }), signal })).text;
+}
+
+export async function synthesizeChorusSpeech(organizationKey: string, text: string, signal?: AbortSignal): Promise<string> {
+  const result = await request(`${base(organizationKey)}/speech`, z.object({ audioBase64: z.string().min(1), mimeType: z.literal("audio/wav") }).strict(), { method: "POST", body: JSON.stringify({ text }), signal });
+  const binary = atob(result.audioBase64);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
+}
+
 export async function listChorusMessages(organizationKey: string, channelKey: string, signal?: AbortSignal) {
   return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages?limit=200`, z.object({ messages: z.array(chorusMessageSchema) }).strict(), { signal })).messages;
 }
