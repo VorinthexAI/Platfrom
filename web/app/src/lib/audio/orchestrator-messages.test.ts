@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { getOrchestratorsForCommand } from '@/lib/galaxy/registry-helpers';
-import { orchestratorMessageUrl } from './audio-store';
+import { MISSION_AUDIO_SRC, orchestratorMessageUrl } from './audio-store';
 
 describe('orchestrator message assets', () => {
   test('publishes one playable personal message for every orchestrator landing page', async () => {
@@ -16,5 +16,13 @@ describe('orchestrator message assets', () => {
       expect(asset.size).toBeGreaterThan(0);
       expect(asset.type).toBe('audio/mpeg');
     }
+  });
+
+  test('publishes the generated Hunt briefing', async () => {
+    expect(MISSION_AUDIO_SRC).toBe('/audio/brand/hunt-briefing.mp3');
+    const asset = Bun.file(join(import.meta.dir, '../../../public', MISSION_AUDIO_SRC));
+    expect(await asset.exists()).toBe(true);
+    expect(asset.size).toBeGreaterThan(0);
+    expect(asset.type).toBe('audio/mpeg');
   });
 });

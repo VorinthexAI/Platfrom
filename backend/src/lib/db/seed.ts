@@ -995,6 +995,15 @@ export const SEEDED_VOICES: SeededVoice[] = [
     language: 'en-US',
     format: 'mp3',
   },
+  {
+    provider: 'openai',
+    model: 'gpt-realtime-2',
+    modelLabel: 'OpenAI GPT Realtime 2',
+    voice: 'ash',
+    label: 'Ash',
+    language: 'en-US',
+    format: 'mp3',
+  },
 ];
 
 /** Converts the retired persisted action before strict action parsing occurs. */
@@ -1174,17 +1183,6 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     }
   }
 
-  const [model, action] = await Promise.all([
-    store.getModelBySlug('openai.gpt-realtime-2'),
-    store.getActionBySlug('orchestrator-chat'),
-  ]);
-  if (!model || !action) return results;
-
-  const existing = await store.getModelActionByPair(model.key, action.key);
-  if (!existing?.enabled) return results;
-
-  await store.updateModelAction(existing.key, { enabled: false });
-  results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
   return results;
 }
 

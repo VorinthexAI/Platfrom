@@ -44,9 +44,10 @@ describe('Arango communication repository structure', () => {
 
   test('deduplicates organization members and lists orchestrators independently', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source.match(/COLLECT userKey = membership\.userId/g)).toHaveLength(2);
+    expect(source.match(/COLLECT userKey = memberLink\.userId INTO memberships = memberLink/g)).toHaveLength(2);
     expect(source).toContain('LET agents = (FOR orchestrator IN orchestrators');
     expect(source).not.toContain('FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey != null');
+    expect(source).not.toMatch(/LET membership = DOCUMENT\([^\n]+\)[\s\S]{0,800}FOR membership IN userOrganizations/);
   });
 
   test('omits null optional identifiers from message projections', async () => {
@@ -59,5 +60,11 @@ describe('Arango communication repository structure', () => {
     expect(source).toContain('RETURN { scopeKey: message.scopeKey, existingKey:');
     expect(source).toContain('scopeKey: validated.scopeKey');
     expect(source).not.toContain('scopeKey: newId()');
+  });
+
+  test('upserts message mentions by their public message key', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source).toContain('UPSERT { messageKey: mention.messageKey, participantKey: mention.participantKey }');
+    expect(source).not.toContain('messageKey: mention._key');
   });
 });

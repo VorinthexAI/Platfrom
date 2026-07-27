@@ -54,7 +54,7 @@ export const orchestratorChatTool = {
       yield* dependencies.stream(organizationKey, chatInput);
       return;
     }
-    const decision = await selectRoute({ mode: 'auto', organizationKey, actionSlug: 'orchestrator-chat' }, dependencies);
+    const decision = await selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, dependencies);
     yield* streamRoute({
       decision,
       input: chatInput,

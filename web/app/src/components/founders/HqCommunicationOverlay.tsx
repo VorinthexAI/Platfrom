@@ -3,7 +3,7 @@
 import Image from "next/image";
 import * as Dialog from "@radix-ui/react-dialog";
 import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon } from "@vorinthex/shared/ui/icons";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons";
 import { Button } from "@vorinthex/shared/ui";
 import { useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
@@ -27,6 +27,8 @@ import {
   plainChorusText,
   reconcileChorusStreamEvent,
   streamChorusMessage,
+  synthesizeChorusSpeech,
+  transcribeChorusAudio,
   voteChorusPoll,
   type ChorusChannelEntry,
   type ChorusDisplayMessage,
@@ -38,6 +40,7 @@ import {
 } from "@/lib/founders/chorus";
 import { createFrameBatcher } from "@/lib/founders/frame-batcher";
 import { filterChorusReactions } from "@/lib/founders/chorus-reactions";
+import { appendSpokenTranscript, startPcmCapture, type PcmCapture } from "@/lib/founders/chorus-microphone";
 
 interface HqCommunicationOverlayProps {
   organizationKey: string;
@@ -307,34 +310,83 @@ interface MessageComposerProps {
   error: string | null;
   onSubmit: (content: string) => void;
   mentions: ChorusMention[];
+  channelDrafts: Map<string, string>;
+  draftId: string;
 }
 
-const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, error, onSubmit, mentions }: MessageComposerProps) {
-  const channelDrafts = useRef(new Map<string, string>());
-  const [draft, setDraft] = useState("");
+const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, error, onSubmit, mentions, channelDrafts, draftId }: MessageComposerProps) {
+  const draftKey = channelKey ? `${organizationKey}:${channelKey}:${draftId}` : null;
+  const [draft, setDraft] = useState(() => draftKey ? channelDrafts.get(draftKey) ?? "" : "");
+  const [recording, setRecording] = useState(false);
+  const [startingRecording, setStartingRecording] = useState(false);
+  const [speechLevel, setSpeechLevel] = useState(0);
+  const [transcribing, setTranscribing] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const capture = useRef<PcmCapture | null>(null);
+  const captureGeneration = useRef(0);
+  const transcription = useRef<AbortController | null>(null);
   const query = /(?:^|\s)@([\w-]*)$/.exec(draft)?.[1] ?? "";
   const ordered = [...mentions].sort((left, right) => right.mentionCount - left.mentionCount || left.name.localeCompare(right.name));
   const visible = ordered.filter((mention) => !query || mention.name.toLocaleLowerCase().startsWith(query.toLocaleLowerCase()));
   const orchestrators = visible.filter((mention) => mention.type === "orchestrator");
   const people = [...visible.filter((mention) => mention.type === "everyone"), ...visible.filter((mention) => mention.type === "user")];
-  const draftKey = channelKey ? `${organizationKey}:${channelKey}` : null;
-
-  useEffect(() => {
-    setDraft(draftKey ? channelDrafts.current.get(draftKey) ?? "" : "");
-  }, [draftKey]);
+  useEffect(() => () => { captureGeneration.current += 1; capture.current?.cancel(); transcription.current?.abort(); }, []);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || !channelKey || !canChat || streaming) return;
-    channelDrafts.current.set(`${organizationKey}:${channelKey}`, "");
+    if (!content || !channelKey || !canChat || streaming || recording || startingRecording || transcribing) return;
+    channelDrafts.set(draftKey!, "");
     setDraft("");
     onSubmit(content);
   };
 
   const insertMention = (name: string) => {
     const next = /@([\w-]*)$/.test(draft) ? draft.replace(/@([\w-]*)$/, `@${name} `) : `${draft}${draft && !/\s$/.test(draft) ? " " : ""}@${name} `;
-    setDraft(next); if (draftKey) channelDrafts.current.set(draftKey, next);
+    setDraft(next); if (draftKey) channelDrafts.set(draftKey, next);
+  };
+  const applyTranscript = async (audioBase64: string) => {
+    if (!draftKey) return;
+    const controller = new AbortController(); transcription.current?.abort(); transcription.current = controller;
+    setTranscribing(true); setVoiceError(null);
+    try {
+      const text = await transcribeChorusAudio(organizationKey, audioBase64, controller.signal);
+      if (controller.signal.aborted) return;
+      setDraft((current) => {
+        const next = appendSpokenTranscript(current, text, mentions);
+        channelDrafts.set(draftKey, next);
+        return next;
+      });
+    } catch (transcriptionError) {
+      if (!controller.signal.aborted) setVoiceError(transcriptionError instanceof Error ? transcriptionError.message : "Speech could not be transcribed");
+    } finally {
+      if (transcription.current === controller) { transcription.current = null; setTranscribing(false); }
+    }
+  };
+  const toggleRecording = async () => {
+    if (capture.current) {
+      const active = capture.current; capture.current = null; setRecording(false);
+      try { await applyTranscript(await active.stop()); }
+      catch (captureError) { setVoiceError(captureError instanceof Error ? captureError.message : "Speech could not be recorded"); }
+      return;
+    }
+    if (!channelKey || !canChat || transcribing || startingRecording) return;
+    const generation = ++captureGeneration.current;
+    setStartingRecording(true);
+    setVoiceError(null);
+    try {
+      const started = await startPcmCapture(setSpeechLevel, (audioBase64) => {
+        capture.current = null; setRecording(false); void applyTranscript(audioBase64);
+      }, (limitError) => {
+        capture.current = null; setRecording(false);
+        setVoiceError(limitError instanceof Error ? limitError.message : "Speech could not be recorded");
+      });
+      if (captureGeneration.current !== generation) { started.cancel(); return; }
+      capture.current = started;
+      setRecording(true);
+    } catch (captureError) {
+      if (captureGeneration.current === generation) setVoiceError(captureError instanceof Error ? captureError.message : "Microphone access failed");
+    } finally { if (captureGeneration.current === generation) setStartingRecording(false); }
   };
   const placeholder = orchestratorName
     ? canChat ? "Message #general..." : `Chat permission required for ${orchestratorName}`
@@ -348,7 +400,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           onChange={(event) => {
             const value = event.target.value;
             setDraft(value);
-            if (draftKey) channelDrafts.current.set(draftKey, value);
+            if (draftKey) channelDrafts.set(draftKey, value);
           }}
           onKeyDown={(event) => {
             if (event.key === "Tab" && visible[0]) {
@@ -370,11 +422,16 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
         />
         <div className="mt-2 flex min-h-8 items-center justify-between gap-3">
           <span role="status" className={`text-[10px] ${error ? "text-status-critical" : "text-silver-600"}`}>
-            {error ? error : streaming ? `${orchestratorName} is responding...` : !canChat && orchestratorName ? `You lack permission to chat with ${orchestratorName}.` : null}
+            {voiceError ? voiceError : error ? error : transcribing ? "Realtime 2 is transcribing..." : recording ? "Listening... tap the soundwave to finish" : streaming ? `${orchestratorName} is responding...` : !canChat && orchestratorName ? `You lack permission to chat with ${orchestratorName}.` : null}
           </span>
-          <button type="submit" disabled={!canChat || !channelKey || streaming || !draft.trim()} aria-label={orchestratorName ? `Send message to ${orchestratorName}` : "Send message"} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--gradient-chrome)] text-obsidian-990 focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-35">
-            <ChevronUpIcon aria-hidden size="sm" strokeWidth={2.2} />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => void toggleRecording()} disabled={!canChat || !channelKey || transcribing || startingRecording} aria-label={recording ? "Stop speaking and transcribe" : "Speak into message"} aria-pressed={recording} className={`flex h-11 w-11 items-center justify-center rounded-lg border focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-35 ${recording ? "border-silver-200 bg-white/[0.1] text-silver-50" : "border-[var(--border-soft)] text-silver-400 hover:text-silver-100"}`}>
+              <SoundwaveIcon size="sm" animated={recording && speechLevel > 0.015} />
+            </button>
+            <button type="submit" disabled={!canChat || !channelKey || streaming || recording || startingRecording || transcribing || !draft.trim()} aria-label={orchestratorName ? `Send message to ${orchestratorName}` : "Send message"} className="flex h-11 w-11 items-center justify-center rounded-lg bg-[var(--gradient-chrome)] text-obsidian-990 focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-35">
+              <ChevronUpIcon aria-hidden size="sm" strokeWidth={2.2} />
+            </button>
+          </div>
         </div>
       </form>
       <div className="mt-2 grid min-w-0 grid-rows-2 gap-1.5 overflow-hidden">
@@ -418,7 +475,13 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const activeChannel = useRef<string | null>(null);
   const messagesPane = useRef<HTMLDivElement>(null);
   const shouldFollowMessages = useRef(true);
+  const channelDrafts = useRef(new Map<string, string>());
   const stopVoice = useAudioStore((state) => state.stopVoice);
+  const voicePlayingSrc = useAudioStore((state) => state.voicePlayingSrc);
+  const pendingVoiceSrc = useAudioStore((state) => state.pendingVoiceSrc);
+  const playVoice = useAudioStore((state) => state.playVoice);
+  const speechAudio = useRef(new Map<string, string>());
+  const speechRequest = useRef<AbortController | null>(null);
   currentOrganization.current = organizationKey;
 
   const loadChannels = useCallback(async () => {
@@ -495,7 +558,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     });
     return () => cancelAnimationFrame(frame);
   }, [selectedMessages]);
-  useEffect(() => () => stopVoice(), [organizationKey, channelKey, stopVoice]);
+  useEffect(() => () => { speechRequest.current?.abort(); stopVoice(); for (const url of speechAudio.current.values()) URL.revokeObjectURL(url); speechAudio.current.clear(); }, [organizationKey, channelKey, stopVoice]);
 
   const selectChannel = useCallback((entry: ChorusChannelEntry) => {
     threadGeneration.current += 1;
@@ -573,6 +636,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
 
   const openThreadSheet = async (message: ChorusMessage) => {
     if (!channelKey) return;
+    speechRequest.current?.abort(); stopVoice();
     setThreadRoot(message); setNewThreadOpen(false); setNewThreadTitle(""); setThreadSheetOpen(true); setActionMessage(null);
     setThreadItems(await listChorusThreads(organizationKey, channelKey).catch(() => []));
   };
@@ -618,6 +682,30 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
       setClearing(false);
     }
   };
+  const stopMessageSpeech = () => {
+    speechRequest.current?.abort(); speechRequest.current = null; stopVoice(); setBusyMessage(null);
+  };
+  const closeMessageActions = () => {
+    stopMessageSpeech(); setActionMessage(null);
+  };
+  const toggleMessageSpeech = async () => {
+    if (!actionMessage) return;
+    const existing = speechAudio.current.get(actionMessage.key);
+    if (existing) { playVoice(existing); return; }
+    const controller = new AbortController(); speechRequest.current?.abort(); speechRequest.current = controller;
+    setBusyMessage(actionMessage.key);
+    try {
+      const url = await synthesizeChorusSpeech(organizationKey, plainChorusText(actionMessage.content), controller.signal);
+      if (controller.signal.aborted) { URL.revokeObjectURL(url); return; }
+      for (const cached of speechAudio.current.values()) URL.revokeObjectURL(cached);
+      speechAudio.current.clear();
+      speechAudio.current.set(actionMessage.key, url); playVoice(url);
+    } catch (speechError) {
+      if (!controller.signal.aborted && channelKey) setErrors((current) => ({ ...current, [channelKey]: speechError instanceof Error ? speechError.message : "Message playback failed" }));
+    } finally {
+      if (speechRequest.current === controller) { speechRequest.current = null; setBusyMessage(null); }
+    }
+  };
   return (
     <div data-scope-id={selectedScopeId} className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
       <header className="flex h-12 shrink-0 items-center border border-[var(--border-faint)] bg-obsidian-990/90 px-3 sm:h-14 sm:px-4">
@@ -637,7 +725,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
                {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallyToggleReaction} />) : null}
           </div>
-          <MessageComposer organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={threadState && channelKey ? (content) => { void replyChorusThread(organizationKey, channelKey, threadState.thread.key, content).then(() => refreshThread()); } : submitComposerMessage} mentions={mentions} />
+          <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${threadState?.thread.key ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={threadState && channelKey ? (content) => { void replyChorusThread(organizationKey, channelKey, threadState.thread.key, content).then(() => refreshThread()); } : submitComposerMessage} mentions={mentions} channelDrafts={channelDrafts.current} draftId={threadState?.thread.key ?? "channel"} />
         </section>
         <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
           <Dialog.Portal>
@@ -665,10 +753,10 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             if (organizationGeneration.current === generation) setBusyMessage(null);
           }
         }} /> : null}
-        <Dialog.Root open={Boolean(actionMessage)} onOpenChange={(open) => { if (!open) setActionMessage(null); }}>
+        <Dialog.Root open={Boolean(actionMessage)} onOpenChange={(open) => { if (!open) closeMessageActions(); }}>
           <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[360px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
             <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Message actions</Dialog.Title><Dialog.Close aria-label="Close message actions" className="flex h-8 w-8 items-center justify-center rounded-lg text-silver-400"><CloseIcon size="sm" /></Dialog.Close></div>
-            <div className="mt-4 grid gap-2"><button type="button" onClick={() => { if (actionMessage) void openThreadSheet(actionMessage); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Threads</button><button type="button" onClick={() => { setPollMessage(actionMessage); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Poll</button><button type="button" onClick={() => setReactionPickerOpen(true)} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">React</button><button type="button" onClick={() => { if (!actionMessage || !channelKey) return; void deleteChorusMessage(organizationKey, channelKey, actionMessage.key).then(() => refreshMessages(channelKey)); setActionMessage(null); }} className="rounded-lg border border-status-critical/40 px-3 py-2 text-left text-xs text-status-critical">Delete message</button></div>
+            <div className="mt-4 grid gap-2"><button type="button" onClick={() => { if (actionMessage) void openThreadSheet(actionMessage); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Threads</button><button type="button" onClick={() => { setPollMessage(actionMessage); closeMessageActions(); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Poll</button><button type="button" onClick={() => { stopMessageSpeech(); setReactionPickerOpen(true); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">React</button><button type="button" disabled={!actionMessage?.content || busyMessage === actionMessage?.key} onClick={() => void toggleMessageSpeech()} className="flex items-center gap-2 rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200 disabled:opacity-40"><SoundwaveIcon size="sm" animated={Boolean(actionMessage && speechAudio.current.get(actionMessage.key) && (voicePlayingSrc === speechAudio.current.get(actionMessage.key) || pendingVoiceSrc === speechAudio.current.get(actionMessage.key)))} />{actionMessage && speechAudio.current.get(actionMessage.key) && (voicePlayingSrc === speechAudio.current.get(actionMessage.key) || pendingVoiceSrc === speechAudio.current.get(actionMessage.key)) ? "Stop listening" : "Listen with Ash"}</button><button type="button" onClick={() => { if (!actionMessage || !channelKey) return; void deleteChorusMessage(organizationKey, channelKey, actionMessage.key).then(() => refreshMessages(channelKey)); closeMessageActions(); }} className="rounded-lg border border-status-critical/40 px-3 py-2 text-left text-xs text-status-critical">Delete message</button></div>
             <div className="mt-auto border-t border-[var(--border-faint)] pt-4"><Dialog.Close className="w-full rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></div>
           </Dialog.Content></Dialog.Portal>
         </Dialog.Root>
