@@ -49,7 +49,7 @@ describe('Chorus SSE API', () => {
     expect(persisted).toEqual(['user', 'assistant']);
     expect(streamInputs).toEqual([{ message: 'hello' }]);
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
-    expect(streamSkills[0]).toContain('concise plain-text summary');
+    expect(streamSkills[0]).toContain('detailed, self-contained plain-text answer');
     expect(streamSkills[0]).toContain('## Organization scopes\nHQ: The organization workspace.');
     expect(streamSkills[0]).not.toContain('Ignored');
   });
