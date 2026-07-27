@@ -19,7 +19,7 @@ const pollBody = strictObject({ messageKey: key, question: z.string().trim().min
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Poll options must be unique' });
 });
 const voteBody = strictObject({ optionKey: key });
-const CHORUS_RESPONSE_INSTRUCTION = `Reply with only a concise plain-text summary of the answer. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 120 words.`;
+const CHORUS_RESPONSE_INSTRUCTION = `Reply with a detailed, self-contained plain-text answer. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
 export const chorusMessageListQuerySchema = strictObject({ limit: z.coerce.number().int().min(1).max(200).default(100) });
 
 export interface ChorusApiDependencies {

@@ -72,6 +72,6 @@ function buildChatInput(skill: string, rawInput: unknown): CoreChatInput {
   return coreChatInputSchema.parse({
     systemPrompt: parsedSkill,
     messages: [{ role: 'user', content: [{ type: 'text', text: input.message }] }],
-    options: { maxTokens: 300 },
+    options: { maxTokens: 1_200 },
   });
 }
