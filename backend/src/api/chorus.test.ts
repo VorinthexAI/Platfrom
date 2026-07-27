@@ -10,24 +10,24 @@ const actor = { organizationKey, membershipKey: newId() };
 function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; output?: string; gate?: Promise<void> } = {}) {
   const persisted: string[] = [];
   const assistantCalls: unknown[][] = [];
-  const historyCalls: unknown[][] = [];
   const streamSkills: string[] = [];
-  const access = { channel: { key: channelKey }, orchestrator: { skill: 'Lead.' } };
+  const streamInputs: unknown[] = [];
+  const access = { channel: { key: channelKey }, humanParticipant: { key: newId() }, mentions: [] };
+  const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
   const service = {
-    async persistUserMessage() { persisted.push('user'); return { access, message: { key: newId(), content: 'hello' } }; },
-    async history(...args: unknown[]) { historyCalls.push(args); return []; },
+    async persistUserMessage() { persisted.push('user'); return { access, message: { key: newId(), content: 'hello' }, orchestrators: [atlas] }; },
     async persistOrchestratorMessage(...args: unknown[]) { assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), content: args[1] as string, threadKey: args[2] as string, replyToMessageKey: args[3] as string }; },
     async clearChannel() { return 2; },
   };
   const handlers = createChorusHandlers({
     service: service as never,
     resolveActor: async (c) => options.authenticated === false ? c.json({ error: 'authentication required' }, 401) : options.forbidden ? c.json({ error: 'founders gate access required' }, 403) : actor,
-    stream: async function* (skill) { streamSkills.push(skill); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; },
+    stream: async function* (skill, input) { streamSkills.push(skill); streamInputs.push(input); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; },
   });
   const app = new Hono();
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.postMessage);
   app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.clearChannel);
-  return { app, persisted, assistantCalls, historyCalls, streamSkills };
+  return { app, persisted, assistantCalls, streamSkills, streamInputs };
 }
 
 describe('Chorus SSE API', () => {
@@ -39,15 +39,15 @@ describe('Chorus SSE API', () => {
   });
 
   test('streams tokens and persists user then assistant messages', async () => {
-    const { app, persisted, assistantCalls, historyCalls, streamSkills } = appFor();
+    const { app, persisted, assistantCalls, streamSkills, streamInputs } = appFor();
     const threadKey = newId();
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello', threadKey }) });
     const text = await response.text();
     expect(response.headers.get('content-type')).toContain('text/event-stream');
     expect(text).toContain('event: start'); expect(text).toContain('event: token'); expect(text).toContain('event: done');
     expect(persisted).toEqual(['user', 'assistant']);
-    expect(historyCalls[0]?.slice(1)).toEqual([threadKey, expect.any(String)]);
-    expect(assistantCalls[0]?.slice(1)).toEqual(['Hi there', threadKey, expect.any(String)]);
+    expect(streamInputs).toEqual([{ message: 'hello' }]);
+    expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(streamSkills[0]).toContain('concise plain-text summary');
   });
 
@@ -69,7 +69,7 @@ describe('Chorus SSE API', () => {
     const { app, assistantCalls } = appFor({ output: `${'x'.repeat(8_100)}😀` });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     await response.text();
-    expect(assistantCalls[0]?.[1]).toBe('x'.repeat(8_000));
+    expect(assistantCalls[0]?.[2]).toBe('x'.repeat(8_000));
   });
 
   test('rejects concurrent sends per channel and releases the lock after completion', async () => {

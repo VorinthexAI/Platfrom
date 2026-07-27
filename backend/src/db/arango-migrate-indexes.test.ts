@@ -21,7 +21,7 @@ describe('Arango migration indexes', () => {
   });
   test('declares sparse direct-channel identity uniqueness and poll vote uniqueness', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    expect(source).toContain("{ fields: ['directUserOrganizationKey', 'directOrchestratorKey'], unique: true, sparse: true }");
+    expect(source).toContain("{ fields: ['organizationKey', 'kind', 'name'], unique: true, sparse: true }");
     expect(source).toContain("{ fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }");
     expect(source).toContain("fields[0] === 'scopeKey' && fields[1] === 'name'");
     expect(source).toContain('Dropped obsolete unique channel-name index');

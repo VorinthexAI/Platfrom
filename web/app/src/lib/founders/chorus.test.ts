@@ -21,11 +21,10 @@ const timestamp = "2026-07-24T12:00:00.000Z";
 const stored = { key: "message_key", channelKey: "channel_key", content: "Hello", createdAt: timestamp, updatedAt: timestamp };
 
 describe("Chorus schemas", () => {
-  test("parses permitted and unavailable channel entries", () => {
-    const orchestrator = { key: "orchestrator_key", name: "Atlas", role: "Commander" };
-    const channel = { key: "channel_key", scopeKey: "scope_key", kind: "direct", name: "Atlas", position: 0, createdAt: timestamp, updatedAt: timestamp };
+  test("parses the shared general channel entry", () => {
+    const orchestrator = { key: "general", name: "General", role: "Organization channel" };
+    const channel = { key: "channel_key", organizationKey: "organization_key", scopeKey: "scope_key", kind: "group", name: "general", position: 0, createdAt: timestamp, updatedAt: timestamp };
     expect(chorusChannelEntrySchema.parse({ orchestrator, scopeKey: "scope_key", canChat: true, channel }).channel?.key).toBe("channel_key");
-    expect(chorusChannelEntrySchema.parse({ orchestrator, scopeKey: "scope_key", canChat: false, channel: null }).channel).toBeNull();
     expect(() => chorusChannelEntrySchema.parse({ orchestrator, scopeKey: "scope_key", canChat: true, channel: null })).toThrow();
   });
 

@@ -1449,6 +1449,16 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   for (const orchestrator of SEEDED_ORCHESTRATOR_SOURCES) {
     results.push(await upsertSeedOrchestrator(orchestrator));
   }
+  const hqScope = await scopes.getScopeByKey(actualKeysBySeedKey.get('cmrnlzf640005qc7kefvra0bn') ?? 'cmrnlzf640005qc7kefvra0bn');
+  if (!hqScope) throw new SeedReferenceError('scope', 'hq', 'general channel');
+  const generalCursor = await db.query<{ key: string }>(`
+    UPSERT { organizationKey: @organizationKey, kind: "group", name: "general" }
+      INSERT { _key: @key, organizationKey: @organizationKey, scopeKey: @scopeKey, kind: "group", name: "general", description: "Organization-wide conversation", position: 0, createdAt: @now, updatedAt: @now, embedding: [] }
+      UPDATE { scopeKey: @scopeKey, archivedAt: null, updatedAt: @now } IN channels OPTIONS { keepNull: false }
+      RETURN { key: NEW._key }
+  `, { key: newId(), organizationKey: rootOrganization.key, scopeKey: hqScope.key, now: now() });
+  const general = (await generalCursor.next())!;
+  results.push({ collection: 'channels', key: general.key, status: 'updated' });
   results.push(...await assignSeededFounderOrchestrators(rootOrganization.key));
 
   return results;

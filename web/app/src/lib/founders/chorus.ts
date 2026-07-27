@@ -6,17 +6,18 @@ const optionalKeySchema = z.preprocess((value) => value === null ? undefined : v
 
 export const chorusChannelSchema = z.object({
   key: keySchema,
+  organizationKey: keySchema,
   scopeKey: keySchema,
   kind: z.string().trim().min(1),
   name: z.string().trim().min(1),
   description: z.string().optional(),
   position: z.number().int(),
-  directOrchestratorKey: keySchema.optional(),
   archivedAt: isoTimestampSchema.optional(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
 }).strict();
 
+export const chorusMentionSchema = z.object({ participantKey: keySchema, type: z.enum(["user", "orchestrator", "everyone"]), key: keySchema, name: z.string().trim().min(1), role: z.string().optional() }).strict();
 export const chorusChannelEntrySchema = z.object({
   orchestrator: z.object({ key: keySchema, name: z.string().trim().min(1), role: z.string() }).strict(),
   scopeKey: keySchema,
@@ -89,6 +90,7 @@ export const chorusStreamEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export type ChorusChannel = z.infer<typeof chorusChannelSchema>;
+export type ChorusMention = z.infer<typeof chorusMentionSchema>;
 export type ChorusChannelEntry = z.infer<typeof chorusChannelEntrySchema>;
 export type ChorusMessage = z.infer<typeof chorusMessageSchema>;
 export type ChorusThread = z.infer<typeof chorusThreadSchema>;
@@ -176,11 +178,9 @@ async function request<T>(url: string, schema: z.ZodType<T>, init?: RequestInit)
 }
 
 export async function listChorusChannels(organizationKey: string, signal?: AbortSignal) {
-  return (await request(`${base(organizationKey)}/channels`, z.object({ channels: z.array(chorusChannelEntrySchema) }).strict(), { signal })).channels;
-}
-
-export async function openChorusChannel(organizationKey: string, orchestratorKey: string, signal?: AbortSignal) {
-  return (await request(`${base(organizationKey)}/orchestrators/${encodeURIComponent(orchestratorKey)}/open`, z.object({ channel: chorusChannelSchema }).strict(), { method: "POST", body: "{}", signal })).channel;
+  const result = await request(`${base(organizationKey)}/channels`, z.object({ channels: z.array(chorusChannelSchema).length(1), mentions: z.array(chorusMentionSchema) }).strict(), { signal });
+  const channel = result.channels[0]!;
+  return { channels: [chorusChannelEntrySchema.parse({ orchestrator: { key: "general", name: "General", role: "Organization channel" }, scopeKey: channel.scopeKey, canChat: true, channel })], mentions: result.mentions };
 }
 
 export async function listChorusMessages(organizationKey: string, channelKey: string, signal?: AbortSignal) {

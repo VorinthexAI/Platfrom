@@ -7,7 +7,6 @@ import { sanitizedAgentMessageSchema } from './input-sanitizer';
 
 export const orchestratorChatToolInputSchema = z.object({
   message: sanitizedAgentMessageSchema,
-  history: z.array(z.object({ role: z.enum(['user', 'assistant']), content: sanitizedAgentMessageSchema }).strict()).max(40).optional(),
 }).strict();
 
 export interface OrchestratorChatToolDependencies extends RouterDependencies, DocumentProcessingDependencies {
@@ -72,10 +71,7 @@ function buildChatInput(skill: string, rawInput: unknown): CoreChatInput {
   const parsedSkill = z.string().trim().min(1).parse(skill);
   return coreChatInputSchema.parse({
     systemPrompt: parsedSkill,
-    messages: [
-      ...(input.history ?? []).map(({ role, content }) => ({ role, content: [{ type: 'text' as const, text: content }] })),
-      ...((input.history?.at(-1)?.role === 'user' && input.history.at(-1)?.content === input.message) ? [] : [{ role: 'user' as const, content: [{ type: 'text' as const, text: input.message }] }]),
-    ],
+    messages: [{ role: 'user', content: [{ type: 'text', text: input.message }] }],
     options: { maxTokens: 300 },
   });
 }

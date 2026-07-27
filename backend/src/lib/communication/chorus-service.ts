@@ -4,7 +4,8 @@ import { threadSchema } from '@/lib/db/threads.node';
 import { pollSchema } from '@/lib/db/polls.node';
 import { pollOptionSchema } from '@/lib/db/poll-options.node';
 import { pollVoteSchema } from '@/lib/db/poll-votes.node';
-import { arangoCommunicationRepository, CommunicationConflictError, type CommunicationRepository, type DirectChannelAccess } from './repository';
+import { arangoCommunicationRepository, CommunicationConflictError, type CommunicationRepository, type GeneralChannelAccess, type MentionCandidate } from './repository';
+import { messageMentionSchema } from '@/lib/db/message-mentions.node';
 
 export type ChorusErrorCode = 'forbidden' | 'not_found' | 'conflict';
 export class ChorusError extends Error {
@@ -17,30 +18,14 @@ const isoNow = () => new Date().toISOString();
 export class ChorusService {
   constructor(private readonly repository: CommunicationRepository = arangoCommunicationRepository, private readonly now = isoNow) {}
 
-  async listDirectChannels(actor: ChorusActor) {
-    const candidates = await this.repository.listDirectCandidates(actor.organizationKey, actor.membershipKey);
-    const channels = [];
-    for (const candidate of candidates) {
-      if (!candidate.canChat) {
-        channels.push({ orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: false as const, channel: null });
-        continue;
-      }
-      const access = await this.repository.ensureDirectChannel(actor.organizationKey, actor.membershipKey, candidate.orchestrator.key);
-      channels.push(access
-        ? { orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: true as const, channel: access.channel }
-        : { orchestrator: candidate.orchestrator, scopeKey: candidate.scopeKey, canChat: false as const, channel: null });
-    }
-    return channels;
-  }
-
-  async openDirectChannel(actor: ChorusActor, orchestratorKey: string) {
-    const access = await this.repository.ensureDirectChannel(actor.organizationKey, actor.membershipKey, orchestratorKey);
-    if (!access) throw new ChorusError('forbidden', 'orchestrator scope access denied');
+  async generalChannel(actor: ChorusActor) {
+    const access = await this.repository.ensureGeneralChannel(actor.organizationKey, actor.membershipKey);
+    if (!access) throw new ChorusError('forbidden', 'organization access denied');
     return access;
   }
 
-  async requireChannel(actor: ChorusActor, channelKey: string): Promise<DirectChannelAccess> {
-    const access = await this.repository.getDirectChannelAccess(actor.organizationKey, actor.membershipKey, channelKey);
+  async requireChannel(actor: ChorusActor, channelKey: string): Promise<GeneralChannelAccess> {
+    const access = await this.repository.getGeneralChannelAccess(actor.organizationKey, actor.membershipKey, channelKey);
     if (!access) throw new ChorusError('forbidden', 'channel access denied');
     return access;
   }
@@ -58,15 +43,17 @@ export class ChorusService {
   async persistUserMessage(actor: ChorusActor, channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) {
     const access = await this.requireChannel(actor, channelKey);
     await this.validateReply(channelKey, threadKey, replyToMessageKey);
-    const message = this.message(access, access.humanParticipant.key, content, threadKey, replyToMessageKey);
-    return { access, message: await this.repository.insertMessage(message) };
+    const message = await this.repository.insertMessage(this.message(access, access.humanParticipant.key, content, threadKey, replyToMessageKey));
+    const mentions = this.mentions(access, message.key, content);
+    await this.repository.insertMentions(mentions.map(({ candidate, mention }) => mention));
+    return { access, message, orchestrators: mentions.filter(({ candidate }) => candidate.type === 'orchestrator').map(({ candidate }) => candidate) };
   }
 
-  async persistOrchestratorMessage(access: DirectChannelAccess, content: string, threadKey?: string, replyToMessageKey?: string) {
-    return this.repository.insertMessage(this.message(access, access.orchestratorParticipant.key, content, threadKey, replyToMessageKey));
+  async persistOrchestratorMessage(access: GeneralChannelAccess, orchestrator: MentionCandidate, content: string, threadKey?: string, replyToMessageKey?: string) {
+    return this.repository.insertMessage(this.message(access, orchestrator.participantKey, content, threadKey, replyToMessageKey));
   }
 
-  async history(access: DirectChannelAccess, threadKey?: string, excludeMessageKey?: string, limit = 40) {
+  async history(access: GeneralChannelAccess, threadKey?: string, excludeMessageKey?: string, limit = 40) {
     return this.repository.listHistory(access.channel.key, threadKey, excludeMessageKey, limit);
   }
 
@@ -162,7 +149,19 @@ export class ChorusService {
     return poll;
   }
 
-  private message(access: DirectChannelAccess, authorParticipantKey: string, content: string, threadKey?: string, replyToMessageKey?: string): Message {
+  private mentions(access: GeneralChannelAccess, messageKey: string, content: string) {
+    const selected = new Map<string, MentionCandidate>();
+    const hasEveryone = /(^|[^\w])@everyone\b/i.test(content);
+    for (const candidate of access.mentions) {
+      if (candidate.type === 'everyone') continue;
+      const pattern = new RegExp(`(^|[^\\w])@${candidate.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\w])`, 'i');
+      if (hasEveryone || pattern.test(content)) selected.set(candidate.participantKey, candidate);
+    }
+    const now = this.now();
+    return [...selected.values()].map((candidate) => ({ candidate, mention: messageMentionSchema.parse({ key: newId(), scopeKey: access.channel.scopeKey, channelKey: access.channel.key, messageKey, participantKey: candidate.participantKey, createdAt: now, updatedAt: now }) }));
+  }
+
+  private message(access: GeneralChannelAccess, authorParticipantKey: string, content: string, threadKey?: string, replyToMessageKey?: string): Message {
     const now = this.now();
     return messageSchema.parse({ key: newId(), scopeKey: access.channel.scopeKey, channelKey: access.channel.key, authorParticipantKey, content, threadKey, replyToMessageKey, createdAt: now, updatedAt: now });
   }

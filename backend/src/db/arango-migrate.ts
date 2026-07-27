@@ -480,7 +480,7 @@ const collections: CollectionSpec[] = [
   // Embedding policy: only human text is embedded — ids, enums, and
   // timestamps are queryable with plain filters and are never embed text.
   { name: 'scopes', embedKeys: ['name', 'slug', 'description'] },
-  { name: 'channels', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'position'] }, { fields: ['scopeKey', 'name'] }, { fields: ['directUserOrganizationKey', 'directOrchestratorKey'], unique: true, sparse: true }] },
+  { name: 'channels', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'position'] }, { fields: ['scopeKey', 'name'] }, { fields: ['organizationKey', 'kind', 'name'], unique: true, sparse: true }] },
   { name: 'channelParticipants', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['userOrganizationKey'], sparse: true }, { fields: ['orchestratorKey'], sparse: true }, { fields: ['channelKey', 'userOrganizationKey'], unique: true, sparse: true }, { fields: ['channelKey', 'orchestratorKey'], unique: true, sparse: true }] },
   { name: 'threads', embedKeys: ['title'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['rootMessageKey'], unique: true }, { fields: ['channelKey', 'status'] }] },
   { name: 'messages', embedKeys: ['content'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['threadKey'], sparse: true }, { fields: ['authorParticipantKey'] }, { fields: ['replyToMessageKey'], sparse: true }, { fields: ['channelKey', 'createdAt'] }, { fields: ['threadKey', 'createdAt'], sparse: true }] },
@@ -2167,6 +2167,23 @@ async function main() {
     });
   }
   console.log('Normalized founder aliases, orchestrator links, and Nexus access');
+
+  // Retire the private per-orchestrator conversations. Their messages and all
+  // dependent communication records must disappear with the channels so they
+  // cannot be read through the shared #general channel implementation.
+  const directChannelCursor = await targetDb.query<{ key: string }>('FOR channel IN channels FILTER channel.kind == "direct" RETURN { key: channel._key }');
+  const directChannelKeys = (await directChannelCursor.all()).map(({ key }) => key);
+  for (const collection of ['messageMentions', 'messageReactions', 'pollVotes', 'pollOptions', 'polls', 'threads', 'messages', 'channelParticipants']) {
+    await targetDb.query(`FOR document IN ${collection} FILTER document.channelKey IN @channelKeys REMOVE document IN ${collection}`, { channelKeys: directChannelKeys });
+  }
+  await targetDb.query('FOR channel IN channels FILTER channel._key IN @channelKeys REMOVE channel IN channels', { channelKeys: directChannelKeys });
+  await targetDb.query(`
+    FOR channel IN channels
+      FILTER channel.kind == "group" && channel.name == "general" && !HAS(channel, "organizationKey")
+      LET scope = DOCUMENT(scopes, channel.scopeKey)
+      FILTER scope != null
+      UPDATE channel WITH { organizationKey: scope.organizationKey } IN channels
+  `);
 
   await seedNexusOrganizationArtifact(targetDb, rootOrganizationId, nexusScopeId);
   console.log('Seeded the Nexus spatial organization artifact');

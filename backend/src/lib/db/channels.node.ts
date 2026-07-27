@@ -5,10 +5,9 @@ export const CHANNELS_COLLECTION = 'channels';
 
 export const channelSchema = z.object({
   key: z.string().cuid(),
+  organizationKey: z.string().trim().min(1).max(160),
   scopeKey: z.string().cuid(),
-  kind: z.enum(['group', 'direct']).default('group'),
-  directUserOrganizationKey: z.string().trim().min(1).max(160).optional(),
-  directOrchestratorKey: z.string().trim().min(1).max(160).optional(),
+  kind: z.literal('group').default('group'),
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   position: z.number().int().nonnegative(),
@@ -16,11 +15,6 @@ export const channelSchema = z.object({
   updatedAt: z.string().datetime(),
   archivedAt: z.string().datetime().optional(),
   embedding: z.array(z.number().finite()).default([]),
-}).superRefine((channel, ctx) => {
-  const hasDirectPair = Boolean(channel.directUserOrganizationKey) && Boolean(channel.directOrchestratorKey);
-  if ((channel.kind === 'direct') !== hasDirectPair) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['kind'], message: 'Direct channels require both direct identities; group channels permit neither' });
-  }
 });
 
 export type Channel = z.infer<typeof channelSchema>;
