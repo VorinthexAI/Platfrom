@@ -15,6 +15,7 @@ import {
   coalesceChorusStreamEvents,
   createChorusPoll,
   createChorusThread,
+  deleteChorusMessage,
   listChorusChannels,
   listChorusMessages,
   markChorusStreamFailed,
@@ -53,8 +54,8 @@ const scopeEntities = [
 ];
 const normalizeName = (name: string) => name.normalize("NFKD").toLowerCase().replace(/[^a-z0-9]/g, "");
 const registryByName = new Map(registryOrchestrators.map((entity) => [normalizeName(entity.name), entity]));
-const REACTIONS = ["ack", "approve", "insight", "question"] as const;
-const MESSAGE_ACTIONS_ENABLED = false;
+const REACTIONS = ["👍", "🔥", "❤️", "😂", "🎉", "👀", "✅", "🤔", "🚀", "💯"] as const;
+const MESSAGE_ACTIONS_ENABLED = true;
 
 function OrchestratorMark({ name, size = 36 }: { name: string; size?: number }) {
   const entity = registryByName.get(normalizeName(name));
@@ -221,6 +222,7 @@ interface MessageViewProps {
   userName: string;
   countryCode: string;
   mentions: ChorusMention[];
+  onOpenActions: (message: ChorusMessage) => void;
 }
 
 function MessageContent({ content, mentions }: { content: string; mentions: ChorusMention[] }) {
@@ -228,7 +230,7 @@ function MessageContent({ content, mentions }: { content: string; mentions: Chor
   return <>{plainChorusText(content).split(/(@[a-z0-9_-]+)/gi).map((part, index) => names.has(part.slice(1).toLocaleLowerCase()) ? <strong key={index} className="font-semibold text-silver-50">{part}</strong> : part)}</>;
 }
 
-const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions }: MessageViewProps) {
+const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions, onOpenActions }: MessageViewProps) {
   const channelKey = entry.channel!.key;
   const interactive = !message.clientState;
   const react = async (reaction: string) => {
@@ -239,7 +241,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
     finally { await onRefresh().catch(() => {}); onBusy(false); }
   };
   return (
-    <article className="group flex gap-3 px-1 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_84px]">
+    <article onContextMenu={(event) => { event.preventDefault(); onOpenActions(message); }} className="group flex gap-3 px-1 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_84px]">
       {message.author.type === "orchestrator" ? <OrchestratorMark name={message.author.name} size={36} /> : <span aria-label={userName} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[11px] text-silver-200">{userName.trim().charAt(0).toUpperCase() || "?"}</span>}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} countryCode={countryCode} /></div>
@@ -251,8 +253,9 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
             const aggregate = message.reactions.find((item) => item.reaction === reaction);
             return <button key={reaction} type="button" disabled={busy} aria-label={`${aggregate?.viewerReacted ? "Remove" : "Add"} ${reaction} reaction`} aria-pressed={aggregate?.viewerReacted ?? false} onClick={() => void react(reaction)} className={`rounded-full border px-2 py-0.5 font-mono text-[8px] focus-visible:outline-2 disabled:opacity-40 ${aggregate?.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-500"}`}>{reaction}{aggregate ? ` ${aggregate.count}` : ""}</button>;
           })}
-          {!message.threadKey ? <button type="button" onClick={() => onOpenThread(message)} className="px-1 text-[9px] text-silver-500 underline focus-visible:outline-2">{message.thread ? `${message.thread.replyCount} replies` : "Thread"}</button> : null}
-          {message.author.type === "user" && !message.poll && !message.threadKey ? <button type="button" onClick={() => onCreatePoll(message)} className="px-1 text-[9px] text-silver-500 underline focus-visible:outline-2">Poll</button> : null}
+          {message.thread && message.thread.replyCount > 0 ? <button type="button" onClick={() => onOpenThread(message)} className="rounded-md border border-[var(--border-soft)] px-2 py-0.5 text-[9px] text-silver-300">{message.thread.replyCount} thread{message.thread.replyCount === 1 ? "" : "s"}</button> : null}
+          {message.poll ? <button type="button" onClick={() => onCreatePoll(message)} className="rounded-md border border-[var(--border-soft)] px-2 py-0.5 text-[9px] text-silver-300">1 poll</button> : null}
+          <button type="button" aria-label="Message actions" onClick={() => onOpenActions(message)} className="ml-auto hidden rounded-md border border-[var(--border-soft)] px-2 py-0.5 text-[11px] text-silver-300 group-hover:block focus-visible:block">...</button>
         </div> : null}
       </div>
     </article>
@@ -420,6 +423,9 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const [errors, setErrors] = useState<Record<string, string | null>>({});
   const [busyMessage, setBusyMessage] = useState<string | null>(null);
   const [pollMessage, setPollMessage] = useState<ChorusMessage | null>(null);
+  const [actionMessage, setActionMessage] = useState<ChorusMessage | null>(null);
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const [reactionQuery, setReactionQuery] = useState("");
   const [threadState, setThreadState] = useState<{ thread: ChorusThread; messages: ChorusMessage[]; loading: boolean; error: string | null } | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -636,7 +642,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
           <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
-              {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
+               {selected?.canChat ? visibleMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={(messageKey, reaction) => channelKey && setMessages((current) => ({ ...current, [channelKey]: (current[channelKey] ?? []).map((item) => {
               if (item.key !== messageKey) return item;
               const existing = item.reactions.find((entry) => entry.reaction === reaction);
               const reactions = existing
@@ -673,6 +679,14 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             if (organizationGeneration.current === generation) setBusyMessage(null);
           }
         }} /> : null}
+        <Dialog.Root open={Boolean(actionMessage)} onOpenChange={(open) => { if (!open) setActionMessage(null); }}>
+          <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[360px] sm:rounded-none" aria-describedby={undefined}>
+            <Dialog.Title className="text-sm text-silver-50">Message actions</Dialog.Title>
+            <div className="mt-4 grid gap-2"><button type="button" onClick={() => { if (actionMessage) void openThread(actionMessage); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Thread</button><button type="button" onClick={() => { setPollMessage(actionMessage); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">Poll</button><button type="button" onClick={() => setReactionPickerOpen(true)} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-left text-xs text-silver-200">React</button><button type="button" onClick={() => { if (!actionMessage || !channelKey) return; void deleteChorusMessage(organizationKey, channelKey, actionMessage.key).then(() => refreshMessages(channelKey)); setActionMessage(null); }} className="rounded-lg border border-status-critical/40 px-3 py-2 text-left text-xs text-status-critical">Delete message</button></div>
+            <div className="mt-5 flex gap-2"><button type="button" onClick={() => setPollMessage(actionMessage)} className="flex-1 rounded-lg bg-[var(--gradient-chrome)] px-3 py-2 text-xs text-obsidian-990">New</button><Dialog.Close className="flex-1 rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></div>
+          </Dialog.Content></Dialog.Portal>
+        </Dialog.Root>
+        <Dialog.Root open={reactionPickerOpen} onOpenChange={setReactionPickerOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[360px] sm:rounded-none" aria-describedby={undefined}><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><input autoFocus value={reactionQuery} onChange={(event) => setReactionQuery(event.target.value)} placeholder="Search reactions" className="mt-3 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><div className="mt-3 flex flex-wrap gap-2">{REACTIONS.filter((reaction) => reaction.includes(reactionQuery)).map((reaction) => <button key={reaction} type="button" onClick={() => { if (!actionMessage || !channelKey) return; void mutateChorusReaction(organizationKey, channelKey, actionMessage.key, reaction).then(() => refreshMessages(channelKey)); setReactionPickerOpen(false); setActionMessage(null); }} className="rounded-lg border border-[var(--border-soft)] px-3 py-2 text-lg">{reaction}</button>)}</div><Dialog.Close className="mt-5 w-full rounded-lg border border-[var(--border-soft)] px-3 py-2 text-xs text-silver-200">Close</Dialog.Close></Dialog.Content></Dialog.Portal></Dialog.Root>
          {selected && channelKey && threadState ? <ThreadPanel entry={selected} countryCode={countryCode} {...threadState} onClose={() => {
           threadGeneration.current += 1;
           controllers.current.get("thread")?.abort();

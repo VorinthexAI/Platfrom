@@ -40,6 +40,11 @@ export class ChorusService {
     return this.repository.clearChannel(channelKey, this.now());
   }
 
+  async deleteMessage(actor: ChorusActor, channelKey: string, messageKey: string) {
+    await this.requireChannel(actor, channelKey);
+    if (!await this.repository.deleteMessage(channelKey, messageKey, actor.membershipKey, this.now())) throw new ChorusError('forbidden', 'message deletion denied');
+  }
+
   async persistUserMessage(actor: ChorusActor, channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) {
     const access = await this.requireChannel(actor, channelKey);
     await this.validateReply(channelKey, threadKey, replyToMessageKey);
@@ -63,6 +68,7 @@ export class ChorusService {
     await this.requireMessage(channelKey, messageKey);
     const result = await this.repository.mutateReaction({ mode, channelKey, messageKey, participantKey: access.humanParticipant.key, reaction, now: this.now() });
     if (!result) throw new ChorusError('not_found', 'message not found');
+    if (result.active) await this.repository.recordUserReaction(access.viewerUserKey, reaction, this.now());
     return result;
   }
 

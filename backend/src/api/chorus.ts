@@ -104,6 +104,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
     }),
     listMessages: (c: Context) => run(c, async (resolved) => ({ messages: await dependencies.service.listMessages(resolved, key.parse(c.req.param('channelKey')), parseQuery(c, chorusMessageListQuerySchema).limit) })),
     clearChannel: (c: Context) => run(c, async (resolved) => ({ cleared: await dependencies.service.clearChannel(resolved, key.parse(c.req.param('channelKey'))) })),
+    deleteMessage: (c: Context) => run(c, async (resolved) => { await dependencies.service.deleteMessage(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey'))); return { deleted: true }; }),
     postMessage: async (c: Context) => {
       const resolved = await actor(c);
       if (resolved instanceof Response) return resolved;

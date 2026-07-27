@@ -10,6 +10,7 @@ import { pollOptionSchema, type PollOption } from '@/lib/db/poll-options.node';
 import { pollVoteSchema, type PollVote } from '@/lib/db/poll-votes.node';
 import { messageMentionSchema, type MessageMention } from '@/lib/db/message-mentions.node';
 import { userMentionSchema } from '@/lib/db/user-mentions.node';
+import { userReactionSchema } from '@/lib/db/user-reactions.node';
 import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 
 export interface MentionCandidate {
@@ -59,12 +60,14 @@ export interface CommunicationRepository {
   getGeneralChannelAccess(organizationKey: string, membershipKey: string, channelKey: string): Promise<GeneralChannelAccess | null>;
   listMessages(channelKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
   clearChannel(channelKey: string, now: string): Promise<number>;
+  deleteMessage(channelKey: string, messageKey: string, membershipKey: string, now: string): Promise<boolean>;
   listThreadMessages(channelKey: string, threadKey: string, rootMessageKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
   listHistory(channelKey: string, threadKey: string | undefined, excludeMessageKey: string | undefined, limit: number): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>;
   getMessage(messageKey: string): Promise<Message | null>;
   insertMessage(message: Message): Promise<Message>;
   insertMentions(mentions: MessageMention[]): Promise<void>;
   recordUserMentions(userKey: string, sourceIds: string[], now: string): Promise<void>;
+  recordUserReaction(userKey: string, reactionSlug: string, now: string): Promise<void>;
   mutateReaction(input: { mode: 'add' | 'remove' | 'toggle'; channelKey: string; messageKey: string; participantKey: string; reaction: string; now: string }): Promise<{ active: boolean } | null>;
   createThread(thread: Thread): Promise<Thread>;
   getThread(threadKey: string): Promise<Thread | null>;
@@ -210,6 +213,18 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     `, { channelKey, now });
     return await cursor.next() ?? 0;
   },
+  async deleteMessage(channelKey, messageKey, membershipKey, now) {
+    const changed = await first<{ key: string }>(`
+      LET message = DOCUMENT(messages, @messageKey)
+      LET membership = DOCUMENT(userOrganizations, @membershipKey)
+      LET author = message == null ? null : DOCUMENT(channelParticipants, message.authorParticipantKey)
+      FILTER message != null && message.channelKey == @channelKey && message.deletedAt == null && membership != null
+      FILTER author.userOrganizationKey == @membershipKey || membership.orgRole == "owner" || membership.orgRole == "admin"
+      UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages
+      RETURN { key: NEW._key }
+    `, { channelKey, messageKey, membershipKey, now });
+    return Boolean(changed);
+  },
 
   async listThreadMessages(channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit) {
     const cursor = await db.query<MessageProjection>(`
@@ -255,6 +270,9 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   async recordUserMentions(userKey, sourceIds, now) {
     if (!sourceIds.length) return;
     await db.query('FOR sourceId IN @sourceIds UPSERT { userKey: @userKey, sourceId } INSERT MERGE(@document, { sourceId }) UPDATE { count: OLD.count + 1, updatedAt: @now } IN userMentions', { userKey, sourceIds, now, document: toArangoDoc(userMentionSchema.parse({ key: newId(), userKey, sourceId: 'pending', count: 1, createdAt: now, updatedAt: now })) });
+  },
+  async recordUserReaction(userKey, reactionSlug, now) {
+    await db.query('UPSERT { userKey: @userKey, reactionSlug: @reactionSlug } INSERT @document UPDATE { count: OLD.count + 1, updatedAt: @now } IN userReactions', { userKey, reactionSlug, now, document: toArangoDoc(userReactionSchema.parse({ key: newId(), userKey, reactionSlug, count: 1, createdAt: now, updatedAt: now })) });
   },
 
   async mutateReaction(input) {
