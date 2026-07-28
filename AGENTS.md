@@ -108,6 +108,7 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - Add or update tests for behavior changes.
 - Do not commit secrets in plaintext. All vars/secrets (dev + prod) live git-crypt-encrypted in `.github/environments.json` — edit it locally after `git-crypt unlock`, never add a new plaintext env file.
 - Keep shared code in the top-level `shared/` folder, not nested inside `web/app/src/shared` or `backend/src/shared`.
+- In the HQ deck, use `Button` and icons from `@vorinthex/shared/ui` for every primary or secondary action CTA and icon action. Native `<button>` elements are reserved for bespoke controls such as listbox options, reaction choices, poll choices, and mention chips. Disabled primary actions must remain visibly identifiable at 80% opacity; do not replace or hide their primary treatment with local disabled styles.
 - Validate backend endpoint JSON payloads and query parameters with Zod strict object schemas; reject unknown fields instead of silently accepting them.
 - ArangoDB documents: application code and schemas ALWAYS use `key` as the public primary-key field — never read or write Arango's `_key` directly. The only place that translates between them is `toArangoDoc`/`withArangoKey` in `backend/src/lib/db/base.ts`; document schemas parse in Zod's default strip mode so `_key`/`_id`/`_rev` drop away on read.
 - Keep backend HTTP endpoints behind the env API key middleware and Redis-backed per-IP rate limiting unless a task explicitly changes that security model.

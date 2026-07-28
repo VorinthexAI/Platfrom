@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   chorusChannelEntrySchema,
   buildChorusMentionRows,
+  CHORUS_ORCHESTRATOR_NAMES,
   chorusMentionRosterSchema,
   chorusMessageSchema,
   chorusThreadSchema,
@@ -72,7 +73,7 @@ describe("Chorus schemas", () => {
 });
 
 describe("Chorus mention rows", () => {
-  const orchestratorNames = ["Atlas", "Metis", "Echo", "Matrix", "Hermes", "Harmony", "Phoenix", "Iris", "Orbit", "Apollo", "Athena", "Forge", "Aura", "Pillar", "Helios", "Vulcan", "Ledger", "Mercury", "Sentinel", "Themis"];
+  const orchestratorNames = [...CHORUS_ORCHESTRATOR_NAMES];
   const roster = chorusMentionRosterSchema.parse({
     orchestrators: orchestratorNames.map((name, index) => ({ participantKey: `participant-${index}`, type: "orchestrator", key: `agent-${index}`, name, role: "Executive", mentionCount: 20 - index })),
     everyone: { participantKey: "everyone", type: "everyone", key: "everyone", name: "everyone", mentionCount: 0 },
@@ -88,6 +89,22 @@ describe("Chorus mention rows", () => {
 
   test("requires all twenty orchestrators in the API contract", () => {
     expect(() => chorusMentionRosterSchema.parse({ ...roster, orchestrators: roster.orchestrators.slice(1) })).toThrow();
+  });
+});
+
+describe("HQ shared controls", () => {
+  test("keeps primary actions visible and renders the canonical orchestrator lane", async () => {
+    const component = await Bun.file(new URL("../../components/founders/HqCommunicationOverlay.tsx", import.meta.url)).text();
+    const theme = await Bun.file(new URL("../../../../../shared/packages/ui/theme.css", import.meta.url)).text();
+    const guidance = await Bun.file(new URL("../../../../../AGENTS.md", import.meta.url)).text();
+    expect(component).toContain("CHORUS_ORCHESTRATOR_NAMES.map");
+    expect(component).toContain('variant="primary"');
+    expect(component).toContain('variant="secondary"');
+    expect(component).toContain('icon={<MoreHorizontalIcon size="sm" />}');
+    expect(component).toContain('border-[var(--border-soft)] pb-1 opacity-0');
+    expect(theme).toContain('.vui-button-primary:disabled');
+    expect(theme.match(/opacity: 0\.8;/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(guidance).toContain("Disabled primary actions must remain visibly identifiable at 80% opacity");
   });
 });
 
