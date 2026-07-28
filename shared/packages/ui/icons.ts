@@ -55,6 +55,8 @@ export * from './icons/archive';
 export * from './icons/gallery';
 export * from './icons/signal';
 export * from './icons/soundwave';
+export * from './icons/microphone';
+export * from './icons/send';
 export * from './icons/compass';
 export * from './icons/ascend';
 export * from './icons/brain';
