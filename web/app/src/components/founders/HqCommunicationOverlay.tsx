@@ -272,7 +272,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
           {message.poll ? <button type="button" onClick={() => onCreatePoll(message)} className="rounded-md border border-[var(--border-soft)] px-2 py-0.5 text-[9px] text-silver-300">1 poll</button> : null}
         </div> : null}
       </div>
-      {MESSAGE_ACTIONS_ENABLED && interactive ? <Button type="button" variant="icon" onClick={() => onOpenActions(message)} icon={<MoreHorizontalIcon size="sm" />} className="pointer-events-none absolute top-3 right-1 h-8 min-h-0 w-9 rounded-lg border-[var(--border-soft)] pb-1 opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100">Message actions</Button> : null}
+      {MESSAGE_ACTIONS_ENABLED && interactive ? <Button type="button" variant="icon" onClick={() => onOpenActions(message)} icon={<MoreHorizontalIcon size="sm" />} className="pointer-events-none absolute top-3 right-1 h-8 min-h-0 w-9 rounded-lg border-[var(--border-soft)] opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100">Message actions</Button> : null}
     </article>
   );
 }, (previous, next) => previous.entry === next.entry
@@ -437,7 +437,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
         </div>
       </form>
       <div className="mt-2 grid min-w-0 grid-rows-[minmax(24px,auto)_minmax(24px,auto)] gap-1.5 overflow-hidden">
-        <div aria-label="Orchestrator mentions" className="flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1">{orchestrators.map((mention) => <button key={`orchestrator:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[var(--gradient-chrome)] px-1.5 py-1 font-mono text-[9px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}</div>
+        <div aria-label="Orchestrator mentions" className="flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1">{orchestrators.map((mention) => <button key={`orchestrator:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[image:var(--gradient-chrome)] px-1.5 py-1 font-mono text-[9px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}</div>
         <div aria-label="Organization member mentions" className="flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{people.map((mention) => <button key={`${mention.type}:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md border border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</button>)}</div>
       </div>
     </div>
