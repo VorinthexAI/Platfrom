@@ -108,7 +108,7 @@ export function PublicGalaxy() {
         onClick={returnToGalaxy}
         size="lg"
         variant="primary"
-        className="mt-8 uppercase"
+        className="mt-8"
       >
         Explore and collect
       </Button>

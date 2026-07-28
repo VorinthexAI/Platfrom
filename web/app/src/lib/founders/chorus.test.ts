@@ -122,7 +122,11 @@ describe("shared button controls", () => {
       expect(theme).toContain(`.vui-button-${size}`);
     }
     expect(theme).toContain("border-radius: var(--vui-radius-pill) !important");
+    expect(theme).toContain("text-transform: none !important");
     expect(theme).toContain('.vui-button-primary:disabled');
+    expect(component).toContain(">Channels</span>");
+    expect(component).not.toContain('selected ? "bg-[var(--panel-strong)]');
+    expect(component).not.toContain("aria-current");
     expect(theme.match(/opacity: 0\.8;/g)?.length).toBeGreaterThanOrEqual(2);
     expect(guidance).toContain("Do not create app-local UI primitives");
     expect(guidance).toContain("one of its five sizes (`xs`, `sm`, `md`, `lg`, `xl`)");

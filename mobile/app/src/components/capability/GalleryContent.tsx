@@ -9,9 +9,9 @@ import { useUiStore, type GalleryTab } from "@/state/ui";
 import { fonts, palette, spacing, tracking } from "@/theme/tokens";
 
 const TABS: { key: GalleryTab; label: string }[] = [
-  { key: "all", label: "ALL" },
-  { key: "collections", label: "COLLECTIONS" },
-  { key: "favorites", label: "FAVORITES" },
+  { key: "all", label: "All" },
+  { key: "collections", label: "Collections" },
+  { key: "favorites", label: "Favorites" },
 ];
 
 const GRID_GAP = 8;

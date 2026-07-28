@@ -74,7 +74,7 @@ function MfaRecoveryBlock({
         variant="secondary"
         loading={status === "sending"}
         onClick={requestRecovery}
-        className="mt-4 w-full px-5 py-3 text-[0.62rem] uppercase"
+        className="mt-4 w-full px-5 py-3 text-[0.62rem]"
       >
         Request recovery
       </Button>
@@ -157,7 +157,7 @@ export function TotpSetupPanel({
           </p>
         </div>
       </div>
-      <Button asChild size="md" variant="secondary" className="mt-4 w-full uppercase">
+      <Button asChild size="md" variant="secondary" className="mt-4 w-full">
         <a href={setupData.otpauthUrl}>On mobile? Tap here to open in your auth app</a>
       </Button>
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -198,7 +198,7 @@ export function TotpSetupPanel({
         variant="primary"
         loading={status === "submitting"}
         disabled={codeA.length !== 6 || codeB.length !== 6}
-        className="mt-5 w-full px-5 py-3.5 text-xs uppercase"
+        className="mt-5 w-full px-5 py-3.5 text-xs"
       >
         Verify
       </Button>
@@ -288,7 +288,7 @@ export function TotpVerifyPanel({
         variant="primary"
         loading={status === "submitting"}
         disabled={code.length !== 6}
-        className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
+        className="mt-4 w-full px-5 py-3.5 text-xs"
       >
         Verify
       </Button>

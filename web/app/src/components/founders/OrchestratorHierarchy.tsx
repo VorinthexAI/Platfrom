@@ -449,7 +449,7 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
           style={{ opacity }}
         >
           <span className={`font-mono text-[0.55rem] tracking-[0.23em] ${selected ? "text-[#ffd799]" : "text-[#a87a50]"}`}>{descriptor}</span>
-          <span className={`mt-0.5 text-[0.62rem] font-medium tracking-[0.15em] uppercase ${selected ? "text-white" : "text-[#ddc1a2]"}`}>{entity.name}</span>
+          <span className={`mt-0.5 text-[0.62rem] font-medium tracking-[0.15em] ${selected ? "text-white" : "text-[#ddc1a2]"}`}>{entity.name}</span>
         </Button>
       </Html>
       {selected ? <pointLight color="#ff7917" intensity={5} distance={3.5} decay={2} position={[0, 0.5, 0]} /> : null}

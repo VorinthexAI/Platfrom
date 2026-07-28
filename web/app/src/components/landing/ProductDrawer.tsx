@@ -179,9 +179,9 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
             playVoice(entityAudioUrl(entity.type, entity.slug));
           }}
           icon={<SpeakerIcon animated />}
-          className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] uppercase sm:px-6"
+          className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] sm:px-6"
         >
-          Play Briefing
+          Play briefing
         </Button>
         {entity.type === "orchestrator" ? (
           <Button
@@ -196,7 +196,7 @@ function EntityPanel({ entity }: { entity: GalaxyEntity }) {
               playVoice(orchestratorMessageUrl(entity.slug));
             }}
             icon={<SpeakerIcon animated />}
-            className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] uppercase sm:px-6"
+            className="min-h-0 max-w-full px-5 py-3 text-[0.62rem] sm:px-6"
           >
             Meet {entity.name}
           </Button>

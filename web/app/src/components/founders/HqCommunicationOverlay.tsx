@@ -148,7 +148,6 @@ function ScopeSelector({ selectedScopeId, onScopeChange }: Pick<HqCommunicationO
 
 interface RailProps {
   channels: ChorusChannelEntry[];
-  selectedKey: string | null;
   loading: boolean;
   error: string | null;
   onRetry: () => void;
@@ -157,19 +156,19 @@ interface RailProps {
   onScopeChange: (id: string) => void;
 }
 
-const OrchestratorRail = memo(function OrchestratorRail({ channels, selectedKey, loading, error, onRetry, onSelect, selectedScopeId, onScopeChange }: RailProps) {
+const OrchestratorRail = memo(function OrchestratorRail({ channels, loading, error, onRetry, onSelect, selectedScopeId, onScopeChange }: RailProps) {
   return (
     <aside className="flex min-h-0 flex-col border-r border-[var(--border-faint)] bg-obsidian-950/90 [contain:layout_paint]">
       <div className="border-b border-[var(--border-faint)] p-4"><span className="mb-2 block font-mono text-[9px] uppercase tracking-[0.2em] text-silver-500">Scope</span><ScopeSelector selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} /></div>
       <div className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 [contain:content]">
+        <span className="mb-2 block font-mono text-[9px] tracking-[0.2em] text-silver-500">Channels</span>
         {loading ? <div aria-label="Loading channels" className="space-y-2">{[0, 1, 2, 3].map((item) => <div key={item} className="h-10 animate-pulse rounded-lg bg-white/[0.04]" />)}</div> : null}
         {error ? <div role="alert" className="rounded-xl border border-status-critical/30 p-3 text-[11px] text-status-critical"><p>{error}</p><Button type="button" variant="secondary" onClick={onRetry} className="mt-2 min-h-0 rounded-md px-3 py-1.5 text-[9px]">Retry</Button></div> : null}
         {!loading && !error && channels.length === 0 ? <p className="p-2 text-[11px] text-silver-500">No channels are available.</p> : null}
         <div className="space-y-1">
           {channels.map((entry) => {
-            const selected = entry.orchestrator.key === selectedKey;
             return (
-              <Button key={entry.orchestrator.key} aria-current={selected ? "page" : undefined} aria-label={`${entry.orchestrator.name}${entry.canChat ? "" : ", chat unavailable"}`} onClick={() => onSelect(entry)} size="sm" variant="secondary" className={`w-full justify-start gap-2 border-transparent px-2.5 py-2 text-left normal-case tracking-normal no-underline hover:no-underline focus-visible:outline-2 focus-visible:outline-silver-300 ${selected ? "bg-[var(--panel-strong)] text-silver-50" : "bg-transparent text-silver-300 hover:border-transparent hover:bg-white/[0.04]"} ${entry.canChat ? "" : "opacity-55"}`}>
+              <Button key={entry.orchestrator.key} aria-label={`${entry.orchestrator.name}${entry.canChat ? "" : ", chat unavailable"}`} onClick={() => onSelect(entry)} size="sm" variant="secondary" className={`w-full justify-start gap-2 px-2.5 py-2 text-left tracking-normal no-underline hover:no-underline focus-visible:outline-2 focus-visible:outline-silver-300 ${entry.canChat ? "" : "opacity-55"}`}>
                  <span aria-hidden className="font-mono text-[12px] text-silver-500">#</span><span className="min-w-0 flex-1 truncate pb-px text-[12px] leading-5 lowercase no-underline">{entry.channel?.name ?? entry.orchestrator.name}</span>
                 {!entry.canChat ? <span aria-hidden title="Chat unavailable" className="text-[10px]">LOCK</span> : null}
               </Button>
@@ -769,7 +768,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
         <div className="ml-3 min-w-0 flex-1 font-mono text-[9px] uppercase tracking-[0.13em] text-silver-500"><span className="text-silver-300">HQ</span><span className="mx-2">/</span><span className="truncate lowercase">#{selected?.channel?.name ?? "general"}</span></div>
       </header>
       <div className="relative grid min-h-0 flex-1 grid-rows-[minmax(150px,30vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1">
-        <OrchestratorRail channels={channels} selectedKey={selectedKey} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
+        <OrchestratorRail channels={channels} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
         <section className="flex min-h-0 min-w-0 flex-col bg-obsidian-990/90 [contain:layout_paint]">
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--border-faint)] px-5">
             {threadState ? <Button type="button" variant="secondary" aria-label="Back to channel" onClick={closeThread} className="min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Back</Button> : null}

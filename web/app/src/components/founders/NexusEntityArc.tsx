@@ -169,8 +169,8 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={entityLogoUrl(entity.type, entity.slug)} alt="" className="h-8 w-8 rounded-full border border-white/12 bg-black/50 p-0.5" />
                   <span className="min-w-0">
-                    <span className="block truncate text-xs font-medium tracking-[0.14em] text-silver-50 uppercase">{entity.name}</span>
-                    <span className="mt-0.5 block truncate font-mono text-[0.46rem] tracking-[0.13em] text-[#ba8150] uppercase">{entity.role ?? entity.label ?? entity.type}</span>
+                    <span className="block truncate text-xs font-medium tracking-[0.14em] text-silver-50">{entity.name}</span>
+                    <span className="mt-0.5 block truncate font-mono text-[0.46rem] tracking-[0.13em] text-[#ba8150]">{entity.role ?? entity.label ?? entity.type}</span>
                   </span>
                 </span>
                 <span className="mt-2 block h-8 overflow-hidden text-[0.64rem] leading-4 text-silver-400">{descriptionFor(entity)}</span>
