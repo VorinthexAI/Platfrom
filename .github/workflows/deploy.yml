@@ -616,13 +616,14 @@ jobs:
           echo "POLAR_SERVER=${polar_server:-production}" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
-      - name: Apply migrations, seed nodes, and sync Polar products
+      - name: Apply migrations, seed nodes, backfill messages, and sync Polar products
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
         run: |
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
+          bun run --cwd backend db:backfill-message-embeddings:ci
           bun run --cwd backend polar:sync
       - name: Close SSH ingress for this runner
         if: always()
