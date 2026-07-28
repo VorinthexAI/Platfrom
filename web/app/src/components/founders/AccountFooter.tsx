@@ -31,7 +31,7 @@ export function AccountFooter({ name, secondary, onOpen }: AccountFooterProps) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm text-silver-100">{name}</span>
-        <span className="block truncate font-mono text-[0.6rem] tracking-[0.18em] text-silver-500 uppercase">
+        <span className="block truncate font-mono text-[0.6rem] tracking-[0.18em] text-silver-500">
           {secondary}
         </span>
       </span>

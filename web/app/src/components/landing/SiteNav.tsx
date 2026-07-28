@@ -101,7 +101,7 @@ export function SiteNav() {
                   enterCave("hunt");
                   syncEntityUrl("/hunt");
                 }}
-                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] whitespace-nowrap sm:px-4"
               >
                 Hunt
               </Button>
@@ -111,7 +111,7 @@ export function SiteNav() {
                   trackCtaClick("signout", { placement: "nav" });
                   void signOut();
                 }}
-                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] whitespace-nowrap sm:px-4"
               >
                 Sign out
               </Button>
@@ -135,7 +135,7 @@ export function SiteNav() {
                   enterCave("hunt");
                   syncEntityUrl("/hunt");
                 }}
-                className="min-h-0 px-3 py-2.5 text-[0.65rem] uppercase whitespace-nowrap sm:px-4"
+                className="min-h-0 px-3 py-2.5 text-[0.65rem] whitespace-nowrap sm:px-4"
               >
                 Hunt
               </Button>

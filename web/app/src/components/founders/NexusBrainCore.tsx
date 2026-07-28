@@ -245,7 +245,7 @@ export default function NexusBrainCore({
           size="xs"
           variant="ghost"
         >
-          <span className={`font-mono text-[0.55rem] tracking-[0.24em] uppercase ${energized ? "text-[#ffd18a]" : "text-[#d8dde0]"}`}>
+          <span className={`font-mono text-[0.55rem] tracking-[0.24em] ${energized ? "text-[#ffd18a]" : "text-[#d8dde0]"}`}>
             Core
           </span>
           <span className={`mt-0.5 whitespace-nowrap text-[0.62rem] font-medium tracking-[0.12em] ${energized ? "text-[#fff0d1]" : "text-[#b9c0c5]"}`}>

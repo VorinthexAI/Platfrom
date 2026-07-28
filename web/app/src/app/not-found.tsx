@@ -12,7 +12,7 @@ export default function NotFound() {
         This coordinate does not exist in the Nexus. Return to the galaxy
         overview.
       </p>
-      <Button asChild size="md" variant="secondary" className="mt-10 uppercase">
+      <Button asChild size="md" variant="secondary" className="mt-10">
         <Link href="/">Back to overview</Link>
       </Button>
     </main>

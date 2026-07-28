@@ -85,7 +85,7 @@ function CollectGateCard() {
               <Button
                 variant="primary"
                 onClick={openDoor}
-                className="w-full px-5 py-3.5 text-xs uppercase"
+                className="w-full px-5 py-3.5 text-xs"
               >
                 Sign in
               </Button>
@@ -199,7 +199,7 @@ function CollectibleTooltip() {
                     select(null);
                     enterCave("signin");
                   }}
-                  className="mt-4 w-full min-h-0 px-5 py-3 text-[0.62rem] uppercase"
+                  className="mt-4 w-full min-h-0 px-5 py-3 text-[0.62rem]"
                 >
                   Sign in
                 </Button>

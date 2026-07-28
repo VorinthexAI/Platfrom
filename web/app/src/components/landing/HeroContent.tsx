@@ -118,7 +118,7 @@ export function HeroContent() {
                 enterCave("hunt");
                 syncEntityUrl("/hunt");
               }}
-              className="px-8 py-4 text-xs uppercase"
+              className="px-8 py-4 text-xs"
             >
               Hunt
             </Button>

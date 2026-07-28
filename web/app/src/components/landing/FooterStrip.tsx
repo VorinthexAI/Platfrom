@@ -53,7 +53,7 @@ export function FooterStrip() {
               onClick={() => openVault(vault)}
               size="xs"
               variant="ghost"
-              className="font-mono text-[0.52rem] tracking-[0.14em] text-silver-500 uppercase transition-colors hover:text-silver-100 sm:text-[0.58rem] sm:tracking-[0.2em] lg:tracking-[0.24em]"
+              className="font-mono text-[0.52rem] tracking-[0.14em] text-silver-500 transition-colors hover:text-silver-100 sm:text-[0.58rem] sm:tracking-[0.2em] lg:tracking-[0.24em]"
             >
               {vault.label}
             </Button>

@@ -311,7 +311,7 @@ function RockDrawer() {
           <Button
             variant="secondary"
             onClick={() => exitCave()}
-            className="min-h-0 shrink-0 px-5 py-2.5 text-[0.6rem] uppercase"
+            className="min-h-0 shrink-0 px-5 py-2.5 text-[0.6rem]"
           >
             Return
           </Button>
@@ -476,7 +476,7 @@ function LeaderboardFlow() {
               toggleMission();
             }}
             icon={<SpeakerIcon animated={missionPlaying} />}
-            className="w-full px-5 py-3.5 text-xs uppercase"
+            className="w-full px-5 py-3.5 text-xs"
           >
             <span className="animate-[fade-in_0.4s_ease-out]">
               {missionPlaying ? "Stop" : "Briefing"}
@@ -489,7 +489,7 @@ function LeaderboardFlow() {
               exitCave();
               syncEntityUrl("/");
             }}
-            className="w-full px-5 py-3 text-[0.62rem] uppercase"
+            className="w-full px-5 py-3 text-[0.62rem]"
           >
             Start collecting
           </Button>
@@ -571,7 +571,7 @@ function LeaderboardFlow() {
                   trackCtaClick("signin_gate_open", { placement: "hunt_standing" });
                   enterCave("signin");
                 }}
-                className="w-full px-5 py-3.5 text-xs uppercase"
+                className="w-full px-5 py-3.5 text-xs"
               >
                 Sign in
               </Button>
@@ -830,7 +830,7 @@ function OAuthCallbackFlow() {
       <Button
         variant="primary"
         onClick={() => useGalaxyStore.getState().enterCave("signin")}
-        className="mt-5 w-full px-5 py-3.5 text-xs uppercase"
+        className="mt-5 w-full px-5 py-3.5 text-xs"
       >
         Sign in
       </Button>
@@ -1095,14 +1095,14 @@ function ExplorerSigninFlow() {
               trackCtaClick("signin_method_email", { placement: "signin_cave" });
               setMethod("email");
             }}
-            className="w-full px-5 py-3.5 text-xs uppercase"
+            className="w-full px-5 py-3.5 text-xs"
           >
             Continue with email
           </Button>
-          <Button asChild size="lg" variant="secondary" className="w-full uppercase">
+          <Button asChild size="lg" variant="secondary" className="w-full">
             <a href="/api/auth/oauth/google/start" onClick={() => trackCtaClick("signin_method_google", { placement: "signin_cave" })}>Continue with Google</a>
           </Button>
-          <Button asChild size="lg" variant="secondary" className="w-full uppercase">
+          <Button asChild size="lg" variant="secondary" className="w-full">
             <a href="/api/auth/oauth/apple/start" onClick={() => trackCtaClick("signin_method_apple", { placement: "signin_cave" })}>Continue with Apple</a>
           </Button>
         </div>
@@ -1138,7 +1138,7 @@ function ExplorerSigninFlow() {
         onClick={() => setMethod("choose")}
         size="xs"
         variant="ghost"
-        className="font-mono text-[0.58rem] tracking-[0.24em] text-silver-500 uppercase transition-colors hover:text-silver-100"
+        className="font-mono text-[0.58rem] tracking-[0.24em] text-silver-500 transition-colors hover:text-silver-100"
       >
         ← Back
       </Button>
@@ -1171,7 +1171,7 @@ function ExplorerSigninFlow() {
         type="submit"
         variant="primary"
         loading={status === "submitting"}
-        className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
+        className="mt-4 w-full px-5 py-3.5 text-xs"
       >
         Sign in
       </Button>
@@ -1498,7 +1498,7 @@ function MagicFlow() {
             trackCtaClick("signin_gate_open", { placement: "magic_failed" });
             useGalaxyStore.getState().enterCave("signin");
           }}
-          className="mt-5 min-h-0 px-6 py-3 text-[0.62rem] uppercase"
+          className="mt-5 min-h-0 px-6 py-3 text-[0.62rem]"
         >
           Request a new link
         </Button>

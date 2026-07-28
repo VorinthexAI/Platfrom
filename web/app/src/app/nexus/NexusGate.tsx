@@ -181,7 +181,7 @@ export function NexusGate() {
                 type="submit"
                 variant="primary"
                 loading={gateStatus === "submitting"}
-                className="mt-4 w-full px-5 py-3.5 text-xs uppercase"
+                className="mt-4 w-full px-5 py-3.5 text-xs"
               >
                 Continue
               </Button>

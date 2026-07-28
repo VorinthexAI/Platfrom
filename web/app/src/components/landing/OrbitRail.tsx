@@ -136,7 +136,7 @@ function RailDot({
         className="group gap-3"
       >
         <span
-          className={`hidden font-mono tracking-[0.26em] uppercase transition-colors md:block ${
+          className={`hidden font-mono tracking-[0.26em] transition-colors md:block ${
             small ? "text-[0.48rem]" : "text-[0.55rem]"
           } ${
             active || emphasized
