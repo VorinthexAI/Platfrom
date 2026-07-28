@@ -84,10 +84,11 @@ describe('OpenAI provider transcription', () => {
 });
 
 describe('OpenAI Realtime provider', () => {
-  test('uses Realtime 2 for chat and speech', async () => {
+  test('uses Realtime 2 for chat, transcription, and speech', async () => {
     const source = await Bun.file(new URL('./openai.ts', import.meta.url)).text();
     expect(source).toContain("OPENAI_REALTIME_MODEL = 'gpt-realtime-2'");
-    expect(source.match(/OpenAIRealtimeWebSocket\.create/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source.match(/OpenAIRealtimeWebSocket\.create/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(source).toContain("request.actionId === 'transcribe' && request.externalModelId === OPENAI_REALTIME_MODEL");
     expect(source).toContain("request.actionId === 'speak'");
     expect(source).toContain("voice: input.voice");
     expect(source).not.toContain('client.audio.speech.create');

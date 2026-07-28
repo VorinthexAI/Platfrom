@@ -205,10 +205,10 @@ describe('Chorus SSE API', () => {
     expect(speechCalls[0]?.slice(0, 2)).toEqual([organizationKey, 'Read this.']);
   });
 
-  test('pins Chorus audio routes to dedicated OpenAI transcription and Realtime Ash speech', async () => {
+  test('routes transcription through its tool and pins speech to Realtime 2 with Ash', async () => {
     const source = await Bun.file(new URL('./chorus.ts', import.meta.url)).text();
-    expect(source).toContain("modelSlug: 'openai.gpt-4o-mini-transcribe', providerSlug: 'openai'");
-    expect(source).toContain("modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai'");
+    expect(source).toContain('transcribeTool.execute');
+    expect(source.match(/modelSlug: 'openai\.gpt-realtime-2', providerSlug: 'openai'/g)).toHaveLength(1);
     expect(source).toContain("{ text, voice: 'ash', format: 'wav' }");
   });
 });

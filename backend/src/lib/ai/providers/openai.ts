@@ -208,7 +208,7 @@ async function executeImageGenerate<TInput, TOutput>(
   };
 }
 
-async function executeTranscribe<TInput, TOutput>(
+async function executeFileTranscribe<TInput, TOutput>(
   client: OpenAI,
   request: ProviderExecuteRequest<TInput>,
 ): Promise<ProviderExecuteResponse<TOutput>> {
@@ -242,6 +242,32 @@ async function executeTranscribe<TInput, TOutput>(
     externalModelId: OPENAI_TRANSCRIPTION_MODEL,
     rawResponse: raw,
   };
+}
+
+async function executeRealtimeTranscribe<TInput, TOutput>(
+  client: OpenAI,
+  request: ProviderExecuteRequest<TInput>,
+): Promise<ProviderExecuteResponse<TOutput>> {
+  const input = transcribeInputSchema.parse(request.input);
+  assertRealtimeModel(request);
+  const realtime = await OpenAIRealtimeWebSocket.create(client, { model: OPENAI_REALTIME_MODEL });
+  const realtimeRequest = realtimeSignal(request, realtime);
+  let text = '';
+  realtime.on('response.output_text.delta', (event) => { text += event.delta; });
+  try {
+    await raceAbort(realtime.emitted('session.created'), realtimeRequest.signal);
+    realtime.send({ type: 'session.update', session: { type: 'realtime', model: OPENAI_REALTIME_MODEL, output_modalities: ['text'], audio: { input: { format: { type: 'audio/pcm', rate: 24_000 }, noise_reduction: { type: 'near_field' }, turn_detection: null } }, instructions: ['Transcribe the supplied speech verbatim. Return only the transcription. Preserve intended punctuation and write spoken mentions using @ followed by the mentioned name.', input.prompt].filter(Boolean).join(' ') } });
+    await raceAbort(realtime.emitted('session.updated'), realtimeRequest.signal);
+    realtime.send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_audio', audio: input.audioBase64 }] } });
+    realtime.send({ type: 'response.create', response: { output_modalities: ['text'] } });
+    const done = await raceAbort(realtime.emitted('response.done'), realtimeRequest.signal);
+    if (done.response.status !== 'completed' || !text.trim()) throw new ProviderError(PROVIDER_ID, 'response_invalid', `Realtime transcription ended with status ${done.response.status ?? 'unknown'}`);
+    const output: TranscriptionOutput = { text: text.trim() };
+    return { output: output as TOutput, usage: realtimeUsage(done.response.usage), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: done.response };
+  } finally {
+    realtimeRequest.remove();
+    realtime.close();
+  }
 }
 
 async function executeSpeech<TInput, TOutput>(
@@ -293,7 +319,8 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       }
       try {
         if (request.actionId === 'generate-image') return await executeImageGenerate(client, request);
-        if (request.actionId === 'transcribe') return await executeTranscribe(client, request);
+        if (request.actionId === 'transcribe' && request.externalModelId === OPENAI_REALTIME_MODEL) return await executeRealtimeTranscribe(client, request);
+        if (request.actionId === 'transcribe') return await executeFileTranscribe(client, request);
         if (request.actionId === 'speak' || request.actionId === 'generate-speech') return await executeSpeech(client, request);
       } catch (err) {
         throw normalizeProviderError(PROVIDER_ID, err);

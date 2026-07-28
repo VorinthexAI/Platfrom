@@ -118,6 +118,8 @@ describe('model and routing relation seeds', () => {
       'aws.transcribe-standard',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
+      .toEqual(['amazon.nova-lite']);
+    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'transcribe').map(({ modelSlug }) => modelSlug))
       .toEqual(['openai.gpt-realtime-2']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
@@ -215,16 +217,17 @@ describe('AI runtime seed orchestration', () => {
     expect(persisted.size).toBe(first.length);
   });
 
-  test('preserves deployed chat bindings while upserting the explicit Realtime route', async () => {
+  test('retires Realtime orchestrator chat while preserving unrelated bindings', async () => {
     const routes = new Map([
       ['sonic-key:chat-key', { key: 'stale-binding-key', priority: 100, enabled: true }],
       ['nova-pro-key:chat-key', { key: 'nova-pro-chat-key', priority: 100, enabled: true }],
       ['nova-lite-key:chat-key', { key: 'nova-lite-chat-key', priority: 90, enabled: true }],
       ['sonic-key:speak-key', { key: 'sonic-speak-key', priority: 100, enabled: true }],
+      ['sonic-key:transcribe-key', { key: 'sonic-transcribe-key', priority: 100, enabled: true }],
       ['custom-key:chat-key', { key: 'custom-chat-key', priority: 80, enabled: true }],
     ]);
     const modelKeys = new Map([['openai.gpt-realtime-2', 'sonic-key'], ['openai.gpt-5.6-terra', 'terra-key'], ['openai.gpt-5.6-luna', 'luna-key'], ['amazon.nova-pro', 'nova-pro-key'], ['amazon.nova-lite', 'nova-lite-key'], ['custom.model', 'custom-key']]);
-    const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key']]);
+    const actionKeys = new Map([['orchestrator-chat', 'chat-key'], ['speak', 'speak-key'], ['transcribe', 'transcribe-key']]);
     let reconciliationUpdates = 0;
     const noop = (collection: string) => async (seed: { key: string }): Promise<SeedResult> => ({ collection, key: seed.key, status: 'updated' });
     const upserters: AiRuntimeSeedUpserters = {
@@ -254,12 +257,13 @@ describe('AI runtime seed orchestration', () => {
     await seedAiRuntimeNodes(upserters);
     await seedAiRuntimeNodes(upserters);
 
-    expect(routes.get('sonic-key:chat-key')?.enabled).toBe(true);
+    expect(routes.get('sonic-key:chat-key')?.enabled).toBe(false);
     expect(routes.get('nova-pro-key:chat-key')?.enabled).toBe(true);
     expect(routes.get('nova-lite-key:chat-key')?.enabled).toBe(true);
     expect(routes.get('sonic-key:speak-key')?.enabled).toBe(true);
+    expect(routes.get('sonic-key:transcribe-key')?.enabled).toBe(true);
     expect(routes.get('custom-key:chat-key')?.enabled).toBe(true);
-    expect(reconciliationUpdates).toBe(0);
+    expect(reconciliationUpdates).toBe(1);
   });
 
   test('disables blocked GPT-5.6 models and their seeded routes during migration', async () => {

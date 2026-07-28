@@ -129,9 +129,11 @@ import { taskRewriteTool } from './task-rewrite';
 import { taskSummarizeTool } from './task-summarize';
 import { taskTranslateTool } from './task-translate';
 import { taskUpdateTool } from './task-update';
+import { transcribeTool } from './transcribe';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   orchestratorChatTool,
+  transcribeTool,
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
   agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,
   documentArchiveToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentProcessingToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareArchiveTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionArchiveTool, documentVersionRestoreTool,

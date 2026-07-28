@@ -29,6 +29,10 @@ describe('action registry', () => {
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
       .toEqual(['amazon.nova-pro', 'amazon.nova-lite']);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'orchestrator-chat')?.models)
+      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'transcribe')?.models)
+      .toEqual([{ provider: 'openai', model: 'openai.gpt-realtime-2', priority: 100 }]);
   });
 
   test('delegates generic data primitives to the node helper implementation', async () => {
