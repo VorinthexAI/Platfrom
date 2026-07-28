@@ -91,8 +91,11 @@ export const chorusStreamMessageSchema = z.object({
 
 export const chorusStreamEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("start"), channelKey: keySchema, userMessage: chorusStreamMessageSchema }).strict(),
-  z.object({ type: z.literal("token"), text: z.string() }).strict(),
-  z.object({ type: z.literal("done"), message: chorusStreamMessageSchema }).strict(),
+  z.object({ type: z.literal("assistant-start"), orchestrator: z.object({ participantKey: keySchema, key: keySchema, name: z.string().trim().min(1) }).strict() }).strict(),
+  z.object({ type: z.literal("assistant-error"), orchestratorKey: keySchema }).strict(),
+  z.object({ type: z.literal("token"), orchestratorKey: keySchema, text: z.string() }).strict(),
+  z.object({ type: z.literal("done"), orchestratorKey: keySchema, message: chorusStreamMessageSchema }).strict(),
+  z.object({ type: z.literal("complete") }).strict(),
   z.object({ type: z.literal("error"), error: z.string().trim().min(1) }).strict(),
 ]);
 
@@ -112,7 +115,7 @@ export type ChorusDisplayMessage = ChorusMessage & {
 export interface ChorusOptimisticStream {
   streamKey: string;
   userKey: string;
-  assistantKey: string;
+  channelKey: string;
 }
 
 export function buildChorusMentionRows(roster: ChorusMentionRoster) {
@@ -125,9 +128,33 @@ export function buildChorusMentionRows(roster: ChorusMentionRoster) {
   };
 }
 
+export function activeChorusMentionQuery(draft: string): string | null {
+  return /(?:^|[^\w])@([\w-]*)$/i.exec(draft)?.[1].toLocaleLowerCase() ?? null;
+}
+
+export function filterChorusMentionShortcuts(mentions: ChorusMention[], query: string | null): ChorusMention[] {
+  return query === null ? mentions : mentions.filter((mention) => mention.name.toLocaleLowerCase().startsWith(query));
+}
+
 export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], stream: ChorusOptimisticStream, event: ChorusStreamEvent): ChorusDisplayMessage[] {
+  if (event.type === "assistant-start") {
+    if (messages.some((message) => message.clientState?.streamKey === stream.streamKey && message.author.key === event.orchestrator.key)) return messages;
+    const now = new Date().toISOString();
+    return [...messages, {
+      key: `optimistic-assistant-${stream.streamKey}-${event.orchestrator.key}`,
+      channelKey: stream.channelKey,
+      content: "",
+      createdAt: now,
+      updatedAt: now,
+      author: { ...event.orchestrator, type: "orchestrator" },
+      reactions: [],
+      thread: null,
+      poll: null,
+      clientState: { streamKey: stream.streamKey, state: "pending" },
+    }];
+  }
   if (event.type === "token") {
-    return messages.map((message) => message.key === stream.assistantKey
+    return messages.map((message) => message.clientState?.streamKey === stream.streamKey && message.author.key === event.orchestratorKey
       ? { ...message, content: message.content + event.text }
       : message);
   }
@@ -137,10 +164,12 @@ export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], str
       : message);
   }
   if (event.type === "done") {
-    return messages.map((message) => message.key === stream.assistantKey
+    return messages.map((message) => message.clientState?.streamKey === stream.streamKey && message.author.key === event.orchestratorKey
       ? { ...message, ...event.message, clientState: { streamKey: stream.streamKey, state: "reconciling" } }
       : message);
   }
+  if (event.type === "assistant-error") return messages.filter((message) => !(message.clientState?.streamKey === stream.streamKey && message.author.key === event.orchestratorKey));
+  if (event.type === "complete") return messages;
   return markChorusStreamFailed(messages, stream.streamKey, event.error);
 }
 
@@ -148,8 +177,8 @@ export function coalesceChorusStreamEvents(events: ChorusStreamEvent[]): ChorusS
   const coalesced: ChorusStreamEvent[] = [];
   for (const event of events) {
     const previous = coalesced.at(-1);
-    if (event.type === "token" && previous?.type === "token") {
-      coalesced[coalesced.length - 1] = { type: "token", text: previous.text + event.text };
+    if (event.type === "token" && previous?.type === "token" && previous.orchestratorKey === event.orchestratorKey) {
+      coalesced[coalesced.length - 1] = { type: "token", orchestratorKey: event.orchestratorKey, text: previous.text + event.text };
     } else {
       coalesced.push(event);
     }
@@ -187,12 +216,16 @@ async function request<T>(url: string, schema: z.ZodType<T>, init?: RequestInit)
   let payload: unknown;
   try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
   if (!response.ok) {
-    const error = z.object({ error: z.string() }).passthrough().safeParse(payload);
-    throw new ChorusRequestError(error.success ? error.data.error : `Chorus request failed (${response.status})`, response.status);
+    throw new ChorusRequestError(chorusErrorMessage(payload, response.status), response.status);
   }
   const parsed = schema.safeParse(payload);
   if (!parsed.success) throw new ChorusRequestError("Chorus returned an invalid response", 502);
   return parsed.data;
+}
+
+function chorusErrorMessage(payload: unknown, status: number): string {
+  const parsed = z.object({ error: z.union([z.string(), z.object({ message: z.string() }).passthrough()]) }).passthrough().safeParse(payload);
+  return parsed.success ? typeof parsed.data.error === "string" ? parsed.data.error : parsed.data.error.message : `Chorus request failed (${status})`;
 }
 
 export async function listChorusChannels(organizationKey: string, signal?: AbortSignal) {
@@ -294,7 +327,7 @@ export function parseChorusSseFrame(frame: string): ChorusStreamEvent | null {
     if (line.startsWith("event:")) event = line.slice(6).trim();
     else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
   }
-  if (!data.length || !["start", "token", "done", "error"].includes(event)) return null;
+  if (!data.length || !["start", "assistant-start", "assistant-error", "token", "done", "complete", "error"].includes(event)) return null;
   let payload: unknown;
   try { payload = JSON.parse(data.join("\n")); } catch { throw new Error(`Malformed Chorus ${event} event`); }
   const parsed = chorusStreamEventSchema.safeParse({ type: event, ...(payload as object) });
@@ -310,14 +343,14 @@ export async function streamChorusMessage(organizationKey: string, channelKey: s
     signal,
   });
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: unknown } | null;
-    throw new ChorusRequestError(typeof payload?.error === "string" ? payload.error : `Chorus request failed (${response.status})`, response.status);
+    const payload = await response.json().catch(() => null);
+    throw new ChorusRequestError(chorusErrorMessage(payload, response.status), response.status);
   }
   if (!response.body) throw new Error("Chorus stream unavailable");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let done = false;
+  let complete = false;
   try {
     while (true) {
       const chunk = await reader.read();
@@ -329,7 +362,7 @@ export async function streamChorusMessage(organizationKey: string, channelKey: s
         if (!parsed) continue;
         onEvent(parsed);
         if (parsed.type === "error") throw new Error(parsed.error);
-        if (parsed.type === "done") done = true;
+        if (parsed.type === "complete") complete = true;
       }
       if (chunk.done) break;
     }
@@ -338,10 +371,10 @@ export async function streamChorusMessage(organizationKey: string, channelKey: s
       if (parsed) {
         onEvent(parsed);
         if (parsed.type === "error") throw new Error(parsed.error);
-        if (parsed.type === "done") done = true;
+        if (parsed.type === "complete") complete = true;
       }
     }
-    if (!done) throw new Error("Chorus stream ended unexpectedly");
+    if (!complete) throw new Error("Chorus stream ended unexpectedly");
   } finally {
     reader.releaseLock();
   }

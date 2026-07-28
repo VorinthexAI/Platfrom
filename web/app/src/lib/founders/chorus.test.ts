@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  activeChorusMentionQuery,
   chorusChannelEntrySchema,
   buildChorusMentionRows,
   CHORUS_ORCHESTRATOR_NAMES,
   chorusMentionRosterSchema,
   chorusMessageSchema,
   chorusThreadSchema,
+  filterChorusMentionShortcuts,
   plainChorusText,
   coalesceChorusStreamEvents,
   markChorusStreamFailed,
@@ -90,6 +92,15 @@ describe("Chorus mention rows", () => {
   test("requires all twenty orchestrators in the API contract", () => {
     expect(() => chorusMentionRosterSchema.parse({ ...roster, orchestrators: roster.orchestrators.slice(1) })).toThrow();
   });
+
+  test("filters shortcuts only while an active mention query is being typed", () => {
+    const mentions = buildChorusMentionRows(roster).ordered;
+    expect(activeChorusMentionQuery("plain text")).toBeNull();
+    expect(activeChorusMentionQuery("ask @sOM")).toBe("som");
+    expect(activeChorusMentionQuery("ask(@MET")).toBe("met");
+    expect(filterChorusMentionShortcuts(mentions, activeChorusMentionQuery("ask @met")).map(({ name }) => name)).toEqual(["Metis"]);
+    expect(filterChorusMentionShortcuts(mentions, activeChorusMentionQuery("ask @"))).toHaveLength(25);
+  });
 });
 
 describe("shared button controls", () => {
@@ -120,72 +131,77 @@ describe("shared button controls", () => {
 });
 
 describe("Chorus stream reconciliation", () => {
-  const stream: ChorusOptimisticStream = { streamKey: "stream_1", userKey: "temp_user", assistantKey: "temp_assistant" };
+  const stream: ChorusOptimisticStream = { streamKey: "stream_1", userKey: "temp_user", channelKey: "channel_key" };
   const author = { participantKey: "optimistic", type: "user" as const, key: "optimistic", name: "You" };
   const optimistic: ChorusDisplayMessage[] = [
     { ...stored, key: stream.userKey, author, reactions: [], thread: null, poll: null, clientState: { streamKey: stream.streamKey, state: "optimistic" } },
-    { ...stored, key: stream.assistantKey, content: "", author: { ...author, type: "orchestrator", name: "Atlas" }, reactions: [], thread: null, poll: null, clientState: { streamKey: stream.streamKey, state: "pending" } },
   ];
 
-  test("canonicalizes optimistic IDs from start and done before final refresh", () => {
+  test("creates and reconciles a separate optimistic response for every orchestrator", () => {
     const started = reconcileChorusStreamEvent(optimistic, stream, { type: "start", channelKey: "channel_key", userMessage: { ...stored, key: "canonical_user" } });
-    const tokenized = reconcileChorusStreamEvent(started, stream, { type: "token", text: "Hi" });
-    const completed = reconcileChorusStreamEvent(tokenized, stream, { type: "done", message: { ...stored, key: "canonical_assistant", content: "Hi" } });
-    expect(completed.map((message) => message.key)).toEqual(["canonical_user", "canonical_assistant"]);
-    expect(completed[1]?.content).toBe("Hi");
-    expect(completed.every((message) => message.clientState?.state === "reconciling")).toBe(true);
+    const atlasStarted = reconcileChorusStreamEvent(started, stream, { type: "assistant-start", orchestrator: { participantKey: "atlas-participant", key: "atlas", name: "Atlas" } });
+    const atlasTokenized = reconcileChorusStreamEvent(atlasStarted, stream, { type: "token", orchestratorKey: "atlas", text: "Hi" });
+    const atlasDone = reconcileChorusStreamEvent(atlasTokenized, stream, { type: "done", orchestratorKey: "atlas", message: { ...stored, key: "canonical_atlas", content: "Hi" } });
+    const metisStarted = reconcileChorusStreamEvent(atlasDone, stream, { type: "assistant-start", orchestrator: { participantKey: "metis-participant", key: "metis", name: "Metis" } });
+    const completed = reconcileChorusStreamEvent(metisStarted, stream, { type: "token", orchestratorKey: "metis", text: "Hello" });
+    expect(completed.map((message) => message.key)).toEqual(["canonical_user", "canonical_atlas", expect.stringContaining("metis")]);
+    expect(completed.map((message) => message.content)).toEqual(["Hello", "Hi", "Hello"]);
+    expect(completed.map((message) => message.clientState?.state)).toEqual(["reconciling", "reconciling", "pending"]);
+    expect(reconcileChorusStreamEvent(completed, stream, { type: "assistant-error", orchestratorKey: "metis" }).map((message) => message.key)).toEqual(["canonical_user", "canonical_atlas"]);
   });
 
   test("preserves active pending entries on unrelated refresh and removes them on final refresh", () => {
     const unrelated = chorusMessageSchema.parse({ ...stored, key: "older", author, reactions: [], thread: null, poll: null });
-    expect(mergeChorusMessageRefresh(optimistic, [unrelated], true).map((message) => message.key)).toEqual(["older", "temp_user", "temp_assistant"]);
+    expect(mergeChorusMessageRefresh(optimistic, [unrelated], true).map((message) => message.key)).toEqual(["older", "temp_user"]);
     expect(mergeChorusMessageRefresh(optimistic, [unrelated], false).map((message) => message.key)).toEqual(["older"]);
   });
 
   test("marks incomplete reconciliation as failed and non-canonical", () => {
     const failed = markChorusStreamFailed(optimistic, stream.streamKey, "Canonical refresh failed");
     expect(failed.every((message) => message.clientState?.state === "failed")).toBe(true);
-    expect(failed[1]?.clientState?.error).toBe("Canonical refresh failed");
+    expect(failed[0]?.clientState?.error).toBe("Canonical refresh failed");
   });
 
   test("coalesces adjacent tokens without crossing lifecycle events", () => {
     expect(coalesceChorusStreamEvents([
-      { type: "token", text: "Hel" },
-      { type: "token", text: "lo" },
+      { type: "token", orchestratorKey: "atlas", text: "Hel" },
+      { type: "token", orchestratorKey: "atlas", text: "lo" },
       { type: "error", error: "stopped" },
-      { type: "token", text: "Again" },
+      { type: "token", orchestratorKey: "metis", text: "Again" },
     ])).toEqual([
-      { type: "token", text: "Hello" },
+      { type: "token", orchestratorKey: "atlas", text: "Hello" },
       { type: "error", error: "stopped" },
-      { type: "token", text: "Again" },
+      { type: "token", orchestratorKey: "metis", text: "Again" },
     ]);
   });
 });
 
 describe("Chorus SSE client", () => {
-  test("parses canonical start, token, and done payloads across chunk boundaries", async () => {
+  test("parses identified assistant streams through terminal completion", async () => {
     globalThis.fetch = (async () => new Response(new ReadableStream({
       start(controller) {
         for (const chunk of [
-          `event: start\ndata: ${JSON.stringify({ channelKey: "channel_key", userMessage: stored })}\n\nevent: tok`,
-          `en\ndata: {"text":"Hi"}\n\nevent: done\ndata: ${JSON.stringify({ message: { ...stored, key: "assistant_key", content: "Hi" } })}\n\n`,
+          `event: start\ndata: ${JSON.stringify({ channelKey: "channel_key", userMessage: stored })}\n\nevent: assistant-start\ndata: {"orchestrator":{"participantKey":"atlas-participant","key":"atlas","name":"Atlas"}}\n\nevent: tok`,
+          `en\ndata: {"orchestratorKey":"atlas","text":"Hi"}\n\nevent: done\ndata: ${JSON.stringify({ orchestratorKey: "atlas", message: { ...stored, key: "assistant_key", content: "Hi" } })}\n\nevent: complete\ndata: {}\n\n`,
         ]) controller.enqueue(new TextEncoder().encode(chunk));
         controller.close();
       },
     }), { headers: { "Content-Type": "text/event-stream" } })) as unknown as typeof fetch;
     const events: unknown[] = [];
     await streamChorusMessage("org_key", "channel_key", "Hello", (event) => events.push(event));
-    expect(events.map((event) => (event as { type: string }).type)).toEqual(["start", "token", "done"]);
+    expect(events.map((event) => (event as { type: string }).type)).toEqual(["start", "assistant-start", "token", "done", "complete"]);
   });
 
   test("surfaces backend errors and incomplete or malformed streams", async () => {
+    globalThis.fetch = (async () => Response.json({ success: false, error: { code: "VALIDATION_ERROR", message: "invalid Chorus message" } }, { status: 400 })) as unknown as typeof fetch;
+    await expect(streamChorusMessage("org", "channel", "hello", () => {})).rejects.toThrow("invalid Chorus message");
     globalThis.fetch = (async () => new Response('event: error\ndata: {"error":"provider failed"}\n\n')) as unknown as typeof fetch;
     await expect(streamChorusMessage("org", "channel", "hello", () => {})).rejects.toThrow("provider failed");
-    globalThis.fetch = (async () => new Response('event: token\ndata: {"text":"partial"}\n\n')) as unknown as typeof fetch;
+    globalThis.fetch = (async () => new Response('event: token\ndata: {"orchestratorKey":"atlas","text":"partial"}\n\n')) as unknown as typeof fetch;
     await expect(streamChorusMessage("org", "channel", "hello", () => {})).rejects.toThrow("ended unexpectedly");
     expect(() => parseChorusSseFrame("event: token\ndata: not-json")).toThrow("Malformed Chorus token event");
     expect(() => parseChorusSseFrame('event: start\ndata: {"channelKey":"channel_key"}')).toThrow("Malformed Chorus start event");
-    expect(() => parseChorusSseFrame(`event: done\ndata: ${JSON.stringify({ message: { ...stored, key: "assistant_key", content: 42 } })}`)).toThrow("Malformed Chorus done event");
+    expect(() => parseChorusSseFrame(`event: done\ndata: ${JSON.stringify({ orchestratorKey: "atlas", message: { ...stored, key: "assistant_key", content: 42 } })}`)).toThrow("Malformed Chorus done event");
   });
 
   test("supports cancellation", async () => {

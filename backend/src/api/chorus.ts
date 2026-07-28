@@ -59,7 +59,7 @@ const defaultDependencies: ChorusApiDependencies = {
   },
   stream: (skill, input, dependencies) => streamTool('chat', skill, input, dependencies),
   listScopes: (organizationKey) => getDefaultScopeRepository().listScopes(organizationKey),
-  transcribe: async (organizationKey, audioBase64, prompt, signal) => (await executeAction<unknown, TranscriptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'transcribe', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { audioBase64, mimeType: 'audio/pcm', prompt }, { signal, timeoutMs: 90_000 })).output,
+  transcribe: async (organizationKey, audioBase64, prompt, signal) => (await executeAction<unknown, TranscriptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'transcribe', modelSlug: 'openai.gpt-4o-mini-transcribe', providerSlug: 'openai' }, { audioBase64, mimeType: 'audio/pcm', prompt }, { signal, timeoutMs: 90_000 })).output,
   speak: async (organizationKey, text, signal) => (await executeAction<unknown, SpeechOutput>({ mode: 'fixed', organizationKey, actionSlug: 'speak', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { text, voice: 'ash', format: 'wav' }, { signal, timeoutMs: 90_000 })).output,
 };
 
@@ -135,7 +135,8 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
     transcribe: (c: Context) => run(c, async (resolved) => {
       const body = await parseJson(c, transcriptionBody);
       const access = await dependencies.service.generalChannel(resolved);
-      const names = access.mentions.map((mention) => `@${mention.name}`).join(', ');
+      const memberNames = access.mentions.filter((mention) => mention.type === 'user').map((mention) => `@${mention.name}`);
+      const names = ['@everyone', ...CANONICAL_ORCHESTRATOR_NAMES.map((name) => `@${name}`), ...memberNames].join(', ').slice(0, 1_000);
       return dependencies.transcribe(resolved.organizationKey, body.audioBase64, `Valid mention names are: ${names}.`, c.req.raw.signal);
     }),
     speak: (c: Context) => run(c, async (resolved) => {
@@ -155,35 +156,41 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       let streamStarted = false;
       try {
         const { access, message, orchestrators } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
-        const context = scopeContext(await dependencies.listScopes(resolved.organizationKey));
+        let context = '';
+        try {
+          context = scopeContext(await dependencies.listScopes(resolved.organizationKey));
+        } catch {
+          console.error('chorus scope context unavailable', { organizationKey: resolved.organizationKey, channelKey });
+        }
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
-          let content = '';
           try {
             await sse.writeSSE({ event: 'start', data: JSON.stringify({ channelKey, userMessage: storedMessage(message) }) });
-            if (!orchestrators.length) {
-              await sse.writeSSE({ event: 'done', data: JSON.stringify({ message: storedMessage(message) }) });
-              return;
-            }
             for (const orchestrator of orchestrators) {
-              const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
-                organizationKey: resolved.organizationKey,
-                messageContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, excludeMessageKey: message.key },
-                signal: c.req.raw.signal,
-              });
-              let response = '';
-              for await (const chunk of provider) {
-                if (chunk.type === 'text-delta' && chunk.text) {
-                  response += chunk.text;
-                  await sse.writeSSE({ event: 'token', data: JSON.stringify({ text: `${response.length === chunk.text.length && orchestrators.length > 1 ? `${orchestrator.name}: ` : ''}${chunk.text}` }) });
+              await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
+              try {
+                const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
+                  organizationKey: resolved.organizationKey,
+                  messageContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, excludeMessageKey: message.key },
+                  signal: c.req.raw.signal,
+                });
+                let response = '';
+                for await (const chunk of provider) {
+                  if (chunk.type === 'text-delta' && chunk.text) {
+                    response += chunk.text;
+                    await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text: chunk.text }) });
+                  }
                 }
+                const storedContent = boundedAssistantContent(response);
+                if (!storedContent) throw new Error('orchestrator returned no valid content');
+                const assistantMessage = await dependencies.service.persistOrchestratorMessage(access, orchestrator, storedContent, body.threadKey, message.key);
+                await sse.writeSSE({ event: 'done', data: JSON.stringify({ orchestratorKey: orchestrator.key, message: storedMessage(assistantMessage) }) });
+              } catch (error) {
+                console.error('chorus orchestrator stream failed', { channelKey, orchestratorKey: orchestrator.key, error });
+                await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
               }
-              const storedContent = boundedAssistantContent(response);
-              if (!storedContent) throw new Error('orchestrator returned no valid content');
-              content = storedContent;
-              const assistantMessage = await dependencies.service.persistOrchestratorMessage(access, orchestrator, storedContent, body.threadKey, message.key);
-              await sse.writeSSE({ event: 'done', data: JSON.stringify({ message: storedMessage(assistantMessage) }) });
             }
+            await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });
           } catch (error) {
             console.error('chorus stream failed', { channelKey, error });
             await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'orchestrator stream failed' }) });

@@ -8,13 +8,27 @@ export function encodePcm16(samples: Float32Array, sourceSampleRate: number): st
   const bytes = new Uint8Array(outputLength * 2);
   const view = new DataView(bytes.buffer);
   for (let index = 0; index < outputLength; index += 1) {
-    const sourceIndex = Math.min(samples.length - 1, Math.floor(index * sourceSampleRate / TARGET_SAMPLE_RATE));
-    const sample = Math.max(-1, Math.min(1, samples[sourceIndex] ?? 0));
+    const sourcePosition = index * sourceSampleRate / TARGET_SAMPLE_RATE;
+    const lowerIndex = Math.min(samples.length - 1, Math.floor(sourcePosition));
+    const upperIndex = Math.min(samples.length - 1, lowerIndex + 1);
+    const fraction = sourcePosition - lowerIndex;
+    const sample = Math.max(-1, Math.min(1, (samples[lowerIndex] ?? 0) * (1 - fraction) + (samples[upperIndex] ?? 0) * fraction));
     view.setInt16(index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
   }
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   return btoa(binary);
+}
+
+export function trimRecordedSilence(samples: Float32Array, sampleRate: number): Float32Array {
+  const threshold = 0.008;
+  let start = 0;
+  let end = samples.length;
+  while (start < end && Math.abs(samples[start] ?? 0) < threshold) start += 1;
+  while (end > start && Math.abs(samples[end - 1] ?? 0) < threshold) end -= 1;
+  if (start === end) return new Float32Array();
+  const padding = Math.floor(sampleRate * 0.12);
+  return samples.slice(Math.max(0, start - padding), Math.min(samples.length, end + padding));
 }
 
 export function appendSpokenTranscript(draft: string, transcript: string, mentions: ChorusMention[]): string {
@@ -82,8 +96,9 @@ export async function startPcmCapture(onLevel: (level: number) => void, onLimit:
         if (remaining <= 0) break;
         samples.set(chunk.subarray(0, remaining), offset); offset += Math.min(chunk.length, remaining);
       }
-      if (samples.length < context.sampleRate / 50) throw new Error("No speech was recorded");
-      return encodePcm16(samples, context.sampleRate);
+      const speech = trimRecordedSilence(samples, context.sampleRate);
+      if (speech.length < context.sampleRate / 12.5) throw new Error("No speech was recorded");
+      return encodePcm16(speech, context.sampleRate);
     });
     return stopPromise;
   };
