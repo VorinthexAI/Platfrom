@@ -43,6 +43,8 @@ export type OpenAICredentials = OpenAIProviderConfig;
 
 const PROVIDER_ID = 'openai' as const;
 export const OPENAI_REALTIME_MODEL = 'gpt-realtime-2';
+export const OPENAI_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
+const TRANSCRIPTION_PROMPT_MAX_LENGTH = 500;
 
 function realtimeUsage(usage: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | undefined) {
   return tokenUsage(usage?.input_tokens, usage?.output_tokens, usage?.total_tokens);
@@ -211,32 +213,35 @@ async function executeTranscribe<TInput, TOutput>(
   request: ProviderExecuteRequest<TInput>,
 ): Promise<ProviderExecuteResponse<TOutput>> {
   const input = transcribeInputSchema.parse(request.input);
-  assertRealtimeModel(request);
-  const realtime = await OpenAIRealtimeWebSocket.create(client, { model: OPENAI_REALTIME_MODEL });
-  const realtimeRequest = realtimeSignal(request, realtime);
-  let text = '';
-  realtime.on('response.output_text.delta', (event) => { text += event.delta; });
-  try {
-    await raceAbort(realtime.emitted('session.created'), realtimeRequest.signal);
-    realtime.send({ type: 'session.update', session: { type: 'realtime', model: OPENAI_REALTIME_MODEL, output_modalities: ['text'], audio: { input: { format: { type: 'audio/pcm', rate: 24_000 }, noise_reduction: { type: 'near_field' }, turn_detection: null } }, instructions: ['Transcribe the supplied speech verbatim. Return only the transcription. Preserve intended punctuation and write spoken mentions using @ followed by the mentioned name.', input.prompt].filter(Boolean).join(' ') } });
-    await raceAbort(realtime.emitted('session.updated'), realtimeRequest.signal);
-    realtime.send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_audio', audio: input.audioBase64 }] } });
-    realtime.send({ type: 'response.create', response: { output_modalities: ['text'] } });
-    const done = await raceAbort(realtime.emitted('response.done'), realtimeRequest.signal);
-    if (done.response.status !== 'completed' || !text.trim()) throw new ProviderError(PROVIDER_ID, 'response_invalid', `Realtime transcription ended with status ${done.response.status ?? 'unknown'}`);
-    const output: TranscriptionOutput = { text: text.trim() };
-    return {
-      output: output as TOutput,
-      usage: realtimeUsage(done.response.usage),
-      providerId: PROVIDER_ID,
-      modelId: request.modelId,
-      externalModelId: request.externalModelId,
-      rawResponse: done.response,
-    };
-  } finally {
-    realtimeRequest.remove();
-    realtime.close();
-  }
+  if (request.externalModelId !== OPENAI_TRANSCRIPTION_MODEL) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenAI transcription requires ${OPENAI_TRANSCRIPTION_MODEL}`);
+  const wav = pcmToWav(Buffer.from(input.audioBase64, 'base64'));
+  const prompt = [
+    'Transcribe verbatim with intended punctuation. Write spoken mentions as @name.',
+    input.prompt?.trim(),
+  ].filter(Boolean).join(' ').slice(0, TRANSCRIPTION_PROMPT_MAX_LENGTH);
+  const raw = await client.audio.transcriptions.create(
+    {
+      file: new File([new Uint8Array(wav)], 'audio.wav', { type: 'audio/wav' }),
+      model: OPENAI_TRANSCRIPTION_MODEL,
+      prompt,
+      ...(input.language ? { language: input.language } : {}),
+    },
+    { signal: resolveRequestSignal(request) },
+  );
+  const text = raw.text.trim();
+  if (!text) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai transcription returned no text');
+  const usage = raw.usage?.type === 'tokens'
+    ? tokenUsage(raw.usage.input_tokens, raw.usage.output_tokens, raw.usage.total_tokens)
+    : tokenUsage(0, 0, 0);
+  const output: TranscriptionOutput = { text };
+  return {
+    output: output as TOutput,
+    usage,
+    providerId: PROVIDER_ID,
+    modelId: request.modelId,
+    externalModelId: OPENAI_TRANSCRIPTION_MODEL,
+    rawResponse: raw,
+  };
 }
 
 async function executeSpeech<TInput, TOutput>(

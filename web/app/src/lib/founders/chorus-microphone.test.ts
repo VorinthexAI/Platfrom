@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appendSpokenTranscript, encodePcm16 } from "./chorus-microphone";
+import { appendSpokenTranscript, encodePcm16, trimRecordedSilence } from "./chorus-microphone";
 
 const mentions = [
   { participantKey: "p1", type: "orchestrator" as const, key: "atlas", name: "Atlas", role: "CEO", mentionCount: 0 },
@@ -15,5 +15,14 @@ describe("Chorus microphone helpers", () => {
   test("appends speech and converts spoken mentions", () => {
     expect(appendSpokenTranscript("Plan:", "At Atlas, notify at everyone.", mentions)).toBe("Plan: @Atlas, notify @everyone.");
     expect(appendSpokenTranscript("Ask ", "@atlas now", mentions)).toBe("Ask @Atlas now");
+  });
+
+  test("trims silence while preserving a small speech boundary", () => {
+    const samples = new Float32Array([0, 0, 0.02, 0.3, 0.02, 0, 0]);
+    const trimmed = trimRecordedSilence(samples, 10);
+    expect(trimmed).toHaveLength(5);
+    expect(trimmed[1]).toBeCloseTo(0.02);
+    expect(trimmed[2]).toBeCloseTo(0.3);
+    expect(trimRecordedSilence(new Float32Array([0, 0]), 10)).toHaveLength(0);
   });
 });

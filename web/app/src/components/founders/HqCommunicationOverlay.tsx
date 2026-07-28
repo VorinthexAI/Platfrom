@@ -1,16 +1,19 @@
 "use client";
 
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import * as Dialog from "@radix-ui/react-dialog";
-import { memo, useCallback, useDeferredValue, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import type { EmojiStyle, Theme } from "emoji-picker-react";
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, MicrophoneIcon, MoreHorizontalIcon, SendIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons";
-import { Button } from "@vorinthex/shared/ui";
+import { Button, Spinner } from "@vorinthex/shared/ui";
 import { useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoThumbnailUrl } from "@/lib/three/entity-logo";
 import {
   closeChorusPoll,
+  activeChorusMentionQuery,
   buildChorusMentionRows,
   CHORUS_ORCHESTRATOR_NAMES,
   clearChorusChannel,
@@ -18,6 +21,7 @@ import {
   createChorusPoll,
   createChorusThread,
   deleteChorusMessage,
+  filterChorusMentionShortcuts,
   listChorusChannels,
   listChorusMessages,
   listChorusThreads,
@@ -25,7 +29,6 @@ import {
   mergeChorusMessageRefresh,
   mutateChorusReaction,
   readChorusThread,
-  replyChorusThread,
   plainChorusText,
   reconcileChorusStreamEvent,
   streamChorusMessage,
@@ -42,8 +45,9 @@ import {
   type ChorusStreamEvent,
 } from "@/lib/founders/chorus";
 import { createFrameBatcher } from "@/lib/founders/frame-batcher";
-import { filterChorusReactions } from "@/lib/founders/chorus-reactions";
 import { appendSpokenTranscript, startPcmCapture, type PcmCapture } from "@/lib/founders/chorus-microphone";
+
+const EmojiPicker = dynamic(() => import("emoji-picker-react"), { ssr: false, loading: () => <div className="flex h-80 items-center justify-center"><Spinner /></div> });
 
 interface HqCommunicationOverlayProps {
   organizationKey: string;
@@ -165,8 +169,8 @@ const OrchestratorRail = memo(function OrchestratorRail({ channels, selectedKey,
           {channels.map((entry) => {
             const selected = entry.orchestrator.key === selectedKey;
             return (
-              <Button key={entry.orchestrator.key} aria-current={selected ? "page" : undefined} aria-label={`${entry.orchestrator.name}${entry.canChat ? "" : ", chat unavailable"}`} onClick={() => onSelect(entry)} size="sm" variant="ghost" className={`w-full justify-start gap-2 px-2.5 py-2 text-left normal-case tracking-normal focus-visible:outline-2 focus-visible:outline-silver-300 ${selected ? "bg-[var(--panel-strong)] text-silver-50" : "text-silver-300 hover:bg-white/[0.04]"} ${entry.canChat ? "" : "opacity-55"}`}>
-                <span aria-hidden className="font-mono text-[12px] text-silver-500">#</span><span className="min-w-0 flex-1 truncate text-[12px] lowercase">{entry.channel?.name}</span>
+              <Button key={entry.orchestrator.key} aria-current={selected ? "page" : undefined} aria-label={`${entry.orchestrator.name}${entry.canChat ? "" : ", chat unavailable"}`} onClick={() => onSelect(entry)} size="sm" variant="secondary" className={`w-full justify-start gap-2 border-transparent px-2.5 py-2 text-left normal-case tracking-normal no-underline hover:no-underline focus-visible:outline-2 focus-visible:outline-silver-300 ${selected ? "bg-[var(--panel-strong)] text-silver-50" : "bg-transparent text-silver-300 hover:border-transparent hover:bg-white/[0.04]"} ${entry.canChat ? "" : "opacity-55"}`}>
+                 <span aria-hidden className="font-mono text-[12px] text-silver-500">#</span><span className="min-w-0 flex-1 truncate pb-px text-[12px] leading-5 lowercase no-underline">{entry.channel?.name ?? entry.orchestrator.name}</span>
                 {!entry.canChat ? <span aria-hidden title="Chat unavailable" className="text-[10px]">LOCK</span> : null}
               </Button>
             );
@@ -263,8 +267,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
       {message.author.type === "orchestrator" ? <OrchestratorMark name={message.author.name} size={36} /> : <span aria-label={userName} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[11px] text-silver-200">{userName.trim().charAt(0).toUpperCase() || "?"}</span>}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} countryCode={countryCode} /></div>
-        <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300">{message.content ? <MessageContent content={message.content} mentions={mentions} /> : message.clientState?.state === "failed" ? <span className="text-status-critical">No response was received.</span> : <span className="animate-pulse text-silver-500">Thinking...</span>}</p>
-        {message.clientState ? <p role={message.clientState.state === "failed" ? "alert" : "status"} className={`mt-1 font-mono text-[8px] uppercase ${message.clientState.state === "failed" ? "text-status-critical" : "text-silver-600"}`}>{message.clientState.state === "failed" ? message.clientState.error ?? "Message reconciliation failed" : message.author.type === "user" ? "Sending" : "Response pending"}</p> : null}
+        {message.content ? <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300"><MessageContent content={message.content} mentions={mentions} /></p> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {message.reactions.map((aggregate) => <Button key={aggregate.reaction} size="xs" variant="outline" disabled={busy} aria-label={`${aggregate.viewerReacted ? "Remove" : "Add"} ${aggregate.reaction} reaction`} aria-pressed={aggregate.viewerReacted} onClick={() => void react(aggregate.reaction)} className={`min-h-0 px-2 py-0.5 font-mono text-[8px] normal-case tracking-normal focus-visible:outline-2 disabled:opacity-40 ${aggregate.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-500"}`}>{aggregate.reaction} {aggregate.count}</Button>)}
@@ -310,7 +313,6 @@ interface MessageComposerProps {
   orchestratorName: string | null;
   canChat: boolean;
   streaming: boolean;
-  error: string | null;
   onSubmit: (content: string) => void;
   mentions: ChorusMention[];
   mentionRoster: ChorusMentionRoster | null;
@@ -318,24 +320,26 @@ interface MessageComposerProps {
   draftId: string;
 }
 
-const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, error, onSubmit, mentions, mentionRoster, channelDrafts, draftId }: MessageComposerProps) {
+const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, onSubmit, mentions, mentionRoster, channelDrafts, draftId }: MessageComposerProps) {
   const draftKey = channelKey ? `${organizationKey}:${channelKey}:${draftId}` : null;
   const [draft, setDraft] = useState(() => draftKey ? channelDrafts.get(draftKey) ?? "" : "");
   const [recording, setRecording] = useState(false);
   const [startingRecording, setStartingRecording] = useState(false);
   const [speechLevel, setSpeechLevel] = useState(0);
   const [transcribing, setTranscribing] = useState(false);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [, setVoiceError] = useState<string | null>(null);
   const capture = useRef<PcmCapture | null>(null);
   const captureGeneration = useRef(0);
   const transcription = useRef<AbortController | null>(null);
-  const query = /(?:^|\s)@([\w-]*)$/.exec(draft)?.[1] ?? "";
+  const mentionMatch = /(?:^|[^\w])@([\w-]*)$/i.exec(draft);
+  const query = activeChorusMentionQuery(draft);
   const rosterRows = mentionRoster ? buildChorusMentionRows(mentionRoster) : { orchestrators: [], people: [] };
   const serverOrchestrators = new Map(rosterRows.orchestrators.map((mention) => [mention.name, mention]));
   const orchestrators: ChorusMention[] = CHORUS_ORCHESTRATOR_NAMES.map((name) => serverOrchestrators.get(name) ?? { participantKey: `canonical-${name.toLowerCase()}`, type: "orchestrator", key: `canonical-${name.toLowerCase()}`, name, role: "Orchestrator", mentionCount: 0 });
   const people = rosterRows.people;
-  const ordered = [...orchestrators, ...people];
-  const visible = ordered.filter((mention) => !query || mention.name.toLocaleLowerCase().startsWith(query.toLocaleLowerCase()));
+  const visiblePeople = filterChorusMentionShortcuts(people, query);
+  const visibleOrchestrators = filterChorusMentionShortcuts(orchestrators, query);
+  const visible = [...visiblePeople, ...visibleOrchestrators];
   useEffect(() => () => { captureGeneration.current += 1; capture.current?.cancel(); transcription.current?.abort(); }, []);
 
   const submit = (event: FormEvent) => {
@@ -348,7 +352,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   };
 
   const insertMention = (name: string) => {
-    const next = /@([\w-]*)$/.test(draft) ? draft.replace(/@([\w-]*)$/, `@${name} `) : `${draft}${draft && !/\s$/.test(draft) ? " " : ""}@${name} `;
+    const next = mentionMatch ? draft.replace(/(^|[^\w])@([\w-]*)$/i, `$1@${name} `) : `${draft}${draft && !/\s$/.test(draft) ? " " : ""}@${name} `;
     setDraft(next); if (draftKey) channelDrafts.set(draftKey, next);
   };
   const applyTranscript = async (audioBase64: string) => {
@@ -400,7 +404,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
 
   return (
     <div className="shrink-0 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <form onSubmit={submit} className="rounded-xl border border-[var(--border-soft)] bg-obsidian-900/90 p-3 focus-within:border-[var(--border-strong)]">
+      <form onSubmit={submit} aria-busy={startingRecording || transcribing || streaming} className="rounded-xl border border-[var(--border-soft)] bg-obsidian-900/90 p-3 focus-within:border-[var(--border-strong)]">
         <textarea
           value={draft}
           onChange={(event) => {
@@ -409,7 +413,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
             if (draftKey) channelDrafts.set(draftKey, value);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Tab" && visible[0]) {
+            if (event.key === "Tab" && mentionMatch && visible[0]) {
               event.preventDefault();
               insertMention(visible[0].name);
               return;
@@ -426,19 +430,16 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           aria-label={orchestratorName ? `Message ${orchestratorName}` : "Message"}
           className="block w-full resize-none bg-transparent text-[12px] text-silver-100 outline-none placeholder:text-silver-500 disabled:cursor-not-allowed"
         />
-        <div className="mt-2 flex min-h-8 items-center justify-between gap-3">
-          <span role="status" className={`text-[10px] ${error ? "text-status-critical" : "text-silver-600"}`}>
-            {voiceError ? voiceError : error ? error : transcribing ? "Realtime 2 is transcribing..." : recording ? "Listening... tap the microphone to finish" : streaming ? `${orchestratorName} is responding...` : !canChat && orchestratorName ? `You lack permission to chat with ${orchestratorName}.` : null}
-          </span>
+        <div className="mt-2 flex min-h-8 items-center justify-end gap-3">
           <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" variant="icon" onClick={() => void toggleRecording()} disabled={!canChat || !channelKey || transcribing || startingRecording} aria-label={recording ? "Stop speaking and transcribe" : "Speak into message"} aria-pressed={recording} icon={<MicrophoneIcon size="sm" className={recording && speechLevel > 0.015 ? "scale-110" : undefined} />} className={`h-11 min-h-11 w-11 rounded-lg ${recording ? "border-silver-200 bg-white/[0.1] text-silver-50" : "text-silver-400"}`}>{recording ? "Stop speaking and transcribe" : "Speak into message"}</Button>
+            <Button type="button" variant="icon" onClick={() => void toggleRecording()} disabled={!canChat || !channelKey || transcribing || startingRecording} aria-label={transcribing ? "Transcribing message" : startingRecording ? "Starting microphone" : recording ? "Stop speaking and transcribe" : "Speak into message"} aria-pressed={recording} icon={transcribing || startingRecording ? <Spinner className="h-4 w-4" /> : <MicrophoneIcon size="sm" className={recording && speechLevel > 0.015 ? "scale-110" : undefined} />} className={`h-11 min-h-11 w-11 rounded-lg ${recording ? "border-silver-200 bg-white/[0.1] text-silver-50" : "text-silver-400"}`}>{recording ? "Stop speaking and transcribe" : "Speak into message"}</Button>
             <Button type="submit" variant="primary" disabled={!canChat || !channelKey || streaming || recording || startingRecording || transcribing || !draft.trim()} aria-label={orchestratorName ? `Send message to ${orchestratorName}` : "Send message"} icon={<SendIcon aria-hidden size="sm" strokeWidth={1.9} />} className="h-11 min-h-11 w-11 rounded-lg p-0 disabled:opacity-80" />
           </div>
         </div>
       </form>
       <div aria-label="Mention shortcuts" className="mt-2 flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">
-        {people.map((mention) => <Button key={`${mention.type}:${mention.key}`} aria-label={`Mention ${mention.name}`} size="xs" variant="outline" onClick={() => insertMention(mention.name)} className="min-h-0 shrink-0 border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] normal-case tracking-normal text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</Button>)}
-        {orchestrators.map((mention) => <Button key={`orchestrator:${mention.key}`} aria-label={`Mention ${mention.name}`} size="xs" variant="primary" onClick={() => insertMention(mention.name)} className="min-h-0 shrink-0 px-1.5 py-1 font-mono text-[9px] normal-case tracking-normal text-obsidian-990">@{mention.name.toLowerCase()}</Button>)}
+        {visiblePeople.map((mention) => <Button key={`${mention.type}:${mention.key}`} aria-label={`Mention ${mention.name}`} size="xs" variant="secondary" onClick={() => insertMention(mention.name)} className="min-h-0 shrink-0 border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] normal-case tracking-normal text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</Button>)}
+        {visibleOrchestrators.map((mention) => <Button key={`orchestrator:${mention.key}`} aria-label={`Mention ${mention.name}`} size="xs" variant="secondary" onClick={() => insertMention(mention.name)} className="min-h-0 shrink-0 border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] normal-case tracking-normal text-silver-200 hover:border-silver-500">@{mention.name.toLowerCase()}</Button>)}
       </div>
     </div>
   );
@@ -459,10 +460,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const [pollMessage, setPollMessage] = useState<ChorusMessage | null>(null);
   const [actionMessage, setActionMessage] = useState<ChorusMessage | null>(null);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
-  const [reactionQuery, setReactionQuery] = useState("");
-  const deferredReactionQuery = useDeferredValue(reactionQuery);
-  const filteredReactions = filterChorusReactions(deferredReactionQuery);
-  const [threadState, setThreadState] = useState<{ thread: ChorusThread; messages: ChorusMessage[]; loading: boolean; error: string | null } | null>(null);
+  const [threadState, setThreadState] = useState<{ thread: ChorusThread; messages: ChorusDisplayMessage[]; loading: boolean; error: string | null } | null>(null);
   const [threadSheetOpen, setThreadSheetOpen] = useState(false);
   const [threadItems, setThreadItems] = useState<ChorusThreadListItem[]>([]);
   const [threadRoot, setThreadRoot] = useState<ChorusMessage | null>(null);
@@ -577,13 +575,11 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     shouldFollowMessages.current = true;
     const now = new Date().toISOString();
     const userKey = `optimistic-user-${crypto.randomUUID()}`;
-    const assistantKey = `optimistic-assistant-${crypto.randomUUID()}`;
     const streamKey = crypto.randomUUID();
-    const stream = { streamKey, userKey, assistantKey };
+    const stream = { streamKey, userKey, channelKey };
     const generation = organizationGeneration.current;
     const user: ChorusDisplayMessage = { key: userKey, channelKey, content, createdAt: now, updatedAt: now, author: { participantKey: "optimistic", type: "user", key: "optimistic", name: "You" }, reactions: [], thread: null, poll: null, clientState: { streamKey, state: "optimistic" } };
-    const assistant: ChorusDisplayMessage = { key: assistantKey, channelKey, content: "", createdAt: now, updatedAt: now, author: { participantKey: "optimistic", type: "orchestrator", key: selected.orchestrator.key, name: selected.orchestrator.name }, reactions: [], thread: null, poll: null, clientState: { streamKey, state: "pending" } };
-    setMessages((current) => ({ ...current, [channelKey]: [...(current[channelKey] ?? []), user, assistant] }));
+    setMessages((current) => ({ ...current, [channelKey]: [...(current[channelKey] ?? []), user] }));
     setErrors((current) => ({ ...current, [channelKey]: null })); setStreaming((current) => ({ ...current, [channelKey]: true }));
     const controller = new AbortController(); controllers.current.set(`stream:${channelKey}`, controller);
     const eventBatcher = createFrameBatcher<ChorusStreamEvent>((events) => {
@@ -595,7 +591,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
         if (organizationGeneration.current !== generation || currentOrganization.current !== organizationKey) return;
         if ((streamEvent.type === "start" && streamEvent.channelKey !== channelKey) || (streamEvent.type === "done" && streamEvent.message.channelKey !== channelKey)) throw new Error("Chorus stream returned a message for another channel");
         eventBatcher.push(streamEvent);
-        if (streamEvent.type === "done") eventBatcher.flush();
+        if (streamEvent.type === "done" || streamEvent.type === "complete") eventBatcher.flush();
       }, controller.signal);
       eventBatcher.flush();
       try {
@@ -622,6 +618,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const openThread = async (message: ChorusMessage, requestedThreadKey = message.thread?.key) => {
     if (!channelKey || !requestedThreadKey) return;
     const generation = ++threadGeneration.current;
+    controllers.current.get(`thread-stream:${channelKey}`)?.abort();
     const requestOrganization = organizationKey;
     const controller = new AbortController();
     controllers.current.get("thread")?.abort(); controllers.current.set("thread", controller);
@@ -660,11 +657,67 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     }
   };
 
+  const submitThreadMessage = async (content: string) => {
+    if (!channelKey || !threadState || streaming[channelKey] || !content) return;
+    const generation = organizationGeneration.current;
+    const requestThreadGeneration = threadGeneration.current;
+    const requestThreadKey = threadState.thread.key;
+    const now = new Date().toISOString();
+    const userKey = `optimistic-user-${crypto.randomUUID()}`;
+    const stream = { streamKey: crypto.randomUUID(), userKey, channelKey };
+    const user: ChorusDisplayMessage = { key: userKey, channelKey, threadKey: threadState.thread.key, content, createdAt: now, updatedAt: now, author: { participantKey: "optimistic", type: "user", key: "optimistic", name: "You" }, reactions: [], thread: null, poll: null, clientState: { streamKey: stream.streamKey, state: "optimistic" } };
+    setThreadState((current) => current ? { ...current, messages: [...current.messages, user] } : current);
+    setStreaming((current) => ({ ...current, [channelKey]: true }));
+    const controller = new AbortController(); controllers.current.set(`thread-stream:${channelKey}`, controller);
+    const eventBatcher = createFrameBatcher<ChorusStreamEvent>((events) => {
+      if (organizationGeneration.current !== generation || threadGeneration.current !== requestThreadGeneration) return;
+      setThreadState((current) => current?.thread.key === requestThreadKey ? { ...current, messages: coalesceChorusStreamEvents(events).reduce((items, event) => reconcileChorusStreamEvent(items, stream, event), current.messages) } : current);
+    });
+    try {
+      await streamChorusMessage(organizationKey, channelKey, content, (event) => {
+        eventBatcher.push(event);
+        if (event.type === "done" || event.type === "complete") eventBatcher.flush();
+      }, controller.signal, threadState.thread.key);
+      eventBatcher.flush();
+      if (threadGeneration.current !== requestThreadGeneration || threadState.thread.key !== requestThreadKey) return;
+      await refreshThread();
+      await refreshMessages(channelKey).catch(() => {});
+    } catch {
+      eventBatcher.flush();
+      if (!controller.signal.aborted && threadGeneration.current === requestThreadGeneration) {
+        try { await refreshThread(); }
+        catch { setThreadState((current) => current?.thread.key === requestThreadKey ? { ...current, messages: markChorusStreamFailed(current.messages, stream.streamKey, "Message reconciliation failed") } : current); }
+      }
+    } finally {
+      eventBatcher.cancel(); controllers.current.delete(`thread-stream:${channelKey}`);
+      if (organizationGeneration.current === generation) setStreaming((current) => ({ ...current, [channelKey]: false }));
+    }
+  };
+
+  const closeThread = () => {
+    threadGeneration.current += 1;
+    if (channelKey) controllers.current.get(`thread-stream:${channelKey}`)?.abort();
+    setThreadState(null);
+  };
+
   const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
   const displayedMessages = threadState?.messages ?? visibleMessages;
   const optimisticallyToggleReaction = (messageKey: string, reaction: string) => {
     if (channelKey) setMessages((current) => ({ ...current, [channelKey]: toggleOptimisticReaction(current[channelKey] ?? [], messageKey, reaction) }));
     setThreadState((current) => current ? { ...current, messages: toggleOptimisticReaction(current.messages, messageKey, reaction) } : current);
+  };
+  const selectReaction = async (reaction: string) => {
+    if (!actionMessage || !channelKey) return;
+    const messageKey = actionMessage.key;
+    const requestChannel = channelKey;
+    optimisticallyToggleReaction(messageKey, reaction);
+    setReactionPickerOpen(false); setActionMessage(null);
+    try {
+      await mutateChorusReaction(organizationKey, requestChannel, messageKey, reaction);
+      if (threadState) await refreshThread(); else await refreshMessages(requestChannel);
+    } catch {
+      optimisticallyToggleReaction(messageKey, reaction);
+    }
   };
   const clearSelectedChannel = async () => {
     if (!channelKey || clearing || streaming[channelKey]) return;
@@ -719,8 +772,8 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
         <OrchestratorRail channels={channels} selectedKey={selectedKey} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
         <section className="flex min-h-0 min-w-0 flex-col bg-obsidian-990/90 [contain:layout_paint]">
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--border-faint)] px-5">
-            {threadState ? <Button type="button" variant="secondary" aria-label="Back to channel" onClick={() => setThreadState(null)} className="min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Back</Button> : null}
-            <div className="min-w-0"><h1 className="truncate font-display text-base text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1>{threadState ? <p className="truncate text-[10px] text-silver-500">{threadState.thread.title}</p> : null}</div>
+            {threadState ? <Button type="button" variant="secondary" aria-label="Back to channel" onClick={closeThread} className="min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Back</Button> : null}
+             <div className="min-w-0"><h1 className="truncate pb-0.5 font-display text-base leading-6 text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1>{threadState ? <p className="truncate text-[10px] text-silver-500">{threadState.thread.title}</p> : null}</div>
             {selected?.canChat && channelKey ? <Button type="button" variant="secondary" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Clear channel</Button> : null}
           </div>
           <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
@@ -728,7 +781,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
                {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallyToggleReaction} />) : null}
           </div>
-           <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${threadState?.thread.key ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} error={channelKey ? errors[channelKey] ?? null : null} onSubmit={threadState && channelKey ? (content) => { void replyChorusThread(organizationKey, channelKey, threadState.thread.key, content).then(() => refreshThread()); } : submitComposerMessage} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={threadState?.thread.key ?? "channel"} />
+            <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${threadState?.thread.key ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} onSubmit={threadState && channelKey ? (content) => { void submitThreadMessage(content); } : submitComposerMessage} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={threadState?.thread.key ?? "channel"} />
         </section>
         <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
           <Dialog.Portal>
@@ -763,7 +816,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             <div className="mt-auto flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div>
           </Dialog.Content></Dialog.Portal>
         </Dialog.Root>
-        <Dialog.Root open={reactionPickerOpen} onOpenChange={setReactionPickerOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[380px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close reactions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close reactions</Button></Dialog.Close></div><input autoFocus value={reactionQuery} onChange={(event) => setReactionQuery(event.target.value)} placeholder="Search reactions" className="mt-4 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><div className="scrollbar-hide mt-4 grid min-h-0 flex-1 grid-cols-5 content-start gap-2 overflow-y-auto pr-1">{filteredReactions.map(({ emoji, name }) => <Button key={emoji} size="md" variant="outline" aria-label={name} title={name} onClick={() => { if (!actionMessage || !channelKey) return; optimisticallyToggleReaction(actionMessage.key, emoji); void mutateChorusReaction(organizationKey, channelKey, actionMessage.key, emoji).then(() => threadState ? refreshThread() : refreshMessages(channelKey)); setReactionPickerOpen(false); setActionMessage(null); }} className="h-11 border-[var(--border-soft)] p-0 text-lg normal-case tracking-normal">{emoji}</Button>)}</div><div className="mt-5 flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div></Dialog.Content></Dialog.Portal></Dialog.Root>
+        <Dialog.Root open={reactionPickerOpen} onOpenChange={setReactionPickerOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex h-[min(88vh,640px)] max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close reactions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close reactions</Button></Dialog.Close></div><div className="mt-4 min-h-0 flex-1 overflow-hidden rounded-xl"><EmojiPicker theme={"dark" as Theme} emojiStyle={"native" as EmojiStyle} width="100%" height="100%" lazyLoadEmojis searchPlaceholder="Search thousands of emojis" previewConfig={{ showPreview: false }} onEmojiClick={({ emoji }) => { void selectReaction(emoji); }} /></div><div className="mt-5 flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div></Dialog.Content></Dialog.Portal></Dialog.Root>
         <Dialog.Root open={threadSheetOpen} onOpenChange={setThreadSheetOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[400px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
           <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Threads</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close threads" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close threads</Button></Dialog.Close></div>
           <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">{newThreadOpen ? <div><label className="text-[10px] text-silver-400" htmlFor="thread-title">Thread name</label><input id="thread-title" autoFocus maxLength={50} value={newThreadTitle} onChange={(event) => setNewThreadTitle(event.target.value)} placeholder="Name this thread" className="mt-2 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><p className="mt-2 text-right font-mono text-[9px] text-silver-600">{newThreadTitle.length}/50</p></div> : threadItems.length ? threadItems.map((thread) => <Button key={thread.key} size="md" variant="outline" aria-label={`Open thread ${thread.title}, ${thread.replyCount} replies`} onClick={() => { const root = visibleMessages.find((message) => message.key === thread.rootMessageKey); if (root) void openThread(root, thread.key); setThreadSheetOpen(false); }} className="block h-auto w-full border-[var(--border-soft)] p-3 text-left normal-case tracking-normal"><span className="block text-xs text-silver-100">{thread.title}</span><span className="mt-1 block truncate text-[10px] text-silver-500">{thread.rootContent}</span><span className="mt-1 block text-[9px] text-silver-600">{thread.replyCount} replies</span></Button>) : <p className="py-8 text-center text-xs text-silver-500">No threads yet.</p>}</div>
