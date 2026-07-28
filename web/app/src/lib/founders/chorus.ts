@@ -4,6 +4,8 @@ const keySchema = z.string().trim().min(1).max(160);
 const isoTimestampSchema = z.string().datetime({ offset: true });
 const optionalKeySchema = z.preprocess((value) => value === null ? undefined : value, keySchema.optional());
 
+export const CHORUS_ORCHESTRATOR_NAMES = ["Atlas", "Metis", "Echo", "Matrix", "Hermes", "Harmony", "Phoenix", "Iris", "Orbit", "Apollo", "Athena", "Forge", "Aura", "Pillar", "Helios", "Vulcan", "Ledger", "Mercury", "Sentinel", "Themis"] as const;
+
 export const chorusChannelSchema = z.object({
   key: keySchema,
   organizationKey: keySchema,
