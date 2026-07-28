@@ -636,6 +636,14 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
+    key: 'cmgpttranscribemodel00001',
+    slug: 'openai.gpt-4o-mini-transcribe',
+    name: 'OpenAI GPT-4o Mini Transcribe',
+    description: 'OpenAI speech recognition model for accurate audio transcription.',
+    supportedUseCases: 'Speech-to-text, message dictation, captions, and mention-aware transcription.',
+    enabled: true,
+  },
+  {
     key: 'cmpollygenerativemodel0001',
     slug: 'amazon.polly-generative',
     name: 'Amazon Polly Generative Engine',
@@ -738,6 +746,13 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'openai.gpt-realtime-2',
     providerSlug: 'openai',
     providerModelId: 'gpt-realtime-2',
+    enabled: true,
+  },
+  {
+    key: 'cmgpttranscriberoute000001',
+    modelSlug: 'openai.gpt-4o-mini-transcribe',
+    providerSlug: 'openai',
+    providerModelId: 'gpt-4o-mini-transcribe',
     enabled: true,
   },
   {

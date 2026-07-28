@@ -43,6 +43,8 @@ export type OpenAICredentials = OpenAIProviderConfig;
 
 const PROVIDER_ID = 'openai' as const;
 export const OPENAI_REALTIME_MODEL = 'gpt-realtime-2';
+export const OPENAI_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
+const TRANSCRIPTION_PROMPT_MAX_LENGTH = 500;
 
 function realtimeUsage(usage: { input_tokens?: number; output_tokens?: number; total_tokens?: number } | undefined) {
   return tokenUsage(usage?.input_tokens, usage?.output_tokens, usage?.total_tokens);
@@ -206,7 +208,43 @@ async function executeImageGenerate<TInput, TOutput>(
   };
 }
 
-async function executeTranscribe<TInput, TOutput>(
+async function executeFileTranscribe<TInput, TOutput>(
+  client: OpenAI,
+  request: ProviderExecuteRequest<TInput>,
+): Promise<ProviderExecuteResponse<TOutput>> {
+  const input = transcribeInputSchema.parse(request.input);
+  if (request.externalModelId !== OPENAI_TRANSCRIPTION_MODEL) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenAI transcription requires ${OPENAI_TRANSCRIPTION_MODEL}`);
+  const wav = pcmToWav(Buffer.from(input.audioBase64, 'base64'));
+  const prompt = [
+    'Transcribe verbatim with intended punctuation. Write spoken mentions as @name.',
+    input.prompt?.trim(),
+  ].filter(Boolean).join(' ').slice(0, TRANSCRIPTION_PROMPT_MAX_LENGTH);
+  const raw = await client.audio.transcriptions.create(
+    {
+      file: new File([new Uint8Array(wav)], 'audio.wav', { type: 'audio/wav' }),
+      model: OPENAI_TRANSCRIPTION_MODEL,
+      prompt,
+      ...(input.language ? { language: input.language } : {}),
+    },
+    { signal: resolveRequestSignal(request) },
+  );
+  const text = raw.text.trim();
+  if (!text) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai transcription returned no text');
+  const usage = raw.usage?.type === 'tokens'
+    ? tokenUsage(raw.usage.input_tokens, raw.usage.output_tokens, raw.usage.total_tokens)
+    : tokenUsage(0, 0, 0);
+  const output: TranscriptionOutput = { text };
+  return {
+    output: output as TOutput,
+    usage,
+    providerId: PROVIDER_ID,
+    modelId: request.modelId,
+    externalModelId: OPENAI_TRANSCRIPTION_MODEL,
+    rawResponse: raw,
+  };
+}
+
+async function executeRealtimeTranscribe<TInput, TOutput>(
   client: OpenAI,
   request: ProviderExecuteRequest<TInput>,
 ): Promise<ProviderExecuteResponse<TOutput>> {
@@ -225,14 +263,7 @@ async function executeTranscribe<TInput, TOutput>(
     const done = await raceAbort(realtime.emitted('response.done'), realtimeRequest.signal);
     if (done.response.status !== 'completed' || !text.trim()) throw new ProviderError(PROVIDER_ID, 'response_invalid', `Realtime transcription ended with status ${done.response.status ?? 'unknown'}`);
     const output: TranscriptionOutput = { text: text.trim() };
-    return {
-      output: output as TOutput,
-      usage: realtimeUsage(done.response.usage),
-      providerId: PROVIDER_ID,
-      modelId: request.modelId,
-      externalModelId: request.externalModelId,
-      rawResponse: done.response,
-    };
+    return { output: output as TOutput, usage: realtimeUsage(done.response.usage), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: done.response };
   } finally {
     realtimeRequest.remove();
     realtime.close();
@@ -288,7 +319,8 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       }
       try {
         if (request.actionId === 'generate-image') return await executeImageGenerate(client, request);
-        if (request.actionId === 'transcribe') return await executeTranscribe(client, request);
+        if (request.actionId === 'transcribe' && request.externalModelId === OPENAI_REALTIME_MODEL) return await executeRealtimeTranscribe(client, request);
+        if (request.actionId === 'transcribe') return await executeFileTranscribe(client, request);
         if (request.actionId === 'speak' || request.actionId === 'generate-speech') return await executeSpeech(client, request);
       } catch (err) {
         throw normalizeProviderError(PROVIDER_ID, err);

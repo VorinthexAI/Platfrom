@@ -10,6 +10,7 @@ describe('logical model slugs', () => {
       'amazon.nova-pro',
       'amazon.nova-lite',
       'openai.gpt-realtime-2',
+      'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
       'amazon.titan-embed-text-v2',
       'aws.transcribe-standard',

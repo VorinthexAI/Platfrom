@@ -16,10 +16,12 @@ function fixture() {
   const channel = channelSchema.parse({ key: newId(), organizationKey, scopeKey, name: 'general', description: 'Organization-wide conversation', position: 0, createdAt: now, updatedAt: now });
   const human = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, userOrganizationKey: membershipKey, joinedAt: now, createdAt: now, updatedAt: now });
   const atlas = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, orchestratorKey: newId(), joinedAt: now, createdAt: now, updatedAt: now });
+  const metis = channelParticipantSchema.parse({ key: newId(), scopeKey, channelKey: channel.key, orchestratorKey: newId(), joinedAt: now, createdAt: now, updatedAt: now });
   const access: GeneralChannelAccess = { channel, humanParticipant: human, viewerUserKey: newId(), mentions: [
     { participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 },
     { participantKey: human.key, type: 'user', key: newId(), name: 'Founder', mentionCount: 0 },
     { participantKey: atlas.key, type: 'orchestrator', key: atlas.orchestratorKey!, name: 'Atlas', role: 'CEO', skill: 'Lead.', mentionCount: 0 },
+    { participantKey: metis.key, type: 'orchestrator', key: metis.orchestratorKey!, name: 'Metis', role: 'CIO', skill: 'Analyze.', mentionCount: 0 },
   ] };
   const messages: Message[] = [];
   const mentions: unknown[] = [];
@@ -44,7 +46,7 @@ describe('Chorus service', () => {
     const f = fixture();
     const access = await f.service.generalChannel(actor);
     expect(access.channel).toMatchObject({ organizationKey, kind: 'group', name: 'general' });
-    expect(access.mentions.map((mention) => mention.name)).toEqual(['everyone', 'Founder', 'Atlas']);
+    expect(access.mentions.map((mention) => mention.name)).toEqual(['everyone', 'Founder', 'Atlas', 'Metis']);
   });
 
   test('persists matching mentions and dispatches each mentioned orchestrator', async () => {
@@ -63,6 +65,14 @@ describe('Chorus service', () => {
     expect(f.mentions).toHaveLength(1);
     expect(f.usage[0]).toEqual(['everyone', f.access.mentions[1]!.key]);
     expect(result.orchestrators).toEqual([]);
+  });
+
+  test('dispatches every explicitly mentioned orchestrator once and keeps everyone human-only', async () => {
+    const f = fixture();
+    const result = await f.service.persistUserMessage(actor, f.channel.key, '@everyone @metis and @Atlas and @METIS respond');
+    expect(result.orchestrators.map(({ name }) => name)).toEqual(['Atlas', 'Metis']);
+    expect(f.mentions).toHaveLength(3);
+    expect(f.usage[0]).toEqual(['everyone', f.access.mentions[1]!.key, f.access.mentions[2]!.key, f.access.mentions[3]!.key]);
   });
 
   test('keeps hidden duplicate-label members in @everyone delivery', async () => {
