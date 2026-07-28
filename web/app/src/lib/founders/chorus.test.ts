@@ -102,6 +102,7 @@ describe("HQ shared controls", () => {
     expect(component).toContain('variant="secondary"');
     expect(component).toContain('icon={<MoreHorizontalIcon size="sm" />}');
     expect(component).toContain('border-[var(--border-soft)] opacity-0');
+    expect(component).toContain('aria-label="Mention shortcuts"');
     expect(component).toContain('bg-[image:var(--gradient-chrome)]');
     expect(theme).toContain('.vui-button-primary:disabled');
     expect(theme.match(/opacity: 0\.8;/g)?.length).toBeGreaterThanOrEqual(2);

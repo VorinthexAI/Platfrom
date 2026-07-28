@@ -436,9 +436,9 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           </div>
         </div>
       </form>
-      <div className="mt-2 grid min-w-0 grid-rows-[minmax(24px,auto)_minmax(24px,auto)] gap-1.5 overflow-hidden">
-        <div aria-label="Orchestrator mentions" className="flex w-full min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1">{orchestrators.map((mention) => <button key={`orchestrator:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[image:var(--gradient-chrome)] px-1.5 py-1 font-mono text-[9px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}</div>
-        <div aria-label="Organization member mentions" className="flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">{people.map((mention) => <button key={`${mention.type}:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md border border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</button>)}</div>
+      <div aria-label="Mention shortcuts" className="mt-2 flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">
+        {people.map((mention) => <button key={`${mention.type}:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md border border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</button>)}
+        {orchestrators.map((mention) => <button key={`orchestrator:${mention.key}`} type="button" onClick={() => insertMention(mention.name)} className="shrink-0 rounded-md bg-[image:var(--gradient-chrome)] px-1.5 py-1 font-mono text-[9px] text-obsidian-990">@{mention.name.toLowerCase()}</button>)}
       </div>
     </div>
   );
