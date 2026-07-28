@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { closeDb } from '@/lib/db/client';
+import { closeDb, db } from '@/lib/db/client';
 import { NODE_REGISTRY, NODE_NAMES } from '@/lib/db/registry';
 import { newId } from '@/lib/ids';
 import { getRootOrganizationId } from '@/platform/events';
@@ -111,6 +111,7 @@ async function main() {
   const idMap = new Map<string, string>();
   let rootOrganizationId: string | null = null;
   const results: { node: string; key: string }[] = [];
+  const authoritativeMemberships = new Map<string, Set<string>>();
 
   for (const [nodeName, docs] of Object.entries(seeds as Record<string, unknown>)) {
     const accessor = NODE_REGISTRY[nodeName];
@@ -166,12 +167,31 @@ async function main() {
         });
         if (membership) {
           results.push({ node: 'userOrganizations', key: membership.key });
+          if (process.env.SYNC_SEEDED_ORGANIZATION_ROSTER === 'true') {
+            const userKeys = authoritativeMemberships.get(membership.organizationId) ?? new Set<string>();
+            userKeys.add(membership.userId);
+            authoritativeMemberships.set(membership.organizationId, userKeys);
+          }
         }
       }
 
       if (localId) idMap.set(localId, saved.key);
       if (nodeName === 'organizations' && resolved.is_root === true) rootOrganizationId = saved.key;
     }
+  }
+
+  for (const [organizationId, userKeys] of authoritativeMemberships) {
+    const cursor = await db.query<number>(`
+      LET changed = LENGTH(
+        FOR membership IN userOrganizations
+          FILTER membership.organizationId == @organizationId
+          FILTER membership.status == "active" && membership.userId NOT IN @userKeys
+          UPDATE membership WITH { status: "inactive", updatedAt: @now } IN userOrganizations
+          RETURN 1
+      )
+      RETURN changed
+    `, { organizationId, userKeys: [...userKeys], now: new Date().toISOString() });
+    console.log(`Deactivated ${await cursor.next() ?? 0} non-seeded organization membership(s).`);
   }
 
   console.table(results);

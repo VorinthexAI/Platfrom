@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   chorusChannelEntrySchema,
   buildChorusMentionRows,
+  chorusMentionRosterSchema,
   chorusMessageSchema,
   chorusThreadSchema,
   plainChorusText,
@@ -71,21 +72,22 @@ describe("Chorus schemas", () => {
 });
 
 describe("Chorus mention rows", () => {
-  test("keeps orchestrators separate and everyone first while collapsing duplicate labels", () => {
-    const mentions = [
-      { participantKey: "user-a", type: "user" as const, key: "user-a", name: "Oscar", mentionCount: 1 },
-      { participantKey: "agent-atlas", type: "orchestrator" as const, key: "atlas", name: "Atlas", role: "CEO", mentionCount: 2 },
-      { participantKey: "everyone", type: "everyone" as const, key: "everyone", name: "everyone", mentionCount: 0 },
-      { participantKey: "user-b", type: "user" as const, key: "user-b", name: " oscar ", mentionCount: 0 },
-    ];
-    const rows = buildChorusMentionRows(mentions);
-    expect(rows.orchestrators.map(({ name }) => name)).toEqual(["Atlas"]);
-    expect(rows.people.map(({ name }) => name)).toEqual(["everyone", "Oscar"]);
+  const orchestratorNames = ["Atlas", "Metis", "Echo", "Matrix", "Hermes", "Harmony", "Phoenix", "Iris", "Orbit", "Apollo", "Athena", "Forge", "Aura", "Pillar", "Helios", "Vulcan", "Ledger", "Mercury", "Sentinel", "Themis"];
+  const roster = chorusMentionRosterSchema.parse({
+    orchestrators: orchestratorNames.map((name, index) => ({ participantKey: `participant-${index}`, type: "orchestrator", key: `agent-${index}`, name, role: "Executive", mentionCount: 20 - index })),
+    everyone: { participantKey: "everyone", type: "everyone", key: "everyone", name: "everyone", mentionCount: 0 },
+    members: ["Anton", "Frank", "Josef", "Vincent"].map((name, index) => ({ participantKey: `member-${index}`, type: "user", key: `user-${index}`, name, mentionCount: index })),
   });
 
-  test("retains all twenty unique orchestrators in the permanent top row", () => {
-    const mentions = Array.from({ length: 20 }, (_, index) => ({ participantKey: `participant-${index}`, type: "orchestrator" as const, key: `agent-${index}`, name: `Agent ${index}`, role: "Executive", mentionCount: index }));
-    expect(buildChorusMentionRows(mentions).orchestrators).toHaveLength(20);
+  test("renders the explicit roster as exactly two permanent lanes", () => {
+    const rows = buildChorusMentionRows(roster);
+    expect(rows.orchestrators.map(({ name }) => name)).toEqual(orchestratorNames);
+    expect(rows.people.map(({ name }) => name)).toEqual(["everyone", "Anton", "Frank", "Josef", "Vincent"]);
+    expect(rows.ordered).toHaveLength(25);
+  });
+
+  test("requires all twenty orchestrators in the API contract", () => {
+    expect(() => chorusMentionRosterSchema.parse({ ...roster, orchestrators: roster.orchestrators.slice(1) })).toThrow();
   });
 });
 

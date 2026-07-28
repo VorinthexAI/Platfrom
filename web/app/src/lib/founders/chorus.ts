@@ -18,6 +18,11 @@ export const chorusChannelSchema = z.object({
 }).strict();
 
 export const chorusMentionSchema = z.object({ participantKey: keySchema, type: z.enum(["user", "orchestrator", "everyone"]), key: keySchema, name: z.string().trim().min(1), role: z.string().optional(), mentionCount: z.number().int().nonnegative() }).strict();
+export const chorusMentionRosterSchema = z.object({
+  orchestrators: z.array(chorusMentionSchema.extend({ type: z.literal("orchestrator") })).length(20),
+  everyone: chorusMentionSchema.extend({ type: z.literal("everyone") }),
+  members: z.array(chorusMentionSchema.extend({ type: z.literal("user") })),
+}).strict();
 export const chorusChannelEntrySchema = z.object({
   orchestrator: z.object({ key: keySchema, name: z.string().trim().min(1), role: z.string() }).strict(),
   scopeKey: keySchema,
@@ -91,6 +96,7 @@ export const chorusStreamEventSchema = z.discriminatedUnion("type", [
 
 export type ChorusChannel = z.infer<typeof chorusChannelSchema>;
 export type ChorusMention = z.infer<typeof chorusMentionSchema>;
+export type ChorusMentionRoster = z.infer<typeof chorusMentionRosterSchema>;
 export type ChorusChannelEntry = z.infer<typeof chorusChannelEntrySchema>;
 export type ChorusMessage = z.infer<typeof chorusMessageSchema>;
 export type ChorusThread = z.infer<typeof chorusThreadSchema>;
@@ -107,19 +113,9 @@ export interface ChorusOptimisticStream {
   assistantKey: string;
 }
 
-export function buildChorusMentionRows(mentions: readonly ChorusMention[]) {
-  const unique = (candidates: ChorusMention[]) => {
-    const seen = new Set<string>();
-    return candidates.filter((mention) => {
-      const identity = mention.name.normalize("NFKC").trim().toLowerCase();
-      if (seen.has(identity)) return false;
-      seen.add(identity);
-      return true;
-    });
-  };
-  const ranked = [...mentions].sort((left, right) => right.mentionCount - left.mentionCount || left.name.localeCompare(right.name));
-  const orchestrators = unique(ranked.filter((mention) => mention.type === "orchestrator"));
-  const people = unique([...ranked.filter((mention) => mention.type === "everyone"), ...ranked.filter((mention) => mention.type === "user")]);
+export function buildChorusMentionRows(roster: ChorusMentionRoster) {
+  const orchestrators: ChorusMention[] = roster.orchestrators;
+  const people: ChorusMention[] = [roster.everyone, ...roster.members];
   return {
     ordered: [...orchestrators, ...people],
     orchestrators,
@@ -198,9 +194,13 @@ async function request<T>(url: string, schema: z.ZodType<T>, init?: RequestInit)
 }
 
 export async function listChorusChannels(organizationKey: string, signal?: AbortSignal) {
-  const result = await request(`${base(organizationKey)}/channels`, z.object({ channels: z.array(chorusChannelSchema).length(1), mentions: z.array(chorusMentionSchema) }).strict(), { signal });
+  const result = await request(`${base(organizationKey)}/channels`, z.object({ channels: z.array(chorusChannelSchema).length(1), mentionRoster: chorusMentionRosterSchema }).strict(), { signal });
   const channel = result.channels[0]!;
-  return { channels: [chorusChannelEntrySchema.parse({ orchestrator: { key: "general", name: "General", role: "Organization channel" }, scopeKey: channel.scopeKey, canChat: true, channel })], mentions: result.mentions };
+  return {
+    channels: [chorusChannelEntrySchema.parse({ orchestrator: { key: "general", name: "General", role: "Organization channel" }, scopeKey: channel.scopeKey, canChat: true, channel })],
+    mentionRoster: result.mentionRoster,
+    mentions: [...result.mentionRoster.orchestrators, result.mentionRoster.everyone, ...result.mentionRoster.members],
+  };
 }
 
 export async function transcribeChorusAudio(organizationKey: string, audioBase64: string, signal?: AbortSignal): Promise<string> {

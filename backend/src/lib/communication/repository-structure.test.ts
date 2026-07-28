@@ -39,7 +39,7 @@ describe('Arango communication repository structure', () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('UPSERT { organizationKey: @organizationKey, kind: "group", name: "general" }');
     expect(source).toContain("name: 'general'");
-    expect(source).toContain('FOR orchestrator IN orchestrators FILTER orchestrator.name IN @orchestratorNames SORT orchestrator.name ASC, orchestrator._key ASC');
+    expect(source.match(/POSITION\(@orchestratorNames, orchestrator\.name, true\)/g)).toHaveLength(2);
   });
 
   test('deduplicates organization members and lists orchestrators independently', async () => {
@@ -49,6 +49,7 @@ describe('Arango communication repository structure', () => {
     expect(source).not.toContain('FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey != null');
     expect(source).not.toMatch(/LET membership = DOCUMENT\([^\n]+\)[\s\S]{0,800}FOR membership IN userOrganizations/);
     expect(source.match(/memberLink\.status == "active"/g)).toHaveLength(2);
+    expect(source.match(/memberLink\.userId != (?:@)?viewerUserKey/g)).toHaveLength(2);
   });
 
   test('omits null optional identifiers from message projections', async () => {

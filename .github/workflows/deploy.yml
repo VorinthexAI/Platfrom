@@ -912,6 +912,7 @@ jobs:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
           SEEDS_FILE: ${{ github.workspace }}/db-seeds.secrets.json
+          SYNC_SEEDED_ORGANIZATION_ROSTER: "true"
         run: |
           jq -c '.secrets.prod.db_seeds' .github/environments.json > "$SEEDS_FILE"
           python3 -m json.tool "$SEEDS_FILE" > /dev/null

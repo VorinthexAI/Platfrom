@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
-import { createChorusHandlers } from './chorus';
+import { buildMentionRoster, createChorusHandlers } from './chorus';
+import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 
 const organizationKey = 'root-org';
 const channelKey = newId();
@@ -40,6 +41,18 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
 }
 
 describe('Chorus SSE API', () => {
+  test('builds an explicit canonical roster with everyone and members in separate lanes', () => {
+    const roster = buildMentionRoster([
+      { participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 },
+      { participantKey: newId(), type: 'user', key: newId(), name: 'Vincent', mentionCount: 2 },
+      { participantKey: newId(), type: 'user', key: newId(), name: 'Anton', mentionCount: 1 },
+      ...[...CANONICAL_ORCHESTRATOR_NAMES].reverse().map((name, index) => ({ participantKey: newId(), type: 'orchestrator' as const, key: newId(), name, role: 'Executive', skill: 'Lead.', mentionCount: index })),
+    ]);
+    expect(roster.orchestrators.map(({ name }) => name)).toEqual([...CANONICAL_ORCHESTRATOR_NAMES]);
+    expect(roster.everyone.name).toBe('everyone');
+    expect(roster.members.map(({ name }) => name)).toEqual(['Anton', 'Vincent']);
+  });
+
   test('returns 401 before parsing a message for an unauthenticated request', async () => {
     const { app } = appFor({ authenticated: false });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });

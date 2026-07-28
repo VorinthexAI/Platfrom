@@ -10,6 +10,8 @@ import { requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/a
 import { ChorusError, ChorusService, type ChorusActor } from '@/lib/communication';
 import { requireFounder } from './founders';
 import { parseJson, parseQuery, strictObject } from './validation';
+import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
+import type { MentionCandidate } from '@/lib/communication/repository';
 
 const key = z.string().cuid();
 const organizationKey = z.string().trim().min(1).max(160);
@@ -94,6 +96,17 @@ function scopeContext(scopes: readonly { name: string; description: string | nul
   return descriptions.length ? `## Organization scopes\n${descriptions.join('\n')}` : '';
 }
 
+export function buildMentionRoster(candidates: readonly MentionCandidate[]) {
+  const mentions = dedupeMentionCandidates(candidates);
+  const byOrchestratorName = new Map(mentions.filter((candidate) => candidate.type === 'orchestrator').map((candidate) => [candidate.name, candidate]));
+  const orchestrators = CANONICAL_ORCHESTRATOR_NAMES.map((name) => byOrchestratorName.get(name)).filter((candidate): candidate is MentionCandidate => Boolean(candidate));
+  if (orchestrators.length !== CANONICAL_ORCHESTRATOR_NAMES.length) throw new ChorusError('conflict', 'canonical orchestrator roster is incomplete');
+  const everyone = mentions.find((candidate) => candidate.type === 'everyone');
+  if (!everyone) throw new ChorusError('conflict', 'everyone mention is unavailable');
+  const members = mentions.filter((candidate) => candidate.type === 'user').sort((left, right) => left.name.localeCompare(right.name));
+  return { orchestrators, everyone, members };
+}
+
 export function createChorusHandlers(dependencies: ChorusApiDependencies = defaultDependencies) {
   const activeChannels = new Set<string>();
   const actor = async (c: Context): Promise<ChorusActor | Response> => {
@@ -115,7 +128,9 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
   return {
     listChannels: (c: Context) => run(c, async (resolved) => {
       const access = await dependencies.service.generalChannel(resolved);
-      return { channels: [channelSummary(access.channel)], mentions: dedupeMentionCandidates(access.mentions).map(({ participantKey, type, key: mentionKey, name, role, mentionCount }) => ({ participantKey, type, key: mentionKey, name, role, mentionCount })) };
+      const roster = buildMentionRoster(access.mentions);
+      const project = ({ participantKey, type, key: mentionKey, name, role, mentionCount }: MentionCandidate) => ({ participantKey, type, key: mentionKey, name, role, mentionCount });
+      return { channels: [channelSummary(access.channel)], mentionRoster: { orchestrators: roster.orchestrators.map(project), everyone: project(roster.everyone), members: roster.members.map(project) } };
     }),
     transcribe: (c: Context) => run(c, async (resolved) => {
       const body = await parseJson(c, transcriptionBody);
