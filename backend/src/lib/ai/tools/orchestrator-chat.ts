@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions';
-import { selectRoute, streamRoute, type RouterDependencies } from '@/lib/ai/router';
+import { ProviderExecutionError, selectRoute, streamRoute, type RouterDependencies } from '@/lib/ai/router';
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
 import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
+import { isAiError } from '@/lib/ai/shared/result';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import { organizationMessageContextTool, type OrganizationMessageContext, type OrganizationMessageContextDependencies } from './organization-message-context';
 
@@ -13,6 +14,8 @@ export const orchestratorChatToolInputSchema = z.object({
 export interface OrchestratorChatToolDependencies extends RouterDependencies, DocumentProcessingDependencies, OrganizationMessageContextDependencies {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
+  selectRoute?: typeof selectRoute;
+  streamRoute?: typeof streamRoute;
   signal?: AbortSignal;
   organizationKey?: string;
   messageContext?: OrganizationMessageContext;
@@ -53,20 +56,64 @@ export const orchestratorChatTool = {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
-      yield* dependencies.stream(organizationKey, chatInput);
+      yield* await bufferSuccessfulAttempt(dependencies.stream(organizationKey, chatInput), 'amazon.nova-lite');
       return;
     }
-    const decision = await selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'amazon.nova-lite', providerSlug: 'aws-bedrock' }, dependencies);
-    yield* streamRoute({
-      decision,
-      input: chatInput,
-      adapters: dependencies.adapters,
-      credentials: dependencies.credentials,
-      timeoutMs: 300_000,
-      signal: dependencies.signal,
-    });
+    const select = dependencies.selectRoute ?? selectRoute;
+    const stream = dependencies.streamRoute ?? streamRoute;
+    const models = ['amazon.nova-lite', 'amazon.nova-lite', 'amazon.nova-pro'] as const;
+    let lastError: unknown;
+    for (const modelSlug of models) {
+      if (dependencies.signal?.aborted) throw dependencies.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+      try {
+        const decision = await select({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug, providerSlug: 'aws-bedrock' }, dependencies);
+        const chunks = await bufferSuccessfulAttempt(stream({
+          decision,
+          input: chatInput,
+          adapters: dependencies.adapters,
+          credentials: dependencies.credentials,
+          timeoutMs: 300_000,
+          signal: dependencies.signal,
+        }), modelSlug);
+        yield* chunks;
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!canTryAnotherRoute(error, dependencies.signal)) throw error;
+      }
+    }
+    throw lastError;
   },
 } as const;
+
+async function bufferSuccessfulAttempt(chunks: AsyncIterable<ProviderStreamChunk>, modelSlug: string): Promise<ProviderStreamChunk[]> {
+  const buffered: ProviderStreamChunk[] = [];
+  let text = '';
+  let done = false;
+  for await (const chunk of chunks) {
+    buffered.push(chunk);
+    if (chunk.type === 'text-delta') text += chunk.text;
+    if (chunk.type === 'done') done = true;
+  }
+  if (!done || !text.trim()) {
+    throw new ProviderExecutionError('orchestrator-chat', [{
+      modelId: modelSlug,
+      providerId: 'aws-bedrock',
+      externalModelId: modelSlug,
+      code: 'response_invalid',
+      message: 'provider stream ended without completed text',
+    }]);
+  }
+  return buffered;
+}
+
+function canTryAnotherRoute(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted || error instanceof z.ZodError) return false;
+  const excludedCodes = new Set(['aborted', 'invalid_input', 'unsupported_action']);
+  if (error instanceof ProviderExecutionError) return !error.attempts.some(({ code }) => excludedCodes.has(code));
+  if (isAiError(error)) return !excludedCodes.has(error.code);
+  return typeof error === 'object' && error !== null && 'retryable' in error && error.retryable === true;
+}
 
 async function prepareChatInput(skill: string, rawInput: unknown, dependencies: OrchestratorChatToolDependencies): Promise<CoreChatInput> {
   const input = orchestratorChatToolInputSchema.parse(rawInput);

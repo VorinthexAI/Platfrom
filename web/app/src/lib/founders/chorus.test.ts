@@ -7,6 +7,7 @@ import {
   chorusMentionRosterSchema,
   chorusMessageSchema,
   chorusThreadSchema,
+  closestChorusMentionCompletion,
   filterChorusMentionShortcuts,
   plainChorusText,
   coalesceChorusStreamEvents,
@@ -100,6 +101,14 @@ describe("Chorus mention rows", () => {
     expect(activeChorusMentionQuery("ask(@MET")).toBe("met");
     expect(filterChorusMentionShortcuts(mentions, activeChorusMentionQuery("ask @met")).map(({ name }) => name)).toEqual(["Metis"]);
     expect(filterChorusMentionShortcuts(mentions, activeChorusMentionQuery("ask @"))).toHaveLength(25);
+  });
+
+  test("provides canonical muted completion text for the closest mention", () => {
+    const mentions = buildChorusMentionRows(roster).ordered;
+    expect(closestChorusMentionCompletion(mentions, "ask @at")).toMatchObject({ mention: { name: "Atlas" }, suffix: "las" });
+    expect(closestChorusMentionCompletion(mentions, "ask @aT")).toMatchObject({ mention: { name: "Atlas" }, suffix: "las" });
+    expect(closestChorusMentionCompletion(mentions, "ask @Atlas")).toBeNull();
+    expect(closestChorusMentionCompletion(mentions, "ask @unknown")).toBeNull();
   });
 });
 
