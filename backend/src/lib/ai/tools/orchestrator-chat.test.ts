@@ -1,5 +1,43 @@
 import { describe, expect, test } from 'bun:test';
+import { ProviderExecutionError } from '@/lib/ai/router';
+import type { ProviderErrorCode } from '@/lib/ai/providers/errors';
+import type { ProviderStreamChunk } from '@/lib/ai/providers';
 import { orchestratorChatTool } from './orchestrator-chat';
+
+function completed(text: string): () => AsyncIterable<ProviderStreamChunk> {
+  return async function* () {
+    yield { type: 'text-delta', text };
+    yield { type: 'done' };
+  };
+}
+
+function failed(code: ProviderErrorCode, partialText?: string): () => AsyncIterable<ProviderStreamChunk> {
+  return async function* () {
+    if (partialText) yield { type: 'text-delta', text: partialText };
+    throw new ProviderExecutionError('orchestrator-chat', [{ modelId: 'model', providerId: 'aws-bedrock', externalModelId: 'model', code, message: 'failed' }]);
+  };
+}
+
+function routes(outcomes: Array<() => AsyncIterable<ProviderStreamChunk>>) {
+  const models: string[] = [];
+  let streamIndex = 0;
+  return {
+    models,
+    dependencies: {
+      selectRoute: async (request: { modelSlug: string }) => {
+        models.push(request.modelSlug);
+        return { modelSlug: request.modelSlug } as never;
+      },
+      streamRoute: () => outcomes[streamIndex++]!(),
+    },
+  };
+}
+
+async function collect(dependencies: unknown): Promise<ProviderStreamChunk[]> {
+  const chunks: ProviderStreamChunk[] = [];
+  for await (const chunk of orchestratorChatTool.stream('Atlas', { message: 'hello' }, dependencies as never)) chunks.push(chunk);
+  return chunks;
+}
 
 describe('orchestrator chat tool', () => {
   test('validates messages and uses the injected executor', async () => {
@@ -39,11 +77,34 @@ describe('orchestrator chat tool', () => {
     });
   });
 
-  test('pins the chat tool to the static Nova Lite route', async () => {
-    const source = await Bun.file(new URL('./orchestrator-chat.ts', import.meta.url)).text();
-    expect(source).toContain("mode: 'fixed'");
-    expect(source).toContain("modelSlug: 'amazon.nova-lite'");
-    expect(source).toContain("providerSlug: 'aws-bedrock'");
-    expect(source).not.toContain('gpt-realtime-2');
+  test('streams the first successful Nova Lite attempt', async () => {
+    const route = routes([completed('first')]);
+    await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'first' }, { type: 'done' }]);
+    expect(route.models).toEqual(['amazon.nova-lite']);
+  });
+
+  test('retries Nova Lite once and streams the successful retry', async () => {
+    const route = routes([failed('provider_unavailable'), completed('retry')]);
+    await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'retry' }, { type: 'done' }]);
+    expect(route.models).toEqual(['amazon.nova-lite', 'amazon.nova-lite']);
+  });
+
+  test('falls back once to Nova Pro after both Nova Lite attempts fail', async () => {
+    const route = routes([failed('rate_limited'), failed('timeout'), completed('fallback')]);
+    await expect(collect(route.dependencies)).resolves.toEqual([{ type: 'text-delta', text: 'fallback' }, { type: 'done' }]);
+    expect(route.models).toEqual(['amazon.nova-lite', 'amazon.nova-lite', 'amazon.nova-pro']);
+  });
+
+  test('does not leak partial output from a failed attempt', async () => {
+    const route = routes([failed('provider_unavailable', 'discard me'), completed('safe response')]);
+    const chunks = await collect(route.dependencies);
+    expect(chunks).toEqual([{ type: 'text-delta', text: 'safe response' }, { type: 'done' }]);
+    expect(JSON.stringify(chunks)).not.toContain('discard me');
+  });
+
+  test('does not retry or fall back after an abort', async () => {
+    const route = routes([failed('aborted'), completed('must not run')]);
+    await expect(collect(route.dependencies)).rejects.toMatchObject({ attempts: [{ code: 'aborted' }] });
+    expect(route.models).toEqual(['amazon.nova-lite']);
   });
 });

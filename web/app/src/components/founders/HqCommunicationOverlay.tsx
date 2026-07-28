@@ -6,7 +6,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import type { EmojiStyle, Theme } from "emoji-picker-react";
 import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, MicrophoneIcon, MoreHorizontalIcon, SendIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons";
-import { Button, Spinner } from "@vorinthex/shared/ui";
+import { Button, Spinner, Textarea } from "@vorinthex/shared/ui";
 import { useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
@@ -16,6 +16,7 @@ import {
   activeChorusMentionQuery,
   buildChorusMentionRows,
   CHORUS_ORCHESTRATOR_NAMES,
+  closestChorusMentionCompletion,
   clearChorusChannel,
   coalesceChorusStreamEvents,
   createChorusPoll,
@@ -339,6 +340,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   const visiblePeople = filterChorusMentionShortcuts(people, query);
   const visibleOrchestrators = filterChorusMentionShortcuts(orchestrators, query);
   const visible = [...visiblePeople, ...visibleOrchestrators];
+  const completion = closestChorusMentionCompletion([...orchestrators, ...people], draft);
   useEffect(() => () => { captureGeneration.current += 1; capture.current?.cancel(); transcription.current?.abort(); }, []);
 
   const submit = (event: FormEvent) => {
@@ -404,31 +406,47 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   return (
     <div className="shrink-0 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-4 sm:pb-[max(1rem,env(safe-area-inset-bottom))]">
       <form onSubmit={submit} aria-busy={startingRecording || transcribing || streaming} className="rounded-xl border border-[var(--border-soft)] bg-obsidian-900/90 p-3 focus-within:border-[var(--border-strong)]">
-        <textarea
-          value={draft}
-          onChange={(event) => {
-            const value = event.target.value;
-            setDraft(value);
-            if (draftKey) channelDrafts.set(draftKey, value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Tab" && mentionMatch && visible[0]) {
-              event.preventDefault();
-              insertMention(visible[0].name);
-              return;
-            }
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          disabled={!canChat || !channelKey}
-          rows={2}
-          maxLength={8000}
-          placeholder={placeholder}
-          aria-label={orchestratorName ? `Message ${orchestratorName}` : "Message"}
-          className="block w-full resize-none bg-transparent text-[12px] text-silver-100 outline-none placeholder:text-silver-500 disabled:cursor-not-allowed"
-        />
+        <div className="relative min-h-10">
+          {completion ? <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words font-sans text-[12px] leading-5 text-transparent select-none">{draft}<span className="text-silver-600">{completion.suffix}</span></div> : null}
+          <Textarea
+            value={draft}
+            onChange={(event) => {
+              const value = event.target.value;
+              setDraft(value);
+              if (draftKey) channelDrafts.set(draftKey, value);
+            }}
+            onKeyDown={(event) => {
+              const caretAtEnd = event.currentTarget.selectionStart === draft.length && event.currentTarget.selectionEnd === draft.length;
+              const acceptCompletion = completion && !event.nativeEvent.isComposing && (
+                (event.key === "Tab" && caretAtEnd)
+                || (event.key === "Enter" && !event.shiftKey && caretAtEnd)
+                || (event.key === "ArrowRight" && caretAtEnd)
+              );
+              if (acceptCompletion) {
+                event.preventDefault();
+                insertMention(completion.mention.name);
+                return;
+              }
+              if (event.key === "Tab" && caretAtEnd && mentionMatch && visible[0]) {
+                event.preventDefault();
+                insertMention(visible[0].name);
+                return;
+              }
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            disabled={!canChat || !channelKey}
+            rows={2}
+            maxLength={8000}
+            placeholder={placeholder}
+            aria-label={orchestratorName ? `Message ${orchestratorName}` : "Message"}
+            aria-autocomplete="inline"
+            className="relative z-10 block !min-h-10 w-full resize-none !rounded-none !border-0 !bg-transparent !p-0 !text-[12px] leading-5 text-silver-100 !shadow-none outline-none placeholder:text-silver-500 disabled:cursor-not-allowed"
+          />
+          <span className="sr-only" aria-live="polite">{completion ? `Suggested mention ${completion.mention.name}. Press Tab, Right Arrow, or Enter to complete.` : ""}</span>
+        </div>
         <div className="mt-2 flex min-h-8 items-center justify-end gap-3">
           <div className="flex shrink-0 items-center gap-2">
             <Button type="button" variant="icon" onClick={() => void toggleRecording()} disabled={!canChat || !channelKey || transcribing || startingRecording} aria-label={transcribing ? "Transcribing message" : startingRecording ? "Starting microphone" : recording ? "Stop speaking and transcribe" : "Speak into message"} aria-pressed={recording} icon={transcribing || startingRecording ? <Spinner className="h-4 w-4" /> : <MicrophoneIcon size="sm" className={recording && speechLevel > 0.015 ? "scale-110" : undefined} />} className={`h-11 min-h-11 w-11 rounded-lg ${recording ? "border-silver-200 bg-white/[0.1] text-silver-50" : "text-silver-400"}`}>{recording ? "Stop speaking and transcribe" : "Speak into message"}</Button>
@@ -438,7 +456,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
       </form>
       <div aria-label="Mention shortcuts" className="mt-2 flex w-full min-w-0 flex-nowrap gap-1.5 overflow-x-auto overscroll-x-contain pb-1">
         {visiblePeople.map((mention) => <Button key={`${mention.type}:${mention.key}`} aria-label={`Mention ${mention.name}`} size="xs" variant="secondary" onClick={() => insertMention(mention.name)} className="min-h-0 shrink-0 border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] normal-case tracking-normal text-silver-200 hover:border-silver-500">@{mention.name === "everyone" ? "everyone" : mention.name}</Button>)}
-        {visibleOrchestrators.map((mention) => <Button key={`orchestrator:${mention.key}`} aria-label={`Mention ${mention.name}`} size="xs" variant="secondary" onClick={() => insertMention(mention.name)} className="min-h-0 shrink-0 border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] normal-case tracking-normal text-silver-200 hover:border-silver-500">@{mention.name.toLowerCase()}</Button>)}
+        {visibleOrchestrators.map((mention) => <Button key={`orchestrator:${mention.key}`} aria-label={`Mention ${mention.name}`} size="xs" variant="secondary" onClick={() => insertMention(mention.name)} className="min-h-0 shrink-0 border-[var(--border-soft)] px-2 py-1 font-mono text-[10px] normal-case tracking-normal text-silver-200 hover:border-silver-500">@{mention.name}</Button>)}
       </div>
     </div>
   );

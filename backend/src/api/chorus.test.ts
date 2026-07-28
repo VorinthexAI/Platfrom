@@ -18,7 +18,7 @@ function parseSse(text: string) {
   });
 }
 
-function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; failSkill?: string; output?: string; gate?: Promise<void>; orchestratorCount?: 0 | 1 | 2 | 3; failScopes?: boolean } = {}) {
+function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; failSkill?: string; failPersistence?: boolean; output?: string; gate?: Promise<void>; orchestratorCount?: 0 | 1 | 2 | 3; failScopes?: boolean } = {}) {
   const persisted: string[] = [];
   const assistantCalls: unknown[][] = [];
   const streamSkills: string[] = [];
@@ -33,7 +33,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const orchestrators = [atlas, nova, metis].slice(0, options.orchestratorCount ?? 1);
   const service = {
     async persistUserMessage() { persisted.push('user'); return { access, message: { key: newId(), channelKey, content: 'hello' }, orchestrators }; },
-    async persistOrchestratorMessage(...args: unknown[]) { assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
+    async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
     async clearChannel() { return 2; },
     async generalChannel() { return access; },
   };
@@ -168,17 +168,28 @@ describe('Chorus SSE API', () => {
     await retried.text();
   });
 
-  test('isolates one orchestrator failure and continues dispatching the rest', async () => {
-    const { app, persisted, streamSkills, orchestrators } = appFor({ orchestratorCount: 3, failSkill: 'Build.' });
+  test('persists a truthful response for every mentioned orchestrator when all providers fail', async () => {
+    const { app, persisted, assistantCalls, streamSkills, orchestrators } = appFor({ orchestratorCount: 3, fail: true });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const text = await response.text();
     const events = parseSse(text);
-    expect(events.some(({ event, data }) => event === 'assistant-error' && data.orchestratorKey === orchestrators[1]!.key)).toBe(true);
+    expect(events.filter(({ event }) => event === 'done').map(({ data }) => data.orchestratorKey)).toEqual(orchestrators.map(({ key }) => key));
+    expect(events.some(({ event }) => event === 'assistant-error')).toBe(false);
     expect(events.at(-1)?.event).toBe('complete');
-    expect(persisted).toEqual(['user', 'assistant', 'assistant']);
+    expect(persisted).toEqual(['user', 'assistant', 'assistant', 'assistant']);
+    expect(assistantCalls.map((call) => call[2])).toEqual(orchestrators.map(() => 'I could not generate a response right now. Please try again.'));
     expect(streamSkills).toHaveLength(3);
     const retried = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'retry' }) });
     expect(retried.status).toBe(200);
+  });
+
+  test('emits assistant-error when the fallback response cannot be persisted', async () => {
+    const { app, persisted, orchestrators } = appFor({ fail: true, failPersistence: true });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const events = parseSse(await response.text());
+    expect(events.some(({ event, data }) => event === 'assistant-error' && data.orchestratorKey === orchestrators[0]!.key)).toBe(true);
+    expect(events.some(({ event }) => event === 'done')).toBe(false);
+    expect(persisted).toEqual(['user']);
   });
 
   test('uses the shared founder gate and founder user key for target organization access', async () => {

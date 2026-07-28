@@ -136,6 +136,14 @@ export function filterChorusMentionShortcuts(mentions: ChorusMention[], query: s
   return query === null ? mentions : mentions.filter((mention) => mention.name.toLocaleLowerCase().startsWith(query));
 }
 
+export function closestChorusMentionCompletion(mentions: ChorusMention[], draft: string): { mention: ChorusMention; suffix: string } | null {
+  const query = activeChorusMentionQuery(draft);
+  if (!query) return null;
+  const mention = mentions.find((candidate) => candidate.name.toLocaleLowerCase().startsWith(query));
+  if (!mention || mention.name.length === query.length) return null;
+  return { mention, suffix: mention.name.slice(query.length) };
+}
+
 export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], stream: ChorusOptimisticStream, event: ChorusStreamEvent): ChorusDisplayMessage[] {
   if (event.type === "assistant-start") {
     if (messages.some((message) => message.clientState?.streamKey === stream.streamKey && message.author.key === event.orchestrator.key)) return messages;
