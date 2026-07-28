@@ -57,18 +57,18 @@ describe('Chorus service', () => {
     expect(f.messages.map((message) => message.content)).toEqual(['@Atlas please review this', 'Reviewed.']);
   });
 
-  test('expands @everyone to every eligible orchestrator while preserving user mentions', async () => {
+  test('expands @everyone to organization members without dispatching orchestrators', async () => {
     const f = fixture();
     const result = await f.service.persistUserMessage(actor, f.channel.key, '@everyone standup');
-    expect(f.mentions).toHaveLength(2);
-    expect(f.usage[0]).toEqual(expect.arrayContaining(['everyone', result.orchestrators[0]!.key]));
-    expect(result.orchestrators.map((orchestrator) => orchestrator.name)).toEqual(['Atlas']);
+    expect(f.mentions).toHaveLength(1);
+    expect(f.usage[0]).toEqual(['everyone', f.access.mentions[1]!.key]);
+    expect(result.orchestrators).toEqual([]);
   });
 
   test('keeps hidden duplicate-label members in @everyone delivery', async () => {
     const f = fixture();
     f.access.mentions.push({ participantKey: newId(), type: 'user', key: newId(), name: 'Founder', mentionCount: 0 });
     await f.service.persistUserMessage(actor, f.channel.key, '@everyone standup');
-    expect(f.mentions).toHaveLength(3);
+    expect(f.mentions).toHaveLength(2);
   });
 });

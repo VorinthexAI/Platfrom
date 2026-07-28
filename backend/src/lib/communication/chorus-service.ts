@@ -167,7 +167,7 @@ export class ChorusService {
     for (const candidate of access.mentions) {
       if (candidate.type === 'everyone') continue;
       const pattern = new RegExp(`(^|[^\\w])@${candidate.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\w])`, 'i');
-      if (hasEveryone || pattern.test(content)) selected.set(candidate.participantKey, candidate);
+      if ((hasEveryone && candidate.type === 'user') || pattern.test(content)) selected.set(candidate.participantKey, candidate);
     }
     const now = this.now();
     return [...selected.values()].map((candidate) => ({ candidate, mention: messageMentionSchema.parse({ key: newId(), scopeKey: access.channel.scopeKey, channelKey: access.channel.key, messageKey, participantKey: candidate.participantKey, createdAt: now, updatedAt: now }) }));

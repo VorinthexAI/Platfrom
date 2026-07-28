@@ -151,7 +151,11 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               return;
             }
             for (const orchestrator of orchestrators) {
-              const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, { organizationKey: resolved.organizationKey, signal: c.req.raw.signal });
+              const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
+                organizationKey: resolved.organizationKey,
+                messageContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, excludeMessageKey: message.key },
+                signal: c.req.raw.signal,
+              });
               let response = '';
               for await (const chunk of provider) {
                 if (chunk.type === 'text-delta' && chunk.text) {
