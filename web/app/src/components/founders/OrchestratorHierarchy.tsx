@@ -5,6 +5,7 @@ import { Billboard, Environment, Html, Lightformer, useTexture } from "@react-th
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useReducedMotion } from "framer-motion";
 import * as THREE from "three";
+import { Button } from "@vorinthex/shared/ui/components";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
 import { entityLogoUrl } from "@/lib/three/entity-logo";
@@ -435,20 +436,21 @@ function CommandModule({ entity, selected, active, muted, metalTexture, nodeObje
       </mesh>
 
       <Html center position={[0, -0.6, 0.3]} distanceFactor={11} zIndexRange={[20, 0]}>
-        <button
+        <Button
           id={`entity-control-${entity.id.replaceAll(".", "-")}`}
-          type="button"
           tabIndex={-1}
           aria-pressed={selected}
           aria-label={`Enter ${entity.name}, ${descriptor}`}
           onFocus={() => onSelect(entity)}
           onClick={(event) => { event.stopPropagation(); onSelect(entity); onEnter(entity); }}
-          className="flex min-w-[80px] flex-col items-center whitespace-nowrap rounded-md px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-[#ffc267] focus-visible:shadow-[0_0_20px_rgba(255,135,40,0.7)]"
+          className="min-h-0 min-w-[80px] flex-col whitespace-nowrap px-2 py-1 normal-case outline-none focus-visible:ring-1 focus-visible:ring-[#ffc267] focus-visible:shadow-[0_0_20px_rgba(255,135,40,0.7)]"
+          size="xs"
+          variant="ghost"
           style={{ opacity }}
         >
           <span className={`font-mono text-[0.55rem] tracking-[0.23em] ${selected ? "text-[#ffd799]" : "text-[#a87a50]"}`}>{descriptor}</span>
           <span className={`mt-0.5 text-[0.62rem] font-medium tracking-[0.15em] uppercase ${selected ? "text-white" : "text-[#ddc1a2]"}`}>{entity.name}</span>
-        </button>
+        </Button>
       </Html>
       {selected ? <pointLight color="#ff7917" intensity={5} distance={3.5} decay={2} position={[0, 0.5, 0]} /> : null}
     </group>

@@ -147,14 +147,14 @@ export function NexusGate() {
           className="chrome-border card-depth relative max-h-[calc(100svh-3rem)] w-full max-w-md overflow-y-auto rounded-3xl p-7 sm:p-9"
           style={{ background: "var(--gradient-panel)" }}
         >
-          <button
-            type="button"
+          <Button
             onClick={() => router.push("/")}
             aria-label="Close"
-            className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
-          >
-            <CloseIcon width={12} height={12} />
-          </button>
+            className="absolute top-4 right-4 text-silver-500 hover:text-silver-100"
+            icon={<CloseIcon width={12} height={12} />}
+            size="sm"
+            variant="icon"
+          >Close</Button>
 
           {phase.kind === "gate" ? (
             <form onSubmit={submitFoundersGate}>

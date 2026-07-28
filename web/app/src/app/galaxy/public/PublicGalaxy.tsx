@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@vorinthex/shared/ui/components";
 import { FragmentGlobe, type GlobeData } from "@/components/fragments/FragmentGlobe";
 import { formatFragments } from "@/lib/format";
 import { useGalaxyStore } from "@/lib/galaxy-store";
@@ -102,13 +103,15 @@ export function PublicGalaxy() {
         </p>
       )}
 
-      <button
+      <Button
         type="button"
         onClick={returnToGalaxy}
-        className="vui-button vui-button-primary mt-8 min-h-0 px-8 py-3.5 text-xs uppercase"
+        size="lg"
+        variant="primary"
+        className="mt-8 uppercase"
       >
         Explore and collect
-      </button>
+      </Button>
 
       <div className="mt-10 flex flex-col items-center">
         <FragmentGlobe data={globe} />

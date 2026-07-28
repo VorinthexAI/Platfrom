@@ -15,10 +15,10 @@ import Svg, {
   RadialGradient,
   Stop,
 } from "react-native-svg";
+import { Button } from "@vorinthex/shared/ui/button";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { ChromePanel } from "@/components/ChromePanel";
-import { PressableScale } from "@/components/PressableScale";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { Capability } from "@/data/registry";
 import { springs } from "@/theme/motion";
@@ -305,11 +305,14 @@ function CubeFace({
         faceStyle,
       ]}
     >
-      <PressableScale
+      <Button
         accessibilityRole="button"
         accessibilityLabel={`Open ${capability.name}`}
+        contentMode="raw"
         onPress={onPress}
+        size="xl"
         style={{ width: faceWidth, height: faceHeight }}
+        variant="ghost"
       >
         <ChromePanel
           radius={radii.md}
@@ -334,7 +337,7 @@ function CubeFace({
             style={[styles.activeBorder, focusStyle]}
           />
         </ChromePanel>
-      </PressableScale>
+      </Button>
     </Animated.View>
   );
 }

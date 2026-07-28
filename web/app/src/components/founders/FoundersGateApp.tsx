@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CloseIcon } from "@vorinthex/shared/ui/icons";
+import { Button } from "@vorinthex/shared/ui/components";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import dynamic from "next/dynamic";
 import {
@@ -27,6 +28,7 @@ import { NEXUS_HQ_ENTITY_ID, NEXUS_HQ_TRANSIT_DESTINATION } from "@/lib/founders
 
 const OrchestratorHierarchy = dynamic(() => import("./OrchestratorHierarchy"), { ssr: false });
 const OrchestratorCommandDeck = dynamic(() => import("./OrchestratorCommandDeck"), { ssr: false });
+const MotionButton = motion.create(Button);
 
 const ORGANIZATION_STORAGE_KEY = "vx_founders_organization";
 const scopeStorageKey = (organizationKey: string) => `vx_founders_scope:${organizationKey}`;
@@ -314,11 +316,11 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
             exit="closed"
             variants={{ open: { transition: { staggerChildren: reducedMotion ? 0 : 0.03 } }, closed: { transition: { staggerChildren: reducedMotion ? 0 : 0.02, staggerDirection: -1 } } }}
           >
-          <motion.button
-            type="button"
+          <MotionButton
             aria-label="Close panel"
             onClick={() => setDrawerOpen(false)}
-            className="absolute inset-0 bg-black/55"
+            variant="ghost"
+            className="absolute inset-[-999px] min-h-0 bg-black/55 p-0"
             variants={{ open: { opacity: 1 }, closed: { opacity: 0 } }}
             transition={{ duration: reducedMotion ? 0.12 : 0.3, ease: "easeOut" }}
           />
@@ -328,14 +330,14 @@ export function FoundersGateApp({ onUnauthorized }: FoundersGateAppProps) {
             transition={reducedMotion ? { duration: 0.12 } : { duration: 0.52, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className="mb-4 flex justify-end">
-              <button
-                type="button"
+              <Button
                 onClick={() => setDrawerOpen(false)}
                 aria-label="Close panel"
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-silver-300 transition-colors hover:border-white/25 hover:text-silver-50"
-              >
-                <CloseIcon size="sm" />
-              </button>
+                className="text-silver-300 hover:text-silver-50"
+                icon={<CloseIcon size="sm" />}
+                size="sm"
+                variant="icon"
+              >Close panel</Button>
             </div>
             {panel}
           </motion.div>

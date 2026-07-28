@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@vorinthex/shared/ui/components";
 import { syncEntityUrl, useGalaxyStore } from "@/lib/galaxy-store";
 import { trackCtaClick } from "@/lib/analytics";
 
@@ -47,14 +48,15 @@ export function FooterStrip() {
           className="flex w-full items-center justify-between gap-2 sm:w-auto sm:justify-center sm:gap-6 lg:gap-8"
         >
           {FOOTER_VAULTS.map((vault) => (
-            <button
+            <Button
               key={vault.kind}
-              type="button"
               onClick={() => openVault(vault)}
+              size="xs"
+              variant="ghost"
               className="font-mono text-[0.52rem] tracking-[0.14em] text-silver-500 uppercase transition-colors hover:text-silver-100 sm:text-[0.58rem] sm:tracking-[0.2em] lg:tracking-[0.24em]"
             >
               {vault.label}
-            </button>
+            </Button>
           ))}
         </nav>
       </div>

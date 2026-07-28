@@ -7,6 +7,10 @@
     "./lib": "./lib/index.ts",
     "./lib/api-client": "./lib/api-client.ts",
     "./ui": "./packages/ui/index.ts",
+    "./ui/button": {
+      "react-native": "./packages/ui/components/button/button.mobile.tsx",
+      "default": "./packages/ui/components/button/button.web.tsx"
+    },
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
     "./ui/icons-mobile": "./packages/ui/icons-mobile.ts",

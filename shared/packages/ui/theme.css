@@ -52,23 +52,19 @@
 
 .vui-button {
   align-items: center;
-  border-radius: var(--vui-radius-pill);
+  border-radius: var(--vui-radius-pill) !important;
   border: 1px solid transparent;
   cursor: pointer;
   display: inline-flex;
   font-family: var(--vui-font-ui);
-  font-size: 13px;
   font-weight: 600;
-  gap: 8px;
   /* Own stacking context + clip so the loading fill can live BEHIND the
      label (negative z-index) yet inside the pill. */
   isolation: isolate;
   justify-content: center;
   letter-spacing: 0.08em;
   line-height: 1.2;
-  min-height: 42px;
   overflow: hidden;
-  padding: 12px 26px;
   position: relative;
   text-transform: uppercase;
   transition: background-position 800ms var(--vui-ease-luxury),
@@ -77,6 +73,41 @@
     box-shadow 400ms var(--vui-ease-luxury),
     color 400ms var(--vui-ease-luxury),
     transform 400ms var(--vui-ease-luxury);
+}
+
+.vui-button-xs {
+  font-size: 10px;
+  gap: 4px;
+  min-height: 28px;
+  padding: 6px 10px;
+}
+
+.vui-button-sm {
+  font-size: 11px;
+  gap: 6px;
+  min-height: 34px;
+  padding: 8px 16px;
+}
+
+.vui-button-md {
+  font-size: 13px;
+  gap: 8px;
+  min-height: 42px;
+  padding: 12px 26px;
+}
+
+.vui-button-lg {
+  font-size: 14px;
+  gap: 10px;
+  min-height: 50px;
+  padding: 15px 32px;
+}
+
+.vui-button-xl {
+  font-size: 15px;
+  gap: 12px;
+  min-height: 58px;
+  padding: 18px 38px;
 }
 
 .vui-button:focus-visible {
@@ -230,8 +261,6 @@
 .vui-button-ghost {
   background: transparent;
   color: var(--vui-color-accent);
-  min-height: auto;
-  padding: 0;
   text-underline-offset: 4px;
 }
 
@@ -250,11 +279,8 @@
 }
 
 .vui-button-icon {
-  border-radius: var(--vui-radius-pill);
-  height: 42px;
-  min-height: 42px;
+  aspect-ratio: 1;
   padding: 0;
-  width: 42px;
 }
 
 .vui-control {

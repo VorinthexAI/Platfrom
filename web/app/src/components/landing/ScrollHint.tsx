@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@vorinthex/shared/ui/components";
 import { useGalaxyStore } from "@/lib/galaxy-store";
 
 /**
@@ -45,9 +46,9 @@ export function ScrollHint() {
 
   return (
     <div className="absolute inset-x-0 bottom-10 z-10 flex justify-center sm:bottom-12">
-      <button type="button" onClick={enterBelt} className="font-mono text-[0.55rem] tracking-[0.3em] text-silver-500 uppercase transition-colors hover:text-silver-100">
+      <Button type="button" variant="ghost" size="xs" onClick={enterBelt} className="font-mono tracking-[0.3em] text-silver-500 uppercase hover:text-silver-100">
         Explore beyond our solar system
-      </button>
+      </Button>
     </div>
   );
 }

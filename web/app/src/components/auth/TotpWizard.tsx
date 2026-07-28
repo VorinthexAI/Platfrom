@@ -157,12 +157,9 @@ export function TotpSetupPanel({
           </p>
         </div>
       </div>
-      <a
-        href={setupData.otpauthUrl}
-        className="vui-button vui-button-secondary mt-4 inline-flex min-h-0 w-full justify-center px-5 py-3 text-[0.62rem] uppercase"
-      >
-        On mobile? Tap here to open in your auth app
-      </a>
+      <Button asChild size="md" variant="secondary" className="mt-4 w-full uppercase">
+        <a href={setupData.otpauthUrl}>On mobile? Tap here to open in your auth app</a>
+      </Button>
       <div className="mt-4 grid grid-cols-2 gap-3">
         <label>
           <span className="font-mono text-[0.5rem] tracking-[0.2em] text-silver-500 uppercase">

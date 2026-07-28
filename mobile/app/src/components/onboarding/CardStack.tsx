@@ -12,8 +12,8 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
+import { Button } from "@vorinthex/shared/ui/button";
 
-import { BrandButton } from "@/components/BrandButton";
 import { OnboardingCard } from "@/components/onboarding/OnboardingCard";
 import {
   CAPABILITIES,
@@ -389,28 +389,32 @@ export function CardStack({ onComplete }: CardStackProps) {
 
       <View style={styles.footer}>
         <View style={styles.fallbackRow}>
-          <BrandButton
+          <Button
             accessibilityLabel={
               activeCapability
                 ? `Skip ${activeCapability.name}`
                 : "Skip capability"
             }
-            label="Skip"
             onPress={() => exitRef.current?.("skipped")}
+            size="md"
             style={[styles.fallbackButton, styles.skipButton]}
             variant="secondary"
-          />
-          <BrandButton
+          >
+            Skip
+          </Button>
+          <Button
             accessibilityLabel={
               activeCapability
                 ? `Enable ${activeCapability.name}`
                 : "Enable capability"
             }
-            label="Enable"
             onPress={() => exitRef.current?.("enabled")}
+            size="md"
             style={[styles.fallbackButton, styles.enableButton]}
             variant="primary"
-          />
+          >
+            Enable
+          </Button>
         </View>
       </View>
     </View>

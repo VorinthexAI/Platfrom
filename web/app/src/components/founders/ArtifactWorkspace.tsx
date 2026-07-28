@@ -1,6 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
+import { Button } from "@vorinthex/shared/ui/components";
 import { CloseIcon } from "@vorinthex/shared/ui/icons";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -144,9 +145,9 @@ export function ArtifactWorkspace({ organizationKey, scopeKey, open, onOpenChang
                   </div>
                   <div className="scrollbar-hide flex min-w-0 flex-1 gap-2 overflow-x-auto px-1">
                     {artifacts.map((artifact) => (
-                      <button key={artifact.key} type="button" onClick={() => selectArtifact(artifact.key)} className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-[0.68rem] transition-colors ${artifact.key === selectedKey ? "border-[#d57828]/60 bg-[#d57828]/15 text-silver-50" : "border-white/10 bg-white/[0.025] text-silver-400 hover:border-white/20 hover:text-silver-100"}`}>
+                      <Button key={artifact.key} size="xs" variant="outline" aria-pressed={artifact.key === selectedKey} onClick={() => selectArtifact(artifact.key)} className={`whitespace-nowrap normal-case tracking-normal ${artifact.key === selectedKey ? "border-[#d57828]/60 bg-[#d57828]/15 text-silver-50" : "border-white/10 bg-white/[0.025] text-silver-400 hover:border-white/20 hover:text-silver-100"}`}>
                         {artifact.name}
-                      </button>
+                      </Button>
                     ))}
                   </div>
                   {manifest ? <span className="hidden shrink-0 font-mono text-[0.58rem] text-silver-500 xl:inline">{manifest.stats.renderedNodeCount}/{manifest.stats.sourceNodeCount} nodes</span> : null}
@@ -157,9 +158,7 @@ export function ArtifactWorkspace({ organizationKey, scopeKey, open, onOpenChang
                     </div>
                   ) : null}
                   <Dialog.Close asChild>
-                    <button type="button" aria-label="Close artifact" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.03] text-silver-300 transition-colors hover:border-white/25 hover:text-silver-50">
-                      <CloseIcon size="sm" />
-                    </button>
+                    <Button aria-label="Close artifact" className="shrink-0 bg-white/[0.03] text-silver-300 hover:text-silver-50" icon={<CloseIcon size="sm" />} size="sm" variant="icon">Close artifact</Button>
                   </Dialog.Close>
                 </header>
 
@@ -169,7 +168,7 @@ export function ArtifactWorkspace({ organizationKey, scopeKey, open, onOpenChang
                   {error ? <p className="absolute inset-0 grid place-items-center text-base text-silver-100">{error}</p> : null}
                   {!loading && !error && artifacts.length === 0 ? <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center"><h1 className="font-display text-2xl tracking-[0.12em] text-silver-50">Spatial artifacts</h1><p className="mt-3 max-w-md text-sm leading-relaxed text-silver-300">Semantic graph artifacts created inside Nexus will appear here.</p></div> : null}
                   {selectedNode ? <aside className="founders-surface absolute inset-x-4 bottom-4 z-20 max-h-[42%] overflow-auto rounded-2xl border border-white/10 p-5 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:w-[360px]" aria-live="polite">
-                    <div className="flex items-start justify-between gap-4"><div><p className="font-mono text-[0.58rem] tracking-[0.16em] text-silver-500 uppercase">{selectedNode.kind} · {selectedNode.state}</p><h2 className="mt-2 text-lg text-silver-50">{selectedNode.label}</h2></div><button type="button" onClick={() => { setSelectedNode(null); setNodeDetails(null); }} className="text-silver-400 hover:text-silver-50" aria-label="Close node details">×</button></div>
+                    <div className="flex items-start justify-between gap-4"><div><p className="font-mono text-[0.58rem] tracking-[0.16em] text-silver-500 uppercase">{selectedNode.kind} · {selectedNode.state}</p><h2 className="mt-2 text-lg text-silver-50">{selectedNode.label}</h2></div><Button onClick={() => { setSelectedNode(null); setNodeDetails(null); }} className="text-silver-400 hover:text-silver-50" aria-label="Close node details" icon={<CloseIcon size="sm" />} size="xs" variant="icon">Close node details</Button></div>
                     <p className="mt-2 break-all font-mono text-[0.6rem] text-silver-500">{selectedNode.ref.nodeType}/{selectedNode.ref.nodeKey}</p>
                     <pre className="mt-4 overflow-auto whitespace-pre-wrap text-xs leading-relaxed text-silver-300">{JSON.stringify(nodeDetails?.details ?? selectedNode.details, null, 2)}</pre>
                   </aside> : null}

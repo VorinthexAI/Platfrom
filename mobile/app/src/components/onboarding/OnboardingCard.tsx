@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button } from "@vorinthex/shared/ui/button";
 
-import { BrandButton } from "@/components/BrandButton";
 import { ChromePanel } from "@/components/ChromePanel";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { ProgressDots } from "@/components/ProgressDots";
@@ -44,15 +44,16 @@ export function OnboardingCard({
         <Text style={styles.description}>
           {capability.onboardingDescription}
         </Text>
-        <BrandButton
+        <Button
           accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${capability.name} briefing`}
-          compact
           icon={<VolumeIcon size="sm" variant="inverse" />}
-          label={briefingPlaying ? "Stop Briefing" : "Play Briefing"}
           onPress={onToggleBriefing}
+          size="sm"
           style={styles.briefingButton}
           variant="primary"
-        />
+        >
+          {briefingPlaying ? "Stop Briefing" : "Play Briefing"}
+        </Button>
       </View>
       <ProgressDots
         count={CAPABILITIES.length}

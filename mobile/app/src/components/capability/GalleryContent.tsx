@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { PlusIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button } from "@vorinthex/shared/ui/button";
 
 import { GalleryThumb } from "@/components/capability/GalleryThumb";
-import { PressableScale } from "@/components/PressableScale";
 import { fetchCapabilityContent } from "@/data/mock";
 import { useUiStore, type GalleryTab } from "@/state/ui";
 import { fonts, palette, spacing, tracking } from "@/theme/tokens";
@@ -41,17 +41,20 @@ export function GalleryContent() {
     <View>
       <View style={styles.tabs}>
         {TABS.map(({ key, label }) => (
-          <PressableScale
+          <Button
             key={key}
             accessibilityRole="tab"
             accessibilityLabel={label}
             accessibilityState={{ selected: tab === key }}
+            contentMode="raw"
             onPress={() => setTab(key)}
+            size="xs"
             style={styles.tab}
+            variant="ghost"
           >
             <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text>
             <View style={[styles.tabLine, tab === key && styles.tabLineActive]} />
-          </PressableScale>
+          </Button>
         ))}
       </View>
 
@@ -61,13 +64,16 @@ export function GalleryContent() {
         ))}
       </View>
 
-      <PressableScale
+      <Button
         accessibilityRole="button"
         accessibilityLabel="Create image"
+        contentMode="raw"
+        size="lg"
         style={styles.fab}
+        variant="icon"
       >
         <PlusIcon size="md" variant="accent" />
-      </PressableScale>
+      </Button>
     </View>
   );
 }

@@ -86,18 +86,18 @@ export function ProductDrawer() {
               <div className="flex cursor-grab justify-center pt-2.5 pb-1 active:cursor-grabbing">
                 <span className="block h-1 w-10 rounded-full bg-white/15" />
               </div>
-              <button
-                type="button"
+              <Button
                 onClick={closeAndLeave}
                 aria-label="Close"
-                className="absolute top-3 right-4 z-10 inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/12 text-silver-500 shadow-none transition-colors hover:border-white/25 hover:bg-white/[0.04] hover:text-silver-200"
+                className="absolute top-3 right-4 z-10 text-silver-500 shadow-none hover:bg-white/[0.04] hover:text-silver-200"
+                icon={<CloseIcon width={12} height={12} />}
+                size="sm"
                 style={{
                   background: "rgba(255, 255, 255, 0.025)",
                   boxShadow: "none",
                 }}
-              >
-                <CloseIcon width={12} height={12} />
-              </button>
+                variant="icon"
+              >Close</Button>
 
               <div
                 data-scroll-safe

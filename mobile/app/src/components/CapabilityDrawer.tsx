@@ -11,11 +11,10 @@ import Animated, {
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Button } from "@vorinthex/shared/ui/button";
 
-import { BrandButton } from "@/components/BrandButton";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { ChromePanel } from "@/components/ChromePanel";
-import { PressableScale } from "@/components/PressableScale";
 import { capabilityIconSource } from "@/data/capability-icons";
 import type { Capability } from "@/data/registry";
 import { useGalaxyStore } from "@/state/galaxy";
@@ -115,15 +114,18 @@ export function CapabilityDrawer({ capability, onOpen }: CapabilityDrawerProps) 
           <View style={styles.handleRow}>
             <View style={styles.handle} />
           </View>
-          <PressableScale
+          <Button
             accessibilityRole="button"
             accessibilityLabel="Close and return to orbit"
+            contentMode="raw"
             hitSlop={10}
             onPress={exit}
+            size="sm"
             style={styles.close}
+            variant="icon"
           >
             <Text style={styles.closeGlyph}>{"×"}</Text>
-          </PressableScale>
+          </Button>
 
           <View style={styles.header}>
             <View style={styles.logoRing}>
@@ -143,13 +145,15 @@ export function CapabilityDrawer({ capability, onOpen }: CapabilityDrawerProps) 
           {/* Voice control lives in the biome header now — the drawer
               keeps a single primary CTA. */}
           <View style={styles.actions}>
-            <BrandButton
+            <Button
               accessibilityLabel={`Open ${capability.name}`}
-              label="Open"
               onPress={() => onOpen(capability)}
+              size="md"
               style={styles.action}
               variant="primary"
-            />
+            >
+              Open
+            </Button>
           </View>
         </ChromePanel>
       </GestureDetector>

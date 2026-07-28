@@ -5,6 +5,7 @@ import { useFrame, type ThreeEvent } from "@react-three/fiber";
 import { useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { Button } from "@vorinthex/shared/ui/components";
 
 const TOTAL_POINTS = 720;
 const NEIGHBOR_LINKS = 3;
@@ -230,9 +231,8 @@ export default function NexusBrainCore({
       </mesh>
 
       <Html center position={[0, -1.48, 0]} distanceFactor={10} zIndexRange={[20, 0]}>
-        <button
+        <Button
           id="entity-control-product-core"
-          type="button"
           tabIndex={-1}
           aria-label="Enter Core, Your AI Brain"
           aria-pressed={selected}
@@ -241,7 +241,9 @@ export default function NexusBrainCore({
             event.stopPropagation();
             activate();
           }}
-          className="flex min-w-[112px] flex-col items-center rounded-md px-3 py-1.5 outline-none focus-visible:ring-1 focus-visible:ring-[#ffc267] focus-visible:shadow-[0_0_20px_rgba(255,160,54,0.65)]"
+          className="min-h-0 min-w-[112px] flex-col px-3 py-1.5 normal-case outline-none focus-visible:ring-1 focus-visible:ring-[#ffc267] focus-visible:shadow-[0_0_20px_rgba(255,160,54,0.65)]"
+          size="xs"
+          variant="ghost"
         >
           <span className={`font-mono text-[0.55rem] tracking-[0.24em] uppercase ${energized ? "text-[#ffd18a]" : "text-[#d8dde0]"}`}>
             Core
@@ -249,7 +251,7 @@ export default function NexusBrainCore({
           <span className={`mt-0.5 whitespace-nowrap text-[0.62rem] font-medium tracking-[0.12em] ${energized ? "text-[#fff0d1]" : "text-[#b9c0c5]"}`}>
             Your AI Brain
           </span>
-        </button>
+        </Button>
       </Html>
     </group>
   );
