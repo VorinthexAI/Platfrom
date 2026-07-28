@@ -21,6 +21,7 @@
     "db:migrate": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",
     "db:migrate:dev": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",
     "db:migrate:ci": "bun run src/db/arango-migrate.ts",
+    "db:backfill-message-embeddings": "bun run load-local-env && bun --env-file=.env.local scripts/backfill-message-embeddings.ts",
     "seed.ts": "bun run load-local-env && bun --env-file=.env.local src/lib/db/seed.ts",
     "db:seed": "bun run load-local-env && bun --env-file=.env.local src/db/seed-all.ts",
     "seed:secrets": "bun run scripts/seed-secrets.ts",

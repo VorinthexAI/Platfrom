@@ -13,6 +13,7 @@ import { userMentionSchema } from '@/lib/db/user-mentions.node';
 import { userReactionSchema } from '@/lib/db/user-reactions.node';
 import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
+import { embeddingMetadata, embedText } from '@/lib/bedrock-titan';
 
 export interface MentionCandidate {
   participantKey: string;
@@ -147,7 +148,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
       };
       const human = await participant({ channelKey: channel.key, userOrganizationKey: membershipKey }, channelParticipantSchema.parse({ key: newId(), scopeKey: allowed.scopeKey, channelKey: channel.key, userOrganizationKey: membershipKey, joinedAt: now, createdAt: now, updatedAt: now }));
       const candidates = await trx.query<Record<string, any>>(`
-        LET people = (FOR memberLink IN userOrganizations FILTER memberLink.organizationId == @organizationKey COLLECT userKey = memberLink.userId INTO memberships = memberLink SORT userKey ASC LET member = FIRST(memberships) LET user = DOCUMENT(users, userKey) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) RETURN { membershipKey: member._key, participantKey: participant == null ? null : participant._key, type: "user", key: user._key, name: TRIM(NOT_NULL(user.name, user.alias, user.email, "Member")), mentionCount: 0 })
+        LET people = (FOR memberLink IN userOrganizations FILTER memberLink.organizationId == @organizationKey && memberLink.status == "active" COLLECT userKey = memberLink.userId INTO memberships = memberLink SORT userKey ASC LET member = FIRST(memberships) LET user = DOCUMENT(users, userKey) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) RETURN { membershipKey: member._key, participantKey: participant == null ? null : participant._key, type: "user", key: user._key, name: TRIM(NOT_NULL(user.name, user.alias, user.email, "Member")), mentionCount: 0 })
         LET agents = (FOR orchestrator IN orchestrators FILTER orchestrator.name IN @orchestratorNames SORT orchestrator.name ASC, orchestrator._key ASC RETURN { participantKey: FIRST(FOR participant IN channelParticipants FILTER participant.channelKey == @channelKey && participant.orchestratorKey == orchestrator._key LIMIT 1 RETURN participant._key), type: "orchestrator", key: orchestrator._key, name: TRIM(orchestrator.name), role: orchestrator.role, skill: orchestrator.skill, mentionCount: 0 })
         RETURN { people, agents }
       `, { organizationKey, channelKey: channel.key, orchestratorNames: CANONICAL_ORCHESTRATOR_NAMES });
@@ -176,7 +177,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
       LET allowed = channel != null && channel.kind == "group" && channel.name == "general" && channel.organizationKey == @organizationKey && channel.archivedAt == null && membership != null && membership.organizationId == @organizationKey && membership.status == "active"
       FILTER allowed && human != null
       LET viewerUserKey = membership.userId
-      LET people = (FOR memberLink IN userOrganizations FILTER memberLink.organizationId == @organizationKey COLLECT userKey = memberLink.userId INTO memberships = memberLink SORT userKey ASC LET member = FIRST(memberships) LET user = DOCUMENT(users, userKey) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) FILTER participant != null LET usage = FIRST(FOR item IN userMentions FILTER item.userKey == viewerUserKey && item.sourceId == user._key LIMIT 1 RETURN item.count) RETURN { participantKey: participant._key, type: "user", key: user._key, name: TRIM(NOT_NULL(user.name, user.alias, user.email, "Member")), mentionCount: NOT_NULL(usage, 0) })
+      LET people = (FOR memberLink IN userOrganizations FILTER memberLink.organizationId == @organizationKey && memberLink.status == "active" COLLECT userKey = memberLink.userId INTO memberships = memberLink SORT userKey ASC LET member = FIRST(memberships) LET user = DOCUMENT(users, userKey) FILTER user != null LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.userOrganizationKey == member._key LIMIT 1 RETURN item) FILTER participant != null LET usage = FIRST(FOR item IN userMentions FILTER item.userKey == viewerUserKey && item.sourceId == user._key LIMIT 1 RETURN item.count) RETURN { participantKey: participant._key, type: "user", key: user._key, name: TRIM(NOT_NULL(user.name, user.alias, user.email, "Member")), mentionCount: NOT_NULL(usage, 0) })
       LET agents = (FOR orchestrator IN orchestrators FILTER orchestrator.name IN @orchestratorNames LET participant = FIRST(FOR item IN channelParticipants FILTER item.channelKey == @channelKey && item.orchestratorKey == orchestrator._key LIMIT 1 RETURN item) FILTER participant != null LET usage = FIRST(FOR item IN userMentions FILTER item.userKey == viewerUserKey && item.sourceId == orchestrator._key LIMIT 1 RETURN item.count) SORT orchestrator.name ASC, orchestrator._key ASC RETURN { participantKey: participant._key, type: "orchestrator", key: orchestrator._key, name: TRIM(orchestrator.name), role: orchestrator.role, skill: orchestrator.skill, mentionCount: NOT_NULL(usage, 0) })
       LET everyoneUsage = FIRST(FOR item IN userMentions FILTER item.userKey == viewerUserKey && item.sourceId == "everyone" LIMIT 1 RETURN item.count)
       RETURN { channel, humanParticipant: human, viewerUserKey, mentions: APPEND([{ participantKey: "everyone", type: "everyone", key: "everyone", name: "everyone", mentionCount: NOT_NULL(everyoneUsage, 0) }], APPEND(people, agents)) }
@@ -273,8 +274,29 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   },
 
   async insertMessage(message) {
-    const result = await db.collection('messages').save(toArangoDoc(message), { returnNew: true });
-    return parse(messageSchema, result.new as Record<string, unknown>);
+    const collection = db.collection('messages');
+    const pending = messageSchema.parse({ ...message, embedding: [], embeddingState: 'pending' });
+    const result = await collection.save(toArangoDoc(pending), { returnNew: true });
+    try {
+      const embedding = await embedText({ text: pending.content });
+      if (!embedding.length) {
+        const failed = await collection.update(pending.key, { embeddingState: 'failed', updatedAt: pending.updatedAt }, { returnNew: true });
+        return parse(messageSchema, failed.new as Record<string, unknown>);
+      }
+      const embeddedAt = new Date().toISOString();
+      const ready = await collection.update(pending.key, {
+        embedding,
+        embeddingState: 'ready',
+        embeddingDimensions: embedding.length,
+        embeddedAt,
+        ...embeddingMetadata(),
+      }, { returnNew: true });
+      return parse(messageSchema, ready.new as Record<string, unknown>);
+    } catch (error) {
+      console.error('message embedding failed', { messageKey: pending.key, error });
+      const failed = await collection.update(pending.key, { embeddingState: 'failed' }, { returnNew: true });
+      return parse(messageSchema, failed.new as Record<string, unknown>);
+    }
   },
   async insertMentions(mentions) {
     if (!mentions.length) return;

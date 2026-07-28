@@ -12,6 +12,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const assistantCalls: unknown[][] = [];
   const streamSkills: string[] = [];
   const streamInputs: unknown[] = [];
+  const streamDependencies: unknown[] = [];
   const transcriptionCalls: unknown[][] = [];
   const speechCalls: unknown[][] = [];
   const access = { channel: { key: channelKey }, humanParticipant: { key: newId() }, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 }, { participantKey: newId(), type: 'orchestrator', key: newId(), name: 'Atlas', mentionCount: 0 }] };
@@ -25,7 +26,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const handlers = createChorusHandlers({
     service: service as never,
     resolveActor: async (c) => options.authenticated === false ? c.json({ error: 'authentication required' }, 401) : options.forbidden ? c.json({ error: 'founders gate access required' }, 403) : actor,
-    stream: async function* (skill, input) { streamSkills.push(skill); streamInputs.push(input); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; },
+    stream: async function* (skill, input, dependencies) { streamSkills.push(skill); streamInputs.push(input); streamDependencies.push(dependencies); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; },
     listScopes: async () => [{ name: 'HQ', description: 'The organization workspace.' }, { name: 'Ignored', description: null }],
     transcribe: async (...args) => { transcriptionCalls.push(args); return { text: '@Atlas hello' }; },
     speak: async (...args) => { speechCalls.push(args); return { audioBase64: 'UklGRg==', mimeType: 'audio/wav' }; },
@@ -35,7 +36,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.clearChannel);
   app.post('/founders/organizations/:organizationKey/chorus/transcriptions', handlers.transcribe);
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, transcriptionCalls, speechCalls };
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls };
 }
 
 describe('Chorus SSE API', () => {
@@ -47,7 +48,7 @@ describe('Chorus SSE API', () => {
   });
 
   test('streams tokens and persists user then assistant messages', async () => {
-    const { app, persisted, assistantCalls, streamSkills, streamInputs } = appFor();
+    const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies } = appFor();
     const threadKey = newId();
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello', threadKey }) });
     const text = await response.text();
@@ -55,6 +56,7 @@ describe('Chorus SSE API', () => {
     expect(text).toContain('event: start'); expect(text).toContain('event: token'); expect(text).toContain('event: done');
     expect(persisted).toEqual(['user', 'assistant']);
     expect(streamInputs).toEqual([{ message: 'hello' }]);
+    expect(streamDependencies[0]).toMatchObject({ organizationKey, messageContext: { organizationKey, membershipKey: actor.membershipKey, excludeMessageKey: expect.any(String) } });
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(streamSkills[0]).toContain('detailed, self-contained plain-text answer');
     expect(streamSkills[0]).toContain('## Organization scopes\nHQ: The organization workspace.');

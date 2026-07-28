@@ -11,6 +11,7 @@ import type { DomainToolContext, DomainToolExecutionOptions } from './domain-exe
 import { orchestratorChatTool, orchestratorChatToolInputSchema } from './orchestrator-chat';
 import { PUBLIC_TOOL_DEFINITIONS } from './tool-definitions';
 import type { PublicToolDependencies } from './tool-definition';
+import type { OrganizationMessageContext, OrganizationMessageContextDependencies } from './organization-message-context';
 
 /**
  * A tool name has exactly one registry entry. Archive lifecycle calls retain
@@ -28,11 +29,12 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
 export { orchestratorChatToolInputSchema };
 
-export interface ToolDependencies extends RouterDependencies, DocumentProcessingDependencies {
+export interface ToolDependencies extends RouterDependencies, DocumentProcessingDependencies, OrganizationMessageContextDependencies {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
   organizationKey?: string;
+  messageContext?: OrganizationMessageContext;
   archiveContext?: DomainToolContext;
   archiveDependencies?: ArchiveToolDependencies;
   domainDependencies?: DomainToolExecutionOptions;
@@ -73,6 +75,8 @@ export async function* streamTool(name: string, skill: string, rawInput: unknown
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
+export { organizationMessageContextTool, semanticSearchOrganizationMessages } from './organization-message-context';
+export type { OrganizationMessageContext, OrganizationMessageContextDependencies, MessageSemanticMatch, MessageSemanticSearchInput } from './organization-message-context';
 export * from './archive-errors';
 export * from './archive-schemas';
 export * from './archive-json-schema';

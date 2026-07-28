@@ -15,6 +15,11 @@ export const messageSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   embedding: z.array(z.number().finite()).default([]),
+  embeddingState: z.enum(['pending', 'ready', 'failed']).default('pending'),
+  embeddingProvider: z.string().min(1).optional(),
+  embeddingModel: z.string().min(1).optional(),
+  embeddingDimensions: z.number().int().positive().optional(),
+  embeddedAt: z.string().datetime().optional(),
 });
 
 export type Message = z.infer<typeof messageSchema>;
