@@ -12,6 +12,7 @@ import { scheduleOnRN } from "react-native-worklets";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as THREE from "three";
 import { ChevronLeftIcon, VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button } from "@vorinthex/shared/ui/button";
 
 import {
   CAPABILITY_CAROUSEL_HEIGHT,
@@ -34,7 +35,6 @@ import {
 } from "@/components/galaxy/galaxy-refs";
 import { GalaxyScene } from "@/components/galaxy/GalaxyScene";
 import { InteriorEmblem } from "@/components/InteriorEmblem";
-import { PressableScale } from "@/components/PressableScale";
 import {
   CAPABILITIES,
   type Capability,
@@ -319,15 +319,18 @@ export function HomeConstellation({
           <CapabilityDrawer capability={targetCapability} onOpen={open} />
           {phase !== "overview" ? (
             <View style={[styles.backButton, { top: insets.top + 8 }]}>
-              <PressableScale
+              <Button
                 accessibilityRole="button"
                 accessibilityLabel="Return to orbit"
+                contentMode="raw"
                 hitSlop={12}
                 onPress={exit}
+                size="md"
                 style={styles.backPress}
+                variant="icon"
               >
                 <ChevronLeftIcon size="md" variant="accent" />
-              </PressableScale>
+              </Button>
             </View>
           ) : null}
           {phase === "inside" && targetCapability ? (
@@ -335,24 +338,27 @@ export function HomeConstellation({
             // back chevron. Icon only; arrival auto-plays the briefing, so
             // this mostly reads as "mute".
             <View style={[styles.voiceButton, { top: insets.top + 8 }]}>
-              <PressableScale
+              <Button
                 accessibilityRole="button"
                 accessibilityLabel={
                   audio.playingBriefing === targetCapability.slug
                     ? `Stop ${targetCapability.name} briefing`
                     : `Play ${targetCapability.name} briefing`
                 }
+                contentMode="raw"
                 hitSlop={12}
                 onPress={() => audio.toggleBriefing(targetCapability.slug)}
+                size="md"
                 style={[
                   styles.backPress,
                   audio.playingBriefing === targetCapability.slug
                     ? styles.voicePressLive
                     : null,
                 ]}
+                variant="icon"
               >
                 <VolumeIcon size="md" variant="accent" />
-              </PressableScale>
+              </Button>
             </View>
           ) : null}
         </View>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Button } from "@vorinthex/shared/ui/components";
 
 export default function NotFound() {
   return (
@@ -11,9 +12,9 @@ export default function NotFound() {
         This coordinate does not exist in the Nexus. Return to the galaxy
         overview.
       </p>
-      <Link href="/" className="vui-button vui-button-secondary mt-10 min-h-0 px-7 py-3 text-xs uppercase">
-        Back to overview
-      </Link>
+      <Button asChild size="md" variant="secondary" className="mt-10 uppercase">
+        <Link href="/">Back to overview</Link>
+      </Button>
     </main>
   );
 }

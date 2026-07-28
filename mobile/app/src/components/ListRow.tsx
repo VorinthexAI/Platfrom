@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { MoreHorizontalIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button } from "@vorinthex/shared/ui/button";
 
-import { PressableScale } from "@/components/PressableScale";
 import { fonts, palette, radii } from "@/theme/tokens";
 
 export type ListRowProps = {
@@ -15,7 +15,14 @@ export type ListRowProps = {
 /** Obsidian panel row used across capability content lists. */
 export function ListRow({ icon, title, subtitle, right }: ListRowProps) {
   return (
-    <PressableScale accessibilityRole="button" accessibilityLabel={title} style={styles.row}>
+    <Button
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      contentMode="raw"
+      size="md"
+      style={styles.row}
+      variant="secondary"
+    >
       {icon ? <View style={styles.iconWell}>{icon}</View> : null}
       <View style={styles.textBlock}>
         <Text style={styles.title} numberOfLines={1}>
@@ -26,7 +33,7 @@ export function ListRow({ icon, title, subtitle, right }: ListRowProps) {
         </Text>
       </View>
       {right ?? <MoreHorizontalIcon size="sm" variant="muted" />}
-    </PressableScale>
+    </Button>
   );
 }
 

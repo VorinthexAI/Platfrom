@@ -65,14 +65,14 @@ function CollectGateCard() {
             className="chrome-border card-depth pointer-events-auto relative w-full max-w-md rounded-3xl p-7 sm:p-9"
             style={{ background: "var(--gradient-panel)" }}
           >
-            <button
-              type="button"
+            <Button
               onClick={dismissCollectGate}
               aria-label="Dismiss"
-              className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
-            >
-              <CloseIcon width={12} height={12} />
-            </button>
+              className="absolute top-4 right-4 text-silver-500 hover:text-silver-100"
+              icon={<CloseIcon width={12} height={12} />}
+              size="sm"
+              variant="icon"
+            >Dismiss</Button>
             <p className="micro-label">The Hunt</p>
             <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
               Fragments need an explorer.
@@ -147,14 +147,14 @@ function CollectibleTooltip() {
         >
           <div className="flex items-center justify-between gap-3">
             <p className="micro-label">{selected.rarity} discovery</p>
-            <button
-              type="button"
+            <Button
               onClick={() => select(null)}
               aria-label="Dismiss discovery"
-              className="rounded-full border border-white/10 p-1.5 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
-            >
-              <CloseIcon width={10} height={10} />
-            </button>
+              className="text-silver-500 hover:text-silver-100"
+              icon={<CloseIcon width={10} height={10} />}
+              size="xs"
+              variant="icon"
+            >Dismiss discovery</Button>
           </div>
           <h3 className="font-display mt-2 text-lg tracking-[0.16em] text-silver-50 uppercase">
             {selected.name}

@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
+import { Button } from "@vorinthex/shared/ui/components";
 import { products } from "@/data/products";
 import { getChildren, getEntityRenderState } from "@/lib/galaxy/registry-helpers";
 import { trackCtaClick } from "@/lib/analytics";
@@ -126,11 +127,13 @@ function RailDot({
 }) {
   return (
     <li className={`relative ${small ? "-my-1.5 pr-[2px]" : ""}`}>
-      <button
-        type="button"
+      <Button
         onClick={onClick}
-        aria-current={active ? "true" : undefined}
-        className="group flex items-center gap-3"
+        aria-current={active ? "page" : undefined}
+        aria-label={label}
+        size="xs"
+        variant="ghost"
+        className="group gap-3"
       >
         <span
           className={`hidden font-mono tracking-[0.26em] uppercase transition-colors md:block ${
@@ -152,7 +155,7 @@ function RailDot({
               : "border-silver-700 bg-transparent group-hover:border-silver-300"
           }`}
         />
-      </button>
+      </Button>
     </li>
   );
 }

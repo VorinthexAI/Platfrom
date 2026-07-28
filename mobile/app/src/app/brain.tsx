@@ -4,9 +4,9 @@ import { StyleSheet, Text, View } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button } from "@vorinthex/shared/ui/button";
 
 import { HomeConstellation } from "@/components/HomeConstellation";
-import { PressableScale } from "@/components/PressableScale";
 import { TransitionVeil } from "@/components/TransitionVeil";
 import { MOCK_USER, greetingForHour } from "@/data/mock";
 import { CAPABILITIES, type CapabilitySlug } from "@/data/registry";
@@ -80,13 +80,16 @@ export default function BrainRoute() {
             <Text style={styles.greeting}>{typedGreeting}</Text>
             <Text style={styles.name}>{typedName}</Text>
           </View>
-          <PressableScale
+          <Button
             accessibilityRole="button"
             accessibilityLabel="Settings"
+            contentMode="raw"
+            size="md"
             style={styles.settingsButton}
+            variant="icon"
           >
             <SettingsIcon size="md" variant="accent" />
-          </PressableScale>
+          </Button>
         </Animated.View>
       )}
 

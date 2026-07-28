@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronRightIcon } from "@vorinthex/shared/ui/icons";
+import { Button } from "@vorinthex/shared/ui/components";
 
 interface AccountFooterProps {
   name: string;
@@ -15,11 +16,12 @@ function initialsOf(name: string): string {
 /** Clickable identity row at the bottom of the left panel. */
 export function AccountFooter({ name, secondary, onOpen }: AccountFooterProps) {
   return (
-    <button
-      type="button"
+    <Button
       onClick={onOpen}
-      aria-label="Open Account"
-      className="group flex items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-white/10 hover:bg-black/25"
+      aria-label={`Open account for ${name}`}
+      className="group w-full justify-start gap-3 border-transparent px-3 py-2.5 text-left normal-case tracking-normal hover:border-white/10 hover:bg-black/25"
+      size="md"
+      variant="ghost"
     >
       <span
         aria-hidden
@@ -34,6 +36,6 @@ export function AccountFooter({ name, secondary, onOpen }: AccountFooterProps) {
         </span>
       </span>
       <ChevronRightIcon size="sm" className="shrink-0 text-silver-500 transition-colors group-hover:text-silver-100" />
-    </button>
+    </Button>
   );
 }

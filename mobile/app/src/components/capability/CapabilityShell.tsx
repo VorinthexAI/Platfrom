@@ -4,9 +4,9 @@ import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-n
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChevronLeftIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { Button } from "@vorinthex/shared/ui/button";
 
 import { ChromeIcon } from "@/components/ChromeIcon";
-import { PressableScale } from "@/components/PressableScale";
 import { NeuralField3D } from "@/components/three/NeuralField3D";
 import { SearchBar } from "@/components/SearchBar";
 import { capabilityIconSource } from "@/data/capability-icons";
@@ -34,14 +34,17 @@ export function CapabilityShell({ capability, children }: CapabilityShellProps) 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 6 }]}>
       <View style={styles.header}>
-        <PressableScale
+        <Button
           accessibilityRole="button"
           accessibilityLabel="Back to your brain"
+          contentMode="raw"
           onPress={() => router.back()}
+          size="md"
           style={styles.backButton}
+          variant="ghost"
         >
           <ChevronLeftIcon size="md" variant="accent" />
-        </PressableScale>
+        </Button>
         <Text style={styles.title}>{capability.name.toUpperCase()}</Text>
         <View style={styles.headerSpacer} />
       </View>

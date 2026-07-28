@@ -132,18 +132,18 @@ export function CaveOverlay() {
                 {/* The sealed chamber has no exit: no close, no escape —
                     the visitor's session lives where they requested it. */}
                 {caveKind === "sealed" ? null : (
-                  <button
-                    type="button"
+                  <Button
                     onClick={() => {
                       trackCtaClick("cave_close", { cave_kind: caveKind });
                       exitCave();
                       syncEntityUrl("/");
                     }}
                     aria-label="Leave the cave"
-                    className="absolute top-4 right-4 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
-                  >
-                    <CloseIcon width={12} height={12} />
-                  </button>
+                    className="absolute top-4 right-4 text-silver-500 hover:text-silver-100"
+                    icon={<CloseIcon width={12} height={12} />}
+                    size="sm"
+                    variant="icon"
+                  >Leave the cave</Button>
                 )}
 
                 {caveKind === "sealed" ? <SealedFlow /> : null}
@@ -623,18 +623,18 @@ function PricingFlow() {
         className="chrome-border card-depth relative w-full rounded-3xl px-6 py-4 sm:px-7"
         style={{ background: "var(--gradient-panel)" }}
       >
-        <button
-          type="button"
+        <Button
           onClick={() => {
             trackCtaClick("cave_close", { cave_kind: "pricing" });
             exitCave();
             syncEntityUrl("/");
           }}
           aria-label="Leave the cave"
-          className="absolute top-3.5 right-3.5 rounded-full border border-white/10 p-2 text-silver-500 transition-colors hover:border-white/25 hover:text-silver-100"
-        >
-          <CloseIcon width={12} height={12} />
-        </button>
+          className="absolute top-3.5 right-3.5 text-silver-500 hover:text-silver-100"
+          icon={<CloseIcon width={12} height={12} />}
+          size="sm"
+          variant="icon"
+        >Leave the cave</Button>
         <p className="micro-label">New to Vorinthex?</p>
         <p className="mt-2 pr-10 text-sm leading-relaxed text-silver-300">
           New users start with at least 1,000 free Sparks to explore and
@@ -1099,42 +1099,32 @@ function ExplorerSigninFlow() {
           >
             Continue with email
           </Button>
-          <a
-            href="/api/auth/oauth/google/start"
-            onClick={() =>
-              trackCtaClick("signin_method_google", { placement: "signin_cave" })
-            }
-            className="vui-button vui-button-secondary inline-flex w-full items-center justify-center px-5 py-3.5 text-xs uppercase"
-          >
-            Continue with Google
-          </a>
-          <a
-            href="/api/auth/oauth/apple/start"
-            onClick={() =>
-              trackCtaClick("signin_method_apple", { placement: "signin_cave" })
-            }
-            className="vui-button vui-button-secondary inline-flex w-full items-center justify-center px-5 py-3.5 text-xs uppercase"
-          >
-            Continue with Apple
-          </a>
+          <Button asChild size="lg" variant="secondary" className="w-full uppercase">
+            <a href="/api/auth/oauth/google/start" onClick={() => trackCtaClick("signin_method_google", { placement: "signin_cave" })}>Continue with Google</a>
+          </Button>
+          <Button asChild size="lg" variant="secondary" className="w-full uppercase">
+            <a href="/api/auth/oauth/apple/start" onClick={() => trackCtaClick("signin_method_apple", { placement: "signin_cave" })}>Continue with Apple</a>
+          </Button>
         </div>
         <p className="mt-5 text-center text-[0.68rem] leading-relaxed text-silver-500">
           By continuing you agree to our{" "}
-          <button
-            type="button"
+          <Button
             onClick={() => openLegalVault("terms")}
-            className="underline decoration-white/20 underline-offset-2 transition-colors hover:text-silver-100"
+            size="xs"
+            variant="ghost"
+            className="inline min-h-0 p-0 text-[inherit] normal-case tracking-normal underline decoration-white/20 underline-offset-2 transition-colors hover:text-silver-100"
           >
             Terms of Service
-          </button>{" "}
+          </Button>{" "}
           and{" "}
-          <button
-            type="button"
+          <Button
             onClick={() => openLegalVault("privacy")}
-            className="underline decoration-white/20 underline-offset-2 transition-colors hover:text-silver-100"
+            size="xs"
+            variant="ghost"
+            className="inline min-h-0 p-0 text-[inherit] normal-case tracking-normal underline decoration-white/20 underline-offset-2 transition-colors hover:text-silver-100"
           >
             Privacy Policy
-          </button>
+          </Button>
           .
         </p>
       </div>
@@ -1144,13 +1134,14 @@ function ExplorerSigninFlow() {
   // Step 2: email. Reached only via "Continue with email" above.
   return (
     <form onSubmit={handleSubmit}>
-      <button
-        type="button"
+      <Button
         onClick={() => setMethod("choose")}
+        size="xs"
+        variant="ghost"
         className="font-mono text-[0.58rem] tracking-[0.24em] text-silver-500 uppercase transition-colors hover:text-silver-100"
       >
         ← Back
-      </button>
+      </Button>
       <h2 className="font-display mt-3 text-2xl tracking-[0.1em] text-silver-50">
         Sign in with email.
       </h2>

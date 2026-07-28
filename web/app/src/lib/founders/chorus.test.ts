@@ -92,9 +92,10 @@ describe("Chorus mention rows", () => {
   });
 });
 
-describe("HQ shared controls", () => {
-  test("keeps primary actions visible and renders the canonical orchestrator lane", async () => {
+describe("shared button controls", () => {
+  test("enforces the shared radius, sizes, and application-level usage", async () => {
     const component = await Bun.file(new URL("../../components/founders/HqCommunicationOverlay.tsx", import.meta.url)).text();
+    const mobileHome = await Bun.file(new URL("../../../../../mobile/app/src/components/HomeConstellation.tsx", import.meta.url)).text();
     const theme = await Bun.file(new URL("../../../../../shared/packages/ui/theme.css", import.meta.url)).text();
     const guidance = await Bun.file(new URL("../../../../../AGENTS.md", import.meta.url)).text();
     expect(component).toContain("CHORUS_ORCHESTRATOR_NAMES.map");
@@ -103,9 +104,17 @@ describe("HQ shared controls", () => {
     expect(component).toContain('icon={<MoreHorizontalIcon size="sm" />}');
     expect(component).toContain('border-[var(--border-soft)] opacity-0');
     expect(component).toContain('aria-label="Mention shortcuts"');
-    expect(component).toContain('bg-[image:var(--gradient-chrome)]');
+    expect(component).not.toContain("<button");
+    expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');
+    expect(mobileHome).not.toContain("PressableScale");
+    for (const size of ["xs", "sm", "md", "lg", "xl"]) {
+      expect(theme).toContain(`.vui-button-${size}`);
+    }
+    expect(theme).toContain("border-radius: var(--vui-radius-pill) !important");
     expect(theme).toContain('.vui-button-primary:disabled');
     expect(theme.match(/opacity: 0\.8;/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(guidance).toContain("Do not create app-local UI primitives");
+    expect(guidance).toContain("one of its five sizes (`xs`, `sm`, `md`, `lg`, `xl`)");
     expect(guidance).toContain("Disabled primary actions must remain visibly identifiable at 80% opacity");
   });
 });

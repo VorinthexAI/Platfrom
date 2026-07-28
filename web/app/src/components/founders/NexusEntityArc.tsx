@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type WheelEvent } from "react";
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronUpIcon } from "@vorinthex/shared/ui/icons";
+import { Button } from "@vorinthex/shared/ui/components";
 import { entityAudioUrl, orchestratorMessageUrl, useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
@@ -132,9 +133,9 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
       </div>
 
       <div className="absolute top-11 left-4 z-20 flex flex-col items-center gap-1 sm:left-7">
-        <button type="button" onClick={() => selectLayer(-1)} aria-label="Previous station layer" className="founders-surface flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronUpIcon size="sm" /></button>
+        <Button onClick={() => selectLayer(-1)} aria-label="Previous station layer" className="founders-surface text-silver-300 hover:text-white" icon={<ChevronUpIcon size="sm" />} size="sm" variant="icon">Previous station layer</Button>
         <span className="w-32 whitespace-nowrap text-center font-mono text-[0.46rem] tracking-[0.16em] text-[#c18a5a] uppercase">{layer.name}</span>
-        <button type="button" onClick={() => selectLayer(1)} aria-label="Next station layer" className="founders-surface flex h-8 w-8 items-center justify-center rounded-full text-silver-300 hover:text-white"><ChevronDownIcon size="sm" /></button>
+        <Button onClick={() => selectLayer(1)} aria-label="Next station layer" className="founders-surface text-silver-300 hover:text-white" icon={<ChevronDownIcon size="sm" />} size="sm" variant="icon">Next station layer</Button>
       </div>
 
       <div
@@ -154,14 +155,15 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
               className={`relative rounded-2xl border p-3 backdrop-blur-md transition-[transform,opacity,border-color,background-color] duration-500 ${selected ? "border-[#d8904d]/55 bg-[#18130f]/90 opacity-100 shadow-[0_18px_50px_rgba(0,0,0,0.5),0_0_35px_rgba(209,111,37,0.12)]" : "border-white/10 bg-[#080b0d]/78 opacity-72"}`}
               style={{ transform: downwardArcTransform(offset, 0, 120, 4, 12, scale) }}
             >
-              <button
+              <Button
                 id={`arc-card-${entity.id.replaceAll(".", "-")}`}
-                type="button"
                 tabIndex={selected ? 0 : -1}
                 onFocus={() => onSelect(entity)}
                 onClick={() => { if (selected) onEnter(entity); else onSelect(entity); }}
-                className="nexus-arc-card block w-full rounded-xl text-left outline-none"
+                className="nexus-arc-card block min-h-0 w-full p-0 text-left normal-case tracking-normal outline-none"
                 aria-label={selected ? `Enter ${entity.name}` : `Select ${entity.name}`}
+                size="xs"
+                variant="ghost"
               >
                 <span className="flex items-center gap-2.5">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -172,10 +174,10 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
                   </span>
                 </span>
                 <span className="mt-2 block h-8 overflow-hidden text-[0.64rem] leading-4 text-silver-400">{descriptionFor(entity)}</span>
-              </button>
+              </Button>
               <div className="mt-2 flex items-center gap-1.5 border-t border-white/8 pt-2">
-                <button type="button" onClick={() => playVoice(entityAudioUrl(entity.type, entity.slug))} className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-1 font-mono text-[0.44rem] tracking-[0.1em] text-silver-300 uppercase hover:border-white/25 hover:text-white"><SpeakerIcon animated width={11} height={11} /> Briefing</button>
-                {entity.type === "orchestrator" ? <button type="button" onClick={() => playVoice(orchestratorMessageUrl(entity.slug))} className="inline-flex items-center gap-1 rounded-full border border-white/10 px-2 py-1 font-mono text-[0.44rem] tracking-[0.1em] text-silver-300 uppercase hover:border-white/25 hover:text-white"><SpeakerIcon animated width={11} height={11} /> Meet</button> : null}
+                <Button onClick={() => playVoice(entityAudioUrl(entity.type, entity.slug))} className="gap-1 border-white/10 px-2 py-1 font-mono text-[0.44rem] tracking-[0.1em] text-silver-300 hover:border-white/25 hover:text-white" icon={<SpeakerIcon animated width={11} height={11} />} size="xs" variant="outline">Briefing</Button>
+                {entity.type === "orchestrator" ? <Button onClick={() => playVoice(orchestratorMessageUrl(entity.slug))} className="gap-1 border-white/10 px-2 py-1 font-mono text-[0.44rem] tracking-[0.1em] text-silver-300 hover:border-white/25 hover:text-white" icon={<SpeakerIcon animated width={11} height={11} />} size="xs" variant="outline">Meet</Button> : null}
               </div>
             </article>
             </div>
@@ -183,8 +185,8 @@ export function NexusEntityArc({ selectedEntityId, onSelect, onEnter }: NexusEnt
         })}
       </div>
       <div className="absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2">
-        <button type="button" disabled={!canNavigateEntities} onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white disabled:opacity-35 disabled:hover:text-silver-300"><ChevronLeftIcon size="sm" /></button>
-        <button type="button" disabled={!canNavigateEntities} onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface flex h-7 w-7 items-center justify-center rounded-full text-silver-300 hover:text-white disabled:opacity-35 disabled:hover:text-silver-300"><ChevronRightIcon size="sm" /></button>
+        <Button disabled={!canNavigateEntities} onClick={() => selectEntity(selectedIndex - 1)} aria-label="Previous entity" className="founders-surface text-silver-300 hover:text-white disabled:opacity-35 disabled:hover:text-silver-300" icon={<ChevronLeftIcon size="sm" />} size="xs" variant="icon">Previous entity</Button>
+        <Button disabled={!canNavigateEntities} onClick={() => selectEntity(selectedIndex + 1)} aria-label="Next entity" className="founders-surface text-silver-300 hover:text-white disabled:opacity-35 disabled:hover:text-silver-300" icon={<ChevronRightIcon size="sm" />} size="xs" variant="icon">Next entity</Button>
       </div>
     </section>
   );
