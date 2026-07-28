@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { CoreChatInput } from '@/lib/ai/actions';
 import type { RouterDependencies } from '@/lib/ai/router';
-import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
+import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk, TranscribeInput, TranscriptionOutput } from '@/lib/ai/providers';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
 import type { ArchiveToolDependencies } from './archive-runtime';
@@ -9,6 +9,7 @@ import type { ArchiveToolInput, ArchiveToolName, ArchiveToolOutput } from './arc
 import type { DomainActionSlug } from './domain-schemas';
 import type { DomainToolContext, DomainToolExecutionOptions } from './domain-execute';
 import { orchestratorChatTool, orchestratorChatToolInputSchema } from './orchestrator-chat';
+import { transcribeTool, type TranscribeToolDependencies } from './transcribe';
 import { PUBLIC_TOOL_DEFINITIONS } from './tool-definitions';
 import type { PublicToolDependencies } from './tool-definition';
 import type { OrganizationMessageContext, OrganizationMessageContextDependencies } from './organization-message-context';
@@ -29,7 +30,7 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
 export { orchestratorChatToolInputSchema };
 
-export interface ToolDependencies extends RouterDependencies, DocumentProcessingDependencies, OrganizationMessageContextDependencies {
+export interface ToolDependencies extends RouterDependencies, DocumentProcessingDependencies, OrganizationMessageContextDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'> {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
@@ -38,6 +39,7 @@ export interface ToolDependencies extends RouterDependencies, DocumentProcessing
   archiveContext?: DomainToolContext;
   archiveDependencies?: ArchiveToolDependencies;
   domainDependencies?: DomainToolExecutionOptions;
+  timeoutMs?: number;
 }
 
 const chatOutputSchema = z.object({
@@ -48,14 +50,16 @@ const chatOutputSchema = z.object({
 
 /** Executes one of the capabilities exposed by the unified tool registry. */
 export function runTool(name: 'chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
+export function runTool(name: 'transcribe', skill: string, rawInput: TranscribeInput, dependencies?: ToolDependencies): Promise<TranscriptionOutput>;
 export function runTool<Name extends ArchiveToolName>(name: Name, skill: string, rawInput: ArchiveToolInput<Name>, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<ArchiveToolOutput<Name>>;
 export function runTool<Name extends DomainActionSlug>(name: Name, skill: string, rawInput: unknown, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<unknown>;
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = toolNameSchema.parse(name);
   if (toolName === orchestratorChatTool.name) return orchestratorChatTool.execute(skill, rawInput, dependencies);
+  if (toolName === transcribeTool.name) return transcribeTool.execute(rawInput, dependencies);
   if (!dependencies.archiveContext) throw new Error(`Tool ${toolName} requires archiveContext.`);
-  const definition = publicToolDefinitionsByName.get(toolName) as Exclude<(typeof PUBLIC_TOOL_DEFINITIONS)[number], typeof orchestratorChatTool>;
+  const definition = publicToolDefinitionsByName.get(toolName) as Exclude<(typeof PUBLIC_TOOL_DEFINITIONS)[number], typeof orchestratorChatTool | typeof transcribeTool>;
   return definition.execute(rawInput, {
     context: dependencies.archiveContext,
     domain: dependencies.domainDependencies,
@@ -76,6 +80,7 @@ export async function* streamTool(name: string, skill: string, rawInput: unknown
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
 export { organizationMessageContextTool, semanticSearchOrganizationMessages } from './organization-message-context';
+export { transcribeTool };
 export type { OrganizationMessageContext, OrganizationMessageContextDependencies, MessageSemanticMatch, MessageSemanticSearchInput } from './organization-message-context';
 export * from './archive-errors';
 export * from './archive-schemas';

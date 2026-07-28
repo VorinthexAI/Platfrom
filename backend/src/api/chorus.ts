@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { sanitizeAgentInput, streamTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
+import { sanitizeAgentInput, streamTool, transcribeTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
 import { executeAction } from '@/lib/ai/router';
 import type { SpeechOutput, TranscriptionOutput } from '@/lib/ai/providers';
 import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
@@ -59,7 +59,10 @@ const defaultDependencies: ChorusApiDependencies = {
   },
   stream: (skill, input, dependencies) => streamTool('chat', skill, input, dependencies),
   listScopes: (organizationKey) => getDefaultScopeRepository().listScopes(organizationKey),
-  transcribe: async (organizationKey, audioBase64, prompt, signal) => (await executeAction<unknown, TranscriptionOutput>({ mode: 'fixed', organizationKey, actionSlug: 'transcribe', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { audioBase64, mimeType: 'audio/pcm', prompt }, { signal, timeoutMs: 90_000 })).output,
+  transcribe: (organizationKey, audioBase64, prompt, signal) => transcribeTool.execute(
+    { audioBase64, mimeType: 'audio/pcm', prompt },
+    { organizationKey, signal, timeoutMs: 90_000 },
+  ),
   speak: async (organizationKey, text, signal) => (await executeAction<unknown, SpeechOutput>({ mode: 'fixed', organizationKey, actionSlug: 'speak', modelSlug: 'openai.gpt-realtime-2', providerSlug: 'openai' }, { text, voice: 'ash', format: 'wav' }, { signal, timeoutMs: 90_000 })).output,
 };
 

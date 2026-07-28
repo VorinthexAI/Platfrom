@@ -14,6 +14,7 @@ const response: ProviderExecuteResponse<ChatOutput> = {
 describe('orchestrator chat tool', () => {
   test('exposes the unified registered tools', () => {
     expect(TOOL_NAMES).toContain('chat');
+    expect(TOOL_NAMES).toContain('transcribe');
     expect(TOOL_NAMES).toEqual(expect.arrayContaining(ARCHIVE_TOOL_NAMES));
     expect(TOOL_NAMES).toContain('scope.list');
   });

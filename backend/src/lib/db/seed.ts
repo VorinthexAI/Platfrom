@@ -1184,6 +1184,16 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     }
   }
 
+  const realtime = await store.getModelBySlug('openai.gpt-realtime-2');
+  const orchestratorChat = await store.getActionBySlug('orchestrator-chat');
+  if (realtime && orchestratorChat) {
+    const existing = await store.getModelActionByPair(realtime.key, orchestratorChat.key);
+    if (existing?.enabled) {
+      await store.updateModelAction(existing.key, { enabled: false });
+      results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
+    }
+  }
+
   return results;
 }
 

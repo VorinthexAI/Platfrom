@@ -147,9 +147,10 @@ describe('Chorus SSE API', () => {
     expect(speechCalls[0]?.slice(0, 2)).toEqual([organizationKey, 'Read this.']);
   });
 
-  test('pins Chorus audio routes to static OpenAI GPT Realtime 2 and Ash', async () => {
+  test('routes transcription through its tool and pins speech to Realtime 2 with Ash', async () => {
     const source = await Bun.file(new URL('./chorus.ts', import.meta.url)).text();
-    expect(source.match(/modelSlug: 'openai\.gpt-realtime-2', providerSlug: 'openai'/g)).toHaveLength(2);
+    expect(source).toContain('transcribeTool.execute');
+    expect(source.match(/modelSlug: 'openai\.gpt-realtime-2', providerSlug: 'openai'/g)).toHaveLength(1);
     expect(source).toContain("{ text, voice: 'ash', format: 'wav' }");
   });
 });

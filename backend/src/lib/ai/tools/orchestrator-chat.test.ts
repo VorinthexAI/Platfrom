@@ -39,10 +39,11 @@ describe('orchestrator chat tool', () => {
     });
   });
 
-  test('pins the chat tool to the static OpenAI Realtime 2 route', async () => {
+  test('pins the chat tool to the static Nova Lite route', async () => {
     const source = await Bun.file(new URL('./orchestrator-chat.ts', import.meta.url)).text();
     expect(source).toContain("mode: 'fixed'");
-    expect(source).toContain("modelSlug: 'openai.gpt-realtime-2'");
-    expect(source).toContain("providerSlug: 'openai'");
+    expect(source).toContain("modelSlug: 'amazon.nova-lite'");
+    expect(source).toContain("providerSlug: 'aws-bedrock'");
+    expect(source).not.toContain('gpt-realtime-2');
   });
 });
