@@ -75,6 +75,19 @@ describe('static Bedrock Titan embeddings', () => {
     expect(maxActiveRequests).toBe(1);
   });
 
+  test('aborts an active embedding request', async () => {
+    process.env.AWS_REGION = 'us-east-1';
+    process.env.AWS_ACCESS_KEY_ID = 'key';
+    process.env.AWS_SECRET_ACCESS_KEY = 'secret';
+    globalThis.fetch = ((_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+    })) as typeof fetch;
+    const controller = new AbortController();
+    const request = embedText({ text: 'cancel me', signal: controller.signal });
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   test('chunks long documents and returns one normalized aggregate vector', async () => {
     process.env.AWS_REGION = 'us-east-1';
     process.env.AWS_ACCESS_KEY_ID = 'key';

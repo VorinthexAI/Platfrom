@@ -20,7 +20,7 @@ export interface OrchestratorChatToolDependencies extends RouterDependencies, Do
   signal?: AbortSignal;
   organizationKey?: string;
   retrievalContext?: RetrievalContext;
-  embedRetrievalQuery?: (text: string) => Promise<number[]>;
+  embedRetrievalQuery?: (text: string, signal?: AbortSignal) => Promise<number[]>;
   retrievalTimeoutMs?: number;
 }
 
@@ -129,22 +129,28 @@ async function prepareChatInput(skill: string, rawInput: unknown, dependencies: 
 }
 
 async function retrieveChatContext(message: string, dependencies: OrchestratorChatToolDependencies): Promise<string> {
+  const controller = new AbortController();
+  const abort = () => controller.abort(dependencies.signal?.reason);
+  if (dependencies.signal?.aborted) abort();
+  dependencies.signal?.addEventListener('abort', abort, { once: true });
   try {
     const results = await withTimeout((async () => {
-      const embedding = await (dependencies.embedRetrievalQuery ?? ((text) => embedText({ text })))(message);
-      return retrievalTool.execute({ nodes: [{ node: 'messages', ...(embedding.length ? { embedding } : {}) }], limit: 50 }, dependencies.retrievalContext!, dependencies);
-    })(), dependencies.retrievalTimeoutMs ?? 8_000);
+      const embedding = await (dependencies.embedRetrievalQuery ?? ((text, signal) => embedText({ text, signal })))(message, controller.signal);
+      return retrievalTool.execute({ nodes: [{ node: 'messages', ...(embedding.length ? { embedding } : {}), filters: { organizationKey: dependencies.retrievalContext!.organizationKey } }], limit: 50 }, dependencies.retrievalContext!, dependencies);
+    })(), dependencies.retrievalTimeoutMs ?? 8_000, () => controller.abort(new Error('retrieval timed out')));
     return formatRetrievalContext(results);
   } catch (error) {
     console.error('orchestrator retrieval failed; continuing without context', { organizationKey: dependencies.retrievalContext!.organizationKey, error });
     return '';
+  } finally {
+    dependencies.signal?.removeEventListener('abort', abort);
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([promise, new Promise<T>((_, reject) => { timer = setTimeout(() => reject(new Error('retrieval embedding timed out')), timeoutMs); })]);
+    return await Promise.race([promise, new Promise<T>((_, reject) => { timer = setTimeout(() => { onTimeout(); reject(new Error('retrieval timed out')); }, timeoutMs); })]);
   } finally {
     if (timer) clearTimeout(timer);
   }

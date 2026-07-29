@@ -10,7 +10,7 @@ const context = { organizationKey: 'org', membershipKey: 'membership', exclude: 
 
 describe('retrieval tool', () => {
   test('validates dynamic nodes, optional embeddings, and a per-node limit', async () => {
-    expect(retrievalInputSchema.parse({ nodes: [{ node: 'messages', embedding: [1, 0] }, { node: 'documents' }], limit: 10 })).toEqual({ nodes: [{ node: 'messages', embedding: [1, 0] }, { node: 'documents' }], limit: 10 });
+    expect(retrievalInputSchema.parse({ nodes: [{ node: 'messages', embedding: [1, 0], filters: { keys: ['one', 'one'], organizationKey: 'org', channelKeys: ['channel'] } }, { node: 'documents' }], limit: 10 })).toEqual({ nodes: [{ node: 'messages', embedding: [1, 0], filters: { keys: ['one'], organizationKey: 'org', channelKeys: ['channel'] } }, { node: 'documents' }], limit: 10 });
     expect(() => retrievalInputSchema.parse({ nodes: [{ node: 'missing' }], limit: 10 })).toThrow();
     expect(() => retrievalInputSchema.parse({ nodes: [{ node: 'messages' }, { node: 'messages' }], limit: 10 })).toThrow();
     expect(() => retrievalInputSchema.parse({ nodes: [{ node: 'messages' }], limit: 51 })).toThrow();
@@ -27,12 +27,36 @@ describe('retrieval tool', () => {
       const result = await retrievalTool.execute({ nodes: [{ node, embedding: [0, 1] }], limit: 7 }, context, {
         retrieveNode: async (...args) => { calls.push(args); return [{ key: 'match', fields: { content: 'Dynamic result' }, score: 0.8 }]; },
       });
-      expect(calls[0]?.slice(0, 3)).toEqual([node, [0, 1], 7]);
+      expect(calls[0]?.slice(0, 4)).toEqual([node, [0, 1], undefined, 7]);
       expect(result).toEqual([{ node, documents: [{ key: 'match', fields: { content: 'Dynamic result' }, score: 0.8 }] }]);
     } finally {
       delete NODE_REGISTRY[node];
       NODE_NAMES.splice(0, NODE_NAMES.length, ...Object.keys(NODE_REGISTRY).sort());
     }
+  });
+
+  test('applies strict narrowing filters through bound query values', async () => {
+    const calls: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
+    const result = await retrievalTool.execute({ nodes: [{ node: 'messages', embedding: [1, 0], filters: { keys: ['message'], organizationKey: 'org', scopeKeys: ['scope'], channelKeys: ['channel'] } }], limit: 5 }, context, {
+      queryRetrieval: async (query, bindVars) => {
+        calls.push({ query, bindVars });
+        return { all: async () => [{ key: 'message', fields: { content: 'Authorized match' }, createdAt: '2026-07-29T12:00:00.000Z', score: 0.8 }] };
+      },
+    });
+    expect(result[0]?.documents[0]?.fields.content).toBe('Authorized match');
+    expect(calls[0]?.bindVars).toMatchObject({ filterKeys: ['message'], filterOrganizationKey: 'org', filterScopeKeys: ['scope'], filterChannelKeys: ['channel'], filterStatuses: [] });
+    expect(calls[0]?.bindVars).not.toHaveProperty('collectionName');
+    expect(calls[0]?.query).toContain('document._key IN @filterKeys');
+    expect(calls[0]?.query).toContain('document.channelKey) IN @filterChannelKeys');
+    const declared = new Set([...calls[0]!.query.matchAll(/@{1,2}([A-Za-z][A-Za-z0-9]*)/g)].map((match) => match[1]));
+    expect(Object.keys(calls[0]!.bindVars).map((name) => name.replace(/^@/, '')).filter((name) => !declared.has(name))).toEqual([]);
+  });
+
+  test('rejects filters that could broaden or do not apply to a node', async () => {
+    await expect(retrievalTool.execute({ nodes: [{ node: 'messages', filters: { organizationKey: 'another-org' } }], limit: 5 }, context, { retrieveNode: async () => [] })).rejects.toThrow('authorized organization');
+    await expect(retrievalTool.execute({ nodes: [{ node: 'messages', filters: { statuses: ['open'] } }], limit: 5 }, context, { retrieveNode: async () => [] })).rejects.toThrow('does not support status filters');
+    await expect(retrievalTool.execute({ nodes: [{ node: 'models', filters: { organizationKey: 'org' } }], limit: 5 }, context, { retrieveNode: async () => [] })).rejects.toThrow('does not support organization filters');
+    expect(() => retrievalInputSchema.parse({ nodes: [{ node: 'messages', filters: { arbitrary: ['value'] } }], limit: 5 })).toThrow();
   });
 
   test('separates safe retrieval fields from embeddings and derives ownership policies', () => {

@@ -64,8 +64,8 @@ describe('orchestrator chat tool', () => {
       organizationKey: 'org',
       retrievalContext: { organizationKey: 'org', membershipKey: 'membership', exclude: { messages: ['current'] } },
       embedRetrievalQuery: async (message) => { expect(message).toBe('Explain the launch'); return [1, 0]; },
-      retrieveNode: async (node, embedding, limit, context) => {
-        expect({ node, embedding, limit, context }).toEqual({ node: 'messages', embedding: [1, 0], limit: 50, context: { organizationKey: 'org', membershipKey: 'membership', exclude: { messages: ['current'] } } });
+      retrieveNode: async (node, embedding, filters, limit, context) => {
+        expect({ node, embedding, filters, limit, context }).toEqual({ node: 'messages', embedding: [1, 0], filters: { organizationKey: 'org' }, limit: 50, context: { organizationKey: 'org', membershipKey: 'membership', exclude: { messages: ['current'] } } });
         return [{ key: 'prior', fields: { content: 'Launch is Friday.' }, createdAt: '2026-07-28T12:00:00.000Z', score: 0.9 }];
       },
       execute: async (organizationKey, input) => {
@@ -91,6 +91,20 @@ describe('orchestrator chat tool', () => {
         return { output: { text: 'Answer without retrieval', toolCalls: [], stopReason: 'stop' } } as never;
       },
     })).resolves.toBe('Answer without retrieval');
+  });
+
+  test('does not start retrieval for an already aborted request', async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException('cancelled', 'AbortError'));
+    let sawAbortedSignal = false;
+    await expect(orchestratorChatTool.execute('Atlas skill', { message: 'hello' }, {
+      organizationKey: 'org',
+      retrievalContext: { organizationKey: 'org', membershipKey: 'membership' },
+      signal: controller.signal,
+      embedRetrievalQuery: async (_message, signal) => { sawAbortedSignal = Boolean(signal?.aborted); throw signal?.reason; },
+      execute: async () => ({ output: { text: 'Cancelled request fallback', toolCalls: [], stopReason: 'stop' } }) as never,
+    })).resolves.toBe('Cancelled request fallback');
+    expect(sawAbortedSignal).toBe(true);
   });
 
   test('streams the first successful Nova Lite attempt', async () => {

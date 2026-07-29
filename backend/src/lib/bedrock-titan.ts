@@ -11,7 +11,13 @@ const EMBEDDING_REQUEST_INTERVAL_MS = 100;
 
 const embedInputSchema = z.object({ text: z.string().min(1) }).strict();
 const titanEmbeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1) }).passthrough();
-const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+const sleep = (milliseconds: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+  if (signal?.aborted) { reject(signal.reason ?? new DOMException('The operation was aborted', 'AbortError')); return; }
+  const finish = () => { signal?.removeEventListener('abort', cancel); resolve(); };
+  const timer = setTimeout(finish, milliseconds);
+  const cancel = () => { clearTimeout(timer); reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError')); };
+  signal?.addEventListener('abort', cancel, { once: true });
+});
 let titanInvocationQueue: Promise<void> = Promise.resolve();
 
 function serializeTitanInvocation<T>(invoke: () => Promise<T>): Promise<T> {
@@ -34,8 +40,9 @@ function getAwsCredentials() {
 }
 
 /** Generates fixed Titan embeddings from the application's AWS environment credentials. */
-export async function embedText(input: z.infer<typeof embedInputSchema>): Promise<number[]> {
-  const parsed = embedInputSchema.parse(input);
+export async function embedText(input: z.infer<typeof embedInputSchema> & { signal?: AbortSignal }): Promise<number[]> {
+  const parsed = embedInputSchema.parse({ text: input.text });
+  const signal = input.signal;
   const credentials = getAwsCredentials();
   if (!credentials) return [];
 
@@ -52,12 +59,13 @@ export async function embedText(input: z.infer<typeof embedInputSchema>): Promis
   for (const inputText of chunks) {
     const body = JSON.stringify({ inputText });
     const embedding = await serializeTitanInvocation(async () => {
+      if (signal?.aborted) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
       for (let attempt = 0; attempt < THROTTLE_MAX_ATTEMPTS; attempt += 1) {
         const signed = signAwsRequest(credentials, 'bedrock', host, canonicalPath, body, { 'content-type': 'application/json', accept: 'application/json' });
-        const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body });
+        const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body, signal });
         if (response.ok) {
           const vector = titanEmbeddingResponseSchema.parse(await response.json()).embedding;
-          await sleep(EMBEDDING_REQUEST_INTERVAL_MS);
+          await sleep(EMBEDDING_REQUEST_INTERVAL_MS, signal);
           return vector;
         }
         if (response.status !== 429 || attempt === THROTTLE_MAX_ATTEMPTS - 1) {
@@ -68,7 +76,7 @@ export async function embedText(input: z.infer<typeof embedInputSchema>): Promis
         const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
           ? retryAfter * 1_000
           : exponentialDelay + Math.random() * 1_000;
-        await sleep(waitMs);
+        await sleep(waitMs, signal);
       }
       throw new Error('AWS Bedrock Titan embedding request retry loop ended unexpectedly.');
     });
