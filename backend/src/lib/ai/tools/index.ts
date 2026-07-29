@@ -36,7 +36,7 @@ export interface ToolDependencies extends RouterDependencies, DocumentProcessing
   signal?: AbortSignal;
   organizationKey?: string;
   retrievalContext?: RetrievalContext;
-  embedRetrievalQuery?: (text: string) => Promise<number[]>;
+  embedRetrievalQuery?: (text: string, signal?: AbortSignal) => Promise<number[]>;
   retrievalTimeoutMs?: number;
   archiveContext?: DomainToolContext;
   archiveDependencies?: ArchiveToolDependencies;
@@ -81,9 +81,9 @@ export async function* streamTool(name: string, skill: string, rawInput: unknown
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
-export { retrievalTool, retrievalInputSchema, retrieveNodeDocuments } from './retrieval';
+export { retrievalTool, retrievalInputSchema, retrievalFiltersSchema, retrieveNodeDocuments } from './retrieval';
 export { transcribeTool };
-export type { RetrievalContext, RetrievalDependencies, RetrievalDocument, RetrievalNodeResult } from './retrieval';
+export type { RetrievalContext, RetrievalDependencies, RetrievalDocument, RetrievalFilters, RetrievalNodeResult } from './retrieval';
 export * from './archive-errors';
 export * from './archive-schemas';
 export * from './archive-json-schema';

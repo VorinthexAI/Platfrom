@@ -27,7 +27,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const streamDependencies: unknown[] = [];
   const transcriptionCalls: unknown[][] = [];
   const speechCalls: unknown[][] = [];
-  const retrievalCalls: unknown[][] = [];
+  const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
   const novaInputs: unknown[] = [];
   const access = { channel: { key: channelKey }, humanParticipant: { key: newId() }, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 }, { participantKey: newId(), type: 'orchestrator', key: newId(), name: 'Atlas', mentionCount: 0 }] };
   const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
@@ -49,7 +49,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
       if (options.throughChatTool) return orchestratorChatTool.stream(skill, input, {
         ...dependencies,
         embedRetrievalQuery: async () => [1, 0],
-        retrieveNode: async (...args) => { retrievalCalls.push(args); return [{ key: 'prior-message', fields: { content: 'The launch is Friday.' }, createdAt: '2026-07-28T12:00:00.000Z', score: 0.9 }]; },
+        queryRetrieval: async (query, bindVars) => { retrievalQueries.push({ query, bindVars }); return { all: async () => [{ key: 'prior-message', fields: { content: 'The launch is Friday.' }, createdAt: '2026-07-28T12:00:00.000Z', score: 0.9 }] }; },
         stream: async function* (_organizationKey, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Retrieved answer' }; yield { type: 'done' }; },
       });
       return (async function* () { yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail || (options.failSkill && skill.includes(options.failSkill))) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; })();
@@ -67,7 +67,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   app.post('/founders/organizations/:organizationKey/chorus/transcriptions', handlers.transcribe);
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/chorus/reactions', handlers.frequentReactions);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalCalls, novaInputs };
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs };
 }
 
 describe('Chorus SSE API', () => {
@@ -123,13 +123,13 @@ describe('Chorus SSE API', () => {
   });
 
   test('runs authorized retrieval before the orchestrator Nova chat response', async () => {
-    const { app, retrievalCalls, novaInputs } = appFor({ throughChatTool: true });
+    const { app, retrievalQueries, novaInputs } = appFor({ throughChatTool: true });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas explain the launch' }) });
     const events = parseSse(await response.text());
     expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'done', 'complete']);
     expect(events[2]?.data).toMatchObject({ text: 'Retrieved answer' });
-    expect(retrievalCalls[0]?.slice(0, 3)).toEqual(['messages', [1, 0], 50]);
-    expect(retrievalCalls[0]?.[3]).toMatchObject({ organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } });
+    expect(retrievalQueries[0]?.bindVars).toMatchObject({ organizationKey, membershipKey: actor.membershipKey, excludeKeys: [expect.any(String)], filterOrganizationKey: organizationKey, dimensions: 2, limit: 50 });
+    expect(retrievalQueries[0]?.bindVars).not.toHaveProperty('collectionName');
     expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('The launch is Friday.'), messages: [{ role: 'user', content: [{ type: 'text', text: '@Atlas explain the launch' }] }] });
   });
 
