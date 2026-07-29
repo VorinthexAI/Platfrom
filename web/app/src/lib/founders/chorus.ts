@@ -286,6 +286,10 @@ export async function mutateChorusReaction(organizationKey: string, channelKey: 
   return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}/reactions`, z.object({ active: z.boolean() }).strict(), { method: "POST", body: JSON.stringify({ reaction, operation }) });
 }
 
+export async function listChorusFrequentReactions(organizationKey: string, signal?: AbortSignal) {
+  return (await request(`${base(organizationKey)}/reactions`, z.object({ reactions: z.array(z.object({ reaction: z.string().trim().min(1).max(64), count: z.number().int().positive() }).strict()).max(10) }).strict(), { signal })).reactions;
+}
+
 export async function createChorusThread(organizationKey: string, channelKey: string, rootMessageKey: string, title: string, signal?: AbortSignal) {
   return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads`, z.object({ thread: chorusThreadSchema }).strict(), { method: "POST", body: JSON.stringify({ rootMessageKey, title }), signal })).thread;
 }

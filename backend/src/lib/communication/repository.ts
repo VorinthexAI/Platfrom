@@ -33,6 +33,7 @@ export interface GeneralChannelAccess {
 }
 
 export interface ReactionAggregate { reaction: string; count: number; viewerReacted: boolean }
+export interface UserReactionUsage { reaction: string; count: number }
 export interface PollProjection {
   key: string;
   question: string;
@@ -72,7 +73,8 @@ export interface CommunicationRepository {
   insertMentions(mentions: MessageMention[]): Promise<void>;
   recordUserMentions(userKey: string, sourceIds: string[], now: string): Promise<void>;
   recordUserReaction(userKey: string, reactionSlug: string, now: string): Promise<void>;
-  mutateReaction(input: { mode: 'add' | 'remove' | 'toggle'; channelKey: string; messageKey: string; participantKey: string; reaction: string; now: string }): Promise<{ active: boolean } | null>;
+  listUserReactions(userKey: string, limit: number): Promise<UserReactionUsage[]>;
+  mutateReaction(input: { mode: 'add' | 'remove' | 'toggle'; channelKey: string; messageKey: string; participantKey: string; reaction: string; now: string }): Promise<{ active: boolean; changed: boolean } | null>;
   createThread(thread: Thread): Promise<Thread>;
   getThread(threadKey: string): Promise<Thread | null>;
   resolveThread(threadKey: string, channelKey: string, now: string): Promise<Thread | null>;
@@ -117,6 +119,27 @@ async function projectPoll(pollKey: string, channelKey: string, viewerParticipan
           LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote)
           RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) }
   `, { pollKey, channelKey, viewerParticipantKey });
+}
+
+async function indexMessage(message: Message): Promise<void> {
+  const collection = db.collection('messages');
+  try {
+    const embedding = await embedText({ text: message.content });
+    if (!embedding.length) {
+      await collection.update(message.key, { embeddingState: 'failed' });
+      return;
+    }
+    await collection.update(message.key, {
+      embedding,
+      embeddingState: 'ready',
+      embeddingDimensions: embedding.length,
+      embeddedAt: new Date().toISOString(),
+      ...embeddingMetadata(),
+    });
+  } catch (error) {
+    console.error('message embedding failed', { messageKey: message.key, error });
+    await collection.update(message.key, { embeddingState: 'failed' }).catch(() => {});
+  }
 }
 
 export const arangoCommunicationRepository: CommunicationRepository = {
@@ -241,7 +264,9 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET user = membership == null ? null : DOCUMENT(users, membership.userId)
         LET orchestrator = participant.orchestratorKey == null ? null : DOCUMENT(orchestrators, participant.orchestratorKey)
         RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
-          author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") }, reactions: [], thread: null, poll: null }
+          author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
+          reactions: (FOR reaction IN messageReactions FILTER reaction.messageKey == message._key COLLECT value = reaction.reaction INTO rows RETURN { reaction: value, count: LENGTH(rows), viewerReacted: LENGTH(FOR row IN rows FILTER row.reaction.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }),
+          thread: null, poll: null }
     `, { channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit });
     return (await cursor.all()).reverse().map(normalizeMessageProjection);
   },
@@ -277,26 +302,9 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     const collection = db.collection('messages');
     const pending = messageSchema.parse({ ...message, embedding: [], embeddingState: 'pending' });
     const result = await collection.save(toArangoDoc(pending), { returnNew: true });
-    try {
-      const embedding = await embedText({ text: pending.content });
-      if (!embedding.length) {
-        const failed = await collection.update(pending.key, { embeddingState: 'failed', updatedAt: pending.updatedAt }, { returnNew: true });
-        return parse(messageSchema, failed.new as Record<string, unknown>);
-      }
-      const embeddedAt = new Date().toISOString();
-      const ready = await collection.update(pending.key, {
-        embedding,
-        embeddingState: 'ready',
-        embeddingDimensions: embedding.length,
-        embeddedAt,
-        ...embeddingMetadata(),
-      }, { returnNew: true });
-      return parse(messageSchema, ready.new as Record<string, unknown>);
-    } catch (error) {
-      console.error('message embedding failed', { messageKey: pending.key, error });
-      const failed = await collection.update(pending.key, { embeddingState: 'failed' }, { returnNew: true });
-      return parse(messageSchema, failed.new as Record<string, unknown>);
-    }
+    const stored = parse(messageSchema, result.new as Record<string, unknown>);
+    void indexMessage(stored);
+    return stored;
   },
   async insertMentions(mentions) {
     if (!mentions.length) return;
@@ -308,6 +316,10 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   },
   async recordUserReaction(userKey, reactionSlug, now) {
     await db.query('UPSERT { userKey: @userKey, reactionSlug: @reactionSlug } INSERT @document UPDATE { count: OLD.count + 1, updatedAt: @now } IN userReactions', { userKey, reactionSlug, now, document: toArangoDoc(userReactionSchema.parse({ key: newId(), userKey, reactionSlug, count: 1, createdAt: now, updatedAt: now })) });
+  },
+  async listUserReactions(userKey, limit) {
+    const cursor = await db.query<UserReactionUsage>('FOR usage IN userReactions FILTER usage.userKey == @userKey SORT usage.count DESC, usage.updatedAt DESC, usage.reactionSlug ASC LIMIT @limit RETURN { reaction: usage.reactionSlug, count: usage.count }', { userKey, limit });
+    return cursor.all();
   },
 
   async mutateReaction(input) {
@@ -322,9 +334,10 @@ export const arangoCommunicationRepository: CommunicationRepository = {
       const validated = await cursor.next();
       if (!validated) return null;
       const remove = input.mode === 'remove' || (input.mode === 'toggle' && validated.existingKey !== null);
+      const changed = (remove && validated.existingKey !== null) || (!remove && validated.existingKey === null);
       if (remove && validated.existingKey) await trx.query('REMOVE @key IN messageReactions', { key: validated.existingKey });
       if (!remove && !validated.existingKey) await trx.query('INSERT @document INTO messageReactions', { document: toArangoDoc(messageReactionSchema.parse({ key: newId(), scopeKey: validated.scopeKey, channelKey: input.channelKey, messageKey: input.messageKey, participantKey: input.participantKey, reaction: input.reaction, createdAt: input.now, updatedAt: input.now })) });
-      return { active: !remove };
+      return { active: !remove, changed };
     });
   },
 

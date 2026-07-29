@@ -6,7 +6,7 @@ import { embedText } from '@/lib/bedrock-titan';
 import { db } from '@/lib/db/client';
 
 const SEARCH_LIMIT = 50;
-const CONTEXT_MESSAGE_LIMIT = 20;
+const CONTEXT_MESSAGE_LIMIT = 50;
 const MINIMUM_SCORE = 0.55;
 const MAX_CONTEXT_CHARACTERS = 12_000;
 

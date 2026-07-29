@@ -173,7 +173,6 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
             for (const orchestrator of orchestrators) {
               await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
               let storedContent = CHORUS_PROVIDER_FALLBACK;
-              const deltas: string[] = [];
               try {
                 const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
                   organizationKey: resolved.organizationKey,
@@ -184,7 +183,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
                 for await (const chunk of provider) {
                   if (chunk.type === 'text-delta' && chunk.text) {
                     response += chunk.text;
-                    deltas.push(chunk.text);
+                    await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text: chunk.text }) });
                   }
                 }
                 storedContent = boundedAssistantContent(response);
@@ -201,7 +200,6 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
                 await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
                 continue;
               }
-              for (const text of deltas) await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text }) });
               await sse.writeSSE({ event: 'done', data: JSON.stringify({ orchestratorKey: orchestrator.key, message: storedMessage(assistantMessage) }) });
             }
             await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });
@@ -223,6 +221,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       const body = await parseJson(c, reactionBody);
       return dependencies.service.react(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey')), body.reaction, body.operation);
     }),
+    frequentReactions: (c: Context) => run(c, async (resolved) => ({ reactions: await dependencies.service.frequentReactions(resolved, 10) })),
     createThread: (c: Context) => run(c, async (resolved) => {
       const body = await parseJson(c, threadBody);
       return { thread: threadProjection(await dependencies.service.createThread(resolved, key.parse(c.req.param('channelKey')), body.rootMessageKey, body.title)) };

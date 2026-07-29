@@ -5,8 +5,8 @@ import dynamic from "next/dynamic";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { EmojiStyle, Theme } from "emoji-picker-react";
 import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, MicrophoneIcon, MoreHorizontalIcon, SendIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons";
-import { Button, Spinner, Textarea } from "@vorinthex/shared/ui";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, MicrophoneIcon, SendIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons";
+import { Button, SearchInput, Spinner, Textarea } from "@vorinthex/shared/ui";
 import { useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
 import type { GalaxyEntity } from "@/lib/galaxy/registry-types";
@@ -24,6 +24,7 @@ import {
   deleteChorusMessage,
   filterChorusMentionShortcuts,
   listChorusChannels,
+  listChorusFrequentReactions,
   listChorusMessages,
   listChorusThreads,
   markChorusStreamFailed,
@@ -262,20 +263,23 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
     catch (error) { onOptimisticReaction(message.key, reaction); onError(error instanceof Error ? error.message : "Reaction failed"); }
     finally { await onRefresh().catch(() => {}); onBusy(false); }
   };
+  const openActionsFromMessage = (target: EventTarget | null) => {
+    if (!interactive || (target instanceof Element && target.closest("button, input, textarea, select, a, [role='button']"))) return;
+    onOpenActions(message);
+  };
   return (
-    <article onContextMenu={(event) => { event.preventDefault(); onOpenActions(message); }} className="group relative flex gap-3 px-1 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_84px]">
+    <article role={interactive ? "button" : undefined} tabIndex={interactive ? 0 : undefined} aria-label={interactive ? `Open actions for message from ${message.author.name}` : undefined} onClick={(event) => openActionsFromMessage(event.target)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onOpenActions(message); } }} onContextMenu={(event) => { event.preventDefault(); onOpenActions(message); }} className={`relative flex gap-3 px-1 py-3 [content-visibility:auto] [contain-intrinsic-size:auto_84px] ${interactive ? "cursor-pointer focus-visible:outline-2 focus-visible:outline-silver-400" : ""}`}>
       {message.author.type === "orchestrator" ? <OrchestratorMark name={message.author.name} size={36} /> : <span aria-label={userName} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border-soft)] bg-obsidian-850 font-mono text-[11px] text-silver-200">{userName.trim().charAt(0).toUpperCase() || "?"}</span>}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} countryCode={countryCode} /></div>
         {message.content ? <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300"><MessageContent content={message.content} mentions={mentions} /></p> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {message.reactions.map((aggregate) => <Button key={aggregate.reaction} size="xs" variant="outline" disabled={busy} aria-label={`${aggregate.viewerReacted ? "Remove" : "Add"} ${aggregate.reaction} reaction`} aria-pressed={aggregate.viewerReacted} onClick={() => void react(aggregate.reaction)} className={`min-h-0 px-2 py-0.5 font-mono text-[8px] normal-case tracking-normal focus-visible:outline-2 disabled:opacity-40 ${aggregate.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-500"}`}>{aggregate.reaction} {aggregate.count}</Button>)}
+          {message.reactions.map((aggregate) => <Button key={aggregate.reaction} size="sm" variant="outline" disabled={busy} aria-label={`${aggregate.viewerReacted ? "Remove" : "Add"} ${aggregate.reaction} reaction`} aria-pressed={aggregate.viewerReacted} onClick={() => void react(aggregate.reaction)} className={`px-3 font-mono text-[11px] normal-case tracking-normal focus-visible:outline-2 disabled:opacity-40 ${aggregate.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-400"}`}>{aggregate.reaction} {aggregate.count}</Button>)}
           {message.thread && message.thread.replyCount > 0 ? <Button size="xs" variant="outline" onClick={() => onOpenThread(message)} className="min-h-0 border-[var(--border-soft)] px-2 py-0.5 text-[9px] normal-case tracking-normal text-silver-300">{message.thread.replyCount} thread{message.thread.replyCount === 1 ? "" : "s"}</Button> : null}
           {message.poll ? <Button size="xs" variant="outline" onClick={() => onCreatePoll(message)} className="min-h-0 border-[var(--border-soft)] px-2 py-0.5 text-[9px] normal-case tracking-normal text-silver-300">1 poll</Button> : null}
         </div> : null}
       </div>
-      {MESSAGE_ACTIONS_ENABLED && interactive ? <Button type="button" variant="icon" onClick={() => onOpenActions(message)} icon={<MoreHorizontalIcon size="sm" />} className="pointer-events-none absolute top-3 right-1 h-8 min-h-0 w-9 rounded-lg border-[var(--border-soft)] opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100">Message actions</Button> : null}
     </article>
   );
 }, (previous, next) => previous.entry === next.entry
@@ -477,6 +481,8 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const [pollMessage, setPollMessage] = useState<ChorusMessage | null>(null);
   const [actionMessage, setActionMessage] = useState<ChorusMessage | null>(null);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
+  const [reactionQuery, setReactionQuery] = useState("");
+  const [frequentReactions, setFrequentReactions] = useState<Array<{ reaction: string; count: number }>>([]);
   const [threadState, setThreadState] = useState<{ thread: ChorusThread; messages: ChorusDisplayMessage[]; loading: boolean; error: string | null } | null>(null);
   const [threadSheetOpen, setThreadSheetOpen] = useState(false);
   const [threadItems, setThreadItems] = useState<ChorusThreadListItem[]>([]);
@@ -492,6 +498,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const currentOrganization = useRef(organizationKey);
   const activeChannel = useRef<string | null>(null);
   const messagesPane = useRef<HTMLDivElement>(null);
+  const emojiPicker = useRef<HTMLDivElement>(null);
   const shouldFollowMessages = useRef(true);
   const channelDrafts = useRef(new Map<string, string>());
   const stopVoice = useAudioStore((state) => state.stopVoice);
@@ -510,7 +517,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     controllers.current.clear();
     messageRequests.current.clear();
     activeChannel.current = null;
-    setChannels([]); setMentions([]); setMentionRoster(null); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setThreadState(null); setPollMessage(null); setBusyMessage(null); setClearOpen(false);
+    setChannels([]); setMentions([]); setMentionRoster(null); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setThreadState(null); setPollMessage(null); setBusyMessage(null); setClearOpen(false); setFrequentReactions([]);
     setChannelsLoading(true); setChannelsError(null);
     const controller = new AbortController();
     controllers.current.get("channels")?.abort(); controllers.current.set("channels", controller);
@@ -519,6 +526,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
       if (controller.signal.aborted || organizationGeneration.current !== generation || currentOrganization.current !== organizationKey) return;
       setChannels(loaded.channels); setMentions(loaded.mentions); setMentionRoster(loaded.mentionRoster);
       setSelectedKey((current) => loaded.channels.some((entry) => entry.orchestrator.key === current) ? current : loaded.channels[0]?.orchestrator.key ?? null);
+      setFrequentReactions(await listChorusFrequentReactions(organizationKey, controller.signal).catch(() => []));
     } catch (error) { if (!controller.signal.aborted && organizationGeneration.current === generation) setChannelsError(error instanceof Error ? error.message : "Channels could not load"); }
     finally { if (!controller.signal.aborted && organizationGeneration.current === generation) setChannelsLoading(false); }
   }, [organizationKey]);
@@ -554,6 +562,25 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
 
   useEffect(() => { void loadChannels(); }, [loadChannels]);
   useEffect(() => () => { for (const controller of controllers.current.values()) controller.abort(); }, []);
+  useEffect(() => {
+    if (!reactionPickerOpen) return;
+    const controller = new AbortController();
+    void listChorusFrequentReactions(organizationKey, controller.signal).then(setFrequentReactions).catch(() => {});
+    return () => controller.abort();
+  }, [organizationKey, reactionPickerOpen]);
+  useEffect(() => {
+    if (!reactionPickerOpen) return;
+    const syncPickerSearch = () => {
+      const input = emojiPicker.current?.querySelector<HTMLInputElement>("input.epr-search");
+      if (!input || input.value === reactionQuery) return;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, reactionQuery);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const frame = requestAnimationFrame(syncPickerSearch);
+    const observer = new MutationObserver(syncPickerSearch);
+    if (emojiPicker.current) observer.observe(emojiPicker.current, { childList: true, subtree: true });
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); };
+  }, [reactionPickerOpen, reactionQuery]);
 
   const selected = channels.find((entry) => entry.orchestrator.key === selectedKey) ?? null;
   const channelKey = selected?.channel?.key ?? null;
@@ -731,6 +758,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     setReactionPickerOpen(false); setActionMessage(null);
     try {
       await mutateChorusReaction(organizationKey, requestChannel, messageKey, reaction);
+      setFrequentReactions(await listChorusFrequentReactions(organizationKey).catch(() => frequentReactions));
       if (threadState) await refreshThread(); else await refreshMessages(requestChannel);
     } catch {
       optimisticallyToggleReaction(messageKey, reaction);
@@ -833,7 +861,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             <div className="mt-auto flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div>
           </Dialog.Content></Dialog.Portal>
         </Dialog.Root>
-        <Dialog.Root open={reactionPickerOpen} onOpenChange={setReactionPickerOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex h-[min(88vh,640px)] max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close reactions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close reactions</Button></Dialog.Close></div><div className="mt-4 min-h-0 flex-1 overflow-hidden rounded-xl"><EmojiPicker theme={"dark" as Theme} emojiStyle={"native" as EmojiStyle} width="100%" height="100%" lazyLoadEmojis searchPlaceholder="Search thousands of emojis" previewConfig={{ showPreview: false }} onEmojiClick={({ emoji }) => { void selectReaction(emoji); }} /></div><div className="mt-5 flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div></Dialog.Content></Dialog.Portal></Dialog.Root>
+        <Dialog.Root open={reactionPickerOpen} onOpenChange={(open) => { setReactionPickerOpen(open); if (!open) { setReactionQuery(""); setActionMessage(null); } }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex h-[min(88vh,680px)] max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close reactions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close reactions</Button></Dialog.Close></div><SearchInput autoFocus value={reactionQuery} onChange={(event) => setReactionQuery(event.target.value)} placeholder="Search..." aria-label="Search reactions" className="mt-4 w-full" />{frequentReactions.length ? <div aria-label="Frequently used reactions" className="mt-3 flex flex-wrap gap-2">{frequentReactions.map(({ reaction, count }) => <Button key={reaction} type="button" size="sm" variant="outline" aria-label={`React with ${reaction}, used ${count} times`} onClick={() => void selectReaction(reaction)} className="px-3 text-base normal-case tracking-normal">{reaction}</Button>)}</div> : null}<div ref={emojiPicker} className="mt-3 min-h-0 flex-1 overflow-hidden rounded-xl [&_.epr-search-container]:!hidden"><EmojiPicker theme={"dark" as Theme} emojiStyle={"native" as EmojiStyle} width="100%" height="100%" lazyLoadEmojis autoFocusSearch={false} searchPlaceholder="Search..." skinTonesDisabled previewConfig={{ showPreview: false }} onEmojiClick={({ emoji }) => { void selectReaction(emoji); }} /></div><div className="mt-5 flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div></Dialog.Content></Dialog.Portal></Dialog.Root>
         <Dialog.Root open={threadSheetOpen} onOpenChange={setThreadSheetOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[400px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
           <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Threads</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close threads" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close threads</Button></Dialog.Close></div>
           <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">{newThreadOpen ? <div><label className="text-[10px] text-silver-400" htmlFor="thread-title">Thread name</label><input id="thread-title" autoFocus maxLength={50} value={newThreadTitle} onChange={(event) => setNewThreadTitle(event.target.value)} placeholder="Name this thread" className="mt-2 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><p className="mt-2 text-right font-mono text-[9px] text-silver-600">{newThreadTitle.length}/50</p></div> : threadItems.length ? threadItems.map((thread) => <Button key={thread.key} size="md" variant="outline" aria-label={`Open thread ${thread.title}, ${thread.replyCount} replies`} onClick={() => { const root = visibleMessages.find((message) => message.key === thread.rootMessageKey); if (root) void openThread(root, thread.key); setThreadSheetOpen(false); }} className="block h-auto w-full border-[var(--border-soft)] p-3 text-left normal-case tracking-normal"><span className="block text-xs text-silver-100">{thread.title}</span><span className="mt-1 block truncate text-[10px] text-silver-500">{thread.rootContent}</span><span className="mt-1 block text-[9px] text-silver-600">{thread.replyCount} replies</span></Button>) : <p className="py-8 text-center text-xs text-silver-500">No threads yet.</p>}</div>

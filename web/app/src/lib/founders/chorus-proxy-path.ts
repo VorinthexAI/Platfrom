@@ -4,6 +4,7 @@ const patterns: Array<{ method: "GET" | "POST" | "DELETE"; pattern: RegExp }> = 
   { method: "GET", pattern: /^channels$/ },
   { method: "POST", pattern: /^transcriptions$/ },
   { method: "POST", pattern: /^speech$/ },
+  { method: "GET", pattern: /^reactions$/ },
   { method: "GET", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages$/ },
   { method: "DELETE", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages$/ },
   { method: "DELETE", pattern: /^channels\/([A-Za-z0-9_-]{1,160})\/messages\/([A-Za-z0-9_-]{1,160})$/ },
