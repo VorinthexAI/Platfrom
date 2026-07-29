@@ -71,7 +71,7 @@ export function Button({
         variantStyles[variant],
         variant === "icon" && iconSizeStyles[size],
         contentMode === "raw" && styles.rawContent,
-        inactive && variant !== "primary" && styles.disabledNonPrimary,
+        disabled && !loading && variant !== "primary" && styles.disabledNonPrimary,
         inactive && styles.disabled,
         loading && styles.loading,
         state.pressed &&

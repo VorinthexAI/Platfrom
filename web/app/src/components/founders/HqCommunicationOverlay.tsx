@@ -834,7 +834,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-[min(92vw,390px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[var(--border-strong)] bg-obsidian-950 p-5 shadow-2xl" aria-describedby="clear-channel-description">
               <Dialog.Title className="text-sm text-silver-50">Clear this channel?</Dialog.Title>
               <Dialog.Description id="clear-channel-description" className="mt-2 text-[11px] leading-5 text-silver-400">This removes every message in your channel with {selected?.orchestrator.name ?? "this orchestrator"}.</Dialog.Description>
-               <div className="mt-5 flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="secondary" disabled={clearing} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Cancel</Button></Dialog.Close><Button type="button" variant="primary" loading={clearing} onClick={() => void clearSelectedChannel()} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">{clearing ? "Clearing..." : "Clear channel"}</Button></div>
+               <div className="mt-5 flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="secondary" disabled={clearing} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Cancel</Button></Dialog.Close><Button type="button" variant="primary" loading={clearing} onClick={() => void clearSelectedChannel()} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Clear channel</Button></div>
             </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
