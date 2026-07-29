@@ -132,6 +132,9 @@ describe("shared button controls", () => {
     expect(component).toContain("Button, SearchInput, Spinner, Textarea");
     expect(component).toContain('placeholder="Search..."');
     expect(component).toContain("skinTonesDisabled");
+    expect(component).toContain("void loadEmojiPicker()");
+    expect(component).toContain("lazyLoadEmojis={false}");
+    expect(component).toContain('backgroundColor: "transparent"');
     expect(component).toContain('aria-label="Mention shortcuts"');
     expect(component).not.toContain("<button");
     expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');

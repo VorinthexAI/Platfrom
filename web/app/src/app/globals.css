@@ -398,3 +398,12 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+/* The reaction catalog sits directly on the Chorus sheet rather than in a nested panel. */
+.EmojiPickerReact {
+  background-color: transparent !important;
+  border-color: transparent !important;
+}
+
+.EmojiPickerReact .epr-emoji-category-label {
+  background-color: transparent !important;
+}

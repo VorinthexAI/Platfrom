@@ -4,7 +4,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { EmojiStyle, Theme } from "emoji-picker-react";
-import { memo, useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ComponentProps, type FormEvent, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, CloseIcon, MicrophoneIcon, SendIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons";
 import { Button, SearchInput, Spinner, Textarea } from "@vorinthex/shared/ui";
 import { useAudioStore } from "@/lib/audio/audio-store";
@@ -49,7 +49,12 @@ import {
 import { createFrameBatcher } from "@/lib/founders/frame-batcher";
 import { appendSpokenTranscript, startPcmCapture, type PcmCapture } from "@/lib/founders/chorus-microphone";
 
-const EmojiPicker = dynamic(() => import("emoji-picker-react"), { ssr: false, loading: () => <div className="flex h-80 items-center justify-center"><Spinner /></div> });
+const loadEmojiPicker = () => import("emoji-picker-react");
+const DynamicEmojiPicker = dynamic(loadEmojiPicker, { ssr: false });
+
+function EmojiPicker(props: ComponentProps<typeof DynamicEmojiPicker>) {
+  return <DynamicEmojiPicker {...props} lazyLoadEmojis={false} style={{ ...props.style, backgroundColor: "transparent", borderColor: "transparent" }} />;
+}
 
 interface HqCommunicationOverlayProps {
   organizationKey: string;
@@ -561,6 +566,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   }, [organizationKey]);
 
   useEffect(() => { void loadChannels(); }, [loadChannels]);
+  useEffect(() => { void loadEmojiPicker(); }, []);
   useEffect(() => () => { for (const controller of controllers.current.values()) controller.abort(); }, []);
   useEffect(() => {
     if (!reactionPickerOpen) return;
