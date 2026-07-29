@@ -9,6 +9,7 @@ import {
   chorusThreadSchema,
   closestChorusMentionCompletion,
   filterChorusMentionShortcuts,
+  formatChorusTypingLabel,
   plainChorusText,
   coalesceChorusStreamEvents,
   markChorusStreamFailed,
@@ -72,6 +73,15 @@ describe("Chorus schemas", () => {
     });
     expect(archived.status).toBe("archived");
     expect(message.thread?.status).toBe("archived");
+  });
+});
+
+describe("Chorus typing labels", () => {
+  test("formats one, two, and many active participants", () => {
+    expect(formatChorusTypingLabel(["Anton"])).toBe("Anton is typing...");
+    expect(formatChorusTypingLabel(["Anton", "Atlas"])).toBe("Anton & Atlas are typing...");
+    expect(formatChorusTypingLabel(["Anton", "Atlas", "Metis"])).toBe("Anton, Atlas & Metis are typing...");
+    expect(formatChorusTypingLabel(["Anton", "Anton"])).toBe("Anton is typing...");
   });
 });
 
@@ -139,6 +149,9 @@ describe("shared button controls", () => {
     expect(component.match(/await refreshMessages\(channelKey, false\)/g)).toHaveLength(2);
     expect(component).toContain('role="alert"');
     expect(component).toContain("An orchestrator response could not be saved. Please try again.");
+    expect(component).toContain("subscribeChorusTyping");
+    expect(component).toContain("publishChorusTyping");
+    expect(component).toContain("chorus-typing-gradient");
     expect(component).not.toContain("<button");
     expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');
     expect(mobileHome).not.toContain("PressableScale");

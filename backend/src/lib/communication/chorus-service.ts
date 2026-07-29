@@ -12,7 +12,7 @@ export class ChorusError extends Error {
   constructor(readonly code: ChorusErrorCode, message: string) { super(message); this.name = 'ChorusError'; }
 }
 
-export interface ChorusActor { organizationKey: string; membershipKey: string }
+export interface ChorusActor { organizationKey: string; membershipKey: string; name?: string }
 const isoNow = () => new Date().toISOString();
 
 export class ChorusService {

@@ -23,6 +23,7 @@ import {
   createChorusThread,
   deleteChorusMessage,
   filterChorusMentionShortcuts,
+  formatChorusTypingLabel,
   listChorusChannels,
   listChorusFrequentReactions,
   listChorusMessages,
@@ -30,10 +31,12 @@ import {
   markChorusStreamFailed,
   mergeChorusMessageRefresh,
   mutateChorusReaction,
+  publishChorusTyping,
   readChorusThread,
   plainChorusText,
   reconcileChorusStreamEvent,
   streamChorusMessage,
+  subscribeChorusTyping,
   synthesizeChorusSpeech,
   transcribeChorusAudio,
   voteChorusPoll,
@@ -44,6 +47,7 @@ import {
   type ChorusMentionRoster,
   type ChorusThread,
   type ChorusThreadListItem,
+  type ChorusTypingEvent,
   type ChorusStreamEvent,
 } from "@/lib/founders/chorus";
 import { createFrameBatcher } from "@/lib/founders/frame-batcher";
@@ -323,13 +327,14 @@ interface MessageComposerProps {
   canChat: boolean;
   streaming: boolean;
   onSubmit: (content: string) => void;
+  onTypingChange: (active: boolean) => void;
   mentions: ChorusMention[];
   mentionRoster: ChorusMentionRoster | null;
   channelDrafts: Map<string, string>;
   draftId: string;
 }
 
-const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, onSubmit, mentions, mentionRoster, channelDrafts, draftId }: MessageComposerProps) {
+const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, onSubmit, onTypingChange, mentions, mentionRoster, channelDrafts, draftId }: MessageComposerProps) {
   const draftKey = channelKey ? `${organizationKey}:${channelKey}:${draftId}` : null;
   const [draft, setDraft] = useState(() => draftKey ? channelDrafts.get(draftKey) ?? "" : "");
   const [recording, setRecording] = useState(false);
@@ -351,6 +356,13 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   const visible = [...visiblePeople, ...visibleOrchestrators];
   const completion = closestChorusMentionCompletion([...orchestrators, ...people], draft);
   useEffect(() => () => { captureGeneration.current += 1; capture.current?.cancel(); transcription.current?.abort(); }, []);
+  const typing = Boolean(draft.trim()) && canChat && !streaming;
+  useEffect(() => {
+    onTypingChange(typing);
+    if (!typing) return;
+    const heartbeat = setInterval(() => onTypingChange(true), 2_500);
+    return () => { clearInterval(heartbeat); onTypingChange(false); };
+  }, [onTypingChange, typing]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -493,6 +505,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const [threadItems, setThreadItems] = useState<ChorusThreadListItem[]>([]);
   const [threadRoot, setThreadRoot] = useState<ChorusMessage | null>(null);
   const [newThreadOpen, setNewThreadOpen] = useState(false);
+  const [typingParticipants, setTypingParticipants] = useState<Record<string, ChorusTypingEvent>>({});
   const [newThreadTitle, setNewThreadTitle] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -592,6 +605,22 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const channelKey = selected?.channel?.key ?? null;
   const selectedMessages = channelKey ? messages[channelKey] : undefined;
   activeChannel.current = channelKey;
+  useEffect(() => {
+    setTypingParticipants({});
+    if (!channelKey) return;
+    let active = true;
+    const unsubscribe = subscribeChorusTyping(organizationKey, channelKey, (event) => {
+      if (!active) return;
+      setTypingParticipants((current) => {
+        const next = { ...current };
+        if (event.active && event.expiresAt > Date.now()) next[event.participantKey] = event;
+        else delete next[event.participantKey];
+        return next;
+      });
+    });
+    const prune = setInterval(() => setTypingParticipants((current) => Object.fromEntries(Object.entries(current).filter(([, event]) => event.expiresAt > Date.now()))), 1_000);
+    return () => { active = false; clearInterval(prune); unsubscribe(); };
+  }, [channelKey, organizationKey]);
   useEffect(() => { if (selected?.canChat && channelKey) void refreshMessages(channelKey).catch(() => {}); }, [selectedKey, channelKey, selected?.canChat, refreshMessages]);
   useEffect(() => {
     shouldFollowMessages.current = true;
@@ -666,6 +695,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
     }
   }, [channelKey, organizationKey, refreshMessages, selected, streaming]);
   const submitComposerMessage = useCallback((content: string) => { void submitMessage(content); }, [submitMessage]);
+  const publishTyping = useCallback((active: boolean) => { if (channelKey) void publishChorusTyping(organizationKey, channelKey, active).catch(() => {}); }, [channelKey, organizationKey]);
 
   const openThread = async (message: ChorusMessage, requestedThreadKey = message.thread?.key) => {
     if (!channelKey || !requestedThreadKey) return;
@@ -754,6 +784,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
 
   const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
   const displayedMessages = threadState?.messages ?? visibleMessages;
+  const typingLabel = formatChorusTypingLabel(Object.values(typingParticipants).map(({ name }) => name));
   const optimisticallyToggleReaction = (messageKey: string, reaction: string) => {
     if (channelKey) setMessages((current) => ({ ...current, [channelKey]: toggleOptimisticReaction(current[channelKey] ?? [], messageKey, reaction) }));
     setThreadState((current) => current ? { ...current, messages: toggleOptimisticReaction(current.messages, messageKey, reaction) } : current);
@@ -835,7 +866,8 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
                {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallyToggleReaction} />) : null}
           </div>
             {channelKey && errors[channelKey] ? <p role="alert" className="shrink-0 border-t border-status-critical/30 bg-status-critical/5 px-5 py-2 text-[10px] text-status-critical">{errors[channelKey]}</p> : null}
-            <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${threadState?.thread.key ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} onSubmit={threadState && channelKey ? (content) => { void submitThreadMessage(content); } : submitComposerMessage} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={threadState?.thread.key ?? "channel"} />
+            <div aria-live="polite" className="flex h-6 shrink-0 items-end px-5 text-[10px] font-medium"><span className={typingLabel ? "chorus-typing-gradient" : "sr-only"}>{typingLabel}</span></div>
+            <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${threadState?.thread.key ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} onSubmit={threadState && channelKey ? (content) => { void submitThreadMessage(content); } : submitComposerMessage} onTypingChange={publishTyping} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={threadState?.thread.key ?? "channel"} />
         </section>
         <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
           <Dialog.Portal>

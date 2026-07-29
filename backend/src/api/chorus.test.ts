@@ -7,7 +7,7 @@ import { orchestratorChatTool } from '@/lib/ai/tools/orchestrator-chat';
 
 const organizationKey = 'root-org';
 const channelKey = newId();
-const actor = { organizationKey, membershipKey: newId() };
+const actor = { organizationKey, membershipKey: newId(), name: 'Anton' };
 
 function parseSse(text: string) {
   return text.trim().split('\n\n').map((block) => {
@@ -29,6 +29,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const speechCalls: unknown[][] = [];
   const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
   const novaInputs: unknown[] = [];
+  const typingEvents: unknown[] = [];
   const access = { channel: { key: channelKey }, humanParticipant: { key: newId() }, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 }, { participantKey: newId(), type: 'orchestrator', key: newId(), name: 'Atlas', mentionCount: 0 }] };
   const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
   const nova = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Nova', role: 'CTO', skill: 'Build.' };
@@ -39,6 +40,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
     async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
     async clearChannel() { return 2; },
     async generalChannel() { return access; },
+    async requireChannel() { return access; },
     async frequentReactions() { return [{ reaction: '🔥', count: 3 }]; },
   };
   const handlers = createChorusHandlers({
@@ -59,6 +61,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
       if (options.failScopes) throw new Error('malformed scope data');
       return [{ name: 'HQ', description: 'The organization workspace.' }, { name: 'Ignored', description: null }];
     },
+    publishTyping: async (event) => { typingEvents.push(event); },
     transcribe: async (...args) => { transcriptionCalls.push(args); return { text: '@Atlas hello' }; },
     speak: async (...args) => { speechCalls.push(args); return { audioBase64: 'UklGRg==', mimeType: 'audio/wav' }; },
   });
@@ -68,7 +71,8 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   app.post('/founders/organizations/:organizationKey/chorus/transcriptions', handlers.transcribe);
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/chorus/reactions', handlers.frequentReactions);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs };
+  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/typing', handlers.typing);
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents };
 }
 
 describe('Chorus SSE API', () => {
@@ -92,7 +96,7 @@ describe('Chorus SSE API', () => {
   });
 
   test('streams separate identified responses for two orchestrators', async () => {
-    const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators } = appFor({ orchestratorCount: 2 });
+    const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, typingEvents } = appFor({ orchestratorCount: 2 });
     const threadKey = newId();
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello', threadKey }) });
     const text = await response.text();
@@ -116,6 +120,7 @@ describe('Chorus SSE API', () => {
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(assistantCalls[1]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(streamSkills).toHaveLength(2);
+    expect(typingEvents).toEqual(orchestrators.flatMap((orchestrator) => [expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: true }), expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: false })]));
     for (const skill of streamSkills) {
       expect(skill).toContain('detailed, self-contained plain-text answer');
       expect(skill).toContain('## Organization scopes\nHQ: The organization workspace.');
@@ -178,6 +183,14 @@ describe('Chorus SSE API', () => {
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/reactions`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ reactions: [{ reaction: '🔥', count: 3 }] });
+  });
+
+  test('publishes authenticated member typing state for the channel', async () => {
+    const { app, typingEvents } = appFor();
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/typing`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ active: true }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(typingEvents).toEqual([expect.objectContaining({ organizationKey, channelKey, participantKey: expect.any(String), type: 'user', name: 'Anton', active: true, expiresAt: expect.any(Number) })]);
   });
 
   test('keeps founder-gate denial distinct from authentication denial', async () => {

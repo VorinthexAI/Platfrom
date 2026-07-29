@@ -407,3 +407,16 @@ button:disabled {
 .EmojiPickerReact .epr-emoji-category-label {
   background-color: transparent !important;
 }
+
+.chorus-typing-gradient {
+  color: transparent;
+  background: linear-gradient(90deg, var(--silver-500), var(--silver-50), #9a5528, var(--silver-300));
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: chorus-typing-shimmer 2.2s linear infinite;
+}
+
+@keyframes chorus-typing-shimmer {
+  to { background-position: -220% center; }
+}
