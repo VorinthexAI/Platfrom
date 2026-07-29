@@ -655,7 +655,8 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
       if (!controller.signal.aborted && organizationGeneration.current === generation) {
         const message = error instanceof Error ? error.message : "Message failed";
         setErrors((current) => ({ ...current, [channelKey]: message }));
-        setMessages((current) => ({ ...current, [channelKey]: markChorusStreamFailed(current[channelKey] ?? [], streamKey, message) }));
+        try { await refreshMessages(channelKey, false); }
+        catch { setMessages((current) => ({ ...current, [channelKey]: markChorusStreamFailed(current[channelKey] ?? [], streamKey, message) })); }
       }
     } finally {
       eventBatcher.cancel();

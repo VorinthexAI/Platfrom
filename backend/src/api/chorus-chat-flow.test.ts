@@ -31,11 +31,27 @@ describe('Chorus orchestrator chat flow', () => {
       insertMentions: async (mentions: unknown[]) => { persistedMentions.push(...mentions); },
       recordUserMentions: async () => {},
       getThread: async () => null,
+      listMessages: async () => messages.map((message) => ({
+        key: message.key,
+        channelKey: message.channelKey,
+        threadKey: message.threadKey,
+        replyToMessageKey: message.replyToMessageKey,
+        content: message.content,
+        createdAt: message.createdAt,
+        updatedAt: message.updatedAt,
+        author: message.authorParticipantKey === human.key
+          ? { participantKey: human.key, type: 'user' as const, key: access.viewerUserKey, name: 'Founder' }
+          : { participantKey: atlasParticipant.key, type: 'orchestrator' as const, key: atlasParticipant.orchestratorKey!, name: 'Atlas' },
+        reactions: [],
+        thread: null,
+        poll: null,
+      })),
     } as unknown as CommunicationRepository;
     const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
     const novaInputs: unknown[] = [];
+    const service = new ChorusService(repository, () => now);
     const handlers = createChorusHandlers({
-      service: new ChorusService(repository, () => now),
+      service,
       resolveActor: async () => ({ organizationKey, membershipKey }),
       stream: (skill, input, dependencies) => orchestratorChatTool.stream(skill, input, {
         ...dependencies,
@@ -46,7 +62,7 @@ describe('Chorus orchestrator chat flow', () => {
         },
         stream: async function* (_key, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Atlas response' }; yield { type: 'done' }; },
       }),
-      listScopes: async () => [],
+      listScopes: async (actor) => { expect(actor).toEqual({ organizationKey, membershipKey }); return []; },
       transcribe: async () => ({ text: '@Atlas hello' }),
       speak: async () => ({ audioBase64: 'UklGRg==', mimeType: 'audio/wav' }),
     });
@@ -69,5 +85,8 @@ describe('Chorus orchestrator chat flow', () => {
     expect(retrievalQueries[0]?.query).toContain('membership.organizationId == @organizationKey');
     expect(retrievalQueries[0]?.query).toContain('document.channelKey IN authorizedChannelKeys');
     expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('Authorized launch decision.'), messages: [{ role: 'user', content: [{ type: 'text', text: '@Atlas explain the launch' }] }] });
+    const canonical = await service.listMessages({ organizationKey, membershipKey }, channel.key, 100);
+    expect(canonical.map(({ content }) => content)).toEqual(['@Atlas explain the launch', 'Atlas response']);
+    expect(canonical[1]).toMatchObject({ replyToMessageKey: canonical[0]!.key, author: { type: 'orchestrator', name: 'Atlas' }, reactions: [] });
   });
 });

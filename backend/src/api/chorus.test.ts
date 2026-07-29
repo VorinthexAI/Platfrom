@@ -19,7 +19,7 @@ function parseSse(text: string) {
   });
 }
 
-function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; failSkill?: string; failPersistence?: boolean; output?: string; gate?: Promise<void>; orchestratorCount?: 0 | 1 | 2 | 3; failScopes?: boolean; throughChatTool?: boolean } = {}) {
+function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; partialFail?: boolean; abort?: boolean; failSkill?: string; failPersistence?: boolean; output?: string; gate?: Promise<void>; orchestratorCount?: 0 | 1 | 2 | 3; failScopes?: boolean; throughChatTool?: boolean } = {}) {
   const persisted: string[] = [];
   const assistantCalls: unknown[][] = [];
   const streamSkills: string[] = [];
@@ -52,9 +52,10 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
         queryRetrieval: async (query, bindVars) => { retrievalQueries.push({ query, bindVars }); return { all: async () => [{ key: 'prior-message', fields: { content: 'The launch is Friday.' }, createdAt: '2026-07-28T12:00:00.000Z', score: 0.9 }] }; },
         stream: async function* (_organizationKey, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Retrieved answer' }; yield { type: 'done' }; },
       });
-      return (async function* () { yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.fail || (options.failSkill && skill.includes(options.failSkill))) throw new Error('provider unavailable'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; })();
+      return (async function* () { if (options.abort) throw new DOMException('cancelled', 'AbortError'); if (options.fail || (options.failSkill && skill.includes(options.failSkill))) throw new Error('provider unavailable'); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.partialFail) throw new Error('provider interrupted'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; })();
     },
-    listScopes: async () => {
+    listScopes: async (resolved) => {
+      expect(resolved).toEqual(actor);
       if (options.failScopes) throw new Error('malformed scope data');
       return [{ name: 'HQ', description: 'The organization workspace.' }, { name: 'Ignored', description: null }];
     },
@@ -177,11 +178,34 @@ describe('Chorus SSE API', () => {
     expect(await response.json()).toEqual({ error: 'founders gate access required' });
   });
 
-  test('sanitizes and bounds provider output before persistence', async () => {
+  test('bounds provider output consistently across streaming and persistence', async () => {
     const { app, assistantCalls } = appFor({ output: `${'x'.repeat(8_100)}😀` });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
-    await response.text();
+    const events = parseSse(await response.text());
+    const tokens = events.filter(({ event }) => event === 'token').map(({ data }) => data.text).join('');
+    const canonical = (events.find(({ event }) => event === 'done')?.data.message as { content: string }).content;
     expect(assistantCalls[0]?.[2]).toBe('x'.repeat(8_000));
+    expect(tokens).toBe(canonical);
+    expect(tokens).toHaveLength(8_000);
+  });
+
+  test('keeps partial provider output identical across tokens, persistence, and done', async () => {
+    const { app, assistantCalls } = appFor({ partialFail: true });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const events = parseSse(await response.text());
+    const tokens = events.filter(({ event }) => event === 'token').map(({ data }) => data.text).join('');
+    const canonical = (events.find(({ event }) => event === 'done')?.data.message as { content: string }).content;
+    expect(tokens).toBe('Hi \n\nI could not complete this response. Please try again.');
+    expect(tokens).toBe(canonical);
+    expect(assistantCalls[0]?.[2]).toBe(canonical);
+  });
+
+  test('does not persist a provider fallback when generation is aborted', async () => {
+    const { app, persisted } = appFor({ abort: true });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    const events = parseSse(await response.text());
+    expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'assistant-error', 'complete']);
+    expect(persisted).toEqual(['user']);
   });
 
   test('rejects concurrent sends per channel and releases the lock after completion', async () => {
