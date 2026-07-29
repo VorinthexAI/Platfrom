@@ -13,11 +13,13 @@ import { requireFounder } from './founders';
 import { parseJson, parseQuery, strictObject } from './validation';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import type { MentionCandidate } from '@/lib/communication/repository';
+import { publishChorusTyping, subscribeChorusTyping, type ChorusTypingEvent } from '@/lib/communication/typing';
 
 const key = z.string().cuid();
 const organizationKey = z.string().trim().min(1).max(160);
 const messageBody = strictObject({ content: sanitizedAgentMessageSchema, threadKey: key.optional(), replyToMessageKey: key.optional() });
 const reactionBody = strictObject({ reaction: z.string().trim().min(1).max(64), operation: z.enum(['add', 'remove', 'toggle']).default('toggle') });
+const typingBody = strictObject({ active: z.boolean() });
 const threadBody = strictObject({ rootMessageKey: key, title: z.string().trim().min(1).max(50) });
 const replyBody = strictObject({ content: sanitizedAgentMessageSchema, replyToMessageKey: key.optional() });
 const pollBody = strictObject({ messageKey: key, question: z.string().trim().min(1).max(500), options: z.array(z.string().trim().min(1).max(200)).min(2).max(20), allowMultiple: z.boolean().default(false) }).superRefine((poll, ctx) => {
@@ -43,6 +45,8 @@ export interface ChorusApiDependencies {
   resolveActor(c: Context, requestedOrganizationKey: string): Promise<ChorusActor | Response>;
   stream(skill: string, input: { message: string }, dependencies: ToolDependencies): AsyncIterable<{ type: string; text?: string }>;
   listScopes(actor: ChorusActor): Promise<readonly { name: string; description: string | null }[]>;
+  publishTyping?(event: ChorusTypingEvent): Promise<void>;
+  subscribeTyping?(listener: (event: ChorusTypingEvent) => void): () => void;
   transcribe(organizationKey: string, audioBase64: string, prompt: string, signal: AbortSignal): Promise<TranscriptionOutput>;
   speak(organizationKey: string, text: string, signal: AbortSignal): Promise<SpeechOutput>;
 }
@@ -54,7 +58,7 @@ const defaultDependencies: ChorusApiDependencies = {
     if ('error' in auth) return auth.error;
     try {
       const { membership } = await requireOrganizationAccess(auth.founder.user.key, requestedOrganizationKey);
-      return { organizationKey: requestedOrganizationKey, membershipKey: membership.key };
+      return { organizationKey: requestedOrganizationKey, membershipKey: membership.key, name: auth.founder.user.name ?? auth.founder.user.alias ?? auth.founder.user.email.split('@')[0] ?? 'Member' };
     } catch (error) {
       if (error instanceof FoundersAccessError) return c.json({ error: 'organization access denied' }, 403);
       throw error;
@@ -67,6 +71,8 @@ const defaultDependencies: ChorusApiDependencies = {
     const accessibleKeys = new Set((await listAccessibleScopes(membership)).map(({ key: scopeKey }) => scopeKey));
     return (await getDefaultScopeRepository().listScopes(actor.organizationKey)).filter((scope) => accessibleKeys.has(scope.key));
   },
+  publishTyping: publishChorusTyping,
+  subscribeTyping: subscribeChorusTyping,
   transcribe: (organizationKey, audioBase64, prompt, signal) => transcribeTool.execute(
     { audioBase64, mimeType: 'audio/pcm', prompt },
     { organizationKey, signal, timeoutMs: 90_000 },
@@ -162,6 +168,33 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       return dependencies.speak(resolved.organizationKey, body.text, c.req.raw.signal);
     }),
     listMessages: (c: Context) => run(c, async (resolved) => ({ messages: await dependencies.service.listMessages(resolved, key.parse(c.req.param('channelKey')), parseQuery(c, chorusMessageListQuerySchema).limit) })),
+    typing: (c: Context) => run(c, async (resolved) => {
+      const channelKey = key.parse(c.req.param('channelKey'));
+      const body = await parseJson(c, typingBody);
+      const access = await dependencies.service.requireChannel(resolved, channelKey);
+      await dependencies.publishTyping?.({ organizationKey: resolved.organizationKey, channelKey, participantKey: access.humanParticipant.key, type: 'user', name: resolved.name?.trim() || 'Member', active: body.active, expiresAt: body.active ? Date.now() + 5_000 : Date.now() });
+      return { ok: true };
+    }),
+    typingStream: async (c: Context) => {
+      const resolved = await actor(c);
+      if (resolved instanceof Response) return resolved;
+      const channelKey = key.parse(c.req.param('channelKey'));
+      let access;
+      try { access = await dependencies.service.requireChannel(resolved, channelKey); }
+      catch (error) { if (error instanceof ChorusError) return c.json({ error: error.message }, statusFor(error)); throw error; }
+      return streamSSE(c, async (stream) => {
+        let eventId = 0;
+        const unsubscribe = dependencies.subscribeTyping?.((event) => {
+          if (event.organizationKey !== resolved.organizationKey || event.channelKey !== channelKey || event.participantKey === access.humanParticipant.key) return;
+          eventId += 1;
+          void stream.writeSSE({ event: 'typing', data: JSON.stringify(event), id: String(eventId) }).catch(() => {});
+        }) ?? (() => {});
+        const heartbeat = setInterval(() => { void stream.write(': heartbeat\n\n').catch(() => {}); }, 25_000);
+        const closed = new Promise<void>((resolve) => stream.onAbort(resolve));
+        try { await closed; }
+        finally { clearInterval(heartbeat); unsubscribe(); }
+      });
+    },
     clearChannel: (c: Context) => run(c, async (resolved) => ({ cleared: await dependencies.service.clearChannel(resolved, key.parse(c.req.param('channelKey'))) })),
     deleteMessage: (c: Context) => run(c, async (resolved) => { await dependencies.service.deleteMessage(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey'))); return { deleted: true }; }),
     postMessage: async (c: Context) => {
@@ -182,6 +215,13 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
         }
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
+          const activeTyping = new Map<string, ChorusTypingEvent>();
+          const stopTyping = async (orchestratorKey: string) => {
+            const current = activeTyping.get(orchestratorKey);
+            if (!current) return;
+            activeTyping.delete(orchestratorKey);
+            await dependencies.publishTyping?.({ ...current, active: false, expiresAt: Date.now() });
+          };
           try {
             await sse.writeSSE({ event: 'start', data: JSON.stringify({ channelKey, userMessage: storedMessage(message) }) });
             if (!orchestrators.length && mentionsCanonicalOrchestrator(body.content)) {
@@ -189,6 +229,9 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               return;
             }
             for (const orchestrator of orchestrators) {
+              const typingEvent: ChorusTypingEvent = { organizationKey: resolved.organizationKey, channelKey, participantKey: orchestrator.participantKey, type: 'orchestrator', name: orchestrator.name, active: true, expiresAt: Date.now() + 120_000 };
+              activeTyping.set(orchestrator.key, typingEvent);
+              await dependencies.publishTyping?.(typingEvent);
               await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
               let storedContent = '';
               try {
@@ -224,6 +267,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               }
               if (!storedContent.trim()) {
                 await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
+                await stopTyping(orchestrator.key);
                 continue;
               }
               let assistantMessage: Awaited<ReturnType<ChorusService['persistOrchestratorMessage']>>;
@@ -232,15 +276,18 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               } catch (persistenceError) {
                 console.error('chorus orchestrator message persistence failed', { channelKey, orchestratorKey: orchestrator.key, error: persistenceError });
                 await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
+                await stopTyping(orchestrator.key);
                 continue;
               }
               await sse.writeSSE({ event: 'done', data: JSON.stringify({ orchestratorKey: orchestrator.key, message: storedMessage(assistantMessage) }) });
+              await stopTyping(orchestrator.key);
             }
             await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });
           } catch (error) {
             console.error('chorus stream failed', { channelKey, error });
             await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'orchestrator stream failed' }) });
           } finally {
+            await Promise.all([...activeTyping.keys()].map(stopTyping));
             activeChannels.delete(channelKey);
           }
         });

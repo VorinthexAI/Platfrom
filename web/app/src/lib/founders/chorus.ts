@@ -69,6 +69,16 @@ export const chorusMessageSchema = z.object({
   poll: chorusPollSchema.nullable(),
 }).strict();
 
+export const chorusTypingEventSchema = z.object({
+  organizationKey: keySchema,
+  channelKey: keySchema,
+  participantKey: keySchema,
+  type: z.enum(["user", "orchestrator"]),
+  name: z.string().trim().min(1).max(160),
+  active: z.boolean(),
+  expiresAt: z.number().int().nonnegative(),
+}).strict();
+
 export const chorusThreadSchema = z.object({
   key: keySchema,
   channelKey: keySchema,
@@ -107,6 +117,7 @@ export type ChorusMessage = z.infer<typeof chorusMessageSchema>;
 export type ChorusThread = z.infer<typeof chorusThreadSchema>;
 export type ChorusPoll = z.infer<typeof chorusPollSchema>;
 export type ChorusStreamEvent = z.infer<typeof chorusStreamEventSchema>;
+export type ChorusTypingEvent = z.infer<typeof chorusTypingEventSchema>;
 export type ChorusDisplayState = "optimistic" | "pending" | "reconciling" | "failed";
 export type ChorusDisplayMessage = ChorusMessage & {
   clientState?: { streamKey: string; state: ChorusDisplayState; error?: string };
@@ -142,6 +153,13 @@ export function closestChorusMentionCompletion(mentions: ChorusMention[], draft:
   const mention = mentions.find((candidate) => candidate.name.toLocaleLowerCase().startsWith(query));
   if (!mention || mention.name.length === query.length) return null;
   return { mention, suffix: mention.name.slice(query.length) };
+}
+
+export function formatChorusTypingLabel(names: string[]): string {
+  const unique = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+  if (!unique.length) return "";
+  const subjects = unique.length === 1 ? unique[0] : `${unique.slice(0, -1).join(", ")} & ${unique.at(-1)}`;
+  return `${subjects} ${unique.length === 1 ? "is" : "are"} typing...`;
 }
 
 export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], stream: ChorusOptimisticStream, event: ChorusStreamEvent): ChorusDisplayMessage[] {
@@ -244,6 +262,21 @@ export async function listChorusChannels(organizationKey: string, signal?: Abort
     mentionRoster: result.mentionRoster,
     mentions: [...result.mentionRoster.orchestrators, result.mentionRoster.everyone, ...result.mentionRoster.members],
   };
+}
+
+export async function publishChorusTyping(organizationKey: string, channelKey: string, active: boolean): Promise<void> {
+  await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/typing`, z.object({ ok: z.literal(true) }).strict(), { method: "POST", body: JSON.stringify({ active }) });
+}
+
+export function subscribeChorusTyping(organizationKey: string, channelKey: string, onEvent: (event: ChorusTypingEvent) => void): () => void {
+  const source = new EventSource(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/typing`);
+  source.addEventListener("typing", (message) => {
+    try {
+      const parsed = chorusTypingEventSchema.safeParse(JSON.parse((message as MessageEvent).data));
+      if (parsed.success) onEvent(parsed.data);
+    } catch {}
+  });
+  return () => source.close();
 }
 
 export async function transcribeChorusAudio(organizationKey: string, audioBase64: string, signal?: AbortSignal): Promise<string> {
