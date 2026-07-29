@@ -255,7 +255,7 @@ function toggleOptimisticReaction(messages: ChorusMessage[], messageKey: string,
 
 const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions, onOpenActions }: MessageViewProps) {
   const channelKey = entry.channel!.key;
-  const interactive = !message.clientState;
+  const interactive = !message.key.startsWith("optimistic-");
   const react = async (reaction: string) => {
     if (busy) return;
     onBusy(true); onError(null); onOptimisticReaction(message.key, reaction);
@@ -264,7 +264,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
     finally { await onRefresh().catch(() => {}); onBusy(false); }
   };
   const openActionsFromMessage = (target: EventTarget | null) => {
-    if (!interactive || (target instanceof Element && target.closest("button, input, textarea, select, a, [role='button']"))) return;
+    if (!interactive || (target instanceof Element && target.closest("button, input, textarea, select, a"))) return;
     onOpenActions(message);
   };
   return (
