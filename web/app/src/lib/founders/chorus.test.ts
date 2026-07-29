@@ -121,8 +121,12 @@ describe("shared button controls", () => {
     expect(component).toContain("CHORUS_ORCHESTRATOR_NAMES.map");
     expect(component).toContain('variant="primary"');
     expect(component).toContain('variant="secondary"');
-    expect(component).toContain('icon={<MoreHorizontalIcon size="sm" />}');
-    expect(component).toContain('border-[var(--border-soft)] opacity-0');
+    expect(component).toContain('className={`relative flex gap-3 px-1 py-3');
+    expect(component).toContain('"cursor-pointer focus-visible:outline-2');
+    expect(component).not.toContain("group-hover:pointer-events-auto");
+    expect(component).toContain("Button, SearchInput, Spinner, Textarea");
+    expect(component).toContain('placeholder="Search..."');
+    expect(component).toContain("skinTonesDisabled");
     expect(component).toContain('aria-label="Mention shortcuts"');
     expect(component).not.toContain("<button");
     expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');

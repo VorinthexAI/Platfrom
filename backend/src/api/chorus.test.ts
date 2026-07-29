@@ -36,6 +36,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
     async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
     async clearChannel() { return 2; },
     async generalChannel() { return access; },
+    async frequentReactions() { return [{ reaction: '🔥', count: 3 }]; },
   };
   const handlers = createChorusHandlers({
     service: service as never,
@@ -53,6 +54,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.clearChannel);
   app.post('/founders/organizations/:organizationKey/chorus/transcriptions', handlers.transcribe);
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
+  app.get('/founders/organizations/:organizationKey/chorus/reactions', handlers.frequentReactions);
   return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators };
 }
 
@@ -136,6 +138,13 @@ describe('Chorus SSE API', () => {
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'DELETE' });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ cleared: 2 });
+  });
+
+  test('lists the ten most-used reactions for the authenticated user', async () => {
+    const { app } = appFor();
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/reactions`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ reactions: [{ reaction: '🔥', count: 3 }] });
   });
 
   test('keeps founder-gate denial distinct from authentication denial', async () => {

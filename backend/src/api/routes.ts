@@ -453,6 +453,7 @@ export function registerRoutes(app: Hono) {
   app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey', chorusHandlers.deleteMessage);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', chorusHandlers.postMessage);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/reactions', chorusHandlers.react);
+  app.get('/founders/organizations/:organizationKey/chorus/reactions', chorusHandlers.frequentReactions);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads', chorusHandlers.createThread);
   app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads', chorusHandlers.listThreads);
   app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey', chorusHandlers.readThread);

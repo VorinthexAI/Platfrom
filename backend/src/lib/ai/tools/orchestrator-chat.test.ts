@@ -95,11 +95,14 @@ describe('orchestrator chat tool', () => {
     expect(route.models).toEqual(['amazon.nova-lite', 'amazon.nova-lite', 'amazon.nova-pro']);
   });
 
-  test('does not leak partial output from a failed attempt', async () => {
+  test('streams immediately and does not retry after exposing partial output', async () => {
     const route = routes([failed('provider_unavailable', 'discard me'), completed('safe response')]);
-    const chunks = await collect(route.dependencies);
-    expect(chunks).toEqual([{ type: 'text-delta', text: 'safe response' }, { type: 'done' }]);
-    expect(JSON.stringify(chunks)).not.toContain('discard me');
+    const chunks: ProviderStreamChunk[] = [];
+    await expect((async () => {
+      for await (const chunk of orchestratorChatTool.stream('Atlas', { message: 'hello' }, route.dependencies as never)) chunks.push(chunk);
+    })()).rejects.toBeInstanceOf(ProviderExecutionError);
+    expect(chunks).toEqual([{ type: 'text-delta', text: 'discard me' }]);
+    expect(route.models).toEqual(['amazon.nova-lite']);
   });
 
   test('does not retry or fall back after an abort', async () => {

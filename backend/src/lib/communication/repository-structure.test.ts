@@ -64,6 +64,14 @@ describe('Arango communication repository structure', () => {
     expect(source).not.toContain('scopeKey: newId()');
   });
 
+  test('projects reactions in channels and threads and indexes messages off the request path', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source.match(/FOR reaction IN messageReactions FILTER reaction\.messageKey == message\._key/g)).toHaveLength(2);
+    expect(source).toContain('void indexMessage(stored)');
+    expect(source).not.toContain('await indexMessage(stored)');
+    expect(source).toContain('SORT usage.count DESC, usage.updatedAt DESC, usage.reactionSlug ASC LIMIT @limit');
+  });
+
   test('upserts message mentions by their public message key', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('UPSERT { messageKey: mention.messageKey, participantKey: mention.participantKey }');

@@ -35,6 +35,16 @@ describe('organization message context tool', () => {
     expect(searched).toBe(false);
   });
 
+  test('loads at most fifty semantic matches into context', async () => {
+    const result = await organizationMessageContextTool.execute('Question', context, {
+      expandQuery: async () => 'Question',
+      embedMessageQuery: async () => [1],
+      search: async () => Array.from({ length: 51 }, (_, index) => ({ key: `message-${index}`, channelKey: 'channel', channelName: 'general', authorName: 'Ari', content: `Match ${index}`, createdAt: '2026-07-28T12:00:00.000Z', score: 0.8 })),
+    });
+    expect(result).toContain('Match 49');
+    expect(result).not.toContain('Match 50');
+  });
+
   test('search implementation derives tenant and channel access in the database', async () => {
     const source = await Bun.file(new URL('./organization-message-context.ts', import.meta.url)).text();
     expect(source).toContain('membership.organizationId == @organizationKey');

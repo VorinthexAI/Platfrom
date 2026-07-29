@@ -68,8 +68,13 @@ export class ChorusService {
     await this.requireMessage(channelKey, messageKey);
     const result = await this.repository.mutateReaction({ mode, channelKey, messageKey, participantKey: access.humanParticipant.key, reaction, now: this.now() });
     if (!result) throw new ChorusError('not_found', 'message not found');
-    if (result.active) await this.repository.recordUserReaction(access.viewerUserKey, reaction, this.now());
-    return result;
+    if (result.active && result.changed) await this.repository.recordUserReaction(access.viewerUserKey, reaction, this.now());
+    return { active: result.active };
+  }
+
+  async frequentReactions(actor: ChorusActor, limit = 10) {
+    const access = await this.generalChannel(actor);
+    return this.repository.listUserReactions(access.viewerUserKey, limit);
   }
 
   async listThreads(actor: ChorusActor, channelKey: string) {

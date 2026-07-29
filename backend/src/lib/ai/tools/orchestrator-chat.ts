@@ -56,7 +56,7 @@ export const orchestratorChatTool = {
     const chatInput = await prepareChatInput(skill, rawInput, dependencies);
     const organizationKey = dependencies.organizationKey ?? 'nexus';
     if (dependencies.stream) {
-      yield* await bufferSuccessfulAttempt(dependencies.stream(organizationKey, chatInput), 'amazon.nova-lite');
+      yield* validateStream(dependencies.stream(organizationKey, chatInput), 'amazon.nova-lite');
       return;
     }
     const select = dependencies.selectRoute ?? selectRoute;
@@ -65,20 +65,22 @@ export const orchestratorChatTool = {
     let lastError: unknown;
     for (const modelSlug of models) {
       if (dependencies.signal?.aborted) throw dependencies.signal.reason ?? new DOMException('The operation was aborted', 'AbortError');
+      let emittedText = false;
       try {
         const decision = await select({ mode: 'fixed', organizationKey, actionSlug: 'orchestrator-chat', modelSlug, providerSlug: 'aws-bedrock' }, dependencies);
-        const chunks = await bufferSuccessfulAttempt(stream({
+        const chunks = validateStream(stream({
           decision,
           input: chatInput,
           adapters: dependencies.adapters,
           credentials: dependencies.credentials,
           timeoutMs: 300_000,
           signal: dependencies.signal,
-        }), modelSlug);
+        }), modelSlug, () => { emittedText = true; });
         yield* chunks;
         return;
       } catch (error) {
         lastError = error;
+        if (emittedText) throw error;
         if (!canTryAnotherRoute(error, dependencies.signal)) throw error;
       }
     }
@@ -86,25 +88,27 @@ export const orchestratorChatTool = {
   },
 } as const;
 
-async function bufferSuccessfulAttempt(chunks: AsyncIterable<ProviderStreamChunk>, modelSlug: string): Promise<ProviderStreamChunk[]> {
-  const buffered: ProviderStreamChunk[] = [];
+async function* validateStream(chunks: AsyncIterable<ProviderStreamChunk>, modelSlug: string, onText?: () => void): AsyncIterable<ProviderStreamChunk> {
   let text = '';
   let done = false;
   for await (const chunk of chunks) {
-    buffered.push(chunk);
-    if (chunk.type === 'text-delta') text += chunk.text;
+    if (chunk.type === 'text-delta') {
+      text += chunk.text;
+      if (chunk.text) onText?.();
+    }
     if (chunk.type === 'done') done = true;
+    yield chunk;
   }
   if (!done || !text.trim()) {
-    throw new ProviderExecutionError('orchestrator-chat', [{
+    const error = new ProviderExecutionError('orchestrator-chat', [{
       modelId: modelSlug,
       providerId: 'aws-bedrock',
       externalModelId: modelSlug,
       code: 'response_invalid',
       message: 'provider stream ended without completed text',
     }]);
+    throw error;
   }
-  return buffered;
 }
 
 function canTryAnotherRoute(error: unknown, signal?: AbortSignal): boolean {

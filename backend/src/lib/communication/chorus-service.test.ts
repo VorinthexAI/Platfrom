@@ -26,6 +26,7 @@ function fixture() {
   const messages: Message[] = [];
   const mentions: unknown[] = [];
   const usage: string[][] = [];
+  const reactionUsage = [{ reaction: '🔥', count: 4 }, { reaction: '✅', count: 2 }];
   const repository = {
     ensureGeneralChannel: async () => access,
     getGeneralChannelAccess: async (_organization: string, member: string, key: string) => member === membershipKey && key === channel.key ? access : null,
@@ -34,11 +35,12 @@ function fixture() {
     insertMessage: async (message: Message) => { messages.push(message); return message; },
     insertMentions: async (items: unknown[]) => { mentions.push(...items); },
     recordUserMentions: async (_userKey: string, sourceIds: string[]) => { usage.push(sourceIds); },
+    listUserReactions: async () => reactionUsage,
     mutateReaction: async () => ({ active: true }), createThread: async () => { throw new Error('unused'); }, getThread: async () => null,
     resolveThread: async () => null, archiveThread: async () => null, createPoll: async () => { throw new Error('unused'); }, getPollProjection: async () => null,
     votePoll: async () => ({ outcome: 'not_found' as const }), closePoll: async () => null,
   } as unknown as CommunicationRepository;
-  return { service: new ChorusService(repository, () => now), channel, access, messages, mentions, usage };
+  return { service: new ChorusService(repository, () => now), channel, access, messages, mentions, usage, reactionUsage };
 }
 
 describe('Chorus service', () => {
@@ -80,5 +82,10 @@ describe('Chorus service', () => {
     f.access.mentions.push({ participantKey: newId(), type: 'user', key: newId(), name: 'Founder', mentionCount: 0 });
     await f.service.persistUserMessage(actor, f.channel.key, '@everyone standup');
     expect(f.mentions).toHaveLength(2);
+  });
+
+  test('lists the current user frequently used reactions', async () => {
+    const f = fixture();
+    expect(await f.service.frequentReactions(actor)).toEqual(f.reactionUsage);
   });
 });
