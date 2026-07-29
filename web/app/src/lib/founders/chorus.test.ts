@@ -126,6 +126,8 @@ describe("shared button controls", () => {
     expect(component).toContain('variant="secondary"');
     expect(component).toContain('className={`relative flex gap-3 px-1 py-3');
     expect(component).toContain('"cursor-pointer focus-visible:outline-2');
+    expect(component).toContain('!message.key.startsWith("optimistic-")');
+    expect(component).not.toContain("a, [role='button']");
     expect(component).not.toContain("group-hover:pointer-events-auto");
     expect(component).toContain("Button, SearchInput, Spinner, Textarea");
     expect(component).toContain('placeholder="Search..."');

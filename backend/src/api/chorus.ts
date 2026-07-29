@@ -176,7 +176,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               try {
                 const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
                   organizationKey: resolved.organizationKey,
-                  messageContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, excludeMessageKey: message.key },
+                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [message.key] } },
                   signal: c.req.raw.signal,
                 });
                 let response = '';

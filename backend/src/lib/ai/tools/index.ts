@@ -12,7 +12,7 @@ import { orchestratorChatTool, orchestratorChatToolInputSchema } from './orchest
 import { transcribeTool, type TranscribeToolDependencies } from './transcribe';
 import { PUBLIC_TOOL_DEFINITIONS } from './tool-definitions';
 import type { PublicToolDependencies } from './tool-definition';
-import type { OrganizationMessageContext, OrganizationMessageContextDependencies } from './organization-message-context';
+import type { RetrievalContext, RetrievalDependencies } from './retrieval';
 
 /**
  * A tool name has exactly one registry entry. Archive lifecycle calls retain
@@ -30,12 +30,14 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
 export { orchestratorChatToolInputSchema };
 
-export interface ToolDependencies extends RouterDependencies, DocumentProcessingDependencies, OrganizationMessageContextDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'> {
+export interface ToolDependencies extends RouterDependencies, DocumentProcessingDependencies, RetrievalDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'> {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
   organizationKey?: string;
-  messageContext?: OrganizationMessageContext;
+  retrievalContext?: RetrievalContext;
+  embedRetrievalQuery?: (text: string) => Promise<number[]>;
+  retrievalTimeoutMs?: number;
   archiveContext?: DomainToolContext;
   archiveDependencies?: ArchiveToolDependencies;
   domainDependencies?: DomainToolExecutionOptions;
@@ -79,9 +81,9 @@ export async function* streamTool(name: string, skill: string, rawInput: unknown
 }
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
-export { organizationMessageContextTool, semanticSearchOrganizationMessages } from './organization-message-context';
+export { retrievalTool, retrievalInputSchema, retrieveNodeDocuments } from './retrieval';
 export { transcribeTool };
-export type { OrganizationMessageContext, OrganizationMessageContextDependencies, MessageSemanticMatch, MessageSemanticSearchInput } from './organization-message-context';
+export type { RetrievalContext, RetrievalDependencies, RetrievalDocument, RetrievalNodeResult } from './retrieval';
 export * from './archive-errors';
 export * from './archive-schemas';
 export * from './archive-json-schema';

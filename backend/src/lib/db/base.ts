@@ -6,6 +6,35 @@ import { embedText, embeddingMetadata } from '@/lib/bedrock-titan';
 const DEFAULT_CHUNK_SIZE = 500;
 const DEFAULT_PAGE_SIZE = 50;
 
+export interface NodeRetrievalMetadata {
+  collectionName: string;
+  fields: readonly string[];
+  schemaFields: readonly string[];
+  access: 'channel' | 'scope' | 'organization' | 'user' | 'organization-self' | 'channel-self' | 'global' | 'none';
+}
+
+const nodeRetrievalMetadata = new Map<string, NodeRetrievalMetadata>();
+const accessorRetrievalMetadata = new WeakMap<Function, NodeRetrievalMetadata>();
+const globallyRetrievableCollections = new Set(['actions', 'capabilities', 'models', 'modelActions', 'modelProviders', 'orchestrators', 'products', 'providers', 'skills', 'voices']);
+const safeRetrievalFields = new Set(['name', 'slug', 'description', 'title', 'summary', 'content', 'text', 'question', 'role', 'skill']);
+
+export function getNodeRetrievalMetadata(collectionNameOrAccessor: string | Function): NodeRetrievalMetadata | undefined {
+  return typeof collectionNameOrAccessor === 'string' ? nodeRetrievalMetadata.get(collectionNameOrAccessor) : accessorRetrievalMetadata.get(collectionNameOrAccessor);
+}
+
+function buildNodeRetrievalMetadata(collectionName: string, schema: z.ZodTypeAny, embedKeys: readonly string[]): NodeRetrievalMetadata {
+  const schemaFields = Object.keys(unwrapObjectSchema(schema).shape);
+  const access: NodeRetrievalMetadata['access'] = schemaFields.includes('channelKey') ? 'channel'
+    : collectionName === 'channels' ? 'channel-self'
+    : schemaFields.includes('scopeKey') ? 'scope'
+    : collectionName === 'organizations' ? 'organization-self'
+    : schemaFields.includes('organizationKey') || schemaFields.includes('organizationId') ? 'organization'
+    : schemaFields.includes('userKey') || schemaFields.includes('userId') ? 'user'
+    : globallyRetrievableCollections.has(collectionName) ? 'global'
+    : 'none';
+  return { collectionName, fields: embedKeys.filter((field) => safeRetrievalFields.has(field)), schemaFields, access };
+}
+
 export function isArangoNotFoundError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'errorNum' in err && (err as { errorNum?: number }).errorNum === 1202;
 }
@@ -144,6 +173,11 @@ export function createNodeHelpers<
 >(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys) {
   type T = z.infer<Schema>;
   assertNodeSchemaShape(schema, embedKeys);
+  const retrievalMetadata = buildNodeRetrievalMetadata(collectionName, schema, embedKeys);
+  const getAllChunked = createChunkedScanner<T>(collectionName, schema);
+  const listPage = createPageReader<T>(collectionName, schema);
+  nodeRetrievalMetadata.set(collectionName, retrievalMetadata);
+  accessorRetrievalMetadata.set(listPage, retrievalMetadata);
   const collection = () => db.collection(collectionName);
 
   return {
@@ -194,9 +228,9 @@ export function createNodeHelpers<
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     /** Streams the entire collection in chunks of `chunkSize` (default 500) instead of loading it all into memory at once. */
-    getAllChunked: createChunkedScanner<T>(collectionName, schema),
+    getAllChunked,
     /** One resumable page (default 50), for stateless HTTP pagination. See {@link Page}. */
-    listPage: createPageReader<T>(collectionName, schema),
+    listPage,
   };
 }
 
@@ -210,6 +244,11 @@ export function createEdgeHelpers<
   // Relations may omit the embedding field entirely; a strict schema without
   // it must never have one injected (parse would reject the unknown key).
   const hasEmbeddingField = Object.keys(unwrapObjectSchema(schema).shape).includes('embedding');
+  const retrievalMetadata = buildNodeRetrievalMetadata(collectionName, schema, embedKeys);
+  const getAllChunked = createChunkedScanner<T>(collectionName, schema);
+  const listPage = createPageReader<T>(collectionName, schema);
+  nodeRetrievalMetadata.set(collectionName, retrievalMetadata);
+  accessorRetrievalMetadata.set(listPage, retrievalMetadata);
 
   return {
     collectionName,
@@ -257,8 +296,8 @@ export function createEdgeHelpers<
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     /** Streams the entire collection in chunks of `chunkSize` (default 500) instead of loading it all into memory at once. */
-    getAllChunked: createChunkedScanner<T>(collectionName, schema),
+    getAllChunked,
     /** One resumable page (default 50), for stateless HTTP pagination. See {@link Page}. */
-    listPage: createPageReader<T>(collectionName, schema),
+    listPage,
   };
 }
