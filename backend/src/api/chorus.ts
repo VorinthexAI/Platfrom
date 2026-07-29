@@ -1,12 +1,13 @@
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
-import { sanitizeAgentInput, streamTool, transcribeTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
+import { streamTool, transcribeTool, sanitizedAgentMessageSchema, type ToolDependencies } from '@/lib/ai/tools';
 import { executeAction } from '@/lib/ai/router';
 import type { SpeechOutput, TranscriptionOutput } from '@/lib/ai/providers';
 import { dedupeMentionCandidates } from '@/lib/communication/mention-candidates';
 import { getDefaultScopeRepository } from '@/lib/ai/scopes';
-import { requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
+import { listAccessibleScopes, requireOrganizationAccess, FoundersAccessError } from '@/lib/founders/access';
+import { getUserOrganizationById } from '@/lib/db/user-organization.node';
 import { ChorusError, ChorusService, type ChorusActor } from '@/lib/communication';
 import { requireFounder } from './founders';
 import { parseJson, parseQuery, strictObject } from './validation';
@@ -34,13 +35,14 @@ const transcriptionBody = strictObject({
 const speechBody = strictObject({ text: z.string().trim().min(1).max(8_000) });
 const CHORUS_RESPONSE_INSTRUCTION = `Reply with a detailed, self-contained plain-text answer. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
 const CHORUS_PROVIDER_FALLBACK = 'I could not generate a response right now. Please try again.';
+const CHORUS_PARTIAL_FALLBACK = '\n\nI could not complete this response. Please try again.';
 export const chorusMessageListQuerySchema = strictObject({ limit: z.coerce.number().int().min(1).max(200).default(100) });
 
 export interface ChorusApiDependencies {
   service: ChorusService;
   resolveActor(c: Context, requestedOrganizationKey: string): Promise<ChorusActor | Response>;
   stream(skill: string, input: { message: string }, dependencies: ToolDependencies): AsyncIterable<{ type: string; text?: string }>;
-  listScopes(organizationKey: string): Promise<readonly { name: string; description: string | null }[]>;
+  listScopes(actor: ChorusActor): Promise<readonly { name: string; description: string | null }[]>;
   transcribe(organizationKey: string, audioBase64: string, prompt: string, signal: AbortSignal): Promise<TranscriptionOutput>;
   speak(organizationKey: string, text: string, signal: AbortSignal): Promise<SpeechOutput>;
 }
@@ -59,7 +61,12 @@ const defaultDependencies: ChorusApiDependencies = {
     }
   },
   stream: (skill, input, dependencies) => streamTool('chat', skill, input, dependencies),
-  listScopes: (organizationKey) => getDefaultScopeRepository().listScopes(organizationKey),
+  async listScopes(actor) {
+    const membership = await getUserOrganizationById(actor.membershipKey);
+    if (!membership || membership.organizationId !== actor.organizationKey || membership.status !== 'active') return [];
+    const accessibleKeys = new Set((await listAccessibleScopes(membership)).map(({ key: scopeKey }) => scopeKey));
+    return (await getDefaultScopeRepository().listScopes(actor.organizationKey)).filter((scope) => accessibleKeys.has(scope.key));
+  },
   transcribe: (organizationKey, audioBase64, prompt, signal) => transcribeTool.execute(
     { audioBase64, mimeType: 'audio/pcm', prompt },
     { organizationKey, signal, timeoutMs: 90_000 },
@@ -83,14 +90,17 @@ function threadProjection(thread: { key: string; channelKey: string; title?: str
   return { key: thread.key, channelKey: thread.channelKey, title: thread.title, rootMessageKey: thread.rootMessageKey, status: thread.status, createdAt: thread.createdAt, updatedAt: thread.updatedAt };
 }
 
-function boundedAssistantContent(content: string): string {
-  const sanitized = sanitizeAgentInput(content);
-  let bounded = '';
-  for (const character of sanitized) {
-    if (bounded.length + character.length > 8_000) break;
-    bounded += character;
+function boundedAssistantDelta(content: string, delta: string): string {
+  let accepted = '';
+  for (const character of delta) {
+    if (content.length + accepted.length + character.length > 8_000) break;
+    accepted += character;
   }
-  return bounded;
+  return accepted;
+}
+
+function isAbort(error: unknown, signal: AbortSignal): boolean {
+  return signal.aborted || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError');
 }
 
 function scopeContext(scopes: readonly { name: string; description: string | null }[]): string {
@@ -162,7 +172,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
         const { access, message, orchestrators } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
         let context = '';
         try {
-          context = scopeContext(await dependencies.listScopes(resolved.organizationKey));
+          context = scopeContext(await dependencies.listScopes(resolved));
         } catch {
           console.error('chorus scope context unavailable', { organizationKey: resolved.organizationKey, channelKey });
         }
@@ -172,25 +182,41 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
             await sse.writeSSE({ event: 'start', data: JSON.stringify({ channelKey, userMessage: storedMessage(message) }) });
             for (const orchestrator of orchestrators) {
               await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
-              let storedContent = CHORUS_PROVIDER_FALLBACK;
+              let storedContent = '';
               try {
                 const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
                   organizationKey: resolved.organizationKey,
                     retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [message.key] } },
                   signal: c.req.raw.signal,
                 });
-                let response = '';
                 for await (const chunk of provider) {
                   if (chunk.type === 'text-delta' && chunk.text) {
-                    response += chunk.text;
-                    await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text: chunk.text }) });
+                    const accepted = boundedAssistantDelta(storedContent, chunk.text);
+                    if (!accepted) continue;
+                    storedContent += accepted;
+                    await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text: accepted }) });
                   }
                 }
-                storedContent = boundedAssistantContent(response);
-                if (!storedContent) throw new Error('orchestrator returned no valid content');
+                if (!storedContent.trim()) throw new Error('orchestrator returned no valid content');
               } catch (error) {
+                if (isAbort(error, c.req.raw.signal)) {
+                  try {
+                    await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
+                    await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });
+                  } catch {}
+                  return;
+                }
                 console.error('chorus orchestrator stream failed', { channelKey, orchestratorKey: orchestrator.key, error });
-                storedContent = CHORUS_PROVIDER_FALLBACK;
+                const fallback = storedContent.trim() ? CHORUS_PARTIAL_FALLBACK : CHORUS_PROVIDER_FALLBACK;
+                const accepted = boundedAssistantDelta(storedContent, fallback);
+                if (accepted) {
+                  storedContent += accepted;
+                  await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text: accepted }) });
+                }
+              }
+              if (!storedContent.trim()) {
+                await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
+                continue;
               }
               let assistantMessage: Awaited<ReturnType<ChorusService['persistOrchestratorMessage']>>;
               try {

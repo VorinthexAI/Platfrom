@@ -136,6 +136,7 @@ describe("shared button controls", () => {
     expect(component).toContain("lazyLoadEmojis={false}");
     expect(component).toContain('backgroundColor: "transparent"');
     expect(component).toContain('aria-label="Mention shortcuts"');
+    expect(component.match(/await refreshMessages\(channelKey, false\)/g)).toHaveLength(2);
     expect(component).not.toContain("<button");
     expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');
     expect(mobileHome).not.toContain("PressableScale");
