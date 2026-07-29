@@ -52,7 +52,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
         queryRetrieval: async (query, bindVars) => { retrievalQueries.push({ query, bindVars }); return { all: async () => [{ key: 'prior-message', fields: { content: 'The launch is Friday.' }, createdAt: '2026-07-28T12:00:00.000Z', score: 0.9 }] }; },
         stream: async function* (_organizationKey, chatInput) { novaInputs.push(chatInput); yield { type: 'text-delta', text: 'Retrieved answer' }; yield { type: 'done' }; },
       });
-      return (async function* () { if (options.abort) throw new DOMException('cancelled', 'AbortError'); if (options.fail || (options.failSkill && skill.includes(options.failSkill))) throw new Error('provider unavailable'); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await options.gate; if (options.partialFail) throw new Error('provider interrupted'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; })();
+      return (async function* () { if (options.abort) throw new DOMException('cancelled', 'AbortError'); if (options.fail || (options.failSkill && skill.includes(options.failSkill))) throw new Error('provider unavailable'); yield { type: 'text-delta', text: options.output ?? 'Hi ' }; if (options.gate) await Promise.race([options.gate, new Promise((_, reject) => dependencies.signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true }))]); if (options.partialFail) throw new Error('provider interrupted'); if (!options.output) yield { type: 'text-delta', text: 'there' }; yield { type: 'done' }; })();
     },
     listScopes: async (resolved) => {
       expect(resolved).toEqual(actor);
@@ -157,6 +157,15 @@ describe('Chorus SSE API', () => {
     expect(persisted).toEqual(['user']);
   });
 
+  test('reports a missing canonical orchestrator instead of completing silently', async () => {
+    const { app, persisted } = appFor({ orchestratorCount: 0 });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) });
+    const events = parseSse(await response.text());
+    expect(events.map(({ event }) => event)).toEqual(['start', 'error']);
+    expect(events[1]?.data.error).toBe('mentioned orchestrator is unavailable');
+    expect(persisted).toEqual(['user']);
+  });
+
   test('clears an authorized channel', async () => {
     const { app } = appFor();
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'DELETE' });
@@ -200,11 +209,24 @@ describe('Chorus SSE API', () => {
     expect(assistantCalls[0]?.[2]).toBe(canonical);
   });
 
-  test('does not persist a provider fallback when generation is aborted', async () => {
+  test('persists a fallback when the provider aborts without a client cancellation', async () => {
     const { app, persisted } = appFor({ abort: true });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
     const events = parseSse(await response.text());
-    expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'assistant-error', 'complete']);
+    expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'done', 'complete']);
+    expect(events[2]?.data.text).toBe('I could not generate a response right now. Please try again.');
+    expect(persisted).toEqual(['user', 'assistant']);
+  });
+
+  test('does not persist a fallback when the client request is actually aborted', async () => {
+    const gate = new Promise<void>(() => {});
+    const controller = new AbortController();
+    const { app, persisted } = appFor({ gate });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }), signal: controller.signal });
+    const consuming = response.text();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+    await consuming;
     expect(persisted).toEqual(['user']);
   });
 

@@ -640,6 +640,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
       await streamChorusMessage(organizationKey, channelKey, content, (streamEvent) => {
         if (organizationGeneration.current !== generation || currentOrganization.current !== organizationKey) return;
         if ((streamEvent.type === "start" && streamEvent.channelKey !== channelKey) || (streamEvent.type === "done" && streamEvent.message.channelKey !== channelKey)) throw new Error("Chorus stream returned a message for another channel");
+        if (streamEvent.type === "assistant-error") setErrors((current) => ({ ...current, [channelKey]: "An orchestrator response could not be saved. Please try again." }));
         eventBatcher.push(streamEvent);
         if (streamEvent.type === "done" || streamEvent.type === "complete") eventBatcher.flush();
       }, controller.signal);
@@ -654,9 +655,9 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
       eventBatcher.flush();
       if (!controller.signal.aborted && organizationGeneration.current === generation) {
         const message = error instanceof Error ? error.message : "Message failed";
-        setErrors((current) => ({ ...current, [channelKey]: message }));
         try { await refreshMessages(channelKey, false); }
         catch { setMessages((current) => ({ ...current, [channelKey]: markChorusStreamFailed(current[channelKey] ?? [], streamKey, message) })); }
+        setErrors((current) => ({ ...current, [channelKey]: message }));
       }
     } finally {
       eventBatcher.cancel();
@@ -833,6 +834,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
                {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallyToggleReaction} />) : null}
           </div>
+            {channelKey && errors[channelKey] ? <p role="alert" className="shrink-0 border-t border-status-critical/30 bg-status-critical/5 px-5 py-2 text-[10px] text-status-critical">{errors[channelKey]}</p> : null}
             <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${threadState?.thread.key ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} onSubmit={threadState && channelKey ? (content) => { void submitThreadMessage(content); } : submitComposerMessage} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={threadState?.thread.key ?? "channel"} />
         </section>
         <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
