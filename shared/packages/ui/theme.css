@@ -51,6 +51,13 @@
 }
 
 .vui-button {
+  --vui-button-loading-background: linear-gradient(
+    135deg,
+    rgba(221, 226, 229, 0.08),
+    rgba(221, 226, 229, 0.22),
+    rgba(221, 226, 229, 0.08)
+  );
+  --vui-button-loading-color: var(--vui-color-accent-light);
   align-items: center;
   border-radius: var(--vui-radius-pill) !important;
   border: 1px solid transparent;
@@ -133,11 +140,10 @@
   transform: none;
 }
 
-/* Loading: the button is disabled but very much alive — the rising
-   chrome melt carries the state, and the label darkens to stay legible
-   on top of it. */
+/* Loading keeps each variant recognizable while the rising melt carries
+   the state. */
 .vui-button[aria-busy="true"] {
-  color: #030507;
+  color: var(--vui-button-loading-color);
   cursor: progress;
   opacity: 1;
 }
@@ -149,7 +155,7 @@
   animation:
     vui-fill-rise 1.4s var(--vui-ease-luxury) forwards,
     vui-fill-churn 2.6s ease-in-out infinite;
-  background: var(--vui-gradient-chrome);
+  background: var(--vui-button-loading-background);
   background-size: 220% 220%;
   border-radius: inherit;
   inset: 0;
@@ -224,6 +230,8 @@
 }
 
 .vui-button-primary {
+  --vui-button-loading-background: var(--vui-gradient-chrome);
+  --vui-button-loading-color: #030507;
   background: var(--vui-gradient-chrome);
   background-position: 0% 0%;
   background-size: 200% 200%;
@@ -270,6 +278,13 @@
 }
 
 .vui-button-danger {
+  --vui-button-loading-background: linear-gradient(
+    135deg,
+    #8f3939,
+    #c05555,
+    #8f3939
+  );
+  --vui-button-loading-color: var(--vui-color-text);
   background: var(--vui-color-danger);
   color: var(--vui-color-text);
 }
