@@ -99,8 +99,8 @@ function boundedAssistantDelta(content: string, delta: string): string {
   return accepted;
 }
 
-function isAbort(error: unknown, signal: AbortSignal): boolean {
-  return signal.aborted || (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError');
+function requestWasAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
 }
 
 function scopeContext(scopes: readonly { name: string; description: string | null }[]): string {
@@ -108,6 +108,10 @@ function scopeContext(scopes: readonly { name: string; description: string | nul
     .filter((scope) => scope.description?.trim())
     .map((scope) => `${scope.name}: ${scope.description!.trim()}`);
   return descriptions.length ? `## Organization scopes\n${descriptions.join('\n')}` : '';
+}
+
+function mentionsCanonicalOrchestrator(content: string): boolean {
+  return CANONICAL_ORCHESTRATOR_NAMES.some((name) => new RegExp(`(^|[^\\w])@${name}(?=$|[^\\w])`, 'i').test(content));
 }
 
 export function buildMentionRoster(candidates: readonly MentionCandidate[]) {
@@ -180,6 +184,10 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
           streamStarted = true;
           try {
             await sse.writeSSE({ event: 'start', data: JSON.stringify({ channelKey, userMessage: storedMessage(message) }) });
+            if (!orchestrators.length && mentionsCanonicalOrchestrator(body.content)) {
+              await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'mentioned orchestrator is unavailable' }) });
+              return;
+            }
             for (const orchestrator of orchestrators) {
               await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
               let storedContent = '';
@@ -199,7 +207,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
                 }
                 if (!storedContent.trim()) throw new Error('orchestrator returned no valid content');
               } catch (error) {
-                if (isAbort(error, c.req.raw.signal)) {
+                if (requestWasAborted(c.req.raw.signal)) {
                   try {
                     await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
                     await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });

@@ -137,6 +137,8 @@ describe("shared button controls", () => {
     expect(component).toContain('backgroundColor: "transparent"');
     expect(component).toContain('aria-label="Mention shortcuts"');
     expect(component.match(/await refreshMessages\(channelKey, false\)/g)).toHaveLength(2);
+    expect(component).toContain('role="alert"');
+    expect(component).toContain("An orchestrator response could not be saved. Please try again.");
     expect(component).not.toContain("<button");
     expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');
     expect(mobileHome).not.toContain("PressableScale");
