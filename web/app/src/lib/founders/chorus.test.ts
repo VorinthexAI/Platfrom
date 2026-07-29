@@ -115,7 +115,10 @@ describe("Chorus mention rows", () => {
 describe("shared button controls", () => {
   test("enforces the shared radius, sizes, and application-level usage", async () => {
     const component = await Bun.file(new URL("../../components/founders/HqCommunicationOverlay.tsx", import.meta.url)).text();
+    const accountModal = await Bun.file(new URL("../../components/founders/AccountModal.tsx", import.meta.url)).text();
     const mobileHome = await Bun.file(new URL("../../../../../mobile/app/src/components/HomeConstellation.tsx", import.meta.url)).text();
+    const mobileButton = await Bun.file(new URL("../../../../../shared/packages/ui/components/button/button.mobile.tsx", import.meta.url)).text();
+    const webButton = await Bun.file(new URL("../../../../../shared/packages/ui/components/button/button.web.tsx", import.meta.url)).text();
     const theme = await Bun.file(new URL("../../../../../shared/packages/ui/theme.css", import.meta.url)).text();
     const guidance = await Bun.file(new URL("../../../../../AGENTS.md", import.meta.url)).text();
     expect(component).toContain("CHORUS_ORCHESTRATOR_NAMES.map");
@@ -137,6 +140,17 @@ describe("shared button controls", () => {
     expect(theme).toContain("border-radius: var(--vui-radius-pill) !important");
     expect(theme).toContain("text-transform: none !important");
     expect(theme).toContain('.vui-button-primary:disabled');
+    expect(webButton).toContain("loading?: boolean");
+    expect(webButton).toContain("aria-busy={loading || undefined}");
+    expect(webButton).toContain("disabled={disabled || loading}");
+    expect(mobileButton).toContain('disabled && !loading && variant !== "primary"');
+    expect(theme).toContain("--vui-button-loading-background");
+    expect(theme).toContain("color: var(--vui-button-loading-color)");
+    expect(accountModal).toContain('loading={saving}>Connect</Button>');
+    expect(accountModal).toContain('loading={signingOut}');
+    expect(accountModal).not.toContain("Connecting...");
+    expect(accountModal).not.toContain("Signing out...");
+    expect(component).not.toContain("Clearing...");
     expect(component).toContain(">Channels</span>");
     expect(component).not.toContain('selected ? "bg-[var(--panel-strong)]');
     expect(component).not.toContain("aria-current");
