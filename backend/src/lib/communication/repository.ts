@@ -111,6 +111,17 @@ function normalizeMessageProjection(message: MessageProjection): MessageProjecti
   };
 }
 
+export function buildUserMentionDocuments(userKey: string, sourceIds: string[], now: string) {
+  return [...new Set(sourceIds)].map((sourceId) => toArangoDoc(userMentionSchema.parse({
+    key: newId(),
+    userKey,
+    sourceId,
+    count: 1,
+    createdAt: now,
+    updatedAt: now,
+  })));
+}
+
 async function projectPoll(pollKey: string, channelKey: string, viewerParticipantKey: string): Promise<PollProjection | null> {
   return first<PollProjection>(`
     FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey
@@ -312,7 +323,8 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   },
   async recordUserMentions(userKey, sourceIds, now) {
     if (!sourceIds.length) return;
-    await db.query('FOR sourceId IN @sourceIds UPSERT { userKey: @userKey, sourceId } INSERT MERGE(@document, { sourceId }) UPDATE { count: OLD.count + 1, updatedAt: @now } IN userMentions', { userKey, sourceIds, now, document: toArangoDoc(userMentionSchema.parse({ key: newId(), userKey, sourceId: 'pending', count: 1, createdAt: now, updatedAt: now })) });
+    const documents = buildUserMentionDocuments(userKey, sourceIds, now);
+    await db.query('FOR document IN @documents UPSERT { userKey: document.userKey, sourceId: document.sourceId } INSERT document UPDATE { count: OLD.count + 1, updatedAt: @now } IN userMentions', { documents, now });
   },
   async recordUserReaction(userKey, reactionSlug, now) {
     await db.query('UPSERT { userKey: @userKey, reactionSlug: @reactionSlug } INSERT @document UPDATE { count: OLD.count + 1, updatedAt: @now } IN userReactions', { userKey, reactionSlug, now, document: toArangoDoc(userReactionSchema.parse({ key: newId(), userKey, reactionSlug, count: 1, createdAt: now, updatedAt: now })) });

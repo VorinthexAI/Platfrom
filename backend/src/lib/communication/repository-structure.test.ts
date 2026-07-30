@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { buildUserMentionDocuments } from './repository';
 
 describe('Arango communication repository structure', () => {
   test('never combines same-collection mutation forms in one transaction query', async () => {
@@ -78,5 +79,12 @@ describe('Arango communication repository structure', () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('UPSERT { messageKey: mention.messageKey, participantKey: mention.participantKey }');
     expect(source).not.toContain('messageKey: mention._key');
+  });
+
+  test('generates a distinct usage document for every mentioned orchestrator', () => {
+    const documents = buildUserMentionDocuments('user_founder', ['orchestrator_atlas', 'orchestrator_athena'], '2026-07-30T12:00:00.000Z');
+
+    expect(documents.map(({ sourceId }) => sourceId)).toEqual(['orchestrator_atlas', 'orchestrator_athena']);
+    expect(new Set(documents.map(({ _key }) => _key)).size).toBe(2);
   });
 });
