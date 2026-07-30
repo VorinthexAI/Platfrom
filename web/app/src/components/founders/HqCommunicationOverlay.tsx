@@ -94,7 +94,7 @@ const COUNTRY_TIME_ZONES: Record<string, string> = {
 
 function Timestamp({ value, countryCode }: { value: string; countryCode: string }) {
   const timeZone = COUNTRY_TIME_ZONES[countryCode] ?? "UTC";
-  const label = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone, timeZoneName: "short" }).format(new Date(value));
+  const label = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", timeZone }).format(new Date(value));
   return <time dateTime={value} title={value} className="font-mono text-[9px] text-silver-600">{label}</time>;
 }
 

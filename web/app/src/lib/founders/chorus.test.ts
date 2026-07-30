@@ -152,6 +152,7 @@ describe("shared button controls", () => {
     expect(component).toContain("subscribeChorusTyping");
     expect(component).toContain("publishChorusTyping");
     expect(component).toContain("chorus-typing-gradient");
+    expect(component).not.toContain('timeZoneName: "short"');
     expect(component).toContain("const scrollMessages = threadState?.messages ?? selectedMessages");
     expect(component).toContain("[channelKey, scrollMessages]");
     expect(component).not.toContain("shouldFollowMessages");

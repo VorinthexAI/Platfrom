@@ -37,7 +37,7 @@ const transcriptionBody = strictObject({
   if (bytes < 960 || bytes > 2_880_000) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['audioBase64'], message: 'Audio must be between 20ms and 60 seconds' });
 });
 const speechBody = strictObject({ text: z.string().trim().min(1).max(8_000) });
-const CHORUS_RESPONSE_INSTRUCTION = `Reply with a detailed, self-contained plain-text answer. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
+const CHORUS_RESPONSE_INSTRUCTION = `Reply directly to the user with a detailed, self-contained plain-text answer. Other orchestrator mentions only select independent recipients: do not address, converse with, or refer to other mentioned orchestrators or their responses. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
 const CHORUS_PROVIDER_FALLBACK = 'I could not generate a response right now. Please try again.';
 const CHORUS_PARTIAL_FALLBACK = '\n\nI could not complete this response. Please try again.';
 export const chorusMessageListQuerySchema = strictObject({ limit: z.coerce.number().int().min(1).max(200).default(100) });
@@ -217,6 +217,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
         }
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
+          const turnMessageKeys = [message.key];
           const activeTyping = new Map<string, ChorusTypingEvent>();
           const stopTyping = async (orchestratorKey: string) => {
             const current = activeTyping.get(orchestratorKey);
@@ -239,7 +240,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               try {
                 const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
                   organizationKey: resolved.organizationKey,
-                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [message.key] } },
+                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [...turnMessageKeys] } },
                   signal: c.req.raw.signal,
                 });
                 for await (const chunk of provider) {
@@ -281,6 +282,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
                 await stopTyping(orchestrator.key);
                 continue;
               }
+              turnMessageKeys.push(assistantMessage.key);
               await sse.writeSSE({ event: 'done', data: JSON.stringify({ orchestratorKey: orchestrator.key, message: storedMessage(assistantMessage) }) });
               await stopTyping(orchestrator.key);
             }
