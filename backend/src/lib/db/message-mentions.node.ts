@@ -7,7 +7,7 @@ export const messageMentionSchema = z.object({
   scopeKey: z.string().cuid(),
   channelKey: z.string().cuid(),
   messageKey: z.string().cuid(),
-  participantKey: z.string().cuid(),
+  participantKey: z.string().trim().min(1).max(160),
   handledAt: z.string().datetime().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
