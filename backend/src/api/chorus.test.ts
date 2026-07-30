@@ -127,12 +127,15 @@ describe('Chorus SSE API', () => {
     expect(persisted).toEqual(['user', 'assistant', 'assistant']);
     expect(streamInputs).toEqual([{ message: 'hello' }, { message: 'hello' }]);
     expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
+    expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String), expect.any(String)]);
+    expect(new Set((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).size).toBe(2);
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(assistantCalls[1]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(streamSkills).toHaveLength(2);
     expect(typingEvents).toEqual(orchestrators.flatMap((orchestrator) => [expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: true }), expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: false })]));
     for (const skill of streamSkills) {
       expect(skill).toContain('detailed, self-contained plain-text answer');
+      expect(skill).toContain('Other orchestrator mentions only select independent recipients');
       expect(skill).toContain('## Organization scopes\nHQ: The organization workspace.');
       expect(skill).not.toContain('Ignored');
     }

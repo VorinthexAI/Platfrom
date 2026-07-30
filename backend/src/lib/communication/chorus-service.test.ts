@@ -65,6 +65,13 @@ describe('Chorus service', () => {
     expect(f.messages.map((message) => message.content)).toEqual(['@Atlas please review this', 'Reviewed.']);
   });
 
+  test('matches orchestrator mentions without regard to case', async () => {
+    const f = fixture();
+    const result = await f.service.persistUserMessage(actor, f.channel.key, '@atlas hello');
+
+    expect(result.orchestrators.map(({ name }) => name)).toEqual(['Atlas']);
+  });
+
   test('persists a mention for a legacy opaque orchestrator participant', async () => {
     const f = fixture();
     f.access.mentions[2]!.participantKey = 'participant_themis';
