@@ -95,6 +95,16 @@ describe('Chorus SSE API', () => {
     expect(await response.json()).toEqual({ error: 'authentication required' });
   });
 
+  test('accepts opaque public channel keys when posting a message', async () => {
+    const opaqueChannelKey = 'channel_general';
+    const { app, persisted } = appFor();
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${opaqueChannelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('event: complete');
+    expect(persisted).toEqual(['user', 'assistant']);
+  });
+
   test('streams separate identified responses for two orchestrators', async () => {
     const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, typingEvents } = appFor({ orchestratorCount: 2 });
     const threadKey = newId();

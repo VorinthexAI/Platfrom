@@ -15,7 +15,9 @@ import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import type { MentionCandidate } from '@/lib/communication/repository';
 import { publishChorusTyping, subscribeChorusTyping, type ChorusTypingEvent } from '@/lib/communication/typing';
 
-const key = z.string().cuid();
+// Chorus identifiers are public application keys. Legacy organization records
+// may use stable opaque keys rather than generated CUIDs.
+const key = z.string().trim().min(1).max(160);
 const organizationKey = z.string().trim().min(1).max(160);
 const messageBody = strictObject({ content: sanitizedAgentMessageSchema, threadKey: key.optional(), replyToMessageKey: key.optional() });
 const reactionBody = strictObject({ reaction: z.string().trim().min(1).max(64), operation: z.enum(['add', 'remove', 'toggle']).default('toggle') });
