@@ -517,7 +517,6 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const activeChannel = useRef<string | null>(null);
   const messagesPane = useRef<HTMLDivElement>(null);
   const emojiPicker = useRef<HTMLDivElement>(null);
-  const shouldFollowMessages = useRef(true);
   const channelDrafts = useRef(new Map<string, string>());
   const stopVoice = useAudioStore((state) => state.stopVoice);
   const voicePlayingSrc = useAudioStore((state) => state.voicePlayingSrc);
@@ -604,6 +603,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   const selected = channels.find((entry) => entry.orchestrator.key === selectedKey) ?? null;
   const channelKey = selected?.channel?.key ?? null;
   const selectedMessages = channelKey ? messages[channelKey] : undefined;
+  const scrollMessages = threadState?.messages ?? selectedMessages;
   activeChannel.current = channelKey;
   useEffect(() => {
     setTypingParticipants({});
@@ -623,21 +623,12 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   }, [channelKey, organizationKey]);
   useEffect(() => { if (selected?.canChat && channelKey) void refreshMessages(channelKey).catch(() => {}); }, [selectedKey, channelKey, selected?.canChat, refreshMessages]);
   useEffect(() => {
-    shouldFollowMessages.current = true;
     const frame = requestAnimationFrame(() => {
       const pane = messagesPane.current;
       if (pane) pane.scrollTop = pane.scrollHeight;
     });
     return () => cancelAnimationFrame(frame);
-  }, [channelKey]);
-  useEffect(() => {
-    if (!shouldFollowMessages.current) return;
-    const frame = requestAnimationFrame(() => {
-      const pane = messagesPane.current;
-      if (pane && shouldFollowMessages.current) pane.scrollTop = pane.scrollHeight;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [selectedMessages]);
+  }, [channelKey, scrollMessages]);
   useEffect(() => () => { speechRequest.current?.abort(); stopVoice(); for (const url of speechAudio.current.values()) URL.revokeObjectURL(url); speechAudio.current.clear(); }, [organizationKey, channelKey, stopVoice]);
 
   const selectChannel = useCallback((entry: ChorusChannelEntry) => {
@@ -651,7 +642,6 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
 
   const submitMessage = useCallback(async (content: string) => {
     if (!selected?.canChat || !channelKey || streaming[channelKey] || !content) return;
-    shouldFollowMessages.current = true;
     const now = new Date().toISOString();
     const userKey = `optimistic-user-${crypto.randomUUID()}`;
     const streamKey = crypto.randomUUID();
@@ -860,7 +850,7 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
              <div className="min-w-0"><h1 className="truncate pb-0.5 font-display text-base leading-6 text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1>{threadState ? <p className="truncate text-[10px] text-silver-500">{threadState.thread.title}</p> : null}</div>
             {selected?.canChat && channelKey ? <Button type="button" variant="secondary" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Clear channel</Button> : null}
           </div>
-          <div ref={messagesPane} onWheel={(event) => { if (event.deltaY < 0) shouldFollowMessages.current = false; }} onScroll={(event) => { const pane = event.currentTarget; shouldFollowMessages.current = Math.max(0, pane.scrollHeight - pane.scrollTop - pane.clientHeight) < 24; }} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
+          <div ref={messagesPane} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
                {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallyToggleReaction} />) : null}
