@@ -4,7 +4,7 @@ import { createNodeHelpers } from './base';
 export const USER_MENTIONS_COLLECTION = 'userMentions';
 export const userMentionSchema = z.object({
   key: z.string().cuid(),
-  userKey: z.string().cuid(),
+  userKey: z.string().trim().min(1).max(160),
   sourceId: z.string().trim().min(1).max(160),
   count: z.number().int().positive(),
   createdAt: z.string().datetime(),

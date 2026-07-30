@@ -3,6 +3,7 @@ import { newId } from '@/lib/ids';
 import { channelSchema } from '@/lib/db/channels.node';
 import { channelParticipantSchema } from '@/lib/db/channel-participants.node';
 import type { Message } from '@/lib/db/messages.node';
+import { userMentionSchema } from '@/lib/db/user-mentions.node';
 import { ChorusService } from './chorus-service';
 import type { CommunicationRepository, GeneralChannelAccess } from './repository';
 
@@ -34,7 +35,10 @@ function fixture() {
     getMessage: async (key: string) => messages.find((message) => message.key === key) ?? null,
     insertMessage: async (message: Message) => { messages.push(message); return message; },
     insertMentions: async (items: unknown[]) => { mentions.push(...items); },
-    recordUserMentions: async (_userKey: string, sourceIds: string[]) => { usage.push(sourceIds); },
+    recordUserMentions: async (userKey: string, sourceIds: string[]) => {
+      for (const sourceId of sourceIds) userMentionSchema.parse({ key: newId(), userKey, sourceId, count: 1, createdAt: now, updatedAt: now });
+      usage.push(sourceIds);
+    },
     listUserReactions: async () => reactionUsage,
     mutateReaction: async () => ({ active: true }), createThread: async () => { throw new Error('unused'); }, getThread: async () => null,
     resolveThread: async () => null, archiveThread: async () => null, createPoll: async () => { throw new Error('unused'); }, getPollProjection: async () => null,
@@ -69,6 +73,18 @@ describe('Chorus service', () => {
 
     expect(f.mentions).toHaveLength(1);
     expect(result.orchestrators).toHaveLength(1);
+  });
+
+  test('completes the response flow for legacy opaque user and orchestrator identities', async () => {
+    const f = fixture();
+    f.access.viewerUserKey = 'user_founder';
+    f.access.mentions[2]!.key = 'orchestrator_atlas';
+
+    const result = await f.service.persistUserMessage(actor, f.channel.key, '@Atlas hello');
+    await f.service.persistOrchestratorMessage(result.access, result.orchestrators[0]!, 'Hello from Atlas.', undefined, result.message.key);
+
+    expect(f.usage).toEqual([['orchestrator_atlas']]);
+    expect(f.messages.map(({ content }) => content)).toEqual(['@Atlas hello', 'Hello from Atlas.']);
   });
 
   test('expands @everyone to organization members without dispatching orchestrators', async () => {
