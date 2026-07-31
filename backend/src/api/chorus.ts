@@ -118,6 +118,11 @@ function scopeContext(scopes: readonly { name: string; description: string | nul
   return descriptions.length ? `## Organization scopes\n${descriptions.join('\n')}` : '';
 }
 
+function responseIdentity(name: string, role?: string): string {
+  const identity = role?.trim() ? `${name}, the ${role.trim()} orchestrator` : `${name}, an orchestrator`;
+  return `## Current response identity\nYou are ${identity}. This invocation belongs only to ${name}. Speak in first person from your own perspective and treat the user's request as addressed solely to you. Any other orchestrator mentions are routing metadata, not participants in your conversation. Ignore them completely: do not greet, address, describe, coordinate with, speak for, or refer to another orchestrator. Do not describe yourself in the third person or answer on behalf of a group.`;
+}
+
 function mentionsCanonicalOrchestrator(content: string): boolean {
   return CANONICAL_ORCHESTRATOR_NAMES.some((name) => new RegExp(`(^|[^\\w])@${name}(?=$|[^\\w])`, 'i').test(content));
 }
@@ -238,7 +243,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
               let storedContent = '';
               try {
-                const provider = dependencies.stream([orchestrator.skill, context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
+                const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
                   organizationKey: resolved.organizationKey,
                     retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [...turnMessageKeys] } },
                   signal: c.req.raw.signal,
