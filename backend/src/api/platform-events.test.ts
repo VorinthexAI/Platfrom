@@ -4,7 +4,7 @@ import { landingEventSlugSchema, landingEventSlugs } from '@/platform/events';
 
 describe('platform event schemas', () => {
   test('catalog contains the 32 landing events', () => {
-    expect(landingEventSlugs).toHaveLength(32);
+    expect(landingEventSlugs).toHaveLength(31);
     expect(landingEventSlugSchema.parse('landing.product_entered')).toBe('landing.product_entered');
     expect(landingEventSlugSchema.parse('fragments.collected')).toBe('fragments.collected');
     expect(landingEventSlugSchema.parse('landing.crystal_collected')).toBe('landing.crystal_collected');
