@@ -72,7 +72,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/chorus/reactions', handlers.frequentReactions);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/typing', handlers.typing);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents };
+  return { app, access, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents };
 }
 
 describe('Chorus SSE API', () => {
@@ -106,7 +106,7 @@ describe('Chorus SSE API', () => {
   });
 
   test('streams separate identified responses for two orchestrators', async () => {
-    const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, typingEvents } = appFor({ orchestratorCount: 2 });
+    const { app, access, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, typingEvents } = appFor({ orchestratorCount: 2 });
     const threadKey = newId();
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova hello', threadKey }) });
     const text = await response.text();
@@ -125,8 +125,9 @@ describe('Chorus SSE API', () => {
     expect(text).not.toContain('Atlas:');
     expect(text).not.toContain('Nova:');
     expect(persisted).toEqual(['user', 'assistant', 'assistant']);
-    expect(streamInputs).toEqual([{ message: '@Atlas @Nova hello' }, { message: '@Atlas @Nova hello' }]);
-    expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
+    expect(streamInputs).toEqual([{ message: 'hello' }, { message: 'hello' }]);
+    expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] }, authorParticipantKeys: { messages: [access.humanParticipant.key, orchestrators[0]!.participantKey] } } });
+    expect(streamDependencies[1]).toMatchObject({ retrievalContext: { authorParticipantKeys: { messages: [access.humanParticipant.key, orchestrators[1]!.participantKey] } } });
     expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String), expect.any(String)]);
     expect(new Set((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).size).toBe(2);
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
@@ -152,14 +153,14 @@ describe('Chorus SSE API', () => {
   });
 
   test('runs authorized retrieval before the orchestrator Nova chat response', async () => {
-    const { app, retrievalQueries, novaInputs } = appFor({ throughChatTool: true });
+    const { app, access, orchestrators, retrievalQueries, novaInputs } = appFor({ throughChatTool: true });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas explain the launch' }) });
     const events = parseSse(await response.text());
     expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'done', 'complete']);
     expect(events[2]?.data).toMatchObject({ text: 'Retrieved answer' });
-    expect(retrievalQueries[0]?.bindVars).toMatchObject({ organizationKey, membershipKey: actor.membershipKey, excludeKeys: [expect.any(String)], filterOrganizationKey: organizationKey, dimensions: 2, limit: 50 });
+    expect(retrievalQueries[0]?.bindVars).toMatchObject({ organizationKey, membershipKey: actor.membershipKey, excludeKeys: [expect.any(String)], authorParticipantKeys: [access.humanParticipant.key, orchestrators[0]!.participantKey], filterOrganizationKey: organizationKey, dimensions: 2, limit: 50 });
     expect(retrievalQueries[0]?.bindVars).not.toHaveProperty('collectionName');
-    expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('The launch is Friday.'), messages: [{ role: 'user', content: [{ type: 'text', text: '@Atlas explain the launch' }] }] });
+    expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('The launch is Friday.'), messages: [{ role: 'user', content: [{ type: 'text', text: 'explain the launch' }] }] });
   });
 
   test('continues with empty scope context when listing scopes fails', async () => {

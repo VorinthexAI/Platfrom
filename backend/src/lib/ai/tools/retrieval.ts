@@ -38,6 +38,7 @@ export interface RetrievalContext {
   organizationKey: string;
   membershipKey: string;
   exclude?: Record<string, string[]>;
+  authorParticipantKeys?: Record<string, string[]>;
 }
 
 export interface RetrievalDocument {
@@ -112,6 +113,7 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
       FILTER @access != "organization-self" || document._key == @organizationKey
       FILTER @access != "user" || document.userKey == viewerUserKey || document.userId == viewerUserKey
       FILTER document._key NOT IN @excludeKeys
+      FILTER LENGTH(@authorParticipantKeys) == 0 || document.authorParticipantKey IN @authorParticipantKeys
       FILTER LENGTH(@filterKeys) == 0 || document._key IN @filterKeys
       FILTER @filterOrganizationKey == null || @filterOrganizationKey == @organizationKey
       FILTER LENGTH(@filterScopeKeys) == 0 || document.scopeKey IN @filterScopeKeys
@@ -135,6 +137,7 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
     organizationKey: context.organizationKey,
     membershipKey: context.membershipKey,
     excludeKeys: context.exclude?.[node] ?? [],
+    authorParticipantKeys: context.authorParticipantKeys?.[node] ?? [],
     filterKeys: filters?.keys ?? [],
     filterOrganizationKey: filters?.organizationKey ?? null,
     filterScopeKeys: filters?.scopeKeys ?? [],

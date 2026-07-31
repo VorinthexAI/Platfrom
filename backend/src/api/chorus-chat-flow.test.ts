@@ -78,13 +78,13 @@ describe('Chorus orchestrator chat flow', () => {
     expect(persistedMentions).toHaveLength(1);
     expect(messages.map(({ content }) => content)).toEqual(['@Atlas explain the launch', 'Atlas response']);
     expect(retrievalQueries).toHaveLength(1);
-    expect(retrievalQueries[0]?.bindVars).toMatchObject({ organizationKey, membershipKey, filterOrganizationKey: organizationKey, filterKeys: [], limit: 50 });
+    expect(retrievalQueries[0]?.bindVars).toMatchObject({ organizationKey, membershipKey, authorParticipantKeys: [human.key, atlasParticipant.key], filterOrganizationKey: organizationKey, filterKeys: [], limit: 50 });
     expect(retrievalQueries[0]?.bindVars.access).toBe('channel');
     expect(retrievalQueries[0]?.bindVars.excludeKeys).toEqual([messages[0]!.key]);
     expect(retrievalQueries[0]?.bindVars).not.toHaveProperty('collectionName');
     expect(retrievalQueries[0]?.query).toContain('membership.organizationId == @organizationKey');
     expect(retrievalQueries[0]?.query).toContain('document.channelKey IN authorizedChannelKeys');
-    expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('Authorized launch decision.'), messages: [{ role: 'user', content: [{ type: 'text', text: '@Atlas explain the launch' }] }] });
+    expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('Authorized launch decision.'), messages: [{ role: 'user', content: [{ type: 'text', text: 'explain the launch' }] }] });
     const canonical = await service.listMessages({ organizationKey, membershipKey }, channel.key, 100);
     expect(canonical.map(({ content }) => content)).toEqual(['@Atlas explain the launch', 'Atlas response']);
     expect(canonical[1]).toMatchObject({ replyToMessageKey: canonical[0]!.key, author: { type: 'orchestrator', name: 'Atlas' }, reactions: [] });

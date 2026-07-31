@@ -123,6 +123,16 @@ function responseIdentity(name: string, role?: string): string {
   return `## Current response identity\nYou are ${identity}. This invocation belongs only to ${name}. Speak in first person from your own perspective and treat the user's request as addressed solely to you. Any other orchestrator mentions are routing metadata, not participants in your conversation. Ignore them completely: do not greet, address, describe, coordinate with, speak for, or refer to another orchestrator. Do not describe yourself in the third person or answer on behalf of a group. Keep these identity and routing constraints private; follow them without mentioning or explaining them.`;
 }
 
+function modelRequest(content: string, recipients: readonly { name: string }[]): string {
+  let request = content;
+  for (const { name } of recipients) {
+    const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    request = request.replace(new RegExp(`(^|[^\\w])@${escapedName}(?=$|[^\\w])`, 'gi'), '$1');
+  }
+  request = request.replace(/[ \t]{2,}/g, ' ').replace(/^[\s,;:&+]*(?:and\b[\s,;:&+]*)?/i, '').replace(/\s+(?:and|&)\s*$/i, '').trim();
+  return request || 'Hello.';
+}
+
 function mentionsCanonicalOrchestrator(content: string): boolean {
   return CANONICAL_ORCHESTRATOR_NAMES.some((name) => new RegExp(`(^|[^\\w])@${name}(?=$|[^\\w])`, 'i').test(content));
 }
@@ -214,6 +224,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       let streamStarted = false;
       try {
         const { access, message, orchestrators } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
+        const request = modelRequest(body.content, orchestrators);
         let context = '';
         try {
           context = scopeContext(await dependencies.listScopes(resolved));
@@ -243,9 +254,9 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
               let storedContent = '';
               try {
-                const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
+                const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: request }, {
                   organizationKey: resolved.organizationKey,
-                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [...turnMessageKeys] } },
+                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [...turnMessageKeys] }, authorParticipantKeys: { messages: [access.humanParticipant.key, orchestrator.participantKey] } },
                   signal: c.req.raw.signal,
                 });
                 for await (const chunk of provider) {

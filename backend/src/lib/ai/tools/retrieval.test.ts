@@ -6,7 +6,7 @@ import { listChannelsPage } from '@/lib/db/channels.node';
 import { z } from 'zod';
 import { retrievalInputSchema, retrievalTool } from './retrieval';
 
-const context = { organizationKey: 'org', membershipKey: 'membership', exclude: { messages: ['current'] } };
+const context = { organizationKey: 'org', membershipKey: 'membership', exclude: { messages: ['current'] }, authorParticipantKeys: { messages: ['human', 'atlas'] } };
 
 describe('retrieval tool', () => {
   test('validates dynamic nodes, optional embeddings, and a per-node limit', async () => {
@@ -44,10 +44,11 @@ describe('retrieval tool', () => {
       },
     });
     expect(result[0]?.documents[0]?.fields.content).toBe('Authorized match');
-    expect(calls[0]?.bindVars).toMatchObject({ filterKeys: ['message'], filterOrganizationKey: 'org', filterScopeKeys: ['scope'], filterChannelKeys: ['channel'], filterStatuses: [] });
+    expect(calls[0]?.bindVars).toMatchObject({ filterKeys: ['message'], authorParticipantKeys: ['human', 'atlas'], filterOrganizationKey: 'org', filterScopeKeys: ['scope'], filterChannelKeys: ['channel'], filterStatuses: [] });
     expect(calls[0]?.bindVars).not.toHaveProperty('collectionName');
     expect(calls[0]?.query).toContain('document._key IN @filterKeys');
     expect(calls[0]?.query).toContain('document.channelKey) IN @filterChannelKeys');
+    expect(calls[0]?.query).toContain('document.authorParticipantKey IN @authorParticipantKeys');
     const declared = new Set([...calls[0]!.query.matchAll(/@{1,2}([A-Za-z][A-Za-z0-9]*)/g)].map((match) => match[1]));
     expect(Object.keys(calls[0]!.bindVars).map((name) => name.replace(/^@/, '')).filter((name) => !declared.has(name))).toEqual([]);
   });
