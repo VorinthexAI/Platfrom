@@ -62,6 +62,8 @@ function EmojiPicker(props: ComponentProps<typeof DynamicEmojiPicker>) {
 
 interface HqCommunicationOverlayProps {
   organizationKey: string;
+  organizationOptions: Array<{ key: string; name: string; hint?: string | null }>;
+  onOrganizationChange: (key: string) => void;
   userName: string;
   countryCode: string;
   selectedScopeId: string;
@@ -152,6 +154,63 @@ function ScopeSelector({ selectedScopeId, onScopeChange }: Pick<HqCommunicationO
       </div>
       <div id="hq-scope-options" role="listbox" className="scrollbar-hide max-h-64 overflow-y-auto overscroll-contain [touch-action:pan-y]">
          {filteredScopes.length ? filteredScopes.map((scope, index) => <Button key={scope.id} role="option" aria-selected={index === activeIndex} onMouseEnter={() => setActiveIndex(index)} onClick={() => selectFilteredScope(index)} size="sm" variant="ghost" className={`w-full justify-start gap-2 px-2.5 py-2 text-left text-[11px] normal-case tracking-normal ${index === activeIndex ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}><ScopeMark entity={scope} size={22} /><span className="truncate">{scope.name}</span></Button>) : <p className="px-2.5 py-3 text-[11px] text-silver-500">No scopes found.</p>}
+      </div>
+    </div> : null}
+  </div>;
+}
+
+function OrganizationSelector({ organizationKey, organizationOptions, onOrganizationChange }: Pick<HqCommunicationOverlayProps, "organizationKey" | "organizationOptions" | "onOrganizationChange">) {
+  const selectedIndex = Math.max(0, organizationOptions.findIndex((organization) => organization.key === organizationKey));
+  const selectedOrganization = organizationOptions[selectedIndex] ?? organizationOptions[0];
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const filteredOrganizations = organizationOptions.filter((organization) => organization.name.toLowerCase().includes(query.toLowerCase()) || organization.hint?.toLowerCase().includes(query.toLowerCase()));
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const dismissPicker = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) { setPickerOpen(false); setQuery(""); }
+    };
+    document.addEventListener("pointerdown", dismissPicker);
+    return () => document.removeEventListener("pointerdown", dismissPicker);
+  }, [pickerOpen]);
+
+  const closePicker = (restoreFocus = false) => {
+    setPickerOpen(false);
+    setQuery("");
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+  const selectFilteredOrganization = (index: number) => {
+    const organization = filteredOrganizations[index];
+    if (!organization) return;
+    onOrganizationChange(organization.key);
+    closePicker();
+  };
+  const handlePickerKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") { event.preventDefault(); closePicker(true); return; }
+    if (!filteredOrganizations.length) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((index) => (index + direction + filteredOrganizations.length) % filteredOrganizations.length);
+    } else if (event.key === "Enter") { event.preventDefault(); selectFilteredOrganization(activeIndex); }
+  };
+
+  return <div ref={pickerRef} className="relative min-w-0">
+    <Button ref={triggerRef} onClick={() => { if (pickerOpen) closePicker(); else { setQuery(""); setActiveIndex(selectedIndex); setPickerOpen(true); } }} aria-expanded={pickerOpen} aria-haspopup="listbox" aria-controls={pickerOpen ? "hq-organization-options" : undefined} size="md" variant="outline" className="h-11 w-full min-w-0 justify-between gap-2 border-[var(--border-faint)] bg-[var(--panel)] px-2.5 text-left normal-case tracking-normal hover:border-[var(--border-strong)]">
+      <span className="min-w-0 truncate text-[13px] text-silver-100">{selectedOrganization?.name ?? "Select organization"}</span>
+      {pickerOpen ? <ChevronUpIcon aria-hidden size="sm" className="shrink-0 text-silver-500" /> : <ChevronDownIcon aria-hidden size="sm" className="shrink-0 text-silver-500" />}
+    </Button>
+    {pickerOpen ? <div className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-30 rounded-2xl border border-[var(--border-strong)] bg-obsidian-990/95 p-2 shadow-2xl backdrop-blur-2xl">
+      <div className="relative mb-2"><input ref={inputRef} autoFocus role="combobox" aria-expanded="true" aria-controls="hq-organization-options" value={query} onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={handlePickerKeyDown} placeholder="Search organizations..." className="w-full rounded-xl border border-[var(--border-faint)] bg-white/[0.04] py-2 pr-9 pl-3 font-mono text-[10px] text-silver-100 outline-none placeholder:text-silver-600 focus:border-[var(--border-strong)]" />
+        {query ? <Button type="button" variant="icon" aria-label="Clear organization search" onClick={() => { setQuery(""); setActiveIndex(0); inputRef.current?.focus(); }} icon={<CloseIcon size="sm" />} className="absolute top-1/2 right-2 h-6 min-h-0 w-6 -translate-y-1/2 text-silver-500">Clear organization search</Button> : null}
+      </div>
+      <div id="hq-organization-options" role="listbox" className="scrollbar-hide max-h-64 overflow-y-auto overscroll-contain [touch-action:pan-y]">
+        {filteredOrganizations.length ? filteredOrganizations.map((organization, index) => <Button key={organization.key} role="option" aria-selected={index === activeIndex} onMouseEnter={() => setActiveIndex(index)} onClick={() => selectFilteredOrganization(index)} size="sm" variant="ghost" className={`w-full justify-start px-2.5 py-2 text-left text-[11px] normal-case tracking-normal ${index === activeIndex ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}><span className="min-w-0 truncate">{organization.name}</span></Button>) : <p className="px-2.5 py-3 text-[11px] text-silver-500">No organizations found.</p>}
       </div>
     </div> : null}
   </div>;
@@ -483,7 +542,7 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
   );
 });
 
-export default function HqCommunicationOverlay({ organizationKey, userName, countryCode, selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
+export default function HqCommunicationOverlay({ organizationKey, organizationOptions, onOrganizationChange, userName, countryCode, selectedScopeId, onScopeChange }: HqCommunicationOverlayProps) {
   const [channels, setChannels] = useState<ChorusChannelEntry[]>([]);
   const [mentions, setMentions] = useState<ChorusMention[]>([]);
   const [mentionRoster, setMentionRoster] = useState<ChorusMentionRoster | null>(null);
@@ -839,8 +898,8 @@ export default function HqCommunicationOverlay({ organizationKey, userName, coun
   return (
     <div data-scope-id={selectedScopeId} className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
       <header className="flex h-12 shrink-0 items-center border border-[var(--border-faint)] bg-obsidian-990/90 px-3 sm:h-14 sm:px-4">
-        <Image src="/logos/vorinthex-mark.png" alt="Vorinthex" width={23} height={23} className="opacity-90" />
-        <div className="ml-3 min-w-0 flex-1 font-mono text-[9px] uppercase tracking-[0.13em] text-silver-500"><span className="text-silver-300">HQ</span><span className="mx-2">/</span><span className="truncate lowercase">#{selected?.channel?.name ?? "general"}</span></div>
+        <div className="w-56 max-w-[58vw]"><OrganizationSelector organizationKey={organizationKey} organizationOptions={organizationOptions} onOrganizationChange={onOrganizationChange} /></div>
+        <div className="ml-3 min-w-0 flex-1 font-mono text-[9px] uppercase tracking-[0.13em] text-silver-300">HQ</div>
       </header>
       <div className="relative grid min-h-0 flex-1 grid-rows-[minmax(150px,30vh)_minmax(0,1fr)] overflow-hidden border-x border-b border-[var(--border-faint)] md:grid-cols-[248px_minmax(0,1fr)] md:grid-rows-1">
         <OrchestratorRail channels={channels} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
