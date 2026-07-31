@@ -6,9 +6,7 @@ import { createPlaybackGeneration } from "./playback-generation";
 import { voiceToggleAction } from "./voice-toggle";
 
 /**
- * The galaxy's sound has three channels:
- * AMBIENT is the master-brand bed — very subtle, starts on the first user
- *   gesture (scroll/tap/click) and loops forever underneath everything.
+ * The galaxy's sound has two channels:
  * MISSION is the hunt briefing voice started by the Briefing CTA inside
  *   the hunt biome. It plays exactly once per tap (no loop); tapping
  *   again mid-play cancels it. While it speaks, any biome voice is
@@ -17,7 +15,6 @@ import { voiceToggleAction } from "./voice-toggle";
  */
 
 export const MISSION_AUDIO_SRC = "/audio/brand/hunt-briefing.mp3";
-export const AMBIENT_AUDIO_SRC = "/audio/brand/master-brand-vorinthex-ai-v1.mp3";
 
 export function entityAudioUrl(type: string, slug: string): string {
   return `/audio/entities/${type}-${slug}.mp3`;
@@ -28,12 +25,9 @@ export function orchestratorMessageUrl(slug: string): string {
   return `/audio/entities/orchestrator-${slug}-message.mp3`;
 }
 
-const AMBIENT_VOLUME = 0.066;
-const AMBIENT_DUCKED = 0.024;
 const MISSION_VOLUME = 0.55;
 const VOICE_VOLUME = 0.9;
 
-let ambient: HTMLAudioElement | null = null;
 let mission: HTMLAudioElement | null = null;
 let voice: HTMLAudioElement | null = null;
 let voiceRequestedSrc: string | null = null;
@@ -48,26 +42,6 @@ let removeVoiceListeners: (() => void) | null = null;
 let voiceHeldForMission = false;
 /** A voice requested while the mission speaks; starts once it finishes. */
 let voiceQueuedBehindMission: string | null = null;
-
-function anyForegroundAudioPlaying() {
-  return Boolean((mission && !mission.paused) || (voice && !voice.paused));
-}
-
-function settleAmbientVolume() {
-  if (!ambient) return;
-  ambient.volume = anyForegroundAudioPlaying() ? AMBIENT_DUCKED : AMBIENT_VOLUME;
-}
-
-function ambientElement(): HTMLAudioElement {
-  if (!ambient) {
-    ambient = new Audio(AMBIENT_AUDIO_SRC);
-    ambient.autoplay = true;
-    ambient.loop = true;
-    ambient.preload = "auto";
-    ambient.volume = AMBIENT_VOLUME;
-  }
-  return ambient;
-}
 
 function createMissionElement(): HTMLAudioElement {
   const audio = new Audio(MISSION_AUDIO_SRC);
@@ -98,7 +72,6 @@ function createVoiceElement(src: string, generation: number): HTMLAudioElement {
     if (!isCurrent()) return;
     voiceRequestedSrc = null;
     useAudioStore.setState({ voicePlayingSrc: null });
-    settleAmbientVolume();
   };
   audio.addEventListener("ended", onEnded);
   removeVoiceListeners = () => {
@@ -109,18 +82,15 @@ function createVoiceElement(src: string, generation: number): HTMLAudioElement {
 
 interface AudioState {
   missionPlaying: boolean;
-  ambientStarted: boolean;
   pendingVoiceSrc: string | null;
   voicePlayingSrc: string | null;
   /** Tap once → hear once; tap mid-voice → cancel. */
   toggleMission: () => void;
-  startAmbient: () => void;
   playVoice: (src: string) => void;
   stopVoice: () => void;
   stopForegroundAudio: () => void;
   pauseVoice: () => void;
   resumeVoice: () => void;
-  resumePending: () => void;
 }
 
 export const useAudioStore = create<AudioState>((set, get) => {
@@ -140,7 +110,6 @@ export const useAudioStore = create<AudioState>((set, get) => {
       voiceHeldForMission = true;
       voice.pause();
       set({ voicePlayingSrc: null });
-      settleAmbientVolume();
     } else if (voiceRequestedSrc) {
       voiceQueuedBehindMission = voiceRequestedSrc;
       invalidateVoicePlayback(true);
@@ -167,7 +136,6 @@ export const useAudioStore = create<AudioState>((set, get) => {
         voiceQueuedBehindMission = null;
         get().playVoice(queued);
       }
-      settleAmbientVolume();
     };
     audio.addEventListener("ended", finish);
     removeMissionEnded = () => audio.removeEventListener("ended", finish);
@@ -181,7 +149,6 @@ export const useAudioStore = create<AudioState>((set, get) => {
           return;
         }
         set({ missionPlaying: true });
-        settleAmbientVolume();
         trackLandingEvent({
           slug: "landing.mission_voice_played",
           metadata: { src: MISSION_AUDIO_SRC },
@@ -200,14 +167,12 @@ export const useAudioStore = create<AudioState>((set, get) => {
           voiceQueuedBehindMission = null;
           get().playVoice(queued);
         }
-        settleAmbientVolume();
         onBlocked?.();
       });
   };
 
   return {
   missionPlaying: false,
-  ambientStarted: false,
   pendingVoiceSrc: null,
   voicePlayingSrc: null,
 
@@ -234,27 +199,10 @@ export const useAudioStore = create<AudioState>((set, get) => {
         voiceQueuedBehindMission = null;
         get().playVoice(queued);
       }
-      settleAmbientVolume();
       return;
     }
 
     startMission();
-  },
-
-  startAmbient: () => {
-    if (get().ambientStarted) return;
-    const audio = ambientElement();
-    audio
-      .play()
-      .then(() => {
-        set({ ambientStarted: true });
-        settleAmbientVolume();
-        trackLandingEvent({
-          slug: "landing.ambient_audio_started",
-          metadata: { src: AMBIENT_AUDIO_SRC },
-        });
-      })
-      .catch(() => {});
   },
 
   playVoice: (src) => {
@@ -273,7 +221,6 @@ export const useAudioStore = create<AudioState>((set, get) => {
       invalidateVoicePlayback(true);
       voiceRequestedSrc = null;
       set({ pendingVoiceSrc: null, voicePlayingSrc: null });
-      settleAmbientVolume();
       return;
     }
     invalidateVoicePlayback(true);
@@ -293,7 +240,6 @@ export const useAudioStore = create<AudioState>((set, get) => {
           pendingVoiceSrc: null,
           voicePlayingSrc: voiceHeldForMission ? null : src,
         });
-        settleAmbientVolume();
         trackLandingEvent({
           slug: "landing.audio_played",
           metadata: { audio_kind: "voice", src },
@@ -303,7 +249,6 @@ export const useAudioStore = create<AudioState>((set, get) => {
         if (!voicePlayback.isCurrent(generation) || voice !== audio) return;
         voiceRequestedSrc = null;
         set({ pendingVoiceSrc: src, voicePlayingSrc: null });
-        settleAmbientVolume();
       });
   },
 
@@ -327,13 +272,11 @@ export const useAudioStore = create<AudioState>((set, get) => {
     voiceHeldForMission = false;
     voiceQueuedBehindMission = null;
     set({ missionPlaying: false, pendingVoiceSrc: null, voicePlayingSrc: null });
-    settleAmbientVolume();
   },
 
   pauseVoice: () => {
     if (voice && !voice.paused) voice.pause();
     set({ voicePlayingSrc: null });
-    settleAmbientVolume();
   },
 
   resumeVoice: () => {
@@ -347,20 +290,12 @@ export const useAudioStore = create<AudioState>((set, get) => {
           return;
         }
         set({ pendingVoiceSrc: null, voicePlayingSrc: src });
-        settleAmbientVolume();
       }).catch(() => {
         if (!voicePlayback.isCurrent(generation) || voice !== audio || !src) return;
         set({ pendingVoiceSrc: src, voicePlayingSrc: null });
-        settleAmbientVolume();
       });
     }
   },
 
-  resumePending: () => {
-    // The first gesture that unlocks audio releases any voice line the
-    // browser held back (the ambient bed starts alongside it).
-    const pending = get().pendingVoiceSrc;
-    if (pending) get().playVoice(pending);
-  },
   };
 });

@@ -8,7 +8,6 @@ export const LANDING_EVENT_SLUGS = [
   "landing.cave_opened",
   "landing.cave_closed",
   "landing.audio_played",
-  "landing.ambient_audio_started",
   "landing.mission_voice_played",
   "landing.mission_voice_cancelled",
   "landing.biome_fragment_collected",

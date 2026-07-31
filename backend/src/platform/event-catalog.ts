@@ -4,7 +4,7 @@ export const landingEventSlugs = [
   'landing.page_viewed', 'landing.product_entered', 'landing.orchestrator_entered',
   'landing.capability_entered', 'landing.rock_entered', 'landing.cta_clicked',
   'landing.cave_opened', 'landing.cave_closed', 'landing.audio_played',
-  'landing.ambient_audio_started', 'landing.mission_voice_played',
+  'landing.mission_voice_played',
   'landing.mission_voice_cancelled', 'landing.biome_fragment_collected',
   'landing.crystal_collected', 'landing.crystal_room_filled',
   'landing.fragment_discovered', 'landing.fragment_collect_clicked',
