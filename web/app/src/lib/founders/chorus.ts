@@ -235,6 +235,7 @@ const base = (organizationKey: string) => `/api/founders/organizations/${encodeU
 
 async function request<T>(url: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
+    cache: "no-store",
     ...init,
     headers: { Accept: "application/json", ...(init?.body ? { "Content-Type": "application/json" } : {}), ...init?.headers },
   });

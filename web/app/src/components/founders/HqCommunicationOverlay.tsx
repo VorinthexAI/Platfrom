@@ -104,6 +104,12 @@ function ScopeMark({ entity, size = 28 }: { entity: GalaxyEntity; size?: number 
   return <span className="relative inline-flex shrink-0 overflow-hidden rounded-full border border-[var(--border-faint)] bg-obsidian-990/80" style={{ width: size, height: size }}><Image src={entityLogoThumbnailUrl(entity.type, entity.slug)} alt="" fill sizes={`${size}px`} unoptimized className="object-contain p-[2px] opacity-90" /></span>;
 }
 
+function OrganizationMark({ name, hint, size = 28 }: { name: string; hint?: string | null; size?: number }) {
+  const identity = `${name} ${hint ?? ""}`.toLowerCase();
+  const src = identity.includes("render") ? "/logos/organizations/render.svg" : identity.includes("vorinthex") ? "/logos/vorinthex-mark.png" : null;
+  return src ? <span className="relative inline-flex shrink-0 overflow-hidden rounded-full border border-[var(--border-faint)] bg-obsidian-990/80" style={{ width: size, height: size }}><Image src={src} alt="" fill sizes={`${size}px`} unoptimized className="object-contain p-1 opacity-90" /></span> : <span aria-hidden className="flex shrink-0 items-center justify-center rounded-full border border-[var(--border-faint)] bg-obsidian-900 font-mono text-[9px] text-silver-300" style={{ width: size, height: size }}>{name.slice(0, 2).toUpperCase()}</span>;
+}
+
 function ScopeSelector({ selectedScopeId, onScopeChange }: Pick<HqCommunicationOverlayProps, "selectedScopeId" | "onScopeChange">) {
   const selectedIndex = Math.max(0, scopeEntities.findIndex((scope) => scope.id === selectedScopeId));
   const selectedScope = scopeEntities[selectedIndex] ?? scopeEntities[0]!;
@@ -176,11 +182,11 @@ function OrganizationSelector({ organizationKey, organizationOptions, onOrganiza
 
   return <div ref={pickerRef} className="relative min-w-0">
     <Button ref={triggerRef} onClick={() => setPickerOpen((open) => !open)} aria-expanded={pickerOpen} aria-haspopup="listbox" aria-controls={pickerOpen ? "hq-organization-options" : undefined} size="md" variant="outline" className="h-11 w-full min-w-0 justify-between gap-2 border-[var(--border-faint)] bg-[var(--panel)] px-2.5 text-left normal-case tracking-normal hover:border-[var(--border-strong)]">
-      <span className="min-w-0 truncate text-[13px] text-silver-100">{selectedOrganization?.name ?? "Select organization"}</span>
+      <span className="flex min-w-0 items-center gap-2">{selectedOrganization ? <OrganizationMark name={selectedOrganization.name} hint={selectedOrganization.hint} /> : null}<span className="truncate text-[13px] text-silver-100">{selectedOrganization?.name ?? "Select organization"}</span></span>
       {pickerOpen ? <ChevronUpIcon aria-hidden size="sm" className="shrink-0 text-silver-500" /> : <ChevronDownIcon aria-hidden size="sm" className="shrink-0 text-silver-500" />}
     </Button>
     {pickerOpen ? <div id="hq-organization-options" role="listbox" className="absolute inset-x-0 top-[calc(100%+0.5rem)] z-30 max-h-64 overflow-y-auto rounded-2xl border border-[var(--border-strong)] bg-obsidian-990/95 p-2 shadow-2xl backdrop-blur-2xl">
-      {organizationOptions.map((organization) => <Button key={organization.key} role="option" aria-selected={organization.key === organizationKey} onClick={() => { onOrganizationChange(organization.key); setPickerOpen(false); }} size="sm" variant="ghost" className={`w-full justify-start px-2.5 py-2 text-left text-[11px] normal-case tracking-normal ${organization.key === organizationKey ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}><span className="min-w-0 truncate">{organization.name}</span></Button>)}
+      {organizationOptions.map((organization) => <Button key={organization.key} role="option" aria-selected={organization.key === organizationKey} onClick={() => { onOrganizationChange(organization.key); setPickerOpen(false); }} size="sm" variant="ghost" className={`w-full justify-start gap-2 px-2.5 py-2 text-left text-[11px] normal-case tracking-normal ${organization.key === organizationKey ? "bg-white/[0.07] text-white" : "text-silver-400 hover:bg-white/[0.07] hover:text-white"}`}><OrganizationMark name={organization.name} hint={organization.hint} size={22} /><span className="min-w-0 truncate">{organization.name}</span></Button>)}
     </div> : null}
   </div>;
 }
@@ -270,7 +276,7 @@ interface MessageViewProps {
   onOpenThread: (message: ChorusMessage) => void;
   onCreatePoll: (message: ChorusMessage) => void;
   onError: (error: string | null) => void;
-  onOptimisticReaction: (messageKey: string, reaction: string) => void;
+  onOptimisticReaction: (messageKey: string, reaction: string, active?: boolean) => void;
   userName: string;
   countryCode: string;
   mentions: ChorusMention[];
@@ -293,15 +299,24 @@ function toggleOptimisticReaction(messages: ChorusMessage[], messageKey: string,
   });
 }
 
+function reconcileReaction(messages: ChorusMessage[], messageKey: string, reaction: string, active: boolean): ChorusMessage[] {
+  const message = messages.find((item) => item.key === messageKey);
+  const aggregate = message?.reactions.find((item) => item.reaction === reaction);
+  return aggregate?.viewerReacted === active ? messages : toggleOptimisticReaction(messages, messageKey, reaction);
+}
+
 const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions, onOpenActions }: MessageViewProps) {
   const channelKey = entry.channel!.key;
   const interactive = !message.key.startsWith("optimistic-");
   const react = async (reaction: string) => {
     if (busy) return;
     onBusy(true); onError(null); onOptimisticReaction(message.key, reaction);
-    try { await mutateChorusReaction(organizationKey, channelKey, message.key, reaction); }
+    try {
+      const result = await mutateChorusReaction(organizationKey, channelKey, message.key, reaction);
+      onOptimisticReaction(message.key, reaction, result.active);
+    }
     catch (error) { onOptimisticReaction(message.key, reaction); onError(error instanceof Error ? error.message : "Reaction failed"); }
-    finally { await onRefresh().catch(() => {}); onBusy(false); }
+    finally { onBusy(false); }
   };
   const openActionsFromMessage = (target: EventTarget | null) => {
     if (!interactive || (target instanceof Element && target.closest("button, input, textarea, select, a"))) return;
@@ -806,9 +821,12 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
   const displayedMessages = threadState?.messages ?? visibleMessages;
   const typingLabel = formatChorusTypingLabel(Object.values(typingParticipants).map(({ name }) => name));
-  const optimisticallyToggleReaction = (messageKey: string, reaction: string) => {
-    if (channelKey) setMessages((current) => ({ ...current, [channelKey]: toggleOptimisticReaction(current[channelKey] ?? [], messageKey, reaction) }));
-    setThreadState((current) => current ? { ...current, messages: toggleOptimisticReaction(current.messages, messageKey, reaction) } : current);
+  const optimisticallyToggleReaction = (messageKey: string, reaction: string, active?: boolean) => {
+    const update = (items: ChorusMessage[]) => active === undefined
+      ? toggleOptimisticReaction(items, messageKey, reaction)
+      : reconcileReaction(items, messageKey, reaction, active);
+    if (channelKey) setMessages((current) => ({ ...current, [channelKey]: update(current[channelKey] ?? []) }));
+    setThreadState((current) => current ? { ...current, messages: update(current.messages) } : current);
   };
   const selectReaction = async (reaction: string) => {
     if (!actionMessage || !channelKey) return;
@@ -817,9 +835,9 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     optimisticallyToggleReaction(messageKey, reaction);
     setReactionPickerOpen(false); setActionMessage(null);
     try {
-      await mutateChorusReaction(organizationKey, requestChannel, messageKey, reaction);
+      const result = await mutateChorusReaction(organizationKey, requestChannel, messageKey, reaction);
+      optimisticallyToggleReaction(messageKey, reaction, result.active);
       setFrequentReactions(await listChorusFrequentReactions(organizationKey).catch(() => frequentReactions));
-      if (threadState) await refreshThread(); else await refreshMessages(requestChannel);
     } catch {
       optimisticallyToggleReaction(messageKey, reaction);
     }

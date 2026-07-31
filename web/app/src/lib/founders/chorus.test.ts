@@ -13,6 +13,7 @@ import {
   plainChorusText,
   coalesceChorusStreamEvents,
   markChorusStreamFailed,
+  listChorusMessages,
   mergeChorusMessageRefresh,
   parseChorusSseFrame,
   reconcileChorusStreamEvent,
@@ -28,6 +29,18 @@ const timestamp = "2026-07-24T12:00:00.000Z";
 const stored = { key: "message_key", channelKey: "channel_key", content: "Hello", createdAt: timestamp, updatedAt: timestamp };
 
 describe("Chorus schemas", () => {
+  test("bypasses browser caches when loading messages", async () => {
+    let requestInit: RequestInit | undefined;
+    globalThis.fetch = (async (_input, init) => {
+      requestInit = init;
+      return Response.json({ messages: [] });
+    }) as typeof fetch;
+
+    await listChorusMessages("organization_key", "channel_key");
+
+    expect(requestInit?.cache).toBe("no-store");
+  });
+
   test("parses the shared general channel entry", () => {
     const orchestrator = { key: "general", name: "General", role: "Organization channel" };
     const channel = { key: "channel_key", organizationKey: "organization_key", scopeKey: "scope_key", kind: "group", name: "general", position: 0, createdAt: timestamp, updatedAt: timestamp };
