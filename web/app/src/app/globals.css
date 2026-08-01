@@ -408,6 +408,15 @@ button:disabled {
   background-color: transparent !important;
 }
 
+.chorus-reaction-picker .EmojiPickerReact {
+  --epr-header-padding: 4px var(--epr-horizontal-padding) !important;
+}
+
+.chorus-reaction-picker .epr-emoji-category-label {
+  position: static !important;
+  backdrop-filter: none !important;
+}
+
 .chorus-typing-gradient {
   color: transparent;
   background: linear-gradient(90deg, var(--silver-500), var(--silver-50), #9a5528, var(--silver-300));

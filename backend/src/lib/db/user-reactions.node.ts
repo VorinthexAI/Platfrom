@@ -4,7 +4,7 @@ import { createNodeHelpers } from './base';
 export const USER_REACTIONS_COLLECTION = 'userReactions';
 export const userReactionSchema = z.object({
   key: z.string().cuid(),
-  userKey: z.string().cuid(),
+  userKey: z.string().trim().min(1).max(160),
   reactionSlug: z.string().trim().min(1).max(64),
   count: z.number().int().positive(),
   createdAt: z.string().datetime(),

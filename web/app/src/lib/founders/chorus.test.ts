@@ -157,6 +157,7 @@ describe("shared button controls", () => {
     const mobileButton = await Bun.file(new URL("../../../../../shared/packages/ui/components/button/button.mobile.tsx", import.meta.url)).text();
     const webButton = await Bun.file(new URL("../../../../../shared/packages/ui/components/button/button.web.tsx", import.meta.url)).text();
     const theme = await Bun.file(new URL("../../../../../shared/packages/ui/theme.css", import.meta.url)).text();
+    const globalStyles = await Bun.file(new URL("../../app/globals.css", import.meta.url)).text();
     const guidance = await Bun.file(new URL("../../../../../AGENTS.md", import.meta.url)).text();
     expect(component).toContain("CHORUS_ORCHESTRATOR_NAMES.map");
     expect(component).toContain('variant="primary"');
@@ -172,6 +173,12 @@ describe("shared button controls", () => {
     expect(component).toContain("void loadEmojiPicker()");
     expect(component).toContain("lazyLoadEmojis={false}");
     expect(component).toContain('backgroundColor: "transparent"');
+    expect(component).toContain('className="chorus-reaction-picker mt-1');
+    expect(component).toContain('size="sm" variant="secondary"');
+    expect(component.match(/sm:w-\[420px\]/g)).toHaveLength(4);
+    expect(globalStyles).toContain('--epr-header-padding: 4px');
+    expect(globalStyles).toContain('position: static !important');
+    expect(globalStyles).toContain('backdrop-filter: none !important');
     expect(component).toContain('aria-label="Mention shortcuts"');
     expect(component.match(/await refreshMessages\(channelKey, false\)/g)).toHaveLength(2);
     expect(component).toContain('role="alert"');

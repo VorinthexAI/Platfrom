@@ -9,6 +9,7 @@ import { pollOptionSchema } from './poll-options.node';
 import { pollVoteSchema } from './poll-votes.node';
 import { pollSchema } from './polls.node';
 import { threadSchema } from './threads.node';
+import { userReactionSchema } from './user-reactions.node';
 
 const now = '2026-08-01T00:00:00.000Z';
 const channelKey = 'channel_general';
@@ -28,5 +29,10 @@ describe('Chorus communication keys', () => {
     expect(pollSchema.parse({ key: pollKey, scopeKey, channelKey, messageKey, creatorParticipantKey: participantKey, question: 'Proceed?', status: 'open', createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);
     expect(pollOptionSchema.parse({ key: newId(), scopeKey, channelKey, pollKey, text: 'Yes', position: 0, createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);
     expect(pollVoteSchema.parse({ key: newId(), scopeKey, channelKey, pollKey, optionKey: newId(), participantKey, createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);
+  });
+
+  test('accepts persisted opaque user keys for reaction usage', () => {
+    const userKey = 'user_founder';
+    expect(userReactionSchema.parse({ key: newId(), userKey, reactionSlug: 'ack', count: 1, createdAt: now, updatedAt: now }).userKey).toBe(userKey);
   });
 });

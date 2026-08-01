@@ -39,12 +39,13 @@ function fixture() {
       for (const sourceId of sourceIds) userMentionSchema.parse({ key: newId(), userKey, sourceId, count: 1, createdAt: now, updatedAt: now });
       usage.push(sourceIds);
     },
+    recordUserReaction: async () => {},
     listUserReactions: async () => reactionUsage,
-    mutateReaction: async () => ({ active: true }), createThread: async () => { throw new Error('unused'); }, getThread: async () => null,
+    mutateReaction: async () => ({ active: true, changed: true }), createThread: async () => { throw new Error('unused'); }, getThread: async () => null,
     resolveThread: async () => null, archiveThread: async () => null, createPoll: async () => { throw new Error('unused'); }, getPollProjection: async () => null,
     votePoll: async () => ({ outcome: 'not_found' as const }), closePoll: async () => null,
   } as unknown as CommunicationRepository;
-  return { service: new ChorusService(repository, () => now), channel, access, messages, mentions, usage, reactionUsage };
+  return { service: new ChorusService(repository, () => now), repository, channel, access, messages, mentions, usage, reactionUsage };
 }
 
 describe('Chorus service', () => {
@@ -120,5 +121,13 @@ describe('Chorus service', () => {
   test('lists the current user frequently used reactions', async () => {
     const f = fixture();
     expect(await f.service.frequentReactions(actor)).toEqual(f.reactionUsage);
+  });
+
+  test('keeps a successful reaction when secondary usage tracking fails', async () => {
+    const f = fixture();
+    const message = await f.service.persistUserMessage(actor, f.channel.key, 'React here');
+    f.repository.recordUserReaction = async () => { throw new Error('usage unavailable'); };
+
+    expect(await f.service.react(actor, f.channel.key, message.message.key, 'ack', 'add')).toEqual({ active: true });
   });
 });
