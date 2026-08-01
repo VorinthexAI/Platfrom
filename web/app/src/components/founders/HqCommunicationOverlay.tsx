@@ -35,6 +35,7 @@ import {
   readChorusThread,
   plainChorusText,
   reconcileChorusStreamEvent,
+  setChorusReactionState,
   streamChorusMessage,
   subscribeChorusTyping,
   synthesizeChorusSpeech,
@@ -276,7 +277,7 @@ interface MessageViewProps {
   onOpenThread: (message: ChorusMessage) => void;
   onCreatePoll: (message: ChorusMessage) => void;
   onError: (error: string | null) => void;
-  onOptimisticReaction: (messageKey: string, reaction: string, active?: boolean) => void;
+  onOptimisticReaction: (messageKey: string, reaction: string, active: boolean) => void;
   userName: string;
   countryCode: string;
   mentions: ChorusMention[];
@@ -288,34 +289,18 @@ function MessageContent({ content, mentions }: { content: string; mentions: Chor
   return <>{plainChorusText(content).split(/(@[a-z0-9_-]+)/gi).map((part, index) => names.has(part.slice(1).toLocaleLowerCase()) ? <strong key={index} className="font-semibold text-silver-50">{part}</strong> : part)}</>;
 }
 
-function toggleOptimisticReaction(messages: ChorusMessage[], messageKey: string, reaction: string): ChorusMessage[] {
-  return messages.map((message) => {
-    if (message.key !== messageKey) return message;
-    const existing = message.reactions.find((item) => item.reaction === reaction);
-    const reactions = existing
-      ? message.reactions.map((item) => item.reaction === reaction ? { ...item, count: item.count + (item.viewerReacted ? -1 : 1), viewerReacted: !item.viewerReacted } : item).filter((item) => item.count > 0)
-      : [...message.reactions, { reaction, count: 1, viewerReacted: true }];
-    return { ...message, reactions };
-  });
-}
-
-function reconcileReaction(messages: ChorusMessage[], messageKey: string, reaction: string, active: boolean): ChorusMessage[] {
-  const message = messages.find((item) => item.key === messageKey);
-  const aggregate = message?.reactions.find((item) => item.reaction === reaction);
-  return aggregate?.viewerReacted === active ? messages : toggleOptimisticReaction(messages, messageKey, reaction);
-}
-
 const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions, onOpenActions }: MessageViewProps) {
   const channelKey = entry.channel!.key;
   const interactive = !message.key.startsWith("optimistic-");
-  const react = async (reaction: string) => {
+  const react = async (reaction: string, wasActive: boolean) => {
     if (busy) return;
-    onBusy(true); onError(null); onOptimisticReaction(message.key, reaction);
+    const active = !wasActive;
+    onBusy(true); onError(null); onOptimisticReaction(message.key, reaction, active);
     try {
-      const result = await mutateChorusReaction(organizationKey, channelKey, message.key, reaction);
+      const result = await mutateChorusReaction(organizationKey, channelKey, message.key, reaction, active ? "add" : "remove");
       onOptimisticReaction(message.key, reaction, result.active);
     }
-    catch (error) { onOptimisticReaction(message.key, reaction); onError(error instanceof Error ? error.message : "Reaction failed"); }
+    catch (error) { onOptimisticReaction(message.key, reaction, wasActive); onError(error instanceof Error ? error.message : "Reaction failed"); }
     finally { onBusy(false); }
   };
   const openActionsFromMessage = (target: EventTarget | null) => {
@@ -330,7 +315,7 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
         {message.content ? <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300"><MessageContent content={message.content} mentions={mentions} /></p> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
         {MESSAGE_ACTIONS_ENABLED && (message.reactions.length > 0 || message.thread || message.poll) ? <div className="mt-1.5 flex flex-wrap items-center gap-1">
-          {message.reactions.map((aggregate) => <Button key={aggregate.reaction} size="sm" variant="outline" disabled={busy || !interactive} aria-label={`${aggregate.viewerReacted ? "Remove" : "Add"} ${aggregate.reaction} reaction`} aria-pressed={aggregate.viewerReacted} onClick={() => void react(aggregate.reaction)} className={`px-3 font-mono text-[11px] normal-case tracking-normal focus-visible:outline-2 disabled:opacity-40 ${aggregate.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-400"}`}>{aggregate.reaction} {aggregate.count}</Button>)}
+          {message.reactions.map((aggregate) => <Button key={aggregate.reaction} size="sm" variant="outline" disabled={busy || !interactive} aria-label={`${aggregate.viewerReacted ? "Remove" : "Add"} ${aggregate.reaction} reaction`} aria-pressed={aggregate.viewerReacted} onClick={() => void react(aggregate.reaction, aggregate.viewerReacted)} className={`px-3 font-mono text-[11px] normal-case tracking-normal focus-visible:outline-2 disabled:opacity-40 ${aggregate.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-400"}`}>{aggregate.reaction} {aggregate.count}</Button>)}
           {message.thread ? <Button size="xs" variant="outline" disabled={!interactive} onClick={() => onOpenThread(message)} className="min-h-0 border-[var(--border-soft)] px-2 py-0.5 text-[9px] normal-case tracking-normal text-silver-300">Thread: {message.thread.replyCount} {message.thread.replyCount === 1 ? "reply" : "replies"}</Button> : null}
           {message.poll ? <Button size="xs" variant="outline" disabled={!interactive} onClick={() => onCreatePoll(message)} className="min-h-0 border-[var(--border-soft)] px-2 py-0.5 text-[9px] normal-case tracking-normal text-silver-300">Poll</Button> : null}
         </div> : null}
@@ -557,6 +542,8 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   const [clearing, setClearing] = useState(false);
   const controllers = useRef(new Map<string, AbortController>());
   const messageRequests = useRef(new Map<string, number>());
+  const messageActionRevisions = useRef(new Map<string, number>());
+  const reactionRequests = useRef(new Set<string>());
   const organizationGeneration = useRef(0);
   const threadGeneration = useRef(0);
   const currentOrganization = useRef(organizationKey);
@@ -578,7 +565,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     threadGeneration.current += 1;
     for (const active of controllers.current.values()) active.abort();
     controllers.current.clear();
-    messageRequests.current.clear();
+    messageRequests.current.clear(); messageActionRevisions.current.clear(); reactionRequests.current.clear();
     activeChannel.current = null;
     setChannels([]); setMentions([]); setMentionRoster(null); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setThreadState(null); setPollMessage(null); setBusyMessage(null); setClearOpen(false); setFrequentReactions([]);
     setChannelsLoading(true); setChannelsError(null);
@@ -598,6 +585,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     const generation = organizationGeneration.current;
     const requestOrganization = organizationKey;
     const requestId = (messageRequests.current.get(channelKey) ?? 0) + 1;
+    const actionRevision = messageActionRevisions.current.get(channelKey) ?? 0;
     messageRequests.current.set(channelKey, requestId);
     setMessagesLoading((current) => ({ ...current, [channelKey]: true }));
     const controller = new AbortController();
@@ -605,7 +593,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     try {
       const loaded = await listChorusMessages(organizationKey, channelKey, controller.signal);
       if (!controller.signal.aborted && organizationGeneration.current === generation && currentOrganization.current === requestOrganization && messageRequests.current.get(channelKey) === requestId) {
-        setMessages((current) => ({ ...current, [channelKey]: mergeChorusMessageRefresh(current[channelKey] ?? [], loaded, preserveTransient) }));
+        setMessages((current) => ({ ...current, [channelKey]: mergeChorusMessageRefresh(current[channelKey] ?? [], loaded, preserveTransient, (messageActionRevisions.current.get(channelKey) ?? 0) !== actionRevision) }));
         setErrors((current) => ({ ...current, [channelKey]: null }));
       }
     } catch (error) {
@@ -821,10 +809,16 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
   const displayedMessages = threadState?.messages ?? visibleMessages;
   const typingLabel = formatChorusTypingLabel(Object.values(typingParticipants).map(({ name }) => name));
-  const optimisticallyToggleReaction = (messageKey: string, reaction: string, active?: boolean) => {
-    const update = (items: ChorusMessage[]) => active === undefined
-      ? toggleOptimisticReaction(items, messageKey, reaction)
-      : reconcileReaction(items, messageKey, reaction, active);
+  const updateMessageActions = (messageKey: string, updateMessage: (message: ChorusMessage) => ChorusMessage) => {
+    if (!channelKey) return;
+    messageActionRevisions.current.set(channelKey, (messageActionRevisions.current.get(channelKey) ?? 0) + 1);
+    const update = (items: ChorusMessage[]) => items.map((message) => message.key === messageKey ? updateMessage(message) : message);
+    setMessages((current) => ({ ...current, [channelKey]: update(current[channelKey] ?? []) }));
+    setThreadState((current) => current ? { ...current, messages: update(current.messages) } : current);
+  };
+  const optimisticallySetReaction = (messageKey: string, reaction: string, active: boolean) => {
+    const update = (items: ChorusMessage[]) => setChorusReactionState(items, messageKey, reaction, active);
+    if (channelKey) messageActionRevisions.current.set(channelKey, (messageActionRevisions.current.get(channelKey) ?? 0) + 1);
     if (channelKey) setMessages((current) => ({ ...current, [channelKey]: update(current[channelKey] ?? []) }));
     setThreadState((current) => current ? { ...current, messages: update(current.messages) } : current);
   };
@@ -832,14 +826,24 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     if (!actionMessage || !channelKey) return;
     const messageKey = actionMessage.key;
     const requestChannel = channelKey;
-    optimisticallyToggleReaction(messageKey, reaction);
+    const requestKey = `${organizationKey}:${requestChannel}:${messageKey}:${reaction}`;
+    if (reactionRequests.current.has(requestKey)) return;
+    reactionRequests.current.add(requestKey);
+    const wasActive = actionMessage.reactions.some((item) => item.reaction === reaction && item.viewerReacted);
+    setBusyMessage(messageKey);
+    setErrors((current) => ({ ...current, [requestChannel]: null }));
+    optimisticallySetReaction(messageKey, reaction, true);
     setReactionPickerOpen(false); setActionMessage(null);
     try {
-      const result = await mutateChorusReaction(organizationKey, requestChannel, messageKey, reaction);
-      optimisticallyToggleReaction(messageKey, reaction, result.active);
+      const result = await mutateChorusReaction(organizationKey, requestChannel, messageKey, reaction, "add");
+      optimisticallySetReaction(messageKey, reaction, result.active);
       setFrequentReactions(await listChorusFrequentReactions(organizationKey).catch(() => frequentReactions));
-    } catch {
-      optimisticallyToggleReaction(messageKey, reaction);
+    } catch (error) {
+      optimisticallySetReaction(messageKey, reaction, wasActive);
+      setErrors((current) => ({ ...current, [requestChannel]: error instanceof Error ? error.message : "Reaction failed" }));
+    } finally {
+      reactionRequests.current.delete(requestKey);
+      setBusyMessage((current) => current === messageKey ? null : current);
     }
   };
   const clearSelectedChannel = async () => {
@@ -901,7 +905,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
           <div ref={messagesPane} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
-               {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallyToggleReaction} />) : null}
+               {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={setPollMessage} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallySetReaction} />) : null}
           </div>
             {channelKey && errors[channelKey] ? <p role="alert" className="shrink-0 border-t border-status-critical/30 bg-status-critical/5 px-5 py-2 text-[10px] text-status-critical">{errors[channelKey]}</p> : null}
             <div aria-live="polite" className="flex h-6 shrink-0 items-end px-5 text-[10px] font-medium"><span className={typingLabel ? "chorus-typing-gradient" : "sr-only"}>{typingLabel}</span></div>
@@ -924,7 +928,9 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
           setBusyMessage(pollMessage.key);
           setErrors((current) => ({ ...current, [requestChannel]: null }));
           try {
-            await createChorusPoll(requestOrganization, requestChannel, pollMessage.key, question, options, allowMultiple);
+            const poll = await createChorusPoll(requestOrganization, requestChannel, pollMessage.key, question, options, allowMultiple);
+            if (organizationGeneration.current !== generation || activeChannel.current !== requestChannel) return;
+            updateMessageActions(pollMessage.key, (message) => ({ ...message, poll }));
             await refreshMessages(requestChannel);
             if (organizationGeneration.current === generation && activeChannel.current === requestChannel) setPollMessage(null);
           } catch (error) {
@@ -944,7 +950,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
         <Dialog.Root open={threadSheetOpen} onOpenChange={setThreadSheetOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[400px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
           <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Threads</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close threads" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close threads</Button></Dialog.Close></div>
           <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">{newThreadOpen ? <div><label className="text-[10px] text-silver-400" htmlFor="thread-title">Thread name</label><input id="thread-title" autoFocus maxLength={50} value={newThreadTitle} onChange={(event) => setNewThreadTitle(event.target.value)} placeholder="Name this thread" className="mt-2 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><p className="mt-2 text-right font-mono text-[9px] text-silver-600">{newThreadTitle.length}/50</p></div> : threadItems.length ? threadItems.map((thread) => <Button key={thread.key} size="md" variant="outline" aria-label={`Open thread ${thread.title}, ${thread.replyCount} replies`} onClick={() => { const root = visibleMessages.find((message) => message.key === thread.rootMessageKey); if (root) void openThread(root, thread.key); setThreadSheetOpen(false); }} className="block h-auto w-full border-[var(--border-soft)] p-3 text-left normal-case tracking-normal"><span className="block text-xs text-silver-100">{thread.title}</span><span className="mt-1 block truncate text-[10px] text-silver-500">{thread.rootContent}</span><span className="mt-1 block text-[9px] text-silver-600">{thread.replyCount} replies</span></Button>) : <p className="py-8 text-center text-xs text-silver-500">No threads yet.</p>}</div>
-          <div className="mt-5 border-t border-[var(--border-faint)] pt-4"><div className="flex justify-end gap-2"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close>{newThreadOpen ? <Button type="button" variant="primary" disabled={!threadRoot || !channelKey || !newThreadTitle.trim()} onClick={() => { if (!threadRoot || !channelKey) return; void createChorusThread(organizationKey, channelKey, threadRoot.key, newThreadTitle.trim()).then((thread) => { setThreadSheetOpen(false); setNewThreadOpen(false); void openThread(threadRoot, thread.key); void refreshMessages(channelKey); }); }} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Create thread</Button> : <Button type="button" variant="primary" onClick={() => setNewThreadOpen(true)} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">New thread</Button>}</div></div>
+          <div className="mt-5 border-t border-[var(--border-faint)] pt-4"><div className="flex justify-end gap-2"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close>{newThreadOpen ? <Button type="button" variant="primary" disabled={!threadRoot || !channelKey || !newThreadTitle.trim()} onClick={() => { if (!threadRoot || !channelKey) return; void createChorusThread(organizationKey, channelKey, threadRoot.key, newThreadTitle.trim()).then((thread) => { updateMessageActions(threadRoot.key, (message) => ({ ...message, thread: { key: thread.key, status: thread.status, replyCount: 0, lastReplyAt: null } })); setThreadSheetOpen(false); setNewThreadOpen(false); void openThread(threadRoot, thread.key); void refreshMessages(channelKey); }); }} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Create thread</Button> : <Button type="button" variant="primary" onClick={() => setNewThreadOpen(true)} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">New thread</Button>}</div></div>
         </Dialog.Content></Dialog.Portal></Dialog.Root>
       </div>
     </div>
