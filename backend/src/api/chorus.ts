@@ -231,7 +231,6 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
         }
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
-          const turnMessageKeys = [message.key];
           const activeTyping = new Map<string, ChorusTypingEvent>();
           const stopTyping = async (orchestratorKey: string) => {
             const current = activeTyping.get(orchestratorKey);
@@ -245,7 +244,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'mentioned orchestrator is unavailable' }) });
               return;
             }
-            for (const orchestrator of orchestrators) {
+            await Promise.all(orchestrators.map(async (orchestrator) => {
               const typingEvent: ChorusTypingEvent = { organizationKey: resolved.organizationKey, channelKey, participantKey: orchestrator.participantKey, type: 'orchestrator', name: orchestrator.name, active: true, expiresAt: Date.now() + 120_000 };
               activeTyping.set(orchestrator.key, typingEvent);
               await dependencies.publishTyping?.(typingEvent);
@@ -254,7 +253,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               try {
                 const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: promptMessage }, {
                   organizationKey: resolved.organizationKey,
-                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [...turnMessageKeys] } },
+                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [message.key] } },
                   signal: c.req.raw.signal,
                 });
                 for await (const chunk of provider) {
@@ -285,7 +284,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               if (!storedContent.trim()) {
                 await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
                 await stopTyping(orchestrator.key);
-                continue;
+                return;
               }
               let assistantMessage: Awaited<ReturnType<ChorusService['persistOrchestratorMessage']>>;
               try {
@@ -294,12 +293,11 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
                 console.error('chorus orchestrator message persistence failed', { channelKey, orchestratorKey: orchestrator.key, error: persistenceError });
                 await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
                 await stopTyping(orchestrator.key);
-                continue;
+                return;
               }
-              turnMessageKeys.push(assistantMessage.key);
               await sse.writeSSE({ event: 'done', data: JSON.stringify({ orchestratorKey: orchestrator.key, message: storedMessage(assistantMessage) }) });
               await stopTyping(orchestrator.key);
-            }
+            }));
             await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });
           } catch (error) {
             console.error('chorus stream failed', { channelKey, error });
