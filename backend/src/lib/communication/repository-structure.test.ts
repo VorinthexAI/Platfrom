@@ -62,6 +62,8 @@ describe('Arango communication repository structure', () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source).toContain('RETURN { scopeKey: message.scopeKey, existingKey:');
     expect(source).toContain('scopeKey: validated.scopeKey');
+    expect(source).toContain('`, { channelKey: input.channelKey, messageKey: input.messageKey, participantKey: input.participantKey, reaction: input.reaction });');
+    expect(source).not.toContain('`, input);');
     expect(source).not.toContain('scopeKey: newId()');
   });
 
