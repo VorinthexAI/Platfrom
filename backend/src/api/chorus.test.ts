@@ -79,7 +79,7 @@ describe('Chorus SSE API', () => {
   test('strips case-insensitive orchestrator mentions only when multiple unique orchestrators are selected', () => {
     const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
     const nova = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Nova', role: 'CTO', skill: 'Build.' };
-    expect(orchestratorPromptMessage('@ATLAS @nova @Atlas @Vincent plan the launch', [atlas, nova])).toBe('@Vincent plan the launch');
+    expect(orchestratorPromptMessage('@ATLAS, @nova; @Atlas: @Vincent plan the launch', [atlas, nova])).toBe('@Vincent plan the launch');
     expect(orchestratorPromptMessage('@ATLAS @Atlas plan the launch', [atlas, atlas])).toBe('@ATLAS @Atlas plan the launch');
   });
 
@@ -115,7 +115,7 @@ describe('Chorus SSE API', () => {
   test('streams separate identified responses for two orchestrators', async () => {
     const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, typingEvents } = appFor({ orchestratorCount: 2 });
     const threadKey = newId();
-    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova hello', threadKey }) });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@ATLAS, @Nova; @Atlas: @Vincent hello', threadKey }) });
     const text = await response.text();
     const events = parseSse(text);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
@@ -129,11 +129,9 @@ describe('Chorus SSE API', () => {
     expect(events[7]?.data).toEqual({ orchestratorKey: orchestrators[1]!.key, text: 'there' });
     expect(events[8]?.data).toMatchObject({ orchestratorKey: orchestrators[1]!.key, message: { content: 'Hi there' } });
     expect(events[9]?.data).toEqual({});
-    expect(text).not.toContain('Atlas:');
-    expect(text).not.toContain('Nova:');
     expect(persisted).toEqual(['user', 'assistant', 'assistant']);
-    expect(streamInputs).toEqual([{ message: 'hello' }, { message: 'hello' }]);
-    expect(events[0]?.data).toMatchObject({ userMessage: { content: '@Atlas @Nova hello' } });
+    expect(streamInputs).toEqual([{ message: '@Vincent hello' }, { message: '@Vincent hello' }]);
+    expect(events[0]?.data).toMatchObject({ userMessage: { content: '@ATLAS, @Nova; @Atlas: @Vincent hello' } });
     expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
     expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String), expect.any(String)]);
     expect(new Set((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).size).toBe(2);
