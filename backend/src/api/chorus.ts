@@ -127,6 +127,14 @@ function mentionsCanonicalOrchestrator(content: string): boolean {
   return CANONICAL_ORCHESTRATOR_NAMES.some((name) => new RegExp(`(^|[^\\w])@${name}(?=$|[^\\w])`, 'i').test(content));
 }
 
+export function orchestratorPromptMessage(content: string, orchestrators: readonly Pick<MentionCandidate, 'key' | 'name'>[]): string {
+  const uniqueOrchestrators = [...new Map(orchestrators.map((orchestrator) => [orchestrator.key, orchestrator])).values()];
+  if (uniqueOrchestrators.length < 2) return content;
+  const names = uniqueOrchestrators.map(({ name }) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((left, right) => right.length - left.length);
+  const pattern = new RegExp(`(^|[^\\w])@(?:${names.join('|')})(?=$|[^\\w])`, 'gi');
+  return content.replace(pattern, '$1').replace(/[ \t]{2,}/g, ' ').trim();
+}
+
 export function buildMentionRoster(candidates: readonly MentionCandidate[]) {
   const mentions = dedupeMentionCandidates(candidates);
   const byOrchestratorName = new Map(mentions.filter((candidate) => candidate.type === 'orchestrator').map((candidate) => [candidate.name, candidate]));
@@ -214,6 +222,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       let streamStarted = false;
       try {
         const { access, message, orchestrators } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
+        const promptMessage = orchestratorPromptMessage(body.content, orchestrators);
         let context = '';
         try {
           context = scopeContext(await dependencies.listScopes(resolved));
@@ -243,7 +252,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
               let storedContent = '';
               try {
-                const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: body.content }, {
+                const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: promptMessage }, {
                   organizationKey: resolved.organizationKey,
                     retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [...turnMessageKeys] } },
                   signal: c.req.raw.signal,

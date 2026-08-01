@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
-import { buildMentionRoster, createChorusHandlers } from './chorus';
+import { buildMentionRoster, createChorusHandlers, orchestratorPromptMessage } from './chorus';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import { orchestratorChatTool } from '@/lib/ai/tools/orchestrator-chat';
 
@@ -36,7 +36,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const metis = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Metis', role: 'CIO', skill: 'Analyze.' };
   const orchestrators = [atlas, nova, metis].slice(0, options.orchestratorCount ?? 1);
   const service = {
-    async persistUserMessage() { persisted.push('user'); return { access, message: { key: newId(), channelKey, content: 'hello' }, orchestrators }; },
+    async persistUserMessage(_actor: unknown, _channelKey: string, content: string) { persisted.push('user'); return { access, message: { key: newId(), channelKey, content }, orchestrators }; },
     async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
     async clearChannel() { return 2; },
     async generalChannel() { return access; },
@@ -76,6 +76,13 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
 }
 
 describe('Chorus SSE API', () => {
+  test('strips case-insensitive orchestrator mentions only when multiple unique orchestrators are selected', () => {
+    const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
+    const nova = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Nova', role: 'CTO', skill: 'Build.' };
+    expect(orchestratorPromptMessage('@ATLAS @nova @Atlas @Vincent plan the launch', [atlas, nova])).toBe('@Vincent plan the launch');
+    expect(orchestratorPromptMessage('@ATLAS @Atlas plan the launch', [atlas, atlas])).toBe('@ATLAS @Atlas plan the launch');
+  });
+
   test('builds an explicit canonical roster with everyone and members in separate lanes', () => {
     const roster = buildMentionRoster([
       { participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 },
@@ -125,7 +132,8 @@ describe('Chorus SSE API', () => {
     expect(text).not.toContain('Atlas:');
     expect(text).not.toContain('Nova:');
     expect(persisted).toEqual(['user', 'assistant', 'assistant']);
-    expect(streamInputs).toEqual([{ message: '@Atlas @Nova hello' }, { message: '@Atlas @Nova hello' }]);
+    expect(streamInputs).toEqual([{ message: 'hello' }, { message: 'hello' }]);
+    expect(events[0]?.data).toMatchObject({ userMessage: { content: '@Atlas @Nova hello' } });
     expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
     expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String), expect.any(String)]);
     expect(new Set((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).size).toBe(2);
