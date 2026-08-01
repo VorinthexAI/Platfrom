@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { createNodeHelpers } from './base';
+import { communicationChannelKeySchema } from './communication-keys';
 
 export const MESSAGE_MENTIONS_COLLECTION = 'messageMentions';
 export const messageMentionSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
-  channelKey: z.string().cuid(),
+  channelKey: communicationChannelKeySchema,
   messageKey: z.string().cuid(),
   participantKey: z.string().trim().min(1).max(160),
   handledAt: z.string().datetime().optional(),

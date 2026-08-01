@@ -274,10 +274,14 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET membership = participant.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, participant.userOrganizationKey)
         LET user = membership == null ? null : DOCUMENT(users, membership.userId)
         LET orchestrator = participant.orchestratorKey == null ? null : DOCUMENT(orchestrators, participant.orchestratorKey)
+        LET thread = message._key == @rootMessageKey ? DOCUMENT(threads, @threadKey) : null
+        LET replies = thread == null ? [] : (FOR reply IN messages FILTER reply.threadKey == thread._key && reply.deletedAt == null SORT reply.createdAt DESC RETURN reply.createdAt)
+        LET poll = FIRST(FOR item IN polls FILTER item.messageKey == message._key LIMIT 1 RETURN item)
         RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
           reactions: (FOR reaction IN messageReactions FILTER reaction.messageKey == message._key COLLECT value = reaction.reaction INTO rows = reaction RETURN { reaction: value, count: LENGTH(rows), viewerReacted: @viewerParticipantKey IN rows[*].participantKey }),
-          thread: null, poll: null }
+          thread: thread == null ? null : { key: thread._key, status: thread.status, replyCount: LENGTH(replies), lastReplyAt: FIRST(replies) },
+          poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) } }
     `, { channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit });
     return (await cursor.all()).reverse().map(normalizeMessageProjection);
   },
