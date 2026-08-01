@@ -169,6 +169,10 @@ describe("shared button controls", () => {
     expect(component).not.toContain("group-hover:pointer-events-auto");
     expect(component).toContain("Button, SearchInput, Spinner, Textarea");
     expect(component).toContain('placeholder="Search..."');
+    expect(component).toContain('setFormError("Poll options must be unique.")');
+    expect(component).toContain('aria-pressed={allowMultiple}');
+    expect(component).toContain('type="submit" variant="primary" disabled={busy}');
+    expect(component).not.toContain('type="checkbox"');
     expect(component).toContain("skinTonesDisabled");
     expect(component).toContain("void loadEmojiPicker()");
     expect(component).toContain("lazyLoadEmojis={false}");
