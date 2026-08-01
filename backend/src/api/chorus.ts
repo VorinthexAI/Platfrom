@@ -131,7 +131,7 @@ export function orchestratorPromptMessage(content: string, orchestrators: readon
   const uniqueOrchestrators = [...new Map(orchestrators.map((orchestrator) => [orchestrator.key, orchestrator])).values()];
   if (uniqueOrchestrators.length < 2) return content;
   const names = uniqueOrchestrators.map(({ name }) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).sort((left, right) => right.length - left.length);
-  const pattern = new RegExp(`(^|[^\\w])@(?:${names.join('|')})(?=$|[^\\w])`, 'gi');
+  const pattern = new RegExp(`(^|[^\\w])@(?:${names.join('|')})(?=$|[^\\w])[,;:]*`, 'gi');
   return content.replace(pattern, '$1').replace(/[ \t]{2,}/g, ' ').trim();
 }
 
