@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { createNodeHelpers } from './base';
+import { communicationChannelKeySchema } from './communication-keys';
 
 export const CHANNEL_PARTICIPANTS_COLLECTION = 'channelParticipants';
 
 export const channelParticipantSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
-  channelKey: z.string().cuid(),
+  channelKey: communicationChannelKeySchema,
   userOrganizationKey: z.string().trim().min(1).max(160).optional(),
   orchestratorKey: z.string().trim().min(1).max(160).optional(),
   lastReadMessageKey: z.string().cuid().optional(),

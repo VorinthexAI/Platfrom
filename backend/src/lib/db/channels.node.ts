@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { createNodeHelpers } from './base';
+import { communicationChannelKeySchema } from './communication-keys';
 
 export const CHANNELS_COLLECTION = 'channels';
 
 export const channelSchema = z.object({
-  key: z.string().cuid(),
+  key: communicationChannelKeySchema,
   organizationKey: z.string().trim().min(1).max(160),
   scopeKey: z.string().cuid(),
   kind: z.literal('group').default('group'),

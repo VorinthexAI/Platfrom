@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { createNodeHelpers } from './base';
+import { communicationChannelKeySchema } from './communication-keys';
 
 export const MESSAGE_REACTIONS_COLLECTION = 'messageReactions';
 export const messageReactionSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
-  channelKey: z.string().cuid(),
+  channelKey: communicationChannelKeySchema,
   messageKey: z.string().cuid(),
   participantKey: z.string().cuid(),
   reaction: z.string().trim().min(1),

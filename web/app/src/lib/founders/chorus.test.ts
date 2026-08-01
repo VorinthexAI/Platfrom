@@ -169,6 +169,9 @@ describe("shared button controls", () => {
     expect(component).toContain("const scrollMessages = threadState?.messages ?? selectedMessages");
     expect(component).toContain("[channelKey, scrollMessages]");
     expect(component).not.toContain("shouldFollowMessages");
+    expect(component).toContain("message.reactions.length > 0 || message.thread || message.poll");
+    expect(component).toContain('disabled={busy || !interactive}');
+    expect(component).not.toContain("message.thread.replyCount > 0");
     expect(component).not.toContain("<button");
     expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');
     expect(mobileHome).not.toContain("PressableScale");

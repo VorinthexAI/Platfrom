@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { createNodeHelpers } from './base';
+import { communicationChannelKeySchema } from './communication-keys';
 
 export const POLL_VOTES_COLLECTION = 'pollVotes';
 export const pollVoteSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
-  channelKey: z.string().cuid(),
+  channelKey: communicationChannelKeySchema,
   pollKey: z.string().cuid(),
   optionKey: z.string().cuid(),
   participantKey: z.string().cuid(),

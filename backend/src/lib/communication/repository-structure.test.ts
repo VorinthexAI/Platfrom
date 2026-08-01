@@ -65,11 +65,15 @@ describe('Arango communication repository structure', () => {
     expect(source).not.toContain('scopeKey: newId()');
   });
 
-  test('projects reactions in channels and threads and indexes messages off the request path', async () => {
+  test('projects message actions consistently in channels and threads and indexes messages off the request path', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
     expect(source.match(/FOR reaction IN messageReactions FILTER reaction\.messageKey == message\._key/g)).toHaveLength(2);
     expect(source.match(/COLLECT value = reaction\.reaction INTO rows = reaction/g)).toHaveLength(2);
     expect(source.match(/@viewerParticipantKey IN rows\[\*\]\.participantKey/g)).toHaveLength(2);
+    expect(source.match(/LET poll = FIRST\(FOR item IN polls FILTER item\.messageKey == message\._key/g)).toHaveLength(2);
+    expect(source.match(/thread: thread == null \? null : \{ key: thread\._key/g)).toHaveLength(2);
+    expect(source.match(/poll: poll == null \? null : \{ key: poll\._key/g)).toHaveLength(2);
+    expect(source).not.toContain('thread: null, poll: null');
     expect(source).toContain('void indexMessage(stored)');
     expect(source).not.toContain('await indexMessage(stored)');
     expect(source).toContain('SORT usage.count DESC, usage.updatedAt DESC, usage.reactionSlug ASC LIMIT @limit');
