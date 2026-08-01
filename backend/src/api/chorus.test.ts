@@ -119,22 +119,18 @@ describe('Chorus SSE API', () => {
     const text = await response.text();
     const events = parseSse(text);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
-    expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'token', 'done', 'assistant-start', 'token', 'token', 'done', 'complete']);
+    expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'assistant-start', 'token', 'token', 'token', 'token', 'done', 'done', 'complete']);
     expect(events[1]?.data).toEqual({ orchestrator: { participantKey: orchestrators[0]!.participantKey, key: orchestrators[0]!.key, name: 'Atlas' } });
-    expect(events[2]?.data).toEqual({ orchestratorKey: orchestrators[0]!.key, text: 'Hi ' });
-    expect(events[3]?.data).toEqual({ orchestratorKey: orchestrators[0]!.key, text: 'there' });
-    expect(events[4]?.data).toMatchObject({ orchestratorKey: orchestrators[0]!.key, message: { content: 'Hi there' } });
-    expect(events[5]?.data).toEqual({ orchestrator: { participantKey: orchestrators[1]!.participantKey, key: orchestrators[1]!.key, name: 'Nova' } });
-    expect(events[6]?.data).toEqual({ orchestratorKey: orchestrators[1]!.key, text: 'Hi ' });
-    expect(events[7]?.data).toEqual({ orchestratorKey: orchestrators[1]!.key, text: 'there' });
-    expect(events[8]?.data).toMatchObject({ orchestratorKey: orchestrators[1]!.key, message: { content: 'Hi there' } });
+    expect(events[2]?.data).toEqual({ orchestrator: { participantKey: orchestrators[1]!.participantKey, key: orchestrators[1]!.key, name: 'Nova' } });
+    expect(events.filter(({ event }) => event === 'token').map(({ data }) => data).filter(({ orchestratorKey }) => orchestratorKey === orchestrators[0]!.key)).toEqual([{ orchestratorKey: orchestrators[0]!.key, text: 'Hi ' }, { orchestratorKey: orchestrators[0]!.key, text: 'there' }]);
+    expect(events.filter(({ event }) => event === 'token').map(({ data }) => data).filter(({ orchestratorKey }) => orchestratorKey === orchestrators[1]!.key)).toEqual([{ orchestratorKey: orchestrators[1]!.key, text: 'Hi ' }, { orchestratorKey: orchestrators[1]!.key, text: 'there' }]);
+    expect(events.filter(({ event }) => event === 'done').map(({ data }) => data)).toEqual(expect.arrayContaining(orchestrators.map((orchestrator) => expect.objectContaining({ orchestratorKey: orchestrator.key, message: expect.objectContaining({ content: 'Hi there' }) }))));
     expect(events[9]?.data).toEqual({});
     expect(persisted).toEqual(['user', 'assistant', 'assistant']);
     expect(streamInputs).toEqual([{ message: '@Vincent hello' }, { message: '@Vincent hello' }]);
     expect(events[0]?.data).toMatchObject({ userMessage: { content: '@ATLAS, @Nova; @Atlas: @Vincent hello' } });
     expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
-    expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String), expect.any(String)]);
-    expect(new Set((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).size).toBe(2);
+    expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String)]);
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(assistantCalls[1]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
     expect(streamSkills).toHaveLength(2);
@@ -142,7 +138,10 @@ describe('Chorus SSE API', () => {
     expect(streamSkills[0]).not.toContain('You are Nova');
     expect(streamSkills[1]).toContain('You are Nova, the CTO orchestrator. This invocation belongs only to Nova.');
     expect(streamSkills[1]).not.toContain('You are Atlas');
-    expect(typingEvents).toEqual(orchestrators.flatMap((orchestrator) => [expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: true }), expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: false })]));
+    expect(typingEvents).toEqual([
+      ...orchestrators.map((orchestrator) => expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: true })),
+      ...orchestrators.map((orchestrator) => expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: false })),
+    ]);
     for (const skill of streamSkills) {
       expect(skill).toContain('Speak in first person from your own perspective');
       expect(skill).toContain('Any other orchestrator mentions are routing metadata, not participants in your conversation. Ignore them completely');
@@ -152,6 +151,20 @@ describe('Chorus SSE API', () => {
       expect(skill).toContain('## Organization scopes\nHQ: The organization workspace.');
       expect(skill).not.toContain('Ignored');
     }
+  });
+
+  test('starts every mentioned orchestrator before waiting for any response', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { app, streamSkills } = appFor({ orchestratorCount: 2, gate });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova hello' }) });
+    const consuming = response.text();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(streamSkills).toHaveLength(2);
+
+    release();
+    await consuming;
   });
 
   test('runs authorized retrieval before the orchestrator Nova chat response', async () => {
