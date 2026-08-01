@@ -212,10 +212,29 @@ export function coalesceChorusStreamEvents(events: ChorusStreamEvent[]): ChorusS
   return coalesced;
 }
 
-export function mergeChorusMessageRefresh(current: ChorusDisplayMessage[], canonical: ChorusMessage[], preserveTransient: boolean): ChorusDisplayMessage[] {
-  if (!preserveTransient) return canonical;
+export function setChorusReactionState(messages: ChorusMessage[], messageKey: string, reaction: string, active: boolean): ChorusMessage[] {
+  return messages.map((message) => {
+    if (message.key !== messageKey) return message;
+    const existing = message.reactions.find((item) => item.reaction === reaction);
+    if (existing?.viewerReacted === active || (!existing && !active)) return message;
+    const reactions = existing
+      ? message.reactions
+        .map((item) => item.reaction === reaction ? { ...item, count: item.count + (active ? 1 : -1), viewerReacted: active } : item)
+        .filter((item) => item.count > 0)
+      : [...message.reactions, { reaction, count: 1, viewerReacted: true }];
+    return { ...message, reactions };
+  });
+}
+
+export function mergeChorusMessageRefresh(current: ChorusDisplayMessage[], canonical: ChorusMessage[], preserveTransient: boolean, preserveActions = false): ChorusDisplayMessage[] {
+  const currentByKey = preserveActions ? new Map(current.map((message) => [message.key, message])) : null;
+  const refreshed = currentByKey ? canonical.map((message) => {
+    const existing = currentByKey.get(message.key);
+    return existing ? { ...message, reactions: existing.reactions, thread: existing.thread, poll: existing.poll } : message;
+  }) : canonical;
+  if (!preserveTransient) return refreshed;
   const canonicalKeys = new Set(canonical.map((message) => message.key));
-  return [...canonical, ...current.filter((message) => message.clientState && !canonicalKeys.has(message.key))];
+  return [...refreshed, ...current.filter((message) => message.clientState && !canonicalKeys.has(message.key))];
 }
 
 export function markChorusStreamFailed(messages: ChorusDisplayMessage[], streamKey: string, error: string): ChorusDisplayMessage[] {

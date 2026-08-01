@@ -15,8 +15,10 @@ import {
   markChorusStreamFailed,
   listChorusMessages,
   mergeChorusMessageRefresh,
+  mutateChorusReaction,
   parseChorusSseFrame,
   reconcileChorusStreamEvent,
+  setChorusReactionState,
   streamChorusMessage,
   type ChorusDisplayMessage,
   type ChorusOptimisticStream,
@@ -39,6 +41,18 @@ describe("Chorus schemas", () => {
     await listChorusMessages("organization_key", "channel_key");
 
     expect(requestInit?.cache).toBe("no-store");
+  });
+
+  test("sends explicit reaction intent instead of a reversible toggle", async () => {
+    let requestBody: unknown;
+    globalThis.fetch = (async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return Response.json({ active: true });
+    }) as typeof fetch;
+
+    await mutateChorusReaction("organization_key", "channel_key", "message_key", "ack", "add");
+
+    expect(requestBody).toEqual({ reaction: "ack", operation: "add" });
   });
 
   test("parses the shared general channel entry", () => {
@@ -172,6 +186,9 @@ describe("shared button controls", () => {
     expect(component).toContain("message.reactions.length > 0 || message.thread || message.poll");
     expect(component).toContain('disabled={busy || !interactive}');
     expect(component).not.toContain("message.thread.replyCount > 0");
+    expect(component).toContain('active ? "add" : "remove"');
+    expect(component).toContain('messageActionRevisions.current.get(channelKey)');
+    expect(component).toContain('messageKey, reaction, "add"');
     expect(component).not.toContain("<button");
     expect(mobileHome).toContain('from "@vorinthex/shared/ui/button"');
     expect(mobileHome).not.toContain("PressableScale");
@@ -226,6 +243,31 @@ describe("Chorus stream reconciliation", () => {
     const unrelated = chorusMessageSchema.parse({ ...stored, key: "older", author, reactions: [], thread: null, poll: null });
     expect(mergeChorusMessageRefresh(optimistic, [unrelated], true).map((message) => message.key)).toEqual(["older", "temp_user"]);
     expect(mergeChorusMessageRefresh(optimistic, [unrelated], false).map((message) => message.key)).toEqual(["older"]);
+  });
+
+  test("sets reaction state idempotently instead of toggling duplicate requests", () => {
+    const message = chorusMessageSchema.parse({ ...stored, author, reactions: [], thread: null, poll: null });
+    const added = setChorusReactionState([message], message.key, "ack", true);
+    const addedAgain = setChorusReactionState(added, message.key, "ack", true);
+    const removed = setChorusReactionState(addedAgain, message.key, "ack", false);
+    const removedAgain = setChorusReactionState(removed, message.key, "ack", false);
+
+    expect(addedAgain[0]?.reactions).toEqual([{ reaction: "ack", count: 1, viewerReacted: true }]);
+    expect(removedAgain[0]?.reactions).toEqual([]);
+  });
+
+  test("does not let a refresh started before a mutation erase message actions", () => {
+    const canonical = chorusMessageSchema.parse({ ...stored, author, reactions: [], thread: null, poll: null });
+    const current = chorusMessageSchema.parse({
+      ...stored,
+      author,
+      reactions: [{ reaction: "ack", count: 1, viewerReacted: true }],
+      thread: { key: "thread_key", status: "open", replyCount: 0, lastReplyAt: null },
+      poll: { key: "poll_key", question: "Proceed?", allowMultiple: false, status: "open", closedAt: null, options: [{ key: "yes", text: "Yes", position: 0, voteCount: 0, viewerVoted: false }, { key: "no", text: "No", position: 1, voteCount: 0, viewerVoted: false }] },
+    });
+
+    expect(mergeChorusMessageRefresh([current], [canonical], true, true)[0]).toMatchObject({ reactions: current.reactions, thread: current.thread, poll: current.poll });
+    expect(mergeChorusMessageRefresh([current], [canonical], true, false)[0]).toMatchObject({ reactions: [], thread: null, poll: null });
   });
 
   test("marks incomplete reconciliation as failed and non-canonical", () => {
