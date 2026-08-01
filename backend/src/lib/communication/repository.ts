@@ -346,7 +346,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         FILTER message != null && message.deletedAt == null && participant != null && message.channelKey == @channelKey && participant.channelKey == @channelKey
         LET existing = FIRST(FOR reaction IN messageReactions FILTER reaction.messageKey == @messageKey && reaction.participantKey == @participantKey && reaction.reaction == @reaction LIMIT 1 RETURN reaction)
         RETURN { scopeKey: message.scopeKey, existingKey: existing == null ? null : existing._key }
-      `, input);
+      `, { channelKey: input.channelKey, messageKey: input.messageKey, participantKey: input.participantKey, reaction: input.reaction });
       const validated = await cursor.next();
       if (!validated) return null;
       const remove = input.mode === 'remove' || (input.mode === 'toggle' && validated.existingKey !== null);
