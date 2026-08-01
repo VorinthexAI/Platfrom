@@ -68,7 +68,13 @@ export class ChorusService {
     await this.requireMessage(channelKey, messageKey);
     const result = await this.repository.mutateReaction({ mode, channelKey, messageKey, participantKey: access.humanParticipant.key, reaction, now: this.now() });
     if (!result) throw new ChorusError('not_found', 'message not found');
-    if (result.active && result.changed) await this.repository.recordUserReaction(access.viewerUserKey, reaction, this.now());
+    if (result.active && result.changed) {
+      try {
+        await this.repository.recordUserReaction(access.viewerUserKey, reaction, this.now());
+      } catch (error) {
+        console.error('chorus reaction usage recording failed', { userKey: access.viewerUserKey, reaction, error });
+      }
+    }
     return { active: result.active };
   }
 
