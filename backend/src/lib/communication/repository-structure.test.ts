@@ -33,7 +33,7 @@ describe('Arango communication repository structure', () => {
 
   test('projects a stable founder display name', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source.match(/NOT_NULL\(user\.name, user\.alias, user\.email, "Member"\)/g)).toHaveLength(4);
+    expect(source.match(/NOT_NULL\(user\.name, user\.alias, user\.email, "Member"\)/g)).toHaveLength(5);
   });
 
   test('uses one organization-scoped general channel', async () => {
@@ -55,7 +55,7 @@ describe('Arango communication repository structure', () => {
 
   test('omits null optional identifiers from message projections', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source.match(/\.map\(normalizeMessageProjection\)/g)).toHaveLength(2);
+    expect(source.match(/\.map\(normalizeMessageProjection\)/g)).toHaveLength(3);
   });
 
   test('persists a new reaction in the validated message scope', async () => {
@@ -67,15 +67,17 @@ describe('Arango communication repository structure', () => {
     expect(source).not.toContain('scopeKey: newId()');
   });
 
-  test('projects message actions consistently in channels and threads and indexes messages off the request path', async () => {
+  test('projects message actions and reply counts consistently and indexes messages off the request path', async () => {
     const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
-    expect(source.match(/FOR reaction IN messageReactions FILTER reaction\.messageKey == message\._key/g)).toHaveLength(2);
-    expect(source.match(/COLLECT value = reaction\.reaction INTO rows = reaction/g)).toHaveLength(2);
-    expect(source.match(/@viewerParticipantKey IN rows\[\*\]\.participantKey/g)).toHaveLength(2);
-    expect(source.match(/LET poll = FIRST\(FOR item IN polls FILTER item\.messageKey == message\._key/g)).toHaveLength(2);
-    expect(source.match(/thread: thread == null \? null : \{ key: thread\._key/g)).toHaveLength(2);
-    expect(source.match(/poll: poll == null \? null : \{ key: poll\._key/g)).toHaveLength(2);
-    expect(source).not.toContain('thread: null, poll: null');
+    expect(source.match(/FOR reaction IN messageReactions FILTER reaction\.messageKey == message\._key/g)).toHaveLength(3);
+    expect(source.match(/COLLECT value = reaction\.reaction INTO rows = reaction/g)).toHaveLength(3);
+    expect(source.match(/@viewerParticipantKey IN rows\[\*\]\.participantKey/g)).toHaveLength(3);
+    expect(source.match(/LET poll = FIRST\(FOR item IN polls FILTER item\.messageKey == message\._key/g)).toHaveLength(3);
+    expect(source.match(/replies: \{ count: legacyReplyGroup == null \? LENGTH\(directReplies\) : LENGTH\(legacyReplies\) \}/g)).toHaveLength(2);
+    expect(source).toContain('message._key == @parentMessageKey || message.replyToMessageKey == @parentMessageKey');
+    expect(source).toContain('message.threadKey == null && message.replyToMessageKey == null');
+    expect(source.match(/poll: poll == null \? null : \{ key: poll\._key/g)).toHaveLength(3);
+    expect(source).not.toContain('replies: { count: 0 }, poll: null');
     expect(source).toContain('void indexMessage(stored)');
     expect(source).not.toContain('await indexMessage(stored)');
     expect(source).toContain('SORT usage.count DESC, usage.updatedAt DESC, usage.reactionSlug ASC LIMIT @limit');

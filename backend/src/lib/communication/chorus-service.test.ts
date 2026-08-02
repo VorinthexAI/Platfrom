@@ -27,11 +27,12 @@ function fixture() {
   const messages: Message[] = [];
   const mentions: unknown[] = [];
   const usage: string[][] = [];
+  const events: Array<{ scopeId: string; slug: string; data?: Record<string, unknown> | null }> = [];
   const reactionUsage = [{ reaction: '🔥', count: 4 }, { reaction: '✅', count: 2 }];
   const repository = {
     ensureGeneralChannel: async () => access,
     getGeneralChannelAccess: async (_organization: string, member: string, key: string) => member === membershipKey && key === channel.key ? access : null,
-    listMessages: async () => [], clearChannel: async () => 0, listThreadMessages: async () => [], listHistory: async () => [],
+    listMessages: async () => [], listMessageReplies: async () => [], clearChannel: async () => 0, listThreadMessages: async () => [], listHistory: async () => [],
     getMessage: async (key: string) => messages.find((message) => message.key === key) ?? null,
     insertMessage: async (message: Message) => { messages.push(message); return message; },
     insertMentions: async (items: unknown[]) => { mentions.push(...items); },
@@ -41,11 +42,12 @@ function fixture() {
     },
     recordUserReaction: async () => {},
     listUserReactions: async () => reactionUsage,
-    mutateReaction: async () => ({ active: true, changed: true }), createThread: async () => { throw new Error('unused'); }, getThread: async () => null,
+    hasMessageReplies: async () => false, deleteMessage: async () => true,
+    mutateReaction: async () => ({ active: true, changed: true }), createThread: async () => { throw new Error('unused'); }, getThread: async () => null, getThreadByRootMessage: async () => null,
     resolveThread: async () => null, archiveThread: async () => null, createPoll: async () => { throw new Error('unused'); }, getPollProjection: async () => null,
     votePoll: async () => ({ outcome: 'not_found' as const }), closePoll: async () => null,
   } as unknown as CommunicationRepository;
-  return { service: new ChorusService(repository, () => now), repository, channel, access, messages, mentions, usage, reactionUsage };
+  return { service: new ChorusService(repository, () => now, async (event) => { events.push(event); }), repository, channel, access, messages, mentions, usage, reactionUsage, events };
 }
 
 describe('Chorus service', () => {
@@ -64,6 +66,45 @@ describe('Chorus service', () => {
     expect(result.orchestrators.map((orchestrator) => orchestrator.name)).toEqual(['Atlas']);
     await f.service.persistOrchestratorMessage(result.access, result.orchestrators[0]!, 'Reviewed.', undefined, result.message.key);
     expect(f.messages.map((message) => message.content)).toEqual(['@Atlas please review this', 'Reviewed.']);
+  });
+
+  test('does not persist an orchestrator response after its triggering message is cleared', async () => {
+    const f = fixture();
+    const result = await f.service.persistUserMessage(actor, f.channel.key, '@Atlas review this');
+    f.messages.splice(0);
+
+    await expect(f.service.persistOrchestratorMessage(result.access, result.orchestrators[0]!, 'Reviewed.', undefined, undefined, result.message.key)).rejects.toMatchObject({ code: 'not_found' });
+    expect(f.messages).toEqual([]);
+  });
+
+  test('persists recursive parent links and publishes organization message invalidations', async () => {
+    const f = fixture();
+    const root = await f.service.persistUserMessage(actor, f.channel.key, 'Root');
+    const reply = await f.service.persistUserMessage(actor, f.channel.key, 'Reply', undefined, root.message.key);
+    const nested = await f.service.persistUserMessage(actor, f.channel.key, 'Nested', undefined, reply.message.key);
+    await f.service.deleteMessage(actor, f.channel.key, nested.message.key);
+
+    expect(reply.message).toMatchObject({ replyToMessageKey: root.message.key });
+    expect(nested.message).toMatchObject({ replyToMessageKey: reply.message.key });
+    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create', 'chorus.message.create', 'chorus.message.create', 'chorus.message.remove']);
+    expect(f.events[0]).toMatchObject({ scopeId: scopeKey, data: { nodeType: 'messages', nodeKey: root.message.key } });
+  });
+
+  test('does not orphan replies when deleting their parent', async () => {
+    const f = fixture();
+    const root = await f.service.persistUserMessage(actor, f.channel.key, 'Root');
+    f.repository.hasMessageReplies = async () => true;
+
+    await expect(f.service.deleteMessage(actor, f.channel.key, root.message.key)).rejects.toMatchObject({ code: 'conflict' });
+    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create']);
+  });
+
+  test('publishes one organization invalidation when clearing a non-empty channel', async () => {
+    const f = fixture();
+    f.repository.clearChannel = async () => 3;
+
+    expect(await f.service.clearChannel(actor, f.channel.key)).toBe(3);
+    expect(f.events).toEqual([{ scopeId: scopeKey, slug: 'chorus.message.remove', data: { nodeType: 'messages', nodeKey: f.channel.key } }]);
   });
 
   test('matches orchestrator mentions without regard to case', async () => {

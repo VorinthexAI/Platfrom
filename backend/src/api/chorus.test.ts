@@ -30,18 +30,20 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
   const novaInputs: unknown[] = [];
   const typingEvents: unknown[] = [];
+  const replyReads: string[] = [];
   const access = { channel: { key: channelKey }, humanParticipant: { key: newId() }, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 }, { participantKey: newId(), type: 'orchestrator', key: newId(), name: 'Atlas', mentionCount: 0 }] };
   const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
   const nova = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Nova', role: 'CTO', skill: 'Build.' };
   const metis = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Metis', role: 'CIO', skill: 'Analyze.' };
   const orchestrators = [atlas, nova, metis].slice(0, options.orchestratorCount ?? 1);
   const service = {
-    async persistUserMessage(_actor: unknown, _channelKey: string, content: string) { persisted.push('user'); return { access, message: { key: newId(), channelKey, content }, orchestrators }; },
+    async persistUserMessage(_actor: unknown, _channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) { persisted.push('user'); return { access, message: { key: newId(), channelKey, content, threadKey, replyToMessageKey }, orchestrators }; },
     async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
     async clearChannel() { return 2; },
     async generalChannel() { return access; },
     async requireChannel() { return access; },
     async frequentReactions() { return [{ reaction: '🔥', count: 3 }]; },
+    async readReplies(_actor: unknown, _channelKey: string, messageKey: string) { replyReads.push(messageKey); return { parentMessageKey: messageKey, messages: [] }; },
   };
   const handlers = createChorusHandlers({
     service: service as never,
@@ -72,10 +74,21 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/chorus/reactions', handlers.frequentReactions);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/typing', handlers.typing);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents };
+  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/replies', handlers.readReplies);
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads };
 }
 
 describe('Chorus SSE API', () => {
+  test('reads replies by their recursive parent message', async () => {
+    const { app, replyReads } = appFor();
+    const messageKey = newId();
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages/${messageKey}/replies`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ parentMessageKey: messageKey, messages: [] });
+    expect(replyReads).toEqual([messageKey]);
+  });
+
   test('strips case-insensitive orchestrator mentions only when multiple unique orchestrators are selected', () => {
     const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
     const nova = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Nova', role: 'CTO', skill: 'Build.' };
@@ -115,7 +128,8 @@ describe('Chorus SSE API', () => {
   test('streams separate identified responses for two orchestrators', async () => {
     const { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, orchestrators, typingEvents } = appFor({ orchestratorCount: 2 });
     const threadKey = newId();
-    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@ATLAS, @Nova; @Atlas: @Vincent hello', threadKey }) });
+    const replyToMessageKey = newId();
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@ATLAS, @Nova; @Atlas: @Vincent hello', threadKey, replyToMessageKey }) });
     const text = await response.text();
     const events = parseSse(text);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
@@ -135,8 +149,8 @@ describe('Chorus SSE API', () => {
     expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
     expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String), expect.any(String)]);
     expect(new Set((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).size).toBe(2);
-    expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
-    expect(assistantCalls[1]?.slice(2)).toEqual(['Hi there', threadKey, expect.any(String)]);
+    expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, replyToMessageKey, (events[0]?.data.userMessage as { key: string }).key]);
+    expect(assistantCalls[1]?.slice(2)).toEqual(['Hi there', threadKey, replyToMessageKey, (events[0]?.data.userMessage as { key: string }).key]);
     expect(streamSkills).toHaveLength(2);
     expect(streamSkills[0]).toContain('You are Atlas, the CEO orchestrator. This invocation belongs only to Atlas.');
     expect(streamSkills[0]).not.toContain('You are Nova');
@@ -278,6 +292,7 @@ describe('Chorus SSE API', () => {
     const consuming = first.text();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await request()).status).toBe(409);
+    expect((await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'DELETE' })).status).toBe(409);
     release();
     await consuming;
     const retried = await request();

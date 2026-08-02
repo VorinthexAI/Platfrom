@@ -455,13 +455,8 @@ export function registerRoutes(app: Hono) {
   app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey', chorusHandlers.deleteMessage);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', chorusHandlers.postMessage);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/reactions', chorusHandlers.react);
+  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/replies', chorusHandlers.readReplies);
   app.get('/founders/organizations/:organizationKey/chorus/reactions', chorusHandlers.frequentReactions);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads', chorusHandlers.createThread);
-  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads', chorusHandlers.listThreads);
-  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey', chorusHandlers.readThread);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey/replies', chorusHandlers.replyThread);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey/resolve', chorusHandlers.resolveThread);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/threads/:threadKey/archive', chorusHandlers.archiveThread);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls', chorusHandlers.createPoll);
   app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey', chorusHandlers.readPoll);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey/votes', chorusHandlers.votePoll);

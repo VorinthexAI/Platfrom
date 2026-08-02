@@ -65,7 +65,7 @@ export const chorusMessageSchema = z.object({
     name: z.string().trim().min(1),
   }).strict(),
   reactions: z.array(z.object({ reaction: z.string().trim().min(1).max(64), count: z.number().int().positive(), viewerReacted: z.boolean() }).strict()),
-  thread: z.object({ key: keySchema, status: z.enum(["open", "resolved", "archived"]), replyCount: z.number().int().nonnegative(), lastReplyAt: isoTimestampSchema.nullable() }).strict().nullable(),
+  replies: z.object({ count: z.number().int().nonnegative() }).strict(),
   poll: chorusPollSchema.nullable(),
 }).strict();
 
@@ -77,16 +77,6 @@ export const chorusTypingEventSchema = z.object({
   name: z.string().trim().min(1).max(160),
   active: z.boolean(),
   expiresAt: z.number().int().nonnegative(),
-}).strict();
-
-export const chorusThreadSchema = z.object({
-  key: keySchema,
-  channelKey: keySchema,
-  title: z.string().trim().min(1).max(50),
-  rootMessageKey: keySchema,
-  status: z.enum(["open", "resolved", "archived"]),
-  createdAt: isoTimestampSchema,
-  updatedAt: isoTimestampSchema,
 }).strict();
 
 export const chorusStreamMessageSchema = z.object({
@@ -114,7 +104,6 @@ export type ChorusMention = z.infer<typeof chorusMentionSchema>;
 export type ChorusMentionRoster = z.infer<typeof chorusMentionRosterSchema>;
 export type ChorusChannelEntry = z.infer<typeof chorusChannelEntrySchema>;
 export type ChorusMessage = z.infer<typeof chorusMessageSchema>;
-export type ChorusThread = z.infer<typeof chorusThreadSchema>;
 export type ChorusPoll = z.infer<typeof chorusPollSchema>;
 export type ChorusStreamEvent = z.infer<typeof chorusStreamEventSchema>;
 export type ChorusTypingEvent = z.infer<typeof chorusTypingEventSchema>;
@@ -162,19 +151,31 @@ export function formatChorusTypingLabel(names: string[]): string {
   return `${subjects} ${unique.length === 1 ? "is" : "are"} typing...`;
 }
 
+export function directChorusReplies(messages: ChorusDisplayMessage[], parent: ChorusDisplayMessage): ChorusDisplayMessage[] {
+  const legacyRootKey = messages.find((message) => !message.threadKey && !message.replyToMessageKey)?.key;
+  return messages.filter((message) => message.replyToMessageKey === parent.key || (parent.key === legacyRootKey && Boolean(message.threadKey) && !message.replyToMessageKey));
+}
+
+export function chorusReplyCount(messages: ChorusDisplayMessage[], parent: ChorusDisplayMessage): number {
+  return Math.max(parent.replies.count, directChorusReplies(messages, parent).length);
+}
+
 export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], stream: ChorusOptimisticStream, event: ChorusStreamEvent): ChorusDisplayMessage[] {
   if (event.type === "assistant-start") {
     if (messages.some((message) => message.clientState?.streamKey === stream.streamKey && message.author.key === event.orchestrator.key)) return messages;
+    const userMessage = messages.find((message) => message.clientState?.streamKey === stream.streamKey && message.author.type === "user");
     const now = new Date().toISOString();
     return [...messages, {
       key: `optimistic-assistant-${stream.streamKey}-${event.orchestrator.key}`,
       channelKey: stream.channelKey,
+      ...(userMessage?.threadKey ? { threadKey: userMessage.threadKey } : {}),
+      ...(userMessage?.replyToMessageKey ? { replyToMessageKey: userMessage.replyToMessageKey } : {}),
       content: "",
       createdAt: now,
       updatedAt: now,
       author: { ...event.orchestrator, type: "orchestrator" },
       reactions: [],
-      thread: null,
+      replies: { count: 0 },
       poll: null,
       clientState: { streamKey: stream.streamKey, state: "pending" },
     }];
@@ -230,7 +231,7 @@ export function mergeChorusMessageRefresh(current: ChorusDisplayMessage[], canon
   const currentByKey = preserveActions ? new Map(current.map((message) => [message.key, message])) : null;
   const refreshed = currentByKey ? canonical.map((message) => {
     const existing = currentByKey.get(message.key);
-    return existing ? { ...message, reactions: existing.reactions, thread: existing.thread, poll: existing.poll } : message;
+    return existing ? { ...message, reactions: existing.reactions, replies: existing.replies, poll: existing.poll } : message;
   }) : canonical;
   if (!preserveTransient) return refreshed;
   const canonicalKeys = new Set(canonical.map((message) => message.key));
@@ -343,30 +344,8 @@ export async function listChorusFrequentReactions(organizationKey: string, signa
   return (await request(`${base(organizationKey)}/reactions`, z.object({ reactions: z.array(z.object({ reaction: z.string().trim().min(1).max(64), count: z.number().int().positive() }).strict()).max(10) }).strict(), { signal })).reactions;
 }
 
-export async function createChorusThread(organizationKey: string, channelKey: string, rootMessageKey: string, title: string, signal?: AbortSignal) {
-  return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads`, z.object({ thread: chorusThreadSchema }).strict(), { method: "POST", body: JSON.stringify({ rootMessageKey, title }), signal })).thread;
-}
-
-export const chorusThreadListItemSchema = z.object({ key: keySchema, channelKey: keySchema, title: z.string().trim().min(1).max(50), rootMessageKey: keySchema, rootContent: z.string(), status: z.enum(["open", "resolved", "archived"]), replyCount: z.number().int().nonnegative(), updatedAt: isoTimestampSchema }).strict();
-export type ChorusThreadListItem = z.infer<typeof chorusThreadListItemSchema>;
-export async function listChorusThreads(organizationKey: string, channelKey: string, signal?: AbortSignal) {
-  return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads`, z.object({ threads: z.array(chorusThreadListItemSchema) }).strict(), { signal })).threads;
-}
-
-export async function readChorusThread(organizationKey: string, channelKey: string, threadKey: string, signal?: AbortSignal) {
-  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads/${encodeURIComponent(threadKey)}`, z.object({ thread: chorusThreadSchema, messages: z.array(chorusMessageSchema) }).strict(), { signal });
-}
-
-export async function replyChorusThread(organizationKey: string, channelKey: string, threadKey: string, content: string, replyToMessageKey?: string, signal?: AbortSignal) {
-  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads/${encodeURIComponent(threadKey)}/replies`, z.object({ message: chorusStreamMessageSchema }).strict(), { method: "POST", body: JSON.stringify({ content, ...(replyToMessageKey ? { replyToMessageKey } : {}) }), signal });
-}
-
-export async function resolveChorusThread(organizationKey: string, channelKey: string, threadKey: string, signal?: AbortSignal) {
-  return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads/${encodeURIComponent(threadKey)}/resolve`, z.object({ thread: chorusThreadSchema }).strict(), { method: "POST", body: "{}", signal })).thread;
-}
-
-export async function archiveChorusThread(organizationKey: string, channelKey: string, threadKey: string, signal?: AbortSignal) {
-  return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/threads/${encodeURIComponent(threadKey)}/archive`, z.object({ thread: chorusThreadSchema }).strict(), { method: "POST", body: "{}", signal })).thread;
+export async function readChorusReplies(organizationKey: string, channelKey: string, messageKey: string, signal?: AbortSignal) {
+  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}/replies`, z.object({ parentMessageKey: keySchema, messages: z.array(chorusMessageSchema) }).strict(), { signal });
 }
 
 export async function createChorusPoll(organizationKey: string, channelKey: string, messageKey: string, question: string, options: string[], allowMultiple: boolean) {

@@ -23,6 +23,7 @@ export const serverEventSlugs = [
   'payment.checkout_completed', 'payment.ticket_purchased',
   'presence.session_expired', 'presence.session_joined', 'presence.session_left',
   'orchestrator.chat.started', 'orchestrator.chat.completed', 'orchestrator.chat.failed',
+  'chorus.message.create', 'chorus.message.remove',
   'artifact.create',
   'organization.member.list', 'organization.member.read', 'organization.member.add',
   'organization.member.role.update', 'organization.member.activate',
