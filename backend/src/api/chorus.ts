@@ -204,11 +204,6 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
         finally { clearInterval(heartbeat); unsubscribe(); }
       });
     },
-    clearChannel: (c: Context) => run(c, async (resolved) => {
-      const channelKey = key.parse(c.req.param('channelKey'));
-      if (activeChannels.has(channelKey)) throw new ChorusError('conflict', 'a message is being processed for this channel');
-      return { cleared: await dependencies.service.clearChannel(resolved, channelKey) };
-    }),
     deleteMessage: (c: Context) => run(c, async (resolved) => { await dependencies.service.deleteMessage(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey'))); return { deleted: true }; }),
     postMessage: async (c: Context) => {
       const resolved = await actor(c);

@@ -17,7 +17,6 @@ import {
   buildChorusMentionRows,
   CHORUS_ORCHESTRATOR_NAMES,
   closestChorusMentionCompletion,
-  clearChorusChannel,
   directChorusReplies,
   coalesceChorusStreamEvents,
   createChorusPoll,
@@ -529,8 +528,6 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   const [frequentReactions, setFrequentReactions] = useState<Array<{ reaction: string; count: number }>>([]);
   const [replyState, setReplyState] = useState<{ parents: ChorusDisplayMessage[]; messages: ChorusDisplayMessage[]; loading: boolean; error: string | null } | null>(null);
   const [typingParticipants, setTypingParticipants] = useState<Record<string, ChorusTypingEvent>>({});
-  const [clearOpen, setClearOpen] = useState(false);
-  const [clearing, setClearing] = useState(false);
   const controllers = useRef(new Map<string, AbortController>());
   const messageRequests = useRef(new Map<string, number>());
   const messageActionRevisions = useRef(new Map<string, number>());
@@ -559,7 +556,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     controllers.current.clear();
     messageRequests.current.clear(); messageActionRevisions.current.clear(); reactionRequests.current.clear(); streamingChannels.current.clear();
     activeChannel.current = null;
-    setChannels([]); setMentions([]); setMentionRoster(null); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setReplyState(null); setPollMessage(null); setBusyMessage(null); setClearOpen(false); setFrequentReactions([]);
+    setChannels([]); setMentions([]); setMentionRoster(null); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setReplyState(null); setPollMessage(null); setBusyMessage(null); setFrequentReactions([]);
     setChannelsLoading(true); setChannelsError(null);
     const controller = new AbortController();
     controllers.current.get("channels")?.abort(); controllers.current.set("channels", controller);
@@ -663,7 +660,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     replyGeneration.current += 1;
     controllers.current.get("replies")?.abort();
     activeChannel.current = entry.channel?.key ?? null;
-    setSelectedKey(entry.orchestrator.key); setPollMessage(null); setReplyState(null); setClearOpen(false);
+    setSelectedKey(entry.orchestrator.key); setPollMessage(null); setReplyState(null);
     if (entry.orchestrator.key === selectedKey && entry.canChat && entry.channel) void refreshMessages(entry.channel.key).catch(() => {});
   }, [refreshMessages, selectedKey]);
   const retryChannels = useCallback(() => { void loadChannels(); }, [loadChannels]);
@@ -866,25 +863,6 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
       setBusyMessage((current) => current === messageKey ? null : current);
     }
   };
-  const clearSelectedChannel = async () => {
-    if (!channelKey || clearing || streaming[channelKey]) return;
-    const requestChannel = channelKey;
-    setClearing(true);
-    setErrors((current) => ({ ...current, [requestChannel]: null }));
-    controllers.current.get(`messages:${requestChannel}`)?.abort();
-    messageRequests.current.set(requestChannel, (messageRequests.current.get(requestChannel) ?? 0) + 1);
-    try {
-      await clearChorusChannel(organizationKey, requestChannel);
-      if (activeChannel.current === requestChannel) {
-        setMessages((current) => ({ ...current, [requestChannel]: [] }));
-        setClearOpen(false);
-      }
-    } catch (error) {
-      if (activeChannel.current === requestChannel) setErrors((current) => ({ ...current, [requestChannel]: error instanceof Error ? error.message : "Channel could not be cleared" }));
-    } finally {
-      setClearing(false);
-    }
-  };
   const stopMessageSpeech = () => {
     speechRequest.current?.abort(); speechRequest.current = null; stopVoice(); setBusyMessage(null);
   };
@@ -941,7 +919,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
         <section className="flex min-h-0 min-w-0 flex-col bg-obsidian-990/90 [contain:layout_paint]">
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--border-faint)] px-5">
              <div className="min-w-0"><h1 className="truncate pb-0.5 font-display text-base leading-6 text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1>{replyParent ? <p className="truncate text-[10px] text-silver-500">Replies to {replyParent.author.type === "user" ? "You" : replyParent.author.name}</p> : null}</div>
-            {replyState ? <Button type="button" variant="secondary" aria-label="Back from replies" onClick={() => void backFromReplies()} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Back</Button> : selected?.canChat && channelKey ? <Button type="button" variant="secondary" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Clear channel</Button> : null}
+             {replyState ? <Button type="button" variant="secondary" aria-label="Back from replies" onClick={() => void backFromReplies()} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Back</Button> : null}
           </div>
           <div ref={messagesPane} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
@@ -952,16 +930,6 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
             <div aria-live="polite" className="flex h-6 shrink-0 items-end px-5 text-[10px] font-medium"><span className={typingLabel ? "chorus-typing-gradient" : "sr-only"}>{typingLabel}</span></div>
             <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${activeReplyParentKey ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} onSubmit={replyState && channelKey ? (content) => { void submitReply(content); } : submitComposerMessage} onTypingChange={publishTyping} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={activeReplyParentKey ?? "channel"} />
         </section>
-        <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
-          <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" />
-            <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-[min(92vw,390px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[var(--border-strong)] bg-obsidian-950 p-5 shadow-2xl" aria-describedby="clear-channel-description">
-              <Dialog.Title className="text-sm text-silver-50">Clear this channel?</Dialog.Title>
-              <Dialog.Description id="clear-channel-description" className="mt-2 text-[11px] leading-5 text-silver-400">This removes every message in your channel with {selected?.orchestrator.name ?? "this orchestrator"}.</Dialog.Description>
-               <div className="mt-5 flex justify-end gap-2"><Dialog.Close asChild><Button type="button" variant="secondary" disabled={clearing} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Cancel</Button></Dialog.Close><Button type="button" variant="primary" loading={clearing} onClick={() => void clearSelectedChannel()} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Clear channel</Button></div>
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
         {pollMessage && channelKey ? <PollComposer message={pollMessage} busy={busyMessage === pollMessage.key} error={errors[channelKey] ?? null} onCancel={() => setPollMessage(null)} onCreate={async (question, options, allowMultiple) => {
           const requestChannel = channelKey;
           const requestOrganization = organizationKey;
@@ -983,8 +951,8 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
         <Dialog.Root open={Boolean(actionMessage)} onOpenChange={(open) => { if (!open) closeMessageActions(); }}>
           <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
             <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Message actions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close message actions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close message actions</Button></Dialog.Close></div>
-             <div className="mt-4 grid gap-2"><Button type="button" variant="secondary" onClick={() => { if (!actionMessage) return; const message = actionMessage; closeMessageActions(); void openReplies(message); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Replies</Button><Button type="button" variant="secondary" onClick={() => { if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); setPollMessage(actionMessage); closeMessageActions(); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Poll</Button><Button type="button" variant="secondary" onClick={() => { stopMessageSpeech(); setReactionPickerOpen(true); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">React</Button><Button type="button" variant="secondary" disabled={!actionMessage?.content || busyMessage === actionMessage?.key} onClick={() => void toggleMessageSpeech()} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">{actionMessage && speechAudio.current.get(actionMessage.key) && (voicePlayingSrc === speechAudio.current.get(actionMessage.key) || pendingVoiceSrc === speechAudio.current.get(actionMessage.key)) ? "Stop listening" : "Listen"}</Button></div>
-             <div className="mt-auto flex justify-between gap-2 border-t border-[var(--border-faint)] pt-4"><Button type="button" variant="danger" onClick={() => void deleteSelectedMessage()} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Delete</Button><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div>
+             <div className="mt-4 grid gap-2"><Button type="button" variant="secondary" onClick={() => { if (!actionMessage) return; const message = actionMessage; void openReplies(message); closeMessageActions(); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Reply</Button><Button type="button" variant="secondary" onClick={() => { if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); setPollMessage(actionMessage); closeMessageActions(); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Create poll</Button><Button type="button" variant="secondary" onClick={() => { stopMessageSpeech(); setReactionPickerOpen(true); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">React</Button><Button type="button" variant="secondary" disabled={!actionMessage?.content || busyMessage === actionMessage?.key} onClick={() => void toggleMessageSpeech()} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">{actionMessage && speechAudio.current.get(actionMessage.key) && (voicePlayingSrc === speechAudio.current.get(actionMessage.key) || pendingVoiceSrc === speechAudio.current.get(actionMessage.key)) ? "Stop listening" : "Listen"}</Button><Button type="button" variant="primary" onClick={() => void deleteSelectedMessage()} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Delete message</Button></div>
+             <div className="mt-auto flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div>
           </Dialog.Content></Dialog.Portal>
         </Dialog.Root>
         <Dialog.Root open={reactionPickerOpen} onOpenChange={(open) => { setReactionPickerOpen(open); if (!open) { setReactionQuery(""); setActionMessage(null); } }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex h-[min(88vh,680px)] max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close reactions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close reactions</Button></Dialog.Close></div><SearchInput autoFocus value={reactionQuery} onChange={(event) => setReactionQuery(event.target.value)} placeholder="Search..." aria-label="Search reactions" className="mt-4 w-full" />{frequentReactions.length ? <div aria-label="Frequently used reactions" className="mt-2 flex flex-wrap gap-2">{frequentReactions.map(({ reaction, count }) => <Button key={reaction} type="button" size="sm" variant="outline" aria-label={`React with ${reaction}, used ${count} times`} onClick={() => void selectReaction(reaction)} className="px-3 text-base normal-case tracking-normal">{reaction}</Button>)}</div> : null}<div ref={emojiPicker} className="chorus-reaction-picker mt-1 min-h-0 flex-1 overflow-hidden rounded-xl [&_.epr-search-container]:!hidden"><EmojiPicker theme={"dark" as Theme} emojiStyle={"native" as EmojiStyle} width="100%" height="100%" lazyLoadEmojis autoFocusSearch={false} searchPlaceholder="Search..." skinTonesDisabled previewConfig={{ showPreview: false }} onEmojiClick={({ emoji }) => { void selectReaction(emoji); }} /></div><div className="mt-5 flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div></Dialog.Content></Dialog.Portal></Dialog.Root>

@@ -35,13 +35,6 @@ export class ChorusService {
     return this.repository.listMessages(channelKey, access.humanParticipant.key, limit);
   }
 
-  async clearChannel(actor: ChorusActor, channelKey: string) {
-    const access = await this.requireChannel(actor, channelKey);
-    const cleared = await this.repository.clearChannel(channelKey, this.now());
-    if (cleared > 0) await this.publishInvalidation(access.channel.scopeKey, channelKey, 'chorus.message.remove');
-    return cleared;
-  }
-
   async deleteMessage(actor: ChorusActor, channelKey: string, messageKey: string) {
     await this.requireChannel(actor, channelKey);
     const message = await this.requireMessage(channelKey, messageKey);

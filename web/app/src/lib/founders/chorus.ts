@@ -315,10 +315,6 @@ export async function listChorusMessages(organizationKey: string, channelKey: st
   return (await request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages?limit=200`, z.object({ messages: z.array(chorusMessageSchema) }).strict(), { signal })).messages;
 }
 
-export async function clearChorusChannel(organizationKey: string, channelKey: string) {
-  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages`, z.object({ cleared: z.number().int().nonnegative() }).strict(), { method: "DELETE" });
-}
-
 export function deleteChorusMessage(organizationKey: string, channelKey: string, messageKey: string) {
   return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}`, z.object({ deleted: z.literal(true) }).strict(), { method: "DELETE" });
 }

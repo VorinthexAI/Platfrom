@@ -32,7 +32,7 @@ function fixture() {
   const repository = {
     ensureGeneralChannel: async () => access,
     getGeneralChannelAccess: async (_organization: string, member: string, key: string) => member === membershipKey && key === channel.key ? access : null,
-    listMessages: async () => [], listMessageReplies: async () => [], clearChannel: async () => 0, listThreadMessages: async () => [], listHistory: async () => [],
+    listMessages: async () => [], listMessageReplies: async () => [], listThreadMessages: async () => [], listHistory: async () => [],
     getMessage: async (key: string) => messages.find((message) => message.key === key) ?? null,
     insertMessage: async (message: Message) => { messages.push(message); return message; },
     insertMentions: async (items: unknown[]) => { mentions.push(...items); },
@@ -68,7 +68,7 @@ describe('Chorus service', () => {
     expect(f.messages.map((message) => message.content)).toEqual(['@Atlas please review this', 'Reviewed.']);
   });
 
-  test('does not persist an orchestrator response after its triggering message is cleared', async () => {
+  test('does not persist an orchestrator response after its triggering message is removed', async () => {
     const f = fixture();
     const result = await f.service.persistUserMessage(actor, f.channel.key, '@Atlas review this');
     f.messages.splice(0);
@@ -97,14 +97,6 @@ describe('Chorus service', () => {
 
     await expect(f.service.deleteMessage(actor, f.channel.key, root.message.key)).rejects.toMatchObject({ code: 'conflict' });
     expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create']);
-  });
-
-  test('publishes one organization invalidation when clearing a non-empty channel', async () => {
-    const f = fixture();
-    f.repository.clearChannel = async () => 3;
-
-    expect(await f.service.clearChannel(actor, f.channel.key)).toBe(3);
-    expect(f.events).toEqual([{ scopeId: scopeKey, slug: 'chorus.message.remove', data: { nodeType: 'messages', nodeKey: f.channel.key } }]);
   });
 
   test('matches orchestrator mentions without regard to case', async () => {

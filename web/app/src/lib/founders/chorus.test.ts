@@ -195,7 +195,13 @@ describe("shared button controls", () => {
     expect(component).not.toContain("shouldFollowMessages");
     expect(component).toContain("message.reactions.length > 0 || message.replies.count > 0 || message.poll");
     expect(component).toContain('disabled={busy || !interactive}');
-    expect(component).toContain('>Replies</Button>');
+    expect(component).toContain('>Reply</Button>');
+    expect(component).toContain('>Create poll</Button>');
+    expect(component).toContain('variant="primary" onClick={() => void deleteSelectedMessage()}');
+    expect(component).toContain('>Delete message</Button>');
+    expect(component).toContain('void openReplies(message); closeMessageActions();');
+    expect(component).not.toContain('closeMessageActions(); void openReplies(message);');
+    expect(component).not.toContain('Clear channel');
     expect(component).toContain(': "Listen"}</Button>');
     expect(component).not.toContain("SoundwaveIcon");
     expect(component).not.toContain("Listen with Ash");
