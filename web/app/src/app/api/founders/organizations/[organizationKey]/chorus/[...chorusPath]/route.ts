@@ -8,4 +8,5 @@ const proxy = createChorusProxy({ stream: backendStream, authHeaders: foundersAu
 
 export const GET = proxy;
 export const POST = proxy;
+export const PATCH = proxy;
 export const DELETE = proxy;

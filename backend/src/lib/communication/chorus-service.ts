@@ -38,12 +38,19 @@ export class ChorusService {
   async deleteMessage(actor: ChorusActor, channelKey: string, messageKey: string) {
     await this.requireChannel(actor, channelKey);
     const message = await this.requireMessage(channelKey, messageKey);
-    if (await this.repository.hasMessageReplies(channelKey, messageKey)) throw new ChorusError('conflict', 'messages with replies cannot be deleted');
     if (!await this.repository.deleteMessage(channelKey, messageKey, actor.membershipKey, this.now())) {
-      if (await this.repository.hasMessageReplies(channelKey, messageKey)) throw new ChorusError('conflict', 'messages with replies cannot be deleted');
       throw new ChorusError('forbidden', 'message deletion denied');
     }
     await this.publishMessageEvent(message, 'chorus.message.remove');
+  }
+
+  async editMessage(actor: ChorusActor, channelKey: string, messageKey: string, content: string) {
+    await this.requireChannel(actor, channelKey);
+    const message = await this.requireMessage(channelKey, messageKey);
+    const edited = await this.repository.editMessage(channelKey, messageKey, actor.membershipKey, content, this.now());
+    if (!edited) throw new ChorusError('forbidden', 'only the message author may edit this message');
+    await this.publishMessageEvent(message, 'chorus.message.update');
+    return edited;
   }
 
   async persistUserMessage(actor: ChorusActor, channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) {
@@ -180,11 +187,11 @@ export class ChorusService {
     return threadKey;
   }
 
-  private async publishMessageEvent(message: Message, slug: 'chorus.message.create' | 'chorus.message.remove') {
+  private async publishMessageEvent(message: Message, slug: 'chorus.message.create' | 'chorus.message.update' | 'chorus.message.remove') {
     await this.publishInvalidation(message.scopeKey, message.key, slug);
   }
 
-  private async publishInvalidation(scopeKey: string, messageKey: string, slug: 'chorus.message.create' | 'chorus.message.remove') {
+  private async publishInvalidation(scopeKey: string, messageKey: string, slug: 'chorus.message.create' | 'chorus.message.update' | 'chorus.message.remove') {
     try {
       await this.recordEvent({ scopeId: scopeKey, slug, data: { nodeType: 'messages', nodeKey: messageKey } });
     } catch (error) {

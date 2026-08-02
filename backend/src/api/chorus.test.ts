@@ -31,6 +31,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const novaInputs: unknown[] = [];
   const typingEvents: unknown[] = [];
   const replyReads: string[] = [];
+  const edits: Array<{ messageKey: string; content: string }> = [];
   const access = { channel: { key: channelKey }, humanParticipant: { key: newId() }, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 }, { participantKey: newId(), type: 'orchestrator', key: newId(), name: 'Atlas', mentionCount: 0 }] };
   const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
   const nova = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Nova', role: 'CTO', skill: 'Build.' };
@@ -43,6 +44,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
     async requireChannel() { return access; },
     async frequentReactions() { return [{ reaction: '🔥', count: 3 }]; },
     async readReplies(_actor: unknown, _channelKey: string, messageKey: string) { replyReads.push(messageKey); return { parentMessageKey: messageKey, messages: [] }; },
+    async editMessage(_actor: unknown, _channelKey: string, messageKey: string, content: string) { edits.push({ messageKey, content }); return { key: messageKey, channelKey, content, editedAt: '2026-08-02T12:00:00.000Z', createdAt: '2026-08-01T12:00:00.000Z', updatedAt: '2026-08-02T12:00:00.000Z' }; },
   };
   const handlers = createChorusHandlers({
     service: service as never,
@@ -67,13 +69,15 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
     speak: async (...args) => { speechCalls.push(args); return { audioBase64: 'UklGRg==', mimeType: 'audio/wav' }; },
   });
   const app = new Hono();
+  app.onError((_error, c) => c.json({ error: 'invalid request' }, 400));
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.postMessage);
   app.post('/founders/organizations/:organizationKey/chorus/transcriptions', handlers.transcribe);
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/chorus/reactions', handlers.frequentReactions);
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/typing', handlers.typing);
   app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/replies', handlers.readReplies);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads };
+  app.patch('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey', handlers.editMessage);
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits };
 }
 
 describe('Chorus SSE API', () => {
@@ -85,6 +89,19 @@ describe('Chorus SSE API', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ parentMessageKey: messageKey, messages: [] });
     expect(replyReads).toEqual([messageKey]);
+  });
+
+  test('edits a message with a strict content-only body', async () => {
+    const { app, edits } = appFor();
+    const messageKey = newId();
+    const url = `/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages/${messageKey}`;
+    const response = await app.request(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated message' }) });
+    const invalid = await app.request(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'Updated again', author: 'forged' }) });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ message: { key: messageKey, content: 'Updated message', editedAt: '2026-08-02T12:00:00.000Z' } });
+    expect(invalid.status).toBe(400);
+    expect(edits).toEqual([{ messageKey, content: 'Updated message' }]);
   });
 
   test('strips case-insensitive orchestrator mentions only when multiple unique orchestrators are selected', () => {

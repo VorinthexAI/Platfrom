@@ -28,7 +28,7 @@ describe('Arango communication repository structure', () => {
     expect(source).toContain("read: ['userOrganizations', 'orchestrators', 'scopes', 'users']");
     expect(source).toContain("write: ['channels', 'channelParticipants']");
     expect(source).toContain("{ read: ['messages', 'channelParticipants'], write: ['messageReactions'] }");
-    expect(source).toContain("{ read: ['pollOptions'], write: ['polls', 'pollVotes'] }");
+    expect(source).toContain("{ read: ['messages', 'pollOptions'], write: ['polls', 'pollVotes'] }");
   });
 
   test('projects a stable founder display name', async () => {
@@ -81,6 +81,19 @@ describe('Arango communication repository structure', () => {
     expect(source).toContain('void indexMessage(stored)');
     expect(source).not.toContain('await indexMessage(stored)');
     expect(source).toContain('SORT usage.count DESC, usage.updatedAt DESC, usage.reactionSlug ASC LIMIT @limit');
+    expect(source.match(/canEdit: participant\._key == @viewerParticipantKey/g)).toHaveLength(3);
+    expect(source.match(/viewerMembership\.orgRole == "owner" \|\| viewerMembership\.orgRole == "admin"/g)).toHaveLength(3);
+  });
+
+  test('cascades deletion through replies and restricts editing to the author', async () => {
+    const source = await Bun.file(new URL('./repository.ts', import.meta.url)).text();
+    expect(source).toContain('message.replyToMessageKey IN @parentKeys');
+    expect(source).toContain('message.threadKey == @threadKey');
+    expect(source).toContain('author.userOrganizationKey == @membershipKey || membership.orgRole == "owner" || membership.orgRole == "admin"');
+    expect(source).toContain('FILTER author.userOrganizationKey == @membershipKey');
+    expect(source).toContain('editedAt: @now, updatedAt: @now');
+    expect(source).toContain('current.updatedAt == @updatedAt && current.content == @content');
+    expect(source.match(/message\.deletedAt == null/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
   test('upserts message mentions by their public message key', async () => {

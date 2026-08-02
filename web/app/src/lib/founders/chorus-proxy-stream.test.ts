@@ -47,3 +47,17 @@ test("streams Chorus SSE through the Next proxy without buffering", async () => 
   const second = await reader.read();
   expect(new TextDecoder().decode(second.value)).toContain("event: complete");
 });
+
+test("forwards Chorus message edits with their JSON body", async () => {
+  let forwardedInit: (RequestInit & { allowErrorResponse?: boolean }) | undefined;
+  const proxy = createChorusProxy({
+    authHeaders: async () => ({ Authorization: "Bearer session" }),
+    rotateSession: () => {},
+    stream: async (_path, init) => { forwardedInit = init; return Response.json({ message: {} }); },
+  });
+  const body = JSON.stringify({ content: "Updated" });
+  const response = await proxy(new Request("https://vorinthex.com/api/founders/organizations/org/chorus/channels/channel/messages/message", { method: "PATCH", headers: { "Content-Type": "application/json" }, body }), { params: Promise.resolve({ organizationKey: "org", chorusPath: ["channels", "channel", "messages", "message"] }) });
+
+  expect(response.status).toBe(200);
+  expect(forwardedInit).toMatchObject({ method: "PATCH", body });
+});

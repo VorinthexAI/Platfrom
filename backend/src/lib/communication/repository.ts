@@ -48,12 +48,15 @@ export interface MessageProjection {
   threadKey?: string;
   replyToMessageKey?: string;
   content: string;
+  editedAt?: string;
   createdAt: string;
   updatedAt: string;
   author: { participantKey: string; type: 'user' | 'orchestrator'; key: string; name: string };
   reactions: ReactionAggregate[];
   replies: { count: number };
   poll: PollProjection | null;
+  canEdit: boolean;
+  canDelete: boolean;
 }
 export interface ThreadProjection { key: string; channelKey: string; title: string; rootMessageKey: string; rootContent: string; status: Thread['status']; replyCount: number; updatedAt: string }
 
@@ -64,8 +67,8 @@ export interface CommunicationRepository {
   getGeneralChannelAccess(organizationKey: string, membershipKey: string, channelKey: string): Promise<GeneralChannelAccess | null>;
   listMessages(channelKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
   listMessageReplies(channelKey: string, parentMessageKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
-  hasMessageReplies(channelKey: string, messageKey: string): Promise<boolean>;
   deleteMessage(channelKey: string, messageKey: string, membershipKey: string, now: string): Promise<boolean>;
+  editMessage(channelKey: string, messageKey: string, membershipKey: string, content: string, now: string): Promise<Message | null>;
   listThreadMessages(channelKey: string, threadKey: string, rootMessageKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
   listThreads(channelKey: string): Promise<ThreadProjection[]>;
   listHistory(channelKey: string, threadKey: string | undefined, excludeMessageKey: string | undefined, limit: number): Promise<Array<{ role: 'user' | 'assistant'; content: string }>>;
@@ -105,11 +108,12 @@ function parseAccess(raw: Record<string, any>): GeneralChannelAccess {
 }
 
 function normalizeMessageProjection(message: MessageProjection): MessageProjection {
-  const { threadKey, replyToMessageKey, ...projection } = message;
+  const { threadKey, replyToMessageKey, editedAt, ...projection } = message;
   return {
     ...projection,
     ...(threadKey ? { threadKey } : {}),
     ...(replyToMessageKey ? { replyToMessageKey } : {}),
+    ...(editedAt ? { editedAt } : {}),
   };
 }
 
@@ -127,6 +131,8 @@ export function buildUserMentionDocuments(userKey: string, sourceIds: string[], 
 async function projectPoll(pollKey: string, channelKey: string, viewerParticipantKey: string): Promise<PollProjection | null> {
   return first<PollProjection>(`
     FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey
+      LET message = DOCUMENT(messages, poll.messageKey)
+      FILTER message != null && message.deletedAt == null && message.channelKey == @channelKey
       RETURN { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt,
         options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC
           LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote)
@@ -134,15 +140,22 @@ async function projectPoll(pollKey: string, channelKey: string, viewerParticipan
   `, { pollKey, channelKey, viewerParticipantKey });
 }
 
+async function updateMessageIndex(message: Message, patch: Record<string, unknown>): Promise<void> {
+  await db.query(`
+    FOR current IN messages
+      FILTER current._key == @messageKey && current.deletedAt == null && current.updatedAt == @updatedAt && current.content == @content
+      UPDATE current WITH @patch IN messages
+  `, { messageKey: message.key, updatedAt: message.updatedAt, content: message.content, patch });
+}
+
 async function indexMessage(message: Message): Promise<void> {
-  const collection = db.collection('messages');
   try {
     const embedding = await embedText({ text: message.content });
     if (!embedding.length) {
-      await collection.update(message.key, { embeddingState: 'failed' });
+      await updateMessageIndex(message, { embeddingState: 'failed' });
       return;
     }
-    await collection.update(message.key, {
+    await updateMessageIndex(message, {
       embedding,
       embeddingState: 'ready',
       embeddingDimensions: embedding.length,
@@ -151,7 +164,7 @@ async function indexMessage(message: Message): Promise<void> {
     });
   } catch (error) {
     console.error('message embedding failed', { messageKey: message.key, error });
-    await collection.update(message.key, { embeddingState: 'failed' }).catch(() => {});
+    await updateMessageIndex(message, { embeddingState: 'failed' }).catch(() => {});
   }
 }
 
@@ -229,15 +242,19 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET membership = participant.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, participant.userOrganizationKey)
         LET user = membership == null ? null : DOCUMENT(users, membership.userId)
         LET orchestrator = participant.orchestratorKey == null ? null : DOCUMENT(orchestrators, participant.orchestratorKey)
+        LET viewer = DOCUMENT(channelParticipants, @viewerParticipantKey)
+        LET viewerMembership = viewer.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, viewer.userOrganizationKey)
         LET legacyReplyGroup = FIRST(FOR item IN threads FILTER item.rootMessageKey == message._key LIMIT 1 RETURN item)
         LET legacyReplies = legacyReplyGroup == null ? [] : (FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key && reply.deletedAt == null RETURN 1)
         LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null RETURN 1)
         LET poll = FIRST(FOR item IN polls FILTER item.messageKey == message._key LIMIT 1 RETURN item)
-        RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
+        RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, editedAt: message.editedAt, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
           reactions: (FOR reaction IN messageReactions FILTER reaction.messageKey == message._key COLLECT value = reaction.reaction INTO rows = reaction RETURN { reaction: value, count: LENGTH(rows), viewerReacted: @viewerParticipantKey IN rows[*].participantKey }),
           replies: { count: legacyReplyGroup == null ? LENGTH(directReplies) : LENGTH(legacyReplies) },
-          poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) } }
+          poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) },
+          canEdit: participant._key == @viewerParticipantKey,
+          canDelete: participant._key == @viewerParticipantKey || viewerMembership.orgRole == "owner" || viewerMembership.orgRole == "admin" }
     `, { channelKey, viewerParticipantKey, limit });
     return (await cursor.all()).reverse().map(normalizeMessageProjection);
   },
@@ -252,42 +269,65 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET membership = participant.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, participant.userOrganizationKey)
         LET user = membership == null ? null : DOCUMENT(users, membership.userId)
         LET orchestrator = participant.orchestratorKey == null ? null : DOCUMENT(orchestrators, participant.orchestratorKey)
+        LET viewer = DOCUMENT(channelParticipants, @viewerParticipantKey)
+        LET viewerMembership = viewer.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, viewer.userOrganizationKey)
         LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null RETURN 1)
         LET poll = FIRST(FOR item IN polls FILTER item.messageKey == message._key LIMIT 1 RETURN item)
-        RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
+        RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, editedAt: message.editedAt, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
           reactions: (FOR reaction IN messageReactions FILTER reaction.messageKey == message._key COLLECT value = reaction.reaction INTO rows = reaction RETURN { reaction: value, count: LENGTH(rows), viewerReacted: @viewerParticipantKey IN rows[*].participantKey }),
           replies: { count: LENGTH(directReplies) },
-          poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) } }
+          poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) },
+          canEdit: participant._key == @viewerParticipantKey,
+          canDelete: participant._key == @viewerParticipantKey || viewerMembership.orgRole == "owner" || viewerMembership.orgRole == "admin" }
     `, { channelKey, parentMessageKey, viewerParticipantKey, limit });
     return (await cursor.all()).map(normalizeMessageProjection);
   },
 
-  async hasMessageReplies(channelKey, messageKey) {
-    return Boolean(await first<boolean>(`
-      LET message = DOCUMENT(messages, @messageKey)
-      FILTER message != null && message.channelKey == @channelKey && message.deletedAt == null
-      LET legacyReplyGroup = FIRST(FOR item IN threads FILTER item.rootMessageKey == message._key LIMIT 1 RETURN item)
-      LET directReply = FIRST(FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null LIMIT 1 RETURN true)
-      LET legacyReply = legacyReplyGroup == null ? null : FIRST(FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key && reply.deletedAt == null LIMIT 1 RETURN true)
-      RETURN directReply == true || legacyReply == true
-    `, { channelKey, messageKey }));
-  },
   async deleteMessage(channelKey, messageKey, membershipKey, now) {
-    const changed = await first<{ key: string }>(`
+    return withTransaction({ read: ['userOrganizations', 'channelParticipants', 'threads'], write: ['messages'] }, async (trx) => {
+      const targetCursor = await trx.query<{ key: string; legacyThreadKey: string | null }>(`
+        LET message = DOCUMENT(messages, @messageKey)
+        LET membership = DOCUMENT(userOrganizations, @membershipKey)
+        LET author = message == null ? null : DOCUMENT(channelParticipants, message.authorParticipantKey)
+        FILTER message != null && message.channelKey == @channelKey && message.deletedAt == null && membership != null
+        FILTER author.userOrganizationKey == @membershipKey || membership.orgRole == "owner" || membership.orgRole == "admin"
+        LET legacyThreadKey = FIRST(FOR item IN threads FILTER item.rootMessageKey == message._key LIMIT 1 RETURN item._key)
+        UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages
+        RETURN { key: NEW._key, legacyThreadKey }
+      `, { channelKey, messageKey, membershipKey, now });
+      const target = await targetCursor.next();
+      if (!target) return false;
+
+      let parentKeys = [target.key];
+      while (parentKeys.length) {
+        const childCursor = await trx.query<{ key: string }>(`
+          FOR message IN messages
+            FILTER message.channelKey == @channelKey && message.deletedAt == null && message.replyToMessageKey IN @parentKeys
+            UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages
+            RETURN { key: NEW._key }
+        `, { channelKey, parentKeys, now });
+        parentKeys = (await childCursor.all()).map(({ key }) => key);
+      }
+      if (target.legacyThreadKey) {
+        await trx.query('FOR message IN messages FILTER message.channelKey == @channelKey && message.threadKey == @threadKey && message.deletedAt == null UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages', { channelKey, threadKey: target.legacyThreadKey, now });
+      }
+      return true;
+    });
+  },
+  async editMessage(channelKey, messageKey, membershipKey, content, now) {
+    const raw = await first<Record<string, unknown>>(`
       LET message = DOCUMENT(messages, @messageKey)
-      LET membership = DOCUMENT(userOrganizations, @membershipKey)
       LET author = message == null ? null : DOCUMENT(channelParticipants, message.authorParticipantKey)
-      LET legacyReplyGroup = message == null ? null : FIRST(FOR item IN threads FILTER item.rootMessageKey == message._key LIMIT 1 RETURN item)
-      LET directReply = message == null ? null : FIRST(FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null LIMIT 1 RETURN true)
-      LET legacyReply = legacyReplyGroup == null ? null : FIRST(FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key && reply.deletedAt == null LIMIT 1 RETURN true)
-      FILTER message != null && message.channelKey == @channelKey && message.deletedAt == null && membership != null
-      FILTER directReply != true && legacyReply != true
-      FILTER author.userOrganizationKey == @membershipKey || membership.orgRole == "owner" || membership.orgRole == "admin"
-      UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages
-      RETURN { key: NEW._key }
-    `, { channelKey, messageKey, membershipKey, now });
-    return Boolean(changed);
+      FILTER message != null && message.channelKey == @channelKey && message.deletedAt == null
+      FILTER author.userOrganizationKey == @membershipKey
+      UPDATE message WITH { content: @content, editedAt: @now, updatedAt: @now, embedding: [], embeddingState: "pending", embeddingDimensions: null, embeddedAt: null, embeddingModel: null, embeddingProvider: null } IN messages OPTIONS { keepNull: false }
+      RETURN NEW
+    `, { channelKey, messageKey, membershipKey, content, now });
+    if (!raw) return null;
+    const message = parse(messageSchema, raw);
+    void indexMessage(message);
+    return message;
   },
 
   async listThreadMessages(channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit) {
@@ -300,15 +340,19 @@ export const arangoCommunicationRepository: CommunicationRepository = {
         LET membership = participant.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, participant.userOrganizationKey)
         LET user = membership == null ? null : DOCUMENT(users, membership.userId)
         LET orchestrator = participant.orchestratorKey == null ? null : DOCUMENT(orchestrators, participant.orchestratorKey)
+        LET viewer = DOCUMENT(channelParticipants, @viewerParticipantKey)
+        LET viewerMembership = viewer.userOrganizationKey == null ? null : DOCUMENT(userOrganizations, viewer.userOrganizationKey)
         LET legacyReplyGroup = message._key == @rootMessageKey ? DOCUMENT(threads, @threadKey) : null
         LET legacyReplies = legacyReplyGroup == null ? [] : (FOR reply IN messages FILTER reply.threadKey == legacyReplyGroup._key && reply.deletedAt == null RETURN 1)
         LET directReplies = (FOR reply IN messages FILTER reply.replyToMessageKey == message._key && reply.deletedAt == null RETURN 1)
         LET poll = FIRST(FOR item IN polls FILTER item.messageKey == message._key LIMIT 1 RETURN item)
-        RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt,
+        RETURN { key: message._key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, editedAt: message.editedAt, createdAt: message.createdAt, updatedAt: message.updatedAt,
           author: { participantKey: participant._key, type: participant.userOrganizationKey == null ? "orchestrator" : "user", key: participant.userOrganizationKey == null ? orchestrator._key : user._key, name: participant.userOrganizationKey == null ? orchestrator.name : NOT_NULL(user.name, user.alias, user.email, "Member") },
           reactions: (FOR reaction IN messageReactions FILTER reaction.messageKey == message._key COLLECT value = reaction.reaction INTO rows = reaction RETURN { reaction: value, count: LENGTH(rows), viewerReacted: @viewerParticipantKey IN rows[*].participantKey }),
           replies: { count: legacyReplyGroup == null ? LENGTH(directReplies) : LENGTH(legacyReplies) },
-          poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) } }
+          poll: poll == null ? null : { key: poll._key, question: poll.question, allowMultiple: poll.allowMultiple, status: poll.status, closedAt: poll.closedAt, options: (FOR option IN pollOptions FILTER option.pollKey == poll._key SORT option.position ASC LET votes = (FOR vote IN pollVotes FILTER vote.optionKey == option._key RETURN vote) RETURN { key: option._key, text: option.text, position: option.position, voteCount: LENGTH(votes), viewerVoted: LENGTH(FOR vote IN votes FILTER vote.participantKey == @viewerParticipantKey LIMIT 1 RETURN 1) > 0 }) },
+          canEdit: participant._key == @viewerParticipantKey,
+          canDelete: participant._key == @viewerParticipantKey || viewerMembership.orgRole == "owner" || viewerMembership.orgRole == "admin" }
     `, { channelKey, threadKey, rootMessageKey, viewerParticipantKey, limit });
     return (await cursor.all()).reverse().map(normalizeMessageProjection);
   },
@@ -424,8 +468,8 @@ export const arangoCommunicationRepository: CommunicationRepository = {
   },
   getPollProjection: projectPoll,
   async votePoll({ vote, allowMultiple }) {
-    const outcome = await withTransaction({ read: ['pollOptions'], write: ['polls', 'pollVotes'] }, async (trx) => {
-      const targetCursor = await trx.query<{ pollStatus: string; optionExists: boolean }>('LET poll = DOCUMENT(polls, @pollKey) LET option = DOCUMENT(pollOptions, @optionKey) FILTER poll != null && poll.channelKey == @channelKey RETURN { pollStatus: poll.status, optionExists: option != null && option.pollKey == poll._key }', vote);
+    const outcome = await withTransaction({ read: ['messages', 'pollOptions'], write: ['polls', 'pollVotes'] }, async (trx) => {
+      const targetCursor = await trx.query<{ pollStatus: string; optionExists: boolean }>('LET poll = DOCUMENT(polls, @pollKey) LET message = poll == null ? null : DOCUMENT(messages, poll.messageKey) LET option = DOCUMENT(pollOptions, @optionKey) FILTER poll != null && message != null && message.deletedAt == null && poll.channelKey == @channelKey && message.channelKey == @channelKey RETURN { pollStatus: poll.status, optionExists: option != null && option.pollKey == poll._key }', vote);
       const target = await targetCursor.next();
       if (!target || !target.optionExists) return 'not_found' as const;
       if (target.pollStatus !== 'open') return 'conflict' as const;
@@ -444,7 +488,7 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     return poll ? { outcome: 'ok', poll } : { outcome: 'not_found' };
   },
   async closePoll(pollKey, channelKey, participantKey, now) {
-    const raw = await first<Record<string, unknown>>('FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey && poll.creatorParticipantKey == @participantKey UPDATE poll WITH { status: "closed", closedAt: @now, updatedAt: @now } IN polls RETURN NEW', { pollKey, channelKey, participantKey, now });
+    const raw = await first<Record<string, unknown>>('FOR poll IN polls FILTER poll._key == @pollKey && poll.channelKey == @channelKey && poll.creatorParticipantKey == @participantKey LET message = DOCUMENT(messages, poll.messageKey) FILTER message != null && message.deletedAt == null && message.channelKey == @channelKey UPDATE poll WITH { status: "closed", closedAt: @now, updatedAt: @now } IN polls RETURN NEW', { pollKey, channelKey, participantKey, now });
     return raw ? projectPoll(pollKey, channelKey, participantKey) : null;
   },
 };
