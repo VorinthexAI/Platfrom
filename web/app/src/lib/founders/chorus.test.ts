@@ -6,12 +6,13 @@ import {
   CHORUS_ORCHESTRATOR_NAMES,
   chorusMentionRosterSchema,
   chorusMessageSchema,
-  chorusThreadSchema,
+  chorusReplyCount,
   closestChorusMentionCompletion,
   filterChorusMentionShortcuts,
   formatChorusTypingLabel,
   plainChorusText,
   coalesceChorusStreamEvents,
+  directChorusReplies,
   markChorusStreamFailed,
   listChorusMessages,
   mergeChorusMessageRefresh,
@@ -67,7 +68,7 @@ describe("Chorus schemas", () => {
       ...stored,
       author: { participantKey: "participant_key", type: "orchestrator", key: "atlas_key", name: "Atlas" },
       reactions: [{ reaction: "ack", count: 2, viewerReacted: true }],
-      thread: { key: "thread_key", status: "open", replyCount: 1, lastReplyAt: timestamp },
+      replies: { count: 1 },
       poll: { key: "poll_key", question: "Proceed?", allowMultiple: false, status: "open", closedAt: null, options: [{ key: "option_a", text: "Yes", position: 0, voteCount: 1, viewerVoted: true }, { key: "option_b", text: "No", position: 1, voteCount: 0, viewerVoted: false }] },
     });
     expect(message.author.name).toBe("Atlas");
@@ -82,24 +83,22 @@ describe("Chorus schemas", () => {
       replyToMessageKey: null,
       author: { participantKey: "participant_key", type: "user", key: "user_key", name: "Founder" },
       reactions: [],
-      thread: null,
+      replies: { count: 0 },
       poll: null,
     });
     expect(message.threadKey).toBeUndefined();
     expect(message.replyToMessageKey).toBeUndefined();
   });
 
-  test("accepts archived thread projections as non-open threads", () => {
-    const archived = chorusThreadSchema.parse({ key: "thread_key", channelKey: "channel_key", title: "Archived thread", rootMessageKey: "message_key", status: "archived", createdAt: timestamp, updatedAt: timestamp });
-    const message = chorusMessageSchema.parse({
-      ...stored,
-      author: { participantKey: "participant_key", type: "user", key: "user_key", name: "User" },
-      reactions: [],
-      thread: { key: archived.key, status: archived.status, replyCount: 2, lastReplyAt: timestamp },
-      poll: null,
-    });
-    expect(archived.status).toBe("archived");
-    expect(message.thread?.status).toBe("archived");
+  test("selects direct recursive replies and includes legacy root replies", () => {
+    const author = { participantKey: "participant_key", type: "user" as const, key: "user_key", name: "User" };
+    const root = chorusMessageSchema.parse({ ...stored, author, reactions: [], replies: { count: 2 }, poll: null });
+    const direct = chorusMessageSchema.parse({ ...stored, key: "direct", replyToMessageKey: root.key, author, reactions: [], replies: { count: 1 }, poll: null });
+    const nested = chorusMessageSchema.parse({ ...stored, key: "nested", replyToMessageKey: direct.key, author, reactions: [], replies: { count: 0 }, poll: null });
+    const legacy = chorusMessageSchema.parse({ ...stored, key: "legacy", threadKey: "legacy_group", author, reactions: [], replies: { count: 0 }, poll: null });
+    expect(directChorusReplies([root, direct, nested, legacy], root).map(({ key }) => key)).toEqual(["direct", "legacy"]);
+    expect(directChorusReplies([root, direct, nested, legacy], direct).map(({ key }) => key)).toEqual(["nested"]);
+    expect(chorusReplyCount([root, direct], root)).toBe(2);
   });
 });
 
@@ -179,7 +178,7 @@ describe("shared button controls", () => {
     expect(component).toContain('backgroundColor: "transparent"');
     expect(component).toContain('className="chorus-reaction-picker mt-1');
     expect(component).toContain('size="sm" variant="secondary"');
-    expect(component.match(/sm:w-\[420px\]/g)).toHaveLength(4);
+    expect(component.match(/sm:w-\[420px\]/g)).toHaveLength(3);
     expect(globalStyles).toContain('--epr-header-padding: 4px');
     expect(globalStyles).toContain('position: static !important');
     expect(globalStyles).toContain('backdrop-filter: none !important');
@@ -191,12 +190,17 @@ describe("shared button controls", () => {
     expect(component).toContain("publishChorusTyping");
     expect(component).toContain("chorus-typing-gradient");
     expect(component).not.toContain('timeZoneName: "short"');
-    expect(component).toContain("const scrollMessages = threadState?.messages ?? selectedMessages");
+    expect(component).toContain("const scrollMessages = replyState?.messages ?? selectedMessages");
     expect(component).toContain("[channelKey, scrollMessages]");
     expect(component).not.toContain("shouldFollowMessages");
-    expect(component).toContain("message.reactions.length > 0 || message.thread || message.poll");
+    expect(component).toContain("message.reactions.length > 0 || message.replies.count > 0 || message.poll");
     expect(component).toContain('disabled={busy || !interactive}');
-    expect(component).not.toContain("message.thread.replyCount > 0");
+    expect(component).toContain('>Replies</Button>');
+    expect(component).toContain(': "Listen"}</Button>');
+    expect(component).not.toContain("SoundwaveIcon");
+    expect(component).not.toContain("Listen with Ash");
+    expect(component).not.toMatch(/Threads|Thread:/);
+    expect(component).toContain("subscribeNexusInvalidations");
     expect(component).toContain('active ? "add" : "remove"');
     expect(component).toContain('messageActionRevisions.current.get(channelKey)');
     expect(component).toContain('messageKey, reaction, "add"');
@@ -234,7 +238,7 @@ describe("Chorus stream reconciliation", () => {
   const stream: ChorusOptimisticStream = { streamKey: "stream_1", userKey: "temp_user", channelKey: "channel_key" };
   const author = { participantKey: "optimistic", type: "user" as const, key: "optimistic", name: "You" };
   const optimistic: ChorusDisplayMessage[] = [
-    { ...stored, key: stream.userKey, author, reactions: [], thread: null, poll: null, clientState: { streamKey: stream.streamKey, state: "optimistic" } },
+    { ...stored, key: stream.userKey, author, reactions: [], replies: { count: 0 }, poll: null, clientState: { streamKey: stream.streamKey, state: "optimistic" } },
   ];
 
   test("creates and reconciles a separate optimistic response for every orchestrator", () => {
@@ -250,14 +254,21 @@ describe("Chorus stream reconciliation", () => {
     expect(reconcileChorusStreamEvent(completed, stream, { type: "assistant-error", orchestratorKey: "metis" }).map((message) => message.key)).toEqual(["canonical_user", "canonical_atlas"]);
   });
 
+  test("keeps streamed orchestrator responses beside the user in the active reply level", () => {
+    const reply = [{ ...optimistic[0]!, replyToMessageKey: "parent_message" }];
+    const started = reconcileChorusStreamEvent(reply, stream, { type: "assistant-start", orchestrator: { participantKey: "atlas-participant", key: "atlas", name: "Atlas" } });
+
+    expect(started[1]).toMatchObject({ replyToMessageKey: "parent_message", author: { key: "atlas" } });
+  });
+
   test("preserves active pending entries on unrelated refresh and removes them on final refresh", () => {
-    const unrelated = chorusMessageSchema.parse({ ...stored, key: "older", author, reactions: [], thread: null, poll: null });
+    const unrelated = chorusMessageSchema.parse({ ...stored, key: "older", author, reactions: [], replies: { count: 0 }, poll: null });
     expect(mergeChorusMessageRefresh(optimistic, [unrelated], true).map((message) => message.key)).toEqual(["older", "temp_user"]);
     expect(mergeChorusMessageRefresh(optimistic, [unrelated], false).map((message) => message.key)).toEqual(["older"]);
   });
 
   test("sets reaction state idempotently instead of toggling duplicate requests", () => {
-    const message = chorusMessageSchema.parse({ ...stored, author, reactions: [], thread: null, poll: null });
+    const message = chorusMessageSchema.parse({ ...stored, author, reactions: [], replies: { count: 0 }, poll: null });
     const added = setChorusReactionState([message], message.key, "ack", true);
     const addedAgain = setChorusReactionState(added, message.key, "ack", true);
     const removed = setChorusReactionState(addedAgain, message.key, "ack", false);
@@ -268,17 +279,17 @@ describe("Chorus stream reconciliation", () => {
   });
 
   test("does not let a refresh started before a mutation erase message actions", () => {
-    const canonical = chorusMessageSchema.parse({ ...stored, author, reactions: [], thread: null, poll: null });
+    const canonical = chorusMessageSchema.parse({ ...stored, author, reactions: [], replies: { count: 0 }, poll: null });
     const current = chorusMessageSchema.parse({
       ...stored,
       author,
       reactions: [{ reaction: "ack", count: 1, viewerReacted: true }],
-      thread: { key: "thread_key", status: "open", replyCount: 0, lastReplyAt: null },
+      replies: { count: 1 },
       poll: { key: "poll_key", question: "Proceed?", allowMultiple: false, status: "open", closedAt: null, options: [{ key: "yes", text: "Yes", position: 0, voteCount: 0, viewerVoted: false }, { key: "no", text: "No", position: 1, voteCount: 0, viewerVoted: false }] },
     });
 
-    expect(mergeChorusMessageRefresh([current], [canonical], true, true)[0]).toMatchObject({ reactions: current.reactions, thread: current.thread, poll: current.poll });
-    expect(mergeChorusMessageRefresh([current], [canonical], true, false)[0]).toMatchObject({ reactions: [], thread: null, poll: null });
+    expect(mergeChorusMessageRefresh([current], [canonical], true, true)[0]).toMatchObject({ reactions: current.reactions, replies: current.replies, poll: current.poll });
+    expect(mergeChorusMessageRefresh([current], [canonical], true, false)[0]).toMatchObject({ reactions: [], replies: { count: 0 }, poll: null });
   });
 
   test("marks incomplete reconciliation as failed and non-canonical", () => {

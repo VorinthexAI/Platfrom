@@ -22,8 +22,6 @@ const organizationKey = z.string().trim().min(1).max(160);
 const messageBody = strictObject({ content: sanitizedAgentMessageSchema, threadKey: key.optional(), replyToMessageKey: key.optional() });
 const reactionBody = strictObject({ reaction: z.string().trim().min(1).max(64), operation: z.enum(['add', 'remove', 'toggle']).default('toggle') });
 const typingBody = strictObject({ active: z.boolean() });
-const threadBody = strictObject({ rootMessageKey: key, title: z.string().trim().min(1).max(50) });
-const replyBody = strictObject({ content: sanitizedAgentMessageSchema, replyToMessageKey: key.optional() });
 const pollBody = strictObject({ messageKey: key, question: z.string().trim().min(1).max(500), options: z.array(z.string().trim().min(1).max(200)).min(2).max(20), allowMultiple: z.boolean().default(false) }).superRefine((poll, ctx) => {
   const normalized = poll.options.map((option) => option.toLocaleLowerCase());
   if (new Set(normalized).size !== normalized.length) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Poll options must be unique' });
@@ -92,10 +90,6 @@ function channelSummary(channel: { key: string; organizationKey: string; scopeKe
 
 function storedMessage(message: { key: string; channelKey: string; threadKey?: string; replyToMessageKey?: string; content: string; createdAt: string; updatedAt: string }) {
   return { key: message.key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt };
-}
-
-function threadProjection(thread: { key: string; channelKey: string; title?: string; rootMessageKey: string; status: string; createdAt: string; updatedAt: string }) {
-  return { key: thread.key, channelKey: thread.channelKey, title: thread.title, rootMessageKey: thread.rootMessageKey, status: thread.status, createdAt: thread.createdAt, updatedAt: thread.updatedAt };
 }
 
 function boundedAssistantDelta(content: string, delta: string): string {
@@ -210,7 +204,11 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
         finally { clearInterval(heartbeat); unsubscribe(); }
       });
     },
-    clearChannel: (c: Context) => run(c, async (resolved) => ({ cleared: await dependencies.service.clearChannel(resolved, key.parse(c.req.param('channelKey'))) })),
+    clearChannel: (c: Context) => run(c, async (resolved) => {
+      const channelKey = key.parse(c.req.param('channelKey'));
+      if (activeChannels.has(channelKey)) throw new ChorusError('conflict', 'a message is being processed for this channel');
+      return { cleared: await dependencies.service.clearChannel(resolved, channelKey) };
+    }),
     deleteMessage: (c: Context) => run(c, async (resolved) => { await dependencies.service.deleteMessage(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey'))); return { deleted: true }; }),
     postMessage: async (c: Context) => {
       const resolved = await actor(c);
@@ -289,7 +287,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
               }
               let assistantMessage: Awaited<ReturnType<ChorusService['persistOrchestratorMessage']>>;
               try {
-                assistantMessage = await dependencies.service.persistOrchestratorMessage(access, orchestrator, storedContent, body.threadKey, message.key);
+                assistantMessage = await dependencies.service.persistOrchestratorMessage(access, orchestrator, storedContent, message.threadKey, body.replyToMessageKey, message.key);
               } catch (persistenceError) {
                 console.error('chorus orchestrator message persistence failed', { channelKey, orchestratorKey: orchestrator.key, error: persistenceError });
                 await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
@@ -321,18 +319,7 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       return dependencies.service.react(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey')), body.reaction, body.operation);
     }),
     frequentReactions: (c: Context) => run(c, async (resolved) => ({ reactions: await dependencies.service.frequentReactions(resolved, 10) })),
-    createThread: (c: Context) => run(c, async (resolved) => {
-      const body = await parseJson(c, threadBody);
-      return { thread: threadProjection(await dependencies.service.createThread(resolved, key.parse(c.req.param('channelKey')), body.rootMessageKey, body.title)) };
-    }, true),
-    listThreads: (c: Context) => run(c, async (resolved) => ({ threads: await dependencies.service.listThreads(resolved, key.parse(c.req.param('channelKey'))) })),
-    readThread: (c: Context) => run(c, async (resolved) => { const result = await dependencies.service.readThread(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('threadKey'))); return { thread: threadProjection(result.thread), messages: result.messages }; }),
-    replyThread: (c: Context) => run(c, async (resolved) => {
-      const body = await parseJson(c, replyBody);
-      return { message: storedMessage(await dependencies.service.replyThread(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('threadKey')), body.content, body.replyToMessageKey)) };
-    }, true),
-    resolveThread: (c: Context) => run(c, async (resolved) => ({ thread: threadProjection(await dependencies.service.resolveThread(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('threadKey')))) })),
-    archiveThread: (c: Context) => run(c, async (resolved) => ({ thread: threadProjection(await dependencies.service.archiveThread(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('threadKey')))) })),
+    readReplies: (c: Context) => run(c, async (resolved) => dependencies.service.readReplies(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey')))),
     createPoll: (c: Context) => run(c, async (resolved) => {
       const body = await parseJson(c, pollBody);
       return { poll: await dependencies.service.createPoll(resolved, key.parse(c.req.param('channelKey')), body.messageKey, body.question, body.options, body.allowMultiple) };

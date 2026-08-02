@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import * as Dialog from "@radix-ui/react-dialog";
 import type { EmojiStyle, Theme } from "emoji-picker-react";
 import { memo, useCallback, useEffect, useRef, useState, type ComponentProps, type FormEvent, type KeyboardEvent } from "react";
-import { ChevronDownIcon, ChevronUpIcon, CloseIcon, MicrophoneIcon, SendIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons";
+import { ChevronDownIcon, ChevronUpIcon, CloseIcon, MicrophoneIcon, SendIcon } from "@vorinthex/shared/ui/icons";
 import { Button, SearchInput, Spinner, Textarea } from "@vorinthex/shared/ui";
 import { useAudioStore } from "@/lib/audio/audio-store";
 import { VORINTHEX_GALAXY_REGISTRY } from "@/lib/galaxy/registry";
@@ -18,21 +18,20 @@ import {
   CHORUS_ORCHESTRATOR_NAMES,
   closestChorusMentionCompletion,
   clearChorusChannel,
+  directChorusReplies,
   coalesceChorusStreamEvents,
   createChorusPoll,
-  createChorusThread,
   deleteChorusMessage,
   filterChorusMentionShortcuts,
   formatChorusTypingLabel,
   listChorusChannels,
   listChorusFrequentReactions,
   listChorusMessages,
-  listChorusThreads,
   markChorusStreamFailed,
   mergeChorusMessageRefresh,
   mutateChorusReaction,
   publishChorusTyping,
-  readChorusThread,
+  readChorusReplies,
   plainChorusText,
   reconcileChorusStreamEvent,
   setChorusReactionState,
@@ -46,13 +45,12 @@ import {
   type ChorusMessage,
   type ChorusMention,
   type ChorusMentionRoster,
-  type ChorusThread,
-  type ChorusThreadListItem,
   type ChorusTypingEvent,
   type ChorusStreamEvent,
 } from "@/lib/founders/chorus";
 import { createFrameBatcher } from "@/lib/founders/frame-batcher";
 import { appendSpokenTranscript, startPcmCapture, type PcmCapture } from "@/lib/founders/chorus-microphone";
+import { subscribeNexusInvalidations } from "@/lib/founders/nexus-events";
 
 const loadEmojiPicker = () => import("emoji-picker-react");
 const DynamicEmojiPicker = dynamic(loadEmojiPicker, { ssr: false });
@@ -274,7 +272,7 @@ interface MessageViewProps {
   busy: boolean;
   onBusy: (busy: boolean) => void;
   onRefresh: () => Promise<void>;
-  onOpenThread: (message: ChorusMessage) => void;
+  onOpenReplies: (message: ChorusMessage) => void;
   onCreatePoll: (message: ChorusMessage) => void;
   onError: (error: string | null) => void;
   onOptimisticReaction: (messageKey: string, reaction: string, active: boolean) => void;
@@ -289,7 +287,7 @@ function MessageContent({ content, mentions }: { content: string; mentions: Chor
   return <>{plainChorusText(content).split(/(@[a-z0-9_-]+)/gi).map((part, index) => names.has(part.slice(1).toLocaleLowerCase()) ? <strong key={index} className="font-semibold text-silver-50">{part}</strong> : part)}</>;
 }
 
-const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenThread, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions, onOpenActions }: MessageViewProps) {
+const MessageView = memo(function MessageView({ entry, message, organizationKey, busy, onBusy, onRefresh, onOpenReplies, onCreatePoll, onError, onOptimisticReaction, userName, countryCode, mentions, onOpenActions }: MessageViewProps) {
   const channelKey = entry.channel!.key;
   const interactive = !message.key.startsWith("optimistic-");
   const react = async (reaction: string, wasActive: boolean) => {
@@ -314,18 +312,15 @@ const MessageView = memo(function MessageView({ entry, message, organizationKey,
         <div className="flex items-baseline gap-2"><h3 className="text-[12px] font-medium text-silver-50">{message.author.type === "user" ? "You" : message.author.name}</h3><Timestamp value={message.createdAt} countryCode={countryCode} /></div>
         {message.content ? <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-silver-300"><MessageContent content={message.content} mentions={mentions} /></p> : null}
         {MESSAGE_ACTIONS_ENABLED && interactive ? <PollView organizationKey={organizationKey} channelKey={channelKey} message={message} busy={busy} onBusy={onBusy} onRefresh={onRefresh} onError={onError} /> : null}
-        {MESSAGE_ACTIONS_ENABLED && (message.reactions.length > 0 || message.thread || message.poll) ? <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        {MESSAGE_ACTIONS_ENABLED && (message.reactions.length > 0 || message.replies.count > 0 || message.poll) ? <div className="mt-1.5 flex flex-wrap items-center gap-1">
           {message.reactions.map((aggregate) => <Button key={aggregate.reaction} size="sm" variant="outline" disabled={busy || !interactive} aria-label={`${aggregate.viewerReacted ? "Remove" : "Add"} ${aggregate.reaction} reaction`} aria-pressed={aggregate.viewerReacted} onClick={() => void react(aggregate.reaction, aggregate.viewerReacted)} className={`px-3 font-mono text-[11px] normal-case tracking-normal focus-visible:outline-2 disabled:opacity-40 ${aggregate.viewerReacted ? "border-silver-400 bg-white/[0.08] text-silver-100" : "border-[var(--border-faint)] text-silver-400"}`}>{aggregate.reaction} {aggregate.count}</Button>)}
-          {message.thread ? <Button size="xs" variant="outline" disabled={!interactive} onClick={() => onOpenThread(message)} className="min-h-0 border-[var(--border-soft)] px-2 py-0.5 text-[9px] normal-case tracking-normal text-silver-300">Thread: {message.thread.replyCount} {message.thread.replyCount === 1 ? "reply" : "replies"}</Button> : null}
+          {message.replies.count > 0 ? <Button size="xs" variant="outline" disabled={!interactive} onClick={() => onOpenReplies(message)} className="min-h-0 border-[var(--border-soft)] px-2 py-0.5 text-[9px] normal-case tracking-normal text-silver-300">{message.replies.count} {message.replies.count === 1 ? "reply" : "replies"}</Button> : null}
           {message.poll ? <Button size="xs" variant="outline" disabled={!interactive} onClick={() => onCreatePoll(message)} className="min-h-0 border-[var(--border-soft)] px-2 py-0.5 text-[9px] normal-case tracking-normal text-silver-300">Poll</Button> : null}
         </div> : null}
       </div>
     </article>
   );
-}, (previous, next) => previous.entry === next.entry
-  && previous.message === next.message
-  && previous.organizationKey === next.organizationKey
-  && previous.busy === next.busy);
+});
 
 function PollComposer({ message, onCancel, onCreate, busy, error }: { message: ChorusMessage; onCancel: () => void; onCreate: (question: string, options: string[], allowMultiple: boolean) => Promise<void>; busy: boolean; error: string | null }) {
   const [question, setQuestion] = useState("");
@@ -532,21 +527,17 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [reactionQuery, setReactionQuery] = useState("");
   const [frequentReactions, setFrequentReactions] = useState<Array<{ reaction: string; count: number }>>([]);
-  const [threadState, setThreadState] = useState<{ thread: ChorusThread; messages: ChorusDisplayMessage[]; loading: boolean; error: string | null } | null>(null);
-  const [threadSheetOpen, setThreadSheetOpen] = useState(false);
-  const [threadItems, setThreadItems] = useState<ChorusThreadListItem[]>([]);
-  const [threadRoot, setThreadRoot] = useState<ChorusMessage | null>(null);
-  const [newThreadOpen, setNewThreadOpen] = useState(false);
+  const [replyState, setReplyState] = useState<{ parents: ChorusDisplayMessage[]; messages: ChorusDisplayMessage[]; loading: boolean; error: string | null } | null>(null);
   const [typingParticipants, setTypingParticipants] = useState<Record<string, ChorusTypingEvent>>({});
-  const [newThreadTitle, setNewThreadTitle] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const controllers = useRef(new Map<string, AbortController>());
   const messageRequests = useRef(new Map<string, number>());
   const messageActionRevisions = useRef(new Map<string, number>());
   const reactionRequests = useRef(new Set<string>());
+  const streamingChannels = useRef(new Set<string>());
   const organizationGeneration = useRef(0);
-  const threadGeneration = useRef(0);
+  const replyGeneration = useRef(0);
   const currentOrganization = useRef(organizationKey);
   const activeChannel = useRef<string | null>(null);
   const messagesPane = useRef<HTMLDivElement>(null);
@@ -563,12 +554,12 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   const loadChannels = useCallback(async () => {
     const generation = ++organizationGeneration.current;
     currentOrganization.current = organizationKey;
-    threadGeneration.current += 1;
+    replyGeneration.current += 1;
     for (const active of controllers.current.values()) active.abort();
     controllers.current.clear();
-    messageRequests.current.clear(); messageActionRevisions.current.clear(); reactionRequests.current.clear();
+    messageRequests.current.clear(); messageActionRevisions.current.clear(); reactionRequests.current.clear(); streamingChannels.current.clear();
     activeChannel.current = null;
-    setChannels([]); setMentions([]); setMentionRoster(null); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setThreadState(null); setPollMessage(null); setBusyMessage(null); setClearOpen(false); setFrequentReactions([]);
+    setChannels([]); setMentions([]); setMentionRoster(null); setMessages({}); setMessagesLoading({}); setStreaming({}); setErrors({}); setSelectedKey(null); setReplyState(null); setPollMessage(null); setBusyMessage(null); setClearOpen(false); setFrequentReactions([]);
     setChannelsLoading(true); setChannelsError(null);
     const controller = new AbortController();
     controllers.current.get("channels")?.abort(); controllers.current.set("channels", controller);
@@ -638,7 +629,9 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   const selected = channels.find((entry) => entry.orchestrator.key === selectedKey) ?? null;
   const channelKey = selected?.channel?.key ?? null;
   const selectedMessages = channelKey ? messages[channelKey] : undefined;
-  const scrollMessages = threadState?.messages ?? selectedMessages;
+  const activeReplyParentKey = replyState?.parents.at(-1)?.key ?? null;
+  const hasReplyState = Boolean(replyState);
+  const scrollMessages = replyState?.messages ?? selectedMessages;
   activeChannel.current = channelKey;
   useEffect(() => {
     setTypingParticipants({});
@@ -667,10 +660,10 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
   useEffect(() => () => { speechRequest.current?.abort(); stopVoice(); for (const url of speechAudio.current.values()) URL.revokeObjectURL(url); speechAudio.current.clear(); }, [organizationKey, channelKey, stopVoice]);
 
   const selectChannel = useCallback((entry: ChorusChannelEntry) => {
-    threadGeneration.current += 1;
-    controllers.current.get("thread")?.abort();
+    replyGeneration.current += 1;
+    controllers.current.get("replies")?.abort();
     activeChannel.current = entry.channel?.key ?? null;
-    setSelectedKey(entry.orchestrator.key); setPollMessage(null); setThreadState(null); setClearOpen(false);
+    setSelectedKey(entry.orchestrator.key); setPollMessage(null); setReplyState(null); setClearOpen(false);
     if (entry.orchestrator.key === selectedKey && entry.canChat && entry.channel) void refreshMessages(entry.channel.key).catch(() => {});
   }, [refreshMessages, selectedKey]);
   const retryChannels = useCallback(() => { void loadChannels(); }, [loadChannels]);
@@ -682,8 +675,9 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     const streamKey = crypto.randomUUID();
     const stream = { streamKey, userKey, channelKey };
     const generation = organizationGeneration.current;
-    const user: ChorusDisplayMessage = { key: userKey, channelKey, content, createdAt: now, updatedAt: now, author: { participantKey: "optimistic", type: "user", key: "optimistic", name: "You" }, reactions: [], thread: null, poll: null, clientState: { streamKey, state: "optimistic" } };
+    const user: ChorusDisplayMessage = { key: userKey, channelKey, content, createdAt: now, updatedAt: now, author: { participantKey: "optimistic", type: "user", key: "optimistic", name: "You" }, reactions: [], replies: { count: 0 }, poll: null, clientState: { streamKey, state: "optimistic" } };
     setMessages((current) => ({ ...current, [channelKey]: [...(current[channelKey] ?? []), user] }));
+    streamingChannels.current.add(channelKey);
     setErrors((current) => ({ ...current, [channelKey]: null })); setStreaming((current) => ({ ...current, [channelKey]: true }));
     const controller = new AbortController(); controllers.current.set(`stream:${channelKey}`, controller);
     const eventBatcher = createFrameBatcher<ChorusStreamEvent>((events) => {
@@ -716,112 +710,137 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
     } finally {
       eventBatcher.cancel();
       controllers.current.delete(`stream:${channelKey}`);
+      streamingChannels.current.delete(channelKey);
       if (organizationGeneration.current === generation) setStreaming((current) => ({ ...current, [channelKey]: false }));
     }
   }, [channelKey, organizationKey, refreshMessages, selected, streaming]);
   const submitComposerMessage = useCallback((content: string) => { void submitMessage(content); }, [submitMessage]);
   const publishTyping = useCallback((active: boolean) => { if (channelKey) void publishChorusTyping(organizationKey, channelKey, active).catch(() => {}); }, [channelKey, organizationKey]);
 
-  const openThread = async (message: ChorusMessage, requestedThreadKey = message.thread?.key) => {
-    if (!channelKey || !requestedThreadKey) return;
-    const generation = ++threadGeneration.current;
-    controllers.current.get(`thread-stream:${channelKey}`)?.abort();
-    const requestOrganization = organizationKey;
-    const controller = new AbortController();
-    controllers.current.get("thread")?.abort(); controllers.current.set("thread", controller);
-    setErrors((current) => ({ ...current, [channelKey]: null }));
-    try {
-      const thread = { key: requestedThreadKey };
-      const placeholder = { key: thread.key, channelKey, title: "Thread", rootMessageKey: message.key, status: message.thread?.status ?? "open", createdAt: message.createdAt, updatedAt: message.updatedAt } as ChorusThread;
-      if (controller.signal.aborted || threadGeneration.current !== generation || activeChannel.current !== channelKey || currentOrganization.current !== requestOrganization) return;
-      setThreadState({ thread: placeholder, messages: [message], loading: true, error: null });
-      const loaded = await readChorusThread(organizationKey, channelKey, thread.key, controller.signal);
-      if (!controller.signal.aborted && threadGeneration.current === generation && activeChannel.current === channelKey && currentOrganization.current === requestOrganization) setThreadState({ ...loaded, loading: false, error: null });
-      await refreshMessages(channelKey).catch(() => {});
-    } catch (error) { if (!controller.signal.aborted && threadGeneration.current === generation) setErrors((current) => ({ ...current, [channelKey]: error instanceof Error ? error.message : "Thread could not open" })); }
-  };
-
-  const openThreadSheet = async (message: ChorusMessage) => {
+  const openReplies = async (message: ChorusDisplayMessage) => {
     if (!channelKey) return;
-    speechRequest.current?.abort(); stopVoice();
-    setThreadRoot(message); setNewThreadOpen(false); setNewThreadTitle(""); setThreadSheetOpen(true); setActionMessage(null);
-    setThreadItems(await listChorusThreads(organizationKey, channelKey).catch(() => []));
-  };
-
-  const refreshThread = async () => {
-    if (!channelKey || !threadState) return;
-    const generation = threadGeneration.current;
-    const threadKey = threadState.thread.key;
+    const generation = ++replyGeneration.current;
     const requestOrganization = organizationKey;
+    const parents = replyState ? [...replyState.parents, message] : [message];
     const controller = new AbortController();
-    controllers.current.get("thread-refresh")?.abort(); controllers.current.set("thread-refresh", controller);
+    controllers.current.get("replies")?.abort(); controllers.current.set("replies", controller);
+    setErrors((current) => ({ ...current, [channelKey]: null }));
+    setReplyState({ parents, messages: replyState?.messages ?? [message], loading: true, error: null });
     try {
-      const loaded = await readChorusThread(organizationKey, channelKey, threadKey, controller.signal);
-      if (!controller.signal.aborted && threadGeneration.current === generation && activeChannel.current === channelKey && currentOrganization.current === requestOrganization) setThreadState({ ...loaded, loading: false, error: null });
+      const loaded = await readChorusReplies(organizationKey, channelKey, message.key, controller.signal);
+      if (controller.signal.aborted || replyGeneration.current !== generation || activeChannel.current !== channelKey || currentOrganization.current !== requestOrganization) return;
+      const canonicalParent = loaded.messages.find((candidate) => candidate.key === message.key) ?? message;
+      setReplyState({ parents: [...parents.slice(0, -1), canonicalParent], messages: loaded.messages, loading: false, error: null });
+      await refreshMessages(channelKey).catch(() => {});
     } catch (error) {
-      if (!controller.signal.aborted && threadGeneration.current === generation) setThreadState((current) => current?.thread.key === threadKey ? { ...current, error: error instanceof Error ? error.message : "Thread refresh failed" } : current);
-      throw error;
+      if (!controller.signal.aborted && replyGeneration.current === generation) setReplyState((current) => current ? { ...current, loading: false, error: error instanceof Error ? error.message : "Replies could not open" } : current);
     }
   };
 
-  const submitThreadMessage = async (content: string) => {
-    if (!channelKey || !threadState || streaming[channelKey] || !content) return;
+  const refreshReplies = useCallback(async () => {
+    const parentKey = activeReplyParentKey;
+    if (!channelKey || !parentKey) return;
+    const generation = replyGeneration.current;
+    const requestOrganization = organizationKey;
+    const controller = new AbortController();
+    controllers.current.get("replies-refresh")?.abort(); controllers.current.set("replies-refresh", controller);
+    try {
+      const loaded = await readChorusReplies(organizationKey, channelKey, parentKey, controller.signal);
+      if (controller.signal.aborted || replyGeneration.current !== generation || activeChannel.current !== channelKey || currentOrganization.current !== requestOrganization) return;
+      setReplyState((current) => current?.parents.at(-1)?.key === parentKey ? {
+        ...current,
+        parents: current.parents.map((parent) => loaded.messages.find((message) => message.key === parent.key) ?? parent),
+        messages: loaded.messages,
+        loading: false,
+        error: null,
+      } : current);
+    } catch (error) {
+      if (!controller.signal.aborted && replyGeneration.current === generation) setReplyState((current) => current?.parents.at(-1)?.key === parentKey ? { ...current, error: error instanceof Error ? error.message : "Replies could not refresh" } : current);
+      throw error;
+    }
+  }, [activeReplyParentKey, channelKey, organizationKey]);
+
+  const submitReply = async (content: string) => {
+    const parent = replyState?.parents.at(-1);
+    if (!channelKey || !replyState || !parent || streaming[channelKey] || !content) return;
     const generation = organizationGeneration.current;
-    const requestThreadGeneration = threadGeneration.current;
-    const requestThreadKey = threadState.thread.key;
+    const requestReplyGeneration = replyGeneration.current;
+    const parentKey = parent.key;
     const now = new Date().toISOString();
     const userKey = `optimistic-user-${crypto.randomUUID()}`;
     const stream = { streamKey: crypto.randomUUID(), userKey, channelKey };
-    const user: ChorusDisplayMessage = { key: userKey, channelKey, threadKey: threadState.thread.key, content, createdAt: now, updatedAt: now, author: { participantKey: "optimistic", type: "user", key: "optimistic", name: "You" }, reactions: [], thread: null, poll: null, clientState: { streamKey: stream.streamKey, state: "optimistic" } };
-    setThreadState((current) => current ? { ...current, messages: [...current.messages, user] } : current);
+    const user: ChorusDisplayMessage = { key: userKey, channelKey, threadKey: parent.threadKey, replyToMessageKey: parentKey, content, createdAt: now, updatedAt: now, author: { participantKey: "optimistic", type: "user", key: "optimistic", name: "You" }, reactions: [], replies: { count: 0 }, poll: null, clientState: { streamKey: stream.streamKey, state: "optimistic" } };
+    setReplyState((current) => current ? { ...current, messages: [...current.messages, user] } : current);
+    streamingChannels.current.add(channelKey);
     setStreaming((current) => ({ ...current, [channelKey]: true }));
-    const controller = new AbortController(); controllers.current.set(`thread-stream:${channelKey}`, controller);
+    const controller = new AbortController(); controllers.current.set(`reply-stream:${channelKey}`, controller);
     const eventBatcher = createFrameBatcher<ChorusStreamEvent>((events) => {
-      if (organizationGeneration.current !== generation || threadGeneration.current !== requestThreadGeneration) return;
-      setThreadState((current) => current?.thread.key === requestThreadKey ? { ...current, messages: coalesceChorusStreamEvents(events).reduce((items, event) => reconcileChorusStreamEvent(items, stream, event), current.messages) } : current);
+      if (organizationGeneration.current !== generation || replyGeneration.current !== requestReplyGeneration) return;
+      setReplyState((current) => current?.parents.at(-1)?.key === parentKey ? { ...current, messages: coalesceChorusStreamEvents(events).reduce((items, event) => reconcileChorusStreamEvent(items, stream, event), current.messages) } : current);
     });
     try {
       await streamChorusMessage(organizationKey, channelKey, content, (event) => {
         eventBatcher.push(event);
         if (event.type === "done" || event.type === "complete") eventBatcher.flush();
-      }, controller.signal, threadState.thread.key);
+      }, controller.signal, parent.threadKey, parentKey);
       eventBatcher.flush();
-      if (threadGeneration.current !== requestThreadGeneration || threadState.thread.key !== requestThreadKey) return;
-      await refreshThread();
+      if (replyGeneration.current !== requestReplyGeneration || replyState.parents.at(-1)?.key !== parentKey) return;
+      await refreshReplies();
       await refreshMessages(channelKey).catch(() => {});
     } catch {
       eventBatcher.flush();
-      if (!controller.signal.aborted && threadGeneration.current === requestThreadGeneration) {
-        try { await refreshThread(); }
-        catch { setThreadState((current) => current?.thread.key === requestThreadKey ? { ...current, messages: markChorusStreamFailed(current.messages, stream.streamKey, "Message reconciliation failed") } : current); }
+      if (!controller.signal.aborted && replyGeneration.current === requestReplyGeneration) {
+        try { await refreshReplies(); }
+        catch { setReplyState((current) => current?.parents.at(-1)?.key === parentKey ? { ...current, messages: markChorusStreamFailed(current.messages, stream.streamKey, "Message reconciliation failed") } : current); }
       }
     } finally {
-      eventBatcher.cancel(); controllers.current.delete(`thread-stream:${channelKey}`);
+      eventBatcher.cancel(); controllers.current.delete(`reply-stream:${channelKey}`); streamingChannels.current.delete(channelKey);
       if (organizationGeneration.current === generation) setStreaming((current) => ({ ...current, [channelKey]: false }));
     }
   };
 
-  const closeThread = () => {
-    threadGeneration.current += 1;
-    if (channelKey) controllers.current.get(`thread-stream:${channelKey}`)?.abort();
-    setThreadState(null);
+  const backFromReplies = async () => {
+    if (!replyState || replyState.parents.length <= 1 || !channelKey) {
+      replyGeneration.current += 1;
+      if (channelKey) controllers.current.get(`reply-stream:${channelKey}`)?.abort();
+      setReplyState(null);
+      return;
+    }
+    const generation = ++replyGeneration.current;
+    controllers.current.get(`reply-stream:${channelKey}`)?.abort();
+    const parents = replyState.parents.slice(0, -1);
+    const parent = parents.at(-1)!;
+    const requestOrganization = organizationKey;
+    const controller = new AbortController();
+    controllers.current.get("replies")?.abort(); controllers.current.set("replies", controller);
+    setReplyState({ parents, messages: [parent], loading: true, error: null });
+    try {
+      const loaded = await readChorusReplies(organizationKey, channelKey, parent.key, controller.signal);
+      if (controller.signal.aborted || replyGeneration.current !== generation || activeChannel.current !== channelKey || currentOrganization.current !== requestOrganization) return;
+      setReplyState({ parents: parents.map((ancestor) => loaded.messages.find((message) => message.key === ancestor.key) ?? ancestor), messages: loaded.messages, loading: false, error: null });
+    } catch (error) {
+      if (!controller.signal.aborted && replyGeneration.current === generation) setReplyState((current) => current ? { ...current, loading: false, error: error instanceof Error ? error.message : "Replies could not open" } : current);
+    }
   };
 
-  const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey);
-  const displayedMessages = threadState?.messages ?? visibleMessages;
+  const visibleMessages = (selectedMessages ?? []).filter((message) => !message.threadKey && !message.replyToMessageKey);
+  const replyParent = replyState?.parents.at(-1) ?? null;
+  const displayedMessages = replyState && replyParent
+    ? [replyState.messages.find((message) => message.key === replyParent.key) ?? replyParent, ...directChorusReplies(replyState.messages, replyParent)]
+    : visibleMessages;
   const typingLabel = formatChorusTypingLabel(Object.values(typingParticipants).map(({ name }) => name));
   const updateMessageActions = (messageKey: string, updateMessage: (message: ChorusMessage) => ChorusMessage) => {
     if (!channelKey) return;
     messageActionRevisions.current.set(channelKey, (messageActionRevisions.current.get(channelKey) ?? 0) + 1);
     const update = (items: ChorusMessage[]) => items.map((message) => message.key === messageKey ? updateMessage(message) : message);
     setMessages((current) => ({ ...current, [channelKey]: update(current[channelKey] ?? []) }));
-    setThreadState((current) => current ? { ...current, messages: update(current.messages) } : current);
+    setReplyState((current) => current ? { ...current, messages: update(current.messages), parents: update(current.parents) } : current);
   };
   const optimisticallySetReaction = (messageKey: string, reaction: string, active: boolean) => {
     const update = (items: ChorusMessage[]) => setChorusReactionState(items, messageKey, reaction, active);
     if (channelKey) messageActionRevisions.current.set(channelKey, (messageActionRevisions.current.get(channelKey) ?? 0) + 1);
     if (channelKey) setMessages((current) => ({ ...current, [channelKey]: update(current[channelKey] ?? []) }));
-    setThreadState((current) => current ? { ...current, messages: update(current.messages) } : current);
+    setReplyState((current) => current ? { ...current, messages: update(current.messages), parents: update(current.parents) } : current);
   };
   const selectReaction = async (reaction: string) => {
     if (!actionMessage || !channelKey) return;
@@ -890,6 +909,28 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
       if (speechRequest.current === controller) { speechRequest.current = null; setBusyMessage(null); }
     }
   };
+  const deleteSelectedMessage = async () => {
+    if (!actionMessage || !channelKey) return;
+    const messageKey = actionMessage.key;
+    closeMessageActions();
+    try {
+      await deleteChorusMessage(organizationKey, channelKey, messageKey);
+      if (activeReplyParentKey === messageKey) await backFromReplies();
+      await Promise.all([refreshMessages(channelKey), activeReplyParentKey && activeReplyParentKey !== messageKey ? refreshReplies() : Promise.resolve()]);
+    } catch (error) {
+      setErrors((current) => ({ ...current, [channelKey]: error instanceof Error ? error.message : "Message could not be deleted" }));
+    }
+  };
+  useEffect(() => subscribeNexusInvalidations(organizationKey, (event) => {
+    if (event.resource?.type !== "messages" || (event.slug !== "chorus.message.create" && event.slug !== "chorus.message.remove")) return;
+    if (channelKey && streamingChannels.current.has(channelKey)) return;
+    if (event.slug === "chorus.message.remove" && hasReplyState && (event.resource.key === activeReplyParentKey || event.resource.key === channelKey)) {
+      replyGeneration.current += 1;
+      setReplyState(null);
+    }
+    if (channelKey) void refreshMessages(channelKey).catch(() => {});
+    if (activeReplyParentKey && event.resource.key !== activeReplyParentKey && event.resource.key !== channelKey) void refreshReplies().catch(() => {});
+  }), [activeReplyParentKey, channelKey, hasReplyState, organizationKey, refreshMessages, refreshReplies]);
   return (
     <div data-scope-id={selectedScopeId} className="pointer-events-auto absolute inset-0 z-10 flex min-h-0 flex-col p-1.5 sm:p-2.5">
       <header className="flex h-12 shrink-0 items-center border border-[var(--border-faint)] bg-obsidian-990/90 px-3 sm:h-14 sm:px-4">
@@ -899,18 +940,17 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
         <OrchestratorRail channels={channels} loading={channelsLoading} error={channelsError} onRetry={retryChannels} onSelect={selectChannel} organizationKey={organizationKey} organizationOptions={organizationOptions} onOrganizationChange={onOrganizationChange} selectedScopeId={selectedScopeId} onScopeChange={onScopeChange} />
         <section className="flex min-h-0 min-w-0 flex-col bg-obsidian-990/90 [contain:layout_paint]">
           <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[var(--border-faint)] px-5">
-            {threadState ? <Button type="button" variant="secondary" aria-label="Back to channel" onClick={closeThread} className="min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Back</Button> : null}
-             <div className="min-w-0"><h1 className="truncate pb-0.5 font-display text-base leading-6 text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1>{threadState ? <p className="truncate text-[10px] text-silver-500">{threadState.thread.title}</p> : null}</div>
-            {selected?.canChat && channelKey ? <Button type="button" variant="secondary" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Clear channel</Button> : null}
+             <div className="min-w-0"><h1 className="truncate pb-0.5 font-display text-base leading-6 text-silver-50 lowercase">#{selected?.channel?.name ?? "general"}</h1>{replyParent ? <p className="truncate text-[10px] text-silver-500">Replies to {replyParent.author.type === "user" ? "You" : replyParent.author.name}</p> : null}</div>
+            {replyState ? <Button type="button" variant="secondary" aria-label="Back from replies" onClick={() => void backFromReplies()} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Back</Button> : selected?.canChat && channelKey ? <Button type="button" variant="secondary" disabled={Boolean(streaming[channelKey]) || clearing} onClick={() => setClearOpen(true)} className="ml-auto min-h-0 rounded-lg px-3 py-1.5 text-[10px]">Clear channel</Button> : null}
           </div>
           <div ref={messagesPane} className="scrollbar-hide min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-2 [contain:content] [touch-action:pan-y] sm:px-6" aria-busy={channelKey ? Boolean(messagesLoading[channelKey]) : false}>
             {selected && !selected.canChat ? <div className="flex h-full items-center justify-center text-center text-[12px] text-silver-300">You lack permission to chat with {selected.orchestrator.name}.</div> : null}
             {selected?.canChat && channelKey && messagesLoading[channelKey] && !messages[channelKey] ? <div className="space-y-3 py-4">{[0, 1, 2].map((item) => <div key={item} className="h-14 animate-pulse rounded-lg bg-white/[0.03]" />)}</div> : null}
-               {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => threadState ? refreshThread() : refreshMessages(channelKey!)} onOpenThread={(target) => void openThread(target)} onCreatePoll={(target) => { if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); setPollMessage(target); }} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallySetReaction} />) : null}
+               {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => replyState ? refreshReplies() : refreshMessages(channelKey!)} onOpenReplies={(target) => void openReplies(target)} onCreatePoll={(target) => { if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); setPollMessage(target); }} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallySetReaction} />) : null}
           </div>
             {channelKey && errors[channelKey] ? <p role="alert" className="shrink-0 border-t border-status-critical/30 bg-status-critical/5 px-5 py-2 text-[10px] text-status-critical">{errors[channelKey]}</p> : null}
             <div aria-live="polite" className="flex h-6 shrink-0 items-end px-5 text-[10px] font-medium"><span className={typingLabel ? "chorus-typing-gradient" : "sr-only"}>{typingLabel}</span></div>
-            <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${threadState?.thread.key ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat) && (!threadState || threadState.thread.status === "open")} streaming={channelKey ? Boolean(streaming[channelKey]) : false} onSubmit={threadState && channelKey ? (content) => { void submitThreadMessage(content); } : submitComposerMessage} onTypingChange={publishTyping} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={threadState?.thread.key ?? "channel"} />
+            <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${activeReplyParentKey ?? "channel"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} onSubmit={replyState && channelKey ? (content) => { void submitReply(content); } : submitComposerMessage} onTypingChange={publishTyping} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={activeReplyParentKey ?? "channel"} />
         </section>
         <Dialog.Root open={clearOpen} onOpenChange={(open) => { if (!clearing) setClearOpen(open); }}>
           <Dialog.Portal>
@@ -943,16 +983,11 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
         <Dialog.Root open={Boolean(actionMessage)} onOpenChange={(open) => { if (!open) closeMessageActions(); }}>
           <Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-40 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-50 flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
             <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Message actions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close message actions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close message actions</Button></Dialog.Close></div>
-             <div className="mt-4 grid gap-2"><Button type="button" variant="secondary" onClick={() => { if (actionMessage) void openThreadSheet(actionMessage); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Threads</Button><Button type="button" variant="secondary" onClick={() => { if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); setPollMessage(actionMessage); closeMessageActions(); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Poll</Button><Button type="button" variant="secondary" onClick={() => { stopMessageSpeech(); setReactionPickerOpen(true); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">React</Button><Button type="button" variant="secondary" disabled={!actionMessage?.content || busyMessage === actionMessage?.key} onClick={() => void toggleMessageSpeech()} icon={<SoundwaveIcon size="sm" animated={Boolean(actionMessage && speechAudio.current.get(actionMessage.key) && (voicePlayingSrc === speechAudio.current.get(actionMessage.key) || pendingVoiceSrc === speechAudio.current.get(actionMessage.key)))} />} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">{actionMessage && speechAudio.current.get(actionMessage.key) && (voicePlayingSrc === speechAudio.current.get(actionMessage.key) || pendingVoiceSrc === speechAudio.current.get(actionMessage.key)) ? "Stop listening" : "Listen with Ash"}</Button><Button type="button" variant="danger" onClick={() => { if (!actionMessage || !channelKey) return; void deleteChorusMessage(organizationKey, channelKey, actionMessage.key).then(() => refreshMessages(channelKey)); closeMessageActions(); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Delete message</Button></div>
-            <div className="mt-auto flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div>
+             <div className="mt-4 grid gap-2"><Button type="button" variant="secondary" onClick={() => { if (!actionMessage) return; const message = actionMessage; closeMessageActions(); void openReplies(message); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Replies</Button><Button type="button" variant="secondary" onClick={() => { if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); setPollMessage(actionMessage); closeMessageActions(); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">Poll</Button><Button type="button" variant="secondary" onClick={() => { stopMessageSpeech(); setReactionPickerOpen(true); }} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">React</Button><Button type="button" variant="secondary" disabled={!actionMessage?.content || busyMessage === actionMessage?.key} onClick={() => void toggleMessageSpeech()} className="min-h-0 justify-start rounded-lg px-3 py-2 text-left text-xs normal-case tracking-normal">{actionMessage && speechAudio.current.get(actionMessage.key) && (voicePlayingSrc === speechAudio.current.get(actionMessage.key) || pendingVoiceSrc === speechAudio.current.get(actionMessage.key)) ? "Stop listening" : "Listen"}</Button></div>
+             <div className="mt-auto flex justify-between gap-2 border-t border-[var(--border-faint)] pt-4"><Button type="button" variant="danger" onClick={() => void deleteSelectedMessage()} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Delete</Button><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div>
           </Dialog.Content></Dialog.Portal>
         </Dialog.Root>
         <Dialog.Root open={reactionPickerOpen} onOpenChange={(open) => { setReactionPickerOpen(open); if (!open) { setReactionQuery(""); setActionMessage(null); } }}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex h-[min(88vh,680px)] max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:h-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}><div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Reactions</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close reactions" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close reactions</Button></Dialog.Close></div><SearchInput autoFocus value={reactionQuery} onChange={(event) => setReactionQuery(event.target.value)} placeholder="Search..." aria-label="Search reactions" className="mt-4 w-full" />{frequentReactions.length ? <div aria-label="Frequently used reactions" className="mt-2 flex flex-wrap gap-2">{frequentReactions.map(({ reaction, count }) => <Button key={reaction} type="button" size="sm" variant="outline" aria-label={`React with ${reaction}, used ${count} times`} onClick={() => void selectReaction(reaction)} className="px-3 text-base normal-case tracking-normal">{reaction}</Button>)}</div> : null}<div ref={emojiPicker} className="chorus-reaction-picker mt-1 min-h-0 flex-1 overflow-hidden rounded-xl [&_.epr-search-container]:!hidden"><EmojiPicker theme={"dark" as Theme} emojiStyle={"native" as EmojiStyle} width="100%" height="100%" lazyLoadEmojis autoFocusSearch={false} searchPlaceholder="Search..." skinTonesDisabled previewConfig={{ showPreview: false }} onEmojiClick={({ emoji }) => { void selectReaction(emoji); }} /></div><div className="mt-5 flex justify-end border-t border-[var(--border-faint)] pt-4"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close></div></Dialog.Content></Dialog.Portal></Dialog.Root>
-        <Dialog.Root open={threadSheetOpen} onOpenChange={setThreadSheetOpen}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-50 bg-obsidian-990/70" /><Dialog.Content className="fixed inset-x-0 bottom-0 z-[60] flex max-h-[88vh] flex-col rounded-t-2xl border border-[var(--border-strong)] bg-obsidian-950 p-4 sm:inset-y-0 sm:right-0 sm:left-auto sm:w-[420px] sm:max-h-none sm:rounded-none" aria-describedby={undefined}>
-          <div className="flex items-center justify-between"><Dialog.Title className="text-sm text-silver-50">Threads</Dialog.Title><Dialog.Close asChild><Button variant="icon" aria-label="Close threads" icon={<CloseIcon size="sm" />} className="h-8 min-h-0 w-8">Close threads</Button></Dialog.Close></div>
-          <div className="scrollbar-hide mt-4 min-h-0 flex-1 space-y-2 overflow-y-auto">{newThreadOpen ? <div><label className="text-[10px] text-silver-400" htmlFor="thread-title">Thread name</label><input id="thread-title" autoFocus maxLength={50} value={newThreadTitle} onChange={(event) => setNewThreadTitle(event.target.value)} placeholder="Name this thread" className="mt-2 w-full rounded-lg border border-[var(--border-faint)] bg-white/[0.04] px-3 py-2 text-xs text-silver-100 outline-none" /><p className="mt-2 text-right font-mono text-[9px] text-silver-600">{newThreadTitle.length}/50</p></div> : threadItems.length ? threadItems.map((thread) => <Button key={thread.key} size="md" variant="outline" aria-label={`Open thread ${thread.title}, ${thread.replyCount} replies`} onClick={() => { const root = visibleMessages.find((message) => message.key === thread.rootMessageKey); if (root) void openThread(root, thread.key); setThreadSheetOpen(false); }} className="block h-auto w-full border-[var(--border-soft)] p-3 text-left normal-case tracking-normal"><span className="block text-xs text-silver-100">{thread.title}</span><span className="mt-1 block truncate text-[10px] text-silver-500">{thread.rootContent}</span><span className="mt-1 block text-[9px] text-silver-600">{thread.replyCount} replies</span></Button>) : <p className="py-8 text-center text-xs text-silver-500">No threads yet.</p>}</div>
-          <div className="mt-5 border-t border-[var(--border-faint)] pt-4"><div className="flex justify-end gap-2"><Dialog.Close asChild><Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close>{newThreadOpen ? <Button type="button" variant="primary" disabled={!threadRoot || !channelKey || !newThreadTitle.trim()} onClick={() => { if (!threadRoot || !channelKey) return; void createChorusThread(organizationKey, channelKey, threadRoot.key, newThreadTitle.trim()).then((thread) => { updateMessageActions(threadRoot.key, (message) => ({ ...message, thread: { key: thread.key, status: thread.status, replyCount: 0, lastReplyAt: null } })); setThreadSheetOpen(false); setNewThreadOpen(false); void openThread(threadRoot, thread.key); void refreshMessages(channelKey); }); }} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Create thread</Button> : <Button type="button" variant="primary" onClick={() => setNewThreadOpen(true)} className="min-h-0 rounded-lg px-4 py-2 text-[10px]">New thread</Button>}</div></div>
-        </Dialog.Content></Dialog.Portal></Dialog.Root>
       </div>
     </div>
   );

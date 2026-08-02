@@ -10,7 +10,8 @@ describe("Chorus proxy endpoint grammar", () => {
     expect(validateChorusProxyPath("GET", "org_key", ["channels", "channel_1", "typing"])).toBe("channels/channel_1/typing");
     expect(validateChorusProxyPath("POST", "org_key", ["channels", "channel_1", "typing"])).toBe("channels/channel_1/typing");
     expect(validateChorusProxyPath("POST", "org_key", ["channels", "channel_1", "polls", "poll_1", "votes"])).toBe("channels/channel_1/polls/poll_1/votes");
-    expect(validateChorusProxyPath("POST", "org_key", ["channels", "channel_1", "threads", "thread_1", "archive"])).toBe("channels/channel_1/threads/thread_1/archive");
+    expect(validateChorusProxyPath("GET", "org_key", ["channels", "channel_1", "messages", "message_1", "replies"])).toBe("channels/channel_1/messages/message_1/replies");
+    expect(validateChorusProxyPath("POST", "org_key", ["channels", "channel_1", "threads"])).toBeNull();
     expect(validateChorusProxyPath("GET", "org_key", ["channels", "channel_1", "messages"], new URLSearchParams("limit=100"))).toBe("channels/channel_1/messages");
     expect(validateChorusProxyPath("DELETE", "org_key", ["channels", "channel_1", "messages"])).toBe("channels/channel_1/messages");
     expect(validateChorusProxyPath("GET", "org_key", ["channels", "channel_1", "messages"], new URLSearchParams("limit=201"))).toBeNull();

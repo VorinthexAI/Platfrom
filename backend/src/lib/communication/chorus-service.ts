@@ -1,11 +1,11 @@
 import { newId } from '@/lib/ids';
 import { messageSchema, type Message } from '@/lib/db/messages.node';
-import { threadSchema } from '@/lib/db/threads.node';
 import { pollSchema } from '@/lib/db/polls.node';
 import { pollOptionSchema } from '@/lib/db/poll-options.node';
 import { pollVoteSchema } from '@/lib/db/poll-votes.node';
 import { arangoCommunicationRepository, CommunicationConflictError, type CommunicationRepository, type GeneralChannelAccess, type MentionCandidate } from './repository';
 import { messageMentionSchema } from '@/lib/db/message-mentions.node';
+import { recordOrganizationEvent, type OrganizationEventRecorder } from '@/lib/live/organization-events';
 
 export type ChorusErrorCode = 'forbidden' | 'not_found' | 'conflict';
 export class ChorusError extends Error {
@@ -16,7 +16,7 @@ export interface ChorusActor { organizationKey: string; membershipKey: string; n
 const isoNow = () => new Date().toISOString();
 
 export class ChorusService {
-  constructor(private readonly repository: CommunicationRepository = arangoCommunicationRepository, private readonly now = isoNow) {}
+  constructor(private readonly repository: CommunicationRepository = arangoCommunicationRepository, private readonly now = isoNow, private readonly recordEvent: OrganizationEventRecorder = recordOrganizationEvent) {}
 
   async generalChannel(actor: ChorusActor) {
     const access = await this.repository.ensureGeneralChannel(actor.organizationKey, actor.membershipKey);
@@ -36,27 +36,39 @@ export class ChorusService {
   }
 
   async clearChannel(actor: ChorusActor, channelKey: string) {
-    await this.requireChannel(actor, channelKey);
-    return this.repository.clearChannel(channelKey, this.now());
+    const access = await this.requireChannel(actor, channelKey);
+    const cleared = await this.repository.clearChannel(channelKey, this.now());
+    if (cleared > 0) await this.publishInvalidation(access.channel.scopeKey, channelKey, 'chorus.message.remove');
+    return cleared;
   }
 
   async deleteMessage(actor: ChorusActor, channelKey: string, messageKey: string) {
     await this.requireChannel(actor, channelKey);
-    if (!await this.repository.deleteMessage(channelKey, messageKey, actor.membershipKey, this.now())) throw new ChorusError('forbidden', 'message deletion denied');
+    const message = await this.requireMessage(channelKey, messageKey);
+    if (await this.repository.hasMessageReplies(channelKey, messageKey)) throw new ChorusError('conflict', 'messages with replies cannot be deleted');
+    if (!await this.repository.deleteMessage(channelKey, messageKey, actor.membershipKey, this.now())) {
+      if (await this.repository.hasMessageReplies(channelKey, messageKey)) throw new ChorusError('conflict', 'messages with replies cannot be deleted');
+      throw new ChorusError('forbidden', 'message deletion denied');
+    }
+    await this.publishMessageEvent(message, 'chorus.message.remove');
   }
 
   async persistUserMessage(actor: ChorusActor, channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) {
     const access = await this.requireChannel(actor, channelKey);
-    await this.validateReply(channelKey, threadKey, replyToMessageKey);
-    const message = await this.repository.insertMessage(this.message(access, access.humanParticipant.key, content, threadKey, replyToMessageKey));
+    const resolvedThreadKey = await this.resolveReplyContext(channelKey, threadKey, replyToMessageKey);
+    const message = await this.repository.insertMessage(this.message(access, access.humanParticipant.key, content, resolvedThreadKey, replyToMessageKey));
+    await this.publishMessageEvent(message, 'chorus.message.create');
     const mentions = this.mentions(access, message.key, content);
     await this.repository.insertMentions(mentions.map(({ candidate, mention }) => mention));
     await this.repository.recordUserMentions(access.viewerUserKey, [...new Set([...( /(^|[^\w])@everyone\b/i.test(content) ? ['everyone'] : []), ...mentions.map(({ candidate }) => candidate.key)])], this.now());
     return { access, message, orchestrators: mentions.filter(({ candidate }) => candidate.type === 'orchestrator').map(({ candidate }) => candidate) };
   }
 
-  async persistOrchestratorMessage(access: GeneralChannelAccess, orchestrator: MentionCandidate, content: string, threadKey?: string, replyToMessageKey?: string) {
-    return this.repository.insertMessage(this.message(access, orchestrator.participantKey, content, threadKey, replyToMessageKey));
+  async persistOrchestratorMessage(access: GeneralChannelAccess, orchestrator: MentionCandidate, content: string, threadKey?: string, replyToMessageKey?: string, sourceMessageKey?: string) {
+    if (sourceMessageKey) await this.requireMessage(access.channel.key, sourceMessageKey);
+    const message = await this.repository.insertMessage(this.message(access, orchestrator.participantKey, content, threadKey, replyToMessageKey));
+    await this.publishMessageEvent(message, 'chorus.message.create');
+    return message;
   }
 
   async history(access: GeneralChannelAccess, threadKey?: string, excludeMessageKey?: string, limit = 40) {
@@ -83,51 +95,14 @@ export class ChorusService {
     return this.repository.listUserReactions(access.viewerUserKey, limit);
   }
 
-  async listThreads(actor: ChorusActor, channelKey: string) {
-    await this.requireChannel(actor, channelKey);
-    return this.repository.listThreads(channelKey);
-  }
-
-  async createThread(actor: ChorusActor, channelKey: string, rootMessageKey: string, title: string) {
+  async readReplies(actor: ChorusActor, channelKey: string, parentMessageKey: string) {
     const access = await this.requireChannel(actor, channelKey);
-    const root = await this.requireMessage(channelKey, rootMessageKey);
-    if (root.threadKey) throw new ChorusError('conflict', 'thread replies cannot be thread roots');
-    const now = this.now();
-    try {
-      return await this.repository.createThread(threadSchema.parse({ key: newId(), scopeKey: access.channel.scopeKey, channelKey, title, rootMessageKey, status: 'open', createdAt: now, updatedAt: now }));
-    } catch (error) {
-      if (error instanceof CommunicationConflictError) throw new ChorusError('conflict', error.message);
-      throw error;
-    }
-  }
-
-  async readThread(actor: ChorusActor, channelKey: string, threadKey: string) {
-    const access = await this.requireChannel(actor, channelKey);
-    const thread = await this.repository.getThread(threadKey);
-    if (!thread || thread.channelKey !== channelKey) throw new ChorusError('not_found', 'thread not found');
-    const messages = await this.repository.listThreadMessages(channelKey, thread.key, thread.rootMessageKey, access.humanParticipant.key, 200);
-    return { thread, messages };
-  }
-
-  async replyThread(actor: ChorusActor, channelKey: string, threadKey: string, content: string, replyToMessageKey?: string) {
-    const thread = await this.repository.getThread(threadKey);
-    if (!thread || thread.channelKey !== channelKey) throw new ChorusError('not_found', 'thread not found');
-    if (thread.status !== 'open') throw new ChorusError('conflict', 'thread is not open');
-    return (await this.persistUserMessage(actor, channelKey, content, threadKey, replyToMessageKey)).message;
-  }
-
-  async resolveThread(actor: ChorusActor, channelKey: string, threadKey: string) {
-    await this.requireChannel(actor, channelKey);
-    const thread = await this.repository.resolveThread(threadKey, channelKey, this.now());
-    if (!thread) throw new ChorusError('not_found', 'thread not found');
-    return thread;
-  }
-
-  async archiveThread(actor: ChorusActor, channelKey: string, threadKey: string) {
-    await this.requireChannel(actor, channelKey);
-    const thread = await this.repository.archiveThread(threadKey, channelKey, this.now());
-    if (!thread) throw new ChorusError('not_found', 'thread not found');
-    return thread;
+    const parent = await this.requireMessage(channelKey, parentMessageKey);
+    const legacyReplyGroup = parent.threadKey ? await this.repository.getThread(parent.threadKey) : await this.repository.getThreadByRootMessage(parent.key);
+    const messages = legacyReplyGroup
+      ? await this.repository.listThreadMessages(channelKey, legacyReplyGroup.key, legacyReplyGroup.rootMessageKey, access.humanParticipant.key, 200)
+      : await this.repository.listMessageReplies(channelKey, parentMessageKey, access.humanParticipant.key, 200);
+    return { parentMessageKey, messages };
   }
 
   async createPoll(actor: ChorusActor, channelKey: string, messageKey: string, question: string, optionTexts: string[], allowMultiple: boolean) {
@@ -195,14 +170,32 @@ export class ChorusService {
     return message;
   }
 
-  private async validateReply(channelKey: string, threadKey?: string, replyToMessageKey?: string) {
-    if (threadKey) {
-      const thread = await this.repository.getThread(threadKey);
-      if (!thread || thread.channelKey !== channelKey) throw new ChorusError('not_found', 'thread not found');
-    }
+  private async resolveReplyContext(channelKey: string, requestedThreadKey?: string, replyToMessageKey?: string) {
+    let threadKey = requestedThreadKey;
     if (replyToMessageKey) {
-      const reply = await this.requireMessage(channelKey, replyToMessageKey);
-      if (reply.threadKey !== threadKey) throw new ChorusError('conflict', 'reply target must be in the same thread');
+      const parent = await this.requireMessage(channelKey, replyToMessageKey);
+      const legacyReplyGroup = parent.threadKey ? await this.repository.getThread(parent.threadKey) : await this.repository.getThreadByRootMessage(parent.key);
+      const derivedThreadKey = parent.threadKey ?? legacyReplyGroup?.key;
+      if (threadKey && threadKey !== derivedThreadKey) throw new ChorusError('conflict', 'reply target must remain in the same reply group');
+      threadKey = derivedThreadKey;
+    }
+    if (threadKey) {
+      const legacyReplyGroup = await this.repository.getThread(threadKey);
+      if (!legacyReplyGroup || legacyReplyGroup.channelKey !== channelKey) throw new ChorusError('not_found', 'reply group not found');
+      if (legacyReplyGroup.status !== 'open') throw new ChorusError('conflict', 'replies are closed');
+    }
+    return threadKey;
+  }
+
+  private async publishMessageEvent(message: Message, slug: 'chorus.message.create' | 'chorus.message.remove') {
+    await this.publishInvalidation(message.scopeKey, message.key, slug);
+  }
+
+  private async publishInvalidation(scopeKey: string, messageKey: string, slug: 'chorus.message.create' | 'chorus.message.remove') {
+    try {
+      await this.recordEvent({ scopeId: scopeKey, slug, data: { nodeType: 'messages', nodeKey: messageKey } });
+    } catch (error) {
+      console.error('chorus organization event recording failed', { messageKey, slug, error });
     }
   }
 }

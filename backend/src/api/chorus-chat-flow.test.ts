@@ -30,6 +30,7 @@ describe('Chorus orchestrator chat flow', () => {
       insertMessage: async (message: Message) => { messages.push(message); return message; },
       insertMentions: async (mentions: unknown[]) => { persistedMentions.push(...mentions); },
       recordUserMentions: async () => {},
+      getMessage: async (messageKey: string) => messages.find((message) => message.key === messageKey) ?? null,
       getThread: async () => null,
       listMessages: async () => messages.map((message) => ({
         key: message.key,
@@ -43,13 +44,13 @@ describe('Chorus orchestrator chat flow', () => {
           ? { participantKey: human.key, type: 'user' as const, key: access.viewerUserKey, name: 'Founder' }
           : { participantKey: atlasParticipant.key, type: 'orchestrator' as const, key: atlasParticipant.orchestratorKey!, name: 'Atlas' },
         reactions: [],
-        thread: null,
+        replies: { count: 0 },
         poll: null,
       })),
     } as unknown as CommunicationRepository;
     const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
     const novaInputs: unknown[] = [];
-    const service = new ChorusService(repository, () => now);
+    const service = new ChorusService(repository, () => now, async () => {});
     const handlers = createChorusHandlers({
       service,
       resolveActor: async () => ({ organizationKey, membershipKey }),
@@ -87,6 +88,7 @@ describe('Chorus orchestrator chat flow', () => {
     expect(novaInputs[0]).toMatchObject({ systemPrompt: expect.stringContaining('Authorized launch decision.'), messages: [{ role: 'user', content: [{ type: 'text', text: '@Atlas explain the launch' }] }] });
     const canonical = await service.listMessages({ organizationKey, membershipKey }, channel.key, 100);
     expect(canonical.map(({ content }) => content)).toEqual(['@Atlas explain the launch', 'Atlas response']);
-    expect(canonical[1]).toMatchObject({ replyToMessageKey: canonical[0]!.key, author: { type: 'orchestrator', name: 'Atlas' }, reactions: [] });
+    expect(canonical[1]).toMatchObject({ author: { type: 'orchestrator', name: 'Atlas' }, reactions: [] });
+    expect(canonical[1]?.replyToMessageKey).toBeUndefined();
   });
 });
