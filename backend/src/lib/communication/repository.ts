@@ -64,7 +64,6 @@ export interface CommunicationRepository {
   getGeneralChannelAccess(organizationKey: string, membershipKey: string, channelKey: string): Promise<GeneralChannelAccess | null>;
   listMessages(channelKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
   listMessageReplies(channelKey: string, parentMessageKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
-  clearChannel(channelKey: string, now: string): Promise<number>;
   hasMessageReplies(channelKey: string, messageKey: string): Promise<boolean>;
   deleteMessage(channelKey: string, messageKey: string, membershipKey: string, now: string): Promise<boolean>;
   listThreadMessages(channelKey: string, threadKey: string, rootMessageKey: string, viewerParticipantKey: string, limit: number): Promise<MessageProjection[]>;
@@ -264,18 +263,6 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     return (await cursor.all()).map(normalizeMessageProjection);
   },
 
-  async clearChannel(channelKey, now) {
-    const cursor = await db.query<number>(`
-      LET cleared = LENGTH(
-        FOR message IN messages
-          FILTER message.channelKey == @channelKey && message.deletedAt == null
-          UPDATE message WITH { deletedAt: @now, updatedAt: @now } IN messages
-          RETURN 1
-      )
-      RETURN cleared
-    `, { channelKey, now });
-    return await cursor.next() ?? 0;
-  },
   async hasMessageReplies(channelKey, messageKey) {
     return Boolean(await first<boolean>(`
       LET message = DOCUMENT(messages, @messageKey)

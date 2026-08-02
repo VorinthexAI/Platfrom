@@ -39,7 +39,6 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const service = {
     async persistUserMessage(_actor: unknown, _channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) { persisted.push('user'); return { access, message: { key: newId(), channelKey, content, threadKey, replyToMessageKey }, orchestrators }; },
     async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
-    async clearChannel() { return 2; },
     async generalChannel() { return access; },
     async requireChannel() { return access; },
     async frequentReactions() { return [{ reaction: '🔥', count: 3 }]; },
@@ -69,7 +68,6 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   });
   const app = new Hono();
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.postMessage);
-  app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.clearChannel);
   app.post('/founders/organizations/:organizationKey/chorus/transcriptions', handlers.transcribe);
   app.post('/founders/organizations/:organizationKey/chorus/speech', handlers.speak);
   app.get('/founders/organizations/:organizationKey/chorus/reactions', handlers.frequentReactions);
@@ -211,13 +209,6 @@ describe('Chorus SSE API', () => {
     expect(persisted).toEqual(['user']);
   });
 
-  test('clears an authorized channel', async () => {
-    const { app } = appFor();
-    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'DELETE' });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ cleared: 2 });
-  });
-
   test('lists the ten most-used reactions for the authenticated user', async () => {
     const { app } = appFor();
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/reactions`);
@@ -292,7 +283,6 @@ describe('Chorus SSE API', () => {
     const consuming = first.text();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect((await request()).status).toBe(409);
-    expect((await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'DELETE' })).status).toBe(409);
     release();
     await consuming;
     const retried = await request();
