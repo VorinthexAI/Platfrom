@@ -35,6 +35,7 @@ export * from './icons/sort';
 export * from './icons/more-horizontal';
 export * from './icons/more-vertical';
 export * from './icons/check';
+export * from './icons/checkbox';
 export * from './icons/x-circle';
 export * from './icons/warning';
 export * from './icons/info';
