@@ -361,11 +361,10 @@ interface MessageComposerProps {
   draftId: string;
   editingMessage: ChorusMessage | null;
   editingBusy: boolean;
-  error: string | null;
   onCancelEdit: () => void;
 }
 
-const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, onSubmit, onTypingChange, mentions, mentionRoster, channelDrafts, draftId, editingMessage, editingBusy, error, onCancelEdit }: MessageComposerProps) {
+const MessageComposer = memo(function MessageComposer({ organizationKey, channelKey, orchestratorName, canChat, streaming, onSubmit, onTypingChange, mentions, mentionRoster, channelDrafts, draftId, editingMessage, editingBusy, onCancelEdit }: MessageComposerProps) {
   const draftKey = channelKey && !editingMessage ? `${organizationKey}:${channelKey}:${draftId}` : null;
   const [draft, setDraft] = useState(() => editingMessage?.content ?? (draftKey ? channelDrafts.get(draftKey) ?? "" : ""));
   const [recording, setRecording] = useState(false);
@@ -501,7 +500,6 @@ const MessageComposer = memo(function MessageComposer({ organizationKey, channel
           />
           <span className="sr-only" aria-live="polite">{completion ? `Suggested mention ${completion.mention.name}. Press Tab, Right Arrow, or Enter to complete.` : ""}</span>
         </div>
-        {error ? <p role="alert" className="mt-2 text-[10px] text-status-critical">{error}</p> : null}
         <div className="mt-2 flex min-h-8 items-center justify-end gap-3">
           <div className="flex shrink-0 items-center gap-2">
             <Button type="button" variant="icon" onClick={() => void toggleRecording()} disabled={!canChat || !channelKey || transcribing || startingRecording} aria-label={transcribing ? "Transcribing message" : startingRecording ? "Starting microphone" : recording ? "Stop speaking and transcribe" : "Speak into message"} aria-pressed={recording} icon={transcribing || startingRecording ? <Spinner className="h-4 w-4" /> : <MicrophoneIcon size="sm" className={recording && speechLevel > 0.015 ? "scale-110" : undefined} />} className={`h-11 min-h-11 w-11 rounded-lg ${recording ? "border-silver-200 bg-white/[0.1] text-silver-50" : "text-silver-400"}`}>{recording ? "Stop speaking and transcribe" : "Speak into message"}</Button>
@@ -956,7 +954,7 @@ export default function HqCommunicationOverlay({ organizationKey, organizationOp
              {selected?.canChat ? displayedMessages.map((message) => <MessageView key={message.key} entry={selected} message={message} organizationKey={organizationKey} userName={userName} countryCode={countryCode} mentions={mentions} onOpenActions={setActionMessage} busy={busyMessage === message.key} onBusy={(busy) => setBusyMessage(busy ? message.key : null)} onRefresh={() => replyState ? refreshReplies() : refreshMessages(channelKey!)} onOpenReplies={(target) => void openReplies(target)} onCreatePoll={(target) => { if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); setPollMessage(target); }} onError={(error) => channelKey && setErrors((current) => ({ ...current, [channelKey]: error }))} onOptimisticReaction={optimisticallySetReaction} />) : null}
            </div>
              <div aria-live="polite" className="flex h-6 shrink-0 items-end px-5 text-[10px] font-medium"><span className={typingLabel ? "chorus-typing-gradient" : "sr-only"}>{typingLabel}</span></div>
-             <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${activeReplyParentKey ?? "channel"}:${editingMessage?.key ?? "new"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} editingMessage={editingMessage} editingBusy={Boolean(editingMessage && busyMessage === editingMessage.key)} error={channelKey ? errors[channelKey] ?? null : null} onCancelEdit={() => { setEditingMessage(null); if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); }} onSubmit={editingMessage ? (content) => { void submitEdit(content); } : replyState && channelKey ? (content) => { void submitReply(content); } : submitComposerMessage} onTypingChange={publishTyping} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={activeReplyParentKey ?? "channel"} />
+             <MessageComposer key={`${organizationKey}:${channelKey ?? "none"}:${activeReplyParentKey ?? "channel"}:${editingMessage?.key ?? "new"}`} organizationKey={organizationKey} channelKey={channelKey} orchestratorName={selected?.orchestrator.name ?? null} canChat={Boolean(selected?.canChat)} streaming={channelKey ? Boolean(streaming[channelKey]) : false} editingMessage={editingMessage} editingBusy={Boolean(editingMessage && busyMessage === editingMessage.key)} onCancelEdit={() => { setEditingMessage(null); if (channelKey) setErrors((current) => ({ ...current, [channelKey]: null })); }} onSubmit={editingMessage ? (content) => { void submitEdit(content); } : replyState && channelKey ? (content) => { void submitReply(content); } : submitComposerMessage} onTypingChange={publishTyping} mentions={mentions} mentionRoster={mentionRoster} channelDrafts={channelDrafts.current} draftId={activeReplyParentKey ?? "channel"} />
         </section>
         {pollMessage && channelKey ? <PollComposer message={pollMessage} busy={busyMessage === pollMessage.key} error={errors[channelKey] ?? null} onCancel={() => setPollMessage(null)} onCreate={async (question, options, allowMultiple) => {
           const requestChannel = channelKey;

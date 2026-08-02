@@ -204,6 +204,8 @@ describe("shared button controls", () => {
     expect(component).toContain('>Edit message</Button>');
     expect(component).toContain('message.updatedAt !== message.createdAt');
     expect(component).not.toContain('border-t border-status-critical/30 bg-status-critical/5');
+    expect(component).not.toContain('editingBusy, error, onCancelEdit');
+    expect(component).not.toContain('error={channelKey ? errors[channelKey]');
     expect(component).toContain('void openReplies(message); closeMessageActions();');
     expect(component).not.toContain('closeMessageActions(); void openReplies(message);');
     expect(component).not.toContain('Clear channel');
