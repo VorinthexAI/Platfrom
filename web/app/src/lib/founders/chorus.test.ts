@@ -198,8 +198,12 @@ describe("shared button controls", () => {
     expect(component).toContain('disabled={busy || !interactive}');
     expect(component).toContain('>Reply</Button>');
     expect(component).toContain('>Create poll</Button>');
-    expect(component).toContain('<Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close><Button type="button" variant="primary" onClick={() => void deleteSelectedMessage()}');
+    expect(component).toContain('{actionMessage?.canDelete ? <Button type="button" variant="primary" onClick={() => void deleteSelectedMessage()}');
     expect(component).toContain('>Delete message</Button>');
+    expect(component).toContain('{actionMessage?.canEdit ? <Button');
+    expect(component).toContain('>Edit message</Button>');
+    expect(component).toContain('message.updatedAt !== message.createdAt');
+    expect(component).not.toContain('border-t border-status-critical/30 bg-status-critical/5');
     expect(component).toContain('void openReplies(message); closeMessageActions();');
     expect(component).not.toContain('closeMessageActions(); void openReplies(message);');
     expect(component).not.toContain('Clear channel');
@@ -245,7 +249,7 @@ describe("Chorus stream reconciliation", () => {
   const stream: ChorusOptimisticStream = { streamKey: "stream_1", userKey: "temp_user", channelKey: "channel_key" };
   const author = { participantKey: "optimistic", type: "user" as const, key: "optimistic", name: "You" };
   const optimistic: ChorusDisplayMessage[] = [
-    { ...stored, key: stream.userKey, author, reactions: [], replies: { count: 0 }, poll: null, clientState: { streamKey: stream.streamKey, state: "optimistic" } },
+    { ...stored, key: stream.userKey, author, reactions: [], replies: { count: 0 }, poll: null, canEdit: true, canDelete: true, clientState: { streamKey: stream.streamKey, state: "optimistic" } },
   ];
 
   test("creates and reconciles a separate optimistic response for every orchestrator", () => {

@@ -56,6 +56,7 @@ export const chorusMessageSchema = z.object({
   threadKey: optionalKeySchema,
   replyToMessageKey: optionalKeySchema,
   content: z.string(),
+  editedAt: isoTimestampSchema.optional(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
   author: z.object({
@@ -67,6 +68,8 @@ export const chorusMessageSchema = z.object({
   reactions: z.array(z.object({ reaction: z.string().trim().min(1).max(64), count: z.number().int().positive(), viewerReacted: z.boolean() }).strict()),
   replies: z.object({ count: z.number().int().nonnegative() }).strict(),
   poll: chorusPollSchema.nullable(),
+  canEdit: z.boolean().default(false),
+  canDelete: z.boolean().default(false),
 }).strict();
 
 export const chorusTypingEventSchema = z.object({
@@ -85,6 +88,7 @@ export const chorusStreamMessageSchema = z.object({
   threadKey: keySchema.optional(),
   replyToMessageKey: keySchema.optional(),
   content: z.string(),
+  editedAt: isoTimestampSchema.optional(),
   createdAt: isoTimestampSchema,
   updatedAt: isoTimestampSchema,
 }).strict();
@@ -177,6 +181,8 @@ export function reconcileChorusStreamEvent(messages: ChorusDisplayMessage[], str
       reactions: [],
       replies: { count: 0 },
       poll: null,
+      canEdit: false,
+      canDelete: false,
       clientState: { streamKey: stream.streamKey, state: "pending" },
     }];
   }
@@ -317,6 +323,10 @@ export async function listChorusMessages(organizationKey: string, channelKey: st
 
 export function deleteChorusMessage(organizationKey: string, channelKey: string, messageKey: string) {
   return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}`, z.object({ deleted: z.literal(true) }).strict(), { method: "DELETE" });
+}
+
+export function editChorusMessage(organizationKey: string, channelKey: string, messageKey: string, content: string) {
+  return request(`${base(organizationKey)}/channels/${encodeURIComponent(channelKey)}/messages/${encodeURIComponent(messageKey)}`, z.object({ message: chorusStreamMessageSchema }).strict(), { method: "PATCH", body: JSON.stringify({ content }) }).then(({ message }) => message);
 }
 
 export function plainChorusText(content: string): string {

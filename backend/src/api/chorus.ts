@@ -20,6 +20,7 @@ import { publishChorusTyping, subscribeChorusTyping, type ChorusTypingEvent } fr
 const key = z.string().trim().min(1).max(160);
 const organizationKey = z.string().trim().min(1).max(160);
 const messageBody = strictObject({ content: sanitizedAgentMessageSchema, threadKey: key.optional(), replyToMessageKey: key.optional() });
+const editMessageBody = strictObject({ content: sanitizedAgentMessageSchema });
 const reactionBody = strictObject({ reaction: z.string().trim().min(1).max(64), operation: z.enum(['add', 'remove', 'toggle']).default('toggle') });
 const typingBody = strictObject({ active: z.boolean() });
 const pollBody = strictObject({ messageKey: key, question: z.string().trim().min(1).max(500), options: z.array(z.string().trim().min(1).max(200)).min(2).max(20), allowMultiple: z.boolean().default(false) }).superRefine((poll, ctx) => {
@@ -88,8 +89,8 @@ function channelSummary(channel: { key: string; organizationKey: string; scopeKe
   return { key: channel.key, organizationKey: channel.organizationKey, scopeKey: channel.scopeKey, kind: channel.kind, name: channel.name, description: channel.description, position: channel.position, archivedAt: channel.archivedAt, createdAt: channel.createdAt, updatedAt: channel.updatedAt };
 }
 
-function storedMessage(message: { key: string; channelKey: string; threadKey?: string; replyToMessageKey?: string; content: string; createdAt: string; updatedAt: string }) {
-  return { key: message.key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, createdAt: message.createdAt, updatedAt: message.updatedAt };
+function storedMessage(message: { key: string; channelKey: string; threadKey?: string; replyToMessageKey?: string; content: string; editedAt?: string; createdAt: string; updatedAt: string }) {
+  return { key: message.key, channelKey: message.channelKey, threadKey: message.threadKey, replyToMessageKey: message.replyToMessageKey, content: message.content, editedAt: message.editedAt, createdAt: message.createdAt, updatedAt: message.updatedAt };
 }
 
 function boundedAssistantDelta(content: string, delta: string): string {
@@ -205,6 +206,11 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       });
     },
     deleteMessage: (c: Context) => run(c, async (resolved) => { await dependencies.service.deleteMessage(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey'))); return { deleted: true }; }),
+    editMessage: (c: Context) => run(c, async (resolved) => {
+      const body = await parseJson(c, editMessageBody);
+      const message = await dependencies.service.editMessage(resolved, key.parse(c.req.param('channelKey')), key.parse(c.req.param('messageKey')), body.content);
+      return { message: storedMessage(message) };
+    }),
     postMessage: async (c: Context) => {
       const resolved = await actor(c);
       if (resolved instanceof Response) return resolved;

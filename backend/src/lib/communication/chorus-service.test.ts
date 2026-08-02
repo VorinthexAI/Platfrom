@@ -42,7 +42,13 @@ function fixture() {
     },
     recordUserReaction: async () => {},
     listUserReactions: async () => reactionUsage,
-    hasMessageReplies: async () => false, deleteMessage: async () => true,
+    deleteMessage: async () => true,
+    editMessage: async (_channelKey: string, key: string, _membershipKey: string, content: string, editedAt: string) => {
+      const message = messages.find((item) => item.key === key);
+      if (!message) return null;
+      Object.assign(message, { content, editedAt, updatedAt: editedAt });
+      return message;
+    },
     mutateReaction: async () => ({ active: true, changed: true }), createThread: async () => { throw new Error('unused'); }, getThread: async () => null, getThreadByRootMessage: async () => null,
     resolveThread: async () => null, archiveThread: async () => null, createPoll: async () => { throw new Error('unused'); }, getPollProjection: async () => null,
     votePoll: async () => ({ outcome: 'not_found' as const }), closePoll: async () => null,
@@ -90,12 +96,33 @@ describe('Chorus service', () => {
     expect(f.events[0]).toMatchObject({ scopeId: scopeKey, data: { nodeType: 'messages', nodeKey: root.message.key } });
   });
 
-  test('does not orphan replies when deleting their parent', async () => {
+  test('deletes a parent message with its replies through the repository cascade', async () => {
     const f = fixture();
     const root = await f.service.persistUserMessage(actor, f.channel.key, 'Root');
-    f.repository.hasMessageReplies = async () => true;
+    await f.service.persistUserMessage(actor, f.channel.key, 'Reply', undefined, root.message.key);
 
-    await expect(f.service.deleteMessage(actor, f.channel.key, root.message.key)).rejects.toMatchObject({ code: 'conflict' });
+    await f.service.deleteMessage(actor, f.channel.key, root.message.key);
+    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create', 'chorus.message.create', 'chorus.message.remove']);
+  });
+
+  test('edits an authored message and publishes an update invalidation', async () => {
+    const f = fixture();
+    const created = await f.service.persistUserMessage(actor, f.channel.key, 'Before');
+
+    const edited = await f.service.editMessage(actor, f.channel.key, created.message.key, 'After');
+
+    expect(edited).toMatchObject({ content: 'After', editedAt: now, updatedAt: now });
+    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create', 'chorus.message.update']);
+  });
+
+  test('rejects delete and edit mutations denied by repository authorization', async () => {
+    const f = fixture();
+    const created = await f.service.persistUserMessage(actor, f.channel.key, 'Protected');
+    f.repository.deleteMessage = async () => false;
+    f.repository.editMessage = async () => null;
+
+    await expect(f.service.deleteMessage(actor, f.channel.key, created.message.key)).rejects.toMatchObject({ code: 'forbidden', message: 'message deletion denied' });
+    await expect(f.service.editMessage(actor, f.channel.key, created.message.key, 'Forged')).rejects.toMatchObject({ code: 'forbidden', message: 'only the message author may edit this message' });
     expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create']);
   });
 

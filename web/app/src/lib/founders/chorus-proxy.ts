@@ -17,14 +17,14 @@ export function createChorusProxy(dependencies: ChorusProxyDependencies) {
     if (!path) return NextResponse.json({ error: "invalid Chorus endpoint" }, { status: 400 });
 
     const contentType = request.headers.get("content-type");
-    if (request.method === "POST" && contentType?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
+    if ((request.method === "POST" || request.method === "PATCH") && contentType?.split(";", 1)[0].trim().toLowerCase() !== "application/json") {
       return NextResponse.json({ error: "content type must be application/json" }, { status: 415 });
     }
     const forwardedFor = request.headers.get("x-forwarded-for");
     const upstreamPath = `/founders/organizations/${encodeURIComponent(organizationKey)}/chorus/${path}${url.search}`;
     const upstream = await dependencies.stream(upstreamPath, {
       method: request.method,
-      ...(request.method === "POST" ? { body: await request.text() } : {}),
+      ...(request.method === "POST" || request.method === "PATCH" ? { body: await request.text() } : {}),
       headers: {
         ...await dependencies.authHeaders(),
         Accept: request.headers.get("accept") ?? "application/json",
