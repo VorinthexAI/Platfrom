@@ -12,6 +12,7 @@ export * from "./icons/calendar/calendar.mobile";
 export * from "./icons/camera/camera.mobile";
 export * from "./icons/chat-bubble/chat-bubble.mobile";
 export * from "./icons/check/check.mobile";
+export * from "./icons/checkbox/checkbox.mobile";
 export * from "./icons/chevron-down/chevron-down.mobile";
 export * from "./icons/chevron-left/chevron-left.mobile";
 export * from "./icons/chevron-right/chevron-right.mobile";

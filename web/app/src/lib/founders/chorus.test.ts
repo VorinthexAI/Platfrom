@@ -170,6 +170,7 @@ describe("shared button controls", () => {
     expect(component).toContain('placeholder="Search..."');
     expect(component).toContain('setFormError("Poll options must be unique.")');
     expect(component).toContain('aria-pressed={allowMultiple}');
+    expect(component).toContain('icon={<CheckboxIcon checked={allowMultiple} size="sm" />}');
     expect(component).toContain('type="submit" variant="primary" disabled={busy}');
     expect(component).not.toContain('type="checkbox"');
     expect(component).toContain("skinTonesDisabled");
@@ -197,7 +198,7 @@ describe("shared button controls", () => {
     expect(component).toContain('disabled={busy || !interactive}');
     expect(component).toContain('>Reply</Button>');
     expect(component).toContain('>Create poll</Button>');
-    expect(component).toContain('variant="primary" onClick={() => void deleteSelectedMessage()}');
+    expect(component).toContain('<Button variant="secondary" className="min-h-0 rounded-lg px-4 py-2 text-[10px]">Close</Button></Dialog.Close><Button type="button" variant="primary" onClick={() => void deleteSelectedMessage()}');
     expect(component).toContain('>Delete message</Button>');
     expect(component).toContain('void openReplies(message); closeMessageActions();');
     expect(component).not.toContain('closeMessageActions(); void openReplies(message);');
