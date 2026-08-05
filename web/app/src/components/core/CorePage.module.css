@@ -1,6 +1,7 @@
 .page {
   --warm: #d9bc91;
   --line: rgba(218, 204, 180, 0.3);
+  position: relative;
   min-height: 100svh;
   overflow: hidden;
   background:
@@ -11,11 +12,17 @@
   font-family: var(--font-sans);
 }
 
+.page > :not(.neuralBackdrop) { position: relative; z-index: 1; }
+.page :global([id]) { scroll-margin-top: 32px; }
+.neuralBackdrop { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.neuralBackdrop > div { width: 100%; height: 100%; }
+.neuralBackdrop canvas { display: block; width: 100%; height: 100%; }
+
 .hero,
 .capabilities,
 .comingSoon,
 .principles {
-  width: min(1180px, calc(100% - 104px));
+  width: calc(100% - 104px);
   margin-inline: auto;
 }
 
@@ -64,7 +71,7 @@
 .heroBody { max-width: 390px; color: #9fa19f; font-size: 14px; line-height: 1.78; }
 .storeButtons { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
 
-.coreVisual { position: relative; min-height: 570px; overflow: hidden; isolation: isolate; }
+.coreVisual { position: relative; min-height: 570px; isolation: isolate; }
 .coreVisual::before {
   content: "";
   position: absolute;
@@ -74,7 +81,6 @@
   background: radial-gradient(circle, rgba(224, 214, 195, 0.11), rgba(119, 142, 157, 0.04) 32%, transparent 67%);
   filter: blur(14px);
 }
-.coreVisual > div:first-child { position: absolute; inset: -9% -10% -7% -7%; }
 
 .capabilities { padding-block: 16px 30px; }
 .sectionHeading { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 22px; }
@@ -99,7 +105,7 @@
   padding: 23px 17px;
   overflow: hidden;
   border: 1px solid rgba(206, 199, 185, 0.28);
-  border-radius: 12px;
+  border-radius: 24px;
   background: linear-gradient(145deg, rgba(25, 31, 36, 0.45), rgba(3, 5, 7, 0.86));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.07), 0 20px 46px rgba(0, 0, 0, 0.25);
   text-align: center;
@@ -120,7 +126,7 @@
   margin-top: 2px;
   overflow: hidden;
   border: 1px solid rgba(206, 199, 185, 0.23);
-  border-radius: 13px;
+  border-radius: 24px;
   background: linear-gradient(140deg, rgba(15, 19, 23, 0.52), rgba(2, 4, 6, 0.72));
 }
 .comingSoon::after { content: ""; position: absolute; bottom: 0; left: 38%; width: 24%; height: 1px; background: linear-gradient(90deg, transparent, var(--warm), transparent); box-shadow: 0 -4px 18px rgba(219, 177, 118, 0.7); }
@@ -173,7 +179,7 @@
   .hero,
   .capabilities,
   .comingSoon,
-  .principles { width: min(100% - 48px, 760px); }
+  .principles { width: calc(100% - 48px); }
   .hero { grid-template-columns: 1fr; padding-top: 76px; }
   .heroCopy { max-width: 610px; }
   .coreVisual { min-height: 590px; margin-top: -26px; }
@@ -187,14 +193,13 @@
   .hero,
   .capabilities,
   .comingSoon,
-  .principles { width: min(100% - 28px, 1180px); }
+  .principles { width: calc(100% - 28px); }
   .hero { min-height: auto; padding-top: 52px; }
   .hero h1 { font-size: clamp(43px, 14vw, 62px); letter-spacing: 0.08em; }
   .heroLead { font-size: 13px; line-height: 1.75; }
   .storeButtons { display: grid; }
   .storeButtons a { width: 100%; }
   .coreVisual { min-height: 445px; margin-top: 8px; }
-  .coreVisual > div:first-child { inset: -3% -38% -6%; }
   .capabilities { padding-bottom: 24px; }
   .sectionHeading { gap: 12px; }
   .sectionHeading h2 { font-size: 16px; letter-spacing: 0.19em; text-align: center; }

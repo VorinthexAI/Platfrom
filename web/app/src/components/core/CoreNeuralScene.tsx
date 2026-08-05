@@ -26,8 +26,8 @@ export function CoreNeuralScene() {
     if (!host) return;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
-    camera.position.set(0, 0.25, 14.5);
+    const camera = new THREE.OrthographicCamera(-7, 7, 13, -13, 0.1, 100);
+    camera.position.set(0, 0, 20);
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
@@ -37,7 +37,7 @@ export function CoreNeuralScene() {
     host.appendChild(renderer.domElement);
 
     const root = new THREE.Group();
-    root.position.y = -0.15;
+    root.position.y = 7.2;
     scene.add(root);
     scene.add(new THREE.AmbientLight(0xc4cbd0, 1.8));
     const warmLight = new THREE.PointLight(0xffdfac, 54, 22, 1.8);
@@ -47,8 +47,6 @@ export function CoreNeuralScene() {
     coldLight.position.set(-3.8, -0.7, 5);
     scene.add(coldLight);
 
-    const chrome = new THREE.MeshPhysicalMaterial({ color: 0xd6dadd, metalness: 1, roughness: 0.13, clearcoat: 1, clearcoatRoughness: 0.08 });
-    const blackGlass = new THREE.MeshPhysicalMaterial({ color: 0x020304, metalness: 0.84, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 });
     const warmLine = new THREE.LineBasicMaterial({ color: 0xf1d5a8, transparent: true, opacity: 0.68, blending: THREE.AdditiveBlending, depthWrite: false });
     const silverLine = new THREE.LineBasicMaterial({ color: 0xd9e0e3, transparent: true, opacity: 0.52, blending: THREE.AdditiveBlending, depthWrite: false });
     const trunkMaterial = new THREE.MeshBasicMaterial({ color: 0xd8dde0, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -58,13 +56,17 @@ export function CoreNeuralScene() {
     const curves: THREE.CatmullRomCurve3[] = [];
     const nodePositions: number[] = [];
 
-    for (let branch = 0; branch < 66; branch += 1) {
-      const rootBranch = branch < 10;
+    for (let branch = 0; branch < 60; branch += 1) {
+      const rootBranch = branch < 8;
       const side = branch % 2 === 0 ? -1 : 1;
       const verticalBranch = !rootBranch && branch % 5 === 0;
       const spread = verticalBranch ? 0.25 + random() * 1.2 : 2.2 + random() * 3.5;
       const end = rootBranch
-        ? new THREE.Vector3(side * (0.25 + random() * 2.4), -3.5 - random() * 1.7, -0.5 + random() * 0.8)
+        ? new THREE.Vector3(
+            side * (0.2 + random() * Math.max(0.8, 3.3 - branch * 0.28)),
+            -5.4 - branch * 1.05 - random() * 1.4,
+            -0.5 + random() * 0.8,
+          )
         : new THREE.Vector3(side * spread, verticalBranch ? 3.8 + random() * 1.3 : 0.1 + random() * 4.3, -0.55 + random() * 1.15);
       const direction = end.clone().normalize();
       const start = direction.clone().multiplyScalar(1.18);
@@ -81,8 +83,8 @@ export function CoreNeuralScene() {
       curves.push(curve);
       const sampled = curve.getPoints(64);
       canopy.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(sampled), branch % 4 === 0 ? warmLine : silverLine));
-      if (branch < 18) canopy.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 48, branch < 6 ? 0.025 : 0.014, 5, false), trunkMaterial));
-      for (let index = 18 + Math.floor(random() * 12); index < sampled.length; index += 14 + Math.floor(random() * 13)) {
+      if (branch < 14) canopy.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 48, branch < 8 ? 0.025 : 0.014, 5, false), trunkMaterial));
+      for (let index = rootBranch ? 25 : 18 + Math.floor(random() * 12); index < sampled.length; index += rootBranch ? 25 : 14 + Math.floor(random() * 13)) {
         const point = sampled[index]!;
         nodePositions.push(point.x, point.y, point.z + 0.08);
       }
@@ -98,51 +100,23 @@ export function CoreNeuralScene() {
     const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffedce, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
     const particles: FlowParticle[] = [];
     for (const [index, curve] of curves.entries()) {
-      const count = index < 18 ? 3 : 1;
+      const count = index < 8 ? 1 : index < 20 ? 3 : 1;
       for (let particleIndex = 0; particleIndex < count; particleIndex += 1) {
         const mesh = new THREE.Mesh(particleGeometry, particleMaterial);
-        mesh.scale.setScalar(index < 18 ? 1.45 : 1);
+        mesh.scale.setScalar(index < 8 ? 1.25 : index < 20 ? 1.45 : 1);
         canopy.add(mesh);
         particles.push({ curve, mesh, offset: random(), speed: 0.045 + random() * 0.08 });
       }
     }
 
     const core = new THREE.Group();
-    const disc = new THREE.Mesh(new THREE.SphereGeometry(1.23, 64, 32), blackGlass);
-    disc.scale.z = 0.3;
-    core.add(disc);
-    const outerRing = new THREE.Mesh(new THREE.TorusGeometry(1.38, 0.105, 20, 128), chrome);
-    core.add(outerRing);
-    const warmRing = new THREE.Mesh(new THREE.TorusGeometry(1.27, 0.025, 10, 128), new THREE.MeshBasicMaterial({ color: 0xe8c897, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending }));
-    core.add(warmRing);
-
     const logoTexture = new THREE.TextureLoader().load("/logos/vorinthex-mark.png");
     logoTexture.colorSpace = THREE.SRGBColorSpace;
     const logo = new THREE.Sprite(new THREE.SpriteMaterial({ map: logoTexture, transparent: true, depthTest: false }));
     logo.position.z = 0.55;
-    logo.scale.set(1.65, 1.65, 1);
+    logo.scale.set(2.05, 2.05, 1);
     core.add(logo);
     root.add(core);
-
-    const stemCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(0, -1.1, -0.1),
-      new THREE.Vector3(-0.08, -2.2, 0.15),
-      new THREE.Vector3(0.04, -3.7, 0),
-      new THREE.Vector3(0, -5.05, -0.2),
-    ]);
-    root.add(new THREE.Mesh(new THREE.TubeGeometry(stemCurve, 64, 0.045, 8, false), chrome));
-
-    const floor = new THREE.Group();
-    floor.position.y = -5.1;
-    floor.rotation.x = Math.PI / 2.27;
-    const floorRings: Array<{ mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; phase: number }> = [];
-    for (let index = 0; index < 10; index += 1) {
-      const material = new THREE.MeshBasicMaterial({ color: index % 3 === 0 ? 0xe1bb83 : 0x93a0a7, transparent: true, opacity: 0.28 - index * 0.018, blending: THREE.AdditiveBlending, depthWrite: false });
-      const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.9 + index * 0.48, 0.009, 6, 128), material);
-      floor.add(mesh);
-      floorRings.push({ mesh, material, phase: index * 0.42 });
-    }
-    root.add(floor);
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const clock = new THREE.Clock();
@@ -150,7 +124,13 @@ export function CoreNeuralScene() {
       const width = host.clientWidth;
       const height = host.clientHeight;
       renderer.setSize(width, height, false);
-      camera.aspect = width / height;
+      const aspect = width / height;
+      const verticalSpan = 26;
+      camera.left = (-verticalSpan * aspect) / 2;
+      camera.right = (verticalSpan * aspect) / 2;
+      camera.top = verticalSpan / 2;
+      camera.bottom = -verticalSpan / 2;
+      root.position.x = width > 980 ? Math.min(3.2, aspect * 4.8) : 0;
       camera.updateProjectionMatrix();
     };
     const observer = new ResizeObserver(resize);
@@ -164,16 +144,9 @@ export function CoreNeuralScene() {
         canopy.scale.set(breath, 1 + Math.cos(elapsed * 0.65) * 0.009, 1);
         canopy.rotation.z = Math.sin(elapsed * 0.24) * 0.012;
         core.position.y = Math.sin(elapsed * 0.82) * 0.08;
-        outerRing.rotation.z = elapsed * 0.12;
-        warmRing.rotation.z = -elapsed * 0.08;
         nodeMaterial.size = 0.075 + (Math.sin(elapsed * 2.1) + 1) * 0.018;
         warmLight.intensity = 48 + Math.sin(elapsed * 1.4) * 10;
         for (const particle of particles) particle.mesh.position.copy(particle.curve.getPointAt((elapsed * particle.speed + particle.offset) % 1));
-        for (const ring of floorRings) {
-          const pulse = (Math.sin(elapsed * 1.05 - ring.phase) + 1) * 0.5;
-          ring.material.opacity = 0.08 + pulse * 0.28;
-          ring.mesh.scale.setScalar(0.985 + pulse * 0.03);
-        }
       }
       renderer.render(scene, camera);
     });
@@ -185,8 +158,6 @@ export function CoreNeuralScene() {
       scene.traverse((object) => {
         if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points) object.geometry.dispose();
       });
-      chrome.dispose();
-      blackGlass.dispose();
       warmLine.dispose();
       silverLine.dispose();
       trunkMaterial.dispose();

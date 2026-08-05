@@ -1,12 +1,12 @@
 .page {
-  --chrome: #dce2e5;
-  --muted: #8c9499;
-  --line: rgba(219, 227, 231, 0.16);
+  --chrome: #dde2e5;
+  --muted: #aeb6bc;
+  --line: rgba(221, 226, 229, 0.16);
   min-height: 100svh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% -8%, rgba(159, 177, 188, 0.2), transparent 30rem),
-    linear-gradient(180deg, #070a0d 0%, #020304 38%, #06090c 100%);
+    radial-gradient(circle at 50% -8%, rgba(159, 180, 199, 0.15), transparent 30rem),
+    linear-gradient(180deg, #080b0f 0%, #030507 38%, #080b0f 100%);
   color: #f1f3f2;
 }
 
@@ -14,7 +14,7 @@
 .plans,
 .topUps,
 .onDemand {
-  width: min(1180px, calc(100% - 48px));
+  width: calc(100% - 48px);
   margin-inline: auto;
 }
 
@@ -102,29 +102,29 @@
 .planCard {
   position: relative;
   display: flex;
-  min-height: 440px;
+  min-height: 370px;
   flex-direction: column;
   padding: 32px;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 4px;
-  background: linear-gradient(145deg, rgba(25, 31, 35, 0.78), rgba(4, 6, 8, 0.94));
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(20, 25, 34, 0.88), rgba(3, 5, 7, 0.96));
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 28px 70px rgba(0, 0, 0, 0.28);
 }
 .planCard::after { position: absolute; inset: 0; background: radial-gradient(circle at 100% 0, rgba(196, 211, 219, 0.13), transparent 38%); content: ""; pointer-events: none; }
-.featured { border-color: rgba(220, 228, 232, 0.38); background: linear-gradient(145deg, rgba(45, 54, 59, 0.85), rgba(5, 8, 10, 0.96)); transform: translateY(-10px); }
-.planTag { position: absolute; z-index: 1; top: 0; right: 0; padding: 8px 13px; background: #dbe0e2; color: #101417; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; }
+.featured { border-color: rgba(221, 226, 229, 0.38); background: linear-gradient(180deg, rgba(27, 35, 44, 0.9), rgba(3, 5, 7, 0.96)); transform: translateY(-10px); }
+.planTag { position: absolute; z-index: 1; top: 14px; right: 14px; padding: 8px 13px; border-radius: 999px; background: #dde2e5; color: #0d1117; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; }
 .planIndex { margin: 0; color: #566167; font-family: var(--font-mono); font-size: 10px; }
 .planCard h3 { position: relative; z-index: 1; margin: 38px 0 0; font-family: var(--font-display); font-size: 29px; font-weight: 400; letter-spacing: 0.18em; text-transform: uppercase; }
 .planPrice { display: flex; align-items: baseline; gap: 8px; margin: 18px 0 0; }
 .planPrice strong { font-family: var(--font-display); font-size: 42px; font-weight: 400; }
 .planPrice span { color: #747d81; font-size: 11px; }
-.sparkAmount { display: grid; gap: 4px; margin: auto 0 28px; padding-top: 25px; border-top: 1px solid var(--line); }
+.sparkAmount { display: grid; gap: 4px; margin: auto 0 0; padding-top: 25px; border-top: 1px solid var(--line); }
 .sparkAmount strong { font-family: var(--font-display); font-size: 21px; font-weight: 400; letter-spacing: 0.08em; }
 .sparkAmount span { color: #747d81; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; }
 .planCard > :last-child { position: relative; z-index: 1; width: 100%; }
 
-.topUpGrid { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 42px; border: 1px solid var(--line); }
+.topUpGrid { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 42px; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; }
 .topUpCard { display: flex; align-items: center; justify-content: space-between; min-height: 126px; padding: 24px; background: rgba(255, 255, 255, 0.018); }
 .topUpCard + .topUpCard { border-left: 1px solid var(--line); }
 .topUpCard div { display: grid; gap: 7px; }
@@ -134,14 +134,14 @@
 
 .onDemand {
   display: grid;
-  grid-template-columns: 130px 1fr auto;
+  grid-template-columns: 130px 1fr;
   align-items: center;
   gap: 36px;
   margin-top: 32px;
   padding: 46px 52px;
   border: 1px solid rgba(218, 226, 230, 0.23);
-  border-radius: 4px;
-  background: radial-gradient(circle at 5% 50%, rgba(194, 211, 219, 0.13), transparent 26%), linear-gradient(100deg, #10161a, #050709 70%);
+  border-radius: 24px;
+  background: radial-gradient(circle at 5% 50%, rgba(159, 180, 199, 0.11), transparent 26%), linear-gradient(100deg, #0d1117, #030507 70%);
   box-shadow: inset 0 1px rgba(255, 255, 255, 0.09), 0 30px 80px rgba(0, 0, 0, 0.36);
 }
 .onDemandMark { color: #d8dfe2; font-family: var(--font-display); font-size: 88px; font-weight: 400; line-height: 1; text-align: center; text-shadow: 0 0 34px rgba(214, 228, 234, 0.24); }
@@ -156,28 +156,26 @@
   .topUpCard:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
   .topUpCard:nth-child(4) { border-top: 1px solid var(--line); }
   .onDemand { grid-template-columns: 100px 1fr; }
-  .onDemand > :last-child { grid-column: 2; width: fit-content; }
 }
 
 @media (max-width: 640px) {
   .hero,
   .plans,
   .topUps,
-  .onDemand { width: min(100% - 28px, 1180px); }
+  .onDemand { width: calc(100% - 28px); }
   .hero { padding: 82px 0 74px; }
   .hero::before { top: 34px; width: 70%; }
   .hero h1 { font-size: 47px; }
   .intro { font-size: 14px; }
-  .freeNotice { grid-template-columns: 1fr; justify-items: center; border-radius: 6px; text-align: center; }
+  .freeNotice { grid-template-columns: 1fr; justify-items: center; border-radius: 24px; text-align: center; }
   .freeNotice p { text-align: center; }
   .plans,
   .topUps { padding: 66px 0; }
   .sectionHeading { grid-template-columns: 1fr; }
   .sectionHeading > p:last-child { text-align: left; }
-  .planCard { min-height: 380px; padding: 27px; }
+  .planCard { min-height: 340px; padding: 27px; }
   .topUpGrid { grid-template-columns: 1fr; }
   .topUpCard + .topUpCard { border-top: 1px solid var(--line); border-left: 0; }
   .onDemand { grid-template-columns: 1fr; justify-items: start; gap: 20px; padding: 34px 28px; }
   .onDemandMark { font-size: 65px; }
-  .onDemand > :last-child { grid-column: auto; }
 }

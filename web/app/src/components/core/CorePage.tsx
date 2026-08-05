@@ -13,14 +13,14 @@ import styles from "./CorePage.module.css";
 function StoreButtons() {
   return (
     <div className={styles.storeButtons} id="download">
-      <Button asChild size="lg" variant="secondary">
-        <a href={GOOGLE_PLAY_URL} rel="noreferrer" target="_blank">
-          Get it on Google Play
-        </a>
-      </Button>
       <Button asChild size="lg" variant="primary">
         <a href={APP_STORE_URL} rel="noreferrer" target="_blank">
           Download on the App Store
+        </a>
+      </Button>
+      <Button asChild size="lg" variant="secondary">
+        <a href={GOOGLE_PLAY_URL} rel="noreferrer" target="_blank">
+          Get it on Google Play
         </a>
       </Button>
     </div>
@@ -31,6 +31,9 @@ export function CorePage() {
   return (
     <main className={styles.page}>
       <SiteHeader />
+      <div className={styles.neuralBackdrop}>
+        <CoreNeuralScene />
+      </div>
 
       <section className={styles.hero} id="overview">
         <div className={styles.heroCopy}>
@@ -44,9 +47,7 @@ export function CorePage() {
           <StoreButtons />
         </div>
 
-        <div className={styles.coreVisual} aria-label="Vorinthex Core">
-          <CoreNeuralScene />
-        </div>
+        <div className={styles.coreVisual} aria-hidden="true" />
       </section>
 
       <section className={styles.capabilities} id="capabilities">
