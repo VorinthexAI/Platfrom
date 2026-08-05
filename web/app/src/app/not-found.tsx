@@ -9,10 +9,10 @@ export default function NotFound() {
         404
       </h1>
       <p className="mt-6 max-w-sm text-sm leading-relaxed text-silver-500">
-        The page you requested is no longer available. Return to Vorinthex Core.
+        The page you requested is no longer available.
       </p>
       <Button asChild size="md" variant="secondary" className="mt-10">
-        <Link href="/">Back to Core</Link>
+        <Link href="/">Go back</Link>
       </Button>
     </main>
   );

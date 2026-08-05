@@ -1,5 +1,3 @@
-import Link from "next/link";
-import { Button } from "@vorinthex/shared/ui/components";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import {
   NEWCOMER_FREE_SPARKS,
@@ -32,9 +30,9 @@ export function PricingPage() {
 
       <section className={styles.plans} aria-labelledby="monthly-plans">
         <div className={styles.sectionHeading}>
-          <p className={styles.eyebrow}>Monthly reserve</p>
-          <h2 id="monthly-plans">Choose your orbit.</h2>
-          <p>Sparks refresh each month, ready for whatever you create next.</p>
+          <p className={styles.eyebrow}>Monthly plans</p>
+          <h2 id="monthly-plans">Monthly Sparks.</h2>
+          <p>Your plan refills your Spark balance every month. Spend them anywhere.</p>
         </div>
         <div className={styles.planGrid}>
           {SPARK_MONTHLY_PLANS.map((plan, index) => (
@@ -53,9 +51,6 @@ export function PricingPage() {
                 <strong>{formatSparkCount(plan.sparks)}</strong>
                 <span>monthly Sparks</span>
               </div>
-              <Button asChild size="md" variant={index === 1 ? "primary" : "outline"}>
-                <Link href="/#download">Choose {plan.name}</Link>
-              </Button>
             </article>
           ))}
         </div>
@@ -86,13 +81,10 @@ export function PricingPage() {
           <p className={styles.eyebrow}>For uninterrupted momentum</p>
           <h2 id="on-demand">{SPARK_ON_DEMAND.name}</h2>
           <p>
-            {SPARK_ON_DEMAND.allowance}, available exclusively to members on
-            the {SPARK_ON_DEMAND.requiresPlan} plan.
+            On-Demand Sparks are added on top of your monthly plan when your
+            included balance runs out. Requires the {SPARK_ON_DEMAND.requiresPlan} plan.
           </p>
         </div>
-        <Button asChild size="lg" variant="outline">
-          <Link href="/contact">Talk to us</Link>
-        </Button>
       </section>
 
       <SiteFooter />
