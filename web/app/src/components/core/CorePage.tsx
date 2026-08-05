@@ -1,27 +1,12 @@
 import Image from "next/image";
-import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
 import {
   APP_STORE_URL,
   CORE_CAPABILITIES,
   GOOGLE_PLAY_URL,
 } from "@/lib/core";
+import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import styles from "./CorePage.module.css";
-
-function Brand() {
-  return (
-    <Link className={styles.brand} href="/" aria-label="Vorinthex home">
-      <Image
-        alt=""
-        className={styles.brandMark}
-        height={42}
-        src="/logos/vorinthex-mark.png"
-        width={42}
-      />
-      <span>Vorinthex</span>
-    </Link>
-  );
-}
 
 function StoreButtons({ compact = false }: { compact?: boolean }) {
   return (
@@ -43,17 +28,7 @@ function StoreButtons({ compact = false }: { compact?: boolean }) {
 export function CorePage() {
   return (
     <main className={styles.page}>
-      <header className={styles.header}>
-        <Brand />
-        <nav className={styles.nav} aria-label="Primary navigation">
-          <a href="#overview">Overview</a>
-          <a href="#capabilities">Core</a>
-          <a href="#principles">Vision</a>
-        </nav>
-        <Button asChild size="sm" variant="outline">
-          <a href="#download">Get the app</a>
-        </Button>
-      </header>
+      <SiteHeader />
 
       <section className={styles.hero} id="overview">
         <div className={styles.heroCopy}>
@@ -139,7 +114,7 @@ export function CorePage() {
         <div className={styles.phone} aria-label="Core mobile app preview">
           <div className={styles.phoneSpeaker} />
           <div className={styles.phoneScreen}>
-            <div className={styles.phoneBrand}>Vorinthex</div>
+            <div className={styles.phoneBrand}>Vorinthex AI</div>
             <p>Good morning.</p>
             <small>How can I help you today?</small>
             <div className={styles.phoneCapabilities}>
@@ -158,15 +133,7 @@ export function CorePage() {
         </div>
       </section>
 
-      <footer className={styles.footer}>
-        <Brand />
-        <div className={styles.footerLinks}>
-          <Link href="/privacy">Privacy</Link>
-          <Link href="/terms">Terms</Link>
-          <Link href="/contact">Contact</Link>
-        </div>
-        <p>© 2026 Vorinthex. All rights reserved.</p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }
