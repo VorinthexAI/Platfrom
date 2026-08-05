@@ -50,6 +50,7 @@ export * from "./icons/plus/plus.mobile";
 export * from "./icons/profile/profile.mobile";
 export * from "./icons/save/save.mobile";
 export * from "./icons/search/search.mobile";
+export * from "./icons/shield/shield.mobile";
 export * from "./icons/settings/settings.mobile";
 export * from "./icons/share/share.mobile";
 export * from "./icons/signal/signal.mobile";

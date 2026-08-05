@@ -11,6 +11,13 @@ function seededRandom(seed: number) {
   };
 }
 
+type FlowParticle = {
+  curve: THREE.CatmullRomCurve3;
+  mesh: THREE.Mesh;
+  offset: number;
+  speed: number;
+};
+
 export function CoreNeuralScene() {
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -19,110 +26,121 @@ export function CoreNeuralScene() {
     if (!host) return;
 
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-    camera.position.set(0, 0.3, 14);
+    const camera = new THREE.PerspectiveCamera(36, 1, 0.1, 100);
+    camera.position.set(0, 0.25, 14.5);
 
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.35;
+    renderer.toneMappingExposure = 1.5;
     host.appendChild(renderer.domElement);
 
     const root = new THREE.Group();
+    root.position.y = -0.15;
     scene.add(root);
-    scene.add(new THREE.AmbientLight(0xbec8d0, 1.4));
-    const keyLight = new THREE.PointLight(0xffe4bc, 42, 22, 1.8);
-    keyLight.position.set(3.5, 3.8, 6);
-    scene.add(keyLight);
-    const rimLight = new THREE.PointLight(0xa9c7da, 28, 18, 2);
-    rimLight.position.set(-4, -1, 5);
-    scene.add(rimLight);
+    scene.add(new THREE.AmbientLight(0xc4cbd0, 1.8));
+    const warmLight = new THREE.PointLight(0xffdfac, 54, 22, 1.8);
+    warmLight.position.set(2.6, 2.8, 6);
+    scene.add(warmLight);
+    const coldLight = new THREE.PointLight(0xa9cce1, 34, 18, 2);
+    coldLight.position.set(-3.8, -0.7, 5);
+    scene.add(coldLight);
 
-    const chrome = new THREE.MeshPhysicalMaterial({
-      color: 0xbfc5c8,
-      metalness: 1,
-      roughness: 0.16,
-      clearcoat: 1,
-      clearcoatRoughness: 0.12,
-    });
-    const darkChrome = new THREE.MeshPhysicalMaterial({ color: 0x090b0d, metalness: 0.92, roughness: 0.18, clearcoat: 1 });
-    const warmLine = new THREE.LineBasicMaterial({ color: 0xe7d1ad, transparent: true, opacity: 0.58, blending: THREE.AdditiveBlending });
-    const silverLine = new THREE.LineBasicMaterial({ color: 0xc9d2d7, transparent: true, opacity: 0.46, blending: THREE.AdditiveBlending });
+    const chrome = new THREE.MeshPhysicalMaterial({ color: 0xd6dadd, metalness: 1, roughness: 0.13, clearcoat: 1, clearcoatRoughness: 0.08 });
+    const blackGlass = new THREE.MeshPhysicalMaterial({ color: 0x020304, metalness: 0.84, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 });
+    const warmLine = new THREE.LineBasicMaterial({ color: 0xf1d5a8, transparent: true, opacity: 0.68, blending: THREE.AdditiveBlending, depthWrite: false });
+    const silverLine = new THREE.LineBasicMaterial({ color: 0xd9e0e3, transparent: true, opacity: 0.52, blending: THREE.AdditiveBlending, depthWrite: false });
+    const trunkMaterial = new THREE.MeshBasicMaterial({ color: 0xd8dde0, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false });
 
-    const disc = new THREE.Mesh(new THREE.SphereGeometry(1.18, 64, 32), darkChrome);
-    disc.scale.z = 0.34;
-    root.add(disc);
-    const outerRing = new THREE.Mesh(new THREE.TorusGeometry(1.32, 0.105, 16, 96), chrome);
-    root.add(outerRing);
-    const innerRing = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.025, 10, 96), chrome);
-    root.add(innerRing);
-
-    const emblem = new THREE.Group();
-    const bladeGeometry = new THREE.CylinderGeometry(0.035, 0.055, 1.25, 8);
-    const addBlade = (x: number, rotation: number, y: number) => {
-      const blade = new THREE.Mesh(bladeGeometry, chrome);
-      blade.position.set(x, y, 0.43);
-      blade.rotation.z = rotation;
-      emblem.add(blade);
-    };
-    addBlade(-0.36, -0.45, 0.03);
-    addBlade(-0.1, -0.28, -0.08);
-    addBlade(0.18, 0.37, -0.08);
-    addBlade(0.42, 0.5, 0.04);
-    root.add(emblem);
-
-    const random = seededRandom(7319);
+    const canopy = new THREE.Group();
+    const random = seededRandom(19106);
+    const curves: THREE.CatmullRomCurve3[] = [];
     const nodePositions: number[] = [];
-    const branchGroup = new THREE.Group();
-    for (let branch = 0; branch < 54; branch += 1) {
-      const angle = (branch / 54) * Math.PI * 2 + (random() - 0.5) * 0.18;
-      const downward = Math.sin(angle) < -0.42;
-      const length = downward ? 3.6 + random() * 1.8 : 3.1 + random() * 3.2;
-      const start = new THREE.Vector3(Math.cos(angle) * 1.2, Math.sin(angle) * 1.2, -0.08);
-      const end = new THREE.Vector3(
-        Math.cos(angle) * length,
-        Math.sin(angle) * length * (downward ? 1.18 : 0.82) + (downward ? -0.7 : 0.45),
-        -0.5 + random() * 1.2,
-      );
-      const tangent = new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0).multiplyScalar((random() - 0.5) * 2.4);
-      const midpoint = start.clone().lerp(end, 0.52).add(tangent);
-      midpoint.z += 0.25 + random() * 0.65;
-      const curve = new THREE.CatmullRomCurve3([start, midpoint, end]);
-      const points = curve.getPoints(42);
-      branchGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), branch % 3 === 0 ? warmLine : silverLine));
-      for (let point = 12 + Math.floor(random() * 10); point < points.length; point += 10 + Math.floor(random() * 10)) {
-        const position = points[point]!;
-        nodePositions.push(position.x, position.y, position.z + 0.05);
+
+    for (let branch = 0; branch < 66; branch += 1) {
+      const rootBranch = branch < 10;
+      const side = branch % 2 === 0 ? -1 : 1;
+      const verticalBranch = !rootBranch && branch % 5 === 0;
+      const spread = verticalBranch ? 0.25 + random() * 1.2 : 2.2 + random() * 3.5;
+      const end = rootBranch
+        ? new THREE.Vector3(side * (0.25 + random() * 2.4), -3.5 - random() * 1.7, -0.5 + random() * 0.8)
+        : new THREE.Vector3(side * spread, verticalBranch ? 3.8 + random() * 1.3 : 0.1 + random() * 4.3, -0.55 + random() * 1.15);
+      const direction = end.clone().normalize();
+      const start = direction.clone().multiplyScalar(1.18);
+      start.y -= 0.05;
+      const tangent = new THREE.Vector3(-direction.y, direction.x, 0);
+      const bend = side * (0.08 + random() * 0.5);
+      const points = [
+        start,
+        start.clone().lerp(end, 0.32).addScaledVector(tangent, bend).add(new THREE.Vector3(0, rootBranch ? -0.1 : 0.18, 0.18 + random() * 0.28)),
+        start.clone().lerp(end, 0.68).addScaledVector(tangent, bend * 0.65).add(new THREE.Vector3(0, rootBranch ? 0 : 0.22, 0.22 + random() * 0.3)),
+        end,
+      ];
+      const curve = new THREE.CatmullRomCurve3(points);
+      curves.push(curve);
+      const sampled = curve.getPoints(64);
+      canopy.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(sampled), branch % 4 === 0 ? warmLine : silverLine));
+      if (branch < 18) canopy.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 48, branch < 6 ? 0.025 : 0.014, 5, false), trunkMaterial));
+      for (let index = 18 + Math.floor(random() * 12); index < sampled.length; index += 14 + Math.floor(random() * 13)) {
+        const point = sampled[index]!;
+        nodePositions.push(point.x, point.y, point.z + 0.08);
       }
     }
-    root.add(branchGroup);
+    root.add(canopy);
 
     const nodeGeometry = new THREE.BufferGeometry();
     nodeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(nodePositions, 3));
-    const nodes = new THREE.Points(nodeGeometry, new THREE.PointsMaterial({
-      color: 0xffe6bf,
-      size: 0.075,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      sizeAttenuation: true,
-    }));
-    root.add(nodes);
+    const nodeMaterial = new THREE.PointsMaterial({ color: 0xffe4ba, size: 0.09, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+    root.add(new THREE.Points(nodeGeometry, nodeMaterial));
 
-    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.12, 4.2, 10), chrome);
-    stem.position.y = -3.1;
-    root.add(stem);
+    const particleGeometry = new THREE.SphereGeometry(0.035, 8, 8);
+    const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffedce, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+    const particles: FlowParticle[] = [];
+    for (const [index, curve] of curves.entries()) {
+      const count = index < 18 ? 3 : 1;
+      for (let particleIndex = 0; particleIndex < count; particleIndex += 1) {
+        const mesh = new THREE.Mesh(particleGeometry, particleMaterial);
+        mesh.scale.setScalar(index < 18 ? 1.45 : 1);
+        canopy.add(mesh);
+        particles.push({ curve, mesh, offset: random(), speed: 0.045 + random() * 0.08 });
+      }
+    }
+
+    const core = new THREE.Group();
+    const disc = new THREE.Mesh(new THREE.SphereGeometry(1.23, 64, 32), blackGlass);
+    disc.scale.z = 0.3;
+    core.add(disc);
+    const outerRing = new THREE.Mesh(new THREE.TorusGeometry(1.38, 0.105, 20, 128), chrome);
+    core.add(outerRing);
+    const warmRing = new THREE.Mesh(new THREE.TorusGeometry(1.27, 0.025, 10, 128), new THREE.MeshBasicMaterial({ color: 0xe8c897, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending }));
+    core.add(warmRing);
+
+    const logoTexture = new THREE.TextureLoader().load("/logos/vorinthex-mark.png");
+    logoTexture.colorSpace = THREE.SRGBColorSpace;
+    const logo = new THREE.Sprite(new THREE.SpriteMaterial({ map: logoTexture, transparent: true, depthTest: false }));
+    logo.position.z = 0.55;
+    logo.scale.set(1.65, 1.65, 1);
+    core.add(logo);
+    root.add(core);
+
+    const stemCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, -1.1, -0.1),
+      new THREE.Vector3(-0.08, -2.2, 0.15),
+      new THREE.Vector3(0.04, -3.7, 0),
+      new THREE.Vector3(0, -5.05, -0.2),
+    ]);
+    root.add(new THREE.Mesh(new THREE.TubeGeometry(stemCurve, 64, 0.045, 8, false), chrome));
+
     const floor = new THREE.Group();
-    floor.position.y = -5.18;
-    floor.rotation.x = Math.PI / 2.36;
-    for (let index = 0; index < 8; index += 1) {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(1.2 + index * 0.55, 0.008, 6, 96),
-        new THREE.MeshBasicMaterial({ color: index % 2 ? 0x8d7658 : 0x8a969b, transparent: true, opacity: 0.3 - index * 0.025 }),
-      );
-      floor.add(ring);
+    floor.position.y = -5.1;
+    floor.rotation.x = Math.PI / 2.27;
+    const floorRings: Array<{ mesh: THREE.Mesh; material: THREE.MeshBasicMaterial; phase: number }> = [];
+    for (let index = 0; index < 10; index += 1) {
+      const material = new THREE.MeshBasicMaterial({ color: index % 3 === 0 ? 0xe1bb83 : 0x93a0a7, transparent: true, opacity: 0.28 - index * 0.018, blending: THREE.AdditiveBlending, depthWrite: false });
+      const mesh = new THREE.Mesh(new THREE.TorusGeometry(0.9 + index * 0.48, 0.009, 6, 128), material);
+      floor.add(mesh);
+      floorRings.push({ mesh, material, phase: index * 0.42 });
     }
     root.add(floor);
 
@@ -142,10 +160,20 @@ export function CoreNeuralScene() {
     renderer.setAnimationLoop(() => {
       const elapsed = clock.getElapsedTime();
       if (!reducedMotion.matches) {
-        branchGroup.rotation.z = Math.sin(elapsed * 0.16) * 0.015;
-        outerRing.rotation.z = elapsed * 0.035;
-        nodes.material.opacity = 0.72 + Math.sin(elapsed * 1.45) * 0.2;
-        keyLight.intensity = 38 + Math.sin(elapsed * 1.1) * 6;
+        const breath = 1 + Math.sin(elapsed * 0.7) * 0.012;
+        canopy.scale.set(breath, 1 + Math.cos(elapsed * 0.65) * 0.009, 1);
+        canopy.rotation.z = Math.sin(elapsed * 0.24) * 0.012;
+        core.position.y = Math.sin(elapsed * 0.82) * 0.08;
+        outerRing.rotation.z = elapsed * 0.12;
+        warmRing.rotation.z = -elapsed * 0.08;
+        nodeMaterial.size = 0.075 + (Math.sin(elapsed * 2.1) + 1) * 0.018;
+        warmLight.intensity = 48 + Math.sin(elapsed * 1.4) * 10;
+        for (const particle of particles) particle.mesh.position.copy(particle.curve.getPointAt((elapsed * particle.speed + particle.offset) % 1));
+        for (const ring of floorRings) {
+          const pulse = (Math.sin(elapsed * 1.05 - ring.phase) + 1) * 0.5;
+          ring.material.opacity = 0.08 + pulse * 0.28;
+          ring.mesh.scale.setScalar(0.985 + pulse * 0.03);
+        }
       }
       renderer.render(scene, camera);
     });
@@ -158,9 +186,13 @@ export function CoreNeuralScene() {
         if (object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points) object.geometry.dispose();
       });
       chrome.dispose();
-      darkChrome.dispose();
+      blackGlass.dispose();
       warmLine.dispose();
       silverLine.dispose();
+      trunkMaterial.dispose();
+      nodeMaterial.dispose();
+      particleMaterial.dispose();
+      logoTexture.dispose();
       host.removeChild(renderer.domElement);
     };
   }, []);

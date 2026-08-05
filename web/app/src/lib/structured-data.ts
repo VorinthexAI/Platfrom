@@ -1,4 +1,9 @@
-import { CORE_CAPABILITIES, CORE_FAQ } from "@/lib/core";
+import { CORE_FAQ } from "@/lib/core";
+import {
+  SPARK_MONTHLY_PLANS,
+  SPARK_ON_DEMAND,
+  SPARK_TOP_UPS,
+} from "@/lib/spark-pricing";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site";
 
 export const organizationJsonLd = {
@@ -36,20 +41,36 @@ export const coreSoftwareJsonLd = {
   offers: [
     {
       "@type": "Offer",
-      name: "Core foundation",
+      name: "Newcomer Sparks",
       availability: "https://schema.org/InStock",
       price: "0",
       priceCurrency: "USD",
-      url: SITE_URL,
+      url: absoluteUrl("/pricing"),
     },
-    ...CORE_CAPABILITIES.map((capability) => ({
+    ...SPARK_MONTHLY_PLANS.map((plan) => ({
       "@type": "Offer",
-      name: `${capability.name} capability monthly subscription`,
+      name: `${plan.name} monthly Sparks plan`,
+      description: `${plan.sparks.toLocaleString("en-US")} Sparks per month`,
       availability: "https://schema.org/InStock",
-      price: capability.price.toFixed(2),
+      price: plan.price.toFixed(2),
       priceCurrency: "USD",
       url: absoluteUrl("/pricing"),
     })),
+    ...SPARK_TOP_UPS.map((topUp) => ({
+      "@type": "Offer",
+      name: `${topUp.sparks.toLocaleString("en-US")} Sparks top-up`,
+      availability: "https://schema.org/InStock",
+      price: topUp.price.toFixed(2),
+      priceCurrency: "USD",
+      url: absoluteUrl("/pricing"),
+    })),
+    {
+      "@type": "Offer",
+      name: SPARK_ON_DEMAND.name,
+      description: `${SPARK_ON_DEMAND.allowance}; requires ${SPARK_ON_DEMAND.requiresPlan}`,
+      availability: "https://schema.org/InStock",
+      url: absoluteUrl("/pricing"),
+    },
   ],
 };
 

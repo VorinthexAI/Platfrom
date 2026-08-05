@@ -1,6 +1,6 @@
 import Image from "next/image";
 import { Button } from "@vorinthex/shared/ui/components";
-import { BrainIcon, LockIcon, StarIcon } from "@vorinthex/shared/ui/icons";
+import { BrainIcon, ShieldIcon, StarIcon } from "@vorinthex/shared/ui/icons";
 import {
   APP_STORE_URL,
   CORE_CAPABILITIES,
@@ -10,15 +10,15 @@ import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import { CoreNeuralScene } from "./CoreNeuralScene";
 import styles from "./CorePage.module.css";
 
-function StoreButtons({ compact = false }: { compact?: boolean }) {
+function StoreButtons() {
   return (
-    <div className={styles.storeButtons} id={compact ? undefined : "download"}>
-      <Button asChild size={compact ? "sm" : "lg"} variant="outline">
+    <div className={styles.storeButtons} id="download">
+      <Button asChild size="lg" variant="secondary">
         <a href={GOOGLE_PLAY_URL} rel="noreferrer" target="_blank">
           Get it on Google Play
         </a>
       </Button>
-      <Button asChild size={compact ? "sm" : "lg"} variant="outline">
+      <Button asChild size="lg" variant="primary">
         <a href={APP_STORE_URL} rel="noreferrer" target="_blank">
           Download on the App Store
         </a>
@@ -46,11 +46,6 @@ export function CorePage() {
 
         <div className={styles.coreVisual} aria-label="Vorinthex Core">
           <CoreNeuralScene />
-          <div className={styles.coreLabel}>
-            <span>Core</span>
-            <strong>Your personal AI</strong>
-            <p>The intelligence that connects everything into one.</p>
-          </div>
         </div>
       </section>
 
@@ -92,7 +87,7 @@ export function CorePage() {
               <p>All your data, conversations, images and knowledge in one place.</p>
             </article>
             <article>
-              <LockIcon aria-hidden size="lg" />
+              <ShieldIcon aria-hidden size="lg" />
               <h3>Private by design</h3>
               <p>Your data is yours. End-to-end encryption and full control.</p>
             </article>

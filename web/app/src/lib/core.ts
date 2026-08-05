@@ -1,3 +1,10 @@
+import {
+  NEWCOMER_FREE_SPARKS,
+  SPARK_MONTHLY_PLANS,
+  formatSparkCount,
+  formatUsd,
+} from "@/lib/spark-pricing";
+
 export const APP_STORE_URL = "https://www.apple.com/app-store/";
 export const GOOGLE_PLAY_URL =
   "https://play.google.com/store/search?q=Vorinthex%20AI&c=apps";
@@ -7,7 +14,6 @@ export const CORE_CAPABILITIES = [
     name: "Archive",
     icon: "/logos/entities/capability-archive.png",
     description: "Store, organize and understand everything that matters.",
-    price: 9.99,
     features: [
       "Notes, ideas, and research",
       "Folders, labels, and backlinks",
@@ -18,7 +24,6 @@ export const CORE_CAPABILITIES = [
     name: "Gallery",
     icon: "/logos/entities/capability-gallery.png",
     description: "Your visual memory. Search, recall and connect images.",
-    price: 19.99,
     features: [
       "Smart albums and visual clusters",
       "Search by people, places, dates, and events",
@@ -29,7 +34,6 @@ export const CORE_CAPABILITIES = [
     name: "Signal",
     icon: "/logos/entities/capability-signal.png",
     description: "Unified communication across people and intelligences.",
-    price: 29.99,
     features: [
       "Connect multiple inboxes",
       "Filter noise and prioritize what matters",
@@ -40,7 +44,6 @@ export const CORE_CAPABILITIES = [
     name: "Compass",
     icon: "/logos/entities/capability-compass.png",
     description: "Discover knowledge and navigate infinite information.",
-    price: 14.99,
     features: [
       "Map places, memories, and plans",
       "Keep visited and future destinations together",
@@ -51,7 +54,6 @@ export const CORE_CAPABILITIES = [
     name: "Ascend",
     icon: "/logos/entities/capability-ascend.png",
     description: "Your AI coach for growth, clarity and mastery.",
-    price: 24.99,
     features: [
       "Goals, habits, health, and routines",
       "Personal learning journeys",
@@ -74,6 +76,6 @@ export const CORE_FAQ = [
   {
     question: "How much does Vorinthex Core cost?",
     answer:
-      "The Core personal AI foundation is free. Optional Core capabilities are available as monthly subscriptions, starting with Archive at $9.99 per month.",
+      `Newcomers receive ${formatSparkCount(NEWCOMER_FREE_SPARKS)} free Sparks. Monthly Sparks plans start with ${SPARK_MONTHLY_PLANS[0].name} at ${formatUsd(SPARK_MONTHLY_PLANS[0].price)} for ${formatSparkCount(SPARK_MONTHLY_PLANS[0].sparks)} Sparks.`,
   },
 ] as const;
