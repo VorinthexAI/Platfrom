@@ -61,4 +61,5 @@ export * from './icons/send';
 export * from './icons/compass';
 export * from './icons/ascend';
 export * from './icons/brain';
+export * from './icons/shield';
 export * from './icons/fragment';

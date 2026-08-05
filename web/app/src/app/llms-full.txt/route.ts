@@ -1,3 +1,12 @@
+import {
+  NEWCOMER_FREE_SPARKS,
+  SPARK_MONTHLY_PLANS,
+  SPARK_ON_DEMAND,
+  SPARK_TOP_UPS,
+  formatSparkCount,
+  formatUsd,
+} from "@/lib/spark-pricing";
+
 export const dynamic = "force-static";
 
 export function GET() {
@@ -21,13 +30,17 @@ Core is designed around one intelligence, privacy by design, and personal contex
 
 ## Pricing
 
-The Core personal AI foundation is free. Optional capabilities are monthly subscriptions:
+Sparks power usage across Vorinthex. Newcomers receive ${formatSparkCount(NEWCOMER_FREE_SPARKS)} free Sparks.
 
-- Archive: $9.99 per month.
-- Gallery: $19.99 per month.
-- Signal: $29.99 per month.
-- Compass: $14.99 per month.
-- Ascend: $24.99 per month.
+Monthly plans:
+
+${SPARK_MONTHLY_PLANS.map((plan) => `- ${plan.name}: ${formatUsd(plan.price)} per month for ${formatSparkCount(plan.sparks)} monthly Sparks.`).join("\n")}
+
+One-time top-ups:
+
+${SPARK_TOP_UPS.map((topUp) => `- ${formatSparkCount(topUp.sparks)} Sparks: ${formatUsd(topUp.price)}.`).join("\n")}
+
+${SPARK_ON_DEMAND.name} provides ${SPARK_ON_DEMAND.allowance.toLowerCase()} and requires the ${SPARK_ON_DEMAND.requiresPlan} plan.
 
 ## About Vorinthex AI
 
@@ -36,7 +49,7 @@ Vorinthex AI is an AI-native software company focused on making personal intelli
 ## Links
 
 - [Download Core](https://vorinthex.com)
-- [Core Pricing](https://vorinthex.com/pricing)
+- [Sparks Pricing](https://vorinthex.com/pricing)
 - [About Vorinthex AI](https://vorinthex.com/about)
 - [Privacy](https://vorinthex.com/privacy)
 - [Terms](https://vorinthex.com/terms)

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { PricingPage } from "@/components/pricing/PricingPage";
 
 export const metadata: Metadata = {
-  title: "Core Pricing",
+  title: "Sparks Pricing",
   description:
-    "Start with the free Vorinthex Core personal AI, then add Archive, Gallery, Signal, Compass, or Ascend as monthly capabilities.",
+    "Usage-based Vorinthex pricing with free newcomer Sparks, monthly Sparks plans, top-ups, and On-Demand access for Nova members.",
   alternates: { canonical: "/pricing" },
 };
 
