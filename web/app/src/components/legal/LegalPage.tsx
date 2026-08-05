@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
+import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
 import type { VaultCopy } from "@/lib/legal-copy";
 import styles from "./LegalPage.module.css";
 
@@ -8,6 +9,7 @@ export function LegalPage({ copy }: { copy: VaultCopy }) {
   return (
     <main className={styles.page}>
       <SiteHeader />
+      <SiteNeuralBackdrop />
       <article className={styles.content}>
         <p className={styles.eyebrow}>{copy.eyebrow}</p>
         <h1>{copy.title}</h1>

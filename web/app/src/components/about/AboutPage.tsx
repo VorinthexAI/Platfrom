@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Button } from "@vorinthex/shared/ui/components";
 import { CORE_CAPABILITIES } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
+import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
 import styles from "./AboutPage.module.css";
 
 const PRINCIPLES = [
@@ -27,6 +28,7 @@ export function AboutPage() {
   return (
     <main className={styles.page}>
       <SiteHeader />
+      <SiteNeuralBackdrop />
 
       <section className={styles.hero}>
         <div>

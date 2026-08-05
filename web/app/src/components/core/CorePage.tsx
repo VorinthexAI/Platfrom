@@ -7,6 +7,7 @@ import {
   GOOGLE_PLAY_URL,
 } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
+import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
 import { CoreNeuralScene } from "./CoreNeuralScene";
 import styles from "./CorePage.module.css";
 
@@ -31,6 +32,7 @@ export function CorePage() {
   return (
     <main className={styles.page}>
       <SiteHeader />
+      <SiteNeuralBackdrop />
       <div className={styles.neuralBackdrop}>
         <CoreNeuralScene />
       </div>

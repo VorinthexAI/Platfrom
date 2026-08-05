@@ -1,4 +1,5 @@
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
+import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
 import {
   NEWCOMER_FREE_SPARKS,
   SPARK_MONTHLY_PLANS,
@@ -13,6 +14,7 @@ export function PricingPage() {
   return (
     <main className={styles.page}>
       <SiteHeader />
+      <SiteNeuralBackdrop />
 
       <section className={styles.hero}>
         <p className={styles.eyebrow}>Usage-based pricing</p>
