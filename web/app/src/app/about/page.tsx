@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
-import { LegalPage } from "@/components/legal/LegalPage";
-import { ABOUT_COPY } from "@/lib/legal-copy";
+import { AboutPage } from "@/components/about/AboutPage";
 
 export const metadata: Metadata = {
-  title: "About",
-  description: "Vorinthex is building Core, your private personal AI.",
+  title: "About Vorinthex",
+  description:
+    "Vorinthex is an AI-native software company building Core, one private personal AI that learns, remembers, and grows with you.",
   alternates: { canonical: "/about" },
 };
 
-export default function AboutPage() {
-  return <LegalPage copy={ABOUT_COPY} />;
+export default function AboutPageRoute() {
+  return <AboutPage />;
 }

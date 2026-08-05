@@ -10,33 +10,12 @@
   color: #e9e8e4;
 }
 
-.header,
 .hero,
 .capabilities,
-.principles,
-.footer {
+.principles {
   width: min(1180px, calc(100% - 48px));
   margin-inline: auto;
 }
-
-.header {
-  position: relative;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  min-height: 96px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.header > :last-child { justify-self: end; }
-.brand { display: inline-flex; align-items: center; gap: 12px; width: fit-content; color: #f0efeb; font-family: var(--font-display); font-size: 20px; letter-spacing: 0.18em; text-transform: uppercase; }
-.brandMark { width: 34px; height: 34px; object-fit: contain; }
-.nav { display: flex; gap: 38px; }
-.nav a,
-.footerLinks a { color: #aaa9a4; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; transition: color 180ms ease; }
-.nav a:hover,
-.footerLinks a:hover { color: #fff; }
 
 .hero { position: relative; display: grid; grid-template-columns: minmax(320px, 0.85fr) minmax(440px, 1.15fr); align-items: center; min-height: 680px; padding-block: 72px 54px; }
 .heroCopy { position: relative; z-index: 2; }
@@ -68,11 +47,11 @@
 .principles h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.28em; text-transform: uppercase; }
 .sectionHeading h2 { font-size: 22px; }
 .capabilityGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 38px; }
-.capabilityCard { position: relative; min-height: 330px; padding: 28px 20px; overflow: hidden; border: 1px solid rgba(206, 199, 185, 0.25); border-radius: 14px; background: linear-gradient(145deg, rgba(29, 35, 40, 0.5), rgba(3, 5, 7, 0.82)); text-align: center; box-shadow: inset 0 1px rgba(255, 255, 255, 0.07), 0 22px 50px rgba(0, 0, 0, 0.28); }
+.capabilityCard { position: relative; display: flex; min-height: 330px; flex-direction: column; align-items: center; padding: 28px 20px; overflow: hidden; border: 1px solid rgba(206, 199, 185, 0.25); border-radius: 14px; background: linear-gradient(145deg, rgba(29, 35, 40, 0.5), rgba(3, 5, 7, 0.82)); text-align: center; box-shadow: inset 0 1px rgba(255, 255, 255, 0.07), 0 22px 50px rgba(0, 0, 0, 0.28); }
 .capabilityCard::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 50% 22%, rgba(193, 207, 215, 0.1), transparent 35%); pointer-events: none; }
 .capabilityCard img { position: relative; width: min(140px, 80%); height: auto; }
 .capabilityCard h3 { margin-top: 8px; font-family: var(--font-display); font-size: 17px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; }
-.capabilityCard p { margin-top: 16px; color: #92938f; font-size: 13px; line-height: 1.7; }
+.capabilityCard p { max-width: 190px; margin-top: 16px; color: #92938f; font-size: 13px; line-height: 1.7; }
 
 .principles { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 380px; align-items: center; min-height: 650px; padding: 70px 60px; border: 1px solid rgba(206, 199, 185, 0.18); border-radius: 18px; background: radial-gradient(circle at 85% 82%, rgba(116, 85, 51, 0.16), transparent 32%), linear-gradient(145deg, rgba(15, 19, 23, 0.68), rgba(2, 4, 6, 0.82)); }
 .principlesCopy { position: relative; z-index: 2; }
@@ -96,34 +75,20 @@
 .phoneInsight small { color: #696f70; letter-spacing: 0.1em; text-transform: uppercase; }
 .phoneInsight strong { font-family: var(--font-display); font-size: 12px; font-weight: 400; }
 
-.footer { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 24px; min-height: 140px; margin-top: 76px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
-.footer .brand { font-size: 13px; }
-.footer .brandMark { width: 26px; height: 26px; }
-.footerLinks { display: flex; gap: 24px; }
-.footer p { justify-self: end; color: #626562; font-size: 11px; }
-
 @media (max-width: 980px) {
-  .header { grid-template-columns: 1fr auto; }
-  .nav { display: none; }
   .hero { grid-template-columns: 1fr; padding-top: 90px; }
   .heroCopy { max-width: 620px; }
   .coreVisual { min-height: 600px; margin-top: -30px; }
   .capabilityGrid { grid-template-columns: repeat(2, 1fr); }
-  .capabilityCard:last-child { grid-column: 1 / -1; }
+  .capabilityCard:last-child { grid-column: 1 / -1; width: calc((100% - 16px) / 2); justify-self: center; }
   .principles { grid-template-columns: 1fr; gap: 70px; }
   .phone { justify-self: center; }
 }
 
 @media (max-width: 640px) {
-  .header,
   .hero,
   .capabilities,
-  .principles,
-  .footer { width: min(100% - 28px, 1180px); }
-  .header { min-height: 78px; }
-  .brand { font-size: 15px; letter-spacing: 0.12em; }
-  .brandMark { width: 30px; height: 30px; }
-  .header > :last-child { font-size: 9px; }
+  .principles { width: min(100% - 28px, 1180px); }
   .hero { min-height: auto; padding-top: 64px; }
   .hero h1 { font-size: clamp(48px, 15vw, 68px); }
   .heroLead { font-size: 14px; line-height: 1.7; }
@@ -136,13 +101,11 @@
   .sectionHeading { gap: 12px; }
   .sectionHeading h2 { font-size: 16px; letter-spacing: 0.18em; text-align: center; }
   .capabilityGrid { grid-template-columns: 1fr; }
-  .capabilityCard:last-child { grid-column: auto; }
+  .capabilityCard:last-child { grid-column: auto; width: 100%; }
   .capabilityCard { min-height: 300px; }
   .principles { padding: 48px 22px; }
   .principles h2 { letter-spacing: 0.16em; }
   .principleGrid { grid-template-columns: 1fr; }
   .phone { width: 252px; height: 520px; }
   .phoneCapabilities span { display: none; }
-  .footer { grid-template-columns: 1fr; justify-items: center; padding-block: 40px; text-align: center; }
-  .footer p { justify-self: center; }
 }
