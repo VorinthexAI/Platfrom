@@ -44,11 +44,11 @@ ${config.style.negativePrompt}`;
 export function buildDefaultVoiceoverScript(target: AudioTarget): string {
   const entity = target.entity;
   if (target.category === "master-brand") {
-    return "Vorinthex AI is the nexus of intelligence. A unified command layer for building, orchestrating, and scaling intelligent systems with clarity and control.";
+    return "Vorinthex AI is your personal AI. One private intelligence that remembers, understands, and connects what matters to you.";
   }
 
   if (target.category === "product") {
-    return `${target.name} brings focused intelligence into the Vorinthex AI platform. It turns complex work into a clear, controlled product experience.`;
+    return `${target.name} is one personal intelligence for your knowledge, memories, communication, discovery, and growth.`;
   }
 
   if (target.category === "capability") {

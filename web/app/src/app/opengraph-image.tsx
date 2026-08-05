@@ -2,8 +2,7 @@ import { ImageResponse } from "next/og";
 import { SITE_NAME, SITE_TAGLINE } from "@/lib/site";
 
 /**
- * The social share card (Open Graph + Twitter): a quiet obsidian sky with
- * the brand name, tagline, and hero line — generated at build time so link
+ * The social share card (Open Graph + Twitter), generated at build time so link
  * previews always match the live site instead of a stale crawl.
  */
 
@@ -64,7 +63,7 @@ export default function Image() {
             color: "#aeb7be",
           }}
         >
-          Your personal AI for everything, with infinite memory.
+          Everything. Intelligently connected.
         </div>
         <div
           style={{

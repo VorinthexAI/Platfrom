@@ -1,0 +1,7 @@
+.page { min-height: 100svh; padding: 80px 24px; background: radial-gradient(circle at top, #11171b, #020304 40%); }
+.page article { width: min(760px, 100%); margin: 0 auto; }
+.eyebrow { color: #8d9294; font-family: var(--font-mono); font-size: 10px; letter-spacing: .24em; text-transform: uppercase; }
+.page h1 { margin: 20px 0 46px; font-family: var(--font-display); font-size: clamp(42px, 7vw, 72px); font-weight: 400; letter-spacing: .08em; text-transform: uppercase; }
+.page h2 { margin-top: 44px; font-family: var(--font-display); font-size: 23px; font-weight: 400; letter-spacing: .06em; }
+.page p { margin-top: 18px; color: #a3a5a3; font-size: 15px; line-height: 1.85; }
+.page .footnote { margin: 48px 0 28px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.1); color: #d5d5d1; }

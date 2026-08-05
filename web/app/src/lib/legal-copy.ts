@@ -1,7 +1,5 @@
 /**
- * Static vault copy, shared between the SEO-visible page bodies and the
- * in-galaxy caverns (privacy/terms/about/contact are read inside asteroid
- * biomes, not on separate flat pages).
+ * Public company and legal copy.
  */
 
 export interface VaultCopy {
@@ -94,9 +92,9 @@ export const TERMS_COPY: VaultCopy = {
   title: "Terms",
   eyebrow: "Accord Vault",
   paragraphs: [
-    "Joining The Hunt does not guarantee access to Vorinthex AI products. Access is granted in waves as capacity allows.",
-    "Intelligence Fragments are a promotional collectible, not money or a currency. They carry no monetary value and cannot be bought, sold, or exchanged.",
-    "The Vorinthex AI name, marks, and visual identity are the property of Vorinthex AI. Full terms of service will be published before Core launches.",
+    "These terms govern your use of Vorinthex websites, apps, and services. By using a Vorinthex service, you agree to use it lawfully and responsibly.",
+    "Vorinthex Core provides AI assisted features. You remain responsible for reviewing outputs before relying on them for important decisions.",
+    "The Vorinthex AI name, marks, visual identity, software, and original content are the property of Vorinthex AI or its licensors.",
   ],
   footnote: "Questions? Reach us at contact@vorinthex.com.",
 };
@@ -105,12 +103,10 @@ export const ABOUT_COPY: VaultCopy = {
   title: "About",
   eyebrow: "Origin Vault",
   paragraphs: [
-    "Vorinthex is an AI-native software company building a unified AI platform for consumers, founders, creators, and businesses.",
-    "Our mission is to make AI practical, accessible, and deeply integrated into everyday work by replacing fragmented AI tools with one intelligent ecosystem.",
-    "Today we are building Core, a personal AI Brain that learns, remembers, and grows with each user. Over time, Core will expand through AI Capabilities for memory, communication, productivity, creativity, discovery, and personal growth.",
-    "Alongside Core, we are developing Command, an AI executive team with specialized business orchestrators; Studio, a unified workspace for chat, image, video, music, code, documents, and research; and Launch, a platform for building, deploying, and managing AI agents and automations.",
-    "Vorinthex is designed as a global AI-native platform, built on modern cloud infrastructure and connected to leading foundation models so users can move from idea to action without stitching together disconnected tools.",
-    "We are currently in active development and onboarding early users through our waitlist.",
+    "Vorinthex is an AI-native software company focused on Core, a personal AI that learns, remembers, and grows with each user.",
+    "Our mission is to make personal intelligence practical, private, and deeply useful without forcing people to stitch together disconnected tools.",
+    "Core connects knowledge, memories, communication, discovery, and personal growth through capabilities including Archive, Gallery, Signal, Compass, and Ascend.",
+    "Vorinthex is built on modern cloud infrastructure and connected to leading foundation models so users can move from context to action in one place.",
   ],
   footnote: "Questions? Reach us at contact@vorinthex.com.",
 };

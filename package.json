@@ -14,7 +14,6 @@
     "web:build": "bun run --cwd web/app build",
     "web:lint": "bun run --cwd web/app lint",
     "web:typecheck": "bun run --cwd web/app typecheck",
-    "web:test": "bun run --cwd web/app test",
     "mobile:start": "bun run --cwd mobile/app start",
     "submit": "bun run mobile/scripts/submit.ts",
     "mobile:typecheck": "bun run --cwd mobile/app typecheck",
@@ -24,8 +23,7 @@
     "backend:nodes": "bun run --cwd backend nodes",
     "backend:reset": "bun run --cwd backend reset",
     "backend:create-super-admin": "bun run --cwd backend create:super-admin",
-    "orchestrators:messages": "bun run scripts/orchestrators/generate-openai-messages.ts",
-    "hunt:briefing": "bun run scripts/audio/generate-hunt-briefing.ts"
+    "orchestrators:messages": "bun run scripts/orchestrators/generate-openai-messages.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",
