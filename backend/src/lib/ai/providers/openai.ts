@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { OpenAIRealtimeWebSocket } from 'openai/realtime/websocket';
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
+import { EMBEDDING_DIMENSIONS, OPENAI_EMBEDDING_MODEL_ID } from '@/lib/openai-embeddings';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
   CHAT_ACTION_IDS,
@@ -12,11 +13,13 @@ import {
 import {
   imageGenerateInputSchema,
   chatInputSchema,
+  embeddingInputSchema,
   resolveRequestSignal,
   speechInputSchema,
   transcribeInputSchema,
   type ImageOutput,
   type ChatOutput,
+  type EmbeddingOutput,
   type ProviderAdapter,
   type ProviderEmbedRequest,
   type ProviderEmbedResponse,
@@ -149,6 +152,13 @@ async function createEmbeddings(client: OpenAI, request: ProviderEmbedRequest): 
       .map((item) => item.embedding);
     if (embeddings.length === 0) {
       throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai embeddings returned no vectors');
+    }
+    const expectedCount = typeof request.input === 'string' ? 1 : request.input.length;
+    const expectedDimensions = request.dimensions;
+    if (embeddings.length !== expectedCount || embeddings.some((embedding) =>
+      (expectedDimensions !== undefined && embedding.length !== expectedDimensions)
+      || embedding.some((value) => !Number.isFinite(value)))) {
+      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai embeddings returned invalid vector dimensions or values');
     }
     return {
       embeddings,
@@ -310,7 +320,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
     id: PROVIDER_ID,
     name: 'OpenAI',
 
-    async execute(request) {
+    async execute<TInput, TOutput>(request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
       if (CHAT_ACTION_IDS.has(request.actionId) && request.externalModelId === OPENAI_REALTIME_MODEL) {
         return executeRealtimeChat(client, request);
       }
@@ -318,6 +328,13 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
         return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_completion_tokens' });
       }
       try {
+        if (request.actionId === 'embed') {
+          if (request.externalModelId !== OPENAI_EMBEDDING_MODEL_ID) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenAI embeddings require ${OPENAI_EMBEDDING_MODEL_ID}`);
+          const input = embeddingInputSchema.parse(request.input);
+          const result = await createEmbeddings(client, { externalModelId: request.externalModelId, input: input.text, dimensions: EMBEDDING_DIMENSIONS, timeoutMs: request.timeoutMs, signal: request.signal });
+          const output: EmbeddingOutput = { embedding: result.embeddings[0]! };
+          return { output: output as TOutput, usage: result.usage, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: result.rawResponse };
+        }
         if (request.actionId === 'generate-image') return await executeImageGenerate(client, request);
         if (request.actionId === 'transcribe' && request.externalModelId === OPENAI_REALTIME_MODEL) return await executeRealtimeTranscribe(client, request);
         if (request.actionId === 'transcribe') return await executeFileTranscribe(client, request);

@@ -1,5 +1,5 @@
 import { db } from '../src/lib/db/client';
-import { embeddingMetadata, embedText } from '../src/lib/bedrock-titan';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, embeddingMetadata, embedText } from '../src/lib/openai-embeddings';
 
 const BATCH_SIZE = 50;
 let processed = 0;
@@ -8,17 +8,17 @@ while (true) {
   const cursor = await db.query<{ key: string; content: string }>(`
     FOR message IN messages
       FILTER message.deletedAt == null
-      FILTER message.embeddingState != "ready" || !IS_ARRAY(message.embedding) || LENGTH(message.embedding) == 0
+      FILTER message.embeddingState != "ready" || message.embeddingModel != @model || !IS_ARRAY(message.embedding) || LENGTH(message.embedding) != @dimensions
       SORT message._key ASC
       LIMIT @limit
       RETURN { key: message._key, content: message.content }
-  `, { limit: BATCH_SIZE });
+  `, { limit: BATCH_SIZE, model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS });
   const messages = await cursor.all();
   if (!messages.length) break;
 
   for (const message of messages) {
     const embedding = await embedText({ text: message.content });
-    if (!embedding.length) throw new Error('Titan returned no embedding. Check the Bedrock AWS credentials before retrying the backfill.');
+    if (embedding.length !== EMBEDDING_DIMENSIONS) throw new Error(`OpenAI returned an invalid embedding. Check OPENAI_API_KEY before retrying the backfill.`);
     const embeddedAt = new Date().toISOString();
     await db.collection('messages').update(message.key, {
       embedding,

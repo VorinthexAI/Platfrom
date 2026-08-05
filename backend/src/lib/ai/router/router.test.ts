@@ -76,29 +76,29 @@ describe('priority-only persisted router', () => {
     await expect(selectRoute({ mode: 'fixed', organizationKey, actionSlug: 'chat', modelSlug: 'openai.gpt-5.4-nano', providerSlug: 'openai' }, deps)).resolves.toMatchObject({ providerSlug: 'openai', credentialSource: 'environment' });
   });
 
-  test('routes every action supported by a static AWS provider without an organization provider', async () => {
+  test('routes every action supported by a static provider without an organization provider', async () => {
     const embed = action('embed');
     const reason = action('reason');
-    const titan = model('amazon.titan-embed-text-v2');
-    const bedrock = providerSchema.parse({ key: newId(), slug: 'aws-bedrock', name: 'AWS Bedrock', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'aws-bedrock', enabled: true });
+    const embeddingModel = model('openai.text-embedding-3-large');
+    const openai = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
     const actions = [embed, reason];
-    const modelActions = actions.map((entry) => modelActionSchema.parse({ key: newId(), modelKey: titan.key, actionKey: entry.key, priority: 100, enabled: true }));
-    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: titan.key, providerKey: bedrock.key, providerModelId: 'amazon.titan-embed-text-v2:0', enabled: true });
+    const modelActions = actions.map((entry) => modelActionSchema.parse({ key: newId(), modelKey: embeddingModel.key, actionKey: entry.key, priority: 100, enabled: true }));
+    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openai.key, providerModelId: 'text-embedding-3-large', enabled: true });
     const data: RouterDataSource = {
       async getActionBySlug(slug) { return actions.find((entry) => entry.slug === slug) ?? null; },
-      async getModelBySlug(slug) { return slug === titan.slug ? titan : null; },
-      async getModelByKey(key) { return key === titan.key ? titan : null; },
-      async getProviderBySlug(slug) { return slug === bedrock.slug ? bedrock : null; },
-      async getProviderByKey(key) { return key === bedrock.key ? bedrock : null; },
+      async getModelBySlug(slug) { return slug === embeddingModel.slug ? embeddingModel : null; },
+      async getModelByKey(key) { return key === embeddingModel.key ? embeddingModel : null; },
+      async getProviderBySlug(slug) { return slug === openai.slug ? openai : null; },
+      async getProviderByKey(key) { return key === openai.key ? openai : null; },
       async listModelActions(actionKey) { return modelActions.filter((entry) => entry.actionKey === actionKey); },
-      async listModelProviders(modelKey) { return modelKey === titan.key ? [modelProvider] : []; },
+      async listModelProviders(modelKey) { return modelKey === embeddingModel.key ? [modelProvider] : []; },
       async listOrganizationProviderKeys() { return []; },
     };
 
     await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'reason' }, { data })).resolves.toMatchObject({
       actionSlug: 'reason',
-      modelSlug: 'amazon.titan-embed-text-v2',
-      providerSlug: 'aws-bedrock',
+      modelSlug: 'openai.text-embedding-3-large',
+      providerSlug: 'openai',
       credentialSource: 'environment',
     });
   });

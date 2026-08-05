@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { embedText } from '../lib/bedrock-titan';
+import { EMBEDDING_DIMENSIONS, embedText } from '../lib/openai-embeddings';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -41,7 +41,7 @@ function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: re
 
 function generateEmbedding(text: string) {
   if (process.env.ARCHIVE_E2E === 'true') {
-    const dimensions = Number(process.env.EMBEDDING_DIMENSIONS ?? 1024);
+    const dimensions = EMBEDDING_DIMENSIONS;
     const digest = Buffer.from(new Bun.CryptoHasher('sha256').update(text).digest());
     return Promise.resolve(Array.from({ length: dimensions }, (_, index) => digest[index % digest.length]! / 255));
   }
@@ -67,8 +67,7 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
 }
 
 export async function migrateArchiveVersions(targetDb: Database) {
-  const dimensions = Number(process.env.EMBEDDING_DIMENSIONS);
-  const enforceDimensions = Number.isInteger(dimensions) && dimensions > 0;
+  const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
   while (true) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
@@ -83,7 +82,7 @@ export async function migrateArchiveVersions(targetDb: Database) {
         SORT snapshot._key
         LIMIT 50
         RETURN snapshot
-    `, { after, dimensions: enforceDimensions ? dimensions : 0 });
+    `, { after, dimensions });
     const snapshots = await cursor.all();
     if (snapshots.length === 0) break;
     const updates: Array<Record<string, unknown>> = [];
@@ -94,10 +93,10 @@ export async function migrateArchiveVersions(targetDb: Database) {
       const hasJson = snapshot.json !== null && typeof snapshot.json === 'object' && (snapshot.json as Record<string, unknown>).type === 'doc';
       const representations = hasHtml && hasJson ? {} : legacyContentRepresentations(content);
       let embedding = snapshot.embedding;
-      if (!Array.isArray(embedding) || embedding.length === 0 || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value)) || (enforceDimensions && embedding.length !== dimensions)) {
+      if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
         embedding = await generateEmbedding(content);
       }
-      if (!Array.isArray(embedding) || embedding.length === 0 || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value)) || (enforceDimensions && embedding.length !== dimensions)) {
+      if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
         throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} could not produce a valid historical-content embedding.`);
       }
       updates.push({ _key: snapshot._key, ...representations, embedding });
@@ -117,7 +116,7 @@ export async function migrateArchiveVersions(targetDb: Database) {
         || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
       RETURN 1)
-  `, { dimensions: enforceDimensions ? dimensions : 0 });
+  `, { dimensions });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`documentVersions migration verification failed for ${invalid} row(s).`);
 }

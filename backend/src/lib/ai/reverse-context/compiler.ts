@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { embedText } from '@/lib/bedrock-titan';
+import { embedText } from '@/lib/openai-embeddings';
 import { sourceSelectionSchema, type SourceSelection } from '@/lib/ai/agent-run-sources';
 import { buildKnowledgePack } from './knowledge-pack';
 import { rankKnowledgeBlocks } from './ranking';

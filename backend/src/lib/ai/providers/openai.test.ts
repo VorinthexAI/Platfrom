@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createOpenAIProvider } from './openai';
+import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
 
 const originalFetch = globalThis.fetch;
 
@@ -36,6 +37,27 @@ describe('OpenAI provider embeddings', () => {
     });
     expect(response?.embeddings).toEqual([[1, 0], [0, 1]]);
     expect(response?.usage).toEqual({ inputTokens: 4, outputTokens: 0, totalTokens: 4 });
+  });
+
+  test('executes the routed embed action at 3072 dimensions', async () => {
+    const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.5);
+    let requestBody: Record<string, unknown> | undefined;
+    globalThis.fetch = (async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return Response.json({ object: 'list', model: 'text-embedding-3-large', data: [{ object: 'embedding', index: 0, embedding }], usage: { prompt_tokens: 2, total_tokens: 2 } });
+    }) as typeof fetch;
+
+    const response = await createOpenAIProvider({ apiKey: 'test-key' }).execute({
+      actionId: 'embed',
+      modelId: 'openai.text-embedding-3-large',
+      externalModelId: 'text-embedding-3-large',
+      input: { text: 'hello' },
+      organizationKey: 'organization',
+    });
+
+    expect(requestBody).toMatchObject({ model: 'text-embedding-3-large', dimensions: 3_072, input: 'hello' });
+    expect(response.output).toEqual({ embedding });
+    expect(response.providerId).toBe('openai');
   });
 });
 

@@ -269,17 +269,17 @@ interface RuntimeDefaults {
 }
 
 async function defaults(deps: ArchiveToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
-  const [{ newId }, storage, processing, titan, router, ledger, events, exports] = await Promise.all([
+  const [{ newId }, storage, processing, embeddings, router, ledger, events, exports] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
-    import('@/lib/bedrock-titan'),
+    import('@/lib/openai-embeddings'),
     import('@/lib/ai/router'),
     import('@/lib/db/archive-idempotency.node'),
     import('@/lib/db/events.node'),
     import('@/lib/ai/document-processing/exports'),
   ]);
-  const embedding = deps.embed ? (text: string) => deps.embed!(text) : (text: string) => titan.embedText({ text });
+  const embedding = deps.embed ? (text: string) => deps.embed!(text) : (text: string) => embeddings.embedText({ text });
   return {
     repository: deps.repository ?? await productionRepository(), storage: deps.storage ?? storage.documentStorage,
     processDocument: deps.processDocument ?? processing.processDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,

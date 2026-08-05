@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { basename, extname } from 'node:path';
 import mammoth from 'mammoth';
 import WordExtractor from 'word-extractor';
-import { embedText } from '@/lib/bedrock-titan';
+import { EMBEDDING_DIMENSIONS, embedText } from '@/lib/openai-embeddings';
 import { getDocumentById, insertPreparedDocument, documentSchema, type Document, type DocumentExtension } from '@/lib/db/documents.node';
 import { getFolderById } from '@/lib/db/folders.node';
 import { newId } from '@/lib/ids';
@@ -28,7 +28,7 @@ import {
 } from './representation';
 
 export const DEFAULT_MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
-export const DEFAULT_EMBEDDING_DIMENSIONS = 1_024;
+export const DEFAULT_EMBEDDING_DIMENSIONS = EMBEDDING_DIMENSIONS;
 export const DEFAULT_MAX_EXTRACTED_CHARACTERS = 10_000_000;
 const MAX_DOCX_ENTRIES = 10_000;
 const MAX_DOCX_EXPANDED_BYTES = 100 * 1024 * 1024;
@@ -277,7 +277,7 @@ export async function documentEmbed(input: { name: string; content: string }, op
     try {
       const text = `${input.name.trim()}\n\n${input.content.trim()}`;
       const embedding = await (options.embed ?? embedText)({ text });
-      const dimensions = options.dimensions ?? Number(process.env.EMBEDDING_DIMENSIONS ?? DEFAULT_EMBEDDING_DIMENSIONS);
+      const dimensions = options.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
       if (!Array.isArray(embedding) || embedding.length === 0 || embedding.some((value) => !Number.isFinite(value)) || embedding.length !== dimensions) {
         throw new Error(`Embedding must contain ${dimensions} finite values.`);
       }

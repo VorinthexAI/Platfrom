@@ -4,9 +4,11 @@ import type { ArchiveRepository } from './archive-runtime';
 import { ARCHIVE_TOOL_NAMES, ArchiveError, runArchiveTool, type ArchiveIdempotencyStore } from '.';
 import { DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed, documentGenerateContent, documentGenerateHtml, documentGenerateJson } from '@/lib/ai/document-processing';
+import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
 
 const now = '2026-07-22T12:00:00.000Z';
 const json = { type: 'doc' as const, content: [{ type: 'paragraph' as const, content: [{ type: 'text' as const, text: 'Body' }] }] };
+const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   const organizationKey = newId(), scopeKey = newId(), membershipKey = newId(), userKey = newId();
@@ -42,7 +44,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding: [1], createdAt: now, updatedAt: now });
-  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, json, content, embedding: [1], createdAt: now, updatedAt: now }); return key; };
+  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, json, content, embedding, createdAt: now, updatedAt: now }); return key; };
   return { repository, context, folders, documents, shares, versions, patches, scopeKey, folderKey, addDocument };
 }
 
@@ -537,8 +539,8 @@ describe('Archive runtime', () => {
       const dependencies: any = {
         repository: f.repository,
         storage,
-        embed: async () => [1],
-        ingestion: { embeddingDimensions: 1 },
+        embed: async () => embedding,
+        ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS },
         clock: () => new Date(now),
         canPermanentlyDelete: () => true,
         audit: async () => {},
@@ -550,7 +552,7 @@ describe('Archive runtime', () => {
           if (action === 'document-generate-html') return documentGenerateHtml(input);
           if (action === 'document-generate-json') return documentGenerateJson(input);
           if (action === 'document-generate-content') return documentGenerateContent(input);
-          if (action === 'document-embed') return documentEmbed(input, { embed: async () => [1], dimensions: 1 });
+          if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);
         },
       };

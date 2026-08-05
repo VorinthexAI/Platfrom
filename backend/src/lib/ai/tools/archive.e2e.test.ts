@@ -22,14 +22,14 @@ suite('Archive live E2E', () => {
   let GetObjectCommand: any;
   const roots = new Set<string>();
   const prefixes = new Set<string>();
-  const embedding = Array.from({ length: 1024 }, (_, index) => (index % 17) / 17);
+  const embedding = Array.from({ length: 3072 }, (_, index) => (index % 17) / 17);
   const now = '2026-07-22T12:00:00.000Z';
 
   beforeAll(async () => {
     expect(process.env.ARANGO_DATABASE).toBeTruthy();
     expect(process.env.ARANGO_DATABASE).not.toBe('vorinthex');
     expect(() => new URL(process.env.AWS_ENDPOINT_URL!)).not.toThrow();
-    expect(process.env.EMBEDDING_DIMENSIONS).toBe('1024');
+    expect(process.env.EMBEDDING_DIMENSIONS).toBe('3072');
     const [client, ids, archive, processing, exports, storage, s3Module, aws] = await Promise.all([
       import('@/lib/db/client'),
       import('@/lib/ids'),
@@ -147,7 +147,7 @@ suite('Archive live E2E', () => {
     const dependencies = {
       embed: async () => embedding,
       ingestion: {
-        embeddingDimensions: 1024,
+        embeddingDimensions: 3072,
         embed: async () => embedding,
         logger: (event: any) => {
           if (event.action === 'document.processing' ? event.status === 'started' : event.status === 'completed') processingOrder.push(event.action);
@@ -159,7 +159,7 @@ suite('Archive live E2E', () => {
         if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
         if (action === 'document-generate-json') return documentGenerateJson(input, { logger: () => undefined });
         if (action === 'document-generate-content') return documentGenerateContent(input, { logger: () => undefined });
-        if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 1024, logger: () => undefined });
+        if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 3072, logger: () => undefined });
         throw new Error(`Unexpected provider action: ${action}`);
       },
       generateExport: (input: any) => generateDocumentExport(input, { pdfRenderer: async () => new TextEncoder().encode('%PDF-1.4\n%%EOF') }),
@@ -230,7 +230,7 @@ suite('Archive live E2E', () => {
     });
     const documentKey = processed.document.key;
     expect(processingOrder).toEqual(['document.processing', 'document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-json', 'document-generate-content', 'document-embed', 'document-insert']);
-    expect((await call('document.find', { documentKeys: [documentKey], include: ['html', 'json', 'content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(1024);
+    expect((await call('document.find', { documentKeys: [documentKey], include: ['html', 'json', 'content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(3072);
     expect((await call('document.list', { folderKey: childFolderKey, extensions: ['md'] })).documents.map((item: any) => item.key)).toContain(documentKey);
     for (const mode of ['content', 'html', 'json'] as const) expect((await call('document.read', { documentKeys: [documentKey], mode })).summary.failed).toBe(0);
     const ephemeralAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 2, includeTitle: true, includeCode: false });
@@ -243,7 +243,7 @@ suite('Archive live E2E', () => {
     const canonical = (await call('document.find', { documentKeys: [documentKey], include: ['html', 'json', 'content', 'embedding'] })).results[0].data.document;
     expect(canonical.content).toContain('Canonical updated body');
     expect(canonical.html).toContain('Canonical updated body');
-    expect(canonical.embedding).toHaveLength(1024);
+    expect(canonical.embedding).toHaveLength(3072);
     await call('document.rename', { renames: [{ documentKey, name: 'Renamed Roadmap' }] });
     const beforeMoveEmbedding = (await db.collection('documents').document(documentKey)).embedding;
     await call('document.move', { moves: [{ documentKey, targetFolderKey: rootFolderKey }] });
@@ -262,7 +262,7 @@ suite('Archive live E2E', () => {
     const versionOne = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release one' } })).results[0].data.version;
     const versionTwo = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release two' }, atomic: true })).results[0].data.version;
     expect(versionTwo.version).toBeGreaterThan(versionOne.version);
-    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['html', 'json', 'content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(1024);
+    expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['html', 'json', 'content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(3072);
     expect((await call('document.list-versions', { documentKeys: [documentKey], limit: 1 })).results[0].data.versions).toHaveLength(1);
     const restoredVersion = await call('document.restore-version', { restores: [{ documentKey, versionKey: versionOne.key, createBackupVersion: true }], atomic: true });
     expect(restoredVersion.results[0].data.document.key).toBe(documentKey);
@@ -381,7 +381,7 @@ suite('Archive live E2E', () => {
       expect(shares[0].permission).toBe('comment');
       const versions = await (await temporary.query('FOR version IN documentVersions SORT version._key RETURN version')).all();
       expect(versions).toHaveLength(55);
-      expect(versions.every((version: any) => version.html.includes('<p>') && version.json.type === 'doc' && version.embedding.length === 1024)).toBe(true);
+      expect(versions.every((version: any) => version.html.includes('<p>') && version.json.type === 'doc' && version.embedding.length === 3072)).toBe(true);
       const shareIndexes = await temporary.collection('documentShares').indexes();
       const versionIndexes = await temporary.collection('documentVersions').indexes();
       expect(shareIndexes.some((index: any) => index.unique && index.fields?.join(',') === 'tokenHash')).toBe(true);

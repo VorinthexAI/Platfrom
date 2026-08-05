@@ -13,7 +13,7 @@ import { userMentionSchema } from '@/lib/db/user-mentions.node';
 import { userReactionSchema } from '@/lib/db/user-reactions.node';
 import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
-import { embeddingMetadata, embedText } from '@/lib/bedrock-titan';
+import { embeddingMetadata, embedText } from '@/lib/openai-embeddings';
 
 export interface MentionCandidate {
   participantKey: string;
