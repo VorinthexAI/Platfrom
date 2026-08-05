@@ -1,24 +1,26 @@
 import Image from "next/image";
 import { Button } from "@vorinthex/shared/ui/components";
+import { BrainIcon, LockIcon, StarIcon } from "@vorinthex/shared/ui/icons";
 import {
   APP_STORE_URL,
   CORE_CAPABILITIES,
   GOOGLE_PLAY_URL,
 } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
+import { CoreNeuralScene } from "./CoreNeuralScene";
 import styles from "./CorePage.module.css";
 
 function StoreButtons({ compact = false }: { compact?: boolean }) {
   return (
     <div className={styles.storeButtons} id={compact ? undefined : "download"}>
       <Button asChild size={compact ? "sm" : "lg"} variant="outline">
-        <a href={APP_STORE_URL} rel="noreferrer" target="_blank">
-          Download on the App Store
+        <a href={GOOGLE_PLAY_URL} rel="noreferrer" target="_blank">
+          Get it on Google Play
         </a>
       </Button>
       <Button asChild size={compact ? "sm" : "lg"} variant="outline">
-        <a href={GOOGLE_PLAY_URL} rel="noreferrer" target="_blank">
-          Get it on Google Play
+        <a href={APP_STORE_URL} rel="noreferrer" target="_blank">
+          Download on the App Store
         </a>
       </Button>
     </div>
@@ -32,34 +34,22 @@ export function CorePage() {
 
       <section className={styles.hero} id="overview">
         <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Your intelligence, connected</p>
           <h1>Your personal AI.</h1>
           <p className={styles.heroLead}>Everything. Intelligently connected.</p>
           <div className={styles.rule} />
           <p className={styles.heroBody}>
-            Vorinthex Core remembers, understands, and connects everything that
-            matters to you. One private intelligence that grows with you.
+            Vorinthex Core is your personal AI that remembers, understands and
+            connects everything that matters to you.
           </p>
           <StoreButtons />
         </div>
 
         <div className={styles.coreVisual} aria-label="Vorinthex Core">
-          <div className={styles.orbit} />
-          <div className={styles.orbitSecondary} />
-          <div className={styles.rays} />
-          <div className={styles.coreDisc}>
-            <Image
-              alt="Vorinthex Core emblem"
-              className={styles.coreLogo}
-              height={512}
-              priority
-              src="/logos/entities/product-core.png"
-              width={512}
-            />
-          </div>
+          <CoreNeuralScene />
           <div className={styles.coreLabel}>
             <span>Core</span>
             <strong>Your personal AI</strong>
+            <p>The intelligence that connects everything into one.</p>
           </div>
         </div>
       </section>
@@ -67,7 +57,7 @@ export function CorePage() {
       <section className={styles.capabilities} id="capabilities">
         <div className={styles.sectionHeading}>
           <span />
-          <h2>Core capabilities</h2>
+          <h2>Core Apps</h2>
           <span />
         </div>
         <div className={styles.capabilityGrid}>
@@ -86,36 +76,39 @@ export function CorePage() {
         </div>
       </section>
 
+      <section className={styles.comingSoon} aria-label="More Core apps coming soon">
+        <Image alt="" height={34} src="/logos/vorinthex-mark.png" width={34} />
+        <p>More coming soon</p>
+      </section>
+
       <section className={styles.principles} id="principles">
         <div className={styles.principlesCopy}>
-          <p className={styles.eyebrow}>Built around you</p>
           <h2>One AI. Every capability. Always with you.</h2>
           <div className={styles.rule} />
           <div className={styles.principleGrid}>
             <article>
-              <span>01</span>
+              <BrainIcon aria-hidden size="lg" />
               <h3>One intelligence</h3>
-              <p>Your knowledge, conversations, images, and goals in one place.</p>
+              <p>All your data, conversations, images and knowledge in one place.</p>
             </article>
             <article>
-              <span>02</span>
+              <LockIcon aria-hidden size="lg" />
               <h3>Private by design</h3>
-              <p>Your data is yours, protected by encryption and clear control.</p>
+              <p>Your data is yours. End-to-end encryption and full control.</p>
             </article>
             <article>
-              <span>03</span>
+              <StarIcon aria-hidden size="lg" />
               <h3>Built for you</h3>
-              <p>Contextual and personal, designed to amplify your potential.</p>
+              <p>Contextual, proactive and personal. Built to amplify your potential.</p>
             </article>
           </div>
-          <StoreButtons compact />
         </div>
 
         <div className={styles.phone} aria-label="Core mobile app preview">
           <div className={styles.phoneSpeaker} />
           <div className={styles.phoneScreen}>
             <div className={styles.phoneBrand}>Vorinthex AI</div>
-            <p>Good morning.</p>
+            <p>Good morning, Oscar.</p>
             <small>How can I help you today?</small>
             <div className={styles.phoneCapabilities}>
               {CORE_CAPABILITIES.map((capability) => (
@@ -127,7 +120,7 @@ export function CorePage() {
             </div>
             <div className={styles.phoneInsight}>
               <small>Recent insight</small>
-              <strong>Everything important, in context.</strong>
+              <strong>Project Nexus Update</strong>
             </div>
           </div>
         </div>

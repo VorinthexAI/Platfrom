@@ -24,9 +24,8 @@ export function SiteHeader() {
       <Brand />
       <nav className={styles.nav} aria-label="Primary navigation">
         <Link href="/">Overview</Link>
-        <Link href="/#capabilities">Core</Link>
-        <Link href="/pricing">Pricing</Link>
-        <Link href="/about">About</Link>
+        <Link href="/#capabilities">Core Apps</Link>
+        <Link href="/#principles">Vision</Link>
       </nav>
       <Button asChild size="sm" variant="outline">
         <Link href="/#download">Get the app</Link>
