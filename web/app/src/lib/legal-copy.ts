@@ -30,7 +30,7 @@ export const PRIVACY_COPY: VaultCopy = {
     {
       title: "How we use data",
       paragraphs: [
-        "We use personal data to create and secure accounts, provide and personalize Vorinthex services, process requests and purchases, communicate about access and service updates, provide support, measure and improve performance, prevent fraud and abuse, comply with law, and enforce our terms.",
+        "We use personal data to create and secure accounts, provide and personalize Vorinthex AI services, process requests and purchases, communicate about access and service updates, provide support, measure and improve performance, prevent fraud and abuse, comply with law, and enforce our terms.",
       ],
     },
     {
@@ -68,13 +68,13 @@ export const PRIVACY_COPY: VaultCopy = {
     {
       title: "Security and international processing",
       paragraphs: [
-        "We use administrative, technical, and organizational safeguards designed to protect personal data. No system is completely secure, so we cannot guarantee absolute security. Vorinthex and its service providers may process data in countries other than your own, with safeguards used where required by applicable law.",
+        "We use administrative, technical, and organizational safeguards designed to protect personal data. No system is completely secure, so we cannot guarantee absolute security. Vorinthex AI and its service providers may process data in countries other than your own, with safeguards used where required by applicable law.",
       ],
     },
     {
       title: "Children",
       paragraphs: [
-        "Vorinthex services are not directed to children under 13, or under the higher minimum age required in their country. We do not knowingly collect personal data from children below that age. Contact us if you believe a child has provided personal data so we can investigate and delete it.",
+        "Vorinthex AI services are not directed to children under 13, or under the higher minimum age required in their country. We do not knowingly collect personal data from children below that age. Contact us if you believe a child has provided personal data so we can investigate and delete it.",
       ],
     },
     {
@@ -92,7 +92,7 @@ export const TERMS_COPY: VaultCopy = {
   title: "Terms",
   eyebrow: "Accord Vault",
   paragraphs: [
-    "These terms govern your use of Vorinthex websites, apps, and services. By using a Vorinthex service, you agree to use it lawfully and responsibly.",
+    "These terms govern your use of Vorinthex AI websites, apps, and services. By using a Vorinthex AI service, you agree to use it lawfully and responsibly.",
     "Vorinthex Core provides AI assisted features. You remain responsible for reviewing outputs before relying on them for important decisions.",
     "The Vorinthex AI name, marks, visual identity, software, and original content are the property of Vorinthex AI or its licensors.",
   ],
@@ -104,7 +104,7 @@ export const CONTACT_COPY: VaultCopy = {
   eyebrow: "Signal Vault",
   paragraphs: [
     "Questions about access, press, partnerships, or removing your data all land in the same inbox. We read everything.",
-    "Reach the Vorinthex team at contact@vorinthex.com.",
+    "Reach the Vorinthex AI team at contact@vorinthex.com.",
   ],
   footnote: "One address answers everything.",
 };

@@ -5,7 +5,7 @@ import styles from "./SiteChrome.module.css";
 
 export function Brand() {
   return (
-    <Link className={styles.brand} href="/" aria-label="Vorinthex home">
+    <Link className={styles.brand} href="/" aria-label="Vorinthex AI home">
       <Image
         alt=""
         className={styles.brandMark}
@@ -13,7 +13,7 @@ export function Brand() {
         src="/logos/vorinthex-mark.png"
         width={42}
       />
-      <span>Vorinthex</span>
+      <span>Vorinthex AI</span>
     </Link>
   );
 }
@@ -46,7 +46,7 @@ export function SiteFooter() {
         <Link href="/terms">Terms</Link>
         <Link href="/contact">Contact</Link>
       </div>
-      <p>© 2026 Vorinthex. All rights reserved.</p>
+      <p>© 2026 Vorinthex AI. All rights reserved.</p>
     </footer>
   );
 }

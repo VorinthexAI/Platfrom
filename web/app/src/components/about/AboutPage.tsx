@@ -30,17 +30,17 @@ export function AboutPage() {
 
       <section className={styles.hero}>
         <div>
-          <p className={styles.eyebrow}>About Vorinthex</p>
+          <p className={styles.eyebrow}>About Vorinthex AI</p>
           <h1>Intelligence should know you.</h1>
           <p className={styles.lead}>
-            Vorinthex is an AI-native software company focused on Core: one
+            Vorinthex AI is an AI-native software company focused on Core: one
             private personal AI that learns, remembers, and grows with you.
           </p>
         </div>
         <div className={styles.heroMark}>
           <div />
           <Image
-            alt="Vorinthex emblem"
+            alt="Vorinthex AI emblem"
             height={420}
             priority
             src="/logos/vorinthex-mark.png"
@@ -108,7 +108,7 @@ export function AboutPage() {
           <p className={styles.eyebrow}>Built for the long term</p>
           <h2>From context to action, in one place.</h2>
           <p>
-            Vorinthex combines modern cloud infrastructure with leading
+            Vorinthex AI combines modern cloud infrastructure with leading
             foundation models to make Core useful across everyday life. The
             technology can evolve; the product principle stays constant: your
             AI should understand your context and remain centered on you.

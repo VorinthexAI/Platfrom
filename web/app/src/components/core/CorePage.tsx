@@ -114,7 +114,7 @@ export function CorePage() {
         <div className={styles.phone} aria-label="Core mobile app preview">
           <div className={styles.phoneSpeaker} />
           <div className={styles.phoneScreen}>
-            <div className={styles.phoneBrand}>Vorinthex</div>
+            <div className={styles.phoneBrand}>Vorinthex AI</div>
             <p>Good morning.</p>
             <small>How can I help you today?</small>
             <div className={styles.phoneCapabilities}>

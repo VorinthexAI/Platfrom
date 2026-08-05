@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { AboutPage } from "@/components/about/AboutPage";
 
 export const metadata: Metadata = {
-  title: "About Vorinthex",
+  title: "About Vorinthex AI",
   description:
-    "Vorinthex is an AI-native software company building Core, one private personal AI that learns, remembers, and grows with you.",
+    "Vorinthex AI is an AI-native software company building Core, one private personal AI that learns, remembers, and grows with you.",
   alternates: { canonical: "/about" },
 };
 

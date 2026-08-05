@@ -29,15 +29,15 @@ The Core personal AI foundation is free. Optional capabilities are monthly subsc
 - Compass: $14.99 per month.
 - Ascend: $24.99 per month.
 
-## About Vorinthex
+## About Vorinthex AI
 
-Vorinthex is an AI-native software company focused on making personal intelligence practical, private, and deeply useful. Core connects context that would otherwise remain scattered across disconnected tools.
+Vorinthex AI is an AI-native software company focused on making personal intelligence practical, private, and deeply useful. Core connects context that would otherwise remain scattered across disconnected tools.
 
 ## Links
 
 - [Download Core](https://vorinthex.com)
 - [Core Pricing](https://vorinthex.com/pricing)
-- [About Vorinthex](https://vorinthex.com/about)
+- [About Vorinthex AI](https://vorinthex.com/about)
 - [Privacy](https://vorinthex.com/privacy)
 - [Terms](https://vorinthex.com/terms)
 - [Contact](https://vorinthex.com/contact)

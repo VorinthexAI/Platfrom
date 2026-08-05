@@ -12,7 +12,7 @@ export function GET() {
 
 ## Company
 
-- [About](https://vorinthex.com/about): Vorinthex is an AI-native software company focused on personal intelligence.
+- [About](https://vorinthex.com/about): Vorinthex AI is an AI-native software company focused on personal intelligence.
 - [Privacy](https://vorinthex.com/privacy): Privacy and data controls.
 - [Contact](https://vorinthex.com/contact): Contact Vorinthex AI.
 `, {
