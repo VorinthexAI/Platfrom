@@ -1,6 +1,13 @@
-import { VORINTHEX_GALAXY_REGISTRY } from "../../../web/app/src/lib/galaxy/registry";
-import type { GalaxyEntity } from "../../../web/app/src/lib/galaxy/registry-types";
+import { CORE_CAPABILITIES } from "../../../web/app/src/lib/core";
 import type { AudioCategory } from "./types";
+
+type CoreEntity = {
+  shortDescription: string;
+  tagline?: string;
+  role?: string;
+  fullTitle?: string;
+  content: { drawerLine: string; bullets?: string[] };
+};
 
 export type AudioTarget = {
   slug: string;
@@ -8,36 +15,42 @@ export type AudioTarget = {
   category: AudioCategory;
   entityId: string;
   description: string;
-  entity?: GalaxyEntity;
+  entity?: CoreEntity;
 };
 
 export function listTargets(): AudioTarget[] {
-  const brand: AudioTarget = {
-    slug: "vorinthex-ai",
-    name: "Vorinthex AI",
-    category: "master-brand",
-    entityId: VORINTHEX_GALAXY_REGISTRY.brand.id,
-    description: "Vorinthex AI master brand: The Nexus of Intelligence."
-  };
   return [
-    brand,
-    ...Object.values(VORINTHEX_GALAXY_REGISTRY.products).map((entity) => toTarget(entity, "product")),
-    ...Object.values(VORINTHEX_GALAXY_REGISTRY.capabilities).map((entity) => toTarget(entity, "capability")),
-    ...Object.values(VORINTHEX_GALAXY_REGISTRY.orchestrators).map((entity) => toTarget(entity, "orchestrator"))
+    {
+      slug: "vorinthex-ai",
+      name: "Vorinthex AI",
+      category: "master-brand",
+      entityId: "brand.vorinthex",
+      description: "Vorinthex AI: your personal AI.",
+    },
+    {
+      slug: "core",
+      name: "Core",
+      category: "product",
+      entityId: "product.core",
+      description: "One private personal AI that grows with you.",
+    },
+    ...CORE_CAPABILITIES.map(({ name, description }) => {
+      const slug = name.toLowerCase();
+      return {
+        slug,
+        name,
+        category: "capability" as const,
+        entityId: `capability.${slug}`,
+        description,
+        entity: {
+          shortDescription: description,
+          content: { drawerLine: description },
+        },
+      };
+    }),
   ];
 }
 
 export function findTarget(category: AudioCategory, slug: string): AudioTarget | undefined {
   return listTargets().find((target) => target.category === category && target.slug === slug);
-}
-
-function toTarget(entity: GalaxyEntity, category: AudioCategory): AudioTarget {
-  return {
-    slug: entity.slug,
-    name: entity.name,
-    category,
-    entityId: entity.id,
-    description: entity.longDescription ?? entity.shortDescription,
-    entity
-  };
 }

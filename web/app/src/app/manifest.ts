@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: SITE_NAME,
     short_name: SITE_NAME,
-    description: `${SITE_TAGLINE}. Core is your personal AI Brain.`,
+    description: `${SITE_TAGLINE}. One private intelligence that grows with you.`,
     start_url: "/",
     display: "standalone",
     background_color: "#020304",

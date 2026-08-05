@@ -1,0 +1,148 @@
+.page {
+  --warm: #d1b68e;
+  --line: rgba(218, 204, 180, 0.28);
+  min-height: 100svh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 68% 18%, rgba(82, 98, 112, 0.15), transparent 29rem),
+    radial-gradient(circle at 50% 68%, rgba(128, 92, 55, 0.08), transparent 34rem),
+    #020406;
+  color: #e9e8e4;
+}
+
+.header,
+.hero,
+.capabilities,
+.principles,
+.footer {
+  width: min(1180px, calc(100% - 48px));
+  margin-inline: auto;
+}
+
+.header {
+  position: relative;
+  z-index: 5;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  min-height: 96px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.header > :last-child { justify-self: end; }
+.brand { display: inline-flex; align-items: center; gap: 12px; width: fit-content; color: #f0efeb; font-family: var(--font-display); font-size: 20px; letter-spacing: 0.18em; text-transform: uppercase; }
+.brandMark { width: 34px; height: 34px; object-fit: contain; }
+.nav { display: flex; gap: 38px; }
+.nav a,
+.footerLinks a { color: #aaa9a4; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; transition: color 180ms ease; }
+.nav a:hover,
+.footerLinks a:hover { color: #fff; }
+
+.hero { position: relative; display: grid; grid-template-columns: minmax(320px, 0.85fr) minmax(440px, 1.15fr); align-items: center; min-height: 680px; padding-block: 72px 54px; }
+.heroCopy { position: relative; z-index: 2; }
+.eyebrow { color: #8e8f8f; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.28em; text-transform: uppercase; }
+.hero h1 { max-width: 580px; margin-top: 20px; font-family: var(--font-display); font-size: clamp(58px, 6vw, 92px); font-weight: 400; letter-spacing: 0.08em; line-height: 0.98; text-transform: uppercase; background: linear-gradient(135deg, #f8f7f3, #7f8589 55%, #e7e6e0); background-clip: text; color: transparent; }
+.heroLead { margin-top: 28px; color: #d1d0cc; font-family: var(--font-display); font-size: 17px; letter-spacing: 0.24em; text-transform: uppercase; }
+.rule { width: 118px; height: 1px; margin-block: 30px; background: linear-gradient(90deg, var(--warm), transparent); box-shadow: 0 0 12px rgba(209, 182, 142, 0.65); }
+.heroBody { max-width: 430px; color: #a5a6a4; font-size: 15px; line-height: 1.85; }
+.storeButtons { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+
+.coreVisual { position: relative; min-height: 540px; isolation: isolate; }
+.coreVisual::after { content: ""; position: absolute; inset: 8% -8% -7%; z-index: -3; background-image: linear-gradient(rgba(194, 207, 214, 0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(194, 207, 214, 0.1) 1px, transparent 1px); background-size: 48px 48px; mask-image: radial-gradient(ellipse at center, #000, transparent 66%); transform: perspective(580px) rotateX(68deg) translateY(35%); }
+.coreDisc { position: absolute; left: 50%; top: 46%; width: clamp(260px, 31vw, 410px); aspect-ratio: 1; transform: translate(-50%, -50%); filter: drop-shadow(0 0 45px rgba(190, 209, 219, 0.16)); }
+.coreLogo { width: 100%; height: 100%; object-fit: contain; }
+.orbit,
+.orbitSecondary { position: absolute; left: 50%; top: 46%; aspect-ratio: 1; border: 1px solid rgba(201, 216, 224, 0.17); border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 70px rgba(153, 180, 195, 0.08), inset 0 0 50px rgba(153, 180, 195, 0.05); }
+.orbit { width: 82%; }
+.orbitSecondary { width: 61%; border-color: rgba(209, 182, 142, 0.22); }
+.rays { position: absolute; inset: 2% 4% 4%; z-index: -1; background: repeating-conic-gradient(from 2deg at 50% 46%, rgba(215, 228, 234, 0.28) 0 0.12deg, transparent 0.18deg 7deg); mask-image: radial-gradient(circle at 50% 46%, transparent 0 24%, #000 38%, transparent 72%); opacity: 0.58; }
+.coreLabel { position: absolute; right: 2%; bottom: 18%; display: grid; gap: 6px; padding-left: 18px; border-left: 1px solid var(--warm); text-transform: uppercase; }
+.coreLabel span { font-family: var(--font-display); font-size: 18px; letter-spacing: 0.18em; }
+.coreLabel strong { color: #858784; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.16em; font-weight: 400; }
+
+.capabilities { padding-block: 30px 96px; }
+.sectionHeading { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 22px; }
+.sectionHeading span { height: 1px; background: linear-gradient(90deg, transparent, var(--line)); }
+.sectionHeading span:last-child { background: linear-gradient(90deg, var(--line), transparent); }
+.sectionHeading h2,
+.principles h2 { font-family: var(--font-display); font-weight: 400; letter-spacing: 0.28em; text-transform: uppercase; }
+.sectionHeading h2 { font-size: 22px; }
+.capabilityGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 38px; }
+.capabilityCard { position: relative; min-height: 330px; padding: 28px 20px; overflow: hidden; border: 1px solid rgba(206, 199, 185, 0.25); border-radius: 14px; background: linear-gradient(145deg, rgba(29, 35, 40, 0.5), rgba(3, 5, 7, 0.82)); text-align: center; box-shadow: inset 0 1px rgba(255, 255, 255, 0.07), 0 22px 50px rgba(0, 0, 0, 0.28); }
+.capabilityCard::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at 50% 22%, rgba(193, 207, 215, 0.1), transparent 35%); pointer-events: none; }
+.capabilityCard img { position: relative; width: min(140px, 80%); height: auto; }
+.capabilityCard h3 { margin-top: 8px; font-family: var(--font-display); font-size: 17px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; }
+.capabilityCard p { margin-top: 16px; color: #92938f; font-size: 13px; line-height: 1.7; }
+
+.principles { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 380px; align-items: center; min-height: 650px; padding: 70px 60px; border: 1px solid rgba(206, 199, 185, 0.18); border-radius: 18px; background: radial-gradient(circle at 85% 82%, rgba(116, 85, 51, 0.16), transparent 32%), linear-gradient(145deg, rgba(15, 19, 23, 0.68), rgba(2, 4, 6, 0.82)); }
+.principlesCopy { position: relative; z-index: 2; }
+.principles h2 { max-width: 680px; margin-top: 20px; font-size: clamp(29px, 3.4vw, 46px); line-height: 1.45; }
+.principleGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; max-width: 720px; }
+.principleGrid article > span { color: var(--warm); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.15em; }
+.principleGrid h3 { margin-top: 12px; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
+.principleGrid p { margin-top: 10px; color: #8e908e; font-size: 12px; line-height: 1.7; }
+
+.phone { position: relative; width: 292px; height: 590px; justify-self: end; padding: 11px; border: 2px solid #767b7e; border-radius: 48px; background: linear-gradient(135deg, #72777a, #111416 13%, #030405 86%, #8e9293); box-shadow: -24px 34px 70px rgba(0, 0, 0, 0.64), 0 0 40px rgba(203, 176, 132, 0.1); transform: rotate(5deg); }
+.phoneSpeaker { position: absolute; z-index: 3; top: 19px; left: 50%; width: 82px; height: 18px; border-radius: 16px; background: #020304; transform: translateX(-50%); }
+.phoneScreen { height: 100%; padding: 54px 18px 20px; border-radius: 37px; background: radial-gradient(circle at top, #11171c, #030507 55%); }
+.phoneBrand { margin-bottom: 55px; color: #bebfbd; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.2em; text-align: center; text-transform: uppercase; }
+.phoneScreen > p { font-family: var(--font-display); font-size: 15px; }
+.phoneScreen > small { display: block; margin-top: 6px; color: #7f8586; }
+.phoneCapabilities { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-top: 26px; }
+.phoneCapabilities div { display: grid; justify-items: center; gap: 4px; padding-block: 8px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 7px; }
+.phoneCapabilities img { width: 32px; height: 32px; }
+.phoneCapabilities span { font-size: 6px; color: #a7a8a5; }
+.phoneInsight { display: grid; gap: 9px; margin-top: 30px; padding: 17px; border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 10px; background: rgba(255, 255, 255, 0.025); }
+.phoneInsight small { color: #696f70; letter-spacing: 0.1em; text-transform: uppercase; }
+.phoneInsight strong { font-family: var(--font-display); font-size: 12px; font-weight: 400; }
+
+.footer { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 24px; min-height: 140px; margin-top: 76px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.footer .brand { font-size: 13px; }
+.footer .brandMark { width: 26px; height: 26px; }
+.footerLinks { display: flex; gap: 24px; }
+.footer p { justify-self: end; color: #626562; font-size: 11px; }
+
+@media (max-width: 980px) {
+  .header { grid-template-columns: 1fr auto; }
+  .nav { display: none; }
+  .hero { grid-template-columns: 1fr; padding-top: 90px; }
+  .heroCopy { max-width: 620px; }
+  .coreVisual { min-height: 600px; margin-top: -30px; }
+  .capabilityGrid { grid-template-columns: repeat(2, 1fr); }
+  .capabilityCard:last-child { grid-column: 1 / -1; }
+  .principles { grid-template-columns: 1fr; gap: 70px; }
+  .phone { justify-self: center; }
+}
+
+@media (max-width: 640px) {
+  .header,
+  .hero,
+  .capabilities,
+  .principles,
+  .footer { width: min(100% - 28px, 1180px); }
+  .header { min-height: 78px; }
+  .brand { font-size: 15px; letter-spacing: 0.12em; }
+  .brandMark { width: 30px; height: 30px; }
+  .header > :last-child { font-size: 9px; }
+  .hero { min-height: auto; padding-top: 64px; }
+  .hero h1 { font-size: clamp(48px, 15vw, 68px); }
+  .heroLead { font-size: 14px; line-height: 1.7; }
+  .storeButtons { display: grid; }
+  .storeButtons a { width: 100%; }
+  .coreVisual { min-height: 430px; margin-top: 10px; }
+  .coreDisc { width: 270px; }
+  .coreLabel { right: 0; bottom: 10%; }
+  .capabilities { padding-bottom: 68px; }
+  .sectionHeading { gap: 12px; }
+  .sectionHeading h2 { font-size: 16px; letter-spacing: 0.18em; text-align: center; }
+  .capabilityGrid { grid-template-columns: 1fr; }
+  .capabilityCard:last-child { grid-column: auto; }
+  .capabilityCard { min-height: 300px; }
+  .principles { padding: 48px 22px; }
+  .principles h2 { letter-spacing: 0.16em; }
+  .principleGrid { grid-template-columns: 1fr; }
+  .phone { width: 252px; height: 520px; }
+  .phoneCapabilities span { display: none; }
+  .footer { grid-template-columns: 1fr; justify-items: center; padding-block: 40px; text-align: center; }
+  .footer p { justify-self: center; }
+}

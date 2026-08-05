@@ -1,4 +1,4 @@
-import { VORINTHEX_GALAXY_REGISTRY } from "../../../web/app/src/lib/galaxy/registry";
+import { CORE_CAPABILITIES } from "../../../web/app/src/lib/core";
 import { generateVersion, type EngineContext } from "./cli";
 import { loadConfig } from "./config";
 import { ensureRuntime } from "./filesystem";
@@ -29,8 +29,8 @@ Concept:
 - no text, no letters, no watermark, no clutter, no colorful background, no glitter`;
 }
 
-function simpleCapabilityPrompt(entity: typeof VORINTHEX_GALAXY_REGISTRY.capabilities[keyof typeof VORINTHEX_GALAXY_REGISTRY.capabilities]): string {
-  return `Create a simpler cleaner logo for the Core capability named ${entity.name}.
+function simpleCapabilityPrompt(name: string, description: string): string {
+  return `Create a simpler cleaner logo for the Core capability named ${name}.
 
 Keep it in the same Vorinthex family as the master logo:
 - obsidian black and polished chrome
@@ -43,7 +43,7 @@ Keep it in the same Vorinthex family as the master logo:
 - no text, no letters, no watermark, no colorful background
 
 Capability meaning:
-${entity.name}: ${entity.shortDescription}
+${name}: ${description}
 
 Use only the simplest abstract geometry needed to suggest this capability.`;
 }
@@ -66,19 +66,20 @@ export async function refreshBrandAndCapabilities(): Promise<void> {
     notes: "Globe V master logo direction with internal orbit."
   });
 
-  for (const entity of Object.values(VORINTHEX_GALAXY_REGISTRY.capabilities)) {
-    const slug = `capability-${entity.slug}`;
+  for (const capability of CORE_CAPABILITIES) {
+    const capabilitySlug = capability.name.toLowerCase();
+    const slug = `capability-${capabilitySlug}`;
     const asset = await context.registry.createAsset({
-      name: entity.name,
+      name: capability.name,
       slug,
       category: "capability",
-      description: entity.longDescription ?? entity.shortDescription,
-      designIntent: `Simplified Core capability logo refresh for ${entity.id}.`
+      description: capability.description,
+      designIntent: `Simplified Core capability logo refresh for capability.${capabilitySlug}.`
     });
 
     await generateVersion(context, {
       asset,
-      instruction: simpleCapabilityPrompt(entity),
+      instruction: simpleCapabilityPrompt(capability.name, capability.description),
       action: "Refresh simple capability logo",
       notes: "Simpler capability logo refresh."
     });

@@ -2,7 +2,9 @@ name: Cleanup Intelligence Fragments
 
 on:
   push:
-    branches: [feat/core-web-restoration]
+    branches: [main]
+    paths: [.github/workflows/cleanup-intelligence-fragments.yml]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -10,7 +12,6 @@ permissions:
 
 jobs:
   cleanup:
-    if: contains(github.event.head_commit.message, '[cleanup-fragments]')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:

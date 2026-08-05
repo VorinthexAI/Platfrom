@@ -23,16 +23,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: workspaceRoot,
   },
-  async redirects() {
-    return [
-      // The founders gate moved from /galaxy/sun to /nexus.
-      {
-        source: "/galaxy/sun",
-        destination: "/nexus",
-        permanent: false,
-      },
-    ];
-  },
   async headers() {
     return [
       {

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { LandingPage } from "@/components/landing/LandingPage";
+import { LegalPage } from "@/components/legal/LegalPage";
 import { TERMS_COPY } from "@/lib/legal-copy";
 
 export const metadata: Metadata = {
@@ -8,20 +8,6 @@ export const metadata: Metadata = {
   alternates: { canonical: "/terms" },
 };
 
-/**
- * The terms are read inside an asteroid — the Accord Vault. The copy
- * stays server-rendered (visually hidden) for crawlers.
- */
 export default function TermsPage() {
-  return (
-    <>
-      <LandingPage initialCave="terms" />
-      <article className="sr-only">
-        <h1>{TERMS_COPY.title}</h1>
-        {TERMS_COPY.paragraphs.map((paragraph) => (
-          <p key={paragraph.slice(0, 24)}>{paragraph}</p>
-        ))}
-      </article>
-    </>
-  );
+  return <LegalPage copy={TERMS_COPY} />;
 }

@@ -1,26 +1,9 @@
 import type { MetadataRoute } from "next";
-import { getIndexableEntities } from "@/lib/galaxy/registry-helpers";
 import { absoluteUrl } from "@/lib/site";
 
-/** Sitemap generated from the registry — hidden entities never appear. */
 export default function sitemap(): MetadataRoute.Sitemap {
-  const entityEntries = getIndexableEntities().map((entity) => ({
-    url: absoluteUrl(entity.routes.path),
-    changeFrequency: "weekly" as const,
-    priority:
-      entity.type === "star"
-        ? 1
-        : entity.type === "product"
-          ? entity.isLive
-            ? 0.9
-            : 0.5
-          : 0.7,
-  }));
-
-  // Indexable pages that live outside the registry.
-  const staticEntries = [
-    { path: "/pricing", priority: 0.8 },
-    { path: "/hunt", priority: 0.6 },
+  return [
+    { path: "/", priority: 1 },
     { path: "/about", priority: 0.5 },
     { path: "/contact", priority: 0.4 },
     { path: "/terms", priority: 0.3 },
@@ -30,6 +13,4 @@ export default function sitemap(): MetadataRoute.Sitemap {
     changeFrequency: "monthly" as const,
     priority,
   }));
-
-  return [...entityEntries, ...staticEntries];
 }
