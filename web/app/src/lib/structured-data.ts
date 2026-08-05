@@ -1,4 +1,4 @@
-import { CORE_FAQ } from "@/lib/core";
+import { CORE_CAPABILITIES, CORE_FAQ } from "@/lib/core";
 import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site";
 
 export const organizationJsonLd = {
@@ -33,12 +33,24 @@ export const coreSoftwareJsonLd = {
   applicationCategory: "ProductivityApplication",
   operatingSystem: "iOS, Android",
   publisher: { "@type": "Organization", name: SITE_NAME, url: SITE_URL },
-  offers: {
-    "@type": "Offer",
-    availability: "https://schema.org/InStock",
-    price: "0",
-    priceCurrency: "USD",
-  },
+  offers: [
+    {
+      "@type": "Offer",
+      name: "Core foundation",
+      availability: "https://schema.org/InStock",
+      price: "0",
+      priceCurrency: "USD",
+      url: SITE_URL,
+    },
+    ...CORE_CAPABILITIES.map((capability) => ({
+      "@type": "Offer",
+      name: `${capability.name} capability monthly subscription`,
+      availability: "https://schema.org/InStock",
+      price: capability.price.toFixed(2),
+      priceCurrency: "USD",
+      url: absoluteUrl("/pricing"),
+    })),
+  ],
 };
 
 export const faqJsonLd = {

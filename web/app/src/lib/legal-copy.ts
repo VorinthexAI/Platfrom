@@ -99,18 +99,6 @@ export const TERMS_COPY: VaultCopy = {
   footnote: "Questions? Reach us at contact@vorinthex.com.",
 };
 
-export const ABOUT_COPY: VaultCopy = {
-  title: "About",
-  eyebrow: "Origin Vault",
-  paragraphs: [
-    "Vorinthex is an AI-native software company focused on Core, a personal AI that learns, remembers, and grows with each user.",
-    "Our mission is to make personal intelligence practical, private, and deeply useful without forcing people to stitch together disconnected tools.",
-    "Core connects knowledge, memories, communication, discovery, and personal growth through capabilities including Archive, Gallery, Signal, Compass, and Ascend.",
-    "Vorinthex is built on modern cloud infrastructure and connected to leading foundation models so users can move from context to action in one place.",
-  ],
-  footnote: "Questions? Reach us at contact@vorinthex.com.",
-};
-
 export const CONTACT_COPY: VaultCopy = {
   title: "Contact",
   eyebrow: "Signal Vault",
