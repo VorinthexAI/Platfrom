@@ -24,12 +24,12 @@ jobs:
         with:
           git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
 
-      - name: Load deploy role
-        run: echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
+      - name: Load infrastructure role
+        run: echo "AWS_INFRA_ROLE_ARN=$(jq -r '.vars.AWS_INFRA_ROLE_ARN' .github/environments.json)" >> "$GITHUB_ENV"
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_INFRA_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Snapshot graph database volume
