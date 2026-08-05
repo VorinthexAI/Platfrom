@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { embedText } from '@/lib/bedrock-titan';
+import { embedText } from '@/lib/openai-embeddings';
 import { AiError } from '@/lib/ai/shared/result';
 import { nodeTypeSchema } from '@/lib/ai/agent-run-sources';
 import { type ArtifactResolverRegistry, defaultArtifactResolverRegistry } from '@/lib/ai/artifact-resolvers';

@@ -3,13 +3,13 @@ import { aql } from 'arangojs';
 import { editorDocumentJsonSchema } from '@/lib/ai/document-processing/schemas';
 import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { db } from './client';
+import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
 
 export const DOCUMENT_VERSIONS_COLLECTION = 'documentVersions';
 
 const configuredEmbeddingSchema = z.array(z.number().finite()).min(1).superRefine((embedding, context) => {
-  const dimensions = Number(process.env.EMBEDDING_DIMENSIONS);
-  if (Number.isInteger(dimensions) && dimensions > 0 && embedding.length !== dimensions) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: `Embedding must contain ${dimensions} dimensions.` });
+  if (embedding.length !== EMBEDDING_DIMENSIONS) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: `Embedding must contain ${EMBEDDING_DIMENSIONS} dimensions.` });
   }
 });
 
@@ -39,9 +39,8 @@ export const getAllDocumentVersionsChunked = helpers.getAllChunked;
 export const listDocumentVersionsPage = helpers.listPage;
 
 function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
-  const configuredDimensions = Number(process.env.EMBEDDING_DIMENSIONS);
-  if (Number.isInteger(configuredDimensions) && configuredDimensions > 0 && embedding.length !== configuredDimensions) {
-    throw new Error(`Document version embedding must contain ${configuredDimensions} dimensions.`);
+  if (embedding.length !== EMBEDDING_DIMENSIONS) {
+    throw new Error(`Document version embedding must contain ${EMBEDDING_DIMENSIONS} dimensions.`);
   }
 }
 

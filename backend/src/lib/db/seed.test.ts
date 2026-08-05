@@ -114,14 +114,14 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-realtime-2',
       'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
-      'amazon.titan-embed-text-v2',
+      'openai.text-embedding-3-large',
       'aws.transcribe-standard',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
       .toEqual(['amazon.nova-lite', 'amazon.nova-pro']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'transcribe').map(({ modelSlug }) => modelSlug))
       .toEqual(['openai.gpt-realtime-2']);
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('amazon.titan-embed-text-v2');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-large');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:false',
@@ -132,7 +132,7 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-lite:aws-bedrock:us.amazon.nova-lite-v1:0:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'openai.gpt-4o-mini-transcribe:openai:gpt-4o-mini-transcribe:true',
-      'amazon.titan-embed-text-v2:aws-bedrock:amazon.titan-embed-text-v2:0:true',
+      'openai.text-embedding-3-large:openai:text-embedding-3-large:true',
       'amazon.polly-generative:aws-polly:generative:true',
       'aws.transcribe-standard:aws-transcribe:standard:true',
     ]);
@@ -288,5 +288,31 @@ describe('AI runtime seed orchestration', () => {
     expect(models.get('openai.gpt-5.6-terra')?.enabled).toBe(false);
     expect(routes.get('blocked-terra:chat-key')?.enabled).toBe(false);
     expect(results.map(({ collection, key }) => `${collection}:${key}`)).toEqual(['models:blocked-terra', 'modelActions:blocked-route']);
+  });
+
+  test('retires the persisted Titan embedding model, action binding, and provider route', async () => {
+    const model = { key: 'legacy-titan', enabled: true };
+    const action = { key: 'embed-action' };
+    const provider = { key: 'bedrock-provider' };
+    const binding = { key: 'legacy-binding', enabled: true };
+    const route = { key: 'legacy-route', enabled: true };
+
+    const results = await reconcileObsoleteSeededModelActions({
+      getModelBySlug: async (slug) => slug === 'amazon.titan-embed-text-v2' ? model : null,
+      updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
+      getActionBySlug: async (slug) => slug === 'embed' ? action : null,
+      getModelActionByPair: async () => binding,
+      updateModelAction: async (_key, patch) => { binding.enabled = patch.enabled; },
+      getProviderBySlug: async (slug) => slug === 'aws-bedrock' ? provider : null,
+      getModelProviderByPair: async () => route,
+      updateModelProvider: async (_key, patch) => { route.enabled = patch.enabled; },
+    });
+
+    expect({ model: model.enabled, binding: binding.enabled, route: route.enabled }).toEqual({ model: false, binding: false, route: false });
+    expect(results.map(({ collection, key }) => `${collection}:${key}`)).toEqual([
+      'models:legacy-titan',
+      'modelActions:legacy-binding',
+      'modelProviders:legacy-route',
+    ]);
   });
 });

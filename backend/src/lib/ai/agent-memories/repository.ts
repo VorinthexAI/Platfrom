@@ -2,7 +2,7 @@ import { aql } from 'arangojs';
 import type { z } from 'zod';
 import { db } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
-import { embedText } from '@/lib/bedrock-titan';
+import { embedText } from '@/lib/openai-embeddings';
 import { newId } from '@/lib/ids';
 import { AGENT_MEMORIES_COLLECTION, agentMemorySchema, type AgentMemory } from './schema';
 

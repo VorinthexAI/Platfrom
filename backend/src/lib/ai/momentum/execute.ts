@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { embedText } from '@/lib/bedrock-titan';
+import { embedText } from '@/lib/openai-embeddings';
 import type { Folder } from '@/lib/db/folders.node';
 import type { Milestone } from '@/lib/db/milestones.node';
 import type { Project } from '@/lib/db/projects.node';

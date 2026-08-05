@@ -6,7 +6,7 @@ export const CORE_CAPABILITIES = [
   {
     name: "Archive",
     icon: "/logos/entities/capability-archive.png",
-    description: "Capture, organize, search, and connect everything that matters.",
+    description: "Store, organize and understand everything that matters.",
     price: 9.99,
     features: [
       "Notes, ideas, and research",
@@ -17,7 +17,7 @@ export const CORE_CAPABILITIES = [
   {
     name: "Gallery",
     icon: "/logos/entities/capability-gallery.png",
-    description: "Your visual memory, organized into a library that understands context.",
+    description: "Your visual memory. Search, recall and connect images.",
     price: 19.99,
     features: [
       "Smart albums and visual clusters",
@@ -28,7 +28,7 @@ export const CORE_CAPABILITIES = [
   {
     name: "Signal",
     icon: "/logos/entities/capability-signal.png",
-    description: "Communication intelligence that filters noise and keeps you connected.",
+    description: "Unified communication across people and intelligences.",
     price: 29.99,
     features: [
       "Connect multiple inboxes",
@@ -39,7 +39,7 @@ export const CORE_CAPABILITIES = [
   {
     name: "Compass",
     icon: "/logos/entities/capability-compass.png",
-    description: "Discover knowledge, map your world, and navigate what matters.",
+    description: "Discover knowledge and navigate infinite information.",
     price: 14.99,
     features: [
       "Map places, memories, and plans",
@@ -50,7 +50,7 @@ export const CORE_CAPABILITIES = [
   {
     name: "Ascend",
     icon: "/logos/entities/capability-ascend.png",
-    description: "Your personal AI coach for growth, clarity, habits, and mastery.",
+    description: "Your AI coach for growth, clarity and mastery.",
     price: 24.99,
     features: [
       "Goals, habits, health, and routines",

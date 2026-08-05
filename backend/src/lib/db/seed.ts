@@ -47,6 +47,9 @@ export interface ObsoleteModelActionReconciliationStore {
   getActionBySlug(slug: string): Promise<{ key: string } | null>;
   getModelActionByPair(modelKey: string, actionKey: string): Promise<{ key: string; enabled: boolean } | null>;
   updateModelAction(key: string, patch: { enabled: boolean }): Promise<unknown>;
+  getProviderBySlug?(slug: string): Promise<{ key: string } | null>;
+  getModelProviderByPair?(modelKey: string, providerKey: string): Promise<{ key: string; enabled: boolean } | null>;
+  updateModelProvider?(key: string, patch: { enabled: boolean }): Promise<unknown>;
 }
 
 const now = () => new Date().toISOString();
@@ -652,10 +655,10 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
-    key: 'cmtitanembedv2model0000001',
-    slug: 'amazon.titan-embed-text-v2',
-    name: 'Amazon Titan Text Embeddings V2',
-    description: 'Amazon Bedrock-native embedding model optimized for retrieval-augmented generation workloads.',
+    key: 'cmopenaiembed3model000001',
+    slug: 'openai.text-embedding-3-large',
+    name: 'OpenAI Text Embedding 3 Large',
+    description: 'OpenAI embedding model configured at its full 3072 dimensions for high-quality semantic retrieval.',
     supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
     enabled: true,
   },
@@ -670,13 +673,6 @@ export const SEEDED_MODELS = [
 ] as const;
 
 const LEGACY_SEEDED_MODEL_ACTIONS = [
-  {
-    key: 'cmtitanembedv2action0000001',
-    modelSlug: 'amazon.titan-embed-text-v2',
-    actionSlug: 'core.embedd',
-    priority: 100,
-    enabled: true,
-  },
   {
     key: 'cmpollygenerativeaction0001',
     modelSlug: 'amazon.polly-generative',
@@ -756,10 +752,10 @@ export const SEEDED_MODEL_PROVIDERS = [
     enabled: true,
   },
   {
-    key: 'cmtitanembedv2route0000001',
-    modelSlug: 'amazon.titan-embed-text-v2',
-    providerSlug: 'aws-bedrock',
-    providerModelId: 'amazon.titan-embed-text-v2:0',
+    key: 'cmopenaiembed3route000001',
+    modelSlug: 'openai.text-embedding-3-large',
+    providerSlug: 'openai',
+    providerModelId: 'text-embedding-3-large',
     enabled: true,
   },
   {
@@ -1175,13 +1171,16 @@ async function upsertSeedModelAction(seed: (typeof SEEDED_MODEL_ACTIONS)[number]
   return { collection: 'modelActions', key: existing.key, status: 'updated' };
 }
 
-/** Retires model-action pairs previously owned by the seed without touching custom routes. */
+/** Retires models and relations previously owned by the seed without touching custom routes. */
 export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelActionReconciliationStore = {
   getModelBySlug,
   updateModel: updatePersistedModel,
   getActionBySlug,
   getModelActionByPair,
   updateModelAction,
+  getProviderBySlug,
+  getModelProviderByPair,
+  updateModelProvider,
 }): Promise<SeedResult[]> {
   const results: SeedResult[] = [];
   for (const modelSlug of ['openai.gpt-5.6-sol', 'openai.gpt-5.6-terra', 'openai.gpt-5.6-luna']) {
@@ -1206,6 +1205,24 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     if (existing?.enabled) {
       await store.updateModelAction(existing.key, { enabled: false });
       results.push({ collection: 'modelActions', key: existing.key, status: 'updated' });
+    }
+  }
+
+  const titan = await store.getModelBySlug('amazon.titan-embed-text-v2');
+  if (titan) {
+    await store.updateModel(titan.key, { enabled: false });
+    results.push({ collection: 'models', key: titan.key, status: 'updated' });
+    const embed = await store.getActionBySlug('embed');
+    const legacyAction = embed ? await store.getModelActionByPair(titan.key, embed.key) : null;
+    if (legacyAction?.enabled) {
+      await store.updateModelAction(legacyAction.key, { enabled: false });
+      results.push({ collection: 'modelActions', key: legacyAction.key, status: 'updated' });
+    }
+    const bedrock = await store.getProviderBySlug?.('aws-bedrock');
+    const legacyRoute = bedrock ? await store.getModelProviderByPair?.(titan.key, bedrock.key) : null;
+    if (legacyRoute?.enabled && store.updateModelProvider) {
+      await store.updateModelProvider(legacyRoute.key, { enabled: false });
+      results.push({ collection: 'modelProviders', key: legacyRoute.key, status: 'updated' });
     }
   }
 

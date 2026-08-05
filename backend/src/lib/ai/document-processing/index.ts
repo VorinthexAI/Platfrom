@@ -16,7 +16,7 @@ import {
 import { DocumentProcessingError } from './errors';
 import { documentStorage, type DocumentStorage } from './storage';
 import type { DocumentOcr } from './textract';
-import type { embedText } from '@/lib/bedrock-titan';
+import type { embedText } from '@/lib/openai-embeddings';
 
 export interface DocumentProcessingDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;

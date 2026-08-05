@@ -4,7 +4,7 @@ import { ProviderExecutionError, selectRoute, streamRoute, type RouterDependenci
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
 import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
 import { isAiError } from '@/lib/ai/shared/result';
-import { embedText } from '@/lib/bedrock-titan';
+import { embedText } from '@/lib/openai-embeddings';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import { retrievalTool, type RetrievalContext, type RetrievalDependencies, type RetrievalNodeResult } from './retrieval';
 

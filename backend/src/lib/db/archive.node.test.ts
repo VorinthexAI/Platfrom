@@ -4,6 +4,9 @@ import { documentExtensionSchema, documentSchema, documentsEmbeddingFields } fro
 import { documentShareSchema, documentSharesEmbeddingFields } from './document-shares.node';
 import { folderSchema, foldersEmbeddingFields } from './folders.node';
 import { documentVersionSchema, documentVersionsEmbeddingFields } from './document-versions.node';
+import { EMBEDDING_DIMENSIONS } from '../openai-embeddings';
+
+const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 describe('Archive node contracts', () => {
   test('accepts only supported document extensions', () => {
@@ -32,9 +35,10 @@ describe('Archive node contracts', () => {
     const snapshot = documentVersionSchema.parse({
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
       version: 2, label: 'Before launch', html: '<p>Launch</p>', json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Launch' }] }] },
-      content: 'Launch', embedding: [0.1, 0.2], createdAt: '2026-07-22T10:00:00.000Z',
+      content: 'Launch', embedding, createdAt: '2026-07-22T10:00:00.000Z',
     });
-    expect(snapshot).toMatchObject({ version: 2, label: 'Before launch', content: 'Launch', embedding: [0.1, 0.2] });
+    expect(snapshot).toMatchObject({ version: 2, label: 'Before launch', content: 'Launch' });
+    expect(snapshot.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
     expect(snapshot).not.toHaveProperty('storageKey');
     expect(snapshot).not.toHaveProperty('sizeBytes');
     expect(() => documentVersionSchema.parse({ ...snapshot, html: '   ' })).toThrow();

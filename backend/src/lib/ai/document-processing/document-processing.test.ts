@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { processDocument } from '.';
 import type { Document } from '@/lib/db/documents.node';
+import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
 import {
   documentEmbed,
   documentExtract,
@@ -26,6 +27,7 @@ const timestamp = '2026-07-22T00:00:00.000Z';
 const folder = { key: folderKey, scopeKey, name: 'Folder', embedding: [], deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const quiet = () => undefined;
 const bytes = (text: string) => new TextEncoder().encode(text);
+const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 function minimalDocxBytes(): Uint8Array {
   const names = ['[Content_Types].xml', 'word/document.xml'];
@@ -75,7 +77,7 @@ const editorJson = {
 const completeDocument = (overrides: Partial<Document> = {}): Document => ({
   key: documentKey, scopeKey, folderKey, name: 'Report', extension: 'txt', mimeType: 'text/plain',
   storageKey: `archive/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
-  html: '<h1>Report</h1><p>Body</p>', json: editorJson, content: 'Report\n\nBody', embedding: [1, 2],
+  html: '<h1>Report</h1><p>Body</p>', json: editorJson, content: 'Report\n\nBody', embedding,
   deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
 });
 
@@ -195,7 +197,7 @@ describe('document-insert action', () => {
     let inserted: Document | undefined;
     const result = await documentInsert(completeDocument(), { logger: quiet, getFolder: async () => folder, getDocument: async () => null, insert: async (document) => { inserted = document; return document; } });
     expect(result.document.key).toBe(documentKey);
-    expect(inserted?.embedding).toEqual([1, 2]);
+    expect(inserted?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
   });
 
   test('rejects missing embedding, content, folder, and failed Arango insertion', async () => {
