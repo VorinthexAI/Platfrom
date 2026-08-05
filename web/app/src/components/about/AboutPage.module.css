@@ -1,4 +1,5 @@
-.page { --warm: #d1b68e; min-height: 100svh; overflow: hidden; background: radial-gradient(circle at 74% 12%, rgba(86,105,115,.15), transparent 29rem), #020406; color: #e9e8e4; }
+.page { --warm: #d1b68e; position: relative; min-height: 100dvh; overflow: hidden; background: radial-gradient(circle at 74% 12%, rgba(86,105,115,.15), transparent 29rem), #020406; color: #e9e8e4; }
+.page > :not(:global([data-site-neural-backdrop])) { position: relative; z-index: 1; }
 .hero,
 .mission,
 .principles,

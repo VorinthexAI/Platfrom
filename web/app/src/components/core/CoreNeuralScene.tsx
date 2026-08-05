@@ -47,30 +47,29 @@ export function CoreNeuralScene() {
     coldLight.position.set(-3.8, -0.7, 5);
     scene.add(coldLight);
 
-    const warmLine = new THREE.LineBasicMaterial({ color: 0xf1d5a8, transparent: true, opacity: 0.68, blending: THREE.AdditiveBlending, depthWrite: false });
-    const silverLine = new THREE.LineBasicMaterial({ color: 0xd9e0e3, transparent: true, opacity: 0.52, blending: THREE.AdditiveBlending, depthWrite: false });
-    const trunkMaterial = new THREE.MeshBasicMaterial({ color: 0xd8dde0, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false });
+    const warmLine = new THREE.LineBasicMaterial({ color: 0xf1d5a8, transparent: true, opacity: 0.38, blending: THREE.AdditiveBlending, depthWrite: false });
+    const silverLine = new THREE.LineBasicMaterial({ color: 0xd9e0e3, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false });
+    const trunkMaterial = new THREE.MeshBasicMaterial({ color: 0xd8dde0, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false });
 
     const canopy = new THREE.Group();
     const random = seededRandom(19106);
     const curves: THREE.CatmullRomCurve3[] = [];
     const nodePositions: number[] = [];
 
-    for (let branch = 0; branch < 60; branch += 1) {
-      const rootBranch = branch < 8;
+    for (let branch = 0; branch < 84; branch += 1) {
+      const rootBranch = branch < 10;
       const side = branch % 2 === 0 ? -1 : 1;
       const verticalBranch = !rootBranch && branch % 5 === 0;
-      const spread = verticalBranch ? 0.25 + random() * 1.2 : 2.2 + random() * 3.5;
+      const spread = verticalBranch ? 0.25 + random() * 2 : 3.4 + random() * 6.6;
       const end = rootBranch
         ? new THREE.Vector3(
-            side * (0.2 + random() * Math.max(0.8, 3.3 - branch * 0.28)),
-            -5.4 - branch * 1.05 - random() * 1.4,
+            side * (0.2 + random() * Math.max(0.8, 4.1 - branch * 0.3)),
+            -5.4 - branch * 0.92 - random() * 1.8,
             -0.5 + random() * 0.8,
           )
-        : new THREE.Vector3(side * spread, verticalBranch ? 3.8 + random() * 1.3 : 0.1 + random() * 4.3, -0.55 + random() * 1.15);
+        : new THREE.Vector3(side * spread, verticalBranch ? 5.2 + random() * 2.5 : -0.2 + random() * 5.8, -0.55 + random() * 1.15);
       const direction = end.clone().normalize();
-      const start = direction.clone().multiplyScalar(1.18);
-      start.y -= 0.05;
+      const start = direction.clone().multiplyScalar(0.08);
       const tangent = new THREE.Vector3(-direction.y, direction.x, 0);
       const bend = side * (0.08 + random() * 0.5);
       const points = [
@@ -83,7 +82,7 @@ export function CoreNeuralScene() {
       curves.push(curve);
       const sampled = curve.getPoints(64);
       canopy.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(sampled), branch % 4 === 0 ? warmLine : silverLine));
-      if (branch < 14) canopy.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 48, branch < 8 ? 0.025 : 0.014, 5, false), trunkMaterial));
+      if (branch < 16) canopy.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 48, branch < 10 ? 0.025 : 0.014, 5, false), trunkMaterial));
       for (let index = rootBranch ? 25 : 18 + Math.floor(random() * 12); index < sampled.length; index += rootBranch ? 25 : 14 + Math.floor(random() * 13)) {
         const point = sampled[index]!;
         nodePositions.push(point.x, point.y, point.z + 0.08);
@@ -93,17 +92,17 @@ export function CoreNeuralScene() {
 
     const nodeGeometry = new THREE.BufferGeometry();
     nodeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(nodePositions, 3));
-    const nodeMaterial = new THREE.PointsMaterial({ color: 0xffe4ba, size: 0.09, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+    const nodeMaterial = new THREE.PointsMaterial({ color: 0xffe4ba, size: 0.075, transparent: true, opacity: 0.62, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
     root.add(new THREE.Points(nodeGeometry, nodeMaterial));
 
     const particleGeometry = new THREE.SphereGeometry(0.035, 8, 8);
-    const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffedce, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+    const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffedce, transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false });
     const particles: FlowParticle[] = [];
     for (const [index, curve] of curves.entries()) {
-      const count = index < 8 ? 1 : index < 20 ? 3 : 1;
+      const count = index < 10 ? 1 : index < 24 ? 2 : 1;
       for (let particleIndex = 0; particleIndex < count; particleIndex += 1) {
         const mesh = new THREE.Mesh(particleGeometry, particleMaterial);
-        mesh.scale.setScalar(index < 8 ? 1.25 : index < 20 ? 1.45 : 1);
+        mesh.scale.setScalar(index < 10 ? 1.2 : index < 24 ? 1.35 : 0.9);
         canopy.add(mesh);
         particles.push({ curve, mesh, offset: random(), speed: 0.045 + random() * 0.08 });
       }

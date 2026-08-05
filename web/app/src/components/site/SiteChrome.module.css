@@ -4,6 +4,14 @@
   margin-inline: auto;
 }
 
+.siteNeuralBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.72;
+  pointer-events: none;
+}
+
 .header {
   position: relative;
   z-index: 5;
