@@ -37,8 +37,8 @@ export function AboutPage() {
           <h1>Intelligence should know you.</h1>
           <p className={styles.lead}>
             Vorinthex AI is an AI-native software company focused on Core: one
-            personal AI in development for iOS and Android, designed to connect
-            the context you choose to provide.
+            personal AI for iOS and Android that connects the context you choose
+            to provide.
           </p>
         </div>
         <div className={styles.heroMark}>
@@ -113,12 +113,12 @@ export function AboutPage() {
           <p className={styles.eyebrow}>Built for the long term</p>
           <h2>From context to action, in one place.</h2>
           <p>
-            Vorinthex AI is developing Core for iOS and Android. The technology
-            can evolve; the product principle stays constant: personal AI should
+            Vorinthex Core is built for iOS and Android. The technology can
+            evolve; the product principle stays constant: personal AI should
             remain centered on the context and controls its user provides.
           </p>
           <Button asChild size="lg" variant="outline">
-            <Link href="/#faq">View pre-launch status</Link>
+            <Link href="/#download">Get the app</Link>
           </Button>
         </div>
       </section>

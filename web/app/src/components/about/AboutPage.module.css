@@ -1,4 +1,4 @@
-.page { --warm: #d1b68e; position: relative; min-height: 100dvh; overflow: hidden; background: radial-gradient(circle at 74% 12%, rgba(86,105,115,.15), transparent 29rem), #020406; color: #e9e8e4; }
+.page { --warm: #cbd3d7; position: relative; min-height: 100dvh; overflow: hidden; background: radial-gradient(circle at 74% 12%, rgba(86,105,115,.15), transparent 29rem), #020406; color: #e9e8e4; }
 .page > :not(:global([data-site-neural-backdrop])) { position: relative; z-index: 1; }
 .hero,
 .mission,
@@ -11,7 +11,7 @@
 .lead { max-width: 600px; margin-top: 30px; color: #a1a3a1; font-size: 16px; line-height: 1.85; }
 .heroMark { position: relative; display: grid; min-height: 480px; place-items: center; }
 .heroMark div { position: absolute; width: 86%; aspect-ratio: 1; border: 1px solid rgba(203,216,223,.16); border-radius: 50%; box-shadow: 0 0 80px rgba(153,180,195,.09), inset 0 0 50px rgba(153,180,195,.05); }
-.heroMark div::after { content: ""; position: absolute; inset: 12%; border: 1px solid rgba(209,182,142,.2); border-radius: 50%; }
+.heroMark div::after { content: ""; position: absolute; inset: 12%; border: 1px solid rgba(203,211,215,.2); border-radius: 50%; }
 .heroMark img { position: relative; width: min(330px, 72%); height: auto; filter: drop-shadow(0 0 40px rgba(190,209,219,.14)); }
 
 .mission { padding: 90px 8%; border-block: 1px solid rgba(255,255,255,.08); text-align: center; }

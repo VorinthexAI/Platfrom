@@ -1,26 +1,12 @@
 import Image from "next/image";
-import Link from "next/link";
-import { Button } from "@vorinthex/shared/ui/components";
 import { BrainIcon, ShieldIcon, StarIcon } from "@vorinthex/shared/ui/icons";
-import { CORE_CAPABILITIES, CORE_FAQ } from "@/lib/core";
+import { CORE_CAPABILITIES } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import { CoreAppsDepthScene } from "./CoreAppsDepthScene";
 import { CoreAppsJourney } from "./CoreAppsJourney";
 import { CoreNeuralScene } from "./CoreNeuralScene";
+import { DownloadAppCta } from "./DownloadAppCta";
 import styles from "./CorePage.module.css";
-
-function PreLaunchActions() {
-  return (
-    <div className={styles.storeButtons}>
-      <Button asChild size="lg" variant="primary">
-        <Link href="/contact">Contact the team</Link>
-      </Button>
-      <Button asChild size="lg" variant="secondary">
-        <Link href="/pricing">View planned pricing</Link>
-      </Button>
-    </div>
-  );
-}
 
 export function CorePage() {
   return (
@@ -37,19 +23,16 @@ export function CorePage() {
             <p className={styles.heroLead}>Everything. Intelligently connected.</p>
             <div className={styles.rule} />
             <p className={styles.heroBody}>
-              Vorinthex Core is a personal AI in development for iOS and Android,
-              planned to connect the context that matters to you.
+              Vorinthex Core is your personal AI that remembers, understands and
+              connects everything that matters to you.
             </p>
-            <p className={styles.launchStatus}>
-              Pre-launch. Downloads and purchases are not currently available.
-            </p>
-            <PreLaunchActions />
+            <DownloadAppCta />
           </div>
 
           <div className={styles.coreVisual} aria-hidden="true" />
         </section>
 
-        <section className={styles.capabilities} id="capabilities">
+        <section className={styles.capabilities} id="core-apps">
           <div className={styles.depthStage} aria-hidden="true">
             <CoreAppsDepthScene />
           </div>
@@ -64,13 +47,9 @@ export function CorePage() {
             </div>
             <p className={styles.appsIntroduction}>
               Move through the parts of your life without losing context. Every app
-              is planned to add understanding to the same personal AI.
+              adds understanding to the same personal AI.
             </p>
             <CoreAppsJourney />
-            <div className={styles.comingSoon} aria-label="More Core apps coming soon">
-              <Image alt="" height={34} src="/logos/vorinthex-mark.png" width={34} />
-              <p>More coming soon</p>
-            </div>
           </div>
         </section>
 
@@ -82,7 +61,7 @@ export function CorePage() {
               <article>
                 <BrainIcon aria-hidden size="lg" />
                 <h3>One intelligence</h3>
-                <p>Planned to connect data, conversations, images, and knowledge.</p>
+                <p>Connect data, conversations, images, and knowledge.</p>
               </article>
               <article>
                 <ShieldIcon aria-hidden size="lg" />
@@ -92,7 +71,7 @@ export function CorePage() {
               <article>
                 <StarIcon aria-hidden size="lg" />
                 <h3>Built for you</h3>
-                <p>Planned around personal context, with proactive assistance.</p>
+                <p>Personal context with proactive assistance.</p>
               </article>
             </div>
           </div>
@@ -119,24 +98,6 @@ export function CorePage() {
           </div>
         </section>
 
-        <section className={styles.faq} id="faq" aria-labelledby="faq-heading">
-          <div className={styles.sectionHeading}>
-            <span />
-            <div>
-              <p>Pre-launch details</p>
-              <h2 id="faq-heading">Frequently Asked Questions</h2>
-            </div>
-            <span />
-          </div>
-          <div className={styles.faqGrid}>
-            {CORE_FAQ.map(({ question, answer }) => (
-              <article key={question}>
-                <h3>{question}</h3>
-                <p>{answer}</p>
-              </article>
-            ))}
-          </div>
-        </section>
       </main>
 
       <SiteFooter />

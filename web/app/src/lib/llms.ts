@@ -13,33 +13,33 @@ const evidenceLinks = PUBLIC_ROUTES.map(
   ({ path, title, summary }) => `- [${title}](${canonicalUrl(path)}): ${summary}`,
 ).join("\n");
 
-function buildPlannedPricingText(): string {
+function buildPricingText(): string {
   const { newcomerAllocation, monthlyPlans, onDemand, topUps } =
     PRODUCT_FACTS.pricing;
 
-  return `All pricing and allocations below are planned. Amounts are in USD, and none are currently purchasable.
+  return `Prices are shown in USD. Local taxes may be added where required.
 
-- Planned newcomer allocation: ${formatSparkCount(newcomerAllocation)} Sparks.
-- Planned monthly options:
+- Newcomer allocation: ${formatSparkCount(newcomerAllocation)} Sparks.
+- Monthly options:
 ${monthlyPlans.map((plan) => `  - ${plan.name}: ${formatUsd(plan.price)} per month for ${formatSparkCount(plan.sparks)} Sparks.`).join("\n")}
-- Planned one-time top-ups:
+- One-time top-ups:
 ${topUps.map((topUp) => `  - ${formatSparkCount(topUp.sparks)} Sparks for ${formatUsd(topUp.price)}.`).join("\n")}
-- ${onDemand.name}: ${onDemand.description}; planned to require ${onDemand.requiresPlan}. No allowance beyond the planned overflow is specified.`;
+- ${onDemand.name}: ${onDemand.description}; requires ${onDemand.requiresPlan}.`;
 }
 
 export function buildLlmsText(): string {
   return `# Vorinthex AI
 
-> Vorinthex Core is a pre-launch personal AI planned for iOS and Android. Downloads and purchases are not currently available.
+> Vorinthex Core is a personal AI for iOS and Android that connects knowledge, memories, communication, discovery, and goals.
 
 Last reviewed: ${CONTENT_LAST_REVIEWED}
 
 ## Product
 
 - [Vorinthex Core](${CANONICAL_ORIGIN}): ${PUBLIC_DISCOVERABILITY_REGISTRY["/"].summary}
-- [Planned Sparks pricing](${canonicalUrl("/pricing")}): ${PRODUCT_FACTS.sparks}
+- [Sparks pricing](${canonicalUrl("/pricing")}): ${PRODUCT_FACTS.sparks}
 
-${buildPlannedPricingText()}
+${buildPricingText()}
 
 ## Company and policies
 
@@ -53,15 +53,15 @@ ${buildPlannedPricingText()}
 export function buildLlmsFullText(): string {
   return `# Vorinthex AI
 
-> Vorinthex AI is developing Core, a personal AI planned for iOS and Android. The product is pre-launch; downloads and purchases are not currently available.
+> Vorinthex AI builds Core, a personal AI for iOS and Android that connects the context that matters to you.
 
 Last reviewed: ${CONTENT_LAST_REVIEWED}
 
-## Current status
+## Product
 
 ${PRODUCT_FACTS.name} is ${PRODUCT_FACTS.status.toLowerCase()}. ${PRODUCT_FACTS.availability} ${PRODUCT_FACTS.privacy}
 
-## Planned capabilities
+## Core apps
 
 ${PRODUCT_FACTS.capabilities.map(({ name, description }) => `- ${name}: ${description}`).join("\n")}
 
@@ -69,11 +69,7 @@ ${PRODUCT_FACTS.capabilities.map(({ name, description }) => `- ${name}: ${descri
 
 ${PRODUCT_FACTS.sparks}
 
-${buildPlannedPricingText()}
-
-## Frequently asked questions
-
-${PRODUCT_FACTS.faq.map(({ question, answer }) => `### ${question}\n\n${answer}`).join("\n\n")}
+${buildPricingText()}
 
 ## Canonical evidence links
 

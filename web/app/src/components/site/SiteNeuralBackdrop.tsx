@@ -73,7 +73,7 @@ export function SiteNeuralBackdrop() {
       context.lineWidth = 0.65;
       for (const [index, branch] of branches.entries()) {
         const gradient = context.createLinearGradient(branch.start.x, branch.start.y, branch.end.x, branch.end.y);
-        const color = branch.warm ? "218, 190, 148" : "190, 204, 212";
+        const color = branch.warm ? "209, 220, 225" : "190, 204, 212";
         gradient.addColorStop(0, `rgba(${color}, 0)`);
         gradient.addColorStop(0.08, `rgba(${color}, 0.15)`);
         gradient.addColorStop(0.65, `rgba(${color}, 0.09)`);
@@ -87,7 +87,7 @@ export function SiteNeuralBackdrop() {
         if (index % 5 === 0) {
           const progress = reducedMotion.matches ? 0.52 : ((time * 0.000025 + index * 0.083) % 0.76) + 0.08;
           const point = pointOnBranch(branch, progress);
-          context.fillStyle = branch.warm ? "rgba(238, 213, 175, 0.34)" : "rgba(221, 231, 235, 0.3)";
+          context.fillStyle = branch.warm ? "rgba(226, 235, 239, 0.34)" : "rgba(221, 231, 235, 0.3)";
           context.beginPath();
           context.arc(point.x, point.y, 1.15, 0, Math.PI * 2);
           context.fill();

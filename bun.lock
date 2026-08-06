@@ -130,6 +130,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@vorinthex/shared": "workspace:*",
+        "bowser": "^2.14.1",
         "next": "16.2.9",
         "react": "19.2.3",
         "react-dom": "19.2.3",

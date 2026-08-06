@@ -4,7 +4,6 @@ import manifest from "@/app/manifest";
 import sitemap from "@/app/sitemap";
 import {
   CANONICAL_ORIGIN,
-  CORE_FAQ,
   PUBLIC_ROUTES,
   canonicalUrl,
 } from "@/lib/discoverability";
@@ -60,13 +59,13 @@ describe("public discoverability registry", () => {
     );
   });
 
-  test("keeps the install manifest aligned with pre-launch facts", () => {
+  test("keeps the install manifest aligned with product facts", () => {
     const output = manifest();
 
     expect(output.id).toBe("/");
     expect(output.scope).toBe("/");
-    expect(output.description).toContain("pre-launch");
-    expect(output.description).toContain("not yet available");
+    expect(output.description).toContain("personal AI");
+    expect(output.description).toContain("iOS and Android");
   });
 });
 
@@ -98,11 +97,11 @@ describe("structured data", () => {
     }
   });
 
-  test("places product and FAQ schema only on home and emits no hidden breadcrumbs", () => {
+  test("places product schema only on home and emits no hidden content", () => {
     expect(buildPageGraph("/")["@graph"].map((node) => node["@type"])).toContain(
       "SoftwareApplication",
     );
-    expect(buildPageGraph("/")["@graph"].map((node) => node["@type"])).toContain(
+    expect(buildPageGraph("/")["@graph"].map((node) => node["@type"])).not.toContain(
       "FAQPage",
     );
 
@@ -118,15 +117,15 @@ describe("structured data", () => {
 });
 
 describe("generated answer-engine content", () => {
-  test("states pre-launch facts consistently and links canonical evidence", () => {
+  test("states product facts consistently and links canonical evidence", () => {
     const outputs = [buildLlmsText(), buildLlmsFullText()];
 
     for (const output of outputs) {
       expect(output).toContain("# Vorinthex AI");
       expect(output).toContain("> ");
       expect(output).toContain("Last reviewed: 2026-08-06");
-      expect(output).toContain("pre-launch");
-      expect(output).toContain("purchases are not currently available");
+      expect(output).toContain("personal AI");
+      expect(output).toContain("Local taxes may be added where required");
       expect(output).toContain(canonicalUrl("/terms"));
       expect(output).not.toMatch(/unlimited|most popular|app store|google play/i);
       expect(output).toContain(formatSparkCount(NEWCOMER_FREE_SPARKS));
@@ -143,10 +142,6 @@ describe("generated answer-engine content", () => {
       }
     }
 
-    for (const { question, answer } of CORE_FAQ) {
-      expect(buildLlmsFullText()).toContain(question);
-      expect(buildLlmsFullText()).toContain(answer);
-    }
   });
 });
 

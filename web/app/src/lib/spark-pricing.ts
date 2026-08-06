@@ -16,7 +16,7 @@ export const SPARK_TOP_UPS = [
 
 export const SPARK_ON_DEMAND = {
   name: "On-Demand",
-  description: "Planned overflow Sparks after the included balance runs out",
+  description: "Overflow Sparks added after the included balance runs out",
   requiresPlan: "Nova",
 } as const;
 

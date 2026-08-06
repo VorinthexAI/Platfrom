@@ -18,20 +18,20 @@ export const PRIVACY_COPY: VaultCopy = {
   title: "Privacy Policy",
   eyebrow: "Records Vault",
   paragraphs: [
-    "Effective August 6, 2026. Vorinthex Core is pre-launch. This policy explains how Vorinthex AI handles personal data on its website and how it intends to handle data when apps and services become available.",
+    "Effective August 6, 2026. This policy explains how Vorinthex AI handles personal data across its website, apps, and services.",
   ],
   sections: [
     {
       title: "Data we collect",
       paragraphs: [
         "On the current website, we collect information you choose to send us, such as email communications. We may also collect technical data needed to operate and secure the site, such as IP address, device and browser information, diagnostics, and security logs.",
-        "If accounts, apps, or AI features become available, this policy will apply to account details and content you choose to provide through those services, and we will update this page when needed to describe the launched features accurately.",
+        "For accounts, apps, and AI features, this policy applies to account details and content you choose to provide through those services. We update this page when needed to describe features accurately.",
       ],
     },
     {
       title: "How we use data",
       paragraphs: [
-        "We use current website data to respond to requests, communicate about access, operate and secure the site, prevent abuse, comply with law, and enforce our terms. If product accounts launch, we may also use data to create and secure accounts and provide requested features as described in the policy then in effect.",
+        "We use website data to respond to requests, communicate with you, operate and secure the site, prevent abuse, comply with law, and enforce our terms. We also use account data to create and secure accounts and provide requested features.",
       ],
     },
     {
@@ -44,7 +44,7 @@ export const PRIVACY_COPY: VaultCopy = {
     {
       title: "Delete your account and data",
       paragraphs: [
-        "Core is not currently available. To request deletion of personal data you have provided to Vorinthex AI, email contact@vorinthex.com from the relevant address and describe the data involved. We may verify your identity before completing the request.",
+        "To request deletion of personal data you have provided to Vorinthex AI, email contact@vorinthex.com from the relevant address and describe the data involved. We may verify your identity before completing the request.",
         "After verification, we delete or deidentify covered data within 30 days. Copies in encrypted backups are removed through the normal backup cycle within 90 days. We may retain limited fraud prevention, security, or legal records for as long as required by law or reasonably necessary to establish or defend legal claims.",
       ],
     },
@@ -93,8 +93,8 @@ export const TERMS_COPY: VaultCopy = {
   title: "Terms",
   eyebrow: "Accord Vault",
   paragraphs: [
-    "These terms currently govern your use of the Vorinthex AI website. Vorinthex Core is pre-launch, and its apps and services are not currently available.",
-    "If Vorinthex apps, services, or AI-assisted features become available, additional or updated terms may apply. When using any future AI-assisted feature, you will remain responsible for reviewing outputs before relying on them for important decisions.",
+    "These terms govern your use of the Vorinthex AI website, apps, and services.",
+    "Additional or updated terms may apply to specific Vorinthex apps, services, or AI-assisted features. When using an AI-assisted feature, you remain responsible for reviewing outputs before relying on them for important decisions.",
     "The Vorinthex AI name, marks, visual identity, software, and original content are the property of Vorinthex AI or its licensors.",
   ],
   footnote: "Questions? Reach us at contact@vorinthex.com.",

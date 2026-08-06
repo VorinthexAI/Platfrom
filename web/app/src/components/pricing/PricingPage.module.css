@@ -20,6 +20,7 @@
   width: var(--site-content-width);
   margin-inline: auto;
 }
+.taxDisclaimer { width: var(--site-content-width); margin: 28px auto 0; color: #7f878b; font-size: 11px; line-height: 1.7; text-align: center; }
 
 .hero {
   position: relative;

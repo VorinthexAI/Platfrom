@@ -37,17 +37,17 @@ export function CoreNeuralScene() {
     host.appendChild(renderer.domElement);
 
     const root = new THREE.Group();
-    root.position.y = 7.2;
+    root.position.y = 8.8;
     scene.add(root);
     scene.add(new THREE.AmbientLight(0xc4cbd0, 1.8));
-    const warmLight = new THREE.PointLight(0xffdfac, 54, 22, 1.8);
+    const warmLight = new THREE.PointLight(0xdce4e8, 54, 22, 1.8);
     warmLight.position.set(2.6, 2.8, 6);
     scene.add(warmLight);
     const coldLight = new THREE.PointLight(0xa9cce1, 34, 18, 2);
     coldLight.position.set(-3.8, -0.7, 5);
     scene.add(coldLight);
 
-    const warmLine = new THREE.LineBasicMaterial({ color: 0xf1d5a8, transparent: true, opacity: 0.38, blending: THREE.AdditiveBlending, depthWrite: false });
+    const warmLine = new THREE.LineBasicMaterial({ color: 0xdce4e8, transparent: true, opacity: 0.38, blending: THREE.AdditiveBlending, depthWrite: false });
     const silverLine = new THREE.LineBasicMaterial({ color: 0xd9e0e3, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false });
     const trunkMaterial = new THREE.MeshBasicMaterial({ color: 0xd8dde0, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false });
 
@@ -92,11 +92,11 @@ export function CoreNeuralScene() {
 
     const nodeGeometry = new THREE.BufferGeometry();
     nodeGeometry.setAttribute("position", new THREE.Float32BufferAttribute(nodePositions, 3));
-    const nodeMaterial = new THREE.PointsMaterial({ color: 0xffe4ba, size: 0.075, transparent: true, opacity: 0.62, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+    const nodeMaterial = new THREE.PointsMaterial({ color: 0xe5ecef, size: 0.075, transparent: true, opacity: 0.62, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
     root.add(new THREE.Points(nodeGeometry, nodeMaterial));
 
     const particleGeometry = new THREE.SphereGeometry(0.035, 8, 8);
-    const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xffedce, transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false });
+    const particleMaterial = new THREE.MeshBasicMaterial({ color: 0xf1f5f6, transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false });
     const particles: FlowParticle[] = [];
     for (const [index, curve] of curves.entries()) {
       const count = index < 10 ? 1 : index < 24 ? 2 : 1;
@@ -129,7 +129,7 @@ export function CoreNeuralScene() {
       camera.right = (verticalSpan * aspect) / 2;
       camera.top = verticalSpan / 2;
       camera.bottom = -verticalSpan / 2;
-      root.position.x = width > 980 ? Math.min(3.2, aspect * 4.8) : 0;
+      root.position.x = width > 980 ? Math.min(7, aspect * 5) : 0;
       camera.updateProjectionMatrix();
     };
     const observer = new ResizeObserver(resize);

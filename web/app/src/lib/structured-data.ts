@@ -12,7 +12,6 @@ export const SCHEMA_IDS = {
   website: `${CANONICAL_ORIGIN}/#website`,
   homePage: `${CANONICAL_ORIGIN}/#webpage`,
   software: `${CANONICAL_ORIGIN}/#core`,
-  faq: `${CANONICAL_ORIGIN}/#faq`,
 } as const;
 
 export function buildGlobalGraph() {
@@ -77,17 +76,6 @@ export function buildPageGraph(path: PublicRoutePath) {
         operatingSystem: PRODUCT_FACTS.platforms.join(", "),
         publisher: { "@id": SCHEMA_IDS.organization },
         mainEntityOfPage: { "@id": pageId },
-      },
-      {
-        "@type": "FAQPage",
-        "@id": SCHEMA_IDS.faq,
-        url: `${url}#faq`,
-        isPartOf: { "@id": pageId },
-        mainEntity: PRODUCT_FACTS.faq.map(({ question, answer }) => ({
-          "@type": "Question",
-          name: question,
-          acceptedAnswer: { "@type": "Answer", text: answer },
-        })),
       },
     );
   }

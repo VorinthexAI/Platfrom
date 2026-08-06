@@ -41,7 +41,7 @@ export function CoreAppsDepthScene() {
 
       const outerMaterial = new THREE.MeshBasicMaterial({
         blending: THREE.AdditiveBlending,
-        color: index % 2 === 0 ? 0xd9bc91 : 0xcbd5da,
+        color: index % 2 === 0 ? 0xdce4e8 : 0xcbd5da,
         depthWrite: false,
         opacity: 0,
         transparent: true,
@@ -88,6 +88,21 @@ export function CoreAppsDepthScene() {
     let targetProgress = 0;
     let progress = 0;
     const clock = new THREE.Clock();
+    const getActiveStep = () => {
+      let index = 0;
+      let distance = Number.POSITIVE_INFINITY;
+      steps.forEach((step, stepIndex) => {
+        const rect = step.getBoundingClientRect();
+        const stepDistance = Math.abs(
+          rect.top + rect.height / 2 - window.innerHeight / 2,
+        );
+        if (stepDistance < distance) {
+          distance = stepDistance;
+          index = stepIndex;
+        }
+      });
+      return { distance, index };
+    };
     const render = () => {
       const elapsed = clock.getElapsedTime();
       progress = reducedMotion.matches
@@ -100,16 +115,15 @@ export function CoreAppsDepthScene() {
       if (!reducedMotion.matches) {
         tunnel.rotation.z = Math.sin(elapsed * 0.11) * 0.045;
       }
+      const active = getActiveStep();
       gates.forEach((gate, index) => {
-        const stepRect = steps[index]?.getBoundingClientRect();
-        const distance = stepRect
-          ? Math.abs(stepRect.top + stepRect.height / 2 - window.innerHeight / 2)
-          : window.innerHeight;
-        const strength = THREE.MathUtils.smoothstep(
-          1 - distance / (window.innerHeight * 0.72),
-          0,
-          1,
-        );
+        const strength = index === active.index
+          ? THREE.MathUtils.smoothstep(
+              1 - active.distance / (window.innerHeight * 0.5),
+              0,
+              1,
+            )
+          : 0;
         gate.group.visible = strength > 0.01;
         gate.materials[0]!.opacity = strength * 0.17;
         gate.materials[1]!.opacity = strength * 0.1;
@@ -118,17 +132,8 @@ export function CoreAppsDepthScene() {
       renderer.render(scene, camera);
     };
     const updateProgress = () => {
-      let closestIndex = 0;
-      let closestDistance = Number.POSITIVE_INFINITY;
-      steps.forEach((step, index) => {
-        const rect = step.getBoundingClientRect();
-        const distance = Math.abs(rect.top + rect.height / 2 - window.innerHeight / 2);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestIndex = index;
-        }
-      });
-      const activeRect = steps[closestIndex]?.getBoundingClientRect();
+      const active = getActiveStep();
+      const activeRect = steps[active.index]?.getBoundingClientRect();
       const localProgress = activeRect
         ? THREE.MathUtils.clamp(
             (window.innerHeight / 2 - activeRect.top) / activeRect.height,

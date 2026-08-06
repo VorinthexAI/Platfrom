@@ -21,18 +21,16 @@ export function Brand() {
 export function SiteHeader() {
   return (
     <>
-      <a className={styles.skipLink} href="#main-content">
-        Skip to content
-      </a>
+      <a className={styles.skipLink} href="#main-content">Skip to content</a>
       <header className={styles.header}>
         <Brand />
         <nav className={styles.nav} aria-label="Primary navigation">
           <Link href="/">Overview</Link>
-          <Link href="/#capabilities">Core Apps</Link>
+          <Link href="/#core-apps">Core Apps</Link>
           <Link href="/#principles">Vision</Link>
         </nav>
         <Button asChild size="sm" variant="outline">
-          <Link href="/#faq">Pre-launch details</Link>
+          <Link href="/#download">Get the app</Link>
         </Button>
       </header>
     </>

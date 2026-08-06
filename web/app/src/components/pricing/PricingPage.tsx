@@ -17,24 +17,23 @@ export function PricingPage() {
       <SiteNeuralBackdrop />
       <main id="main-content" tabIndex={-1}>
         <section className={styles.hero}>
-          <p className={styles.eyebrow}>Planned pricing preview</p>
-          <h1>Usage-based pricing is planned.</h1>
+          <p className={styles.eyebrow}>Sparks pricing</p>
+          <h1>Usage-based pricing.</h1>
           <p className={styles.intro}>
-            All amounts are planned USD pricing. Sparks and subscriptions are not
-            currently purchasable.
+            Choose a monthly Spark balance and add more whenever you need it.
           </p>
           <div className={styles.freeNotice}>
-            <span>Planned newcomer allocation</span>
+            <span>Newcomer allocation</span>
             <strong>{formatSparkCount(NEWCOMER_FREE_SPARKS)} Sparks</strong>
-            <p>Planned USD preview. Not purchasable.</p>
+            <p>Included when you get started.</p>
           </div>
         </section>
 
         <section className={styles.plans} aria-labelledby="monthly-plans">
           <div className={styles.sectionHeading}>
-            <p className={styles.eyebrow}>Planned monthly options</p>
+            <p className={styles.eyebrow}>Monthly options</p>
             <h2 id="monthly-plans">Monthly Sparks.</h2>
-            <p>Planned allocations and USD amounts. No purchases are available.</p>
+            <p>Your Spark balance refreshes each month.</p>
           </div>
           <div className={styles.planGrid}>
             {SPARK_MONTHLY_PLANS.map((plan, index) => (
@@ -42,16 +41,16 @@ export function PricingPage() {
                 className={`${styles.planCard} ${index === 1 ? styles.featured : ""}`}
                 key={plan.name}
               >
-                <span className={styles.planTag}>Planned · not purchasable</span>
+                {index === 1 && <span className={styles.planTag}>Most popular</span>}
                 <p className={styles.planIndex}>0{index + 1}</p>
                 <h3>{plan.name}</h3>
                 <p className={styles.planPrice}>
                   <strong>{formatUsd(plan.price)}</strong>
-                  <span>planned / month</span>
+                  <span>/ month</span>
                 </p>
                 <div className={styles.sparkAmount}>
                   <strong>{formatSparkCount(plan.sparks)}</strong>
-                  <span>Planned monthly Sparks · not purchasable</span>
+                  <span>monthly Sparks</span>
                 </div>
               </article>
             ))}
@@ -60,16 +59,16 @@ export function PricingPage() {
 
         <section className={styles.topUps} aria-labelledby="top-ups">
           <div className={styles.sectionHeading}>
-            <p className={styles.eyebrow}>Planned overflow options</p>
+            <p className={styles.eyebrow}>More when you need it</p>
             <h2 id="top-ups">Top up your Sparks.</h2>
-            <p>Planned one-time Spark packs in USD. Not currently purchasable.</p>
+            <p>One-time Spark packs for a bigger idea or a busier month.</p>
           </div>
           <div className={styles.topUpGrid}>
             {SPARK_TOP_UPS.map((topUp) => (
               <article className={styles.topUpCard} key={topUp.sparks}>
                 <div>
                   <strong>{formatSparkCount(topUp.sparks)}</strong>
-                  <span>Planned Sparks · not purchasable</span>
+                  <span>Sparks</span>
                 </div>
                 <p>{formatUsd(topUp.price)}</p>
               </article>
@@ -80,15 +79,17 @@ export function PricingPage() {
         <section className={styles.onDemand} aria-labelledby="on-demand">
           <div className={styles.onDemandMark}>∞</div>
           <div className={styles.onDemandCopy}>
-            <p className={styles.eyebrow}>Planned overflow</p>
+            <p className={styles.eyebrow}>For uninterrupted momentum</p>
             <h2 id="on-demand">{SPARK_ON_DEMAND.name}</h2>
             <p>
-              {SPARK_ON_DEMAND.description}. It is planned to require the{" "}
-              {SPARK_ON_DEMAND.requiresPlan} option. It is not currently purchasable,
-              and no allowance beyond the planned overflow is specified.
+              {SPARK_ON_DEMAND.description}. Requires the{" "}
+              {SPARK_ON_DEMAND.requiresPlan} plan.
             </p>
           </div>
         </section>
+        <p className={styles.taxDisclaimer}>
+          Prices are shown in USD. Local taxes may be added where required.
+        </p>
       </main>
 
       <SiteFooter />

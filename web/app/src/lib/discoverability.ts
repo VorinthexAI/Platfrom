@@ -18,7 +18,7 @@ export interface PublicRouteEntry {
   description: string;
   summary: string;
   schemaPageType: SchemaPageType;
-  status: "pre-launch" | "current";
+  status: "current";
   lastModified: typeof CONTENT_LAST_REVIEWED;
   capabilities: readonly string[];
   faq?: readonly { question: string; answer: string }[];
@@ -32,9 +32,9 @@ export const CORE_CAPABILITIES = [
     description: "Store, organize and understand everything that matters.",
     promise: "A living home for everything you know.",
     detail:
-      "Capture thoughts, documents, links and research without deciding where every idea belongs first. Archive is planned to organize material around meaning, then bring relevant context back when needed.",
+      "Capture thoughts, documents, links and research without deciding where every idea belongs first. Archive organizes material around meaning, then brings relevant context back when needed.",
     connection:
-      "Archive is planned to give every Core app durable memory, so conversations, plans and coaching can build on saved knowledge.",
+      "Archive gives every Core app durable memory, so conversations, plans and coaching can build on saved knowledge.",
     features: [
       "Notes, ideas, and research",
       "Folders, labels, and backlinks",
@@ -48,9 +48,9 @@ export const CORE_CAPABILITIES = [
     description: "Your visual memory. Search, recall and connect images.",
     promise: "Remember the story behind every image.",
     detail:
-      "Gallery is planned to turn a camera roll into an explorable visual memory, with natural-language discovery and context around people, places and moments.",
+      "Gallery turns a camera roll into an explorable visual memory, with natural-language discovery and context around people, places and moments.",
     connection:
-      "Gallery is planned to link visual moments to Archive knowledge, Compass places and people connected through Signal.",
+      "Gallery links visual moments to Archive knowledge, Compass places and people connected through Signal.",
     features: [
       "Albums and visual clusters",
       "Search by people, places, dates, and events",
@@ -64,9 +64,9 @@ export const CORE_CAPABILITIES = [
     description: "Unified communication across people and intelligences.",
     promise: "One calm view of every important conversation.",
     detail:
-      "Signal is planned to gather communication into one intelligent stream, identify priority, preserve shared history and help prepare responses for approval.",
+      "Signal gathers communication into one intelligent stream, identifies priority, preserves shared history and helps prepare responses for approval.",
     connection:
-      "Signal is planned to draw on Core context to explain references and prepare replies without creating another isolated silo.",
+      "Signal draws on Core context to explain references and prepare replies without creating another isolated silo.",
     features: [
       "Connect multiple inboxes",
       "Filter noise and prioritize what matters",
@@ -80,9 +80,9 @@ export const CORE_CAPABILITIES = [
     description: "Discover knowledge and navigate infinite information.",
     promise: "Turn curiosity into a path you can follow.",
     detail:
-      "Compass is planned to explore places, topics and possibilities while preserving why each discovery matters, from open research through grounded plans.",
+      "Compass explores places, topics and possibilities while preserving why each discovery matters, from open research through grounded plans.",
     connection:
-      "Compass is planned to connect discoveries to Archive knowledge, Gallery memories and goals developed in Ascend.",
+      "Compass connects discoveries to Archive knowledge, Gallery memories and goals developed in Ascend.",
     features: [
       "Map places, memories, and plans",
       "Keep visited and future destinations together",
@@ -96,9 +96,9 @@ export const CORE_CAPABILITIES = [
     description: "Your AI coach for growth, clarity and mastery.",
     promise: "Progress guided by your real life, not a template.",
     detail:
-      "Ascend is planned to turn ambitions into practical rhythms, helping define goals, notice patterns and adapt routines around user-provided context.",
+      "Ascend turns ambitions into practical rhythms, helping define goals, notice patterns and adapt routines around user-provided context.",
     connection:
-      "Ascend is planned to use knowledge, communication and discoveries a user chooses to connect, grounding guidance in actual priorities.",
+      "Ascend uses knowledge, communication and discoveries a user chooses to connect, grounding guidance in actual priorities.",
     features: [
       "Goals, habits, health, and routines",
       "Personal learning journeys",
@@ -107,33 +107,15 @@ export const CORE_CAPABILITIES = [
   },
 ] as const;
 
-export const CORE_FAQ = [
-  {
-    question: "What is Vorinthex Core?",
-    answer:
-      "Vorinthex Core is a personal AI product in development for iOS and Android. It is planned to connect knowledge, memories, communication, discovery, and goals in one place.",
-  },
-  {
-    question: "Is Vorinthex Core available now?",
-    answer:
-      "No. Vorinthex Core is pre-launch, and app downloads and purchases are not currently available.",
-  },
-  {
-    question: "What are Sparks?",
-    answer:
-      "Sparks are a planned usage unit for Vorinthex services. The pricing page shows approved planned amounts in US dollars, but Sparks and subscriptions are not currently purchasable.",
-  },
-] as const;
-
 export const PRODUCT_FACTS = {
   name: "Vorinthex Core",
-  status: "Pre-launch and in development",
+  status: "Personal AI for iOS and Android",
   platforms: ["iOS", "Android"],
-  availability: "Downloads and purchases are not currently available.",
+  availability: "Download Core for your platform.",
   privacy:
-    "Core is being designed with privacy and user control as product principles.",
+    "Privacy and user control are central product principles for Core.",
   sparks:
-    "Sparks are a planned usage unit. Approved planned pricing is shown in USD, but Sparks and subscriptions are not currently purchasable.",
+    "Sparks are the usage unit for Vorinthex services. Pricing is shown in USD, and local taxes may be added where required.",
   pricing: {
     currency: SPARK_PRICING_CURRENCY,
     newcomerAllocation: NEWCOMER_FREE_SPARKS,
@@ -142,7 +124,6 @@ export const PRODUCT_FACTS = {
     onDemand: SPARK_ON_DEMAND,
   },
   capabilities: CORE_CAPABILITIES,
-  faq: CORE_FAQ,
 } as const;
 
 const capabilityNames = CORE_CAPABILITIES.map(({ name }) => name);
@@ -152,24 +133,23 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/",
     title: "Vorinthex AI | Your Personal AI",
     description:
-      "Meet Vorinthex Core, a pre-launch personal AI planned for iOS and Android that connects knowledge, memories, communication, discovery, and goals.",
+      "Meet Vorinthex Core, a personal AI for iOS and Android that connects knowledge, memories, communication, discovery, and goals.",
     summary:
-      "Vorinthex Core is a pre-launch personal AI planned for iOS and Android; downloads and purchases are not yet available.",
+      "Vorinthex Core is a personal AI for iOS and Android that connects the context that matters to you.",
     schemaPageType: "WebPage",
-    status: "pre-launch",
+    status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
     capabilities: capabilityNames,
-    faq: CORE_FAQ,
   },
   "/pricing": {
     path: "/pricing",
-    title: "Planned Sparks Pricing | Vorinthex AI",
+    title: "Sparks Pricing | Vorinthex AI",
     description:
-      "Preview approved planned Vorinthex Sparks amounts in USD. Sparks are a planned usage unit, and purchases are not currently available.",
+      "Explore Vorinthex Sparks monthly balances, one-time top-ups, and on-demand usage pricing in USD.",
     summary:
-      "This pre-launch page shows approved planned Sparks allocations and USD amounts; purchases are not currently available.",
+      "Vorinthex Sparks pricing includes monthly balances, one-time top-ups, and on-demand usage in USD.",
     schemaPageType: "WebPage",
-    status: "pre-launch",
+    status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
     capabilities: [],
   },
@@ -177,11 +157,11 @@ export const PUBLIC_DISCOVERABILITY_REGISTRY = {
     path: "/about",
     title: "About Vorinthex AI",
     description:
-      "Learn about Vorinthex AI and its work on Core, a pre-launch personal AI planned for iOS and Android.",
+      "Learn about Vorinthex AI and Core, a personal AI for iOS and Android.",
     summary:
-      "Vorinthex AI is developing Core around connected personal context, privacy, and user control.",
+      "Vorinthex AI builds Core around connected personal context, privacy, and user control.",
     schemaPageType: "AboutPage",
-    status: "pre-launch",
+    status: "current",
     lastModified: CONTENT_LAST_REVIEWED,
     capabilities: capabilityNames,
   },

@@ -9,14 +9,16 @@
   z-index: 100;
   top: 12px;
   left: 12px;
-  padding: 10px 14px;
+  padding: 9px 13px;
+  clip-path: inset(50%);
+  border: 1px solid rgba(221, 226, 229, 0.24);
   border-radius: 8px;
-  background: #f0efeb;
-  color: #020304;
+  background: #080b0f;
+  color: #dde2e5;
   transform: translateY(-180%);
 }
 
-.skipLink:focus { transform: translateY(0); }
+.skipLink:focus-visible { clip-path: none; transform: translateY(0); }
 
 .siteNeuralBackdrop {
   position: fixed;
