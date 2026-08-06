@@ -64,6 +64,7 @@ export function CoreAppsJourney() {
         <section
           className={styles.journeyStep}
           data-core-app-step
+          id={capability.id}
           key={capability.name}
         >
           <div className={styles.cubeAnchor}>

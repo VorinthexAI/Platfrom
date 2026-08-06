@@ -1,3 +1,4 @@
+export const SPARK_PRICING_CURRENCY = "USD" as const;
 export const NEWCOMER_FREE_SPARKS = 1_000;
 
 export const SPARK_MONTHLY_PLANS = [
@@ -15,7 +16,7 @@ export const SPARK_TOP_UPS = [
 
 export const SPARK_ON_DEMAND = {
   name: "On-Demand",
-  allowance: "Unlimited monthly Sparks",
+  description: "Planned overflow Sparks after the included balance runs out",
   requiresPlan: "Nova",
 } as const;
 
@@ -24,5 +25,5 @@ export function formatSparkCount(sparks: number) {
 }
 
 export function formatUsd(price: number) {
-  return `$${price.toFixed(2)}`;
+  return `$${price.toFixed(2)} ${SPARK_PRICING_CURRENCY}`;
 }

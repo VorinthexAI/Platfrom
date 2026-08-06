@@ -1,4 +1,15 @@
-vorinthex.com {
+http://vorinthex.com {
+	redir https://vorinthex.com{uri} permanent
+}
+
+https://vorinthex.com {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
 	@api path /api/v1 /api/v1/*
 	handle @api {
 		reverse_proxy app-blue:3001 {

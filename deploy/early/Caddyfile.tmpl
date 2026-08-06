@@ -28,10 +28,17 @@
 }
 
 http://vorinthex.com {
-	import routes
+	redir https://vorinthex.com{uri} permanent
 }
 
 https://vorinthex.com {
 	tls internal
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
 	import routes
 }

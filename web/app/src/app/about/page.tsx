@@ -1,13 +1,15 @@
-import type { Metadata } from "next";
+import { JsonLd } from "@/components/site/JsonLd";
 import { AboutPage } from "@/components/about/AboutPage";
+import { buildRouteMetadata } from "@/lib/metadata";
+import { buildPageGraph } from "@/lib/structured-data";
 
-export const metadata: Metadata = {
-  title: "About Vorinthex AI",
-  description:
-    "Vorinthex AI is an AI-native software company building Core, one private personal AI that learns, remembers, and grows with you.",
-  alternates: { canonical: "/about" },
-};
+export const metadata = buildRouteMetadata("/about");
 
 export default function AboutPageRoute() {
-  return <AboutPage />;
+  return (
+    <>
+      <JsonLd data={buildPageGraph("/about")} />
+      <AboutPage />
+    </>
+  );
 }

@@ -7,9 +7,10 @@ import styles from "./LegalPage.module.css";
 
 export function LegalPage({ copy }: { copy: VaultCopy }) {
   return (
-    <main className={styles.page}>
+    <div className={styles.page}>
       <SiteHeader />
       <SiteNeuralBackdrop />
+      <main id="main-content" tabIndex={-1}>
       <article className={styles.content}>
         <p className={styles.eyebrow}>{copy.eyebrow}</p>
         <h1>{copy.title}</h1>
@@ -26,10 +27,15 @@ export function LegalPage({ copy }: { copy: VaultCopy }) {
         ))}
         <p className={styles.footnote}>{copy.footnote}</p>
         <Button asChild size="md" variant="outline">
-          <Link href="/">Go back</Link>
+          {copy.email ? (
+            <a href={`mailto:${copy.email}`}>Email Vorinthex AI</a>
+          ) : (
+            <Link href="/">Go back</Link>
+          )}
         </Button>
       </article>
+      </main>
       <SiteFooter />
-    </main>
+    </div>
   );
 }

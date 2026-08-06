@@ -19,6 +19,7 @@
 .mission > p:last-child { max-width: 760px; margin: 28px auto 0; color: #969996; font-size: 15px; line-height: 1.9; }
 
 .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; padding-block: 90px; }
+.principles > h2 { grid-column: 1 / -1; margin-bottom: 4px; font-weight: 400; }
 .principles article { min-height: 260px; padding: 38px 34px; border: 1px solid rgba(206,199,185,.2); border-radius: 14px; background: linear-gradient(145deg, rgba(25,31,35,.54), rgba(3,5,7,.84)); }
 .principles span { color: var(--warm); font-family: var(--font-mono); font-size: 10px; letter-spacing: .15em; }
 .principles h3 { margin-top: 30px; font-family: var(--font-display); font-size: 19px; font-weight: 400; letter-spacing: .12em; text-transform: uppercase; }

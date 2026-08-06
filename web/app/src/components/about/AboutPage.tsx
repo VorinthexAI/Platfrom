@@ -26,9 +26,10 @@ const PRINCIPLES = [
 
 export function AboutPage() {
   return (
-    <main className={styles.page}>
+    <div className={styles.page}>
       <SiteHeader />
       <SiteNeuralBackdrop />
+      <main id="main-content" tabIndex={-1}>
 
       <section className={styles.hero}>
         <div>
@@ -36,7 +37,8 @@ export function AboutPage() {
           <h1>Intelligence should know you.</h1>
           <p className={styles.lead}>
             Vorinthex AI is an AI-native software company focused on Core: one
-            private personal AI that learns, remembers, and grows with you.
+            personal AI in development for iOS and Android, designed to connect
+            the context you choose to provide.
           </p>
         </div>
         <div className={styles.heroMark}>
@@ -64,6 +66,7 @@ export function AboutPage() {
       </section>
 
       <section className={styles.principles}>
+        <h2 className={styles.eyebrow}>Our principles</h2>
         {PRINCIPLES.map((principle) => (
           <article key={principle.number}>
             <span>{principle.number}</span>
@@ -110,18 +113,18 @@ export function AboutPage() {
           <p className={styles.eyebrow}>Built for the long term</p>
           <h2>From context to action, in one place.</h2>
           <p>
-            Vorinthex AI combines modern cloud infrastructure with leading
-            foundation models to make Core useful across everyday life. The
-            technology can evolve; the product principle stays constant: your
-            AI should understand your context and remain centered on you.
+            Vorinthex AI is developing Core for iOS and Android. The technology
+            can evolve; the product principle stays constant: personal AI should
+            remain centered on the context and controls its user provides.
           </p>
           <Button asChild size="lg" variant="outline">
-            <Link href="/#download">Get the app</Link>
+            <Link href="/#faq">View pre-launch status</Link>
           </Button>
         </div>
       </section>
 
+      </main>
       <SiteFooter />
-    </main>
+    </div>
   );
 }

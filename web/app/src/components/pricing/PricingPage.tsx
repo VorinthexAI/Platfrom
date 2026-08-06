@@ -12,83 +12,86 @@ import styles from "./PricingPage.module.css";
 
 export function PricingPage() {
   return (
-    <main className={styles.page}>
+    <div className={styles.page}>
       <SiteHeader />
       <SiteNeuralBackdrop />
-
-      <section className={styles.hero}>
-        <p className={styles.eyebrow}>Pricing preview</p>
-        <h1>Usage-based pricing is coming.</h1>
-        <p className={styles.intro}>
-          These planned Sparks options are not yet available to purchase.
-        </p>
-        <div className={styles.freeNotice}>
-          <span>New here?</span>
-          <strong>{formatSparkCount(NEWCOMER_FREE_SPARKS)} free Sparks</strong>
-          <p>Every newcomer starts with Sparks on us.</p>
-        </div>
-      </section>
-
-      <section className={styles.plans} aria-labelledby="monthly-plans">
-        <div className={styles.sectionHeading}>
-          <p className={styles.eyebrow}>Monthly plans</p>
-          <h2 id="monthly-plans">Monthly Sparks.</h2>
-          <p>Your plan refills your Spark balance every month. Spend them anywhere.</p>
-        </div>
-        <div className={styles.planGrid}>
-          {SPARK_MONTHLY_PLANS.map((plan, index) => (
-            <article
-              className={`${styles.planCard} ${index === 1 ? styles.featured : ""}`}
-              key={plan.name}
-            >
-              {index === 1 && <span className={styles.planTag}>Most popular</span>}
-              <p className={styles.planIndex}>0{index + 1}</p>
-              <h3>{plan.name}</h3>
-              <p className={styles.planPrice}>
-                <strong>{formatUsd(plan.price)}</strong>
-                <span>/ month</span>
-              </p>
-              <div className={styles.sparkAmount}>
-                <strong>{formatSparkCount(plan.sparks)}</strong>
-                <span>monthly Sparks</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className={styles.topUps} aria-labelledby="top-ups">
-        <div className={styles.sectionHeading}>
-          <p className={styles.eyebrow}>More when you need it</p>
-          <h2 id="top-ups">Top up your Sparks.</h2>
-          <p>One-time Spark packs for a bigger idea or a busier month.</p>
-        </div>
-        <div className={styles.topUpGrid}>
-          {SPARK_TOP_UPS.map((topUp) => (
-            <article className={styles.topUpCard} key={topUp.sparks}>
-              <div>
-                <strong>{formatSparkCount(topUp.sparks)}</strong>
-                <span>Sparks</span>
-              </div>
-              <p>{formatUsd(topUp.price)}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className={styles.onDemand} aria-labelledby="on-demand">
-        <div className={styles.onDemandMark}>∞</div>
-        <div className={styles.onDemandCopy}>
-          <p className={styles.eyebrow}>For uninterrupted momentum</p>
-          <h2 id="on-demand">{SPARK_ON_DEMAND.name}</h2>
-          <p>
-            On-Demand Sparks are added on top of your monthly plan when your
-            included balance runs out. Requires the {SPARK_ON_DEMAND.requiresPlan} plan.
+      <main id="main-content" tabIndex={-1}>
+        <section className={styles.hero}>
+          <p className={styles.eyebrow}>Planned pricing preview</p>
+          <h1>Usage-based pricing is planned.</h1>
+          <p className={styles.intro}>
+            All amounts are planned USD pricing. Sparks and subscriptions are not
+            currently purchasable.
           </p>
-        </div>
-      </section>
+          <div className={styles.freeNotice}>
+            <span>Planned newcomer allocation</span>
+            <strong>{formatSparkCount(NEWCOMER_FREE_SPARKS)} Sparks</strong>
+            <p>Planned USD preview. Not purchasable.</p>
+          </div>
+        </section>
+
+        <section className={styles.plans} aria-labelledby="monthly-plans">
+          <div className={styles.sectionHeading}>
+            <p className={styles.eyebrow}>Planned monthly options</p>
+            <h2 id="monthly-plans">Monthly Sparks.</h2>
+            <p>Planned allocations and USD amounts. No purchases are available.</p>
+          </div>
+          <div className={styles.planGrid}>
+            {SPARK_MONTHLY_PLANS.map((plan, index) => (
+              <article
+                className={`${styles.planCard} ${index === 1 ? styles.featured : ""}`}
+                key={plan.name}
+              >
+                <span className={styles.planTag}>Planned · not purchasable</span>
+                <p className={styles.planIndex}>0{index + 1}</p>
+                <h3>{plan.name}</h3>
+                <p className={styles.planPrice}>
+                  <strong>{formatUsd(plan.price)}</strong>
+                  <span>planned / month</span>
+                </p>
+                <div className={styles.sparkAmount}>
+                  <strong>{formatSparkCount(plan.sparks)}</strong>
+                  <span>Planned monthly Sparks · not purchasable</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className={styles.topUps} aria-labelledby="top-ups">
+          <div className={styles.sectionHeading}>
+            <p className={styles.eyebrow}>Planned overflow options</p>
+            <h2 id="top-ups">Top up your Sparks.</h2>
+            <p>Planned one-time Spark packs in USD. Not currently purchasable.</p>
+          </div>
+          <div className={styles.topUpGrid}>
+            {SPARK_TOP_UPS.map((topUp) => (
+              <article className={styles.topUpCard} key={topUp.sparks}>
+                <div>
+                  <strong>{formatSparkCount(topUp.sparks)}</strong>
+                  <span>Planned Sparks · not purchasable</span>
+                </div>
+                <p>{formatUsd(topUp.price)}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className={styles.onDemand} aria-labelledby="on-demand">
+          <div className={styles.onDemandMark}>∞</div>
+          <div className={styles.onDemandCopy}>
+            <p className={styles.eyebrow}>Planned overflow</p>
+            <h2 id="on-demand">{SPARK_ON_DEMAND.name}</h2>
+            <p>
+              {SPARK_ON_DEMAND.description}. It is planned to require the{" "}
+              {SPARK_ON_DEMAND.requiresPlan} option. It is not currently purchasable,
+              and no allowance beyond the planned overflow is specified.
+            </p>
+          </div>
+        </section>
+      </main>
 
       <SiteFooter />
-    </main>
+    </div>
   );
 }

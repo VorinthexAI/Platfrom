@@ -1,46 +1,96 @@
-import { CORE_FAQ } from "@/lib/core";
-import { SITE_NAME, SITE_URL, absoluteUrl } from "@/lib/site";
+import {
+  CANONICAL_ORIGIN,
+  CONTACT_EMAIL,
+  PRODUCT_FACTS,
+  PUBLIC_DISCOVERABILITY_REGISTRY,
+  canonicalUrl,
+  type PublicRoutePath,
+} from "@/lib/discoverability";
 
-export const organizationJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "Organization",
-  name: SITE_NAME,
-  slogan: "Your Personal AI",
-  url: SITE_URL,
-  logo: absoluteUrl("/logos/vorinthex-mark.png"),
-  contactPoint: {
-    "@type": "ContactPoint",
-    contactType: "customer support",
-    email: "contact@vorinthex.com",
-    url: absoluteUrl("/contact"),
-  },
-};
+export const SCHEMA_IDS = {
+  organization: `${CANONICAL_ORIGIN}/#organization`,
+  website: `${CANONICAL_ORIGIN}/#website`,
+  homePage: `${CANONICAL_ORIGIN}/#webpage`,
+  software: `${CANONICAL_ORIGIN}/#core`,
+  faq: `${CANONICAL_ORIGIN}/#faq`,
+} as const;
 
-export const webSiteJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "WebSite",
-  name: SITE_NAME,
-  url: SITE_URL,
-};
+export function buildGlobalGraph() {
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": SCHEMA_IDS.organization,
+        name: "Vorinthex AI",
+        url: CANONICAL_ORIGIN,
+        logo: `${CANONICAL_ORIGIN}/logos/vorinthex-mark.png`,
+        email: CONTACT_EMAIL,
+        contactPoint: {
+          "@type": "ContactPoint",
+          contactType: "customer support",
+          email: CONTACT_EMAIL,
+          url: canonicalUrl("/contact"),
+        },
+      },
+      {
+        "@type": "WebSite",
+        "@id": SCHEMA_IDS.website,
+        name: "Vorinthex AI",
+        url: CANONICAL_ORIGIN,
+        publisher: { "@id": SCHEMA_IDS.organization },
+      },
+    ],
+  };
+}
 
-export const coreSoftwareJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "Vorinthex Core",
-  description:
-    "A private personal AI that connects your knowledge, memories, communication, discovery, and growth.",
-  url: SITE_URL,
-  applicationCategory: "ProductivityApplication",
-  operatingSystem: "iOS, Android",
-  publisher: { "@type": "Organization", name: SITE_NAME, url: SITE_URL },
-};
+export function buildPageGraph(path: PublicRoutePath) {
+  const entry = PUBLIC_DISCOVERABILITY_REGISTRY[path];
+  const url = canonicalUrl(path);
+  const pageId = path === "/" ? SCHEMA_IDS.homePage : `${url}#webpage`;
+  const page = {
+    "@type": entry.schemaPageType,
+    "@id": pageId,
+    url,
+    name: entry.title,
+    description: entry.description,
+    dateModified: entry.lastModified,
+    isPartOf: { "@id": SCHEMA_IDS.website },
+    publisher: { "@id": SCHEMA_IDS.organization },
+    ...(path === "/" && {
+      mainEntity: { "@id": SCHEMA_IDS.software },
+      about: { "@id": SCHEMA_IDS.software },
+    }),
+  };
 
-export const faqJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: CORE_FAQ.map(({ question, answer }) => ({
-    "@type": "Question",
-    name: question,
-    acceptedAnswer: { "@type": "Answer", text: answer },
-  })),
-};
+  const graph: Record<string, unknown>[] = [page];
+
+  if (path === "/") {
+    graph.push(
+      {
+        "@type": "SoftwareApplication",
+        "@id": SCHEMA_IDS.software,
+        name: PRODUCT_FACTS.name,
+        description: entry.summary,
+        url,
+        applicationCategory: "ProductivityApplication",
+        operatingSystem: PRODUCT_FACTS.platforms.join(", "),
+        publisher: { "@id": SCHEMA_IDS.organization },
+        mainEntityOfPage: { "@id": pageId },
+      },
+      {
+        "@type": "FAQPage",
+        "@id": SCHEMA_IDS.faq,
+        url: `${url}#faq`,
+        isPartOf: { "@id": pageId },
+        mainEntity: PRODUCT_FACTS.faq.map(({ question, answer }) => ({
+          "@type": "Question",
+          name: question,
+          acceptedAnswer: { "@type": "Answer", text: answer },
+        })),
+      },
+    );
+  }
+
+  return { "@context": "https://schema.org", "@graph": graph };
+}
