@@ -51,6 +51,7 @@
 .hero h1 {
   max-width: 940px;
   margin: 24px 0 0;
+  padding-bottom: 0.12em;
   background: linear-gradient(115deg, #fff 8%, #7f898f 44%, #eef2f3 68%, #7c858a);
   background-clip: text;
   color: transparent;
@@ -58,7 +59,7 @@
   font-size: clamp(48px, 7.5vw, 96px);
   font-weight: 400;
   letter-spacing: 0.025em;
-  line-height: 1.04;
+  line-height: 1.12;
 }
 
 .intro {

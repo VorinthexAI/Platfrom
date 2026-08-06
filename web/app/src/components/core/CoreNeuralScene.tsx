@@ -37,7 +37,7 @@ export function CoreNeuralScene() {
     host.appendChild(renderer.domElement);
 
     const root = new THREE.Group();
-    root.position.y = 8.8;
+    root.position.y = 7.2;
     scene.add(root);
     scene.add(new THREE.AmbientLight(0xc4cbd0, 1.8));
     const warmLight = new THREE.PointLight(0xdce4e8, 54, 22, 1.8);

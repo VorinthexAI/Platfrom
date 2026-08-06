@@ -32,7 +32,7 @@ export const CORE_CAPABILITIES = [
     description: "Store, organize and understand everything that matters.",
     promise: "A living home for everything you know.",
     detail:
-      "Capture thoughts, documents, links and research without deciding where every idea belongs first. Archive organizes material around meaning, then brings relevant context back when needed.",
+      "Archive connects to your personal AI to intelligently handle notes, documents, links, and research. It organizes material around meaning and brings the right context back when you need it.",
     connection:
       "Archive gives every Core app durable memory, so conversations, plans and coaching can build on saved knowledge.",
     features: [
@@ -48,7 +48,7 @@ export const CORE_CAPABILITIES = [
     description: "Your visual memory. Search, recall and connect images.",
     promise: "Remember the story behind every image.",
     detail:
-      "Gallery turns a camera roll into an explorable visual memory, with natural-language discovery and context around people, places and moments.",
+      "Gallery connects to your personal AI to intelligently organize and understand your photos. Search naturally across people, places, dates, and moments without manually sorting everything first.",
     connection:
       "Gallery links visual moments to Archive knowledge, Compass places and people connected through Signal.",
     features: [
@@ -64,7 +64,7 @@ export const CORE_CAPABILITIES = [
     description: "Unified communication across people and intelligences.",
     promise: "One calm view of every important conversation.",
     detail:
-      "Signal gathers communication into one intelligent stream, identifies priority, preserves shared history and helps prepare responses for approval.",
+      "Signal connects to your personal AI to intelligently handle conversations across your inboxes. It identifies priority, preserves shared context, and helps prepare responses for your approval.",
     connection:
       "Signal draws on Core context to explain references and prepare replies without creating another isolated silo.",
     features: [
@@ -80,7 +80,7 @@ export const CORE_CAPABILITIES = [
     description: "Discover knowledge and navigate infinite information.",
     promise: "Turn curiosity into a path you can follow.",
     detail:
-      "Compass explores places, topics and possibilities while preserving why each discovery matters, from open research through grounded plans.",
+      "Compass connects to your personal AI to intelligently explore places, topics, and possibilities. It remembers why each discovery matters and turns open research into grounded plans.",
     connection:
       "Compass connects discoveries to Archive knowledge, Gallery memories and goals developed in Ascend.",
     features: [
@@ -96,7 +96,7 @@ export const CORE_CAPABILITIES = [
     description: "Your AI coach for growth, clarity and mastery.",
     promise: "Progress guided by your real life, not a template.",
     detail:
-      "Ascend turns ambitions into practical rhythms, helping define goals, notice patterns and adapt routines around user-provided context.",
+      "Ascend connects to your personal AI to intelligently support goals, habits, health, and learning. It notices patterns and adapts guidance around the context you choose to provide.",
     connection:
       "Ascend uses knowledge, communication and discoveries a user chooses to connect, grounding guidance in actual priorities.",
     features: [
