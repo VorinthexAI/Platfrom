@@ -84,7 +84,7 @@ const MODEL_DEFAULTS: Record<ModelCategory, Record<ModelLevel, string>> = {
     low: 'stability/sdxl',
   },
   embedding: {
-    xhigh: 'text-embedding-3-large',
+    xhigh: 'text-embedding-3-small',
     high: 'text-embedding-3-small',
     medium: 'text-embedding-3-small',
     low: 'text-embedding-3-small',

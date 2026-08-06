@@ -26,7 +26,7 @@ describe('OpenAI embeddings', () => {
     await expect(embedText({ text: '  ' })).rejects.toThrow();
   });
 
-  test('requests the fixed model and 3072 dimensions with optional client configuration', async () => {
+  test('requests the fixed model and 1536 dimensions with optional client configuration', async () => {
     process.env.OPENAI_API_KEY = 'test-key';
     process.env.OPENAI_BASE_URL = 'https://openai.example/v1';
     process.env.OPENAI_ORGANIZATION = 'org';
@@ -41,7 +41,7 @@ describe('OpenAI embeddings', () => {
     expect(request?.url).toBe('https://openai.example/v1/embeddings');
     expect(request?.headers.get('openai-organization')).toBe('org');
     expect(request?.headers.get('openai-project')).toBe('project');
-    await expect(request?.json()).resolves.toEqual({ model: OPENAI_EMBEDDING_MODEL_ID, input: 'Backend Developer', dimensions: 3_072, encoding_format: 'float' });
+    await expect(request?.json()).resolves.toEqual({ model: OPENAI_EMBEDDING_MODEL_ID, input: 'Backend Developer', dimensions: 1_536, encoding_format: 'float' });
     expect(embeddingMetadata()).toEqual({ embeddingProvider: 'openai', embeddingModel: EMBEDDING_MODEL });
   });
 

@@ -2,9 +2,9 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 
 export const EMBEDDING_PROVIDER_ID = 'openai' as const;
-export const EMBEDDING_MODEL = 'openai.text-embedding-3-large';
-export const OPENAI_EMBEDDING_MODEL_ID = 'text-embedding-3-large';
-export const EMBEDDING_DIMENSIONS = 3_072;
+export const EMBEDDING_MODEL = 'openai.text-embedding-3-small';
+export const OPENAI_EMBEDDING_MODEL_ID = 'text-embedding-3-small';
+export const EMBEDDING_DIMENSIONS = 1_536;
 
 const MAX_RETRIES = 3;
 const embedInputSchema = z.object({

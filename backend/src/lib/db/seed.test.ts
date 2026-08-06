@@ -112,14 +112,14 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-realtime-2',
       'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
-      'openai.text-embedding-3-large',
+      'openai.text-embedding-3-small',
       'aws.transcribe-standard',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
       .toEqual(['amazon.nova-lite', 'amazon.nova-pro']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'transcribe').map(({ modelSlug }) => modelSlug))
       .toEqual(['openai.gpt-realtime-2']);
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-large');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-small');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:false',
@@ -130,7 +130,7 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-lite:aws-bedrock:us.amazon.nova-lite-v1:0:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'openai.gpt-4o-mini-transcribe:openai:gpt-4o-mini-transcribe:true',
-      'openai.text-embedding-3-large:openai:text-embedding-3-large:true',
+      'openai.text-embedding-3-small:openai:text-embedding-3-small:true',
       'amazon.polly-generative:aws-polly:generative:true',
       'aws.transcribe-standard:aws-transcribe:standard:true',
     ]);

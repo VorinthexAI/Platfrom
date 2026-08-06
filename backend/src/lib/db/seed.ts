@@ -655,9 +655,9 @@ export const SEEDED_MODELS = [
   },
   {
     key: 'cmopenaiembed3model000001',
-    slug: 'openai.text-embedding-3-large',
-    name: 'OpenAI Text Embedding 3 Large',
-    description: 'OpenAI embedding model configured at its full 3072 dimensions for high-quality semantic retrieval.',
+    slug: 'openai.text-embedding-3-small',
+    name: 'OpenAI Text Embedding 3 Small',
+    description: 'OpenAI embedding model configured at its full 1536 dimensions for efficient semantic retrieval.',
     supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
     enabled: true,
   },
@@ -752,9 +752,9 @@ export const SEEDED_MODEL_PROVIDERS = [
   },
   {
     key: 'cmopenaiembed3route000001',
-    modelSlug: 'openai.text-embedding-3-large',
+    modelSlug: 'openai.text-embedding-3-small',
     providerSlug: 'openai',
-    providerModelId: 'text-embedding-3-large',
+    providerModelId: 'text-embedding-3-small',
     enabled: true,
   },
   {

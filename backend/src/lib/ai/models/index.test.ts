@@ -12,7 +12,7 @@ describe('logical model slugs', () => {
       'openai.gpt-realtime-2',
       'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
-      'openai.text-embedding-3-large',
+      'openai.text-embedding-3-small',
       'aws.transcribe-standard',
     ]);
     for (const slug of MODEL_SLUGS) expect(modelSlugSchema.parse(slug)).toBe(slug);
