@@ -1,13 +1,16 @@
-import type { Metadata } from "next";
+import { JsonLd } from "@/components/site/JsonLd";
 import { LegalPage } from "@/components/legal/LegalPage";
 import { PRIVACY_COPY } from "@/lib/legal-copy";
+import { buildRouteMetadata } from "@/lib/metadata";
+import { buildPageGraph } from "@/lib/structured-data";
 
-export const metadata: Metadata = {
-  title: "Privacy Policy and Data Deletion",
-  description: "How Vorinthex AI handles personal data and deletion requests.",
-  alternates: { canonical: "/privacy" },
-};
+export const metadata = buildRouteMetadata("/privacy");
 
 export default function PrivacyPage() {
-  return <LegalPage copy={PRIVACY_COPY} />;
+  return (
+    <>
+      <JsonLd data={buildPageGraph("/privacy")} />
+      <LegalPage copy={PRIVACY_COPY} />
+    </>
+  );
 }

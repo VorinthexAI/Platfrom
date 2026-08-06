@@ -11,26 +11,27 @@ export interface VaultCopy {
     paragraphs: string[];
   }>;
   footnote: string;
+  email?: string;
 }
 
 export const PRIVACY_COPY: VaultCopy = {
   title: "Privacy Policy",
   eyebrow: "Records Vault",
   paragraphs: [
-    "Effective July 15, 2026. This policy explains how Vorinthex AI collects, uses, shares, retains, and protects personal data when you use our websites, apps, and services.",
+    "Effective August 6, 2026. Vorinthex Core is pre-launch. This policy explains how Vorinthex AI handles personal data on its website and how it intends to handle data when apps and services become available.",
   ],
   sections: [
     {
       title: "Data we collect",
       paragraphs: [
-        "We collect account and profile data such as your email address, name or alias, profile details, sign in identifiers, and preferences. We also collect content and activity you choose to provide, including prompts, files, messages, saved content, feedback, and communications with us.",
-        "We may collect technical and usage data such as IP address, device and browser information, cookie or similar identifiers, app interactions, diagnostics, and security logs.",
+        "On the current website, we collect information you choose to send us, such as email communications. We may also collect technical data needed to operate and secure the site, such as IP address, device and browser information, diagnostics, and security logs.",
+        "If accounts, apps, or AI features become available, this policy will apply to account details and content you choose to provide through those services, and we will update this page when needed to describe the launched features accurately.",
       ],
     },
     {
       title: "How we use data",
       paragraphs: [
-        "We use personal data to create and secure accounts, provide and personalize Vorinthex AI services, process requests, communicate about access and service updates, provide support, measure and improve performance, prevent fraud and abuse, comply with law, and enforce our terms.",
+        "We use current website data to respond to requests, communicate about access, operate and secure the site, prevent abuse, comply with law, and enforce our terms. If product accounts launch, we may also use data to create and secure accounts and provide requested features as described in the policy then in effect.",
       ],
     },
     {
@@ -43,26 +44,26 @@ export const PRIVACY_COPY: VaultCopy = {
     {
       title: "Delete your account and data",
       paragraphs: [
-        "You can request deletion of your account and its associated data by signing in, opening your Profile page, selecting Delete account, and confirming the request. If you cannot sign in, email contact@vorinthex.com from the address associated with your account and ask us to delete the account. We may verify your identity before completing the request.",
-        "Account deletion removes or deidentifies your profile, saved content, and account activity within 30 days after verification. Copies in encrypted backups are removed through the normal backup cycle within 90 days. We may retain limited fraud prevention, security, or legal records for as long as required by law or reasonably necessary to establish or defend legal claims.",
+        "Core is not currently available. To request deletion of personal data you have provided to Vorinthex AI, email contact@vorinthex.com from the relevant address and describe the data involved. We may verify your identity before completing the request.",
+        "After verification, we delete or deidentify covered data within 30 days. Copies in encrypted backups are removed through the normal backup cycle within 90 days. We may retain limited fraud prevention, security, or legal records for as long as required by law or reasonably necessary to establish or defend legal claims.",
       ],
     },
     {
       title: "Delete selected data without deleting your account",
       paragraphs: [
-        "You may request deletion of specific data while keeping your account. Use the available controls on your Profile page, or email contact@vorinthex.com from your account email and clearly identify the profile field, saved content, conversation, file, activity record, or other data you want removed. We will delete or deidentify the selected data within 30 days after verification, with backup copies expiring within 90 days, subject to the same limited legal and security retention described above.",
+        "To request deletion of specific data, email contact@vorinthex.com from the relevant address and clearly identify what you want removed. We will delete or deidentify covered data within 30 days after verification, with backup copies expiring within 90 days, subject to the limited legal and security retention described above.",
       ],
     },
     {
       title: "Retention",
       paragraphs: [
-        "We keep account data while your account is active and retain other personal data only for as long as needed for the purposes described in this policy. Retention periods depend on the type of data, the service involved, security needs, contractual obligations, and legal requirements. When data is no longer needed, we delete or deidentify it.",
+        "We retain personal data only for as long as needed for the purposes described in this policy. Retention periods depend on the type of data, security needs, contractual obligations, and legal requirements. When data is no longer needed, we delete or deidentify it.",
       ],
     },
     {
       title: "Your privacy choices and rights",
       paragraphs: [
-        "Depending on where you live, you may have rights to access, correct, delete, restrict, object to, or receive a copy of your personal data, and to withdraw consent where processing relies on consent. You may make a request through your Profile page or by emailing contact@vorinthex.com. You may also have the right to complain to your local data protection authority.",
+        "Depending on where you live, you may have rights to access, correct, delete, restrict, object to, or receive a copy of your personal data, and to withdraw consent where processing relies on consent. Make a request by emailing contact@vorinthex.com from the relevant address. You may also have the right to complain to your local data protection authority.",
       ],
     },
     {
@@ -92,8 +93,8 @@ export const TERMS_COPY: VaultCopy = {
   title: "Terms",
   eyebrow: "Accord Vault",
   paragraphs: [
-    "These terms govern your use of Vorinthex AI websites, apps, and services. By using a Vorinthex AI service, you agree to use it lawfully and responsibly.",
-    "Vorinthex Core provides AI assisted features. You remain responsible for reviewing outputs before relying on them for important decisions.",
+    "These terms currently govern your use of the Vorinthex AI website. Vorinthex Core is pre-launch, and its apps and services are not currently available.",
+    "If Vorinthex apps, services, or AI-assisted features become available, additional or updated terms may apply. When using any future AI-assisted feature, you will remain responsible for reviewing outputs before relying on them for important decisions.",
     "The Vorinthex AI name, marks, visual identity, software, and original content are the property of Vorinthex AI or its licensors.",
   ],
   footnote: "Questions? Reach us at contact@vorinthex.com.",
@@ -103,8 +104,9 @@ export const CONTACT_COPY: VaultCopy = {
   title: "Contact",
   eyebrow: "Signal Vault",
   paragraphs: [
-    "Questions about access, press, partnerships, or removing your data all land in the same inbox. We read everything.",
+    "Questions about access, press, partnerships, or removing your data all go to the same inbox.",
     "Reach the Vorinthex AI team at contact@vorinthex.com.",
   ],
   footnote: "One address answers everything.",
+  email: "contact@vorinthex.com",
 };

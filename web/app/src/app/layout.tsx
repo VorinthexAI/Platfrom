@@ -1,12 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Cinzel, Geist, JetBrains_Mono } from "next/font/google";
-import {
-  coreSoftwareJsonLd,
-  faqJsonLd,
-  organizationJsonLd,
-  webSiteJsonLd,
-} from "@/lib/structured-data";
-import { SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/site";
+import { JsonLd } from "@/components/site/JsonLd";
+import { buildRobotsMetadata } from "@/lib/metadata";
+import { buildGlobalGraph } from "@/lib/structured-data";
+import { BLOCK_INDEXING, SITE_NAME, SITE_TAGLINE, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const cinzel = Cinzel({
@@ -32,40 +29,13 @@ export const metadata: Metadata = {
     default: `${SITE_NAME} | ${SITE_TAGLINE}`,
     template: `%s | ${SITE_NAME}`,
   },
-  description:
-    "Download Vorinthex Core, your private personal AI for knowledge, memories, communication, discovery, and growth.",
-  alternates: {
-    canonical: "/",
-  },
-  openGraph: {
-    title: `${SITE_NAME} | ${SITE_TAGLINE}`,
-    description:
-      "One private personal AI that remembers, understands, and connects everything that matters to you.",
-    url: SITE_URL,
-    siteName: SITE_NAME,
-    type: "website",
-    images: ["/social-cards/vorinthex/opengraph.png"],
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: `${SITE_NAME} | ${SITE_TAGLINE}`,
-    description:
-      "One private personal AI that remembers, understands, and connects everything that matters to you.",
-    images: ["/social-cards/vorinthex/twitter.png"],
-  },
+  ...buildRobotsMetadata(BLOCK_INDEXING),
 };
 
 export const viewport: Viewport = {
   themeColor: "#020304",
   colorScheme: "dark",
 };
-
-const jsonLd = [
-  organizationJsonLd,
-  webSiteJsonLd,
-  coreSoftwareJsonLd,
-  faqJsonLd,
-];
 
 export default function RootLayout({
   children,
@@ -77,13 +47,7 @@ export default function RootLayout({
       <body
         className={`${cinzel.variable} ${geist.variable} ${jetbrains.variable} antialiased`}
       >
-        {jsonLd.map((entry, index) => (
-          <script
-            key={index}
-            type="application/ld+json"
-            dangerouslySetInnerHTML={{ __html: JSON.stringify(entry) }}
-          />
-        ))}
+        <JsonLd data={buildGlobalGraph()} />
         {children}
       </body>
     </html>

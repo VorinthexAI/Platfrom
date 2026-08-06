@@ -1,27 +1,12 @@
-import {
-  SPARK_MONTHLY_PLANS,
-  formatSparkCount,
-  formatUsd,
-} from "@/lib/spark-pricing";
+import { buildLlmsText } from "@/lib/llms";
 
 export const dynamic = "force-static";
 
 export function GET() {
-  return new Response(`# Vorinthex AI
-
-> Vorinthex Core is your private personal AI, available for iOS and Android.
-
-## Core
-
-- [Vorinthex Core](https://vorinthex.com): Connect knowledge, memories, communication, discovery, and growth in one personal AI.
-- [Sparks Pricing](https://vorinthex.com/pricing): Planned monthly options start with ${SPARK_MONTHLY_PLANS[0].name} at ${formatUsd(SPARK_MONTHLY_PLANS[0].price)} for ${formatSparkCount(SPARK_MONTHLY_PLANS[0].sparks)} Sparks. Purchases are not yet available.
-
-## Company
-
-- [About](https://vorinthex.com/about): Vorinthex AI is an AI-native software company focused on personal intelligence.
-- [Privacy](https://vorinthex.com/privacy): Privacy and data controls.
-- [Contact](https://vorinthex.com/contact): Contact Vorinthex AI.
-`, {
-    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  return new Response(buildLlmsText(), {
+    headers: {
+      "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+      "Content-Type": "text/plain; charset=utf-8",
+    },
   });
 }

@@ -7,6 +7,28 @@ const appRoot = path.dirname(fileURLToPath(import.meta.url));
 // levels up, and Turbopack needs it to resolve hoisted monorepo deps.
 const workspaceRoot = path.resolve(appRoot, "../..");
 
+export function getPermanentRedirects() {
+  return [{ source: "/core", destination: "/", permanent: true }];
+}
+
+export function getSecurityHeaders(blockIndexing = false) {
+  const headers = [
+    { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+    { key: "X-Content-Type-Options", value: "nosniff" },
+    { key: "X-Frame-Options", value: "DENY" },
+    {
+      key: "Permissions-Policy",
+      value: "camera=(), microphone=(), geolocation=()",
+    },
+  ];
+
+  if (blockIndexing) {
+    headers.push({ key: "X-Robots-Tag", value: "noindex, nofollow" });
+  }
+
+  return headers;
+}
+
 const nextConfig: NextConfig = {
   // Emit a self-contained server bundle (.next/standalone/server.js) so the
   // Docker runner needs neither node_modules nor the source tree at runtime.
@@ -16,6 +38,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: workspaceRoot,
   // @vorinthex/shared ships TypeScript source straight from the workspace.
   transpilePackages: ["@vorinthex/shared"],
+  poweredByHeader: false,
   // One logo image; skip the sharp-based optimizer so the image stays ARM-clean.
   images: {
     unoptimized: true,
@@ -27,23 +50,13 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "no-store, no-cache, must-revalidate, proxy-revalidate",
-          },
-          {
-            key: "Pragma",
-            value: "no-cache",
-          },
-          {
-            key: "Expires",
-            value: "0",
-          },
-        ],
+        headers: getSecurityHeaders(
+          process.env.NEXT_PUBLIC_BLOCK_INDEXING === "true",
+        ),
       },
     ];
   },
+  redirects: getPermanentRedirects,
 };
 
 export default nextConfig;

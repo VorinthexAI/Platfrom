@@ -20,17 +20,22 @@ export function Brand() {
 
 export function SiteHeader() {
   return (
-    <header className={styles.header}>
-      <Brand />
-      <nav className={styles.nav} aria-label="Primary navigation">
-        <Link href="/">Overview</Link>
-        <Link href="/#capabilities">Core Apps</Link>
-        <Link href="/#principles">Vision</Link>
-      </nav>
-      <Button asChild size="sm" variant="outline">
-        <Link href="/#download">Get the app</Link>
-      </Button>
-    </header>
+    <>
+      <a className={styles.skipLink} href="#main-content">
+        Skip to content
+      </a>
+      <header className={styles.header}>
+        <Brand />
+        <nav className={styles.nav} aria-label="Primary navigation">
+          <Link href="/">Overview</Link>
+          <Link href="/#capabilities">Core Apps</Link>
+          <Link href="/#principles">Vision</Link>
+        </nav>
+        <Button asChild size="sm" variant="outline">
+          <Link href="/#faq">Pre-launch details</Link>
+        </Button>
+      </header>
+    </>
   );
 }
 
@@ -38,13 +43,13 @@ export function SiteFooter() {
   return (
     <footer className={styles.footer}>
       <Brand />
-      <div className={styles.footerLinks}>
+      <nav className={styles.footerLinks} aria-label="Footer navigation">
         <Link href="/pricing">Pricing</Link>
         <Link href="/about">About</Link>
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms</Link>
         <Link href="/contact">Contact</Link>
-      </div>
+      </nav>
       <p>© 2026 Vorinthex AI. All rights reserved.</p>
     </footer>
   );

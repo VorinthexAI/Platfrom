@@ -4,6 +4,20 @@
   margin-inline: auto;
 }
 
+.skipLink {
+  position: fixed;
+  z-index: 100;
+  top: 12px;
+  left: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #f0efeb;
+  color: #020304;
+  transform: translateY(-180%);
+}
+
+.skipLink:focus { transform: translateY(0); }
+
 .siteNeuralBackdrop {
   position: fixed;
   inset: 0;
