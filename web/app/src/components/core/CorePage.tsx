@@ -2,8 +2,8 @@ import Image from "next/image";
 import { BrainIcon, ShieldIcon, StarIcon } from "@vorinthex/shared/ui/icons";
 import { CORE_CAPABILITIES } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
-import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
 import { CoreAppsDepthScene } from "./CoreAppsDepthScene";
+import { CoreAppsJourney } from "./CoreAppsJourney";
 import { CoreNeuralScene } from "./CoreNeuralScene";
 import { DownloadAppCta } from "./DownloadAppCta";
 import styles from "./CorePage.module.css";
@@ -12,7 +12,6 @@ export function CorePage() {
   return (
     <main className={styles.page}>
       <SiteHeader />
-      <SiteNeuralBackdrop />
       <div className={styles.neuralBackdrop}>
         <CoreNeuralScene />
       </div>
@@ -49,29 +48,7 @@ export function CorePage() {
             Move through the parts of your life without losing context. Every app
             adds understanding to the same private personal AI.
           </p>
-          <div className={styles.capabilityJourney}>
-            {CORE_CAPABILITIES.map((capability, index) => (
-              <article className={styles.capabilityCard} key={capability.name}>
-                <div className={styles.capabilityIndex}>0{index + 1}</div>
-                <Image
-                  alt={`${capability.name} icon`}
-                  height={180}
-                  src={capability.icon}
-                  width={180}
-                />
-                <div className={styles.capabilityCopy}>
-                  <p className={styles.capabilityLabel}>Core app</p>
-                  <h3>{capability.name}</h3>
-                  <p>{capability.description}</p>
-                  <ul>
-                    {capability.features.map((feature) => (
-                      <li key={feature}>{feature}</li>
-                    ))}
-                  </ul>
-                </div>
-              </article>
-            ))}
-          </div>
+          <CoreAppsJourney />
           <div className={styles.comingSoon} aria-label="More Core apps coming soon">
             <Image alt="" height={34} src="/logos/vorinthex-mark.png" width={34} />
             <p>More coming soon</p>
