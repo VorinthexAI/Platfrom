@@ -18,10 +18,10 @@
 .neuralBackdrop {
   position: absolute;
   z-index: 0;
-  top: 96px;
+  top: 150px;
   left: 0;
   width: 100%;
-  height: min(804px, calc(105vh - 96px));
+  height: min(750px, calc(105vh - 150px));
   pointer-events: none;
   mask-image: linear-gradient(to bottom, transparent 0%, #000 10%, #000 68%, transparent 100%);
 }
@@ -221,7 +221,7 @@
 }
 
 @media (max-width: 640px) {
-  .neuralBackdrop { top: 78px; height: min(822px, calc(105vh - 78px)); }
+  .neuralBackdrop { top: 110px; height: min(790px, calc(105vh - 110px)); }
   .hero,
   .principles { width: var(--site-content-width); }
   .hero { min-height: auto; padding-top: 52px; }

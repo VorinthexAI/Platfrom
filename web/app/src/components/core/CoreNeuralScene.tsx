@@ -129,7 +129,7 @@ export function CoreNeuralScene() {
       camera.right = (verticalSpan * aspect) / 2;
       camera.top = verticalSpan / 2;
       camera.bottom = -verticalSpan / 2;
-      root.position.x = width > 980 ? Math.min(7, aspect * 5) : 0;
+      root.position.x = width > 640 ? Math.min(6.5, aspect * 4.6) : 0;
       camera.updateProjectionMatrix();
     };
     const observer = new ResizeObserver(resize);
