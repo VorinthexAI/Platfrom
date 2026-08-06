@@ -1,6 +1,5 @@
 import Image from "next/image";
 import { BrainIcon, ShieldIcon, StarIcon } from "@vorinthex/shared/ui/icons";
-import { CORE_CAPABILITIES } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import { CoreAppsDepthScene } from "./CoreAppsDepthScene";
 import { CoreAppsJourney } from "./CoreAppsJourney";
@@ -55,7 +54,7 @@ export function CorePage() {
 
         <section className={styles.principles} id="principles">
           <div className={styles.principlesCopy}>
-            <h2>One AI. Every capability. Always with you.</h2>
+            <h2>One AI. Always with you.</h2>
             <div className={styles.rule} />
             <div className={styles.principleGrid}>
               <article>
@@ -79,21 +78,13 @@ export function CorePage() {
           <div className={styles.phone} aria-hidden="true">
             <div className={styles.phoneSpeaker} />
             <div className={styles.phoneScreen}>
-              <div className={styles.phoneBrand}>Vorinthex AI</div>
-              <p>Good morning, Oscar.</p>
-              <small>How can I help you today?</small>
-              <div className={styles.phoneCapabilities}>
-                {CORE_CAPABILITIES.map((capability) => (
-                  <div key={capability.name}>
-                    <Image alt="" height={38} src={capability.icon} width={38} />
-                    <span>{capability.name}</span>
-                  </div>
-                ))}
-              </div>
-              <div className={styles.phoneInsight}>
-                <small>Recent insight</small>
-                <strong>Project Nexus Update</strong>
-              </div>
+              <Image
+                alt=""
+                className={styles.phoneLogo}
+                height={120}
+                src="/logos/vorinthex-mark.png"
+                width={120}
+              />
             </div>
           </div>
         </section>

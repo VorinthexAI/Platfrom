@@ -18,7 +18,8 @@ test("renders the download action and immersive Core app journey", () => {
   expect(html).not.toMatch(/pre-launch|in development|not purchasable/i);
   for (const capability of CORE_CAPABILITIES) {
     expect(html).toContain(`id="${capability.id}"`);
-    for (const feature of capability.features) expect(html).toContain(feature);
+    expect(html).toContain(capability.promise);
+    expect(html).toContain(capability.detail);
   }
 });
 

@@ -139,12 +139,8 @@
 }
 .capabilityPanel {
   position: relative;
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
-  align-items: center;
-  gap: 42px;
-  width: min(760px, 76vw);
-  padding: 42px;
+  width: min(620px, 68vw);
+  padding: 44px;
   overflow: hidden;
   border: 1px solid rgba(206, 199, 185, 0.28);
   border-radius: 24px;
@@ -153,18 +149,11 @@
   backdrop-filter: blur(12px);
 }
 .capabilityPanel::before { position: absolute; inset: 0; background: radial-gradient(circle at 18% 30%, rgba(211, 221, 225, 0.1), transparent 38%); content: ""; pointer-events: none; }
-.capabilityPanel > img { position: relative; width: 170px; height: auto; filter: drop-shadow(0 0 22px rgba(221, 226, 229, 0.18)); }
-.capabilityIndex { position: absolute; top: 20px; right: 22px; color: rgba(203, 211, 215, 0.58); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; }
 .capabilityLabel { position: relative; margin: 0 0 12px; color: #70777a; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.2em; text-transform: uppercase; }
 .capabilityPanel h3 { position: relative; font-family: var(--font-display); font-size: clamp(22px, 2.4vw, 31px); font-weight: 400; letter-spacing: 0.12em; line-height: 1.35; text-transform: uppercase; }
 .capabilityPromise { color: #d2d7d8 !important; font-family: var(--font-display); font-size: 15px !important; letter-spacing: 0.04em; }
 .capabilityDetails { position: relative; display: grid; align-content: center; }
 .capabilityDetails > p:not(.capabilityLabel) { max-width: 600px; margin-top: 14px; color: #a0a3a0; font-size: 13px; line-height: 1.75; }
-.capabilityDetails ul { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 22px 0 0; padding: 18px 0 0; border-top: 1px solid rgba(255, 255, 255, 0.09); list-style: none; }
-.capabilityDetails li { color: #8b908d; font-size: 10px; line-height: 1.55; }
-.coreConnection { margin-top: 22px; padding: 16px 18px; border-left: 1px solid var(--warm); background: rgba(203, 211, 215, 0.045); }
-.coreConnection span { color: var(--warm); font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.16em; text-transform: uppercase; }
-.coreConnection p { margin-top: 7px; color: #898e8b; font-size: 11px; line-height: 1.6; }
 
 .principles {
   position: relative;
@@ -197,17 +186,8 @@
   transform: rotate(7deg) translateY(18px);
 }
 .phoneSpeaker { position: absolute; z-index: 3; top: 16px; left: 50%; width: 69px; height: 16px; border-radius: 16px; background: #020304; transform: translateX(-50%); }
-.phoneScreen { height: 100%; padding: 47px 14px 17px; border-radius: 32px; background: radial-gradient(circle at top, #11171c, #030507 55%); }
-.phoneBrand { margin-bottom: 45px; color: #bebfbd; font-family: var(--font-display); font-size: 10px; letter-spacing: 0.2em; text-align: center; text-transform: uppercase; }
-.phoneScreen > p { font-family: var(--font-display); font-size: 12px; }
-.phoneScreen > small { display: block; margin-top: 5px; color: #7f8586; font-size: 8px; }
-.phoneCapabilities { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin-top: 20px; }
-.phoneCapabilities div { display: grid; justify-items: center; gap: 3px; padding-block: 7px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; }
-.phoneCapabilities img { width: 27px; height: 27px; }
-.phoneCapabilities span { color: #a7a8a5; font-size: 5px; }
-.phoneInsight { display: grid; gap: 8px; margin-top: 25px; padding: 14px; border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 9px; background: rgba(255, 255, 255, 0.025); }
-.phoneInsight small { color: #696f70; font-size: 7px; letter-spacing: 0.1em; text-transform: uppercase; }
-.phoneInsight strong { font-family: var(--font-display); font-size: 10px; font-weight: 400; }
+.phoneScreen { display: grid; height: 100%; place-items: center; border-radius: 32px; background: radial-gradient(circle at center, #11171c, #030507 58%); }
+.phoneLogo { width: 92px; height: 92px; object-fit: contain; filter: drop-shadow(0 0 24px rgba(221, 226, 229, 0.2)); }
 
 @media (max-width: 980px) {
   .hero,
@@ -215,7 +195,7 @@
   .hero { grid-template-columns: 1fr; padding-top: 76px; }
   .heroCopy { max-width: 610px; }
   .coreVisual { min-height: 590px; margin-top: -26px; }
-  .capabilityPanel { width: min(720px, 84vw); }
+  .capabilityPanel { width: min(620px, 84vw); }
   .principles { grid-template-columns: 1fr; gap: 56px; padding-top: 70px; }
   .phone { justify-self: center; }
 }
@@ -237,15 +217,13 @@
   .appsIntroduction { font-size: 13px; }
   .journeyStep { min-height: 115vh; }
   .panelAnchor { top: 8vh; min-height: 84vh; }
-  .capabilityPanel { grid-template-columns: 1fr; justify-items: center; width: 100%; padding: 28px 22px; text-align: center; }
-  .capabilityPanel > img { width: 110px; }
+  .capabilityPanel { width: 100%; padding: 32px 26px; text-align: left; }
   .capabilityDetails { align-content: center; }
   .capabilityDetails ul { grid-template-columns: 1fr; gap: 6px; }
   .coreConnection { text-align: left; }
   .principles h2 { letter-spacing: 0.15em; }
   .principleGrid { grid-template-columns: 1fr; }
   .phone { width: 236px; height: 478px; justify-self: center; }
-  .phoneCapabilities span { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
