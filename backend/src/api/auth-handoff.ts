@@ -132,9 +132,11 @@ export async function claimHandoff(handoffPublicHash: string): Promise<HandoffCl
   if (!user) return null;
 
   if (challenge.identityType !== 'user') {
+    if (!challenge.membershipKey) return null;
     const totp = await createTotpChallengeForIdentity(
       challenge.identityType as LoginIdentityType,
       challenge.identityKey,
+      challenge.membershipKey,
     );
     if (!totp) return null;
     return {

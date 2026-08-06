@@ -9,6 +9,19 @@ import { refreshAccessToken, verifyAccessToken, type AuthIdentity, type SessionT
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
 
+const PUBLIC_FOUNDER_AUTH_PATHS = new Set([
+  '/api/v1/auth/founders-gate',
+  '/api/v1/auth/magic/validate',
+  '/api/v1/auth/totp/reset/request',
+  '/api/v1/auth/totp/setup/start',
+  '/api/v1/auth/totp/setup/complete',
+  '/api/v1/auth/totp/verify',
+]);
+
+export function isPublicFounderAuthPath(path: string) {
+  return PUBLIC_FOUNDER_AUTH_PATHS.has(path.replace(/\/$/, ''));
+}
+
 function getClientIp(c: Parameters<MiddlewareHandler>[0]) {
   const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
   return forwarded || c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || 'unknown';
@@ -106,6 +119,9 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   if (isResendWebhookPath(c.req.path)) return next();
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
+  // Native clients cannot safely embed the platform API key. These endpoints
+  // authenticate with short-lived bearer challenges and are rate limited.
+  if (isPublicFounderAuthPath(c.req.path)) return next();
   const expected = process.env.API_KEY;
   if (!expected) {
     if (process.env.NODE_ENV === 'production') {
@@ -181,10 +197,15 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   // would drop or delay deliveries. The endpoint is protected by signatures.
   if (isResendWebhookPath(c.req.path)) return next();
 
-  if (process.env.RATE_LIMIT_ENABLED !== 'true') return next();
+  const founderAuth = isPublicFounderAuthPath(c.req.path);
+  if (!founderAuth && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
 
-  const limit = Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60);
-  const windowSeconds = Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60);
+  const limit = founderAuth
+    ? 20
+    : Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60);
+  const windowSeconds = founderAuth
+    ? 5 * 60
+    : Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60);
   if (!Number.isInteger(limit) || limit < 1) {
     return c.json({ error: 'RATE_LIMIT_MAX_REQUESTS must be a positive integer' }, 500);
   }
@@ -193,7 +214,8 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   }
 
   const ip = getClientIp(c);
-  const key = `rate-limit:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
+  const bucket = founderAuth ? 'founder-auth' : 'global';
+  const key = `rate-limit:${bucket}:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
 
   try {
     const { redisConnection } = await import('@/lib/redis');
@@ -209,6 +231,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
     }
   } catch (error) {
     console.warn('rate limit check failed', error);
+    if (founderAuth) return c.json({ error: 'authentication temporarily unavailable' }, 503);
   }
 
   return next();

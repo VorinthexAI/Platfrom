@@ -64,11 +64,25 @@ function parseFounderProviderCredentials(provider: ProviderSlug, credentials: un
 
 export type FounderContext = FoundersGateAccess & { identityType: 'user' | 'member' | 'superAdmin' };
 
+export function hasFounderAssurance(
+  identity: { founderAssured?: boolean; founderMembershipKey?: string; founderMfaVersion?: number } | null,
+  membership?: { key: string; isMfaEnabled: boolean; mfaVersion: number },
+) {
+  if (identity?.founderAssured !== true) return false;
+  if (!membership) return true;
+  return membership.isMfaEnabled
+    && identity.founderMembershipKey === membership.key
+    && identity.founderMfaVersion === membership.mfaVersion;
+}
+
 export async function requireFounder(c: Context): Promise<{ founder: FounderContext } | { error: Response }> {
   const identity = await getAuthIdentity(c);
   if (!identity) return { error: c.json({ error: 'authentication required' }, 401) };
   try {
     const access = await requireFoundersGateAccess(identity.key);
+    if (!hasFounderAssurance(identity, access.rootMembership)) {
+      return { error: c.json({ error: 'founder MFA authentication required' }, 403) };
+    }
     return { founder: { ...access, identityType: identity.identityType } };
   } catch (error) {
     if (error instanceof FoundersAccessError) {

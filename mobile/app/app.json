@@ -10,7 +10,10 @@
     "backgroundColor": "#030507",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "app.vorinthex.com"
+      "bundleIdentifier": "app.vorinthex.com",
+      "associatedDomains": [
+        "applinks:vorinthex.com"
+      ]
     },
     "android": {
       "package": "app.vorinthex.com",
@@ -18,6 +21,23 @@
         "backgroundColor": "#030507",
         "foregroundImage": "./assets/brand/adaptive-icon-foreground.png"
       },
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "vorinthex.com",
+              "path": "/auth/mfa"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
       "predictiveBackGestureEnabled": false
     },
     "plugins": [

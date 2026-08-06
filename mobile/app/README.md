@@ -25,6 +25,13 @@ bun run mobile:typecheck
 Native projects are generated on demand (`bunx expo prebuild` in this
 folder) — they are not committed.
 
+## Verified Links
+
+Founder MFA links use `https://vorinthex.com/auth/mfa`.
+
+- iOS Universal Links use the `applinks:vorinthex.com` associated domain and the AASA file served by the web app.
+- Android App Links are configured for the same path. Set the public `ANDROID_APP_CERTIFICATE_SHA256` production parameter to the Play App Signing SHA-256 fingerprint before enabling Android verification. Multiple fingerprints may be comma-separated during a signing-key rotation.
+
 ## Structure
 
 - `src/app` — expo-router routes (thin screens)

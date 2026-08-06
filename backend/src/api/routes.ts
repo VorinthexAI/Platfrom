@@ -9,7 +9,6 @@ import {
   requestFoundersGate,
   requestMfaResetEmail,
   requestSignInEmail,
-  resetTotpForChallenge,
   startTotpSetup,
   validateMagicLink,
   verifyTotpAndIssueSession,
@@ -103,18 +102,11 @@ export function registerRoutes(app: Hono) {
   app.post('/auth/founders-gate', async (c) => {
     const body = await parseJson(c, emailBody);
     const result = await requestFoundersGate(body.email);
-    if (!result.allowed) {
-      return c.json({ error: 'founder identity not found' }, 403);
-    }
     return c.json({
       ok: true,
-      status: result.status,
-      totp_challenge_token_hash: result.totpChallengeToken,
+      accepted: result.accepted,
       expires_at: result.expiresAt.toISOString(),
-      name: result.name,
-      organization_title: result.organizationTitle,
-      orchestrator_slug: result.orchestratorSlug,
-    });
+    }, 202);
   });
 
   app.get('/auth/oauth/start', async (c) => {
@@ -208,27 +200,12 @@ export function registerRoutes(app: Hono) {
   });
 
   app.post('/auth/totp/reset/request', async (c) => {
-    const body = await parseJson(c, strictObject({
-      email: emailSchema.optional(),
-      challenge_token_hash: challengeHash.optional(),
-    }));
-    if (body.challenge_token_hash) {
-      const result = await resetTotpForChallenge(body.challenge_token_hash);
-      if (!result) return c.json({ error: 'invalid TOTP challenge' }, 401);
-      return c.json({
-        ok: true,
-        reset: true,
-        setup_challenge_token_hash: result.setupChallengeToken,
-        secret: result.secret,
-        otpauth_url: result.otpauthUrl,
-        qr_code_data_url: result.qrCodeDataUrl,
-      });
-    }
-    if (!body.email) return c.json({ error: 'email or challenge token required' }, 400);
-    const result = await requestMfaResetEmail(body.email);
+    const body = await parseJson(c, challengeTokenHashBodyBase);
+    const result = await requestMfaResetEmail(body.challenge_token_hash);
+    if (!result) return c.json({ error: 'invalid or expired founder MFA challenge' }, 401);
     return c.json({
       ok: result.ok,
-      email_sent: result.emailSent,
+      email_sent: true,
       expires_at: result.expiresAt.toISOString(),
     });
   });
@@ -253,6 +230,16 @@ export function registerRoutes(app: Hono) {
         welcome_line: result.welcomeLine,
       });
     }
+    if (result.status === 'totp_setup') {
+      return c.json({
+        status: result.status,
+        setup_challenge_token_hash: result.setupChallengeToken,
+        expires_at: result.expiresAt.toISOString(),
+        secret: result.secret,
+        otpauth_url: result.otpauthUrl,
+        qr_code_data_url: result.qrCodeDataUrl,
+      });
+    }
     return c.json({
       status: result.status,
       totp_challenge_token_hash: result.totpChallengeToken,
@@ -266,6 +253,7 @@ export function registerRoutes(app: Hono) {
     if (!result) return c.json({ error: 'invalid challenge or TOTP is already enabled' }, 401);
     return c.json({
       setup_challenge_token_hash: result.setupChallengeToken,
+      expires_at: result.expiresAt.toISOString(),
       secret: result.secret,
       otpauth_url: result.otpauthUrl,
       qr_code_data_url: result.qrCodeDataUrl,

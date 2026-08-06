@@ -12,6 +12,7 @@ import {
   createAccessToken,
   createChallengeTokenHash,
   getAuthSessionPolicy,
+  isChallengeUsableForPurpose,
   isRefreshTokenActive,
   loginIdentityTypeForMembership,
   verifyAccessToken,
@@ -93,7 +94,7 @@ describe('auth helpers', () => {
 
     const token = await createAccessToken('usr_test');
 
-    expect(await verifyAccessToken(token)).toEqual({ key: 'usr_test', identityType: 'user' });
+    expect(await verifyAccessToken(token)).toEqual({ key: 'usr_test', identityType: 'user', founderAssured: false });
     expect(await verifyAccessToken(`${token}tampered`)).toBeNull();
     expect(timingSafeEqual('abcdef', 'abcdef')).toBe(true);
     expect(timingSafeEqual('abcdef', 'abcdeg')).toBe(false);
@@ -114,6 +115,16 @@ describe('auth helpers', () => {
     expect(loginIdentityTypeForMembership('owner', false)).toBe('member');
   });
 
+  test('carries founder MFA assurance for non-owner root members', async () => {
+    process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
+    const token = await createAccessToken({ key: 'root_member', identityType: 'member', founderAssured: true });
+    const payload = JSON.parse(Buffer.from(token.slice('vrtx_access_'.length).split('.')[0]!, 'base64url').toString('utf8')) as { founder: boolean; iat: number; exp: number };
+
+    expect(payload.founder).toBe(true);
+    expect(payload.exp - payload.iat).toBe(FOUNDER_ACCESS_MAX_AGE_SECONDS);
+    expect(await verifyAccessToken(token)).toEqual({ key: 'root_member', identityType: 'member', founderAssured: true });
+  });
+
   test('uses seven-day access and one-year refresh for ordinary sessions', async () => {
     process.env.ACCESS_TOKEN_SECRET = 'test-access-secret';
     const sessionExpiresAt = new Date(Date.now() + STANDARD_REFRESH_MAX_AGE_SECONDS * 1000);
@@ -124,6 +135,7 @@ describe('auth helpers', () => {
     expect(isRefreshTokenActive(sessionExpiresAt.toISOString())).toBe(true);
     expect(getAuthSessionPolicy('user')).toEqual({ accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS });
     expect(getAuthSessionPolicy('member')).toEqual({ accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS });
+    expect(getAuthSessionPolicy('member', true)).toEqual({ accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS });
     expect(getAuthSessionPolicy('superAdmin')).toEqual({ accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS });
   });
 
@@ -162,5 +174,20 @@ describe('auth helpers', () => {
 
     expect(await acceptVerifiedChallenge(async () => 42, consume)).toBe(42);
     expect(await acceptVerifiedChallenge(async () => 42, consume)).toBeNull();
+  });
+
+  test('purpose-binds founder login, setup, and recovery challenges', () => {
+    const founderLogin = {
+      kind: 'founder_totp' as const,
+      consumedAt: null,
+      expiresAt: '2026-08-06T12:05:00.000Z',
+    };
+    const now = Date.parse('2026-08-06T12:00:00.000Z');
+
+    expect(isChallengeUsableForPurpose(founderLogin, ['founder_totp'], now)).toBe(true);
+    expect(isChallengeUsableForPurpose(founderLogin, ['founder_recovery'], now)).toBe(false);
+    expect(isChallengeUsableForPurpose(founderLogin, ['founder_setup'], now)).toBe(false);
+    expect(isChallengeUsableForPurpose({ ...founderLogin, consumedAt: '2026-08-06T12:01:00.000Z' }, ['founder_totp'], now)).toBe(false);
+    expect(isChallengeUsableForPurpose(founderLogin, ['founder_totp'], Date.parse(founderLogin.expiresAt))).toBe(false);
   });
 });
