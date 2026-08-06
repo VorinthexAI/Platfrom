@@ -17,7 +17,7 @@
 .plans,
 .topUps,
 .onDemand {
-  width: calc(100% - 48px);
+  width: var(--site-content-width);
   margin-inline: auto;
 }
 
@@ -165,7 +165,7 @@
   .hero,
   .plans,
   .topUps,
-  .onDemand { width: calc(100% - 28px); }
+  .onDemand { width: var(--site-content-width); }
   .hero { padding: 82px 0 74px; }
   .hero::before { top: 34px; width: 70%; }
   .hero h1 { font-size: 47px; }

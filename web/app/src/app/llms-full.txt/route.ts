@@ -47,7 +47,7 @@ Vorinthex AI is an AI-native software company focused on making personal intelli
 
 ## Links
 
-- [Get the app](https://vorinthex.com/#overview)
+- [Get the app](https://vorinthex.com/#download)
 - [Sparks Pricing](https://vorinthex.com/pricing)
 - [About Vorinthex AI](https://vorinthex.com/about)
 - [Privacy](https://vorinthex.com/privacy)

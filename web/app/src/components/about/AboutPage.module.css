@@ -4,7 +4,7 @@
 .mission,
 .principles,
 .coreStory,
-.foundation { width: min(1180px, calc(100% - 48px)); margin-inline: auto; }
+.foundation { width: min(1180px, var(--site-content-width)); margin-inline: auto; }
 .eyebrow { color: #8e8f8f; font-family: var(--font-mono); font-size: 10px; letter-spacing: .28em; text-transform: uppercase; }
 .hero { display: grid; grid-template-columns: 1fr .8fr; align-items: center; min-height: 650px; padding-block: 72px; }
 .hero h1 { max-width: 720px; margin-top: 22px; font-family: var(--font-display); font-size: clamp(54px, 6vw, 86px); font-weight: 400; letter-spacing: .07em; line-height: 1.08; text-transform: uppercase; background: linear-gradient(135deg, #f8f7f3, #7f8589 58%, #e7e6e0); background-clip: text; color: transparent; }
@@ -53,7 +53,7 @@
   .mission,
   .principles,
   .coreStory,
-  .foundation { width: min(100% - 28px, 1180px); }
+  .foundation { width: min(1180px, var(--site-content-width)); }
   .hero { min-height: auto; padding-block: 70px 30px; }
   .hero h1 { font-size: 46px; }
   .heroMark { min-height: 340px; }

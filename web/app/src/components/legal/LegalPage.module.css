@@ -1,6 +1,6 @@
 .page { position: relative; display: grid; min-height: 100dvh; grid-template-rows: auto 1fr auto; overflow: hidden; background: radial-gradient(circle at top, #11171b, #020304 40%); }
 .page > :not(:global([data-site-neural-backdrop])) { position: relative; z-index: 1; }
-.content { width: min(760px, calc(100% - 48px)); margin: 0 auto; padding-block: 80px 24px; }
+.content { width: min(760px, var(--site-content-width)); margin: 0 auto; padding-block: 80px 24px; }
 .page > footer { align-self: end; margin-top: 0; }
 .eyebrow { color: #8d9294; font-family: var(--font-mono); font-size: 10px; letter-spacing: .24em; text-transform: uppercase; }
 .page h1 { margin: 20px 0 46px; font-family: var(--font-display); font-size: clamp(42px, 7vw, 72px); font-weight: 400; letter-spacing: .08em; text-transform: uppercase; }
@@ -9,5 +9,5 @@
 .page .footnote { margin: 48px 0 28px; padding-top: 24px; border-top: 1px solid rgba(255,255,255,.1); color: #d5d5d1; }
 
 @media (max-width: 640px) {
-  .content { width: calc(100% - 28px); padding-top: 56px; }
+  .content { width: min(760px, var(--site-content-width)); padding-top: 56px; }
 }

@@ -116,7 +116,7 @@ export function AboutPage() {
             AI should understand your context and remain centered on you.
           </p>
           <Button asChild size="lg" variant="outline">
-            <Link href="/#overview">Get the app</Link>
+            <Link href="/#download">Get the app</Link>
           </Button>
         </div>
       </section>

@@ -1,32 +1,12 @@
 import Image from "next/image";
-import { Button } from "@vorinthex/shared/ui/components";
 import { BrainIcon, ShieldIcon, StarIcon } from "@vorinthex/shared/ui/icons";
-import {
-  APP_STORE_URL,
-  CORE_CAPABILITIES,
-  GOOGLE_PLAY_URL,
-} from "@/lib/core";
+import { CORE_CAPABILITIES } from "@/lib/core";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
 import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
+import { CoreAppsDepthScene } from "./CoreAppsDepthScene";
 import { CoreNeuralScene } from "./CoreNeuralScene";
+import { DownloadAppCta } from "./DownloadAppCta";
 import styles from "./CorePage.module.css";
-
-function StoreButtons() {
-  return (
-    <div className={styles.storeButtons} id="download">
-      <Button asChild size="lg" variant="primary">
-        <a href={APP_STORE_URL} rel="noreferrer" target="_blank">
-          Download on the App Store
-        </a>
-      </Button>
-      <Button asChild size="lg" variant="secondary">
-        <a href={GOOGLE_PLAY_URL} rel="noreferrer" target="_blank">
-          Get it on Google Play
-        </a>
-      </Button>
-    </div>
-  );
-}
 
 export function CorePage() {
   return (
@@ -46,37 +26,57 @@ export function CorePage() {
             Vorinthex Core is your personal AI that remembers, understands and
             connects everything that matters to you.
           </p>
-          <StoreButtons />
+          <DownloadAppCta />
         </div>
 
         <div className={styles.coreVisual} aria-hidden="true" />
       </section>
 
       <section className={styles.capabilities} id="capabilities">
-        <div className={styles.sectionHeading}>
-          <span />
-          <h2>Core Apps</h2>
-          <span />
+        <div className={styles.depthStage} aria-hidden="true">
+          <CoreAppsDepthScene />
         </div>
-        <div className={styles.capabilityGrid}>
-          {CORE_CAPABILITIES.map((capability) => (
-            <article className={styles.capabilityCard} key={capability.name}>
-              <Image
-                alt={`${capability.name} icon`}
-                height={160}
-                src={capability.icon}
-                width={160}
-              />
-              <h3>{capability.name}</h3>
-              <p>{capability.description}</p>
-            </article>
-          ))}
+        <div className={styles.appsContent}>
+          <div className={styles.sectionHeading}>
+            <span />
+            <div>
+              <p>One intelligence, five connected spaces</p>
+              <h2>Core Apps</h2>
+            </div>
+            <span />
+          </div>
+          <p className={styles.appsIntroduction}>
+            Move through the parts of your life without losing context. Every app
+            adds understanding to the same private personal AI.
+          </p>
+          <div className={styles.capabilityJourney}>
+            {CORE_CAPABILITIES.map((capability, index) => (
+              <article className={styles.capabilityCard} key={capability.name}>
+                <div className={styles.capabilityIndex}>0{index + 1}</div>
+                <Image
+                  alt={`${capability.name} icon`}
+                  height={180}
+                  src={capability.icon}
+                  width={180}
+                />
+                <div className={styles.capabilityCopy}>
+                  <p className={styles.capabilityLabel}>Core app</p>
+                  <h3>{capability.name}</h3>
+                  <p>{capability.description}</p>
+                  <ul>
+                    {capability.features.map((feature) => (
+                      <li key={feature}>{feature}</li>
+                    ))}
+                  </ul>
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className={styles.comingSoon} aria-label="More Core apps coming soon">
+            <Image alt="" height={34} src="/logos/vorinthex-mark.png" width={34} />
+            <p>More coming soon</p>
+          </div>
         </div>
-      </section>
-
-      <section className={styles.comingSoon} aria-label="More Core apps coming soon">
-        <Image alt="" height={34} src="/logos/vorinthex-mark.png" width={34} />
-        <p>More coming soon</p>
       </section>
 
       <section className={styles.principles} id="principles">

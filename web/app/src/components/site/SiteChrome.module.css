@@ -1,6 +1,6 @@
 .header,
 .footer {
-  width: calc(100% - 48px);
+  width: var(--site-content-width);
   margin-inline: auto;
 }
 
@@ -43,8 +43,6 @@
 }
 
 @media (max-width: 640px) {
-  .header,
-  .footer { width: calc(100% - 28px); }
   .header { min-height: 78px; }
   .brand { font-size: 15px; letter-spacing: 0.12em; }
   .brandMark { width: 30px; height: 30px; }

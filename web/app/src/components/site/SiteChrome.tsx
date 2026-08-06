@@ -28,7 +28,7 @@ export function SiteHeader() {
         <Link href="/#principles">Vision</Link>
       </nav>
       <Button asChild size="sm" variant="outline">
-        <Link href="/#overview">Get the app</Link>
+        <Link href="/#download">Get the app</Link>
       </Button>
     </header>
   );
