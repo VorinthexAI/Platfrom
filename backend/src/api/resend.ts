@@ -1,12 +1,8 @@
 import type { Context } from 'hono';
 import { Webhook } from 'svix';
 import { z } from 'zod';
-import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
-import { insertEvent } from '@/lib/db/events.node';
 import { claimWebhookEvent, deleteProcessedWebhookEventByProviderAndEventId, updateProcessedWebhookEventByProviderAndEventId } from '@/lib/db/processed-webhook-events.node';
 import { deleteUser, getUserByEmailHash } from '@/lib/db/users.node';
-import { newId } from '@/lib/ids';
-import { providerEventSlugs } from '@/platform/event-catalog';
 import { hashUserEmail } from './users';
 
 export const RESEND_WEBHOOK_V1_PATH = '/api/v1/webhooks/resend';
@@ -31,21 +27,10 @@ const resendEventSchema = z.object({
 }).passthrough();
 
 type ResendEvent = z.infer<typeof resendEventSchema>;
-type ResendEmailEventType = typeof providerEventSlugs[number];
-const providerEventSlugSet = new Set<string>(providerEventSlugs);
 
 export function isResendWebhookPath(path: string) {
   const normalized = path.length > 1 ? path.replace(/\/+$/, '') : path;
   return RESEND_WEBHOOK_PUBLIC_PATHS.some((candidate) => normalized === candidate);
-}
-
-function eventTimestamp(event: ResendEvent) {
-  const value = event.data.created_at ?? event.created_at;
-  if (value) {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
-  }
-  return new Date().toISOString();
 }
 
 export function recipientEmailFromResendEvent(payload: unknown) {
@@ -55,74 +40,44 @@ export function recipientEmailFromResendEvent(payload: unknown) {
 
 export interface ResendWebhookDeps {
   getUserByEmailHash: typeof getUserByEmailHash;
-  insertEvent: typeof insertEvent;
   deleteUser: typeof deleteUser;
   hashUserEmail: typeof hashUserEmail;
-  newId: typeof newId;
 }
 
 const defaultDeps: ResendWebhookDeps = {
   getUserByEmailHash,
-  insertEvent,
   deleteUser,
   hashUserEmail,
-  newId,
 };
 
-function isTrackedResendEmailEvent(type: string): type is ResendEmailEventType {
-  return providerEventSlugSet.has(type);
-}
-
-export async function recordResendEmailEvent(
+export async function processResendEmailEvent(
   event: ResendEvent,
-  eventId: string,
   deps: ResendWebhookDeps = defaultDeps,
 ) {
-  if (!isTrackedResendEmailEvent(event.type)) return { ignored: true };
+  if (event.type !== 'email.bounced') return { ignored: true };
 
   const recipientEmail = event.data.to[0];
   const emailHash = await deps.hashUserEmail(recipientEmail);
   const user = await deps.getUserByEmailHash(emailHash);
   if (!user) {
     console.warn('resend webhook recipient hash not found', { emailHash });
-    return { processed: true, matched: false, inserted: false, deleted: false };
+    return { processed: true, matched: false, deleted: false };
   }
 
-  const bounce = event.type === 'email.bounced' ? event.data.bounce : undefined;
-  await deps.insertEvent({
-    key: deps.newId(),
-    scopeId: NEXUS_SCOPE_KEY,
-    userId: user.key,
-    slug: event.type,
-    data: {
-      provider: 'resend',
-      user_id: user.key,
-      email_hash: emailHash,
-      resend_event_id: eventId,
-      message_id: typeof event.data.email_id === 'string' ? event.data.email_id : null,
-      occurred_at: eventTimestamp(event),
-      ...(event.type === 'email.bounced'
-        ? { bounce_type: bounce?.type ?? null, bounce_sub_type: bounce?.subType ?? null }
-        : {}),
-    },
-    createdAt: new Date().toISOString(),
-  });
-
-  // Auto-filter rubbish addresses: a Permanent bounce means the mailbox does
-  // not exist, so the account is junk and gets purged. Transient/Undetermined
-  // bounces are real mailboxes failing temporarily (full inbox, greylisting) —
-  // deleting those would erase legitimate users, so they only get the event.
-  if (event.type === 'email.bounced' && bounce?.type?.toLowerCase() === 'permanent') {
+  const bounce = event.data.bounce;
+  // A permanent bounce means the mailbox does not exist, so purge the account.
+  // Transient and unclassified bounces leave the account intact.
+  if (bounce?.type?.toLowerCase() === 'permanent') {
     await deps.deleteUser(user.key);
-    return { processed: true, matched: true, inserted: true, deleted: true };
+    return { processed: true, matched: true, deleted: true };
   }
 
-  return { processed: true, matched: true, inserted: true, deleted: false };
+  return { processed: true, matched: true, deleted: false };
 }
 
-export async function processResendWebhookPayload(payload: unknown, eventId: string, deps: ResendWebhookDeps = defaultDeps) {
+export async function processResendWebhookPayload(payload: unknown, deps: ResendWebhookDeps = defaultDeps) {
   const event = resendEventSchema.parse(payload);
-  return recordResendEmailEvent(event, eventId, deps);
+  return processResendEmailEvent(event, deps);
 }
 
 export function verifyResendWebhookSignature(input: {
@@ -182,7 +137,7 @@ export async function handleResendWebhook(c: Context) {
   }
 
   try {
-    await processResendWebhookPayload(event, eventId);
+    await processResendWebhookPayload(event);
     await completeWebhookEvent(eventId);
     return c.json({ ok: true });
   } catch (error) {

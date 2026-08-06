@@ -20,8 +20,8 @@ describe('user helpers', () => {
     expect(normalizedHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  // completeOAuthSignIn (backend/src/api/auth.ts) and the magic-link/waitlist
-  // flows all resolve users through this same hashUserEmail, then
+  // completeOAuthSignIn (backend/src/api/auth.ts) and magic-link flows both
+  // resolve users through this same hashUserEmail, then
   // upsertUserByEmail's getUserByEmailHash-before-insert lookup — so an
   // account created via magic link and later signed into via OAuth (or vice
   // versa) with a differently-cased/whitespaced but otherwise identical

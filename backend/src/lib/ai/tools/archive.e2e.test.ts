@@ -79,7 +79,6 @@ suite('Archive live E2E', () => {
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['archiveIdempotency', 'row.organizationKey == @organizationKey', { organizationKey }],
-      ['events', 'row.scopeId IN @scopeKeys', { scopeKeys }],
       ['agentMembers', 'row.organizationKey == @organizationKey', { organizationKey }],
       ['agentSkills', 'row.agentKey IN @agentKeys', { agentKeys }],
       ['scopeAgents', 'row.organizationKey == @organizationKey', { organizationKey }],
@@ -141,9 +140,6 @@ suite('Archive live E2E', () => {
 
     let randomSeed = 1;
     const processingOrder: string[] = [];
-    const audit = async (event: any) => {
-      await save('events', { _key: newId(), scopeId: event.scopeKey, userId: event.actorKey, slug: `archive.${event.tool}.${event.success ? 'succeeded' : 'failed'}`, data: { resourceKeys: event.resourceKeys, code: event.code }, embedding: [], createdAt: now });
-    };
     const dependencies = {
       embed: async () => embedding,
       ingestion: {
@@ -166,7 +162,6 @@ suite('Archive live E2E', () => {
       random: (size: number) => Uint8Array.from({ length: size }, (_, index) => (organizationKey.charCodeAt(index % organizationKey.length) + randomSeed + index) % 255 + 1),
       clock: () => new Date(now),
       canPermanentlyDelete: () => true,
-      audit,
     };
     const context = {
       organizationKey,
@@ -191,10 +186,8 @@ suite('Archive live E2E', () => {
       return output;
     };
 
-    const eventRecorder = async (event: any) => save('events', { _key: newId(), ...event, embedding: [], createdAt: now });
     const agentList = await runArchiveAgentTool({ organizationKey, agentKey, tool: 'folder.list', input: { scopeKey } }, {
       authenticatedUserKey: userKey,
-      events: eventRecorder,
       execute: ((tool: string, input: unknown, resolvedContext: unknown) => runArchiveTool(tool, input, resolvedContext, dependencies)) as any,
     });
     outputSchemas['folder.list']!.parse(agentList);
@@ -342,9 +335,6 @@ suite('Archive live E2E', () => {
     const claims = await ledger.all();
     expect(claims.length).toBeGreaterThan(0);
     expect(claims.every((claim: any) => claim.status === 'completed' && typeof claim.responseCiphertext === 'string' && !('response' in claim))).toBe(true);
-    const auditCursor = await db.query(`FOR event IN events FILTER event.scopeId == @scopeKey && STARTS_WITH(event.slug, "archive.") RETURN event`, { scopeKey });
-    expect((await auditCursor.all()).length).toBeGreaterThanOrEqual(toolNames.length);
-
     await removeObjects(testPrefix);
     const remaining = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: testPrefix }));
     expect(remaining.KeyCount ?? 0).toBe(0);

@@ -48,7 +48,7 @@ async function main() {
     } = await import('@/lib/db/user-organization.node');
     const { encryptSecret } = await import('@/lib/crypto');
     const { newId } = await import('@/lib/ids');
-    const { getRootOrganizationId } = await import('@/platform/events');
+    const { getRootOrganizationId } = await import('@/lib/db/organizations.node');
     const { verifySuccessiveTotpCodes } = await import('@/api/auth');
 
     const email = await askEmail();
@@ -67,7 +67,6 @@ async function main() {
       profileUrl: null,
       alias: null,
       alias_slug: null,
-      waitlistNumber: null,
       isVerified: true,
       is_subscribed_to_updates: true,
       is_subscribed_to_updates_unsubscribe_token_hash: null,

@@ -11,7 +11,7 @@ export const VISITORS_COLLECTION = 'visitors';
  * 1-day distinct-id cookie (anonymous fallback). The alias is assigned
  * here first — from the user's alias when authed, otherwise rolled from
  * the same 250×250 lists used at signup — and follows the visitor into
- * `users` when they later join the waitlist.
+ * `users` when they later authenticate.
  */
 export const visitorSchema = z.object({
   key: z.string(),
@@ -20,7 +20,7 @@ export const visitorSchema = z.object({
   distinctId: z.string().nullable().default(null),
   /** sha256 of the normalized email; null until the visitor is known. */
   emailHash: z.string().nullable().default(null),
-  /** Linked user once the visitor authenticates or joins the waitlist. */
+  /** Linked user once the visitor authenticates. */
   userId: z.string().nullable().default(null),
   alias: z.string(),
   lastSeenAt: z.string(),

@@ -17,8 +17,8 @@ Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert
 ```
 
 - **app box** — `vorinthex-early-app`, t4g.medium (ARM), **public** subnet, EIP
-  `13.49.39.46`. Caddy host-routes `api.vorinthex.com` → api, everything else →
-  web (which fans the other subdomains out via `proxy.ts`). Security group only
+  `13.49.39.46`. Caddy serves only `vorinthex.com`, path-routing `/api/v1/*`
+  (including the Resend webhook) to api and all other paths to web. Security group only
   admits Cloudflare's IP ranges (managed prefix list) on :80/:443.
 - **graph-db box** — `vorinthex-prod-graph-db-host`, t3.small, ArangoDB in Docker
   on the `/data/arangodb` EBS volume. Unchanged from before; holds all data.
@@ -26,10 +26,10 @@ Cloudflare (SSL = Full) ──▶ app box :443 (Caddy, self-signed internal cert
 
 ## DNS
 
-Cloudflare proxied CNAMEs (apex + every subdomain in `.github/scripts/domains.json`)
-point at the app box's public DNS, set via the `CLOUDFLARE_DNS_TARGET` repo
+The Cloudflare proxied apex CNAME in `.github/scripts/domains.json` points at
+the app box's public DNS, set via the `CLOUDFLARE_DNS_TARGET` repo
 variable (`ec2-13-49-39-46.eu-north-1.compute.amazonaws.com`). The zone SSL mode
-is **Full** (Caddy serves a self-signed cert for `vorinthex.com` + `*.vorinthex.com`).
+is **Full** (Caddy serves a self-signed certificate for `vorinthex.com`).
 Run the sync from `infra.yml` (`run_dns_sync=true`).
 
 ## Deploy

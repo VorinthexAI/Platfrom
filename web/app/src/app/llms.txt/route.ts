@@ -1,5 +1,4 @@
 import {
-  NEWCOMER_FREE_SPARKS,
   SPARK_MONTHLY_PLANS,
   formatSparkCount,
   formatUsd,
@@ -15,7 +14,7 @@ export function GET() {
 ## Core
 
 - [Vorinthex Core](https://vorinthex.com): Connect knowledge, memories, communication, discovery, and growth in one personal AI.
-- [Sparks Pricing](https://vorinthex.com/pricing): Newcomers receive ${formatSparkCount(NEWCOMER_FREE_SPARKS)} free Sparks. Monthly plans start with ${SPARK_MONTHLY_PLANS[0].name} at ${formatUsd(SPARK_MONTHLY_PLANS[0].price)} for ${formatSparkCount(SPARK_MONTHLY_PLANS[0].sparks)} Sparks.
+- [Sparks Pricing](https://vorinthex.com/pricing): Planned monthly options start with ${SPARK_MONTHLY_PLANS[0].name} at ${formatUsd(SPARK_MONTHLY_PLANS[0].price)} for ${formatSparkCount(SPARK_MONTHLY_PLANS[0].sparks)} Sparks. Purchases are not yet available.
 
 ## Company
 

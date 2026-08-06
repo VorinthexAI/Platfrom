@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build the company/user/membership layer — everything needed to create a company, add members with roles and titles, control which apps a member can see data for, and authenticate both humans and external apps (like Lensoflow's backend, which will call this system's event ingestion API).
+Build the company/user/membership layer — everything needed to create a company, add members with roles and titles, control which apps a member can see data for, and authenticate both humans and external apps.
 
 This phase has no AI logic at all. It's CRUD + auth + permissions plumbing. Get it exactly right — every later phase's security model depends on it.
 

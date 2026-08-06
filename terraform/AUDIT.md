@@ -157,7 +157,7 @@ of this task (see the WAF section).
   `web_acl_id`).
 - Locals: create_acm, has_aliases, aliases, origin_id, AWS managed cache/origin/
   response policy IDs.
-- Variables: name_prefix, alb_domain_name, web/api_domain_names,
+- Variables: name_prefix, alb_domain_name, web_domain_names,
   viewer_acm_certificate_arn, origin_custom_header_name/value, price_class,
   **`waf_enabled`** (NEW, default true), **`waf_rate_limit`** (NEW, default
   2000), tags.

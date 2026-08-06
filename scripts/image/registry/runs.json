@@ -544,46 +544,6 @@
     "status": "completed"
   },
   {
-    "runId": "7cAslWYS98y3",
-    "assetId": "announcement-hunt-launch",
-    "versionId": "v1",
-    "action": "Generate slideshow",
-    "createdAt": "2026-07-07T23:35:42.420Z",
-    "status": "started"
-  },
-  {
-    "runId": "jht8z4Y7W3qm",
-    "assetId": "announcement-hunt-launch",
-    "versionId": "v1",
-    "action": "Generate slideshow",
-    "createdAt": "2026-07-07T23:36:57.525Z",
-    "status": "started"
-  },
-  {
-    "runId": "jht8z4Y7W3qm",
-    "assetId": "announcement-hunt-launch",
-    "versionId": "v1",
-    "action": "Generate slideshow",
-    "createdAt": "2026-07-07T23:44:05.388Z",
-    "status": "completed"
-  },
-  {
-    "runId": "Tyla0HR4I_Y0",
-    "assetId": "announcement-hunt-launch-2",
-    "versionId": "v1",
-    "action": "Generate slideshow",
-    "createdAt": "2026-07-08T00:04:47.303Z",
-    "status": "started"
-  },
-  {
-    "runId": "Tyla0HR4I_Y0",
-    "assetId": "announcement-hunt-launch-2",
-    "versionId": "v1",
-    "action": "Generate slideshow",
-    "createdAt": "2026-07-08T00:09:11.859Z",
-    "status": "completed"
-  },
-  {
     "runId": "f8ByJCIBasLR",
     "assetId": "orchestrator-orchestrator-phoenix",
     "versionId": "v1",

@@ -15,7 +15,7 @@ export interface NodeRetrievalMetadata {
 
 const nodeRetrievalMetadata = new Map<string, NodeRetrievalMetadata>();
 const accessorRetrievalMetadata = new WeakMap<Function, NodeRetrievalMetadata>();
-const globallyRetrievableCollections = new Set(['actions', 'capabilities', 'models', 'modelActions', 'modelProviders', 'orchestrators', 'products', 'providers', 'skills', 'voices']);
+const globallyRetrievableCollections = new Set(['actions', 'capabilities', 'models', 'modelActions', 'modelProviders', 'orchestrators', 'providers', 'skills', 'voices']);
 const safeRetrievalFields = new Set(['name', 'slug', 'description', 'title', 'summary', 'content', 'text', 'question', 'role', 'skill']);
 
 export function getNodeRetrievalMetadata(collectionNameOrAccessor: string | Function): NodeRetrievalMetadata | undefined {

@@ -4,22 +4,12 @@ import { cors } from 'hono/cors';
 import { websocket } from 'hono/bun';
 import { errorHandler } from './errors';
 import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
-import { handlePolarWebhook, POLAR_WEBHOOK_PATH } from './payments';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
 import { registerRoutes } from './routes';
-import { ensureLeaderboardDigestSweeper } from '@/platform/leaderboard-digest';
-
-if (process.env.NODE_ENV === 'production' && process.env.POLAR_ACCESS_TOKEN && !process.env.POLAR_WEBHOOK_SECRET) {
-  throw new Error('POLAR_WEBHOOK_SECRET is required in production when POLAR_ACCESS_TOKEN is configured');
-}
 
 export const app = new Hono();
 const api = app.basePath('/api/v1');
-const DEFAULT_PROD_CORS_ORIGINS = [
-  'https://www.vorinthex.com',
-  'https://vorinthex.com',
-  'https://app.vorinthex.com',
-];
+const DEFAULT_PROD_CORS_ORIGINS = ['https://vorinthex.com'];
 
 app.use('*', cors({
   origin: (origin) => {
@@ -56,8 +46,6 @@ app.use('*', validateQueryParams);
 app.onError(errorHandler);
 api.get('/health', (c) => c.json({ ok: true }));
 registerRoutes(api);
-app.post(POLAR_WEBHOOK_PATH, handlePolarWebhook);
-app.post(`${POLAR_WEBHOOK_PATH}/`, handlePolarWebhook);
 app.post(RESEND_WEBHOOK_V1_PATH, handleResendWebhook);
 app.post(`${RESEND_WEBHOOK_V1_PATH}/`, handleResendWebhook);
 
@@ -69,10 +57,6 @@ if (import.meta.main) {
     websocket,
   });
   console.log(`vorinthex app listening on ${port}`);
-
-  // Daily waitlist-leaderboard digest: hourly ticks race for a Redis
-  // day-lock, so exactly one instance sends per UTC day.
-  ensureLeaderboardDigestSweeper();
 
   const shutdown = async () => {
     server.stop();

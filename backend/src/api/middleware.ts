@@ -2,7 +2,6 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { timingSafeEqual } from '@/lib/crypto';
-import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
 import { strictObject } from './validation';
 import { refreshAccessToken, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
@@ -31,7 +30,7 @@ function setAuthIdentity(c: Parameters<MiddlewareHandler>[0], identity: AuthIden
 }
 
 function cookieOptions(maxAge: number) {
-  // Root-scope sessions let a founder enter Nexus from any product subdomain.
+  // Root-scope sessions keep authentication available across the apex site.
   // The web bridge uses the same production fallback when it persists a rotation.
   const domain = process.env.COOKIE_DOMAIN ?? (process.env.NODE_ENV === 'production' ? 'vorinthex.com' : undefined);
   const crossSite = Boolean(domain);
@@ -69,12 +68,6 @@ function querySchemaForPath(path: string) {
   if (apiPath === '/updates/unsubscribe') {
     return strictObject({ token_hash: z.string().regex(/^[a-f0-9]{64}$/).optional() });
   }
-  if (apiPath === '/waitlist/verify') {
-    return strictObject({
-      token_hash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-      explorer_id: z.string().min(8).max(80).optional(),
-    });
-  }
   if (apiPath === '/auth/handoff/stream' || apiPath === '/auth/handoff/status') {
     return strictObject({ handoff: z.string().regex(/^[a-f0-9]{64}$/) });
   }
@@ -84,22 +77,8 @@ function querySchemaForPath(path: string) {
       redirect_uri: z.string().url(),
     });
   }
-  if (apiPath === '/nexus/events/stream') {
-    return strictObject({ organizationKey: z.string().trim().min(1) });
-  }
   if (apiPath === '/founders/artifacts' || apiPath === '/founders/artifacts/stream' || /^\/founders\/artifacts\/[^/]+$/.test(apiPath)) {
     return strictObject({ organizationKey: z.string().trim().min(1).optional(), scopeKey: z.string().cuid().optional() });
-  }
-  if (apiPath === '/fragments/summary') {
-    return strictObject({
-      explorer_id: z.string().optional(),
-      format: z.string().optional(),
-    });
-  }
-  if (apiPath === '/fragments/standing') {
-    return strictObject({
-      explorer_id: z.string().optional(),
-    });
   }
   if (apiPath === '/orchestrators/chat') {
     return strictObject({
@@ -124,18 +103,9 @@ export const validateQueryParams: MiddlewareHandler = async (c, next) => {
 
 export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   // Provider webhooks authenticate via signature verification, not our API key.
-  if (isPolarWebhookPath(c.req.path) || isResendWebhookPath(c.req.path)) return next();
+  if (isResendWebhookPath(c.req.path)) return next();
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
-  // Public frontend telemetry endpoint; still protected by CORS and IP rate limiting.
-  if (c.req.path === '/api/v1/platform/events') return next();
-  // Public waitlist event ingestion supports either auth or email_hash lookup in the route.
-  if (c.req.path === '/api/v1/users/events') return next();
-  // Public checkout creation supports either auth or email_hash lookup in the route.
-  if (c.req.path === '/api/v1/payments/checkout') return next();
-  // Public email verification must be callable from the frontend verification page.
-  if (c.req.path === '/api/v1/waitlist/verify') return next();
-
   const expected = process.env.API_KEY;
   if (!expected) {
     if (process.env.NODE_ENV === 'production') {
@@ -209,7 +179,7 @@ export const autoRefreshAuthTokens = createAutoRefreshAuthTokens();
 export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   // Provider webhook retries burst from a small IP pool; rate-limiting them
   // would drop or delay deliveries. The endpoint is protected by signatures.
-  if (isPolarWebhookPath(c.req.path) || isResendWebhookPath(c.req.path)) return next();
+  if (isResendWebhookPath(c.req.path)) return next();
 
   if (process.env.RATE_LIMIT_ENABLED !== 'true') return next();
 

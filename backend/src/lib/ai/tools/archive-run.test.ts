@@ -9,7 +9,6 @@ import { skillSchema } from '@/lib/db/skills.node';
 import { agentSkillSchema } from '@/lib/db/agent-skills.node';
 import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { agentMemberSchema } from '@/lib/db/agent-members.node';
-import type { RuntimeEventInput } from '@/platform/events';
 import { runArchiveAgentTool } from './archive-run';
 
 const now = '2026-07-22T00:00:00.000Z';
@@ -30,52 +29,45 @@ function fixture() {
 }
 
 describe('runArchiveAgentTool', () => {
-  test('derives the principal from the authenticated user and dispatches with safe events', async () => {
-    const f = fixture(); const events: RuntimeEventInput[] = []; let received: any;
+  test('derives the principal from the authenticated user and dispatches', async () => {
+    const f = fixture(); let received: any;
     const output = await runArchiveAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: { scopeKey: f.scope.key } }, {
       authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData,
       resolveMembership: async (organizationKey, userKey) => organizationKey === f.organization.key && userKey === f.user.key ? f.membership : null,
-      events: async (event) => { events.push(event); },
       execute: (async (tool: any, input: any, context: any) => { received = { tool, input, context }; return { folders: [] }; }) as any,
     });
     expect(output).toEqual({ folders: [] });
     expect(received).toMatchObject({ tool: 'folder.list', context: { principal: { kind: 'member', user: { key: f.user.key }, userOrganization: { key: f.membership.key } } } });
-    expect(events.map((event) => event.slug)).toEqual(['agent.started', 'agent.completed']);
-    expect(events[0]!.data).toEqual({ invocationKey: events[0]!.data.invocationKey, agentKey: f.agent.key, actionSlug: 'folder.list', status: 'started' });
-    expect(JSON.stringify(events)).not.toContain('scopeKey');
   });
 
   test('rejects organization-agent mismatch before membership resolution', async () => {
     const f = fixture(); let resolved = false;
     await expect(runArchiveAgentTool({ organizationKey: newId(), agentKey: f.agent.key, tool: 'folder.list', input: {} }, {
       authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData,
-      resolveMembership: async () => { resolved = true; return f.membership; }, events: async () => {},
+      resolveMembership: async () => { resolved = true; return f.membership; },
     })).rejects.toMatchObject({ code: 'ARCHIVE_FORBIDDEN' });
     expect(resolved).toBe(false);
   });
 
-  test('emits a safe failed event without tool input or error content', async () => {
-    const f = fixture(); const events: RuntimeEventInput[] = [];
+  test('preserves execution failures', async () => {
+    const f = fixture();
     await expect(runArchiveAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: { secret: 'do-not-log' } }, {
       authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData,
-      resolveMembership: async () => f.membership, events: async (event) => { events.push(event); },
+      resolveMembership: async () => f.membership,
       execute: (async () => { throw new Error('sensitive provider response'); }) as any,
     })).rejects.toThrow('sensitive provider response');
-    expect(events.map((event) => event.slug)).toEqual(['agent.started', 'agent.failed']);
-    expect(JSON.stringify(events)).not.toContain('do-not-log');
-    expect(JSON.stringify(events)).not.toContain('sensitive provider response');
   });
 
   test('cannot use a membership belonging to another authenticated user', async () => {
     const f = fixture();
     await expect(runArchiveAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: {} }, {
       authenticatedUserKey: newId(), runtimeData: f.runtimeData, accessData: f.accessData,
-      resolveMembership: async () => f.membership, events: async () => {},
+      resolveMembership: async () => f.membership,
     })).rejects.toMatchObject({ code: 'ARCHIVE_FORBIDDEN' });
   });
 
   test('strictly rejects unknown tools and top-level fields', async () => {
-    const f = fixture(); const options = { authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData, resolveMembership: async () => f.membership, events: async () => {} };
+    const f = fixture(); const options = { authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData, resolveMembership: async () => f.membership };
     await expect(runArchiveAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'unknown', input: {} } as any, options)).rejects.toThrow();
     await expect(runArchiveAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: {}, principal: { kind: 'system' } } as any, options)).rejects.toThrow();
   });

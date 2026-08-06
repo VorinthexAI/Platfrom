@@ -3,6 +3,7 @@ import { aql } from 'arangojs';
 import { db } from './client';
 import { createNodeHelpers } from './base';
 import { withArangoKey } from './base';
+import { newId } from '@/lib/ids';
 
 export const ORGANIZATIONS_COLLECTION = 'organizations';
 
@@ -10,7 +11,7 @@ export const organizationSchema = z.object({
   key: z.string(),
   name: z.string(),
   /** Exactly one organization is the root — Vorinthex AI itself. Every
-   * user, visitor, session, and event hangs off it via organizationId. */
+   * user, visitor, and session hangs off it via organizationId. */
   is_root: z.boolean().default(false),
   slug: z.string().nullable().default(null),
   description: z.string().nullable().default(null),
@@ -53,6 +54,22 @@ export async function getRootOrganization(): Promise<Organization | null> {
   `);
   const doc = await cursor.next();
   return doc ? organizationSchema.parse(withArangoKey(doc)) : null;
+}
+
+export async function getRootOrganizationId() {
+  const existing = await getRootOrganization();
+  if (existing) return existing.key;
+
+  const now = new Date().toISOString();
+  const created = await insertOrganization({
+    key: newId(),
+    name: 'Vorinthex AI',
+    is_root: true,
+    metadata: {},
+    createdAt: now,
+    updatedAt: now,
+  });
+  return created.key;
 }
 
 export async function getOrganizationBySlug(slug: string): Promise<Organization | null> {

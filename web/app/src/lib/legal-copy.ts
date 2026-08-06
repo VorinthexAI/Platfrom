@@ -23,20 +23,20 @@ export const PRIVACY_COPY: VaultCopy = {
     {
       title: "Data we collect",
       paragraphs: [
-        "We collect account and profile data such as your email address, name or alias, profile details, sign in identifiers, preferences, and waitlist status. We also collect content and activity you choose to provide, including prompts, files, messages, saved content, feedback, and communications with us.",
-        "We may collect technical and usage data such as IP address, device and browser information, cookie or similar identifiers, app interactions, diagnostics, and security logs. If you make a purchase, we receive transaction details such as the product, plan, payment status, and billing contact information. Payment providers process complete payment card details on our behalf.",
+        "We collect account and profile data such as your email address, name or alias, profile details, sign in identifiers, and preferences. We also collect content and activity you choose to provide, including prompts, files, messages, saved content, feedback, and communications with us.",
+        "We may collect technical and usage data such as IP address, device and browser information, cookie or similar identifiers, app interactions, diagnostics, and security logs.",
       ],
     },
     {
       title: "How we use data",
       paragraphs: [
-        "We use personal data to create and secure accounts, provide and personalize Vorinthex AI services, process requests and purchases, communicate about access and service updates, provide support, measure and improve performance, prevent fraud and abuse, comply with law, and enforce our terms.",
+        "We use personal data to create and secure accounts, provide and personalize Vorinthex AI services, process requests, communicate about access and service updates, provide support, measure and improve performance, prevent fraud and abuse, comply with law, and enforce our terms.",
       ],
     },
     {
       title: "How we share data",
       paragraphs: [
-        "We share data only as needed with service providers that support hosting, authentication, email, analytics, customer support, payments, security, and AI features. When a feature uses an external AI model provider, the content submitted to that feature may be processed by that provider to return the requested result. We may also share data at your direction, to comply with law, protect rights and safety, or as part of a business reorganization.",
+        "We share data only as needed with service providers that support hosting, authentication, email, analytics, customer support, security, and AI features. When a feature uses an external AI model provider, the content submitted to that feature may be processed by that provider to return the requested result. We may also share data at your direction, to comply with law, protect rights and safety, or as part of a business reorganization.",
         "We do not sell personal data or share it with third parties for targeted advertising.",
       ],
     },
@@ -44,13 +44,13 @@ export const PRIVACY_COPY: VaultCopy = {
       title: "Delete your account and data",
       paragraphs: [
         "You can request deletion of your account and its associated data by signing in, opening your Profile page, selecting Delete account, and confirming the request. If you cannot sign in, email contact@vorinthex.com from the address associated with your account and ask us to delete the account. We may verify your identity before completing the request.",
-        "Account deletion removes or deidentifies your profile, saved content, and account activity within 30 days after verification. Copies in encrypted backups are removed through the normal backup cycle within 90 days. We may retain limited transaction, fraud prevention, security, or legal records for as long as required by law or reasonably necessary to establish or defend legal claims.",
+        "Account deletion removes or deidentifies your profile, saved content, and account activity within 30 days after verification. Copies in encrypted backups are removed through the normal backup cycle within 90 days. We may retain limited fraud prevention, security, or legal records for as long as required by law or reasonably necessary to establish or defend legal claims.",
       ],
     },
     {
       title: "Delete selected data without deleting your account",
       paragraphs: [
-        "You may request deletion of specific data while keeping your account. Use the available controls on your Profile page, or email contact@vorinthex.com from your account email and clearly identify the profile field, saved content, conversation, file, activity record, or other data you want removed. We will delete or deidentify the selected data within 30 days after verification, with backup copies expiring within 90 days, subject to the same limited legal, security, and transaction retention described above.",
+        "You may request deletion of specific data while keeping your account. Use the available controls on your Profile page, or email contact@vorinthex.com from your account email and clearly identify the profile field, saved content, conversation, file, activity record, or other data you want removed. We will delete or deidentify the selected data within 30 days after verification, with backup copies expiring within 90 days, subject to the same limited legal and security retention described above.",
       ],
     },
     {

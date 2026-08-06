@@ -1690,15 +1690,15 @@
       "category": "announcement",
       "status": "reviewed",
       "locked": false,
-      "description": "Open Graph and Twitter preview cards for core.vorinthex.com.",
+      "description": "Open Graph and Twitter preview cards for vorinthex.com/core.",
       "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
       "currentVersionId": "v2",
       "versions": [
         {
           "id": "v1",
           "version": 1,
-          "prompt": "Materialize social preview cards for core.vorinthex.com from Next.js metadata image routes.",
-          "fullPrompt": "Target: Core\nSubdomain: core.vorinthex.com\nCanonical route: /core\nOpen Graph route: /core/opengraph-image\nTwitter route: /core/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "prompt": "Materialize social preview cards for vorinthex.com/core from Next.js metadata image routes.",
+          "fullPrompt": "Target: Core\nURL: vorinthex.com/core\nCanonical route: /core\nOpen Graph route: /core/opengraph-image\nTwitter route: /core/twitter-image\nBase URL: http://127.0.0.1:3000",
           "slideshowPath": "assets/announcement/social-card-core/v1/metadata.json",
           "previewPath": "assets/announcement/social-card-core/v1/opengraph-1200x630.png",
           "slidePaths": [
@@ -1708,14 +1708,14 @@
           "metadataPath": "assets/announcement/social-card-core/v1/metadata.json",
           "accepted": true,
           "rejected": false,
-          "notes": "Generated Open Graph and Twitter cards for core.vorinthex.com.",
+          "notes": "Generated Open Graph and Twitter cards for vorinthex.com/core.",
           "createdAt": "2026-07-08T17:42:55.952Z"
         },
         {
           "id": "v2",
           "version": 2,
-          "prompt": "Materialize social preview cards for core.vorinthex.com from Next.js metadata image routes.",
-          "fullPrompt": "Target: Core\nSubdomain: core.vorinthex.com\nCanonical route: /core\nOpen Graph route: /core/opengraph-image\nTwitter route: /core/twitter-image\nBase URL: http://127.0.0.1:3000",
+          "prompt": "Materialize social preview cards for vorinthex.com/core from Next.js metadata image routes.",
+          "fullPrompt": "Target: Core\nURL: vorinthex.com/core\nCanonical route: /core\nOpen Graph route: /core/opengraph-image\nTwitter route: /core/twitter-image\nBase URL: http://127.0.0.1:3000",
           "slideshowPath": "assets/announcement/social-card-core/v2/metadata.json",
           "previewPath": "assets/announcement/social-card-core/v2/opengraph-1200x630.png",
           "slidePaths": [
@@ -1725,7 +1725,7 @@
           "metadataPath": "assets/announcement/social-card-core/v2/metadata.json",
           "accepted": true,
           "rejected": false,
-          "notes": "Generated Open Graph and Twitter cards for core.vorinthex.com.",
+          "notes": "Generated Open Graph and Twitter cards for vorinthex.com/core.",
           "createdAt": "2026-07-08T17:43:31.423Z"
         }
       ],
@@ -2023,72 +2023,6 @@
       ],
       "createdAt": "2026-07-21T14:35:28.871Z",
       "updatedAt": "2026-07-21T15:26:25.744Z"
-    },
-    {
-      "id": "announcement-social-card-hunt",
-      "slug": "social-card-hunt",
-      "name": "The Hunt Social Cards",
-      "category": "announcement",
-      "status": "reviewed",
-      "locked": false,
-      "description": "Open Graph and Twitter preview cards for hunt.vorinthex.com.",
-      "designIntent": "Materialized 1200x630 social preview images generated from the live Next.js metadata image routes.",
-      "currentVersionId": "v3",
-      "versions": [
-        {
-          "id": "v1",
-          "version": 1,
-          "prompt": "Materialize social preview cards for hunt.vorinthex.com from Next.js metadata image routes.",
-          "fullPrompt": "Target: The Hunt\nSubdomain: hunt.vorinthex.com\nCanonical route: /hunt\nOpen Graph route: /hunt/opengraph-image\nTwitter route: /hunt/twitter-image\nBase URL: http://127.0.0.1:3000",
-          "slideshowPath": "assets/announcement/social-card-hunt/v1/metadata.json",
-          "previewPath": "assets/announcement/social-card-hunt/v1/opengraph-1200x630.png",
-          "slidePaths": [
-            "assets/announcement/social-card-hunt/v1/opengraph-1200x630.png",
-            "assets/announcement/social-card-hunt/v1/twitter-1200x630.png"
-          ],
-          "metadataPath": "assets/announcement/social-card-hunt/v1/metadata.json",
-          "accepted": true,
-          "rejected": false,
-          "notes": "Generated Open Graph and Twitter cards for hunt.vorinthex.com.",
-          "createdAt": "2026-07-08T17:42:56.840Z"
-        },
-        {
-          "id": "v2",
-          "version": 2,
-          "prompt": "Materialize social preview cards for hunt.vorinthex.com from Next.js metadata image routes.",
-          "fullPrompt": "Target: The Hunt\nSubdomain: hunt.vorinthex.com\nCanonical route: /hunt\nOpen Graph route: /hunt/opengraph-image\nTwitter route: /hunt/twitter-image\nBase URL: http://127.0.0.1:3000",
-          "slideshowPath": "assets/announcement/social-card-hunt/v2/metadata.json",
-          "previewPath": "assets/announcement/social-card-hunt/v2/opengraph-1200x630.png",
-          "slidePaths": [
-            "assets/announcement/social-card-hunt/v2/opengraph-1200x630.png",
-            "assets/announcement/social-card-hunt/v2/twitter-1200x630.png"
-          ],
-          "metadataPath": "assets/announcement/social-card-hunt/v2/metadata.json",
-          "accepted": true,
-          "rejected": false,
-          "notes": "Generated Open Graph and Twitter cards for hunt.vorinthex.com.",
-          "createdAt": "2026-07-08T17:43:32.453Z"
-        },
-        {
-          "id": "v3",
-          "version": 3,
-          "prompt": "Materialize social preview cards for hunt.vorinthex.com from Next.js metadata image routes.",
-          "fullPrompt": "Target: The Hunt\nSubdomain: hunt.vorinthex.com\nCanonical route: /hunt\nOpen Graph route: /hunt/opengraph-image\nTwitter route: /hunt/twitter-image\nBase URL: http://127.0.0.1:3000",
-          "slideshowPath": "assets/announcement/social-card-hunt/v3/metadata.json",
-          "previewPath": "assets/announcement/social-card-hunt/v3/opengraph-1200x630.png",
-          "slidePaths": [
-            "assets/announcement/social-card-hunt/v3/opengraph-1200x630.png",
-            "assets/announcement/social-card-hunt/v3/twitter-1200x630.png"
-          ],
-          "metadataPath": "assets/announcement/social-card-hunt/v3/metadata.json",
-          "accepted": true,
-          "rejected": false,
-          "notes": "Generated Open Graph and Twitter cards for hunt.vorinthex.com.",
-          "createdAt": "2026-07-08T18:12:37.359Z"
-        }
-      ],
-      "createdAt": "2026-07-08T17:42:56.569Z",
-      "updatedAt": "2026-07-08T18:12:37.367Z"
     },
     {
       "id": "announcement-social-card-iris",

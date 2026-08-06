@@ -14,11 +14,9 @@ function harness() {
   const document = { key: documentKey, scopeKey, folderKey, name: 'Doc', extension: 'txt' as const, mimeType: 'text/plain', html: '<p>x</p>', storageKey: 'x', sizeBytes: 1, json: { type: 'doc' as const }, content: 'x', embedding: [1], deletedAt: null as string | null, createdAt: timestamp, updatedAt: timestamp };
   const version = { key: versionKey, scopeKey, documentKey, version: 1, storageKey: 'v', sizeBytes: 1, content: 'x', embedding: [1], deletedAt: null as string | null, createdAt: timestamp, updatedAt: timestamp };
   const share = { key: shareKey, scopeKey, documentKey, token: 'token', embedding: [], deletedAt: null as string | null, createdAt: timestamp, updatedAt: timestamp };
-  const events: string[] = [];
   const mutate = <T extends { deletedAt: string | null; updatedAt: string }>(node: T, deletedAt: string | null) => async () => Object.assign(node, { deletedAt, updatedAt: timestamp });
   const dependencies = {
     authorize: async () => undefined,
-    emit: async (action: ArchiveActionSlug) => { events.push(action); },
     getFolder: async (key: string) => key === folderKey ? folder : null,
     getDocument: async (key: string) => key === documentKey ? document : null,
     getDocumentVersion: async (key: string) => key === versionKey ? version : null,
@@ -34,7 +32,7 @@ function harness() {
       return [node];
     },
   };
-  return { folder, document, version, share, events, dependencies };
+  return { folder, document, version, share, dependencies };
 }
 
 const cases = [
@@ -58,22 +56,21 @@ describe('Archive lifecycle domain tools', () => {
       const context = harness();
       const archiveAction = `${resource}.archive` as ArchiveActionSlug;
       const restoreAction = `${resource}.restore` as ArchiveActionSlug;
-      const archived = await executeArchiveLifecycleTool(archiveAction, { items: [{ [field]: key }], atomic: true }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, context.dependencies as never);
+      const archived = await executeArchiveLifecycleTool(archiveAction, { items: [{ [field]: key }], atomic: true }, { organizationKey: 'org' }, context.dependencies as never);
       expect(archived.items[0]).toMatchObject({ key, success: true });
       expect((archived.items[0] as { value: { deletedAt: string } }).value.deletedAt).toBeString();
-      const restored = await executeArchiveLifecycleTool(restoreAction, { items: [{ [field]: key }], atomic: true }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, context.dependencies as never);
+      const restored = await executeArchiveLifecycleTool(restoreAction, { items: [{ [field]: key }], atomic: true }, { organizationKey: 'org' }, context.dependencies as never);
       expect(restored.items[0]).toMatchObject({ key, success: true, value: { deletedAt: null } });
-      expect(context.events).toEqual([archiveAction, restoreAction]);
     }
   });
 
   test('supports partial failures and atomic prevalidation without mutating valid items', async () => {
     const partialContext = harness();
-    const partial = await executeArchiveLifecycleTool('folder.archive', { items: [{ folderKey }, { folderKey: shareKey }], atomic: false }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, partialContext.dependencies as never);
+    const partial = await executeArchiveLifecycleTool('folder.archive', { items: [{ folderKey }, { folderKey: shareKey }], atomic: false }, { organizationKey: 'org' }, partialContext.dependencies as never);
     expect(partial.items.map(({ success }) => success)).toEqual([true, false]);
 
     const atomicContext = harness();
-    const atomic = await executeArchiveLifecycleTool('folder.archive', { items: [{ folderKey }, { folderKey: shareKey }], atomic: true }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, atomicContext.dependencies as never);
+    const atomic = await executeArchiveLifecycleTool('folder.archive', { items: [{ folderKey }, { folderKey: shareKey }], atomic: true }, { organizationKey: 'org' }, atomicContext.dependencies as never);
     expect(atomic.items.every(({ success }) => !success)).toBe(true);
     expect(atomicContext.folder.deletedAt).toBeNull();
   });
@@ -81,13 +78,13 @@ describe('Archive lifecycle domain tools', () => {
   test('enforces authorization and active parent restoration', async () => {
     const denied = harness();
     denied.dependencies.authorize = async () => { throw new Error('forbidden'); };
-    const deniedResult = await executeArchiveLifecycleTool('document.archive', { items: [{ documentKey }], atomic: false }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, denied.dependencies as never);
+    const deniedResult = await executeArchiveLifecycleTool('document.archive', { items: [{ documentKey }], atomic: false }, { organizationKey: 'org' }, denied.dependencies as never);
     expect(deniedResult.items[0]).toMatchObject({ success: false, error: 'forbidden' });
 
     const parent = harness();
     parent.document.deletedAt = timestamp;
     parent.folder.deletedAt = timestamp;
-    const restore = await executeArchiveLifecycleTool('document.restore', { items: [{ documentKey }], atomic: false }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, parent.dependencies as never);
+    const restore = await executeArchiveLifecycleTool('document.restore', { items: [{ documentKey }], atomic: false }, { organizationKey: 'org' }, parent.dependencies as never);
     expect(restore.items[0]).toMatchObject({ success: false });
     expect(parent.document.deletedAt).toBe(timestamp);
   });
@@ -95,14 +92,14 @@ describe('Archive lifecycle domain tools', () => {
   test('protects canonical project folders and delegates atomic writes as one operation', async () => {
     const projectFolder = harness();
     projectFolder.dependencies.isProjectFolder = async () => true;
-    const blocked = await executeArchiveLifecycleTool('folder.archive', { items: [{ folderKey }], atomic: false }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, projectFolder.dependencies as never);
+    const blocked = await executeArchiveLifecycleTool('folder.archive', { items: [{ folderKey }], atomic: false }, { organizationKey: 'org' }, projectFolder.dependencies as never);
     expect(blocked.items[0]).toMatchObject({ success: false });
     expect(projectFolder.folder.deletedAt).toBeNull();
 
     const atomic = harness();
     let calls = 0;
     atomic.dependencies.atomicMutate = async () => { calls += 1; throw new Error('transaction rolled back'); };
-    const failed = await executeArchiveLifecycleTool('document.archive', { items: [{ documentKey }, { documentKey }], atomic: true }, { organizationKey: 'org', runtimeScopeKey: scopeKey }, atomic.dependencies as never);
+    const failed = await executeArchiveLifecycleTool('document.archive', { items: [{ documentKey }, { documentKey }], atomic: true }, { organizationKey: 'org' }, atomic.dependencies as never);
     expect(calls).toBe(1);
     expect(failed.items.every(({ success }) => !success)).toBe(true);
     expect(atomic.document.deletedAt).toBeNull();

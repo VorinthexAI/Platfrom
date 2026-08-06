@@ -5,7 +5,6 @@ import { pollOptionSchema } from '@/lib/db/poll-options.node';
 import { pollVoteSchema } from '@/lib/db/poll-votes.node';
 import { arangoCommunicationRepository, CommunicationConflictError, type CommunicationRepository, type GeneralChannelAccess, type MentionCandidate } from './repository';
 import { messageMentionSchema } from '@/lib/db/message-mentions.node';
-import { recordOrganizationEvent, type OrganizationEventRecorder } from '@/lib/live/organization-events';
 
 export type ChorusErrorCode = 'forbidden' | 'not_found' | 'conflict';
 export class ChorusError extends Error {
@@ -16,7 +15,7 @@ export interface ChorusActor { organizationKey: string; membershipKey: string; n
 const isoNow = () => new Date().toISOString();
 
 export class ChorusService {
-  constructor(private readonly repository: CommunicationRepository = arangoCommunicationRepository, private readonly now = isoNow, private readonly recordEvent: OrganizationEventRecorder = recordOrganizationEvent) {}
+  constructor(private readonly repository: CommunicationRepository = arangoCommunicationRepository, private readonly now = isoNow) {}
 
   async generalChannel(actor: ChorusActor) {
     const access = await this.repository.ensureGeneralChannel(actor.organizationKey, actor.membershipKey);
@@ -37,19 +36,17 @@ export class ChorusService {
 
   async deleteMessage(actor: ChorusActor, channelKey: string, messageKey: string) {
     await this.requireChannel(actor, channelKey);
-    const message = await this.requireMessage(channelKey, messageKey);
+    await this.requireMessage(channelKey, messageKey);
     if (!await this.repository.deleteMessage(channelKey, messageKey, actor.membershipKey, this.now())) {
       throw new ChorusError('forbidden', 'message deletion denied');
     }
-    await this.publishMessageEvent(message, 'chorus.message.remove');
   }
 
   async editMessage(actor: ChorusActor, channelKey: string, messageKey: string, content: string) {
     await this.requireChannel(actor, channelKey);
-    const message = await this.requireMessage(channelKey, messageKey);
+    await this.requireMessage(channelKey, messageKey);
     const edited = await this.repository.editMessage(channelKey, messageKey, actor.membershipKey, content, this.now());
     if (!edited) throw new ChorusError('forbidden', 'only the message author may edit this message');
-    await this.publishMessageEvent(message, 'chorus.message.update');
     return edited;
   }
 
@@ -57,7 +54,6 @@ export class ChorusService {
     const access = await this.requireChannel(actor, channelKey);
     const resolvedThreadKey = await this.resolveReplyContext(channelKey, threadKey, replyToMessageKey);
     const message = await this.repository.insertMessage(this.message(access, access.humanParticipant.key, content, resolvedThreadKey, replyToMessageKey));
-    await this.publishMessageEvent(message, 'chorus.message.create');
     const mentions = this.mentions(access, message.key, content);
     await this.repository.insertMentions(mentions.map(({ candidate, mention }) => mention));
     await this.repository.recordUserMentions(access.viewerUserKey, [...new Set([...( /(^|[^\w])@everyone\b/i.test(content) ? ['everyone'] : []), ...mentions.map(({ candidate }) => candidate.key)])], this.now());
@@ -67,7 +63,6 @@ export class ChorusService {
   async persistOrchestratorMessage(access: GeneralChannelAccess, orchestrator: MentionCandidate, content: string, threadKey?: string, replyToMessageKey?: string, sourceMessageKey?: string) {
     if (sourceMessageKey) await this.requireMessage(access.channel.key, sourceMessageKey);
     const message = await this.repository.insertMessage(this.message(access, orchestrator.participantKey, content, threadKey, replyToMessageKey));
-    await this.publishMessageEvent(message, 'chorus.message.create');
     return message;
   }
 
@@ -187,15 +182,4 @@ export class ChorusService {
     return threadKey;
   }
 
-  private async publishMessageEvent(message: Message, slug: 'chorus.message.create' | 'chorus.message.update' | 'chorus.message.remove') {
-    await this.publishInvalidation(message.scopeKey, message.key, slug);
-  }
-
-  private async publishInvalidation(scopeKey: string, messageKey: string, slug: 'chorus.message.create' | 'chorus.message.update' | 'chorus.message.remove') {
-    try {
-      await this.recordEvent({ scopeId: scopeKey, slug, data: { nodeType: 'messages', nodeKey: messageKey } });
-    } catch (error) {
-      console.error('chorus organization event recording failed', { messageKey, slug, error });
-    }
-  }
 }

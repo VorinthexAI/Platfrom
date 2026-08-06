@@ -298,46 +298,6 @@ Notes: Removed glossy globe interior; cleaner V/orbit mark.
 Paths:
 - solid: assets/master-brand/vorinthex-ai-globe-v/v2/solid-1024.png
 - transparent: assets/master-brand/vorinthex-ai-globe-v/v2/transparent-1024.png
-## 2026-07-07 23:35
-Asset: Hunt is Now Open
-Action: Created asset
-Notes: A cinematic vertical slideshow announcing the opening of Hunt, the pre-launch Intelligence Fragment expedition across the Vorinthex Galaxy.
-## 2026-07-07 23:44
-Asset: Hunt is Now Open
-Action: Generated v1
-Notes: TikTok slideshow: 6 slides, 0 reference image(s).
-## 2026-07-07 23:44
-Asset: Hunt is Now Open
-Action: Generated slideshow v1
-Notes: TikTok slideshow: 6 slides, 0 reference image(s).
-Paths:
-- slideshow/intelligence-hunt-launch-1/outputs/v1/slideshow.json
-- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-01.png
-- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-02.png
-- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-03.png
-- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-04.png
-- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-05.png
-- slideshow/intelligence-hunt-launch-1/outputs/v1/slide-06.png
-## 2026-07-08 00:04
-Asset: Hunt is Now Open
-Action: Created asset
-Notes: A cinematic vertical slideshow announcing the opening of Hunt, with broad atmospheric scenes and generous safe space for overlay text.
-## 2026-07-08 00:09
-Asset: Hunt is Now Open
-Action: Generated v1
-Notes: TikTok slideshow: 6 slides, 0 reference image(s).
-## 2026-07-08 00:09
-Asset: Hunt is Now Open
-Action: Generated slideshow v1
-Notes: TikTok slideshow: 6 slides, 0 reference image(s).
-Paths:
-- slideshow/intelligence-hunt-launch-2/outputs/v1/slideshow.json
-- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-01.png
-- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-02.png
-- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-03.png
-- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-04.png
-- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-05.png
-- slideshow/intelligence-hunt-launch-2/outputs/v1/slide-06.png
 ## 2026-07-08 17:27
 Asset: Nexus Social Cards
 Action: Created asset
@@ -405,11 +365,11 @@ Notes: Generated Open Graph and Twitter cards for compass.vorinthex.com.
 ## 2026-07-08 17:27
 Asset: Core Social Cards
 Action: Created asset
-Notes: Open Graph and Twitter preview cards for core.vorinthex.com.
+Notes: Open Graph and Twitter preview cards for vorinthex.com/core.
 ## 2026-07-08 17:27
 Asset: Core Social Cards
 Action: Generated v1
-Notes: Generated Open Graph and Twitter cards for core.vorinthex.com.
+Notes: Generated Open Graph and Twitter cards for vorinthex.com/core.
 ## 2026-07-08 17:27
 Asset: Forge Social Cards
 Action: Created asset
@@ -434,14 +394,6 @@ Notes: Open Graph and Twitter preview cards for hermes.vorinthex.com.
 Asset: Hermes Social Cards
 Action: Generated v1
 Notes: Generated Open Graph and Twitter cards for hermes.vorinthex.com.
-## 2026-07-08 17:27
-Asset: The Hunt Social Cards
-Action: Created asset
-Notes: Open Graph and Twitter preview cards for hunt.vorinthex.com.
-## 2026-07-08 17:27
-Asset: The Hunt Social Cards
-Action: Generated v1
-Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
 ## 2026-07-08 17:27
 Asset: Iris Social Cards
 Action: Created asset
@@ -593,11 +545,11 @@ Notes: Generated Open Graph and Twitter cards for compass.vorinthex.com.
 ## 2026-07-08 17:42
 Asset: Core Social Cards
 Action: Created asset
-Notes: Open Graph and Twitter preview cards for core.vorinthex.com.
+Notes: Open Graph and Twitter preview cards for vorinthex.com/core.
 ## 2026-07-08 17:42
 Asset: Core Social Cards
 Action: Generated v1
-Notes: Generated Open Graph and Twitter cards for core.vorinthex.com.
+Notes: Generated Open Graph and Twitter cards for vorinthex.com/core.
 ## 2026-07-08 17:42
 Asset: Forge Social Cards
 Action: Created asset
@@ -622,14 +574,6 @@ Notes: Open Graph and Twitter preview cards for hermes.vorinthex.com.
 Asset: Hermes Social Cards
 Action: Generated v1
 Notes: Generated Open Graph and Twitter cards for hermes.vorinthex.com.
-## 2026-07-08 17:42
-Asset: The Hunt Social Cards
-Action: Created asset
-Notes: Open Graph and Twitter preview cards for hunt.vorinthex.com.
-## 2026-07-08 17:42
-Asset: The Hunt Social Cards
-Action: Generated v1
-Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
 ## 2026-07-08 17:42
 Asset: Iris Social Cards
 Action: Created asset
@@ -745,7 +689,7 @@ Notes: Generated Open Graph and Twitter cards for compass.vorinthex.com.
 ## 2026-07-08 17:43
 Asset: Core Social Cards
 Action: Generated v2
-Notes: Generated Open Graph and Twitter cards for core.vorinthex.com.
+Notes: Generated Open Graph and Twitter cards for vorinthex.com/core.
 ## 2026-07-08 17:43
 Asset: Forge Social Cards
 Action: Generated v2
@@ -758,10 +702,6 @@ Notes: Generated Open Graph and Twitter cards for gallery.vorinthex.com.
 Asset: Hermes Social Cards
 Action: Generated v2
 Notes: Generated Open Graph and Twitter cards for hermes.vorinthex.com.
-## 2026-07-08 17:43
-Asset: The Hunt Social Cards
-Action: Generated v2
-Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
 ## 2026-07-08 17:43
 Asset: Iris Social Cards
 Action: Generated v2
@@ -802,10 +742,6 @@ Notes: Generated Open Graph and Twitter cards for studio.vorinthex.com.
 Asset: Themis Social Cards
 Action: Generated v2
 Notes: Generated Open Graph and Twitter cards for themis.vorinthex.com.
-## 2026-07-08 18:12
-Asset: The Hunt Social Cards
-Action: Generated v3
-Notes: Generated Open Graph and Twitter cards for hunt.vorinthex.com.
 ## 2026-07-19 20:01
 Asset: Phoenix
 Action: Created asset

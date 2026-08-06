@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import { countUsers, getUserByAliasSlug, getUserByEmailHash, insertUser, updateUser, type User } from '@/lib/db/users.node';
+import { getUserByAliasSlug, getUserByEmailHash, insertUser, updateUser, type User } from '@/lib/db/users.node';
 import { getVisitorByDistinctId, type Visitor } from '@/lib/db/visitors.node';
 import { isArangoUniqueConstraintError } from '@/lib/db/base';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '@/lib/alias';
 import { sha256 } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
-import { getRootOrganizationId } from '@/platform/events';
+import { getRootOrganizationId } from '@/lib/db/organizations.node';
 
 export function normalizeEmail(email: string) {
   return z.string().email().parse(email.trim().toLowerCase());
@@ -75,10 +75,7 @@ export async function upsertUserByEmail(
   const existing = await getUserByEmailHash(emailHash);
   if (existing) return reconcileWithExisting(existing);
 
-  // Exact-once precision on the waitlist number is not critical; a COUNT
-  // right before the insert is close enough for a marketing counter.
   const key = newId();
-  const waitlistNumber = values.waitlistNumber ?? (await countUsers()) + 1;
   const alias = values.alias ?? visitor?.alias ?? generateAlias(key);
   try {
     return await insertUser({
@@ -90,7 +87,6 @@ export async function upsertUserByEmail(
       name: values.name ?? defaultNameFromEmail(normalized),
       alias,
       alias_slug: values.alias_slug ?? await createUniqueAliasSlug(alias, key),
-      waitlistNumber,
       createdAt: now,
       updatedAt: now,
     });
@@ -100,9 +96,7 @@ export async function upsertUserByEmail(
     // request racing an OAuth callback for the same address) can both pass
     // the emailHash lookup above before either has inserted. The unique
     // index on emailHash is the real backstop here — resolve to whichever
-    // row won the race instead of surfacing a raw 500 (same pattern as the
-    // other emailHash/idempotency-key races handled elsewhere, e.g.
-    // payments.ts checkout creation).
+    // row won the race instead of surfacing a raw 500.
     if (!isArangoUniqueConstraintError(err)) throw err;
     const winner = await getUserByEmailHash(emailHash);
     if (!winner) throw err;

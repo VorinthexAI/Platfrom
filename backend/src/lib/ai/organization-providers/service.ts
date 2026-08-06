@@ -16,7 +16,7 @@ const defaultResolver: OrganizationProviderReferenceResolver = {
   },
 };
 export interface OrganizationProviderService {
-  enableProvider(organizationKey: string, providerSlug: ProviderSlug, scopeKey?: string): Promise<OrganizationProvider>;
+  enableProvider(organizationKey: string, providerSlug: ProviderSlug): Promise<OrganizationProvider>;
   disableProvider(organizationKey: string, providerSlug: ProviderSlug): Promise<void>;
   listEnabledProviderKeys(organizationKey: string): Promise<readonly string[]>;
   isProviderEnabled(organizationKey: string, providerSlug: ProviderSlug): Promise<boolean>;
@@ -38,9 +38,9 @@ export function createOrganizationProviderService(
     };
   }
   return {
-    async enableProvider(organizationKey, providerSlug, scopeKey) {
+    async enableProvider(organizationKey, providerSlug) {
       const provider = await resolve(organizationKey, providerSlug);
-      return repository.addProvider(provider.organizationKey, { providerKey: provider.providerKey, name: provider.name, description: null }, scopeKey);
+      return repository.addProvider(provider.organizationKey, { providerKey: provider.providerKey, name: provider.name, description: null });
     },
     async disableProvider(organizationKey, providerSlug) { const keys = await resolve(organizationKey, providerSlug); return repository.removeProvider(keys.organizationKey, keys.providerKey); },
     async listEnabledProviderKeys(organizationKey) { return repository.listProviderKeys(organizationProviderSchema.shape.organizationKey.parse(organizationKey)); },

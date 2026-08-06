@@ -17,14 +17,12 @@ import { folderSchema } from '@/lib/db/folders.node';
 import { documentSchema } from '@/lib/db/documents.node';
 import { documentVersionSchema } from '@/lib/db/document-versions.node';
 import { documentShareSchema } from '@/lib/db/document-shares.node';
-import { newId } from '@/lib/ids';
 
 type ArchiveNode = Folder | Document | DocumentVersion | DocumentShare;
-type ArchiveContext = { organizationKey: string; runtimeScopeKey: string; userKey?: string };
+type ArchiveContext = { organizationKey: string };
 
 export interface ArchiveExecutionDependencies {
   authorize(scopeKey: string, roles: readonly string[]): Promise<void>;
-  emit(action: ArchiveActionSlug, data: Record<string, unknown>): Promise<void>;
   getFolder?: typeof getFolderById;
   getDocument?: typeof getDocumentById;
   getDocumentVersion?: typeof getDocumentVersionById;
@@ -37,7 +35,7 @@ export interface ArchiveExecutionDependencies {
   restoreDocumentVersion?: typeof restoreDocumentVersion;
   archiveDocumentShare?: typeof archiveDocumentShare;
   restoreDocumentShare?: typeof restoreDocumentShare;
-  atomicMutate?: (resource: 'folders' | 'documents' | 'documentVersions' | 'documentShares', keys: string[], deletedAt: string | null, action: ArchiveActionSlug, context: ArchiveContext) => Promise<ArchiveNode[]>;
+  atomicMutate?: (resource: 'folders' | 'documents' | 'documentVersions' | 'documentShares', keys: string[], deletedAt: string | null, context: ArchiveContext) => Promise<ArchiveNode[]>;
   isProjectFolder?: (folderKey: string) => Promise<boolean>;
 }
 
@@ -46,7 +44,7 @@ export class ArchiveLifecycleError extends Error {
   constructor(code: string, message: string) { super(message); this.code = code; }
 }
 
-async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'documentVersions' | 'documentShares', keys: string[], deletedAt: string | null, action: ArchiveActionSlug, context: ArchiveContext): Promise<ArchiveNode[]> {
+async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'documentVersions' | 'documentShares', keys: string[], deletedAt: string | null, context: ArchiveContext): Promise<ArchiveNode[]> {
   const timestamp = new Date().toISOString();
   const schema = resource === 'folders' ? folderSchema : resource === 'documents' ? documentSchema : resource === 'documentVersions' ? documentVersionSchema : documentShareSchema;
   const parentCollections = resource === 'folders' ? ['projects'] : resource === 'documents' ? ['folders'] : ['documents'];
@@ -55,17 +53,13 @@ async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'document
     : resource === 'documents'
       ? 'LET parent = DOCUMENT("folders", node.folderKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)'
       : 'LET parent = DOCUMENT("documents", node.documentKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)';
-  return withTransaction([resource, ...parentCollections, 'events', 'scopes'], async (transaction) => {
+  return withTransaction([resource, ...parentCollections, 'scopes'], async (transaction) => {
     const cursor = await transaction.query<Record<string, unknown>>(
       `FOR node IN @@collection FILTER node._key IN @keys FILTER @restoring ? node.deletedAt != null : node.deletedAt == null LET scope = DOCUMENT("scopes", node.scopeKey) FILTER scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null ${guard} UPDATE node WITH { deletedAt: @deletedAt, updatedAt: @timestamp } IN @@collection RETURN NEW`,
       { keys, deletedAt, timestamp, restoring: deletedAt === null, organizationKey: context.organizationKey, '@collection': resource },
     );
     const values = (await cursor.all()).map((node) => schema.parse(withArangoKey(node)) as ArchiveNode);
     if (values.length !== keys.length) throw new ArchiveLifecycleError('archive_state_changed', 'Archive lifecycle state changed before the transaction committed.');
-    await transaction.query(
-      'INSERT @event IN events',
-      { event: { _key: newId(), scopeId: context.runtimeScopeKey, userId: context.userKey ?? null, slug: action, data: { nodeType: resource, nodeKeys: keys }, embedding: [], createdAt: timestamp } },
-    );
     return values;
   });
 }
@@ -73,11 +67,6 @@ async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'document
 async function defaultIsProjectFolder(folderKey: string): Promise<boolean> {
   const cursor = await db.query<number>('RETURN LENGTH(FOR project IN projects FILTER project.archiveFolderKey == @folderKey LIMIT 1 RETURN 1)', { folderKey });
   return (await cursor.next() ?? 0) > 0;
-}
-
-async function safeEmit(emit: ArchiveExecutionDependencies['emit'], action: ArchiveActionSlug, data: Record<string, unknown>): Promise<void> {
-  try { await emit(action, data); }
-  catch (error) { console.warn('Archive lifecycle audit event failed', { action, error: error instanceof Error ? error.message : String(error) }); }
 }
 
 function resourceFor(action: ArchiveActionSlug) {
@@ -133,13 +122,11 @@ export async function executeArchiveLifecycleTool(
   };
 
   const atomicMutate = dependencies.atomicMutate ?? defaultAtomicMutate;
-  const emitsInsideTransaction = dependencies.atomicMutate === undefined;
 
   if (input.atomic) {
     try {
       const prepared = await Promise.all(input.items.map(validate));
-      const values = await atomicMutate(resource.type, prepared.map(({ key }) => key), restoring ? null : new Date().toISOString(), action, context);
-      if (!emitsInsideTransaction) await safeEmit(dependencies.emit, action, { nodeType: resource.type, nodeKeys: values.map(({ key }) => key) });
+      const values = await atomicMutate(resource.type, prepared.map(({ key }) => key), restoring ? null : new Date().toISOString(), context);
       return { items: values.map((value) => ({ key: value.key, success: true, value })) };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -151,9 +138,8 @@ export async function executeArchiveLifecycleTool(
   for (const item of input.items) {
     try {
       const target = await validate(item);
-      const [value] = await atomicMutate(resource.type, [target.key], restoring ? null : new Date().toISOString(), action, context);
+      const [value] = await atomicMutate(resource.type, [target.key], restoring ? null : new Date().toISOString(), context);
       if (!value) throw new ArchiveLifecycleError('archive_update_failed', `${target.key} was not updated.`);
-      if (!emitsInsideTransaction) await safeEmit(dependencies.emit, action, { nodeType: resource.type, nodeKey: value.key });
       results.push({ key: target.key, success: true, value });
     } catch (error) {
       results.push({ key: item[resource.field], success: false, error: error instanceof Error ? error.message : String(error) });

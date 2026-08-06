@@ -10,7 +10,7 @@ import type { AudioConfig, AudioFormat } from "./types";
 import { hashText, rel, slugify } from "./utils";
 import type { AudioTarget } from "./targets";
 
-const speechInput = "Welcome to the Vorinthex galaxy. This is the hunt: collect Intelligence Fragments scattered across the galaxy, and climb the ranks. Dive into asteroids to uncover giant crystals worth thousands of fragments. The higher you stand at launch, the greater your prizes, offers, and early access. Every fragment feeds the Nexus. Keep exploring. The galaxy is watching.";
+const speechInput = "Welcome to Vorinthex AI, the Nexus of Intelligence. One connected platform brings your knowledge, workflows, and leading AI models together, helping you think clearly, create confidently, and turn ambitious ideas into meaningful results.";
 
 const target: AudioTarget = {
   slug: "vorinthex-ai",

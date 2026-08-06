@@ -17,7 +17,7 @@ Production follows the Lensoflow deployment pattern, adapted to Vorinthex's two 
 
 ## GitHub Variables
 
-- `APP_HEALTH_URL`, for example `https://api.vorinthex.com/api/v1/health`
+- `APP_HEALTH_URL`, for example `https://vorinthex.com/api/v1/health`
 - `RENDER_TASK_FAMILY`, required for render deploys
 - `RENDER_ECS_CLUSTER`, required to roll the running render service
 - `RENDER_ECS_SERVICE`, required to roll the running render service

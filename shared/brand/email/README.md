@@ -21,7 +21,7 @@ layouts; keep values inline and in sync with the design system.
 - `{{supporting_html}}`
 - `{{footer_html}}`
 
-Use the same template for sign-in links, waitlist messages, TOTP setup notices,
+Use the same template for sign-in links, TOTP setup notices,
 invitations, receipts, and operational alerts by changing the placeholder values.
 
 Keep critical CSS inline where possible. Many email clients strip external

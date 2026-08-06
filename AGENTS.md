@@ -12,10 +12,8 @@ Vorinthex platform monorepo. Top-level workspaces:
   currently runs on the single-box early-infra stack (see Deployments
   below); the `vorinthex-prod-web` ECS service on the shared
   `vorinthex-production` cluster behind the ALB takes over once the
-  cluster is provisioned. That single image serves every subdomain —
-  entity subdomains (orbit.vorinthex.com, …) and cave subdomains
-  (hunt.vorinthex.com → /hunt) are routed inside the app via
-  `web/app/src/proxy.ts`. (Vercel has been fully removed.)
+  cluster is provisioned. The only public hostname is `vorinthex.com`;
+  `/api/v1/*` routes to the Bun backend and all other paths route to Next.js.
 - `backend`: Bun backend service.
 - `shared`: shared UI, brand, and library code used by the web app and
   backend.
@@ -95,8 +93,7 @@ keep them in sync:
 - **Robots**: `web/app/src/app/robots.ts` (staging noindex via
   `BLOCK_INDEXING`). Private/auth/deep-link pages must export
   `robots: { index: false }` metadata.
-- **Metadata**: canonical URLs always point at `vorinthex.com` (subdomains
-  rewrite via `web/app/src/proxy.ts`); use `buildMetadataFromEntity` in
+- **Metadata**: canonical URLs always point at `vorinthex.com`; use `buildMetadataFromEntity` in
   `web/app/src/lib/galaxy/seo.ts` for entity pages.
 
 After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
@@ -118,4 +115,4 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - Run the relevant checks before considering a task complete.
 - Ask before introducing a new major dependency or framework.
 - This repo is its own monorepo; do not add git submodules for `web/app`, `backend`, or `shared`.
-- Deployments happen ONLY through the Unified Deploy GitHub workflow (`.github/workflows/deploy.yml`): merge to `main` builds the `vorinthex-web` and `vorinthex-backend` images and pushes them to ECR. **Current state: to keep costs low early on, production is served by the single-box early-infra stack** — one EC2 box running web + api + redis behind Caddy (see `deploy/early/`) — and every merge reaches it via an SSM blue-green swap (`deploy/early/deploy.sh`). The AWS-ECS rollout steps (`vorinthex-prod-web` / `vorinthex-prod-api` on the `vorinthex-production` cluster via `aws ecs update-service --force-new-deployment`) exist in the same workflow but no-op while the cluster is INACTIVE; once ECS is provisioned the roles flip automatically and the early-infra job no-ops instead. Vercel is GONE — there are no Vercel projects, no `vercel` CLI, and no git-connected hosting; do not reintroduce any of them. Infrastructure itself (Terraform plan/approval/apply) is provisioned by `infra.yml`, not `deploy.yml`.
+- Deployments happen ONLY through the Unified Deploy GitHub workflow (`.github/workflows/deploy.yml`): merge to `main` builds the `vorinthex-web` and `vorinthex-backend` images and pushes them to ECR. **Current state: to keep costs low early on, production is served by the single-box early-infra stack** — one EC2 box running web + api + redis behind Caddy (see `deploy/early/`) — and every merge reaches it via an SSM blue-green swap (`deploy/early/deploy.sh`). The AWS-ECS rollout steps (`vorinthex-prod-web` / `vorinthex-prod-api` on the `vorinthex-production` cluster via `aws ecs update-service --force-new-deployment`) exist in the same workflow but no-op while the cluster is INACTIVE; once ECS is provisioned the roles flip automatically and the early-infra job no-ops instead. Infrastructure itself (Terraform plan/approval/apply) is provisioned by `infra.yml`, not `deploy.yml`.

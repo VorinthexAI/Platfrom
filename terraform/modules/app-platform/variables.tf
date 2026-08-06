@@ -143,13 +143,7 @@ variable "api_max_count" {
 
 variable "web_domain_names" {
   type        = list(string)
-  description = "Public web hostnames (apex + subdomains) served by the web target group. First entry is the ACM primary domain."
-  default     = []
-}
-
-variable "api_domain_names" {
-  type        = list(string)
-  description = "Public api hostnames (e.g. api.vorinthex.com) routed to the api target group."
+  description = "Public apex hostname served by the platform. First entry is the ACM primary domain."
   default     = []
 }
 
@@ -246,10 +240,6 @@ variable "api_secret_keys" {
     "CORS_ORIGINS",
     "FRONTEND_URL",
     "NO_REPLY_EMAIL",
-    "POLAR_ACCESS_TOKEN",
-    "POLAR_SERVER",
-    "POLAR_SKIP_WEBHOOK_VERIFICATION",
-    "POLAR_WEBHOOK_SECRET",
     "RATE_LIMIT_ENABLED",
     "RATE_LIMIT_REQ_PER_MIN",
     "REDIS_URL",

@@ -1,20 +1,18 @@
 #!/usr/bin/env bun
-// Idempotent Cloudflare DNS synchronization for the Vorinthex universe.
+// Idempotent Cloudflare DNS synchronization for the Vorinthex apex.
 //
 // Source of truth: .github/scripts/domains.json, generated from the galaxy
-// registry by another script. Shape:
+// domain generator. Shape:
 //
-//   { "vorinthex.com": ["core", "command", ..., "hunt"] }
+//   { "vorinthex.com": [] }
 //
-// Each apex key becomes a proxied CNAME to the CloudFront target (Cloudflare
-// "CNAME flattening" makes an apex CNAME legal), and every slug becomes a
-// proxied CNAME `<slug>.<apex>` to the same target. Proxied CNAMEs are
-// compatible with Cloudflare SSL/TLS "Full" mode: Cloudflare terminates TLS
-// at the edge and re-encrypts to CloudFront (which serves a valid cert).
+// The apex becomes a proxied CNAME to the configured origin target. Cloudflare
+// CNAME flattening makes an apex CNAME legal.
 //
 // The sync is idempotent: existing records are matched by name+type, updated
 // only when content/proxied/type differ, created when missing, and never
-// duplicated. Unrelated records in the zone are left untouched.
+// duplicated. Only exact historical Vorinthex web hostnames are pruned;
+// unrelated names and all MX/TXT/mail records are left untouched.
 //
 // Usage:
 //   CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ZONE_ID=... \
@@ -41,6 +39,44 @@ const DEFAULT_TARGET = "ec2-13-49-39-46.eu-north-1.compute.amazonaws.com";
 const DEFAULT_APEX = "vorinthex.com";
 const DEFAULT_DOMAINS_FILE = ".github/scripts/domains.json";
 const MAX_RETRIES = 5;
+
+// Union of labels from prior committed domains.json versions. This explicit
+// allowlist prevents a malformed desired file from broad-deleting zone records.
+const RETIRED_MANAGED_LABELS = [
+  "api",
+  "apollo",
+  "archive",
+  "ascend",
+  "athena",
+  "atlas",
+  "aura",
+  "command",
+  "compass",
+  "core",
+  "echo",
+  "forge",
+  "gallery",
+  "harmony",
+  "helios",
+  "hermes",
+  "hunt",
+  "iris",
+  "launch",
+  "ledger",
+  "matrix",
+  "mercury",
+  "metis",
+  "orbit",
+  "phoenix",
+  "pillar",
+  "sentinel",
+  "signal",
+  "studio",
+  "themis",
+  "vulcan",
+  "www",
+] as const;
+const RETIRED_MANAGED_TYPES = new Set(["A", "AAAA", "CNAME"]);
 
 type CloudflareError = { code: number; message: string };
 
@@ -203,8 +239,7 @@ function loadDesiredHostnames(): string[] {
   for (const slug of slugsRaw) {
     if (typeof slug !== "string" || !slug.trim()) continue;
     const clean = slug.trim().toLowerCase();
-    // A slug may be a bare label ("core") or already-qualified
-    // ("core.vorinthex.com"); normalise to the FQDN either way.
+    // A slug may be a bare label or already qualified; normalize either form.
     const host = clean.endsWith(`.${apex}`) || clean === apex
       ? clean
       : `${clean}.${apex}`;
@@ -277,6 +312,7 @@ async function main() {
   let created = 0;
   let updated = 0;
   let unchanged = 0;
+  let deleted = 0;
   let failures = 0;
 
   for (const want of desired) {
@@ -288,8 +324,8 @@ async function main() {
 
     if (matches.length === 0) {
       // A CNAME cannot coexist with an A/AAAA record at the same name. Any
-      // address record here is a legacy origin (e.g. api.vorinthex.com pointing
-      // at the old EC2 EIP) that this desired CNAME is meant to REPLACE — remove
+      // address record here is a legacy origin that this desired CNAME is meant
+      // to REPLACE — remove
       // it, then create the CNAME. Scoped to A/AAAA only so TXT/MX/etc. are never
       // touched. (Non-address shadow types are surfaced, not deleted.)
       const addressShadow = existing.filter(
@@ -373,8 +409,37 @@ async function main() {
     }
   }
 
+  const desiredNames = new Set(desired.map((record) => record.name.toLowerCase()));
+  const retiredNames = new Set(
+    RETIRED_MANAGED_LABELS.map((label) => `${label}.${apex}`),
+  );
+  const retiredRecords = existing.filter((record) => {
+    const name = record.name.toLowerCase().replace(/\.$/, "");
+    return !desiredNames.has(name) &&
+      retiredNames.has(name) &&
+      RETIRED_MANAGED_TYPES.has(record.type.toUpperCase());
+  });
+
+  for (const record of retiredRecords) {
+    if (dryRun) {
+      console.log(`[plan] DELETE retired ${record.type} ${record.name} -> ${record.content}`);
+      deleted += 1;
+      continue;
+    }
+    try {
+      await cfFetch<unknown>(`/zones/${zoneId}/dns_records/${record.id}`, {
+        method: "DELETE",
+      });
+      console.log(`[delete] retired ${record.type} ${record.name} -> ${record.content}`);
+      deleted += 1;
+    } catch (err) {
+      console.error(`[cloudflare-dns-sync] failed to delete retired ${record.name}: ${String(err)}`);
+      failures += 1;
+    }
+  }
+
   console.log(
-    `[cloudflare-dns-sync] summary: created=${created} updated=${updated} unchanged=${unchanged} failures=${failures}${dryRun ? " (dry-run, no changes applied)" : ""}`,
+    `[cloudflare-dns-sync] summary: created=${created} updated=${updated} unchanged=${unchanged} deleted=${deleted} failures=${failures}${dryRun ? " (dry-run, no changes applied)" : ""}`,
   );
 
   if (failures > 0) {

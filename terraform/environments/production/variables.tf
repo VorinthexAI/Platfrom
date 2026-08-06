@@ -237,16 +237,8 @@ variable "api_desired_count" {
 
 variable "web_domain_names" {
   type        = list(string)
-  description = "Public web hostnames for the ALB/CloudFront and ACM certs."
-  # Apex + wildcard: one CloudFront alias set covers vorinthex.com and every
-  # entity subdomain (core/command/atlas/hunt/…). proxy.ts routes by Host.
-  default = ["vorinthex.com", "*.vorinthex.com"]
-}
-
-variable "api_domain_names" {
-  type        = list(string)
-  description = "Public api hostnames routed to the api target group."
-  default     = []
+  description = "Public apex hostname for the ALB, CloudFront, and ACM certificates."
+  default     = ["vorinthex.com"]
 }
 
 variable "alb_https_enabled" {
@@ -264,8 +256,8 @@ variable "alb_acm_certificate_arn" {
 variable "cloudfront_viewer_acm_certificate_arn" {
   type        = string
   description = "Existing validated us-east-1 ACM cert ARN for CloudFront aliases. Empty = default cert, no aliases."
-  # us-east-1 wildcard cert (vorinthex.com + *.vorinthex.com), DNS-validated via
-  # Cloudflare. Apply CloudFront with this only after ACM status = ISSUED.
+  # Existing us-east-1 certificate covering vorinthex.com. Apply CloudFront
+  # with this only after ACM status = ISSUED.
   default = "arn:aws:acm:us-east-1:938565868704:certificate/9d512719-f631-411c-8067-8b30e3309b6d"
 }
 

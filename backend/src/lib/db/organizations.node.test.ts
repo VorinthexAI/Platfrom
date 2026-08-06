@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import { NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
 import { actionSchema } from './actions.node';
 import { organizationSchema } from './organizations.node';
 import { skillSchema } from './skills.node';
@@ -8,25 +7,17 @@ import { agentSchema } from './agents.node';
 import { agentSkillSchema } from './agent-skills.node';
 import { authChallengeSchema } from './auth-challenges.node';
 import { capabilitySchema } from './capabilities.node';
-import { eventSchema } from './events.node';
-import { intelligenceFragmentSchema } from './intelligence-fragments.node';
 import { mindCapabilitySchema } from './mind-capabilities.node';
 import { mindSchema } from './minds.node';
 import { modelSchema } from './models.node';
 import { modelActionSchema } from './model-actions.node';
 import { modelProviderSchema } from './model-providers.node';
 import { orchestratorSchema } from './orchestrators.node';
-import { paymentCheckoutSchema } from './payment-checkouts.node';
-import { paymentOrderSchema } from './payment-orders.node';
 import { processedWebhookEventSchema } from './processed-webhook-events.node';
-import { productSchema } from './products.node';
 import { providerObjectSchema } from './providers.node';
-import { subscriptionSchema } from './subscriptions.node';
-import { userEntitlementSchema } from './user-entitlements.node';
 import { userOrganizationSchema } from './user-organization.node';
 import { userSchema } from './users.node';
 import { userSessionSchema } from './user-sessions.node';
-import { userWaitlistLeaderboardChangeSchema } from './user-waitlist-leaderboard-changes.node';
 import { visitorSchema } from './visitors.node';
 import { visitorSessionSchema } from './visitor-sessions.node';
 import { voiceSchema } from './voices.node';
@@ -84,19 +75,6 @@ describe('organization node schema', () => {
     expect(linked.visitor.organizationId).toBe('org_root');
   });
 
-  test('events belong directly to a scope', () => {
-    const event = eventSchema.parse({
-      key: 'evt_1',
-      scopeId: NEXUS_SCOPE_KEY,
-      sourceId: 'legacy-source',
-      belongsTo: 'platform',
-      slug: 'landing.page_viewed',
-      createdAt: baseOrganization.createdAt,
-    });
-    expect(event.scopeId).toBe(NEXUS_SCOPE_KEY);
-    expect('sourceId' in event).toBe(false);
-    expect('belongsTo' in event).toBe(false);
-  });
 });
 
 /** The platform and team nodes are gone: no node schema may keep a
@@ -108,8 +86,6 @@ describe('no node field mentions the retired platform or team nodes', () => {
     agentSkills: agentSkillSchema,
     authChallenges: authChallengeSchema,
     capabilities: capabilitySchema,
-    events: eventSchema,
-    intelligenceFragments: intelligenceFragmentSchema,
     mindCapabilities: mindCapabilitySchema,
     minds: mindSchema,
     modelActions: modelActionSchema,
@@ -117,17 +93,11 @@ describe('no node field mentions the retired platform or team nodes', () => {
     models: modelSchema,
     orchestrators: orchestratorSchema,
     organizations: organizationSchema,
-    paymentCheckouts: paymentCheckoutSchema,
-    paymentOrders: paymentOrderSchema,
     processedWebhookEvents: processedWebhookEventSchema,
     providers: providerObjectSchema,
-    products: productSchema,
-    subscriptions: subscriptionSchema,
     skills: skillSchema,
-    userEntitlements: userEntitlementSchema,
     userOrganizations: userOrganizationSchema,
     userSessions: userSessionSchema,
-    userWaitlistLeaderboardChanges: userWaitlistLeaderboardChangeSchema,
     users: userSchema,
     visitorSessions: visitorSessionSchema,
     visitors: visitorSchema,

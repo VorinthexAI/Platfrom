@@ -94,7 +94,6 @@ function userDoc(key: string, organizationId: string) {
     profileUrl: 'https://example.com/avatar.png',
     alias: null,
     alias_slug: null,
-    waitlistNumber: null,
     isVerified: true,
     is_subscribed_to_updates: true,
     is_subscribed_to_updates_unsubscribe_token_hash: null,

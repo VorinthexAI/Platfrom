@@ -32,7 +32,7 @@ describe('auth helpers', () => {
     expect(link).not.toContain(rawToken);
   });
 
-  test('builds user-flow magic links for waitlist explorer sign-in', async () => {
+  test('builds user-flow magic links for account sign-in', async () => {
     process.env.FRONTEND_URL = 'https://app.example.com';
 
     const tokenHash = await createChallengeTokenHash('vrtx_email_user');

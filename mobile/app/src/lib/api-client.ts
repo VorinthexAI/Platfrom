@@ -8,7 +8,7 @@ import axios, { type AxiosInstance } from "axios";
  * resolvers for these helpers without any screen-level changes.
  */
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: "https://api.vorinthex.com",
+  baseURL: "https://vorinthex.com",
   timeout: 15_000,
   headers: { "Content-Type": "application/json" },
 });

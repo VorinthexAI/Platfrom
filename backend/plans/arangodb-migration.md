@@ -19,16 +19,14 @@ current stack (see "Current state" below); status: **proposal, not started**.
   literally emulating a graph database inside a JSON column — the strongest argument for Arango.
 - `companyOutputRelations` is an explicit self-referential edge table (parent/child output +
   relationType) — another direct graph-native candidate.
-- Real relational needs that don't map as cleanly: Polar payments/subscriptions/entitlements
-  (financial correctness, partial unique index enforcing "one active entitlement per user+product",
-  check constraints on enums, idempotency keys), and pgvector HNSW embedding search on
+- A relational need that does not map as cleanly is pgvector HNSW embedding search on
   `companyEvents`/`companyOutputs`.
 - Primary keys are already app-generated CUID2 strings (`usr_...`, `cmp_...`), not DB serials —
   this maps cleanly onto Arango `_key` with no ID-scheme rewrite needed.
 - **No DB integration tests exist today** — the 13 test files are pure unit tests on
   extracted logic (validation, graph-mutation helpers); nothing exercises Postgres in CI. This is a
   gap the migration needs to close, not inherit.
-- No prior Arango work exists in this repo (checked `plan.md`, `polar.md`, `deploy.md`, `README.md`,
+- No prior Arango work exists in this repo (checked `plan.md`, `deploy.md`, `README.md`,
   all of `plans/`) — this is a fresh initiative.
 
 ## Guiding decisions
@@ -39,13 +37,9 @@ current stack (see "Current state" below); status: **proposal, not started**.
    rewrite-everything-at-once change.
 2. **Strangler-fig, not big-bang.** Migrate module by module behind those interfaces, dual-write
    during transition, shadow-read to diff, then cut over. No flag-day rewrite of a system with zero
-   existing DB test coverage and real financial data in it.
-3. **De-risk the two unknowns before committing:** ArangoDB vector search parity with pgvector/HNSW,
-   and how to express the partial-unique-index entitlement invariant without Postgres partial
-   indexes. Both get a Phase 0 spike; either can fail and change downstream scope.
-4. **Payments migrate last, and not without test coverage.** `payments.ts`'s DB-touching branches
-   (`fulfillOrderPaid`, `grantEntitlement`) have zero test coverage today. Build tests for the
-   current behavior before touching this module, so there's a correctness baseline to migrate against.
+   existing DB test coverage.
+3. **De-risk vector search before committing:** verify ArangoDB vector search parity with
+   pgvector/HNSW in a Phase 0 spike.
 
 ## Phase 0 — Spike & go/no-go
 
@@ -59,10 +53,6 @@ current stack (see "Current state" below); status: **proposal, not started**.
 - Prototype vector similarity search using Arango's vector index against the `companyEvents`/
   `companyOutputs` embedding use case. **Decision point:** if parity is insufficient, plan to keep a
   dedicated vector store for embeddings (e.g. pgvector standalone) rather than forcing it into Arango.
-- Prototype the "one active entitlement per user+product" invariant without a Postgres partial unique
-  index — likely: keep it enforced transactionally in application code (the existing `grantEntitlement`
-  logic in `src/api/security.ts` already reads-then-revokes-then-inserts inside a transaction; port that
-  pattern rather than the index).
 - Decide hosting: self-managed ArangoDB (own container, replaces Postgres+PgBouncer in
   docker-compose/terraform) vs. ArangoDB Oasis (managed; removes the SSH-tunnel migration complexity
   documented in `deploy.md`/`.github/workflows/deploy.yml` at the cost of a new vendor dependency).
@@ -71,7 +61,7 @@ current stack (see "Current state" below); status: **proposal, not started**.
 ## Phase 1 — Introduce a repository layer (still on Postgres)
 
 - Define TypeScript interfaces per domain: `UsersRepo`, `CompaniesRepo`, `CompanyGraphRepo`,
-  `EventsRepo`, `OutputsRepo`, `PaymentsRepo`, `AuthRepo`.
+  `EventsRepo`, `OutputsRepo`, `AuthRepo`.
 - Move the ~107 inline Drizzle call sites in `src/api/*.ts`, `src/core/actions/*.ts`,
   `src/core/modes/*.ts`, `src/admin/waitlist.ts` behind these interfaces, backed by the existing
   Drizzle/Postgres implementation. Behavior should not change; this is a pure refactor.
@@ -81,8 +71,7 @@ current stack (see "Current state" below); status: **proposal, not started**.
 ## Phase 2 — Arango data model design
 
 - **Vertex collections:** users, companies, companyRoles, companyTitles, companyApps,
-  companyApiKeys, authChallenges, products, paymentCheckouts, paymentOrders, subscriptions,
-  userEntitlements, processedWebhookEvents, companyEventDefinitions, companyEvents, companyOutputs,
+  companyApiKeys, authChallenges, processedWebhookEvents, companyEventDefinitions, companyEvents, companyOutputs,
   companyOutputAnalytics, postRenders, blueprints, and — newly relational — agents, managers, roles,
   tasks, actions (promoted out of the `CompanyGraph` JSONB blob).
 - **Edge collections** (replacing today's join tables and array-based back-edges):
@@ -100,8 +89,6 @@ current stack (see "Current state" below); status: **proposal, not started**.
   company — simpler ops, consistent with today's model.
 - Replace SQL check constraints (status/type enums) with Arango collection-level JSON Schema
   validation.
-- Replace the partial unique index on `userEntitlements` with the transactional invariant identified
-  in Phase 0.
 
 ## Phase 3 — Tooling & infra
 
@@ -129,8 +116,7 @@ For each module, in this order (lowest risk first):
    `action-utils.test.ts`/`security.test.ts`) that can be adapted to assert identical behavior
    against the new vertex/edge model.
 3. Events/outputs and their app-link + relation edges.
-4. Users/auth (sessions, TOTP, magic links) and payments/entitlements/webhooks — highest risk,
-   migrate last, gated on the new test coverage from the guiding decisions above.
+4. Users/auth (sessions, TOTP, magic links) and webhooks, migrated last.
 
 Per module: implement the Arango-backed repository from Phase 1's interface, dual-write (Postgres
 stays source of truth), shadow-read and diff outputs, flip reads over, stop writing to Postgres,
@@ -143,8 +129,6 @@ then drop those Postgres tables once confidence holds (keep an export first).
   implementations can be verified against the same spec during transition.
 - Load-test the ABAC security join path (runs on every request) and the events query path as AQL
   traversals against current latency baselines.
-- Before migrating payments (Phase 4.4): add integration tests for `fulfillOrderPaid`,
-  `grantEntitlement`, and the webhook idempotency path in `payments.ts`, since none exist today.
 
 ## Phase 6 — Decommission Postgres
 
@@ -157,8 +141,6 @@ then drop those Postgres tables once confidence holds (keep an export first).
 ## Open risks to revisit
 
 - Vector search parity (pgvector HNSW vs. Arango's vector index) — unresolved until Phase 0 spikes it.
-- Entitlement uniqueness invariant needs to move from a DB constraint to app-enforced transactional
-  logic — slightly weaker guarantee, mitigated by the existing transactional pattern already in use.
 - No rollback net exists today (no DB test coverage) — the dual-write/shadow-read approach in Phase 4
   is the mitigation; do not shortcut it under schedule pressure.
 - Hosting choice (self-managed vs. Oasis) changes Phase 3/6 scope materially — decide in Phase 0.

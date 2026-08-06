@@ -1,12 +1,11 @@
 # Caddy reverse proxy for the single-box early-infra app host.
 # Rendered by deploy.sh with __COLOR__ replaced by the active color (blue|green).
 #
-# Cloudflare is the client (proxied) and forwards the real Host header, which we
-# route on: api.vorinthex.com -> Bun backend (:3001); everything else -> Next.js
-# web (:3000, fans other subdomains out via proxy.ts).
+# Cloudflare is the client (proxied). Only the apex is public: backend v1 API
+# paths go to Bun (:3001), and every other path goes to Next.js (:3000).
 #
-# Serves :80 (Cloudflare "Flexible") AND :443 with a self-signed internal cert for
-# vorinthex.com + *.vorinthex.com (Cloudflare "Full", non-strict). local_certs
+# Serves the apex on :80 AND :443 with a self-signed internal certificate
+# (Cloudflare "Full", non-strict). local_certs
 # forces Caddy's internal CA so it never reaches out to Let's Encrypt.
 
 {
@@ -15,7 +14,7 @@
 }
 
 (routes) {
-	@api header Host api.vorinthex.com
+	@api path /api/v1 /api/v1/*
 	handle @api {
 		reverse_proxy api-__COLOR__:3001 {
 			flush_interval -1
@@ -28,11 +27,11 @@
 	}
 }
 
-:80 {
+http://vorinthex.com {
 	import routes
 }
 
-https://vorinthex.com, https://*.vorinthex.com {
+https://vorinthex.com {
 	tls internal
 	import routes
 }

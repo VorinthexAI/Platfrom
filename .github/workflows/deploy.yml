@@ -254,9 +254,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # WEB: build the Next standalone image, push to ECR (vorinthex-web), and roll
-  # the vorinthex-prod-web ECS service. ONE image serves every subdomain
-  # (orbit/hunt/...) — routing happens inside the app via web/app/src/proxy.ts.
-  # Replaces the three former Vercel jobs (deploy-vorinthex / -orbit / -hunt).
+  # the vorinthex-prod-web ECS service. The image serves the apex site.
   # ---------------------------------------------------------------------------
   deploy-web:
     name: Build image and roll web ECS service
@@ -456,12 +454,11 @@ jobs:
           provenance: false
 
   # NOTE (migrate/seed): ArangoDB lives on its own PRIVATE EC2 and is reached
-  # through an SSH tunnel. This path is intentionally kept (it is NOT a Vercel
-  # dependency). It could not be safely moved to `aws ecs run-task` because the
-  # runtime image only ships backend/src (not backend/scripts), so polar:sync and
-  # seed:secrets are unavailable inside the api image, and seed:secrets also needs
+  # through an SSH tunnel. It could not be safely moved to `aws ecs run-task`
+  # because the runtime image only ships backend/src (not backend/scripts), so seed:secrets is
+  # unavailable inside the api image and also needs
   # the git-crypt-encrypted .github/environments.json (secrets.prod.db_seeds) which
-  # is not baked into any image. Schema migrate + node seed + Polar sync therefore keep
+  # is not baked into any image. Schema migration and node seeding therefore keep
   # running from a full checkout over the tunnel.
   backend-db:
     name: Deploy graph database
@@ -598,8 +595,6 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          polar_access_token=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v')
-          polar_server=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_SERVER")) | .v')
           bedrock_aws_access_key_id=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_ACCESS_KEY_ID")) | .v')
           bedrock_aws_secret_access_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_SECRET_ACCESS_KEY")) | .v')
           openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
@@ -607,26 +602,22 @@ jobs:
           openai_organization=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_ORGANIZATION")) | .v')
           openai_project=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_PROJECT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$polar_access_token" || { echo "::error::POLAR_ACCESS_TOKEN not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH"; exit 1; }
           test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; OpenAI embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$polar_access_token"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"
           echo "::add-mask::$openai_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "POLAR_ACCESS_TOKEN=$polar_access_token" >> "$GITHUB_ENV"
-          echo "POLAR_SERVER=${polar_server:-production}" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
           echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
           test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
           test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
           test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
-      - name: Apply migrations, seed nodes, backfill messages, and sync Polar products
+      - name: Apply migrations, seed nodes, and backfill messages
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
@@ -634,7 +625,6 @@ jobs:
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
           bun run --cwd backend db:backfill-message-embeddings:ci
-          bun run --cwd backend polar:sync
       - name: Close SSH ingress for this runner
         if: always()
         run: |
@@ -766,25 +756,19 @@ jobs:
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
           arango_database=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_DATABASE")) | .v')
-          polar_access_token=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_ACCESS_TOKEN")) | .v')
-          polar_server=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/POLAR_SERVER")) | .v')
           bedrock_aws_access_key_id=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_ACCESS_KEY_ID")) | .v')
           bedrock_aws_secret_access_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_SECRET_ACCESS_KEY")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
-          test -n "$polar_access_token" || { echo "::error::POLAR_ACCESS_TOKEN not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
-          echo "::add-mask::$polar_access_token"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
-          echo "POLAR_ACCESS_TOKEN=$polar_access_token" >> "$GITHUB_ENV"
-          echo "POLAR_SERVER=${polar_server:-production}" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
-      - name: Apply migrations, seed nodes, and sync Polar products
+      - name: Apply migrations and seed nodes
         if: ${{ false }}
         working-directory: .
         env:
@@ -793,7 +777,6 @@ jobs:
         run: |
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
-          bun run --cwd backend polar:sync
       - name: Close SSH ingress for this runner
         if: always()
         run: |
@@ -1177,7 +1160,7 @@ jobs:
 
       - name: Web health smoke check
         run: |
-          URL="${SITE_URL:-https://www.vorinthex.com}"
+          URL="${SITE_URL:-https://vorinthex.com}"
           for i in $(seq 1 24); do
             CODE=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 10 "$URL" 2>/dev/null || echo "000")
             if [ "$CODE" = "200" ]; then

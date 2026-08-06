@@ -504,18 +504,15 @@ describe('Archive runtime', () => {
     expect(f.documents.get(documentKey).deletedAt).toBe(now);
   });
 
-  test('does not audit preview-only AI and observer payloads contain no generated content', async () => {
+  test('keeps generated content out of observer payloads', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument('Private source text');
-    const audits: unknown[] = [];
     const events: unknown[] = [];
     await runArchiveTool('document.summarize', { documentKeys: [documentKey] }, f.context, {
       repository: f.repository,
       runAction: async () => ({ text: 'Private generated summary' }),
-      audit: async (event) => { audits.push(event); },
       observer: (event) => { events.push(event); },
     });
-    expect(audits).toHaveLength(0);
     const serialized = JSON.stringify(events);
     expect(serialized).not.toContain('Private source text');
     expect(serialized).not.toContain('Private generated summary');
@@ -543,7 +540,6 @@ describe('Archive runtime', () => {
         ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS },
         clock: () => new Date(now),
         canPermanentlyDelete: () => true,
-        audit: async () => {},
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         processDocument: async () => ({ document: f.documents.get(documentKey) }),
         runAction: async (action: string, input: any) => {

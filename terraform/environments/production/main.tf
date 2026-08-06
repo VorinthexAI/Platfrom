@@ -169,8 +169,8 @@ resource "aws_ssm_parameter" "prod" {
 }
 
 # (Removed the app_host module: the backend was cut over to the autoscaling ECS
-# api service — api.vorinthex.com → CloudFront → ALB → ECS. The old blue-green
-# EC2 backend host is retired; this destroys its instance + EIP + IAM. The
+# api service. The old blue-green EC2 backend host is retired; this destroys its
+# instance + EIP + IAM. The
 # ArangoDB graph-db host, Redis, and the shared SSH key remain. var.instance_type
 # and the network app SG are now unused but harmless.)
 
