@@ -21,6 +21,8 @@ describe('user node schema', () => {
     const user = userSchema.parse(baseUser);
 
     expect(user.refreshTokenExpiresAt).toBeNull();
+    expect(user.refreshFounderMembershipKey).toBeNull();
+    expect(user.refreshFounderMfaVersion).toBeNull();
 
     expect('organization_role' in user).toBe(false);
     expect('organization_title' in user).toBe(false);

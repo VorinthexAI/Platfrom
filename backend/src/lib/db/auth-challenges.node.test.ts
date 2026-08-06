@@ -17,5 +17,22 @@ describe('auth challenge node schema', () => {
 
     expect(challenge.identityKey).toBe('usr_test');
     expect(challenge.identityType).toBe('user');
+    expect(challenge.membershipKey).toBeNull();
+  });
+
+  test('parses purpose-bound founder challenges', () => {
+    const challenge = parseAuthChallenge({
+      key: 'ach_founder',
+      identityKey: 'usr_founder',
+      identityType: 'superAdmin',
+      membershipKey: 'uorg_root',
+      kind: 'founder_recovery',
+      tokenHash: 'hash',
+      expiresAt: '2026-07-07T00:05:00.000Z',
+      createdAt: '2026-07-07T00:00:00.000Z',
+    });
+
+    expect(challenge.membershipKey).toBe('uorg_root');
+    expect(challenge.kind).toBe('founder_recovery');
   });
 });

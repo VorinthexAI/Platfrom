@@ -173,6 +173,8 @@ jobs:
         run: bun run web:lint
       - name: Web typecheck
         run: bun run web:typecheck
+      - name: Web test
+        run: bun run web:test
       - name: Web build
         run: bun run web:build
       - name: Backend check

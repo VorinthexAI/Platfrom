@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isResendWebhookPath } from './resend';
-import { createAutoRefreshAuthTokens, rateLimitByIp, requireEnvApiKey, setSessionCookies, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { createAutoRefreshAuthTokens, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, setSessionCookies, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
   return {
@@ -62,6 +62,32 @@ describe('api middleware webhook exemptions', () => {
     } finally {
       if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
       else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
+    }
+  });
+});
+
+describe('native founder auth API-key exemptions', () => {
+  test('exempts only challenge-based founder auth endpoints', async () => {
+    expect(isPublicFounderAuthPath('/api/v1/auth/founders-gate')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/magic/validate/')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/totp/reset/request')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/founders/me')).toBe(false);
+    expect(isPublicFounderAuthPath('/api/v1/auth/login')).toBe(false);
+
+    const previousApiKey = process.env.API_KEY;
+    process.env.API_KEY = 'server-key';
+    let nextCalls = 0;
+    try {
+      await requireEnvApiKey(middlewareContext('/api/v1/auth/founders-gate'), async () => { nextCalls += 1; });
+      const protectedResponse = await requireEnvApiKey(
+        middlewareContext('/api/v1/founders/me'),
+        async () => { nextCalls += 1; },
+      );
+      expect(nextCalls).toBe(1);
+      expect(protectedResponse?.status).toBe(401);
+    } finally {
+      if (previousApiKey === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = previousApiKey;
     }
   });
 });
@@ -173,7 +199,7 @@ describe('backend session cookies', () => {
 
     app.use('*', createAutoRefreshAuthTokens({
       verifyAccessToken: async (token) => token === rotatedTokens.accessToken
-        ? { key: 'founder', identityType: 'superAdmin' }
+        ? { key: 'founder', identityType: 'superAdmin', founderAssured: true }
         : null,
       refreshAccessToken: async (token) => {
         rotateCalls.push(token);
@@ -190,7 +216,7 @@ describe('backend session cookies', () => {
     });
 
     expect(rotateCalls).toEqual(['vrtx_refresh_valid']);
-    expect(await response.json()).toEqual({ identity: { key: 'founder', identityType: 'superAdmin' } });
+    expect(await response.json()).toEqual({ identity: { key: 'founder', identityType: 'superAdmin', founderAssured: true } });
     expect(response.headers.get('x-access-token')).toBe(rotatedTokens.accessToken);
     expect(response.headers.get('x-refresh-token')).toBe(rotatedTokens.refreshToken);
     expect(response.headers.get('set-cookie')).toBeNull();

@@ -129,9 +129,13 @@ WEB_ENV="${ROOT}/web.env"
 } >> "$WEB_ENV"
 # NEXT_PUBLIC_BACKEND_API_KEY / BACKEND_API_KEY mirror the api key for the web SSR bridge.
 APIKEY="$(grep -m1 '^API_KEY=' "$API_ENV" | cut -d= -f2-)"
+ANDROID_APP_CERTIFICATE_SHA256="$(grep -m1 '^ANDROID_APP_CERTIFICATE_SHA256=' "$API_ENV" | cut -d= -f2- || true)"
 {
 	echo "NEXT_PUBLIC_BACKEND_API_KEY=${APIKEY}"
 	echo "BACKEND_API_KEY=${APIKEY}"
+	if [ -n "$ANDROID_APP_CERTIFICATE_SHA256" ]; then
+		echo "ANDROID_APP_CERTIFICATE_SHA256=${ANDROID_APP_CERTIFICATE_SHA256}"
+	fi
 } >> "$WEB_ENV"
 
 # --- pick colors ------------------------------------------------------------

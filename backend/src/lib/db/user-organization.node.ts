@@ -20,6 +20,8 @@ export const userOrganizationSchema = z.object({
   isMfaEnabled: z.boolean().default(false),
   totpSecret: z.string().nullable().default(null),
   lastTotpTimeStep: z.number().nullable().default(null),
+  mfaVersion: z.number().int().nonnegative().default(0),
+  mfaRecoveryPending: z.boolean().default(false),
   createdAt: z.string(),
   updatedAt: z.string(),
   embedding: z.array(z.number()).default([]),

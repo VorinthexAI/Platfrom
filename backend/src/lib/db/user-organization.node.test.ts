@@ -24,6 +24,8 @@ describe('user organization node schema', () => {
     expect(link.isMfaEnabled).toBe(false);
     expect(link.totpSecret).toBeNull();
     expect(link.lastTotpTimeStep).toBeNull();
+    expect(link.mfaVersion).toBe(0);
+    expect(link.mfaRecoveryPending).toBe(false);
   });
 
   test('accepts only organization roles', () => {

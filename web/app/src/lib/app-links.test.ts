@@ -1,0 +1,24 @@
+import { describe, expect, test } from "bun:test";
+import { buildAndroidAssetLinks, buildAppleAppSiteAssociation } from "./app-links";
+
+describe("mobile app associations", () => {
+  test("limits iOS universal links to founder MFA", () => {
+    expect(buildAppleAppSiteAssociation()).toEqual({
+      applinks: {
+        details: [{
+          appIDs: ["3RMYX67679.app.vorinthex.com"],
+          components: [{ "/": "/auth/mfa", comment: "Founder sign-in and MFA recovery" }],
+        }],
+      },
+    });
+  });
+
+  test("publishes only valid Android signing fingerprints", () => {
+    const fingerprint = Array.from({ length: 32 }, () => "AB").join(":");
+    const statements = buildAndroidAssetLinks(`invalid, ${fingerprint.toLowerCase()}`);
+
+    expect(statements).toHaveLength(1);
+    expect(statements[0]?.target.sha256_cert_fingerprints).toEqual([fingerprint]);
+    expect(buildAndroidAssetLinks(undefined)).toEqual([]);
+  });
+});
