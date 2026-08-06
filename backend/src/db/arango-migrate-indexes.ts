@@ -15,7 +15,6 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   // is (scopeKey, agentKey), not agentKey by itself.
   scopeAgents: [['agentKey']],
   organizations: [['ownerId']],
-  events: [['belongsTo', 'sourceId', 'createdAt']],
   folders: [['parentFolderKey']],
   documents: [['folderKey']],
   documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],

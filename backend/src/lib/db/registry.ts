@@ -11,19 +11,12 @@ import { getAllVisitorSessionsChunked, listVisitorSessionsPage, upsertVisitorSes
 import { getAllUserSessionsChunked, listUserSessionsPage, upsertUserSessionByKey } from './user-sessions.node';
 import { getAllAuthChallengesChunked, listAuthChallengesPage, upsertAuthChallengeByKey } from './auth-challenges.node';
 import { getAllCapabilitiesChunked, listCapabilitiesPage, upsertCapabilityByKey } from './capabilities.node';
-import { getAllEventsChunked, listEventsPage, upsertEventByKey } from './events.node';
-import { getAllIntelligenceFragmentsChunked, listIntelligenceFragmentsPage, upsertIntelligenceFragmentByKey } from './intelligence-fragments.node';
 import { getAllMindCapabilitiesChunked, listMindCapabilitiesPage, upsertMindCapabilityByKey } from './mind-capabilities.node';
 import { getAllMindsChunked, listMindsPage, upsertMindByKey } from './minds.node';
 import { getAllOrchestratorsChunked, listOrchestratorsPage, upsertOrchestratorByKey } from './orchestrators.node';
 import { getAllUserOrganizationsChunked, listUserOrganizationsPage, upsertUserOrganizationByKey } from './user-organization.node';
 import { getAllOrganizationsChunked, listOrganizationsPage, upsertOrganization } from './organizations.node';
-import { getAllPaymentCheckoutsChunked, listPaymentCheckoutsPage, upsertPaymentCheckoutByKey } from './payment-checkouts.node';
-import { getAllPaymentOrdersChunked, listPaymentOrdersPage, upsertPaymentOrderByKey } from './payment-orders.node';
 import { getAllProcessedWebhookEventsChunked, listProcessedWebhookEventsPage, upsertProcessedWebhookEventByKey } from './processed-webhook-events.node';
-import { getAllProductsChunked, listProductsPage, upsertProduct } from './products.node';
-import { getAllSubscriptionsChunked, listSubscriptionsPage, upsertSubscriptionByKey } from './subscriptions.node';
-import { getAllUserEntitlementsChunked, listUserEntitlementsPage, upsertUserEntitlementByKey } from './user-entitlements.node';
 import { getAllUsersChunked, listUsersPage, upsertUserByKey } from './users.node';
 import { getAllVisitorsChunked, listVisitorsPage, upsertVisitorByKey } from './visitors.node';
 import { getAllVoicesChunked, listVoicesPage, upsertVoiceByKey } from './voices.node';
@@ -94,8 +87,6 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   projects: { listPage: listProjectsPage, getAllChunked: getAllProjectsChunked, upsertByKey: upsertProjectByKey },
   milestones: { listPage: listMilestonesPage, getAllChunked: getAllMilestonesChunked, upsertByKey: upsertMilestoneByKey },
   tasks: { listPage: listTasksPage, getAllChunked: getAllTasksChunked, upsertByKey: upsertTaskByKey },
-  events: { listPage: listEventsPage, getAllChunked: getAllEventsChunked, upsertByKey: upsertEventByKey },
-  intelligenceFragments: { listPage: listIntelligenceFragmentsPage, getAllChunked: getAllIntelligenceFragmentsChunked, upsertByKey: upsertIntelligenceFragmentByKey },
   mindCapabilities: { listPage: listMindCapabilitiesPage, getAllChunked: getAllMindCapabilitiesChunked, upsertByKey: upsertMindCapabilityByKey },
   minds: { listPage: listMindsPage, getAllChunked: getAllMindsChunked, upsertByKey: upsertMindByKey },
   modelActions: { listPage: listModelActionsPage, getAllChunked: getAllModelActionsChunked, upsertByKey: upsertModelActionByKey },
@@ -103,15 +94,10 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   models: { listPage: listModelsPage, getAllChunked: getAllModelsChunked, upsertByKey: upsertModelByKey },
   orchestrators: { listPage: listOrchestratorsPage, getAllChunked: getAllOrchestratorsChunked, upsertByKey: upsertOrchestratorByKey },
   organizations: { listPage: listOrganizationsPage, getAllChunked: getAllOrganizationsChunked, upsertByKey: upsertOrganization },
-  paymentCheckouts: { listPage: listPaymentCheckoutsPage, getAllChunked: getAllPaymentCheckoutsChunked, upsertByKey: upsertPaymentCheckoutByKey },
-  paymentOrders: { listPage: listPaymentOrdersPage, getAllChunked: getAllPaymentOrdersChunked, upsertByKey: upsertPaymentOrderByKey },
   processedWebhookEvents: { listPage: listProcessedWebhookEventsPage, getAllChunked: getAllProcessedWebhookEventsChunked, upsertByKey: upsertProcessedWebhookEventByKey },
   providers: { listPage: listProvidersPage, getAllChunked: getAllProvidersChunked, upsertByKey: upsertProviderByKey },
-  products: { listPage: listProductsPage, getAllChunked: getAllProductsChunked, upsertByKey: upsertProduct },
-  subscriptions: { listPage: listSubscriptionsPage, getAllChunked: getAllSubscriptionsChunked, upsertByKey: upsertSubscriptionByKey },
   skills: { listPage: listSkillsPage, getAllChunked: getAllSkillsChunked, upsertByKey: upsertSkillByKey },
   scopeAgents: { listPage: listScopeAgentsPage, getAllChunked: getAllScopeAgentsChunked, upsertByKey: upsertScopeAgentByKey },
-  userEntitlements: { listPage: listUserEntitlementsPage, getAllChunked: getAllUserEntitlementsChunked, upsertByKey: upsertUserEntitlementByKey },
   userSessions: { listPage: listUserSessionsPage, getAllChunked: getAllUserSessionsChunked, upsertByKey: upsertUserSessionByKey },
   userOrganizations: { listPage: listUserOrganizationsPage, getAllChunked: getAllUserOrganizationsChunked, upsertByKey: upsertUserOrganizationByKey },
   users: { listPage: listUsersPage, getAllChunked: getAllUsersChunked, upsertByKey: upsertUserByKey },

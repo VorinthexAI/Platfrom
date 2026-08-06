@@ -10,13 +10,7 @@ variable "alb_domain_name" {
 
 variable "web_domain_names" {
   type        = list(string)
-  description = "Viewer aliases (CNAMEs) served by the distribution. First entry is the ACM primary domain."
-  default     = []
-}
-
-variable "api_domain_names" {
-  type        = list(string)
-  description = "Additional api aliases to include on the viewer certificate."
+  description = "Apex viewer alias served by the distribution. First entry is the ACM primary domain."
   default     = []
 }
 

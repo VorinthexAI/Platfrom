@@ -25,8 +25,7 @@
     "db:backfill-message-embeddings:ci": "bun run scripts/backfill-message-embeddings.ts",
     "seed.ts": "bun run load-local-env && bun --env-file=.env.local src/lib/db/seed.ts",
     "db:seed": "bun run load-local-env && bun --env-file=.env.local src/db/seed-all.ts",
-    "seed:secrets": "bun run scripts/seed-secrets.ts",
-    "polar:sync": "bun run scripts/sync-polar-products.ts"
+    "seed:secrets": "bun run scripts/seed-secrets.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",

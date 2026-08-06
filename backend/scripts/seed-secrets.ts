@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { closeDb, db } from '@/lib/db/client';
 import { NODE_REGISTRY, NODE_NAMES } from '@/lib/db/registry';
 import { newId } from '@/lib/ids';
-import { getRootOrganizationId } from '@/platform/events';
+import { getRootOrganizationId } from '@/lib/db/organizations.node';
 import { normalizeEmail } from '@/api/users';
 import { sha256 } from '@/lib/crypto';
 import { getUserByEmailHash } from '@/lib/db/users.node';
@@ -138,7 +138,7 @@ async function main() {
       if (existing) {
         // upsertByKey saves a FULL replacement, so merge over the live doc:
         // a seed entry updates only the fields it declares and never wipes
-        // account state (MFA secret, alias, waitlist number, sessions, …).
+        // account state (MFA secret, alias, sessions, etc.).
         const seeded = { ...doc };
         Object.assign(doc, existing, seeded);
         doc.key = existing.key;

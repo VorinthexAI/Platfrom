@@ -1,5 +1,5 @@
 /**
- * Deterministic waitlist alias + welcome line generation.
+ * Deterministic account alias + welcome line generation.
  *
  * Aliases are "<Prefix> <Role>" pairs ("Orbit Surfer", "Nova Cartographer")
  * picked from two fixed 10000-entry lists themed around the product universe:

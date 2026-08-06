@@ -217,17 +217,6 @@ export async function migrateArchiveShares(targetDb: Database) {
   if (invalid > 0) throw new Error(`documentShares migration verification failed for ${invalid} hash group(s).`);
 }
 
-function emailHashFromData(data: unknown): string | null {
-  if (!data || typeof data !== 'object') return null;
-  const record = data as Record<string, unknown>;
-  return nonEmptyString(record.email_hash)
-    ?? nonEmptyString(record.emailHash)
-    ?? (record.payload && typeof record.payload === 'object'
-      ? nonEmptyString((record.payload as Record<string, unknown>).email_hash)
-        ?? nonEmptyString((record.payload as Record<string, unknown>).emailHash)
-      : null);
-}
-
 async function getUserIdByEmailHash(targetDb: Database, emailHash: string): Promise<string | null> {
   const cursor = await targetDb.query<{ _key: string }>(
     `
@@ -240,29 +229,6 @@ async function getUserIdByEmailHash(targetDb: Database, emailHash: string): Prom
   );
   const user = await cursor.next();
   return user?._key ?? null;
-}
-
-async function resolveEventUserId(input: {
-  targetDb: Database;
-  explicitUserId?: unknown;
-  legacyEntityId?: unknown;
-  legacyBelongsTo?: unknown;
-  data?: unknown;
-}): Promise<string | null> {
-  const explicitUserId = nonEmptyString(input.explicitUserId);
-  if (explicitUserId) return explicitUserId;
-
-  const data = input.data && typeof input.data === 'object' ? input.data as Record<string, unknown> : {};
-  const dataUserId = nonEmptyString(data.user_id) ?? nonEmptyString(data.userId);
-  if (dataUserId) return dataUserId;
-
-  if (input.legacyBelongsTo === 'user') {
-    const legacyUserId = nonEmptyString(input.legacyEntityId);
-    if (legacyUserId) return legacyUserId;
-  }
-
-  const emailHash = emailHashFromData(input.data);
-  return emailHash ? getUserIdByEmailHash(input.targetDb, emailHash) : null;
 }
 
 const collections: CollectionSpec[] = [
@@ -381,40 +347,10 @@ const collections: CollectionSpec[] = [
       { fields: ['mindId', 'capabilityId'], unique: true },
     ],
   },
-  {
-    name: 'products',
-    embedKeys: ['productId', 'name', 'type', 'billingPeriod'],
-    indexes: [
-      { fields: ['productId'], unique: true },
-      { fields: ['polarProductId'], unique: true, sparse: true },
-    ],
-  },
-  {
-    name: 'paymentCheckouts',
-    indexes: [
-      { fields: ['userId', 'idempotencyKey'], unique: true },
-      { fields: ['provider', 'providerCheckoutId'], unique: true, sparse: true },
-    ],
-  },
-  { name: 'paymentOrders', indexes: [{ fields: ['provider', 'providerOrderId'], unique: true }] },
-  {
-    name: 'subscriptions',
-    indexes: [{ fields: ['provider', 'providerSubscriptionId'], unique: true }, { fields: ['userId'] }],
-  },
-  {
-    name: 'userEntitlements',
-    indexes: [{ fields: ['sourceType', 'sourceId'], unique: true }, { fields: ['userId', 'productId'] }],
-  },
   { name: 'processedWebhookEvents', indexes: [{ fields: ['provider', 'eventId'], unique: true }] },
   {
     name: 'authChallenges',
     indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['identityKey', 'identityType', 'kind'] }, { fields: ['expiresAt'] }],
-  },
-  {
-    name: 'events',
-    embedKeys: ['slug'],
-    skipEmbedding: true,
-    indexes: [{ fields: ['slug', 'createdAt'] }, { fields: ['scopeId', 'createdAt'] }, { fields: ['userId', 'createdAt'] }],
   },
   {
     name: 'organizations',
@@ -450,27 +386,6 @@ const collections: CollectionSpec[] = [
       { fields: ['disconnectedAt'] },
       { fields: ['organizationId', 'connectedAt'] },
       { fields: ['userId', 'connectedAt'] },
-    ],
-  },
-  {
-    name: 'intelligenceFragments',
-    embedKeys: ['collectibleId', 'rarity'],
-    indexes: [
-      { fields: ['userId'] },
-      { fields: ['explorerId'] },
-      { fields: ['explorerId', 'collectibleId'], unique: true },
-      { fields: ['collectibleId'] },
-      // Leaderboard lookups: recent collects and per-user totals straight
-      // from the fragments ledger — no separate leaderboard node.
-      { fields: ['createdAt'] },
-      { fields: ['userId', 'createdAt'] },
-    ],
-  },
-  {
-    name: 'userWaitlistLeaderboardChanges',
-    indexes: [
-      { fields: ['userId', 'createdAt'] },
-      { fields: ['createdAt'] },
     ],
   },
   // AI framework nodes. Creation + read-path indexes are owned by the
@@ -742,6 +657,13 @@ async function main() {
     if (!exists) {
       await collection.create();
       console.log(`Created collection ${spec.name}`);
+    }
+    if (spec.name === 'processedWebhookEvents') {
+      await targetDb.query(`
+        FOR event IN processedWebhookEvents
+          FILTER event.provider == "polar"
+          REMOVE event IN processedWebhookEvents
+      `);
     }
     if (spec.archive) {
       await targetDb.query(
@@ -1494,7 +1416,6 @@ async function main() {
           alias: null,
           alias_slug: null,
           organization_role: "viewer",
-          waitlistNumber: null,
           isVerified: true,
           is_subscribed_to_updates: true,
           is_subscribed_to_updates_unsubscribe_token_hash: null,
@@ -1548,7 +1469,6 @@ async function main() {
           alias: null,
           alias_slug: null,
           organization_role: "owner",
-          waitlistNumber: null,
           isVerified: true,
           is_subscribed_to_updates: true,
           is_subscribed_to_updates_unsubscribe_token_hash: null,
@@ -1649,148 +1569,6 @@ async function main() {
       } IN users OPTIONS { keepNull: false }
   `);
 
-  const usersWithEventsCursor = await targetDb.query<{
-    _key: string;
-    events?: Array<Record<string, unknown>>;
-  }>(`
-    FOR user IN users
-      FILTER HAS(user, "events") && IS_ARRAY(user.events) && LENGTH(user.events) > 0
-      RETURN { _key: user._key, events: user.events }
-  `);
-  const eventsCollection = targetDb.collection('events');
-  // Drain before the slow embed() work — see the legacy-events note.
-  const usersWithEvents = await usersWithEventsCursor.all();
-  for (const user of usersWithEvents) {
-    for (const event of user.events ?? []) {
-      const slug = typeof event.slug === 'string' && event.slug.length > 0 ? event.slug : 'unknown';
-      const key = newId();
-      const createdAt = typeof event.createdAt === 'string'
-        ? event.createdAt
-        : typeof event.created_at === 'string'
-          ? event.created_at
-          : new Date().toISOString();
-      const eventEmbedText = buildNodeEmbedText('events', key, ['slug'], { slug });
-      await eventsCollection.save({
-        _key: key,
-        scopeId: nexusScopeId,
-        userId: user._key,
-        slug,
-        data: {
-          distinctId: typeof event.distinctId === 'string' ? event.distinctId : null,
-          payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
-        },
-        createdAt,
-        embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
-      });
-    }
-  }
-
-  const userEventsCollection = targetDb.collection('userEvents');
-  if (await userEventsCollection.exists()) {
-    const cursor = await targetDb.query<{
-      _key: string;
-      userId?: string;
-      slug?: string;
-      data?: Record<string, unknown> | null;
-      createdAt?: string;
-    }>(`
-      FOR event IN userEvents
-        RETURN {
-          _key: event._key,
-          userId: event.userId,
-          slug: event.slug,
-          data: event.data,
-          createdAt: event.createdAt
-        }
-    `);
-
-    let migratedUserEvents = 0;
-    // Drain before the slow embed() work — see the legacy-events note.
-    const legacyUserEvents = await cursor.all();
-    for (const event of legacyUserEvents) {
-      if (typeof event.userId !== 'string' || event.userId.length === 0) continue;
-
-      const slug = typeof event.slug === 'string' && event.slug.length > 0 ? event.slug : 'unknown';
-      const key = `user_event_${event._key}`;
-      const eventEmbedText = buildNodeEmbedText('events', key, ['slug'], { slug });
-      await eventsCollection.save(
-        {
-          _key: key,
-          scopeId: nexusScopeId,
-          userId: event.userId,
-          slug,
-          data: event.data && typeof event.data === 'object' ? event.data : {},
-          createdAt: typeof event.createdAt === 'string' ? event.createdAt : new Date().toISOString(),
-          embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
-        },
-        { overwriteMode: 'ignore' },
-      );
-      migratedUserEvents += 1;
-    }
-
-    await userEventsCollection.drop();
-    console.log(`Migrated ${migratedUserEvents} userEvents -> events and dropped collection userEvents`);
-  }
-
-  await targetDb.query(`
-    FOR event IN events
-      FILTER HAS(event, "category")
-      UPDATE event WITH { category: null } IN events OPTIONS { keepNull: false }
-  `);
-
-  // Only events still carrying the LEGACY shape need this pass. Selecting
-  // everything re-embedded the whole collection on every deploy — and once
-  // the collection grew, one batch of embed() calls outlived the server's
-  // cursor TTL and the next batch fetch died with "cursor not found"
-  // (errorNum 1600). Filter to the legacy rows and drain the cursor fully
-  // BEFORE the slow per-event work so no server cursor stays open.
-  const eventsCursor = await targetDb.query<{
-    _key: string;
-    slug?: string;
-    userId?: string;
-    entityId?: string;
-    belongsTo?: string;
-    data?: Record<string, unknown> | null;
-  }>(`
-    FOR event IN events
-      FILTER HAS(event, "entityId")
-        || HAS(event, "entityType")
-      RETURN {
-        _key: event._key,
-        slug: event.slug,
-        userId: event.userId,
-        entityId: event.entityId,
-        belongsTo: event.belongsTo,
-        data: event.data
-      }
-  `);
-  const legacyEvents = await eventsCursor.all();
-  if (legacyEvents.length > 0) {
-    console.log(`Migrating ${legacyEvents.length} legacy events`);
-  }
-  for (const event of legacyEvents) {
-    const userId = await resolveEventUserId({
-      targetDb,
-      explicitUserId: event.userId,
-      legacyEntityId: event.entityId,
-      legacyBelongsTo: event.belongsTo,
-      data: event.data,
-    });
-    const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
-      ? buildNodeEmbedText('events', event._key, ['slug'], { slug: event.slug })
-      : null;
-    const embedding = eventEmbedText ? await generateEmbedding(eventEmbedText) : [];
-    await eventsCollection.update(event._key, {
-      scopeId: nexusScopeId,
-      sourceId: null,
-      belongsTo: null,
-      userId,
-      entityId: null,
-      entityType: null,
-      embedding,
-    }, { keepNull: false });
-  }
-
   await targetDb.query(`
     FOR u IN users
       FILTER !HAS(u, "is_subscribed_to_updates")
@@ -1799,11 +1577,13 @@ async function main() {
         || !HAS(u, "refreshTokenHash")
         || !HAS(u, "refreshTokenExpiresAt")
         || !HAS(u, "lastLoginAt")
+        || HAS(u, "waitlistNumber")
         || HAS(u, "isOnWaitlist")
         || HAS(u, "isWaitlistApproved")
         || HAS(u, "events")
       UPDATE u WITH {
         events: null,
+        waitlistNumber: null,
         isOnWaitlist: null,
         isWaitlistApproved: null,
         is_subscribed_to_updates: HAS(u, "is_subscribed_to_updates") ? u.is_subscribed_to_updates : (HAS(u, "isSubscribedToNewsletter") ? u.isSubscribedToNewsletter : true),
@@ -1815,14 +1595,6 @@ async function main() {
       } IN users OPTIONS { keepNull: false }
   `);
 
-  const maxWaitlistNumberCursor = await targetDb.query<number | null>(`
-    RETURN MAX(
-      FOR u IN users
-        FILTER HAS(u, "waitlistNumber") && u.waitlistNumber != null
-        RETURN u.waitlistNumber
-    )
-  `);
-  let nextWaitlistNumber = (await maxWaitlistNumberCursor.next()) ?? 0;
   const usersCollection = targetDb.collection('users');
   const existingAliasSlugsCursor = await targetDb.query<{ _key: string; alias_slug?: string | null }>(`
     FOR u IN users
@@ -1850,14 +1622,12 @@ async function main() {
     _key: string;
     alias?: string | null;
     alias_slug?: string | null;
-    waitlistNumber?: number | null;
   }>(`
     FOR u IN users
       FILTER !HAS(u, "alias") || u.alias == null
         || !HAS(u, "alias_slug") || u.alias_slug == null || u.alias_slug == ""
-        || !HAS(u, "waitlistNumber") || u.waitlistNumber == null
       SORT u.createdAt ASC
-      RETURN { _key: u._key, alias: u.alias, alias_slug: u.alias_slug, waitlistNumber: u.waitlistNumber }
+      RETURN { _key: u._key, alias: u.alias, alias_slug: u.alias_slug }
   `);
   const usersMissingAlias = await usersMissingAliasCursor.all();
   for (const user of usersMissingAlias) {
@@ -1866,10 +1636,6 @@ async function main() {
     if (user.alias == null) patch.alias = alias;
     if (user.alias_slug == null || user.alias_slug === '') {
       patch.alias_slug = allocateAliasSlug(alias, user._key);
-    }
-    if (user.waitlistNumber == null) {
-      nextWaitlistNumber += 1;
-      patch.waitlistNumber = nextWaitlistNumber;
     }
     await usersCollection.update(user._key, patch);
   }
@@ -1994,36 +1760,6 @@ async function main() {
       `,
       { '@collection': ownedCollection, rootOrganizationId },
     );
-  }
-
-  // Every historical event now belongs directly to Nexus. Drain the cursor
-  // before per-row embedding work, and only touch legacy rows on reruns.
-  const scopeEventsCursor = await targetDb.query<{ _key: string; slug?: string }>(`
-    FOR event IN events
-      FILTER !HAS(event, "scopeId")
-        || event.scopeId != @nexusScopeId
-        || HAS(event, "sourceId")
-        || HAS(event, "belongsTo")
-        || HAS(event, "entityId")
-        || HAS(event, "entityType")
-      RETURN { _key: event._key, slug: event.slug }
-  `, { nexusScopeId });
-  const scopeEvents = await scopeEventsCursor.all();
-  if (scopeEvents.length > 0) {
-    console.log(`Migrating ${scopeEvents.length} events to Nexus scope ${nexusScopeId}`);
-  }
-  for (const event of scopeEvents) {
-    const eventEmbedText = typeof event.slug === 'string' && event.slug.length > 0
-      ? buildNodeEmbedText('events', event._key, ['slug'], { slug: event.slug })
-      : null;
-    await eventsCollection.update(event._key, {
-      scopeId: nexusScopeId,
-      sourceId: null,
-      belongsTo: null,
-      entityId: null,
-      entityType: null,
-      embedding: eventEmbedText ? await generateEmbedding(eventEmbedText) : [],
-    }, { keepNull: false });
   }
 
   // user_organization -> userOrganizations rename: copy every row across
@@ -2191,12 +1927,25 @@ async function main() {
   await seedNexusOrganizationArtifact(targetDb, rootOrganizationId, nexusScopeId);
   console.log('Seeded the Nexus spatial organization artifact');
 
-  // The platforms collection is fully copied into organizations (same keys)
-  // and nothing references it anymore — retire it. Teams follow the same
-  // path (copied into organizations/userOrganizations above), and the
-  // invites collection retires with the teams feature. user_organization
-  // retires here too, now that its rows live in userOrganizations above.
-  for (const retiredCollectionName of ['platforms', 'teams', 'teamMembers', 'teamMemberInvites', 'organizationMembers', 'user_organization']) {
+  // Retire collections whose data is no longer part of the platform. The
+  // organization-era collections below have already been copied above.
+  for (const retiredCollectionName of [
+    'events',
+    'userEvents',
+    'intelligenceFragments',
+    'userWaitlistLeaderboardChanges',
+    'products',
+    'paymentCheckouts',
+    'paymentOrders',
+    'subscriptions',
+    'userEntitlements',
+    'platforms',
+    'teams',
+    'teamMembers',
+    'teamMemberInvites',
+    'organizationMembers',
+    'user_organization',
+  ]) {
     const retiredCollection = targetDb.collection(retiredCollectionName);
     if (await retiredCollection.exists()) {
       await retiredCollection.drop();

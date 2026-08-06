@@ -1,6 +1,6 @@
 output "app_health_url" {
   description = "Set GitHub variable APP_HEALTH_URL to this value after DNS points at the app host."
-  value       = "https://api.vorinthex.com/api/v1/health"
+  value       = "https://vorinthex.com/api/v1/health"
 }
 
 # (Removed app_ec2_host / app_ec2_user / app_ec2_ssh_private_key outputs — the
@@ -51,7 +51,6 @@ output "arango_url" {
 output "ssm_parameter_prefix" {
   value = local.normalized_ssm_prefix
 }
-
 
 
 

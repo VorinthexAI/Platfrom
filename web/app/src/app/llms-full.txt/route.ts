@@ -1,5 +1,4 @@
 import {
-  NEWCOMER_FREE_SPARKS,
   SPARK_MONTHLY_PLANS,
   SPARK_ON_DEMAND,
   SPARK_TOP_UPS,
@@ -30,13 +29,13 @@ Core is designed around one intelligence, privacy by design, and personal contex
 
 ## Pricing
 
-Sparks power usage across Vorinthex. Newcomers receive ${formatSparkCount(NEWCOMER_FREE_SPARKS)} free Sparks.
+The following Sparks pricing is planned. Purchases are not yet available.
 
-Monthly plans:
+Planned monthly options:
 
 ${SPARK_MONTHLY_PLANS.map((plan) => `- ${plan.name}: ${formatUsd(plan.price)} per month for ${formatSparkCount(plan.sparks)} monthly Sparks.`).join("\n")}
 
-One-time top-ups:
+Planned one-time top-ups:
 
 ${SPARK_TOP_UPS.map((topUp) => `- ${formatSparkCount(topUp.sparks)} Sparks: ${formatUsd(topUp.price)}.`).join("\n")}
 

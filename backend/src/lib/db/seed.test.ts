@@ -51,10 +51,8 @@ describe('scope seeds', () => {
     const source = await Bun.file(join(import.meta.dir, 'seed.ts')).text();
     const relationCreation = source.indexOf('scopes.addScopeRelation(parent.key, child.key)');
     const membershipReconciliation = source.indexOf('reconcileOrganizationScopeMemberships(rootOrganization.key)');
-    const productSeeding = source.indexOf('for (const product of SEEDED_PRODUCTS)');
     expect(relationCreation).toBeGreaterThan(-1);
     expect(membershipReconciliation).toBeGreaterThan(relationCreation);
-    expect(membershipReconciliation).toBeLessThan(productSeeding);
   });
 });
 

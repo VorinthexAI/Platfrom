@@ -17,11 +17,10 @@ export function PricingPage() {
       <SiteNeuralBackdrop />
 
       <section className={styles.hero}>
-        <p className={styles.eyebrow}>Usage-based pricing</p>
-        <h1>Only pay for what you use.</h1>
+        <p className={styles.eyebrow}>Pricing preview</p>
+        <h1>Usage-based pricing is coming.</h1>
         <p className={styles.intro}>
-          Sparks power Vorinthex. Choose a monthly reserve, add more when you
-          need them, and keep your usage in your control.
+          These planned Sparks options are not yet available to purchase.
         </p>
         <div className={styles.freeNotice}>
           <span>New here?</span>

@@ -27,7 +27,6 @@ function fixture() {
   const messages: Message[] = [];
   const mentions: unknown[] = [];
   const usage: string[][] = [];
-  const events: Array<{ scopeId: string; slug: string; data?: Record<string, unknown> | null }> = [];
   const reactionUsage = [{ reaction: '🔥', count: 4 }, { reaction: '✅', count: 2 }];
   const repository = {
     ensureGeneralChannel: async () => access,
@@ -53,7 +52,7 @@ function fixture() {
     resolveThread: async () => null, archiveThread: async () => null, createPoll: async () => { throw new Error('unused'); }, getPollProjection: async () => null,
     votePoll: async () => ({ outcome: 'not_found' as const }), closePoll: async () => null,
   } as unknown as CommunicationRepository;
-  return { service: new ChorusService(repository, () => now, async (event) => { events.push(event); }), repository, channel, access, messages, mentions, usage, reactionUsage, events };
+  return { service: new ChorusService(repository, () => now), repository, channel, access, messages, mentions, usage, reactionUsage };
 }
 
 describe('Chorus service', () => {
@@ -83,7 +82,7 @@ describe('Chorus service', () => {
     expect(f.messages).toEqual([]);
   });
 
-  test('persists recursive parent links and publishes organization message invalidations', async () => {
+  test('persists recursive parent links', async () => {
     const f = fixture();
     const root = await f.service.persistUserMessage(actor, f.channel.key, 'Root');
     const reply = await f.service.persistUserMessage(actor, f.channel.key, 'Reply', undefined, root.message.key);
@@ -92,8 +91,6 @@ describe('Chorus service', () => {
 
     expect(reply.message).toMatchObject({ replyToMessageKey: root.message.key });
     expect(nested.message).toMatchObject({ replyToMessageKey: reply.message.key });
-    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create', 'chorus.message.create', 'chorus.message.create', 'chorus.message.remove']);
-    expect(f.events[0]).toMatchObject({ scopeId: scopeKey, data: { nodeType: 'messages', nodeKey: root.message.key } });
   });
 
   test('deletes a parent message with its replies through the repository cascade', async () => {
@@ -102,17 +99,15 @@ describe('Chorus service', () => {
     await f.service.persistUserMessage(actor, f.channel.key, 'Reply', undefined, root.message.key);
 
     await f.service.deleteMessage(actor, f.channel.key, root.message.key);
-    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create', 'chorus.message.create', 'chorus.message.remove']);
   });
 
-  test('edits an authored message and publishes an update invalidation', async () => {
+  test('edits an authored message', async () => {
     const f = fixture();
     const created = await f.service.persistUserMessage(actor, f.channel.key, 'Before');
 
     const edited = await f.service.editMessage(actor, f.channel.key, created.message.key, 'After');
 
     expect(edited).toMatchObject({ content: 'After', editedAt: now, updatedAt: now });
-    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create', 'chorus.message.update']);
   });
 
   test('rejects delete and edit mutations denied by repository authorization', async () => {
@@ -123,7 +118,6 @@ describe('Chorus service', () => {
 
     await expect(f.service.deleteMessage(actor, f.channel.key, created.message.key)).rejects.toMatchObject({ code: 'forbidden', message: 'message deletion denied' });
     await expect(f.service.editMessage(actor, f.channel.key, created.message.key, 'Forged')).rejects.toMatchObject({ code: 'forbidden', message: 'only the message author may edit this message' });
-    expect(f.events.map(({ slug }) => slug)).toEqual(['chorus.message.create']);
   });
 
   test('matches orchestrator mentions without regard to case', async () => {

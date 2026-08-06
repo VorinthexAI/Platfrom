@@ -10,7 +10,6 @@ import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, u
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
 import { getUserByEmail } from './users.node';
-import { getProductByProductId, insertProduct, updateProduct, type Product } from './products.node';
 import { getVoiceByProviderModelVoice, insertVoice, updateVoice, type Voice } from './voices.node';
 import { getOrchestratorByName, insertOrchestrator, updateOrchestrator, type Orchestrator } from './orchestrators.node';
 import { getDefaultScopeRepository, NEXUS_SCOPE_KEY } from '@/lib/ai/scopes';
@@ -333,7 +332,7 @@ const LEGACY_SEEDED_ACTIONS = [
     description: 'Permanently removes an archived empty leaf scope through owner-only confirmed cleanup.',
     objective: 'Validate destructive removal, create audit or tombstone state, atomically detach relations and delete or anonymize the scope, and never leave partial deletion.',
     inputDescription: 'An object with scopes: string[], confirmation: string, and optional reason: string. The initiating human must be an owner; root is forbidden; every scope must be archived, childless, free of active runs, and unambiguously resolved in the verified organization.',
-    outputDescription: 'Per-scope validation and atomic removal results covering children, members, agents, runs, artifacts, schedules, sources, memories, policies, events, graph relations, retention, tombstone, and emitted audit event.',
+    outputDescription: 'Per-scope validation and atomic removal results covering children, members, agents, runs, artifacts, schedules, sources, memories, policies, graph relations, retention, and tombstones.',
     handlerKey: 'scope.remove',
     enabled: true,
   },
@@ -773,41 +772,6 @@ export const SEEDED_MODEL_PROVIDERS = [
     enabled: true,
   },
 ] as const;
-
-export const SEEDED_PRODUCTS = [
-  {
-    productId: 'private.beta.access',
-    name: 'Private beta',
-    type: 'subscription' as const,
-    priceCents: 79900,
-    billingPeriod: 'month',
-    gracePeriod: 7,
-  },
-  {
-    productId: 'founder.access',
-    name: 'Founder',
-    type: 'subscription' as const,
-    priceCents: 199900,
-    billingPeriod: 'month',
-    gracePeriod: 7,
-  },
-  {
-    productId: 'enterprise.access',
-    name: 'Enterprise',
-    type: 'subscription' as const,
-    priceCents: 599900,
-    billingPeriod: 'month',
-    gracePeriod: 7,
-  },
-  {
-    productId: 'private.beta.access.ticket',
-    name: 'Private beta ticket',
-    type: 'one_time' as const,
-    priceCents: 9900,
-    billingPeriod: null,
-    gracePeriod: null,
-  },
-];
 
 export const SEEDED_ORGANIZATION = {
   name: 'Vorinthex AI',
@@ -1280,33 +1244,6 @@ async function upsertSeedOrganization(seed: typeof SEEDED_ORGANIZATION): Promise
   return { collection: 'organizations', key: existing.key, status: 'updated' };
 }
 
-async function upsertSeedProduct(seed: (typeof SEEDED_PRODUCTS)[number]): Promise<SeedResult> {
-  const existing = await getProductByProductId(seed.productId);
-  if (!existing) {
-    const key = newId();
-    await insertProduct({
-      ...seed,
-      key,
-      polarProductId: null,
-      createdAt: now(),
-      updatedAt: now(),
-    });
-    return { collection: 'products', key, status: 'created' };
-  }
-
-  const patch: Partial<Omit<Product, 'key' | 'embedding'>> = {
-    productId: seed.productId,
-    name: seed.name,
-    type: seed.type,
-    priceCents: seed.priceCents,
-    billingPeriod: seed.billingPeriod,
-    gracePeriod: seed.gracePeriod,
-    updatedAt: now(),
-  };
-  await updateProduct(existing.key, patch);
-  return { collection: 'products', key: existing.key, status: 'updated' };
-}
-
 async function upsertSeedVoice(seed: (typeof SEEDED_VOICES)[number]): Promise<SeedResult> {
   const existing = await getVoiceByProviderModelVoice(seed.provider, seed.model, seed.voice);
   if (!existing) {
@@ -1478,10 +1415,6 @@ export async function seedCoreDbNodes(): Promise<SeedResult[]> {
   results.push(...membershipReconciliation.created.map(({ key }) => ({ collection: 'scopeMembers', key, status: 'created' as const })));
   const agentMembershipReconciliation = await reconcileOrganizationInheritedAgentMemberships(rootOrganization.key);
   results.push(...agentMembershipReconciliation.created.map(({ key }) => ({ collection: 'agentMembers', key, status: 'created' as const })));
-
-  for (const product of SEEDED_PRODUCTS) {
-    results.push(await upsertSeedProduct(product));
-  }
 
   for (const voice of SEEDED_VOICES) {
     results.push(await upsertSeedVoice(voice));

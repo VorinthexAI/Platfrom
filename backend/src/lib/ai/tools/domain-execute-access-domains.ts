@@ -1,5 +1,4 @@
 import { db, withTransaction } from '@/lib/db/client';
-import { insertEvent } from '@/lib/db/events.node';
 import { newId } from '@/lib/ids';
 import { providerSlugSchema } from '@/lib/ai/providers';
 import type { DomainActionSlug, DomainToolResult } from './domain-schemas';
@@ -36,11 +35,6 @@ function human(context: DomainToolContext) {
 
 function output(action: DomainActionSlug, data: unknown, status: 'completed' | 'preview' = 'completed'): DomainToolResult {
   return domainToolResultSchema.parse({ action, status, data });
-}
-
-async function audit(context: DomainToolContext, action: DomainActionSlug, data: Record<string, unknown>) {
-  const principal = human(context);
-  await insertEvent({ key: newId(), scopeId: context.runtimeScopeKey, userId: principal.user.key, slug: action, data, createdAt: new Date().toISOString() });
 }
 
 async function requireScopeManager(context: DomainToolContext, scope: string) {
@@ -167,7 +161,7 @@ async function executeScopeAgent(action: DomainActionSlug, input: Input, context
     if (await getScopeAgent(scope.key, agent.key)) throw new DomainToolExecutionError('scope_agent_duplicate', 'The agent is already linked to this scope');
     const timestamp = new Date().toISOString(); const relation: ScopeAgentRecord = { key: newId(), organizationKey: context.organizationKey, scopeKey: scope.key, agentKey: agent.key, position: input.position, status: 'active', minimumAccessRole: access.effectiveRole!, createdByUserOrganizationKey: human(context).userOrganization.key, createdAt: timestamp, updatedAt: timestamp };
     await withTransaction(['scopeAgents'], async (trx) => { await trx.query('INSERT MERGE(@relation, { _key: @key, embedding: [] }) INTO scopeAgents', { relation: { ...relation, key: undefined }, key: relation.key }); });
-    const sync = await applyInheritedGrantPlan(context, relation); await audit(context, action, { scopeAgentKey: relation.key }); return output(action, { relation, sync });
+    const sync = await applyInheritedGrantPlan(context, relation); return output(action, { relation, sync });
   }
 
   if (action === 'scope.agent.move') {
@@ -176,7 +170,7 @@ async function executeScopeAgent(action: DomainActionSlug, input: Input, context
     if (sensitiveAgent(current.agent) && sourceAccess.effectiveRole !== 'owner') throw new DomainToolExecutionError('system_agent_policy_denied', 'Only a scope owner may move a sensitive system agent');
     if (input.scope) {
       await withTransaction(['scopeAgents'], async (trx) => { await trx.query('UPDATE @key WITH { position: @position, updatedAt: @updatedAt } IN scopeAgents', { key: current.relation.key, position: input.position, updatedAt: new Date().toISOString() }); });
-      await audit(context, action, { scopeAgentKey: current.relation.key }); return output(action, { scopeAgentKey: current.relation.key, scopeKey: scope.key, position: input.position });
+      return output(action, { scopeAgentKey: current.relation.key, scopeKey: scope.key, position: input.position });
     }
     const destination = await resolveScope(context, input.toScope);
     const destinationAccess = await requireScopeManager(context, destination.key);
@@ -185,7 +179,7 @@ async function executeScopeAgent(action: DomainActionSlug, input: Input, context
     if (await getScopeAgent(destination.key, current.agent.key)) throw new DomainToolExecutionError('scope_agent_duplicate', 'The destination already contains this agent');
     const moved = { ...current.relation, scopeKey: destination.key, position: input.position ?? current.relation.position, updatedAt: new Date().toISOString() };
     await withTransaction(['scopeAgents', 'agentMembers'], async (trx) => { await trx.query('UPDATE @key WITH { scopeKey: @scopeKey, position: @position, minimumAccessRole: @minimumAccessRole, updatedAt: @updatedAt } IN scopeAgents', { key: moved.key, scopeKey: moved.scopeKey, position: moved.position, minimumAccessRole: moved.minimumAccessRole, updatedAt: moved.updatedAt }); await trx.query('FOR grant IN agentMembers FILTER grant.scopeAgentKey == @key UPDATE grant WITH { scopeKey: @scopeKey } IN agentMembers', { key: moved.key, scopeKey: moved.scopeKey }); });
-    const sync = await applyInheritedGrantPlan(context, moved); await audit(context, action, { scopeAgentKey: moved.key, fromScopeKey: scope.key, toScopeKey: destination.key }); return output(action, { relation: moved, sync });
+    const sync = await applyInheritedGrantPlan(context, moved); return output(action, { relation: moved, sync });
   }
 
   const managerAccess = await requireScopeManager(context, scope.key);
@@ -195,14 +189,14 @@ async function executeScopeAgent(action: DomainActionSlug, input: Input, context
   if (action === 'scope.agent.archive') {
     const timestamp = new Date().toISOString(); const keys = relations.map(({ relation }) => relation.key);
     await withTransaction(['scopeAgents'], async (trx) => { await trx.query('FOR relation IN scopeAgents FILTER relation._key IN @keys UPDATE relation WITH { status: "archived", updatedAt: @timestamp } IN scopeAgents', { keys, timestamp }); });
-    await audit(context, action, { scopeAgentKeys: keys }); return output(action, { scopeAgentKeys: keys, status: 'archived', runtimeBlocked: true, schedulesResumed: false });
+    return output(action, { scopeAgentKeys: keys, status: 'archived', runtimeBlocked: true, schedulesResumed: false });
   }
   if (action === 'scope.agent.restore') {
     if (scope.deletedAt) throw new DomainToolExecutionError('scope_archived', 'Restore the scope before restoring agent relations');
     const timestamp = new Date().toISOString(); const keys = relations.map(({ relation }) => relation.key);
     await withTransaction(['scopeAgents'], async (trx) => { await trx.query('FOR relation IN scopeAgents FILTER relation._key IN @keys UPDATE relation WITH { status: "active", updatedAt: @timestamp } IN scopeAgents', { keys, timestamp }); });
     const sync = await Promise.all(relations.map(({ relation }) => applyInheritedGrantPlan(context, { ...relation, status: 'active', updatedAt: timestamp })));
-    await audit(context, action, { scopeAgentKeys: keys }); return output(action, { scopeAgentKeys: keys, sync, schedulesResumed: false });
+    return output(action, { scopeAgentKeys: keys, sync, schedulesResumed: false });
   }
   if (action === 'scope.agent.remove') {
     if (relations.some(({ relation }) => relation.status !== 'archived')) throw new DomainToolExecutionError('scope_agent_active', 'Archive every relation before removal');
@@ -210,14 +204,14 @@ async function executeScopeAgent(action: DomainActionSlug, input: Input, context
     const activeRuns = await db.query('FOR run IN agentRuns FILTER run.scopeKey == @scopeKey && run.agentKey IN @agentKeys && run.status == "accepted" LIMIT 1 RETURN run._key', { scopeKey: scope.key, agentKeys: relations.map(({ agent }) => agent.key) });
     if (await activeRuns.next()) throw new DomainToolExecutionError('agent_run_active', 'An active run blocks relation removal');
     await withTransaction(['scopeAgents', 'agentMembers'], async (trx) => { await trx.query('FOR grant IN agentMembers FILTER grant.scopeAgentKey IN @keys REMOVE grant IN agentMembers', { keys }); await trx.query('FOR relation IN scopeAgents FILTER relation._key IN @keys REMOVE relation IN scopeAgents', { keys }); });
-    await audit(context, action, { scopeAgentKeys: keys }); return output(action, { scopeAgentKeys: keys, agentDefinitionsRemoved: false });
+    return output(action, { scopeAgentKeys: keys, agentDefinitionsRemoved: false });
   }
   const relation = relations[0]!.relation; const actorRole = (await evaluateScopeAccess(context, { scope: scope.key, action: 'scope.agent.manage' })).effectiveRole!;
   if (sensitiveAgent(relations[0]!.agent) && input.minimumAccessRole !== 'owner') throw new DomainToolExecutionError('system_agent_policy_denied', 'Sensitive system agents require owner access');
   if (rankAccessRole(input.minimumAccessRole) < rankAccessRole(actorRole) && actorRole !== 'owner') throw new DomainToolExecutionError('threshold_escalation', 'Only an owner may lower the threshold below the actor role');
   const updated = { ...relation, minimumAccessRole: input.minimumAccessRole, updatedAt: new Date().toISOString() };
   await withTransaction(['scopeAgents'], async (trx) => { await trx.query('UPDATE @key WITH { minimumAccessRole: @role, updatedAt: @updatedAt } IN scopeAgents', { key: relation.key, role: input.minimumAccessRole, updatedAt: updated.updatedAt }); });
-  const sync = await applyInheritedGrantPlan(context, updated); await audit(context, action, { scopeAgentKey: relation.key, minimumAccessRole: input.minimumAccessRole }); return output(action, { relation: updated, sync });
+  const sync = await applyInheritedGrantPlan(context, updated); return output(action, { relation: updated, sync });
 }
 
 async function executeAgentMember(action: DomainActionSlug, input: Input, context: DomainToolContext) {
@@ -225,7 +219,7 @@ async function executeAgentMember(action: DomainActionSlug, input: Input, contex
   const resolved = await uniqueRelation(access.scope.key, input.agent);
   const relation = resolved.relation;
   if (action === 'agent.member.sync') {
-    const sync = await applyInheritedGrantPlan(context, relation, input.dryRun); if (!input.dryRun) await audit(context, action, { scopeAgentKey: relation.key }); return output(action, sync);
+    const sync = await applyInheritedGrantPlan(context, relation, input.dryRun); return output(action, sync);
   }
   const members = await allOrganizationMembers(context.organizationKey);
   if (action === 'agent.member.list') {
@@ -256,13 +250,13 @@ async function executeAgentMember(action: DomainActionSlug, input: Input, contex
       documents.push({ _key: newId(), organizationKey: context.organizationKey, scopeKey: access.scope.key, agentKey: resolved.agent.key, scopeAgentKey: relation.key, userOrganizationKey: member.key, source: 'explicit', createdByUserOrganizationKey: human(context).userOrganization.key, createdAt: new Date().toISOString(), embedding: [] });
     }
     await withTransaction(['agentMembers'], async (trx) => { await trx.query('FOR document IN @documents UPSERT { scopeAgentKey: document.scopeAgentKey, userOrganizationKey: document.userOrganizationKey, source: "explicit" } INSERT document UPDATE {} IN agentMembers', { documents }); });
-    await audit(context, action, { scopeAgentKey: relation.key, userOrganizationKeys: targets.map((member) => member.key) }); return output(action, { granted: targets.map((member) => member.key) });
+    return output(action, { granted: targets.map((member) => member.key) });
   }
   for (const member of targets) { const targetAccess = await evaluateScopeAccess(context, { scope: access.scope.key, member: member.key, action: 'read' }); if (rankAccessRole(targetAccess.effectiveRole) > rankAccessRole(access.effectiveRole)) throw new DomainToolExecutionError('higher_role_protected', 'Explicit access for a higher scope role cannot be revoked'); }
   const targetKeys = targets.map((member) => member.key);
   await withTransaction(['agentMembers'], async (trx) => { await trx.query('FOR grant IN agentMembers FILTER grant.scopeAgentKey == @scopeAgentKey && grant.userOrganizationKey IN @targetKeys && grant.source == "explicit" REMOVE grant IN agentMembers', { scopeAgentKey: relation.key, targetKeys }); });
   const remaining = await Promise.all(targets.map(async (member) => { const decision = await evaluateAgentAccess(context, { scope: access.scope.key, agent: resolved.agent.key, member: member.key, action: 'run' }); return { userOrganizationKey: member.key, explicitGrantRemoved: true, effectiveAccessRemaining: decision.allowed, remainingSources: decision.agentAccessSources }; }));
-  await audit(context, action, { scopeAgentKey: relation.key, userOrganizationKeys: targetKeys }); return output(action, { members: remaining });
+  return output(action, { members: remaining });
 }
 
 async function directScopeMemberships(scopeKey: string) {
@@ -360,7 +354,6 @@ async function executeScopeMember(action: DomainActionSlug, input: Input, contex
     }
   }
   const sync = await syncOrganizationAgentMembers(context);
-  await audit(context, action, { scopeKey, userOrganizationKeys: targets.map((target) => target.key), changedAt: timestamp });
   return output(action, { scopeKey, userOrganizationKeys: targets.map((target) => target.key), sync, authorizationState: 'effective_immediately' });
 }
 
@@ -392,20 +385,20 @@ async function executeProvider(action: DomainActionSlug, input: Input, context: 
   const provider = matches[0]!;
   if (action === 'organization.provider.enable') {
     await withTransaction(['organizationProviders'], async (trx) => { await trx.query('UPSERT { organizationKey: @organizationKey, providerKey: @providerKey } INSERT { _key: @key, organizationKey: @organizationKey, providerKey: @providerKey } UPDATE {} IN organizationProviders', { key: newId(), organizationKey: context.organizationKey, providerKey: provider.key }); });
-    await audit(context, action, { providerKey: provider.key }); return output(action, { providerKey: provider.key, enabled: true, routingState: 'effective_immediately' });
+    return output(action, { providerKey: provider.key, enabled: true, routingState: 'effective_immediately' });
   }
   if (action === 'organization.provider.disable') {
     const activeRuns = await db.query('FOR run IN agentRuns FILTER run.organizationKey == @organizationKey && run.status == "accepted" LIMIT 1 RETURN run._key', { organizationKey: context.organizationKey });
     if (await activeRuns.next()) return output(action, { providerKey: provider.key, warning: 'Provider has active calls; explicit operational review required' }, 'preview');
     await withTransaction(['organizationProviders'], async (trx) => { await trx.query('FOR link IN organizationProviders FILTER link.organizationKey == @organizationKey && link.providerKey == @providerKey REMOVE link IN organizationProviders', { organizationKey: context.organizationKey, providerKey: provider.key }); });
-    await audit(context, action, { providerKey: provider.key }); return output(action, { providerKey: provider.key, enabled: false, routingState: 'effective_immediately' });
+    return output(action, { providerKey: provider.key, enabled: false, routingState: 'effective_immediately' });
   }
   const started = Date.now(); const routingEligible = provider.enabled && provider.models.length > 0;
   providerSlugSchema.parse(provider.slug);
   const success = false;
   const message = 'Provider connectivity requires explicit per-call credentials and is not connected yet.';
   const data = { provider: provider.slug, success, status: success ? 'healthy' : routingEligible ? 'degraded' : 'unavailable', latencyMs: Date.now() - started, testedAt: new Date().toISOString(), message };
-  await audit(context, action, { providerKey: provider.key, mode: input.mode, success }); return output(action, data);
+  return output(action, data);
 }
 
 async function executeOrganization(action: DomainActionSlug, input: Input, context: DomainToolContext) {
@@ -419,18 +412,18 @@ async function executeOrganization(action: DomainActionSlug, input: Input, conte
   if (action === 'organization.update') {
     if (input.alias) { const duplicate = await db.query('FOR organization IN organizations FILTER organization._key != @key && LOWER(organization.slug) == LOWER(@alias) LIMIT 1 RETURN true', { key: organization.key, alias: input.alias }); if (await duplicate.next()) throw new DomainToolExecutionError('organization_alias_duplicate', 'Organization alias is already in use'); }
     const patch = Object.fromEntries(Object.entries({ name: input.name, slug: input.alias, description: input.description, updatedAt: new Date().toISOString() }).filter(([, value]) => value !== undefined));
-    await withTransaction(['organizations'], async (trx) => { await trx.query('UPDATE @key WITH @patch IN organizations', { key: organization.key, patch }); }); await audit(context, action, { fields: Object.keys(patch) }); return output(action, { organizationKey: organization.key, updated: patch });
+    await withTransaction(['organizations'], async (trx) => { await trx.query('UPDATE @key WITH @patch IN organizations', { key: organization.key, patch }); }); return output(action, { organizationKey: organization.key, updated: patch });
   }
   if (organization.is_root) throw new DomainToolExecutionError('root_organization_protected', 'The root organization cannot be archived or restored through this tool');
   if (input.confirmation && input.confirmation !== organization.name && input.confirmation !== organization.key) throw new DomainToolExecutionError('confirmation_mismatch', 'Confirmation must match the organization name or key');
   if (action === 'organization.archive') {
     const timestamp = new Date().toISOString();
     await withTransaction(['organizations', 'userSessions'], async (trx) => { await trx.query('UPDATE @key WITH { isActive: false, metadata: MERGE(@metadata, { archivedAt: @timestamp, archiveReason: @reason }), updatedAt: @timestamp } IN organizations', { key: organization.key, metadata: organization.metadata, timestamp, reason: input.reason ?? null }); await trx.query('FOR session IN userSessions FOR member IN userOrganizations FILTER member.organizationId == @key && member.userId == session.userId && session.disconnectedAt == null UPDATE session WITH { disconnectedAt: @timestamp, updatedAt: @timestamp } IN userSessions', { key: organization.key, timestamp }); });
-    await audit(context, action, { organizationKey: organization.key }); return output(action, { organizationKey: organization.key, status: 'archived', runtimeBlocked: true, schedulesResumed: false });
+    return output(action, { organizationKey: organization.key, status: 'archived', runtimeBlocked: true, schedulesResumed: false });
   }
   if (organization.isActive) throw new DomainToolExecutionError('organization_active', 'The organization is already active');
   const timestamp = new Date().toISOString(); await withTransaction(['organizations'], async (trx) => { await trx.query('UPDATE @key WITH { isActive: true, metadata: UNSET(@metadata, "archivedAt", "archiveReason"), updatedAt: @timestamp } IN organizations', { key: organization.key, metadata: organization.metadata, timestamp }); });
-  await audit(context, action, { organizationKey: organization.key }); return output(action, { organizationKey: organization.key, status: 'active', schedulesResumed: false, providersRequireRetest: true });
+  return output(action, { organizationKey: organization.key, status: 'active', schedulesResumed: false, providersRequireRetest: true });
 }
 
 async function executeAccess(action: DomainActionSlug, input: Input, context: DomainToolContext) {

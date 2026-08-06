@@ -165,13 +165,6 @@ Every new run also records `principalType` and, for member executions,
 `userOrganizationKey`, making the organization and scope authorization path
 auditable without placing user profile data in model context.
 
-The generic `events` timeline records only stable lifecycle slugs:
-`agent.*`, `step.*`, `model.*`, `artifact.created`,
-`artifact.used`, and `guardrail.blocked`. Payloads contain relation keys,
-status, timing, and token counts only. Full inputs, outputs, and artifacts stay
-in the run, call, and domain collections. Every runtime event takes `scopeId`
-from the loaded `scopeAgents` relation, never from a client request.
-
 Legacy run documents that cannot supply trustworthy foreign keys or token
 usage are retained in `agentRunsLegacy`; they are never fabricated into the
 new call ledger.

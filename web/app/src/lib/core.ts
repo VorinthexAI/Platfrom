@@ -1,5 +1,4 @@
 import {
-  NEWCOMER_FREE_SPARKS,
   SPARK_MONTHLY_PLANS,
   formatSparkCount,
   formatUsd,
@@ -76,6 +75,6 @@ export const CORE_FAQ = [
   {
     question: "How much does Vorinthex Core cost?",
     answer:
-      `Newcomers receive ${formatSparkCount(NEWCOMER_FREE_SPARKS)} free Sparks. Monthly Sparks plans start with ${SPARK_MONTHLY_PLANS[0].name} at ${formatUsd(SPARK_MONTHLY_PLANS[0].price)} for ${formatSparkCount(SPARK_MONTHLY_PLANS[0].sparks)} Sparks.`,
+      `Planned monthly Sparks options start with ${SPARK_MONTHLY_PLANS[0].name} at ${formatUsd(SPARK_MONTHLY_PLANS[0].price)} for ${formatSparkCount(SPARK_MONTHLY_PLANS[0].sparks)} Sparks. Purchases are not yet available.`,
   },
 ] as const;

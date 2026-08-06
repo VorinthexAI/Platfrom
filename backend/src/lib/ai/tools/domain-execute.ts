@@ -1,10 +1,8 @@
 import { db, withTransaction } from '@/lib/db/client';
-import { insertEvent } from '@/lib/db/events.node';
 import type { ResolvedExecutionPrincipal } from '@/lib/ai/agents/access';
 import { newId } from '@/lib/ids';
 import { AiError } from '@/lib/ai/shared/result';
 import { getDefaultArtifactService } from '@/lib/artifacts/service';
-import { recordRuntimeEvent, type RuntimeEventRecorder } from '@/platform/events';
 import { domainToolInputSchemas, domainToolResultSchema, type DomainActionSlug, type DomainToolResult } from './domain-schemas';
 import { executeAccessDomainTool, syncOrganizationAgentMembers } from './domain-execute-access-domains';
 import { executeArchiveLifecycleTool, type ArchiveExecutionDependencies } from './domain-execute-archive';
@@ -38,10 +36,8 @@ type ArtifactCreator = Pick<ReturnType<typeof getDefaultArtifactService>, 'creat
 
 export interface DomainToolExecutionOptions {
   artifacts?: ArtifactCreator;
-  domainEvents?: (context: DomainToolContext, action: DomainActionSlug, data: Record<string, unknown>) => Promise<void>;
-  runtimeEvents?: RuntimeEventRecorder;
-  momentum?: Partial<Omit<MomentumExecutionDependencies, 'authorize' | 'audit'>>;
-  archive?: Partial<Omit<ArchiveExecutionDependencies, 'authorize' | 'emit'>>;
+  momentum?: Partial<Omit<MomentumExecutionDependencies, 'authorize'>>;
+  archive?: Partial<Omit<ArchiveExecutionDependencies, 'authorize'>>;
   authorizeScope?: (scopeKey: string, roles: readonly string[]) => Promise<void>;
 }
 
@@ -149,11 +145,6 @@ async function assertOperationalScope(context: DomainToolContext, scopeKey: stri
   if (scope.deletedAt !== null) throw new DomainToolExecutionError('scope_archived', 'Archived scopes cannot be mutated or searched');
 }
 
-async function emitDomainEvent(context: DomainToolContext, action: DomainActionSlug, data: Record<string, unknown>) {
-  const principal = memberPrincipal(context);
-  await insertEvent({ key: newId(), scopeId: context.runtimeScopeKey, userId: principal.user.key, slug: action, data, createdAt: new Date().toISOString() });
-}
-
 function result(action: DomainActionSlug, data: unknown, status: 'completed' | 'preview' = 'completed'): DomainToolResult {
   return domainToolResultSchema.parse({ action, status, data });
 }
@@ -161,13 +152,11 @@ function result(action: DomainActionSlug, data: unknown, status: 'completed' | '
 export async function executeDomainTool(action: DomainActionSlug, rawInput: unknown, context: DomainToolContext, options: DomainToolExecutionOptions = {}): Promise<DomainToolResult> {
   const input = domainToolInputSchemas[action].parse(rawInput) as any;
   const principal = memberPrincipal(context);
-  const emit = options.domainEvents ?? emitDomainEvent;
   const authorizeScope = options.authorizeScope ?? (async (scopeKey: string, roles: readonly string[]) => { await assertOperationalScope(context, scopeKey, roles); });
   if (isArchiveAction(action)) {
-    const data = await executeArchiveLifecycleTool(action, input, { ...context, userKey: principal.user.key }, {
+    const data = await executeArchiveLifecycleTool(action, input, { organizationKey: context.organizationKey }, {
       ...options.archive,
       authorize: authorizeScope,
-      emit: (eventAction, eventData) => emit(context, eventAction, eventData),
     });
     return result(action, data);
   }
@@ -195,7 +184,6 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
         return (await cursor.all()).map(({ key }) => key);
       }),
       authorize: authorizeScope,
-      audit: (eventAction, eventData) => emit(context, eventAction, eventData as Record<string, unknown>),
     });
     return result(action, data);
   }
@@ -212,13 +200,6 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
       name: input.name,
       definition: input.definition,
       createdByUserOrganizationKey: principal.userOrganization.key,
-    });
-    await (options.domainEvents ?? emitDomainEvent)(context, action, { artifactKey: artifact.key });
-    await (options.runtimeEvents ?? recordRuntimeEvent)({
-      scopeId: context.runtimeScopeKey,
-      userId: principal.user.key,
-      slug: 'artifact.created',
-      data: { nodeType: 'artifacts', nodeKey: artifact.key },
     });
     return result(action, {
       artifact: {
@@ -250,7 +231,7 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
       if (rows.some((row) => row.user._key === users[0]!._key)) throw new DomainToolExecutionError('already_member', 'User already belongs to the organization');
       const now = new Date().toISOString(); const key = newId();
       await withTransaction(['userOrganizations', 'scopes', 'scopeMembers'], async (trx) => { await trx.query('INSERT { _key: @key, organizationId: @organizationKey, userId: @userId, orgRole: @role, orgTitle: null, status: "active", joinedAt: @now, isMfaEnabled: false, totpSecret: null, lastTotpTimeStep: null, createdAt: @now, updatedAt: @now, embedding: [] } INTO userOrganizations', { key, organizationKey: context.organizationKey, userId: users[0]!._key, role: input.role, now }); await reconcileOrganizationScopeMemberships(context.organizationKey, { userOrganizationKeys: [key] }, trx); });
-      const sync = await syncOrganizationAgentMembers(context); await emitDomainEvent(context, action, { userOrganizationKey: key }); return result(action, { userOrganizationKey: key, role: input.role, status: 'active', sync });
+      const sync = await syncOrganizationAgentMembers(context); return result(action, { userOrganizationKey: key, role: input.role, status: 'active', sync });
     }
     const resolved = resolveMembers(rows, input.members, true).map(({ results }) => results[0]!);
     const owners = rows.filter((row) => row.membership.orgRole === 'owner');
@@ -264,7 +245,7 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
     if (action === 'organization.member.activate') await withTransaction(['userOrganizations', 'scopes', 'scopeMembers'], async (trx) => { await trx.query('FOR membership IN userOrganizations FILTER membership._key IN @keys UPDATE membership WITH { status: "active", updatedAt: @now } IN userOrganizations', { keys, now }); await reconcileOrganizationScopeMemberships(context.organizationKey, { userOrganizationKeys: keys }, trx); });
     if (action === 'organization.member.suspend') await withTransaction(['userOrganizations', 'userSessions'], async (trx) => { await trx.query('FOR membership IN userOrganizations FILTER membership._key IN @keys UPDATE membership WITH { status: "suspended", updatedAt: @now } IN userOrganizations', { keys, now }); await trx.query('FOR session IN userSessions FILTER session.userId IN @userIds && session.disconnectedAt == null UPDATE session WITH { disconnectedAt: @now, updatedAt: @now } IN userSessions', { userIds: resolved.map((row) => row.user._key), now }); });
     if (action === 'organization.member.remove') await withTransaction(['userOrganizations', 'scopeMembers', 'agentMembers', 'userSessions'], async (trx) => { await trx.query('FOR member IN scopeMembers FILTER member.userOrganizationKey IN @keys REMOVE member IN scopeMembers', { keys }); await trx.query('FOR grant IN agentMembers FILTER grant.userOrganizationKey IN @keys REMOVE grant IN agentMembers', { keys }); await trx.query('FOR session IN userSessions FILTER session.userId IN @userIds && session.disconnectedAt == null UPDATE session WITH { disconnectedAt: @now, updatedAt: @now } IN userSessions', { userIds: resolved.map((row) => row.user._key), now }); await trx.query('FOR membership IN userOrganizations FILTER membership._key IN @keys REMOVE membership IN userOrganizations', { keys }); });
-    const sync = action === 'organization.member.role.update' || action === 'organization.member.activate' ? await syncOrganizationAgentMembers(context) : []; await emitDomainEvent(context, action, { userOrganizationKeys: keys }); return result(action, { userOrganizationKeys: keys, sync });
+    const sync = action === 'organization.member.role.update' || action === 'organization.member.activate' ? await syncOrganizationAgentMembers(context) : []; return result(action, { userOrganizationKeys: keys, sync });
   }
 
   const graph = await listScopeGraph(context.organizationKey);
@@ -297,15 +278,15 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
     const key = newId(), relationKey = parent ? newId() : null; const slug = input.name.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); const level = (parent?.level ?? 0) + 1;
     await withTransaction(['scopes', 'scopeScopes', 'userOrganizations', 'scopeMembers'], async (trx) => { await trx.query('INSERT { _key: @key, organizationKey: @organizationKey, slug: @slug, name: @name, summary: @description, description: @description, position: @position, level: @level, deletedAt: null, embedding: [] } INTO scopes', { key, organizationKey: context.organizationKey, slug, name: input.name, description: input.description ?? input.name, position: input.position, level }); if (parent) await trx.query('INSERT { _key: @relationKey, parentKey: @parentKey, childKey: @key, level: @level, deletedAt: null } INTO scopeScopes', { relationKey, parentKey: parent._key, key, level }); await reconcileOrganizationScopeMemberships(context.organizationKey, { scopeKeys: [key] }, trx); });
     const sync = await syncOrganizationAgentMembers(context);
-    await emitDomainEvent(context, action, { scopeKey: key }); return result(action, { key, slug, parentScopeKey: parent?._key ?? null, role: scopeRoleForOrganizationRole(principal.userOrganization.orgRole), sync });
+    return result(action, { key, slug, parentScopeKey: parent?._key ?? null, role: scopeRoleForOrganizationRole(principal.userOrganization.orgRole), sync });
   }
   for (const scope of targets) if (scope.organizationKey !== context.organizationKey) throw new DomainToolExecutionError('scope_forbidden', 'Scope belongs to another organization');
-  if (action === 'scope.update') { const scope = targets[0]!; await assertScopeRole(context, scope._key, ['owner', 'admin', 'moderator']); if (scope.deletedAt) throw new DomainToolExecutionError('scope_archived', 'Restore the scope before updating it'); if (input.name && graph.scopes.some((candidate) => candidate._key !== scope._key && (graph.parentByChild.get(candidate._key) ?? null) === (graph.parentByChild.get(scope._key) ?? null) && candidate.name.toLocaleLowerCase() === input.name.toLocaleLowerCase())) throw new DomainToolExecutionError('duplicate_scope', 'A sibling scope already has this name'); await withTransaction(['scopes'], async (trx) => { await trx.query('UPDATE @key WITH MERGE(@patch, { embedding: [] }) IN scopes', { key: scope._key, patch: Object.fromEntries(Object.entries({ name: input.name, description: input.description }).filter(([, value]) => value !== undefined)) }); }); await emitDomainEvent(context, action, { scopeKey: scope._key }); return result(action, { scopeKey: scope._key }); }
-  if (action === 'scope.move') { const scope = targets[0]!; await assertScopeRole(context, scope._key, ['owner', 'admin']); if (!graph.parentByChild.has(scope._key)) throw new DomainToolExecutionError('root_scope_protected', 'Root scopes cannot be moved'); const parent = input.parentScope === undefined ? graph.byKey.get(graph.parentByChild.get(scope._key)!) ?? null : input.parentScope === null ? null : resolveScopes(graph, [input.parentScope], true)[0]!.results[0]!; if (parent?.deletedAt) throw new DomainToolExecutionError('parent_archived', 'Destination parent is archived'); let cursor = parent?._key; while (cursor) { if (cursor === scope._key) throw new DomainToolExecutionError('scope_cycle', 'Move would create a cycle'); cursor = graph.parentByChild.get(cursor); } const level = (parent?.level ?? 0) + 1; await withTransaction(['scopes', 'scopeScopes'], async (trx) => { if (input.parentScope !== undefined) { await trx.query('FOR relation IN scopeScopes FILTER relation.childKey == @scopeKey REMOVE relation IN scopeScopes', { scopeKey: scope._key }); if (parent) await trx.query('INSERT { _key: @key, parentKey: @parentKey, childKey: @scopeKey, level: @level, deletedAt: null } INTO scopeScopes', { key: newId(), parentKey: parent._key, scopeKey: scope._key, level }); await trx.query('UPDATE @scopeKey WITH { level: @level } IN scopes', { scopeKey: scope._key, level }); } if (input.position !== undefined) await trx.query('UPDATE @scopeKey WITH { position: @position } IN scopes', { scopeKey: scope._key, position: input.position }); }); const sync = await syncOrganizationAgentMembers(context); await emitDomainEvent(context, action, { scopeKey: scope._key }); return result(action, { scopeKey: scope._key, parentScopeKey: parent?._key ?? null, position: input.position ?? scope.position, sync }); }
+  if (action === 'scope.update') { const scope = targets[0]!; await assertScopeRole(context, scope._key, ['owner', 'admin', 'moderator']); if (scope.deletedAt) throw new DomainToolExecutionError('scope_archived', 'Restore the scope before updating it'); if (input.name && graph.scopes.some((candidate) => candidate._key !== scope._key && (graph.parentByChild.get(candidate._key) ?? null) === (graph.parentByChild.get(scope._key) ?? null) && candidate.name.toLocaleLowerCase() === input.name.toLocaleLowerCase())) throw new DomainToolExecutionError('duplicate_scope', 'A sibling scope already has this name'); await withTransaction(['scopes'], async (trx) => { await trx.query('UPDATE @key WITH MERGE(@patch, { embedding: [] }) IN scopes', { key: scope._key, patch: Object.fromEntries(Object.entries({ name: input.name, description: input.description }).filter(([, value]) => value !== undefined)) }); }); return result(action, { scopeKey: scope._key }); }
+  if (action === 'scope.move') { const scope = targets[0]!; await assertScopeRole(context, scope._key, ['owner', 'admin']); if (!graph.parentByChild.has(scope._key)) throw new DomainToolExecutionError('root_scope_protected', 'Root scopes cannot be moved'); const parent = input.parentScope === undefined ? graph.byKey.get(graph.parentByChild.get(scope._key)!) ?? null : input.parentScope === null ? null : resolveScopes(graph, [input.parentScope], true)[0]!.results[0]!; if (parent?.deletedAt) throw new DomainToolExecutionError('parent_archived', 'Destination parent is archived'); let cursor = parent?._key; while (cursor) { if (cursor === scope._key) throw new DomainToolExecutionError('scope_cycle', 'Move would create a cycle'); cursor = graph.parentByChild.get(cursor); } const level = (parent?.level ?? 0) + 1; await withTransaction(['scopes', 'scopeScopes'], async (trx) => { if (input.parentScope !== undefined) { await trx.query('FOR relation IN scopeScopes FILTER relation.childKey == @scopeKey REMOVE relation IN scopeScopes', { scopeKey: scope._key }); if (parent) await trx.query('INSERT { _key: @key, parentKey: @parentKey, childKey: @scopeKey, level: @level, deletedAt: null } INTO scopeScopes', { key: newId(), parentKey: parent._key, scopeKey: scope._key, level }); await trx.query('UPDATE @scopeKey WITH { level: @level } IN scopes', { scopeKey: scope._key, level }); } if (input.position !== undefined) await trx.query('UPDATE @scopeKey WITH { position: @position } IN scopes', { scopeKey: scope._key, position: input.position }); }); const sync = await syncOrganizationAgentMembers(context); return result(action, { scopeKey: scope._key, parentScopeKey: parent?._key ?? null, position: input.position ?? scope.position, sync }); }
   const expand = (initial: ScopeRow[]) => { const selected = new Map(initial.map((scope) => [scope._key, scope])); if (input.includeDescendants) { const pending = [...selected.keys()]; while (pending.length) for (const child of graph.childrenByParent.get(pending.shift()!) ?? []) if (!selected.has(child)) { selected.set(child, graph.byKey.get(child)!); pending.push(child); } } return [...selected.values()]; };
   const affected = expand(targets);
-  if (action === 'scope.archive') { for (const scope of targets) { await assertScopeRole(context, scope._key, ['owner', 'admin']); if (!graph.parentByChild.has(scope._key)) throw new DomainToolExecutionError('root_scope_protected', 'Root scopes cannot be archived'); if (!input.includeDescendants && (graph.childrenByParent.get(scope._key) ?? []).some((key) => !graph.byKey.get(key)?.deletedAt)) throw new DomainToolExecutionError('active_children', 'Active children require includeDescendants'); } const keys = affected.map((scope) => scope._key); if (keys.length > 20) return result(action, { scopeKeys: keys, reason: 'Large subtree requires explicit review' }, 'preview'); const now = new Date().toISOString(); await withTransaction(['scopes'], async (trx) => { await trx.query('FOR scope IN scopes FILTER scope._key IN @keys UPDATE scope WITH { deletedAt: @now } IN scopes', { keys, now }); }); await emitDomainEvent(context, action, { scopeKeys: keys }); return result(action, { scopeKeys: keys, archivedAt: now }); }
-  if (action === 'scope.restore') { for (const scope of targets) { await assertScopeRole(context, scope._key, ['owner', 'admin']); if (!scope.deletedAt) throw new DomainToolExecutionError('scope_active', 'Scope is already active'); const parent = graph.byKey.get(graph.parentByChild.get(scope._key) ?? ''); if (parent?.deletedAt) throw new DomainToolExecutionError('parent_archived', 'Restore the parent first'); } const keys = affected.map((scope) => scope._key); await withTransaction(['scopes'], async (trx) => { await trx.query('FOR scope IN scopes FILTER scope._key IN @keys UPDATE scope WITH { deletedAt: null } IN scopes', { keys }); }); const sync = await syncOrganizationAgentMembers(context); await emitDomainEvent(context, action, { scopeKeys: keys }); return result(action, { scopeKeys: keys, schedulesResumed: false, sync }); }
+  if (action === 'scope.archive') { for (const scope of targets) { await assertScopeRole(context, scope._key, ['owner', 'admin']); if (!graph.parentByChild.has(scope._key)) throw new DomainToolExecutionError('root_scope_protected', 'Root scopes cannot be archived'); if (!input.includeDescendants && (graph.childrenByParent.get(scope._key) ?? []).some((key) => !graph.byKey.get(key)?.deletedAt)) throw new DomainToolExecutionError('active_children', 'Active children require includeDescendants'); } const keys = affected.map((scope) => scope._key); if (keys.length > 20) return result(action, { scopeKeys: keys, reason: 'Large subtree requires explicit review' }, 'preview'); const now = new Date().toISOString(); await withTransaction(['scopes'], async (trx) => { await trx.query('FOR scope IN scopes FILTER scope._key IN @keys UPDATE scope WITH { deletedAt: @now } IN scopes', { keys, now }); }); return result(action, { scopeKeys: keys, archivedAt: now }); }
+  if (action === 'scope.restore') { for (const scope of targets) { await assertScopeRole(context, scope._key, ['owner', 'admin']); if (!scope.deletedAt) throw new DomainToolExecutionError('scope_active', 'Scope is already active'); const parent = graph.byKey.get(graph.parentByChild.get(scope._key) ?? ''); if (parent?.deletedAt) throw new DomainToolExecutionError('parent_archived', 'Restore the parent first'); } const keys = affected.map((scope) => scope._key); await withTransaction(['scopes'], async (trx) => { await trx.query('FOR scope IN scopes FILTER scope._key IN @keys UPDATE scope WITH { deletedAt: null } IN scopes', { keys }); }); const sync = await syncOrganizationAgentMembers(context); return result(action, { scopeKeys: keys, schedulesResumed: false, sync }); }
   for (const scope of targets) { await assertScopeRole(context, scope._key, ['owner']); if (!scope.deletedAt) throw new DomainToolExecutionError('scope_not_archived', 'Scope must be archived before removal'); if (!graph.parentByChild.has(scope._key)) throw new DomainToolExecutionError('root_scope_protected', 'Root scopes cannot be removed'); if ((graph.childrenByParent.get(scope._key) ?? []).length) throw new DomainToolExecutionError('scope_has_children', 'Scope with children cannot be removed'); if (input.confirmation !== scope.name && input.confirmation !== scope._key) throw new DomainToolExecutionError('confirmation_mismatch', `Confirmation must match ${scope.name} or its key`); }
-  const keys = targets.map((scope) => scope._key); const activeRunCursor = await db.query<{ key: string }>('FOR run IN agentRuns FILTER run.scopeKey IN @keys && run.status == "accepted" LIMIT 1 RETURN { key: run._key }', { keys }); if (await activeRunCursor.next()) throw new DomainToolExecutionError('scope_has_active_runs', 'Scope with active runs cannot be removed'); await withTransaction(['scopes', 'scopeScopes', 'scopeMembers'], async (trx) => { await trx.query('FOR member IN scopeMembers FILTER member.scopeKey IN @keys REMOVE member IN scopeMembers', { keys }); await trx.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @keys || relation.childKey IN @keys REMOVE relation IN scopeScopes', { keys }); await trx.query('FOR scope IN scopes FILTER scope._key IN @keys REMOVE scope IN scopes', { keys }); }); await emitDomainEvent(context, action, { scopeKeys: keys }); return result(action, { scopeKeys: keys });
+  const keys = targets.map((scope) => scope._key); const activeRunCursor = await db.query<{ key: string }>('FOR run IN agentRuns FILTER run.scopeKey IN @keys && run.status == "accepted" LIMIT 1 RETURN { key: run._key }', { keys }); if (await activeRunCursor.next()) throw new DomainToolExecutionError('scope_has_active_runs', 'Scope with active runs cannot be removed'); await withTransaction(['scopes', 'scopeScopes', 'scopeMembers'], async (trx) => { await trx.query('FOR member IN scopeMembers FILTER member.scopeKey IN @keys REMOVE member IN scopeMembers', { keys }); await trx.query('FOR relation IN scopeScopes FILTER relation.parentKey IN @keys || relation.childKey IN @keys REMOVE relation IN scopeScopes', { keys }); await trx.query('FOR scope IN scopes FILTER scope._key IN @keys REMOVE scope IN scopes', { keys }); }); return result(action, { scopeKeys: keys });
 }

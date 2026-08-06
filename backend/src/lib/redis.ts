@@ -1,6 +1,6 @@
 import IORedis from 'ioredis';
 
-// lazyConnect: short-lived CLI scripts (migrations, seeds, Polar sync)
+// lazyConnect: short-lived CLI scripts (migrations and seeds)
 // import backend modules that transitively touch this client (e.g. auth.ts
 // -> auth-handoff.ts) without ever issuing a Redis command. Without
 // lazyConnect, the client connects immediately on import and retries

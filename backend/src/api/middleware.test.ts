@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
-import { isPolarWebhookPath } from './payments';
 import { isResendWebhookPath } from './resend';
 import { createAutoRefreshAuthTokens, rateLimitByIp, requireEnvApiKey, setSessionCookies, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
@@ -22,20 +21,12 @@ function middlewareContext(path: string, headers: Record<string, string> = {}, s
 }
 
 describe('api middleware webhook exemptions', () => {
-  test('recognizes Polar webhook paths with or without the api prefix', () => {
-    expect(isPolarWebhookPath('/api/v1/webhooks/polar')).toBe(true);
-    expect(isPolarWebhookPath('/api/v1/webhooks/polar/')).toBe(true);
-    expect(isPolarWebhookPath('/webhooks/polar')).toBe(true);
-    expect(isPolarWebhookPath('/webhooks/polar/')).toBe(true);
-    expect(isPolarWebhookPath('/api/v1/payments/checkout')).toBe(false);
-  });
-
   test('recognizes only the v1 Resend webhook path', () => {
     expect(isResendWebhookPath('/api/webhooks/resend')).toBe(false);
     expect(isResendWebhookPath('/api/webhooks/resend/')).toBe(false);
     expect(isResendWebhookPath('/api/v1/webhooks/resend')).toBe(true);
     expect(isResendWebhookPath('/api/v1/webhooks/resend/')).toBe(true);
-    expect(isResendWebhookPath('/api/v1/payments/checkout')).toBe(false);
+    expect(isResendWebhookPath('/api/webhooks/resend')).toBe(false);
   });
 
   test('does not require the global API key for provider webhooks', async () => {
@@ -44,19 +35,12 @@ describe('api middleware webhook exemptions', () => {
     let nextCalls = 0;
 
     try {
-      for (const path of [
-        '/api/v1/webhooks/polar',
-        '/api/v1/webhooks/polar/',
-        '/webhooks/polar',
-        '/webhooks/polar/',
-        '/api/v1/webhooks/resend',
-        '/api/v1/webhooks/resend/',
-      ]) {
+      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/resend/']) {
         await requireEnvApiKey(middlewareContext(path), async () => {
           nextCalls += 1;
         });
       }
-      expect(nextCalls).toBe(6);
+      expect(nextCalls).toBe(2);
     } finally {
       if (previousApiKey === undefined) delete process.env.API_KEY;
       else process.env.API_KEY = previousApiKey;
@@ -70,14 +54,11 @@ describe('api middleware webhook exemptions', () => {
     let nextCalls = 0;
 
     try {
-      await rateLimitByIp(middlewareContext('/api/v1/webhooks/polar'), async () => {
-        nextCalls += 1;
-      });
       await rateLimitByIp(middlewareContext('/api/v1/webhooks/resend'), async () => {
         nextCalls += 1;
       });
 
-      expect(nextCalls).toBe(2);
+      expect(nextCalls).toBe(1);
     } finally {
       if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
       else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
@@ -95,19 +76,6 @@ describe('validateQueryParams', () => {
     expect(nextCalls).toBe(1);
     await expect(validateQueryParams(
       middlewareContext('/api/v1/founders/artifacts/stream', {}, '?organizationKey=root-org&scopeKey=cmrnlzf640000qc7k4p5zem5w&query=FOR'),
-      async () => { nextCalls += 1; },
-    )).rejects.toThrow();
-    expect(nextCalls).toBe(1);
-  });
-  test('allows only an organization key on the Nexus invalidation stream', async () => {
-    let nextCalls = 0;
-    await validateQueryParams(
-      middlewareContext('/api/v1/nexus/events/stream', {}, '?organizationKey=root-org'),
-      async () => { nextCalls += 1; },
-    );
-    expect(nextCalls).toBe(1);
-    await expect(validateQueryParams(
-      middlewareContext('/api/v1/nexus/events/stream', {}, '?organizationKey=root-org&scopeKey=cmrnlzf640000qc7k4p5zem5w'),
       async () => { nextCalls += 1; },
     )).rejects.toThrow();
     expect(nextCalls).toBe(1);

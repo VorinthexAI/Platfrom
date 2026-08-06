@@ -45,12 +45,12 @@ on:
         required: false
         type: string
       enable_app_platform:
-        description: 'Create the additive ALB + ECS EC2 web/api + CloudFront target-state platform'
+        description: 'Create the additive apex ALB + ECS EC2 web/api + CloudFront target-state platform'
         required: false
         type: boolean
         default: false
       run_dns_sync:
-        description: 'Also run the Cloudflare DNS sync (domains.json -> proxied CNAMEs at the CloudFront target)'
+        description: 'Sync the Cloudflare apex CNAME and prune known retired Vorinthex web hostnames'
         required: false
         type: boolean
         default: false

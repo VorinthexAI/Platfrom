@@ -2,8 +2,8 @@
 # edge: CloudFront distribution in front of the web ALB, plus the us-east-1
 # ACM certificate CloudFront requires. Fully additive — it fronts the ALB and
 # touches no existing resource. Static paths (_next/static, /public) are cached;
-# /api/* is forwarded with no caching, no buffering, and all headers/cookies +
-# Host preserved for proxy.ts hostname routing and SSE pass-through.
+# /api/* is forwarded with no caching, no buffering, and all headers/cookies
+# preserved. The ALB sends /api/v1/* to Bun and other API paths to Next.js.
 #
 # Requires an aws provider aliased to us-east-1 (CloudFront/ACM constraint).
 # ============================================================================
@@ -20,7 +20,7 @@ terraform {
 locals {
   create_acm  = var.viewer_acm_certificate_arn == "" && length(var.web_domain_names) > 0
   has_aliases = var.viewer_acm_certificate_arn != "" && length(var.web_domain_names) > 0
-  aliases     = local.has_aliases ? distinct(concat(var.web_domain_names, var.api_domain_names)) : []
+  aliases     = local.has_aliases ? distinct(var.web_domain_names) : []
   origin_id   = "${var.name_prefix}-alb-origin"
 
   # AWS managed policies (well-known IDs).
@@ -34,7 +34,7 @@ locals {
 # (Next.js App Router RSC vs document responses share a URL and must not be
 # cache-collided). This policy is kept only to avoid a CachePolicyInUse deletion
 # error during the same apply that detaches it; it can be removed in a later,
-# separate apply. proxy.ts gets the right Host via the AllViewer origin policy.
+# separate apply. The AllViewer origin policy preserves request context.
 resource "aws_cloudfront_cache_policy" "html" {
   name    = "${var.name_prefix}-html-per-host"
   comment = "Unused (default behavior is CachingDisabled); kept to avoid in-use delete"
@@ -68,7 +68,7 @@ resource "aws_acm_certificate" "cloudfront" {
   provider                  = aws.us_east_1
   count                     = local.create_acm ? 1 : 0
   domain_name               = var.web_domain_names[0]
-  subject_alternative_names = distinct(concat(slice(var.web_domain_names, 1, length(var.web_domain_names)), var.api_domain_names))
+  subject_alternative_names = slice(var.web_domain_names, 1, length(var.web_domain_names))
   validation_method         = "DNS"
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-cloudfront-cert" })
@@ -234,15 +234,14 @@ resource "aws_cloudfront_distribution" "this" {
     }
   }
 
-  # Default behavior -> web origin. Host is forwarded (AllViewer) so proxy.ts
-  # subdomain routing works.
+  # Default behavior -> web origin.
   # Default (HTML) behavior: NOT cached at CloudFront. Next.js App Router serves
   # the same URL as either an HTML document or an RSC flight payload depending on
   # request headers (RSC / Next-Router-State-Tree / Next-Url). Caching HTML here
   # collides the two — a cached RSC response served for a document load renders as
   # raw ":HL[...]" text on a black screen. Disabling cache lets the origin decide
   # per-request (correct); _next/static stays edge-cached below, and Cloudflare
-  # still fronts the whole thing. AllViewer forwards Host (proxy.ts) + RSC headers.
+  # still fronts the whole thing. AllViewer forwards the required RSC headers.
   default_cache_behavior {
     target_origin_id         = local.origin_id
     viewer_protocol_policy   = "redirect-to-https"
@@ -265,7 +264,7 @@ resource "aws_cloudfront_distribution" "this" {
     origin_request_policy_id = local.origin_all_viewer_id
   }
 
-  # api / SSE: no caching, all methods, forward everything incl. Host + cookies.
+  # Dynamic API / SSE: no caching, all methods, forward all headers and cookies.
   ordered_cache_behavior {
     path_pattern             = "/api/*"
     target_origin_id         = local.origin_id

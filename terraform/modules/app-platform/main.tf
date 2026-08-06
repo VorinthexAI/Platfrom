@@ -155,7 +155,7 @@ resource "aws_vpc_security_group_ingress_rule" "cache_from_api" {
 resource "aws_acm_certificate" "alb" {
   count                     = local.create_alb_acm ? 1 : 0
   domain_name               = var.web_domain_names[0]
-  subject_alternative_names = distinct(concat(slice(var.web_domain_names, 1, length(var.web_domain_names)), var.api_domain_names))
+  subject_alternative_names = slice(var.web_domain_names, 1, length(var.web_domain_names))
   validation_method         = "DNS"
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-alb-cert" })
@@ -240,8 +240,7 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-resource "aws_lb_listener_rule" "http_api_host" {
-  count        = length(var.api_domain_names) > 0 ? 1 : 0
+resource "aws_lb_listener_rule" "http_api_path" {
   listener_arn = aws_lb_listener.http.arn
   priority     = 10
 
@@ -251,18 +250,14 @@ resource "aws_lb_listener_rule" "http_api_host" {
   }
 
   condition {
-    host_header {
-      values = var.api_domain_names
+    path_pattern {
+      values = ["/api/v1", "/api/v1/*"]
     }
   }
 }
 
-# NOTE: deliberately NO "/api/*" path rule to the api target group. The web
-# app (Next.js) OWNS the /api/* path space — /api/members, /api/fragments/*,
-# /api/auth/* are its own route handlers that proxy to the backend server-side
-# (adding the API key). Routing /api/* to the api target group would hijack
-# those and return "api key required". The backend is reached only via its own
-# host (api_domain_names → http_api_host rule), never by path on the web domains.
+# Route only the Bun v1 API (including its Resend webhook) to the api target.
+# Other /api/* paths remain available to Next.js route handlers.
 
 # Optional HTTPS listener; only when a validated cert is available.
 resource "aws_lb_listener" "https" {
@@ -279,8 +274,8 @@ resource "aws_lb_listener" "https" {
   }
 }
 
-resource "aws_lb_listener_rule" "https_api_host" {
-  count        = var.alb_https_enabled && length(var.api_domain_names) > 0 ? 1 : 0
+resource "aws_lb_listener_rule" "https_api_path" {
+  count        = var.alb_https_enabled ? 1 : 0
   listener_arn = aws_lb_listener.https[0].arn
   priority     = 10
 
@@ -290,14 +285,11 @@ resource "aws_lb_listener_rule" "https_api_host" {
   }
 
   condition {
-    host_header {
-      values = var.api_domain_names
+    path_pattern {
+      values = ["/api/v1", "/api/v1/*"]
     }
   }
 }
-
-# NOTE: no "/api/*" path rule on HTTPS either — see the HTTP listener note
-# above. The web app owns /api/*; the backend is host-routed only.
 
 # ----------------------------------------------------------------------------
 # ECS EC2 capacity: instance role, launch template, ASG, capacity provider.

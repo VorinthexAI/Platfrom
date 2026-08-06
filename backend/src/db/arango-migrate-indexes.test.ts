@@ -100,4 +100,31 @@ describe('Arango migration indexes', () => {
     expect(sourceMigration).toBeGreaterThan(-1);
     expect(reconciliation).toBeGreaterThan(sourceMigration);
   });
+
+  test('purges retired Hunt, waitlist, Polar, and event data idempotently', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    const retiredCollections = [
+      'events',
+      'userEvents',
+      'intelligenceFragments',
+      'userWaitlistLeaderboardChanges',
+      'products',
+      'paymentCheckouts',
+      'paymentOrders',
+      'subscriptions',
+      'userEntitlements',
+    ];
+    const retiredCollectionLoop = source.indexOf('for (const retiredCollectionName of [');
+    expect(retiredCollectionLoop).toBeGreaterThan(-1);
+    for (const collection of retiredCollections) {
+      expect(source.indexOf(`'${collection}'`, retiredCollectionLoop)).toBeGreaterThan(retiredCollectionLoop);
+    }
+    expect(source).toContain('FILTER event.provider == "polar"');
+    expect(source).toContain('REMOVE event IN processedWebhookEvents');
+    expect(source).toContain('HAS(u, "waitlistNumber")');
+    expect(source).toContain('waitlistNumber: null');
+    expect(source).toContain('isOnWaitlist: null');
+    expect(source).toContain('isWaitlistApproved: null');
+    expect(source).toContain('IN users OPTIONS { keepNull: false }');
+  });
 });

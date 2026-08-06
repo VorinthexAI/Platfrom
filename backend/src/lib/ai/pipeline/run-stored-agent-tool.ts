@@ -18,7 +18,6 @@ import type { Action } from '@/lib/db/actions.node';
 import type { ReverseContextCompiler } from '@/lib/ai/reverse-context/compiler';
 import { newId } from '@/lib/ids';
 import { organizationKeySchema } from '@/lib/ai/shared/ids';
-import { recordRuntimeEvent, type RuntimeEventData, type RuntimeEventRecorder, type RuntimeEventSlug } from '@/platform/events';
 import { InvalidRunRequestError, ResponseValidationError } from './validation';
 import { validateAgentOutput, validateProviderResponse } from './validation';
 
@@ -54,7 +53,6 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
   calls?: AgentRunCallRepository;
   sources?: AgentRunSourceRepository;
   artifacts?: AgentArtifactRepository;
-  events?: RuntimeEventRecorder;
   variables?: RuntimeVariableRepository;
   memories?: AgentMemoryRepository;
   artifactResolvers?: ArtifactResolverRegistry;
@@ -67,7 +65,6 @@ export interface RunStoredAgentToolOptions extends RouterDependencies {
     run: AgentRun;
     response: ProviderExecuteResponse<unknown>;
     agentContext: AgentContext;
-    recordArtifactCreated: (artifact: { nodeType: string; nodeKey: string }) => Promise<void>;
   }) => Promise<void>;
   stepSlugs?: readonly string[];
   /** Internal model route used before a local tool action finalizes. Never accepted from clients. */
@@ -88,38 +85,18 @@ function finalStatus(error: unknown) {
   return 'failed' as const;
 }
 
-function runtimeEventReason(error: unknown) {
-  return (error instanceof Error ? error.message : String(error)).trim().slice(0, 500) || 'Unknown runtime error';
-}
-
 /** Secure persisted-agent entry point. Provider routing is selected by a direct action slug. */
 export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAgentToolParams, options: RunStoredAgentToolOptions = {}): Promise<StoredAgentRunResult<TOutput>> {
   const parsed = runStoredAgentToolParamsSchema.safeParse(params);
   if (!parsed.success) throw new InvalidRunRequestError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
   const request = parsed.data;
-  const recordEvent = options.events ?? recordRuntimeEvent;
   const runtime = await loadAgentRuntime(request.agentKey, options.runtimeData);
   if (runtime.scope.organizationKey !== runtime.organization.key) throw new InvalidRunRequestError('execution scope belongs to another organization');
-  const emit = async (slug: RuntimeEventSlug, data: RuntimeEventData, userId: string | null = null) => {
-    try {
-      await recordEvent({ scopeId: runtime.scope.key, userId, slug, data });
-    } catch (error) {
-      console.warn('failed to record agent runtime event', { slug, runKey: data.runKey, error: error instanceof Error ? error.message : String(error) });
-    }
-  };
   if (runtime.scope.organizationKey !== request.organizationKey) throw new InvalidRunRequestError('agent scope does not belong to the requested organization');
   if (!options.principal) {
-    await emit('guardrail.blocked', { agentKey: runtime.agent.key, reason: 'Execution principal is required' });
     throw new InvalidRunRequestError('execution principal is required');
   }
-  let principal: Awaited<ReturnType<typeof authorizeAgentExecution>>;
-  try {
-    principal = await authorizeAgentExecution(runtime, options.principal, options.accessData);
-  } catch (error) {
-    await emit('guardrail.blocked', { agentKey: runtime.agent.key, reason: runtimeEventReason(error) });
-    throw error;
-  }
-  const eventUserId = principal.kind === 'member' ? principal.user.key : null;
+  const principal = await authorizeAgentExecution(runtime, options.principal, options.accessData);
   const runs = options.runs ?? getDefaultAgentRunRepository();
   const steps = options.steps ?? getDefaultAgentRunStepRepository();
   const calls = options.calls ?? getDefaultAgentRunCallRepository();
@@ -131,8 +108,6 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   if (request.metadata.status === 'rejected') {
     const endedAtMs = Date.now();
     const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, status: 'rejected', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
-    await emit('agent.started', { runKey: run.key, agentKey: runtime.agent.key, status: 'started' }, eventUserId);
-    await emit('agent.failed', { runKey: run.key, agentKey: runtime.agent.key, status: 'rejected', reason: request.metadata.reason, elapsedMs: endedAtMs - startedAtMs }, eventUserId);
     return { executed: false, run, step: null, calls: [], response: null };
   }
 
@@ -151,15 +126,11 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
   if (stepSlugs.length === 0 || stepSlugs.at(-1) !== request.stepSlug) throw new InvalidRunRequestError('stepSlugs must end with the executed stepSlug');
   const preparedSteps = stepSlugs.map((stepSlug) => ({ key: newId(), stepSlug }));
   const run = await runs.insertRun({ organizationKey: request.organizationKey, scopeKey: runtime.scope.key, agentKey: runtime.agent.key, principalType: principal.kind, userOrganizationKey: principal.kind === 'member' ? principal.userOrganization.key : null, status: 'accepted', reason: request.metadata.reason, score: request.metadata.score, startedAt, endedAt: startedAt, elapsedMs: 0 });
-  await emit('agent.started', { runKey: run.key, agentKey: runtime.agent.key, status: 'started' }, eventUserId);
-  for (const step of preparedSteps) await emit('step.started', { runKey: run.key, stepKey: step.key, agentKey: runtime.agent.key, status: 'started' }, eventUserId);
   try {
-    await persistSources(run.key, request.sources, sources, artifacts, async (data) => emit('artifact.used', { ...data, agentKey: runtime.agent.key }, eventUserId));
+    await persistSources(run.key, request.sources, sources, artifacts);
   } catch (error) {
     const endedAtMs = Date.now();
     await runs.updateRun(run.key, { status: 'failed', reason: request.metadata.reason, score: request.metadata.score, endedAt: new Date(endedAtMs).toISOString(), elapsedMs: endedAtMs - startedAtMs });
-    for (const step of preparedSteps) await emit('step.failed', { runKey: run.key, stepKey: step.key, agentKey: runtime.agent.key, status: 'failed', reason: runtimeEventReason(error), elapsedMs: endedAtMs - startedAtMs }, eventUserId);
-    await emit('agent.failed', { runKey: run.key, agentKey: runtime.agent.key, status: 'failed', reason: runtimeEventReason(error), elapsedMs: endedAtMs - startedAtMs }, eventUserId);
     throw error;
   }
 
@@ -176,17 +147,10 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       signal: options.signal,
       onAttemptStart: async (attempt) => {
         const callKey = newId();
-        await emit('model.called', { runKey: run.key, stepKey: executedStep.key, callKey, agentKey: runtime.agent.key, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, status: 'called' }, eventUserId);
         return callKey;
       },
       onAttempt: async (attempt) => {
         attempts.push(attempt);
-        await emit(attempt.status === 'completed' ? 'model.completed' : 'model.failed', {
-          runKey: run.key, stepKey: executedStep.key, callKey: attempt.callKey, agentKey: runtime.agent.key,
-          actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey,
-          status: attempt.status, reason: attempt.errorCode, inputTokens: attempt.usage.inputTokens,
-          outputTokens: attempt.usage.outputTokens, elapsedMs: attempt.elapsedMs,
-        }, eventUserId);
       },
     })));
     responseMetadata = validateAgentOutput(response.output);
@@ -195,13 +159,12 @@ export async function runStoredAgentTool<TOutput = unknown>(params: RunStoredAge
       run,
       response: response as ProviderExecuteResponse<unknown>,
       agentContext,
-      recordArtifactCreated: ({ nodeType, nodeKey }) => emit('artifact.created', { runKey: run.key, agentKey: runtime.agent.key, nodeType, nodeKey, status: 'created' }, eventUserId),
     });
   } catch (error) {
-    await persistExecution({ run, runs, steps, calls, runtime, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, status: finalStatus(error), reason: request.metadata.reason, eventReason: runtimeEventReason(error), score: request.metadata.score, startedAtMs, emit, eventUserId });
+    await persistExecution({ run, runs, steps, calls, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, status: finalStatus(error), reason: request.metadata.reason, score: request.metadata.score, startedAtMs });
     throw error;
   }
-  const persisted = await persistExecution({ run, runs, steps, calls, runtime, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, status: responseMetadata.status === 'accepted' ? 'completed' : 'rejected', reason: responseMetadata.reason, eventReason: responseMetadata.reason, score: responseMetadata.score, startedAtMs, emit, eventUserId });
+  const persisted = await persistExecution({ run, runs, steps, calls, attempts, preparedSteps, primarySkillKey: primarySkill.skill.key, status: responseMetadata.status === 'accepted' ? 'completed' : 'rejected', reason: responseMetadata.reason, score: responseMetadata.score, startedAtMs });
   return { executed: true, ...persisted, response };
 }
 
@@ -226,10 +189,8 @@ export function normalizeStructuredProviderResponse<TOutput>(response: ProviderE
 
 async function persistExecution(input: {
   run: AgentRun; runs: AgentRunRepository; steps: AgentRunStepRepository; calls: AgentRunCallRepository;
-  runtime: Awaited<ReturnType<typeof loadAgentRuntime>>;
   attempts: readonly RouteAttemptTelemetry[]; preparedSteps: readonly { key: string; stepSlug: string }[]; primarySkillKey: string; status: 'completed' | 'rejected' | 'failed' | 'cancelled' | 'timeout';
-  reason: string; eventReason: string; score: number; startedAtMs: number; eventUserId: string | null;
-  emit: (slug: RuntimeEventSlug, data: RuntimeEventData, userId?: string | null) => Promise<void>;
+  reason: string; score: number; startedAtMs: number;
 }) {
   const endedAtMs = Math.max(Date.now(), input.startedAtMs + input.preparedSteps.length - 1);
   const endedAt = new Date(endedAtMs).toISOString();
@@ -238,13 +199,10 @@ async function persistExecution(input: {
     const stepStartedAtMs = input.startedAtMs + index;
     const stepStatus = input.status === 'completed' || input.status === 'rejected' ? 'completed' : 'failed';
     persistedSteps.push(await input.steps.insertStep({ key: prepared.key, agentRunKey: input.run.key, stepSlug: prepared.stepSlug, status: stepStatus, startedAt: new Date(stepStartedAtMs).toISOString(), endedAt, elapsedMs: endedAtMs - stepStartedAtMs }));
-    await input.emit(stepStatus === 'completed' ? 'step.completed' : 'step.failed', { runKey: input.run.key, stepKey: prepared.key, agentKey: input.runtime.agent.key, status: stepStatus, reason: stepStatus === 'failed' ? input.eventReason : undefined, elapsedMs: endedAtMs - stepStartedAtMs }, input.eventUserId);
   }
   const step = persistedSteps.at(-1)!;
   const persistedCalls = await Promise.all(input.attempts.map((attempt) => input.calls.insertCall({ key: attempt.callKey, agentRunKey: input.run.key, agentRunStepKey: step.key, skillKey: input.primarySkillKey, actionKey: attempt.actionKey, modelKey: attempt.modelKey, providerKey: attempt.providerKey, ...attempt.usage, startedAt: attempt.startedAt, endedAt: attempt.endedAt, elapsedMs: attempt.elapsedMs })));
   const run = await input.runs.updateRun(input.run.key, { status: input.status, reason: input.reason, score: input.score, endedAt, elapsedMs: endedAtMs - input.startedAtMs });
-  const terminalCall = persistedCalls.at(-1);
-  await input.emit(input.status === 'completed' ? 'agent.completed' : 'agent.failed', { runKey: run.key, agentKey: input.runtime.agent.key, status: input.status, reason: input.status === 'completed' ? undefined : input.eventReason, elapsedMs: endedAtMs - input.startedAtMs }, input.eventUserId);
   return { run, step, calls: persistedCalls };
 }
 
@@ -253,12 +211,10 @@ async function persistSources(
   selections: z.infer<typeof sourceSelectionSchema>[],
   sources: AgentRunSourceRepository,
   artifacts: AgentArtifactRepository,
-  onUsed: (data: RuntimeEventData) => Promise<void>,
 ) {
   const ordered = [...selections].sort((left, right) => right.priority - left.priority || left.nodeType.localeCompare(right.nodeType) || left.nodeKey.localeCompare(right.nodeKey));
   for (const [position, source] of ordered.entries()) {
     await sources.insertSource({ agentRunKey: runKey, ...source });
     await artifacts.insertArtifact({ agentRunKey: runKey, nodeType: source.nodeType, nodeKey: source.nodeKey, relation: 'source', groupKey: null, position });
-    await onUsed({ runKey, nodeType: source.nodeType, nodeKey: source.nodeKey, status: 'used' });
   }
 }

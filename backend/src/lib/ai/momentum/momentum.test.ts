@@ -63,7 +63,6 @@ function memoryRepository() {
 
 function harness(deniedScope?: string) {
   const memory = memoryRepository();
-  const audits: Array<{ action: string; data: unknown }> = [];
   let counter = 0;
   const execute = (action: MomentumActionSlug, input: unknown) => executeMomentumTool(action, input, {
     repository: memory.repository,
@@ -71,14 +70,12 @@ function harness(deniedScope?: string) {
     now: () => timestamp,
     generateEmbedding: async (text) => [text.length, 1],
     authorize: async (scope) => { if (scope === deniedScope) throw new Error('forbidden'); },
-    audit: async (action, data) => { audits.push({ action, data }); },
     reason: async ({ action, language, instruction, task }) => `${action}:${language ?? instruction ?? task.title}`,
   });
   return {
     repository: memory.repository,
     setTransactionScopesActive: memory.setTransactionScopesActive,
     setBeforeAtomic: memory.setBeforeAtomic,
-    audits,
     execute,
     get projects() { return memory.projects; },
     get milestones() { return memory.milestones; },
@@ -133,7 +130,6 @@ describe('Project tools', () => {
     expect(project.archiveFolderKey).toBeDefined();
     expect(context.folders.get(project.archiveFolderKey)).toMatchObject({ scopeKey, name: 'Apollo', deletedAt: null });
     expect(project.embedding.length).toBeGreaterThan(0);
-    expect(context.audits.at(-1)).toMatchObject({ action: 'project.create', data: { success: true } });
   });
 
   test('rolls back project insertion when Archive folder creation fails', async () => {
@@ -170,14 +166,14 @@ describe('Project tools', () => {
     expect(context.folders.size).toBe(0);
   });
 
-  test('clears optional descriptions and does not misreport committed writes when audit fails', async () => {
+  test('clears optional descriptions and preserves committed writes', async () => {
     const context = harness();
     const { project } = await createHierarchy(context);
     await context.execute('project.update', { items: [{ projectKey: project.key, description: null }] });
     expect(context.projects.get(project.key)).not.toHaveProperty('description');
     const result = await executeMomentumTool('project.rename', { items: [{ projectKey: project.key, name: 'Audit-safe' }], atomic: true }, {
       repository: context.repository, generateEmbedding: async () => [1], authorize: async () => undefined,
-      audit: async () => { throw new Error('audit unavailable'); }, now: () => timestamp,
+      now: () => timestamp,
     });
     expect(result.results![0]).toMatchObject({ success: true });
     expect(context.projects.get(project.key)?.name).toBe('Audit-safe');
@@ -268,7 +264,6 @@ describe('Batch, authorization, search, and domain envelope', () => {
     const deniedAtomic = await denied.execute('project.create', { items: [{ scopeKey, name: 'Atomic' }, { scopeKey: otherScopeKey, name: 'Denied' }], atomic: true });
     expect(deniedAtomic.results!.every(({ success }) => !success)).toBe(true);
     expect([...denied.projects.values()].some(({ name }) => name === 'Atomic')).toBe(false);
-    expect(denied.audits.length).toBeGreaterThan(0);
   });
 
   test('rejects duplicate atomic targets and scopes archived at the transaction boundary', async () => {
@@ -313,7 +308,6 @@ describe('Batch, authorization, search, and domain envelope', () => {
     const result = await executeDomainTool('project.create', { items: [{ scopeKey, name: 'Envelope' }], atomic: true }, { organizationKey: 'org', runtimeScopeKey: scopeKey, principal }, {
       momentum: { repository: context.repository, createKey: () => `cmrnlzf64${String(context.projects.size).padStart(4, '0')}qc7k4p5zem5w`, now: () => timestamp, generateEmbedding: async () => [1], reason: async () => 'reason' },
       authorizeScope: async () => undefined,
-      domainEvents: async () => undefined,
     });
     expect(result).toMatchObject({ action: 'project.create', status: 'completed', data: { action: 'project.create' } });
   });

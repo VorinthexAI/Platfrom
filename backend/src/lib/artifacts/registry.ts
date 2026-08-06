@@ -84,7 +84,6 @@ export interface ArtifactQueryDefinition<Input> {
   authorize(input: Input, context: ArtifactResolveContext): void;
   execute(input: Input, context: ArtifactResolveContext): Promise<ArtifactLiteral>;
   dependencies(input: Input, context: ArtifactResolveContext): string[];
-  invalidatedBy: readonly string[];
 }
 
 const scopeInput = z.object({ scopeKey: z.string().cuid() }).strict();
@@ -104,7 +103,7 @@ register<z.infer<typeof organizationInput>>({
     const organization = organizationSchema.parse(raw);
     return { ref: { nodeType: 'organizations', nodeKey: organization.key }, name: organization.name, slug: organization.slug, state: organization.isActive ? 'active' : 'archived' };
   },
-  dependencies: (input) => [`organization:${input.organizationKey}`, `node:organizations:${input.organizationKey}`], invalidatedBy: ['organization.update', 'organization.archive', 'organization.restore'],
+  dependencies: (input) => [`organization:${input.organizationKey}`, `node:organizations:${input.organizationKey}`],
 });
 
 register<z.infer<typeof organizationInput>>({
@@ -117,7 +116,7 @@ register<z.infer<typeof organizationInput>>({
       return { ref: { nodeType: 'scopes', nodeKey: scope.key }, parentRef: { nodeType: 'organizations', nodeKey: input.organizationKey }, name: scope.name, summary: scope.summary, state: 'active', weight: 1 };
     });
   },
-  dependencies: (input) => [`organization:${input.organizationKey}`, 'query:organization.scopes'], invalidatedBy: ['scope.create', 'scope.update', 'scope.move', 'scope.archive', 'scope.restore', 'scope.remove'],
+  dependencies: (input) => [`organization:${input.organizationKey}`, 'query:organization.scopes'],
 });
 
 register<z.infer<typeof scopeInput>>({
@@ -129,7 +128,7 @@ register<z.infer<typeof scopeInput>>({
       return { ...publicAgent(agent), ref: { nodeType: 'agents', nodeKey: agent.key }, parentRef: { nodeType: 'scopes', nodeKey: input.scopeKey }, state: 'active', weight: Math.max(0.2, agent.explorationRate), position: row.position };
     });
   },
-  dependencies: (input) => [`scope:${input.scopeKey}`, 'query:scope.active-agents'], invalidatedBy: ['scope.agent.add', 'scope.agent.move', 'scope.agent.archive', 'scope.agent.restore', 'scope.agent.remove', 'scope.agent.access-threshold.update'],
+  dependencies: (input) => [`scope:${input.scopeKey}`, 'query:scope.active-agents'],
 });
 register<z.infer<typeof recentRunsInput>>({
   id: ARTIFACT_QUERY_IDS.AGENT_RUNS_RECENT, inputSchema: recentRunsInput, authorize: requireScope,
@@ -140,7 +139,7 @@ register<z.infer<typeof recentRunsInput>>({
       return { ...publicRun(run), ref: { nodeType: 'agentRuns', nodeKey: run.key }, parentRef: { nodeType: 'agents', nodeKey: run.agentKey }, state: run.status === 'failed' ? 'warning' : run.status === 'completed' ? 'active' : 'default', weight: Math.max(0.2, run.score) };
     });
   },
-  dependencies: (input) => [`scope:${input.scopeKey}`, 'query:agent.runs.recent'], invalidatedBy: ['agent.started', 'agent.completed', 'agent.failed'],
+  dependencies: (input) => [`scope:${input.scopeKey}`, 'query:agent.runs.recent'],
 });
 register<z.infer<typeof organizationInput>>({
   id: ARTIFACT_QUERY_IDS.ORGANIZATION_MEMBER_COUNTS, inputSchema: organizationInput, authorize: requireOrganization,
@@ -148,20 +147,16 @@ register<z.infer<typeof organizationInput>>({
     const cursor = await db.query(`FOR membership IN userOrganizations FILTER membership.organizationId == @organizationKey COLLECT status = membership.status WITH COUNT INTO count RETURN { status, count }`, { organizationKey: input.organizationKey });
     return await cursor.all() as ArtifactLiteral;
   },
-  dependencies: (_input, context) => [`organization:${context.organizationKey}`, 'query:organization.member-counts'], invalidatedBy: ['organization.member.add', 'organization.member.role.update', 'organization.member.activate', 'organization.member.suspend', 'organization.member.remove'],
+  dependencies: (_input, context) => [`organization:${context.organizationKey}`, 'query:organization.member-counts'],
 });
 
-export async function resolveArtifactQuery(queryId: string, variables: unknown, context: ArtifactResolveContext): Promise<ResolvedValue & { dependencies: string[]; invalidatedBy: readonly string[] }> {
+export async function resolveArtifactQuery(queryId: string, variables: unknown, context: ArtifactResolveContext): Promise<ResolvedValue & { dependencies: string[] }> {
   const definition = queryRegistry.get(queryId);
   if (!definition) throw new Error(`Artifact query is not registered: ${queryId}`);
   const input = definition.inputSchema.parse(variables);
   definition.authorize(input, context);
   const value = await definition.execute(input, context);
-  return { value, revision: revision(value), dependencies: definition.dependencies(input, context), invalidatedBy: definition.invalidatedBy };
+  return { value, revision: revision(value), dependencies: definition.dependencies(input, context) };
 }
 
 export function isRegisteredArtifactQuery(queryId: string): boolean { return queryRegistry.has(queryId); }
-
-export function artifactQueryIdsInvalidatedBy(eventSlug: string): string[] {
-  return [...queryRegistry.values()].filter((definition) => definition.invalidatedBy.includes(eventSlug)).map((definition) => definition.id);
-}

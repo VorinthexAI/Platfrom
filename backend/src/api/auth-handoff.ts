@@ -10,13 +10,12 @@ import { getUserById } from '@/lib/db/users.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { redisConnection } from '@/lib/redis';
-import { trackPlatformEvent } from '@/platform/events';
 import { createTotpChallengeForIdentity, issueUserTokens, type LoginIdentityType, type SessionTokens } from './auth';
 
 /**
  * Cross-device sign-in handoff.
  *
- * When a visitor requests a magic link (sign in or waitlist verify), the
+ * When a visitor requests a magic link, the
  * requesting browser parks a handoff secret in an httpOnly cookie. The
  * emailed link may be opened anywhere — a phone, a mail app's built-in
  * view — and tapping it APPROVES the handoff instead of only signing in
@@ -97,7 +96,6 @@ type HandoffClaimResult =
     status: 'authenticated';
     alias: string;
     aliasSlug: string | null;
-    waitlistNumber: number | null;
     welcomeLine: string;
   } & SessionTokens)
   | {
@@ -148,17 +146,11 @@ export async function claimHandoff(handoffPublicHash: string): Promise<HandoffCl
 
   const tokens = await issueUserTokens(user);
   const alias = user.alias ?? generateAlias(user.key);
-  trackPlatformEvent({
-    slug: 'auth.magic_link_authenticated',
-    userId: user.key,
-    data: { user_id: user.key, email_hash: user.emailHash, via: 'handoff' },
-  });
   return {
     status: 'authenticated' as const,
     ...tokens,
     alias,
     aliasSlug: user.alias_slug,
-    waitlistNumber: user.waitlistNumber,
     welcomeLine: pickWelcomeLine(user.key, alias),
   };
 }

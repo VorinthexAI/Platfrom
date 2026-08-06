@@ -23,7 +23,7 @@ import {
 } from '@/lib/db/visitors.node';
 import { newId } from '@/lib/ids';
 import { redisConnection } from '@/lib/redis';
-import { getRootOrganizationId, trackPlatformEvent } from '@/platform/events';
+import { getRootOrganizationId } from '@/lib/db/organizations.node';
 import { getUserId } from './security';
 import { parseJson, strictObject } from './validation';
 
@@ -100,15 +100,6 @@ async function publishPresence(event: Record<string, unknown>) {
   }
 }
 
-export function buildPresenceEventData(input:
-  | { presenceType: 'user'; source: PresenceSource; userId: string }
-  | { presenceType: 'visitor'; source: PresenceSource; visitorId: string }
-) {
-  return input.presenceType === 'user'
-    ? { presence_type: 'user', source: input.source, user_id: input.userId }
-    : { presence_type: 'visitor', source: input.source, visitor_id: input.visitorId };
-}
-
 let sweeperStarted = false;
 function ensureSweeper() {
   if (sweeperStarted) return;
@@ -153,13 +144,6 @@ async function sweepOpenSessions(
     if (alive) continue;
     const session = open[index]!;
     await markDisconnected(session.key, now);
-    trackPlatformEvent({
-      slug: 'presence.session_expired',
-      userId: session.userId ?? null,
-      data: session.userId
-        ? buildPresenceEventData({ presenceType: 'user', source: session.source ?? 'web', userId: session.userId })
-        : buildPresenceEventData({ presenceType: 'visitor', source: session.source ?? 'web', visitorId: session.visitorId ?? '' }),
-    });
     await publishPresence({ type: 'leave', session: session.sessionKey, at: now });
   }
 }
@@ -238,11 +222,6 @@ export async function joinPresence(c: Context) {
         createdAt: now,
         updatedAt: now,
       });
-      trackPlatformEvent({
-        slug: 'presence.session_joined',
-        userId: user.key,
-        data: buildPresenceEventData({ presenceType: 'user', source: body.source, userId: user.key }),
-      });
       await publishPresence({ type: 'join', session: sessionKey, alias, position, at: now, t: 'user' });
       ensureSubscriber();
       ensureSweeper();
@@ -271,10 +250,6 @@ export async function joinPresence(c: Context) {
     disconnectedAt: null,
     createdAt: now,
     updatedAt: now,
-  });
-  trackPlatformEvent({
-    slug: 'presence.session_joined',
-    data: buildPresenceEventData({ presenceType: 'visitor', source: body.source, visitorId: visitor.key }),
   });
   await publishPresence({ type: 'join', session: sessionKey, alias: visitor.alias, position, at: now, t: 'visitor' });
   ensureSubscriber();
@@ -326,13 +301,6 @@ export async function leavePresence(c: Context) {
       // sweeper reconciles anything that lands in the wrong collection.
       if (record.t === 'user') await markUserSessionDisconnected(record.k, now);
       else await markVisitorSessionDisconnected(record.k, now);
-      trackPlatformEvent({
-        slug: 'presence.session_left',
-        userId: record.t === 'user' ? record.v : null,
-        data: record.t === 'user'
-          ? buildPresenceEventData({ presenceType: 'user', source: record.s ?? body.source, userId: record.v })
-          : buildPresenceEventData({ presenceType: 'visitor', source: record.s ?? body.source, visitorId: record.v }),
-      });
     } catch {
       // Corrupt record — the sweeper reconciles the ledger.
     }

@@ -6,7 +6,6 @@ import {
 } from '@/lib/db/auth-challenges.node';
 import { decryptSecret, encryptSecret, randomToken, sha256, timingSafeEqual } from '@/lib/crypto';
 import { newId } from '@/lib/ids';
-import { adoptExplorerFragments } from '@/lib/db/intelligence-fragments.node';
 import { verify as verifyTotpToken } from '@otplib/totp';
 import { base32 } from '@otplib/plugin-base32-scure';
 import { crypto as otpCrypto } from '@otplib/plugin-crypto-noble';
@@ -24,9 +23,7 @@ import {
   type UserOrganization,
 } from '@/lib/db/user-organization.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
-import { trackPlatformEvent } from '@/platform/events';
 import { approveHandoff, createHandoffSecret, HANDOFF_CLAIM_WINDOW_MS } from './auth-handoff';
-import { notifyCountersDirty } from './live-bus';
 
 const EMAIL_LINK_TTL_MS = 15 * 60 * 1000;
 const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
@@ -85,7 +82,6 @@ export type MagicLinkValidationResult =
     identity: AuthIdentity;
     alias: string;
     aliasSlug: string | null;
-    waitlistNumber: number | null;
     welcomeLine: string;
   } & SessionTokens);
 
@@ -353,7 +349,7 @@ export async function createChallengeTokenHash(rawToken: string) {
 
 export async function createChallenge(
   identityKey: string,
-  kind: 'email' | 'totp' | 'waitlist',
+  kind: 'email' | 'totp',
   ttlMs: number,
   identityType: ChallengeIdentityType = 'user',
   options: { withHandoff?: boolean } = {},
@@ -397,7 +393,7 @@ export async function createTotpChallengeForIdentity(
   };
 }
 
-export async function consumeChallenge(tokenHash: string, kind: 'email' | 'totp' | 'waitlist') {
+export async function consumeChallenge(tokenHash: string, kind: 'email' | 'totp') {
   const storedTokenHash = await sha256(tokenHash);
   const now = new Date();
   const challenge = await getAuthChallengeByTokenHash(storedTokenHash);
@@ -606,23 +602,12 @@ export async function completeOAuthSignIn(input: {
   });
   const tokens = await issueUserTokens(user);
   const alias = user.alias ?? generateAlias(user.key);
-  trackPlatformEvent({
-    slug: 'auth.magic_link_authenticated',
-    userId: user.key,
-    data: {
-      user_id: user.key,
-      email_hash: user.emailHash,
-      provider: input.provider,
-      via: 'oauth',
-    },
-  });
   return {
     status: 'authenticated' as const,
     identity: { key: user.key, identityType: 'user' as const },
     ...tokens,
     alias,
     aliasSlug: user.alias_slug,
-    waitlistNumber: user.waitlistNumber,
     welcomeLine: pickWelcomeLine(user.key, alias),
   };
 }
@@ -725,16 +710,6 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
     // MFA *requirement* itself is organization.mfa_enabled (true on the
     // root organization), checked below for every other organization.
     if (identity.organizationIsRoot) {
-      trackPlatformEvent({
-        slug: 'platform.sign_in_link_requested',
-        userId: identity.key,
-        data: {
-          user_id: identity.key,
-          identity_type: identity.type,
-          email_hash: identity.emailHash,
-          delivery: 'founders_gate_required',
-        },
-      });
       return {
         allowed: false as const,
         foundersGateRequired: true as const,
@@ -743,17 +718,6 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
     if (identity.organizationMfaEnabled) {
       const challenge = await createTotpChallengeForIdentity(identity.type, identity.key);
       if (!challenge) return { allowed: false as const };
-      trackPlatformEvent({
-        slug: 'platform.sign_in_link_requested',
-        userId: identity.key,
-        data: {
-          user_id: identity.key,
-          identity_type: identity.type,
-          email_hash: identity.emailHash,
-          mfa_enabled: true,
-          delivery: 'direct_challenge',
-        },
-      });
       return {
         allowed: true as const,
         organizationMfaRequired: true as const,
@@ -774,16 +738,6 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
       mfaEnabled: false,
       expiresAt: challenge.expiresAt,
     });
-    trackPlatformEvent({
-      slug: 'platform.sign_in_link_requested',
-      userId: identity.key,
-      data: {
-        user_id: identity.key,
-        identity_type: identity.type,
-        email_hash: identity.emailHash,
-        mfa_enabled: false,
-      },
-    });
     return {
       allowed: true as const,
       expiresAt: challenge.expiresAt,
@@ -792,9 +746,7 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
     };
   }
 
-  // Waitlist users — verified or not — sign in with the same magic-link
-  // email; they get a direct session (no TOTP) that lands in their public
-  // galaxy, and signing in doubles as email verification.
+  // Users without an organization membership sign in directly without TOTP.
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
   const user = existingUser ?? await upsertUserByEmail(normalized, {
     name: defaultNameFromEmail(normalized),
@@ -805,11 +757,6 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
   const challenge = await createChallenge(user.key, 'email', EMAIL_LINK_TTL_MS, 'user', { withHandoff: true });
   const magicLink = buildMagicLink(challenge.tokenHash, 'user');
   await deliverSignInEmail({ email: normalized, magicLink, expiresAt: challenge.expiresAt });
-  trackPlatformEvent({
-    slug: 'auth.signin_email_sent',
-    userId: user.key,
-    data: { identity_type: 'user', user_id: user.key, email_hash: user.emailHash },
-  });
   return {
     allowed: true as const,
     expiresAt: challenge.expiresAt,
@@ -837,16 +784,6 @@ export async function requestFoundersGate(email: string) {
   if (!identity) return { allowed: false as const };
   const challenge = await createTotpChallengeForIdentity(identity.type, identity.key);
   if (!challenge) return { allowed: false as const };
-  trackPlatformEvent({
-    slug: 'platform.sign_in_link_requested',
-    userId: identity.key,
-    data: {
-      user_id: identity.key,
-      identity_type: identity.type,
-      email_hash: identity.emailHash,
-      delivery: 'founders_gate',
-    },
-  });
   return {
     allowed: true as const,
     status: challenge.status,
@@ -860,7 +797,7 @@ export async function requestFoundersGate(email: string) {
   };
 }
 
-export async function validateMagicLink(token: string, explorerId?: string): Promise<MagicLinkValidationResult | null> {
+export async function validateMagicLink(token: string): Promise<MagicLinkValidationResult | null> {
   const emailChallenge = await consumeChallenge(token, 'email');
   if (!emailChallenge) return null;
 
@@ -872,41 +809,18 @@ export async function validateMagicLink(token: string, explorerId?: string): Pro
     await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
     const tokens = await issueUserTokens(user);
     // Signing in proves inbox ownership — it verifies the email too.
-    const wasUnverified = !user.isVerified;
     await updateUser(user.key, {
       isVerified: true,
       lastLoginAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    // Fragments collected anonymously (as this browser's explorerId) since
-    // the last adoption — at join, or never, for a returning explorer who
-    // kept exploring signed out — merge into the account on every sign in,
-    // not just the first one.
-    if (explorerId) {
-      const adopted = await adoptExplorerFragments(explorerId, user.key);
-      if (adopted > 0) notifyCountersDirty();
-    }
     const alias = user.alias ?? generateAlias(user.key);
-    trackPlatformEvent({
-      slug: 'auth.magic_link_authenticated',
-      userId: user.key,
-      data: { user_id: user.key, email_hash: user.emailHash },
-    });
-    if (wasUnverified) {
-      trackPlatformEvent({
-        slug: 'waitlist.email_verified',
-        userId: user.key,
-        data: { user_id: user.key, email_hash: user.emailHash, via: 'signin' },
-      });
-      notifyCountersDirty();
-    }
     return {
       status: 'authenticated',
       identity: { key: user.key, identityType: 'user' },
       ...tokens,
       alias,
       aliasSlug: user.alias_slug,
-      waitlistNumber: user.waitlistNumber,
       welcomeLine: pickWelcomeLine(user.key, alias),
     };
   }
@@ -921,18 +835,12 @@ export async function validateMagicLink(token: string, explorerId?: string): Pro
     lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  trackPlatformEvent({
-    slug: 'auth.magic_link_authenticated',
-    userId: auth.key,
-    data: { user_id: auth.key, email_hash: auth.emailHash, identity_type: auth.type },
-  });
   return {
     status: 'authenticated',
     identity: { key: auth.key, identityType: auth.type },
     ...(await issueTokens(auth)),
     alias: auth.name ?? defaultNameFromEmail(auth.email) ?? auth.email,
     aliasSlug: null,
-    waitlistNumber: null,
     welcomeLine: `Welcome back${auth.name ? `, ${auth.name}` : ''}.`,
   };
 }
@@ -962,11 +870,6 @@ export async function startTotpSetup(challengeToken: string) {
   });
 
   const otpauthUrl = generateURI({ issuer: ISSUER, label: identity.email, secret });
-  trackPlatformEvent({
-    slug: 'platform.mfa_setup_started',
-    userId: identity.key,
-    data: { user_id: identity.key, email_hash: identity.emailHash },
-  });
   return {
     setupChallengeToken: (await createChallenge(identity.key, 'totp', TOTP_CHALLENGE_TTL_MS, identity.type)).tokenHash,
     secret,
@@ -1060,12 +963,6 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
     lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  trackPlatformEvent({
-    slug: 'platform.mfa_enabled',
-    userId: auth.key,
-    data: { user_id: auth.key, email_hash: auth.emailHash },
-  });
-
   return {
     ok: true as const,
     identity: { key: auth.key, identityType: auth.type },
@@ -1119,12 +1016,6 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
     lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  trackPlatformEvent({
-    slug: 'platform.mfa_verified',
-    userId: auth.key,
-    data: { user_id: auth.key, email_hash: auth.emailHash },
-  });
-
   return {
     identity: { key: auth.key, identityType: auth.type },
     name: auth.name,

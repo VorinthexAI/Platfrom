@@ -19,7 +19,7 @@ import { archiveToolInputSchemas, archiveToolOutputSchemas, isArchiveToolName } 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-json' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
-  type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup' | 'audit';
+  type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
   tool: ArchiveToolName;
   invocationKey: string;
@@ -73,7 +73,6 @@ export interface ArchiveToolDependencies extends RouterDependencies {
   runAction?: (action: Action, input: Record<string, unknown>, context: DomainToolContext) => Promise<ArchiveActionResult>;
   embed?: (text: string) => Promise<number[]>;
   observer?: (event: SafeEvent) => void | Promise<void>;
-  audit?: (event: { tool: ArchiveToolName; success: boolean; organizationKey: string; scopeKey: string; actorKey: string; resourceKeys: string[]; code?: string }) => Promise<void>;
   clock?: () => Date;
   id?: () => string;
   random?: (size: number) => Uint8Array;
@@ -264,19 +263,17 @@ interface RuntimeDefaults {
   embed: (text: string) => Promise<number[]>;
   runAction: NonNullable<ArchiveToolDependencies['runAction']>;
   idempotency: ArchiveIdempotencyStore;
-  audit: NonNullable<ArchiveToolDependencies['audit']>;
   generateExport: typeof generateDocumentExport;
 }
 
 async function defaults(deps: ArchiveToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
-  const [{ newId }, storage, processing, embeddings, router, ledger, events, exports] = await Promise.all([
+  const [{ newId }, storage, processing, embeddings, router, ledger, exports] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
     import('@/lib/openai-embeddings'),
     import('@/lib/ai/router'),
     import('@/lib/db/archive-idempotency.node'),
-    import('@/lib/db/events.node'),
     import('@/lib/ai/document-processing/exports'),
   ]);
   const embedding = deps.embed ? (text: string) => deps.embed!(text) : (text: string) => embeddings.embedText({ text });
@@ -297,16 +294,6 @@ async function defaults(deps: ArchiveToolDependencies, context: DomainToolContex
       complete: ledger.completeArchiveIdempotency,
       release: ledger.releaseArchiveIdempotency,
     },
-    audit: deps.audit ?? (async (audit) => {
-      await events.insertEvent({
-        key: newId(),
-        scopeId: audit.scopeKey,
-        userId: audit.actorKey,
-        slug: `archive.${audit.tool}.${audit.success ? 'succeeded' : 'failed'}`,
-        data: { resourceKeys: audit.resourceKeys, ...(audit.code ? { code: audit.code } : {}) },
-        createdAt: new Date().toISOString(),
-      });
-    }),
     generateExport: deps.generateExport ?? exports.generateDocumentExport,
   };
 }
@@ -677,11 +664,10 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
     if (claim.status === 'pending') throw new ArchiveError('ARCHIVE_CONFLICT', 'An invocation with this idempotency key is still pending.', tool, { action: 'idempotency', retryable: true });
     ownsIdempotencyClaim = true;
   }
-  let resourceKeys: string[] = []; let result: unknown;
+  let result: unknown;
   try {
     if (tool === 'folder.create') {
       const creates = input.folders.map((item: any) => ({ ...item, key: item.key ?? d.id() }));
-      resourceKeys = creates.map((item: any) => item.key);
       result = await batch(tool, creates.map((item: any) => ({
         key: item.key,
         run: async () => {
@@ -707,7 +693,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), false, repo);
     } else if (tool === 'folder.find') {
-      resourceKeys = input.folderKeys;
       result = await batch(tool, input.folderKeys.map((key: string) => ({
         key,
         run: async () => {
@@ -747,7 +732,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
     } else if (['folder.update', 'folder.rename'].includes(tool)) {
       const items = tool === 'folder.update' ? input.updates : input.renames;
       if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic folder metadata updates are unavailable because embedding is an external side effect.', tool, 'embed');
-      resourceKeys = items.map((item: any) => item.folderKey);
       result = await batch(tool, items.map((item: any) => ({
         key: item.folderKey,
         preflight: async () => { await folder(item.folderKey, 'moderator', false); },
@@ -766,7 +750,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'folder.move') {
-      resourceKeys = input.moves.map((item: any) => item.folderKey);
       result = await batch(tool, input.moves.map((item: any) => ({
         key: item.folderKey,
         preflight: async () => {
@@ -788,7 +771,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       })), input.atomic, repo);
     } else if (tool === 'folder.archive' || tool === 'folder.restore') {
       const restore = tool === 'folder.restore';
-      resourceKeys = input.folderKeys;
       const lifecycleItems = input.folderKeys.map((key: string) => ({
         key,
         preflight: async () => {
@@ -826,7 +808,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       }));
       result = await batch(tool, lifecycleItems, input.atomic, repo);
     } else if (tool === 'folder.delete') {
-      resourceKeys = input.folderKeys;
       result = await batch(tool, input.folderKeys.map((key: string) => ({
         key,
         preflight: async () => {
@@ -937,7 +918,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'document.processing') {
-      resourceKeys = [input.folderKey];
       await roleFor(input.scopeKey, 'moderator');
       const parent = await folder(input.folderKey, 'moderator', false);
       if (parent.scopeKey !== input.scopeKey) fail('ARCHIVE_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', parent.key);
@@ -957,7 +937,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       });
       result = { document: documentView(processed.document) };
     } else if (tool === 'document.find') {
-      resourceKeys = input.documentKeys;
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
@@ -994,7 +973,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         ...(offset + limit < values.length ? { cursor: Buffer.from(String(offset + limit)).toString('base64url') } : {}),
       };
     } else if (tool === 'document.read') {
-      resourceKeys = input.documentKeys;
       if (input.atomic && input.mode === 'audio') fail('ARCHIVE_CONFLICT', 'Atomic audio generation is impossible because speech is an external side effect.', tool, 'speak');
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
@@ -1057,7 +1035,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       })), input.atomic, repo);
     } else if (tool === 'document.update') {
       if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic document updates are unavailable because transformation and embedding actions are external side effects.', tool, 'document-embed');
-      resourceKeys = input.updates.map((item: any) => item.documentKey);
       const updates = input.updates.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
@@ -1090,7 +1067,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       result = await batch(tool, updates, input.atomic, repo);
     } else if (tool === 'document.rename') {
       if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic document rename is unavailable because embedding is an external side effect.', tool, 'document-embed');
-      resourceKeys = input.renames.map((item: any) => item.documentKey);
       result = await batch(tool, input.renames.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
@@ -1103,7 +1079,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'document.move') {
-      resourceKeys = input.moves.map((item: any) => item.documentKey);
       result = await batch(tool, input.moves.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => {
@@ -1119,7 +1094,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       })), input.atomic, repo);
     } else if (tool === 'document.copy') {
       if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic copy is unavailable because storage copy cannot be rolled back transactionally.', tool, 'storage');
-      resourceKeys = input.copies.map((item: any) => item.documentKey);
       result = await batch(tool, input.copies.map((item: any) => ({
         key: item.documentKey,
         run: async () => {
@@ -1202,7 +1176,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       })), false, repo);
     } else if (tool === 'document.archive' || tool === 'document.restore') {
       const restore = tool === 'document.restore';
-      resourceKeys = input.documentKeys;
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => {
@@ -1225,7 +1198,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       })), input.atomic, repo);
     } else if (tool === 'document.delete') {
       if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic deletion is unavailable because storage deletion cannot be rolled back.', tool, 'storage');
-      resourceKeys = input.documentKeys;
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => {
@@ -1283,7 +1255,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       const items = tool === 'document.download'
         ? input.documentKeys.map((documentKey: string) => ({ documentKey, format: input.format }))
         : input.exports;
-      resourceKeys = items.map((item: any) => item.documentKey);
       const byteBudget = Math.min(Math.max(dependencies.maxDownloadBytes ?? 25_000_000, 1), 100_000_000);
       let downloadedBytes = 0;
       const fileOperations = items.map((item: any) => ({
@@ -1326,7 +1297,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       } else result = await batch(tool, fileOperations, false, repo);
     } else if (tool === 'document.share') {
       if (input.atomic) fail('ARCHIVE_CONFLICT', 'Atomic share creation is unavailable because secure randomness cannot be rolled back.', tool, 'insert');
-      resourceKeys = input.shares.map((item: any) => item.documentKey);
       result = await batch(tool, input.shares.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => {
@@ -1353,7 +1323,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       })), false, repo);
     } else if (tool === 'document.unshare') {
       const selectors: string[] = input.shareKeys ?? input.documentKeys;
-      resourceKeys = selectors;
       result = await batch(tool, selectors.map((key: string) => ({
         key,
         preflight: async () => {
@@ -1384,7 +1353,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'document.list-shares') {
-      resourceKeys = input.documentKeys;
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
@@ -1394,7 +1362,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), false, repo);
     } else if (tool === 'document.create-version') {
-      resourceKeys = input.documentKeys;
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         preflight: async () => { await document(key, 'moderator', false); },
@@ -1413,7 +1380,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'document.find-version') {
-      resourceKeys = input.versionKeys;
       result = await batch(tool, input.versionKeys.map((key: string) => ({
         key,
         run: async () => {
@@ -1425,7 +1391,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), false, repo);
     } else if (tool === 'document.list-versions') {
-      resourceKeys = input.documentKeys;
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
         run: async () => {
@@ -1441,7 +1406,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), false, repo);
     } else if (tool === 'document.restore-version') {
-      resourceKeys = input.restores.map((item: any) => item.documentKey);
       result = await batch(tool, input.restores.map((item: any) => ({
         key: item.documentKey,
         preflight: async () => {
@@ -1482,7 +1446,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         },
       })), input.atomic, repo);
     } else if (tool === 'document.delete-version') {
-      resourceKeys = input.versionKeys;
       result = await batch(tool, input.versionKeys.map((key: string) => ({
         key,
         preflight: async () => {
@@ -1532,7 +1495,6 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           mode: tool === 'document.translate' ? input.mode : input.persist ? 'copy' : 'preview',
         }));
       if (input.atomic && items.some((item: any) => item.mode !== 'preview')) fail('ARCHIVE_CONFLICT', 'Atomic persisted AI transformations are unavailable because generation and storage cannot be rolled back.', tool, 'reason');
-      resourceKeys = items.map((item: any) => item.documentKey);
 
       if (tool === 'document.summarize' && input.combine) {
         const sourceDocuments = [];
@@ -1683,13 +1645,11 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
     const parsed = archiveToolOutputSchemas[tool].parse(result) as ArchiveToolOutput<Name>;
     executionCompleted = true;
     if (idempotencyIdentity && requestHash && ownsIdempotencyClaim) await d.idempotency.complete(idempotencyIdentity, requestHash, invocationKey, parsed, now());
-    if (mutation) { const success = !(parsed && typeof parsed === 'object' && 'summary' in parsed && (parsed as { summary?: { failed?: number } }).summary?.failed); try { await d.audit({ tool, success, organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey, actorKey: member.user.key, resourceKeys: resourceKeys.filter((key) => key !== 'new'), ...(!success ? { code: 'ARCHIVE_BATCH_PARTIAL_FAILURE' } : {}) }); } catch { await event('audit', 'failed'); } }
     await event('action', 'succeeded', 'tool', undefined, context.runtimeScopeKey, Math.round(performance.now() - invocationStarted));
     return parsed;
   } catch (error) {
     const mapped = mappedError(error, tool);
     if (idempotencyIdentity && requestHash && ownsIdempotencyClaim && !executionCompleted) await d.idempotency.release(idempotencyIdentity, requestHash, invocationKey).catch(() => undefined);
-    if (mutation) { try { await d.audit({ tool, success: false, organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey, actorKey: member.user.key, resourceKeys: resourceKeys.filter((key) => key !== 'new'), code: mapped.code }); } catch { await event('audit', 'failed'); } }
     await event('action', 'failed', 'tool', mapped.resourceKey, context.runtimeScopeKey, Math.round(performance.now() - invocationStarted));
     throw mapped;
   }

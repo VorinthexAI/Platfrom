@@ -4,10 +4,10 @@ import type { OrganizationProvider } from './schema';
 export interface OrganizationProviderRepository {
   listProviderKeys(organizationKey: string): Promise<readonly string[]>;
   hasProvider(organizationKey: string, providerKey: string): Promise<boolean>;
-  addProvider(organizationKey: string, provider: Pick<OrganizationProvider, 'providerKey' | 'name' | 'description'>, scopeKey?: string): Promise<OrganizationProvider>;
+  addProvider(organizationKey: string, provider: Pick<OrganizationProvider, 'providerKey' | 'name' | 'description'>): Promise<OrganizationProvider>;
   upsertProvider(organizationKey: string, provider: Pick<OrganizationProvider, 'providerKey' | 'name' | 'description'>, scopeKey?: string): Promise<OrganizationProvider>;
-  updateProvider(organizationKey: string, providerKey: string, patch: Pick<OrganizationProvider, 'name' | 'description'>, scopeKey?: string): Promise<OrganizationProvider>;
-  recordUsage(organizationKey: string, providerKey: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }, scopeKey?: string): Promise<OrganizationProvider>;
+  updateProvider(organizationKey: string, providerKey: string, patch: Pick<OrganizationProvider, 'name' | 'description'>): Promise<OrganizationProvider>;
+  recordUsage(organizationKey: string, providerKey: string, usage: { inputTokens: number; outputTokens: number; totalTokens: number }): Promise<OrganizationProvider>;
   removeProvider(organizationKey: string, providerKey: string): Promise<void>;
 }
 export class DuplicateOrganizationProviderError extends AiError {

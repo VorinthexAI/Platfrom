@@ -50,7 +50,7 @@ describe('Chorus orchestrator chat flow', () => {
     } as unknown as CommunicationRepository;
     const retrievalQueries: Array<{ query: string; bindVars: Record<string, unknown> }> = [];
     const novaInputs: unknown[] = [];
-    const service = new ChorusService(repository, () => now, async () => {});
+    const service = new ChorusService(repository, () => now);
     const handlers = createChorusHandlers({
       service,
       resolveActor: async () => ({ organizationKey, membershipKey }),

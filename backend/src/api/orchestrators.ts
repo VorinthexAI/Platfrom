@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { streamSSE } from 'hono/streaming';
 import { getOrchestratorById, getOrchestratorByName, type Orchestrator } from '@/lib/db/orchestrators.node';
 import { sanitizedAgentMessageSchema, streamTool } from '@/lib/ai/tools';
-import { trackPlatformEvent } from '@/platform/events';
 import { getAuthIdentity } from './security';
 import { parseJson, parseQuery, strictObject } from './validation';
 
@@ -40,7 +39,6 @@ export async function postOrchestratorChat(c: Context) {
   const message = sanitizedAgentMessageSchema.parse(body.message);
   const orchestrator = await resolveChatOrchestrator(query);
   if (!orchestrator) return c.json({ error: 'orchestrator not found' }, 404);
-  trackPlatformEvent({ slug: 'orchestrator.chat.started', data: { orchestratorId: orchestrator.key } });
   const stream = streamTool('chat', orchestrator.skill, { message }, { signal: c.req.raw.signal });
   return streamSSE(c, async (sse) => {
     await sse.writeSSE({ event: 'start', data: JSON.stringify({ orchestrator_id: orchestrator.key }) });
@@ -48,13 +46,11 @@ export async function postOrchestratorChat(c: Context) {
       for await (const chunk of stream) {
         if (chunk.type === 'text-delta') await sse.writeSSE({ event: 'token', data: JSON.stringify({ text: chunk.text }) });
         if (chunk.type === 'done') {
-          trackPlatformEvent({ slug: 'orchestrator.chat.completed', data: { orchestratorId: orchestrator.key } });
           await sse.writeSSE({ event: 'done', data: '{}' });
         }
       }
     } catch (error) {
       console.error('orchestrator chat stream failed', { orchestratorId: orchestrator.key, error });
-      trackPlatformEvent({ slug: 'orchestrator.chat.failed', data: { orchestratorId: orchestrator.key } });
       await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'orchestrator stream failed' }) });
     }
   });

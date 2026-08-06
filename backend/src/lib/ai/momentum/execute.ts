@@ -13,15 +13,6 @@ const WRITE_ROLES = ['owner', 'admin', 'moderator'] as const;
 const DELETE_ROLES = ['owner'] as const;
 
 export type MomentumRole = (typeof READ_ROLES)[number];
-export interface MomentumAuditData {
-  scopeKey?: string;
-  projectKey?: string;
-  milestoneKey?: string;
-  taskKey?: string;
-  archiveFolderKey?: string;
-  success?: boolean;
-}
-
 export interface MomentumReasonInput {
   action: 'summarize' | 'translate' | 'rewrite';
   task: Pick<Task, 'key' | 'title' | 'description'>;
@@ -33,10 +24,6 @@ export interface MomentumAuthorizationDependency {
   authorize(scopeKey: string, allowedRoles: readonly MomentumRole[]): void | Promise<void>;
 }
 
-export interface MomentumAuditDependency {
-  audit(action: MomentumActionSlug, data: MomentumAuditData): void | Promise<void>;
-}
-
 export interface MomentumEmbeddingDependency {
   generateEmbedding?: (text: string) => Promise<readonly number[]>;
 }
@@ -45,7 +32,7 @@ export interface MomentumReasonDependency {
   reason?: (input: MomentumReasonInput) => Promise<string>;
 }
 
-export interface MomentumExecutionDependencies extends MomentumAuthorizationDependency, MomentumAuditDependency, MomentumEmbeddingDependency, MomentumReasonDependency {
+export interface MomentumExecutionDependencies extends MomentumAuthorizationDependency, MomentumEmbeddingDependency, MomentumReasonDependency {
   repository?: MomentumRepository;
   createKey?: () => string;
   now?: () => string;
@@ -79,8 +66,10 @@ export class MomentumExecutionError extends Error {
   }
 }
 
+type MomentumResourceKeys = Partial<Record<'scopeKey' | 'projectKey' | 'milestoneKey' | 'taskKey' | 'archiveFolderKey', string>>;
+
 type Prepared<T> = {
-  keys: MomentumAuditData;
+  keys: MomentumResourceKeys;
   scopeKeys?: string[];
   run(repository: MomentumRepository): Promise<T>;
 };
@@ -142,8 +131,8 @@ function publicNode<T extends { embedding: number[] }>(node: T): Omit<T, 'embedd
   return view;
 }
 
-function safeKeys(item: Record<string, unknown>): MomentumAuditData {
-  const output: MomentumAuditData = {};
+function safeKeys(item: Record<string, unknown>): MomentumResourceKeys {
+  const output: MomentumResourceKeys = {};
   for (const key of ['scopeKey', 'projectKey', 'milestoneKey', 'taskKey', 'archiveFolderKey'] as const) {
     if (typeof item[key] === 'string') output[key] = item[key];
   }
@@ -200,16 +189,10 @@ async function assertTransactionState(action: MomentumActionSlug, prepared: Prep
   }
 }
 
-async function safeAudit(audit: MomentumExecutionDependencies['audit'], action: MomentumActionSlug, data: MomentumAuditData): Promise<void> {
-  try { await audit(action, data); }
-  catch (error) { console.warn('Momentum audit event failed', { action, error: error instanceof Error ? error.message : String(error) }); }
-}
-
 async function executeBatch<T>(
   action: MomentumActionSlug,
   input: BatchInput,
   repository: MomentumRepository,
-  audit: MomentumExecutionDependencies['audit'],
   prepare: (item: any, index: number) => Promise<Prepared<T>>,
 ): Promise<MomentumToolResult> {
   if (input.atomic) {
@@ -221,7 +204,6 @@ async function executeBatch<T>(
     if (new Set(targets).size !== targets.length) {
       const error = new MomentumExecutionError('atomic_duplicate_target', 'An atomic batch may target each existing resource only once.');
       const results = input.items.map((_, index) => failure(index, error));
-      for (let index = 0; index < results.length; index += 1) await safeAudit(audit, action, { ...safeKeys(input.items[index] as Record<string, unknown>), success: false });
       return { action, results };
     }
     const prepared: Prepared<T>[] = [];
@@ -236,7 +218,6 @@ async function executeBatch<T>(
     if (preparationFailures.length) {
       const first = preparationFailures[0]!.error;
       const failed = input.items.map((_, index) => preparationFailures.find((item) => item.index === index) ?? failure(index, new MomentumExecutionError('atomic_prevalidation_failed', `Atomic batch was not written because another item failed prevalidation: ${first.message}`)));
-      for (let index = 0; index < failed.length; index += 1) await safeAudit(audit, action, { ...safeKeys(input.items[index] as Record<string, unknown>), success: false });
       return { action, results: failed };
     }
     try {
@@ -248,22 +229,18 @@ async function executeBatch<T>(
         return output;
       });
       const results = values.map((value, index): MomentumItemSuccess<T> => ({ index, success: true, value }));
-      for (let index = 0; index < results.length; index += 1) await safeAudit(audit, action, { ...prepared[index]!.keys, success: true });
       return { action, results };
     } catch (error) {
       const results = input.items.map((_, index) => failure(index, error));
-      for (let index = 0; index < results.length; index += 1) await safeAudit(audit, action, { ...prepared[index]!.keys, success: false });
       return { action, results };
     }
   }
 
   const results: MomentumItemResult<T>[] = [];
   for (let index = 0; index < input.items.length; index += 1) {
-    let keys = safeKeys(input.items[index] as Record<string, unknown>);
     let outcome: MomentumItemResult<T>;
     try {
       const prepared = await prepare(input.items[index], index);
-      keys = prepared.keys;
       const value = await repository.withAtomic(async (transaction) => {
         const scopeKeys = prepared.scopeKeys ?? (prepared.keys.scopeKey ? [prepared.keys.scopeKey] : []);
         if (!await transaction.areScopesActive(scopeKeys)) throw new MomentumExecutionError('scope_archived', 'The scope was archived before the transaction committed.');
@@ -275,7 +252,6 @@ async function executeBatch<T>(
       outcome = failure(index, error);
     }
     results.push(outcome);
-    await safeAudit(audit, action, { ...keys, success: outcome.success });
   }
   return { action, results };
 }
@@ -289,7 +265,6 @@ export async function executeMomentumTool(
   const input = momentumToolInputSchemas[action].parse(rawInput) as any;
   const repository = dependencies.repository ?? getDefaultMomentumRepository();
   const authorize = dependencies.authorize;
-  const audit = dependencies.audit;
   const key = dependencies.createKey ?? newId;
   const now = dependencies.now ?? (() => new Date().toISOString());
   const generateEmbedding = dependencies.generateEmbedding ?? (async (text: string) => embedText({ text }));
@@ -357,7 +332,7 @@ export async function executeMomentumTool(
   });
   const undefinedWhenNull = (value: unknown) => value === null ? undefined : value;
 
-  if (action === 'project.create') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'project.create') return executeBatch(action, input, repository, async (item) => {
     await authorize(item.scopeKey, WRITE_ROLES);
     const projectKey = key();
     const archiveFolderKey = key();
@@ -369,16 +344,15 @@ export async function executeMomentumTool(
 
   if (action === 'project.find') {
     const items = [];
-    for (const projectKey of input.projectKeys) { const project = await projectContext(projectKey, READ_ROLES, false); items.push(publicNode(project)); await safeAudit(audit, action, { scopeKey: project.scopeKey, projectKey, success: true }); }
+    for (const projectKey of input.projectKeys) { const project = await projectContext(projectKey, READ_ROLES, false); items.push(publicNode(project)); }
     return { action, items };
   }
   if (action === 'project.list') {
     await authorize(input.scopeKey, READ_ROLES);
     const items = (await repository.listProjects(input.scopeKey, { includeDeleted: input.includeArchived })).map(publicNode);
-    await safeAudit(audit, action, { scopeKey: input.scopeKey, success: true });
     return { action, items };
   }
-  if (action === 'project.update' || action === 'project.rename') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'project.update' || action === 'project.rename') return executeBatch(action, input, repository, async (item) => {
     const project = await projectContext(item.projectKey);
     const patch: Partial<Project> = action === 'project.rename' ? { name: item.name } : {};
     if (action === 'project.update' && item.name !== undefined) patch.name = item.name;
@@ -386,7 +360,7 @@ export async function executeMomentumTool(
     await embeddingFor({ ...project, ...patch });
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, archiveFolderKey: project.archiveFolderKey }, run: async (source) => { const updated = await updateProject(source, project, patch); await updateFolder(source, project, patch); return updated; } };
   });
-  if (action === 'project.move') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'project.move') return executeBatch(action, input, repository, async (item) => {
     const project = await projectContext(item.projectKey);
     await authorize(item.scopeKey, WRITE_ROLES);
     return { keys: { scopeKey: item.scopeKey, projectKey: project.key, archiveFolderKey: project.archiveFolderKey }, scopeKeys: [project.scopeKey, item.scopeKey], run: async (source) => {
@@ -398,7 +372,7 @@ export async function executeMomentumTool(
       return updated;
     } };
   });
-  if (action === 'project.archive' || action === 'project.restore') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'project.archive' || action === 'project.restore') return executeBatch(action, input, repository, async (item) => {
     const restoring = action === 'project.restore';
     const project = await projectContext(item.projectKey, WRITE_ROLES, false);
     restoring ? requireArchived(project, 'project') : requireActive(project, 'project');
@@ -409,7 +383,7 @@ export async function executeMomentumTool(
       return updated;
     } };
   });
-  if (action === 'project.delete') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'project.delete') return executeBatch(action, input, repository, async (item) => {
     const project = await projectContext(item.projectKey, DELETE_ROLES, false);
     requireArchived(project, 'project');
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, archiveFolderKey: project.archiveFolderKey }, run: async (source) => {
@@ -424,7 +398,7 @@ export async function executeMomentumTool(
     } };
   });
 
-  if (action === 'milestone.create') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'milestone.create') return executeBatch(action, input, repository, async (item) => {
     const project = await projectContext(item.projectKey);
     const timestamp = now();
     const milestone: Milestone = { key: key(), scopeKey: project.scopeKey, projectKey: project.key, name: item.name, ...(item.description ? { description: item.description } : {}), status: item.status, ...(item.startDate ? { startDate: item.startDate } : {}), ...(item.endDate ? { endDate: item.endDate } : {}), order: item.order, embedding: await embeddingFor(item), deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
@@ -432,16 +406,15 @@ export async function executeMomentumTool(
   });
   if (action === 'milestone.find') {
     const items = [];
-    for (const milestoneKey of input.milestoneKeys) { const context = await milestoneContext(milestoneKey, READ_ROLES, false); items.push(publicNode(context.milestone)); await safeAudit(audit, action, { scopeKey: context.project.scopeKey, projectKey: context.project.key, milestoneKey, success: true }); }
+    for (const milestoneKey of input.milestoneKeys) { const context = await milestoneContext(milestoneKey, READ_ROLES, false); items.push(publicNode(context.milestone)); }
     return { action, items };
   }
   if (action === 'milestone.list') {
     const project = await projectContext(input.projectKey, READ_ROLES, false);
     const items = (await repository.listMilestones(project.key, { includeDeleted: input.includeArchived })).map(publicNode);
-    await safeAudit(audit, action, { scopeKey: project.scopeKey, projectKey: project.key, success: true });
     return { action, items };
   }
-  if (action === 'milestone.update' || action === 'milestone.rename' || action === 'milestone.schedule' || action === 'milestone.change-status' || action === 'milestone.complete' || action === 'milestone.reopen') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'milestone.update' || action === 'milestone.rename' || action === 'milestone.schedule' || action === 'milestone.change-status' || action === 'milestone.complete' || action === 'milestone.reopen') return executeBatch(action, input, repository, async (item) => {
     const { milestone, project } = await milestoneContext(item.milestoneKey);
     let patch: Partial<Milestone>;
     if (action === 'milestone.rename') patch = { name: item.name };
@@ -456,7 +429,7 @@ export async function executeMomentumTool(
     await embeddingFor({ ...milestone, ...patch });
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key }, run: (source) => updateMilestone(source, milestone, patch) };
   });
-  if (action === 'milestone.move') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'milestone.move') return executeBatch(action, input, repository, async (item) => {
     const { milestone, project: oldProject } = await milestoneContext(item.milestoneKey);
     const project = await projectContext(item.projectKey);
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key }, scopeKeys: [oldProject.scopeKey, project.scopeKey], run: async (source) => {
@@ -466,7 +439,7 @@ export async function executeMomentumTool(
       return updated;
     } };
   });
-  if (action === 'milestone.archive' || action === 'milestone.restore') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'milestone.archive' || action === 'milestone.restore') return executeBatch(action, input, repository, async (item) => {
     const restoring = action === 'milestone.restore';
     const { milestone, project } = await milestoneContext(item.milestoneKey, WRITE_ROLES, false);
     if (restoring) { requireActive(project, 'project'); requireArchived(milestone, 'milestone'); } else requireActive(milestone, 'milestone');
@@ -476,13 +449,13 @@ export async function executeMomentumTool(
       return updated;
     } };
   });
-  if (action === 'milestone.delete') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'milestone.delete') return executeBatch(action, input, repository, async (item) => {
     const { milestone, project } = await milestoneContext(item.milestoneKey, DELETE_ROLES, false);
     requireArchived(milestone, 'milestone');
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key }, run: async (source) => { const tasks = await source.listTasks(project.key, { milestoneKey: milestone.key, includeDeleted: true }); for (const task of tasks) requireArchived(task, 'task'); for (const task of tasks) await source.deleteTask(task.key); await source.deleteMilestone(milestone.key); return { milestoneKey: milestone.key }; } };
   });
 
-  if (action === 'task.create') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'task.create') return executeBatch(action, input, repository, async (item) => {
     const { milestone, project } = await milestoneContext(item.milestoneKey);
     const timestamp = now();
     const task: Task = { key: key(), scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, title: item.title, ...(item.description ? { description: item.description } : {}), status: item.status, priority: item.priority, position: item.position, embedding: await embeddingFor(item), deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
@@ -490,17 +463,16 @@ export async function executeMomentumTool(
   });
   if (action === 'task.find') {
     const items = [];
-    for (const taskKey of input.taskKeys) { const context = await taskContext(taskKey, READ_ROLES, false); items.push(publicNode(context.task)); await safeAudit(audit, action, { scopeKey: context.project.scopeKey, projectKey: context.project.key, milestoneKey: context.milestone.key, taskKey, success: true }); }
+    for (const taskKey of input.taskKeys) { const context = await taskContext(taskKey, READ_ROLES, false); items.push(publicNode(context.task)); }
     return { action, items };
   }
   if (action === 'task.list') {
     const project = await projectContext(input.projectKey, READ_ROLES, false);
     if (input.milestoneKey) { const context = await milestoneContext(input.milestoneKey, READ_ROLES, false); if (context.project.key !== project.key) throw new MomentumExecutionError('invalid_ownership', 'Milestone belongs to another project.'); }
     const items = (await repository.listTasks(project.key, { milestoneKey: input.milestoneKey, includeDeleted: input.includeArchived })).map(publicNode);
-    await safeAudit(audit, action, { scopeKey: project.scopeKey, projectKey: project.key, ...(input.milestoneKey ? { milestoneKey: input.milestoneKey } : {}), success: true });
     return { action, items };
   }
-  if (action === 'task.update' || action === 'task.rename' || action === 'task.reorder' || action === 'task.change-status' || action === 'task.complete' || action === 'task.reopen') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'task.update' || action === 'task.rename' || action === 'task.reorder' || action === 'task.change-status' || action === 'task.complete' || action === 'task.reopen') return executeBatch(action, input, repository, async (item) => {
     const { task, milestone, project } = await taskContext(item.taskKey);
     let patch: Partial<Task>;
     if (action === 'task.rename') patch = { title: item.title };
@@ -512,24 +484,24 @@ export async function executeMomentumTool(
     await embeddingFor({ ...task, ...patch });
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, taskKey: task.key }, run: (source) => updateTask(source, task, patch) };
   });
-  if (action === 'task.move') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'task.move') return executeBatch(action, input, repository, async (item) => {
     const { task } = await taskContext(item.taskKey);
     const { milestone, project } = await milestoneContext(item.milestoneKey);
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, taskKey: task.key }, scopeKeys: [task.scopeKey, project.scopeKey], run: (source) => updateTask(source, task, { milestoneKey: milestone.key, projectKey: project.key, scopeKey: project.scopeKey, ...(item.position === undefined ? {} : { position: item.position }) }) };
   });
-  if (action === 'task.archive' || action === 'task.restore') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'task.archive' || action === 'task.restore') return executeBatch(action, input, repository, async (item) => {
     const restoring = action === 'task.restore';
     const { task, milestone, project } = await taskContext(item.taskKey, WRITE_ROLES, false);
     if (restoring) { requireActive(project, 'project'); requireActive(milestone, 'milestone'); requireArchived(task, 'task'); } else requireActive(task, 'task');
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, taskKey: task.key }, run: (source) => updateTask(source, task, { deletedAt: restoring ? null : now() }) };
   });
-  if (action === 'task.delete') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'task.delete') return executeBatch(action, input, repository, async (item) => {
     const { task, milestone, project } = await taskContext(item.taskKey, DELETE_ROLES, false);
     requireArchived(task, 'task');
     return { keys: { scopeKey: project.scopeKey, projectKey: project.key, milestoneKey: milestone.key, taskKey: task.key }, run: async (source) => { await source.deleteTask(task.key); return { taskKey: task.key }; } };
   });
 
-  if (action === 'task.summarize' || action === 'task.translate' || action === 'task.rewrite') return executeBatch(action, input, repository, audit, async (item) => {
+  if (action === 'task.summarize' || action === 'task.translate' || action === 'task.rewrite') return executeBatch(action, input, repository, async (item) => {
     const { task, milestone, project } = await taskContext(item.taskKey, item.persist ? WRITE_ROLES : READ_ROLES);
     if (!dependencies.reason) throw new MomentumExecutionError('reason_unavailable', 'A reason(input) dependency is required because Momentum input does not contain an organization key for route selection.');
     const operation = action.slice('task.'.length) as MomentumReasonInput['action'];
@@ -575,7 +547,6 @@ export async function executeMomentumTool(
       for (const task of await repository.listTasks(project.key)) if (milestoneKeys.has(task.milestoneKey) && accepts('task', task.key)) ranked.push({ type: 'task', score: cosine(queryEmbedding, task.embedding), item: task });
     }
     const items = ranked.filter((result) => Number.isFinite(result.score)).sort((left, right) => right.score - left.score || left.item.key.localeCompare(right.item.key)).slice(0, input.limit).map((result) => ({ ...result, item: publicNode(result.item) }));
-    await safeAudit(audit, action, { ...(action === 'scope.project.search' ? { scopeKey: input.scopeKey } : {}), success: true });
     return { action, items };
   }
 

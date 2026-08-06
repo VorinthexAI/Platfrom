@@ -15,7 +15,6 @@ import { modelProviderSchema } from '@/lib/db/model-providers.node';
 import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
 import { agentMemberSchema } from '@/lib/db/agent-members.node';
 import { tokenUsage } from '@/lib/ai/shared';
-import type { RuntimeEventInput } from '@/platform/events';
 import { artifactSchema } from '@/lib/artifacts/schema';
 import { DOMAIN_ACTION_SLUGS, domainToolInputSchemas, domainToolJsonSchemas, executeDomainTool, interpretAndRunDomainTool, runDomainAgentTool } from '.';
 
@@ -72,7 +71,7 @@ describe('domain tool schemas', () => {
 
 describe('local domain tool boundary', () => {
   test('creates a semantic artifact in the authenticated runtime scope without granting an agent', async () => {
-    const f = fixture(); const runtimeEvents: RuntimeEventInput[] = []; const domainEvents: Array<{ action: string; data: Record<string, unknown> }> = []; let receivedInput: unknown = null;
+    const f = fixture(); let receivedInput: unknown = null;
     const artifactKey = newId();
     const output = await executeDomainTool('artifact.create', { name: 'Organization', definition: organizationArtifactDefinition }, {
       organizationKey: f.organization.key,
@@ -85,30 +84,25 @@ describe('local domain tool boundary', () => {
           return artifactSchema.parse({ key: artifactKey, organizationKey: input.organizationKey, scopeKey: input.scopeKey, name: input.name, definition: input.definition, schemaVersion: 1, snapshotKey: null, createdByAgentRunKey: null, createdByUserOrganizationKey: input.createdByUserOrganizationKey, createdAt: now, updatedAt: now });
         },
       },
-      domainEvents: async (_context, action, data) => { domainEvents.push({ action, data }); },
-      runtimeEvents: async (event) => { runtimeEvents.push(event); },
     });
 
     expect(receivedInput).toMatchObject({ organizationKey: f.organization.key, scopeKey: f.scope.key, organizationWide: true, allowedScopeKeys: [f.scope.key], createdByUserOrganizationKey: f.membership.key });
     expect(output).toEqual({ action: 'artifact.create', status: 'completed', data: { artifact: { key: artifactKey, name: 'Organization', mode: 'live', root: 'organization', layout: 'tree', theme: 'obsidian' } } });
-    expect(domainEvents).toEqual([{ action: 'artifact.create', data: { artifactKey } }]);
-    expect(runtimeEvents).toEqual([{ scopeId: f.scope.key, userId: f.user.key, slug: 'artifact.created', data: { nodeType: 'artifacts', nodeKey: artifactKey } }]);
   });
 
   test('authorizes a direct action and executes locally without a model route', async () => {
-    const f = fixture(); const events: RuntimeEventInput[] = []; let receivedContext: unknown;
+    const f = fixture(); let receivedContext: unknown;
     const output = await runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, actionSlug: 'scope.list', principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: { query: 'ops' } }, {
-      runtimeData: f.runtimeData, accessData: f.accessData, events: async (event) => { events.push(event); },
+      runtimeData: f.runtimeData, accessData: f.accessData,
       execute: async (action, input, context) => { receivedContext = context; return { action, status: 'completed', data: { input } }; },
     });
     expect(output).toEqual({ action: 'scope.list', status: 'completed', data: { input: { query: 'ops' } } });
     expect(receivedContext).toMatchObject({ organizationKey: f.organization.key, runtimeScopeKey: f.scope.key, principal: { kind: 'member' } });
-    expect(events).toEqual([]);
   });
 
   test('rejects an unknown direct action', async () => {
     const f = fixture();
-    await expect(runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, actionSlug: 'unknown.action', principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: {} }, { runtimeData: f.runtimeData, accessData: f.accessData, events: async () => {} })).rejects.toThrow('unknown domain action');
+    await expect(runDomainAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, actionSlug: 'unknown.action', principal: { kind: 'member', userOrganizationKey: f.membership.key }, input: {} }, { runtimeData: f.runtimeData, accessData: f.accessData })).rejects.toThrow('unknown domain action');
   });
 
   test('uses reason on Mini to interpret, then executes the selected action locally', async () => {
@@ -119,7 +113,7 @@ describe('local domain tool boundary', () => {
     const route = modelActionSchema.parse({ key: newId(), modelKey: model.key, actionKey: reason.key, priority: 100 });
     const providerRoute = modelProviderSchema.parse({ key: newId(), modelKey: model.key, providerKey: provider.key, providerModelId: 'gpt-5.4-mini' });
     const output = await interpretAndRunDomainTool({ organizationKey: f.organization.key, agentKey: f.agent.key, principal: { kind: 'member', userOrganizationKey: f.membership.key }, request: 'List scopes matching operations' }, {
-      runtimeData: f.runtimeData, accessData: f.accessData, events: async () => {},
+      runtimeData: f.runtimeData, accessData: f.accessData,
       data: { async getActionBySlug(slug) { return slug === 'reason' ? reason : null; }, async getModelBySlug(slug) { return slug === model.slug ? model : null; }, async getModelByKey() { return model; }, async getProviderBySlug() { return provider; }, async getProviderByKey() { return provider; }, async listModelActions() { return [route]; }, async listModelProviders() { return [providerRoute]; }, async listOrganizationProviderKeys() { return [provider.key]; } },
       adapters: { openai: { id: 'openai', name: 'OpenAI', async execute<TInput, TOutput>() { return { output: { text: '', stopReason: 'tool_calls', toolCalls: [{ id: 'call-1', name: 'scope__list', arguments: { query: 'operations' } }] } as TOutput, usage: tokenUsage(10, 4), providerId: 'openai' as const, modelId: model.slug, externalModelId: 'gpt-5.4-mini' }; } } },
       execute: async (action, input) => ({ action, status: 'completed', data: input }),

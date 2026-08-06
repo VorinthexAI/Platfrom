@@ -70,22 +70,16 @@ describe('organizationProviders key allow-list', () => {
     expect(database.docs.size).toBe(1);
   });
 
-  test('emits thin organization-provider invalidations for create, update and usage', async () => {
-    const events: Array<{ scopeId: string; slug: string; data: { nodeType: string; nodeKey: string } }> = [];
-    const repository = createOrganizationProviderRepository(memoryDatabase(), async (event) => { events.push(event); });
+  test('updates provider metadata and usage', async () => {
+    const repository = createOrganizationProviderRepository(memoryDatabase());
     const organizationKey = newId();
     const providerKey = newId();
-    const scopeKey = newId();
+    await repository.addProvider(organizationKey, { providerKey, name: 'OpenAI', description: null });
+    const updated = await repository.updateProvider(organizationKey, providerKey, { name: 'OpenAI API', description: 'Primary routing provider.' });
+    const used = await repository.recordUsage(organizationKey, providerKey, { inputTokens: 4, outputTokens: 6, totalTokens: 10 });
 
-    const created = await repository.addProvider(organizationKey, { providerKey, name: 'OpenAI', description: null }, scopeKey);
-    await repository.updateProvider(organizationKey, providerKey, { name: 'OpenAI API', description: 'Primary routing provider.' }, scopeKey);
-    await repository.recordUsage(organizationKey, providerKey, { inputTokens: 4, outputTokens: 6, totalTokens: 10 }, scopeKey);
-
-    expect(events).toEqual([
-      { scopeId: scopeKey, slug: 'organization.provider.create', data: { nodeType: 'organizationProviders', nodeKey: created.key } },
-      { scopeId: scopeKey, slug: 'organization.provider.update', data: { nodeType: 'organizationProviders', nodeKey: created.key } },
-      { scopeId: scopeKey, slug: 'organization.provider.usage', data: { nodeType: 'organizationProviders', nodeKey: created.key } },
-    ]);
+    expect(updated.name).toBe('OpenAI API');
+    expect(used).toMatchObject({ inputTokens: 4, outputTokens: 6, totalTokens: 10 });
   });
 
   test('service resolves provider slugs and rejects missing references', async () => {
