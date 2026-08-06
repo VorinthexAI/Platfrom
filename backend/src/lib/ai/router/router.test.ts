@@ -79,11 +79,11 @@ describe('priority-only persisted router', () => {
   test('routes every action supported by a static provider without an organization provider', async () => {
     const embed = action('embed');
     const reason = action('reason');
-    const embeddingModel = model('openai.text-embedding-3-large');
+    const embeddingModel = model('openai.text-embedding-3-small');
     const openai = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
     const actions = [embed, reason];
     const modelActions = actions.map((entry) => modelActionSchema.parse({ key: newId(), modelKey: embeddingModel.key, actionKey: entry.key, priority: 100, enabled: true }));
-    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openai.key, providerModelId: 'text-embedding-3-large', enabled: true });
+    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openai.key, providerModelId: 'text-embedding-3-small', enabled: true });
     const data: RouterDataSource = {
       async getActionBySlug(slug) { return actions.find((entry) => entry.slug === slug) ?? null; },
       async getModelBySlug(slug) { return slug === embeddingModel.slug ? embeddingModel : null; },
@@ -97,7 +97,7 @@ describe('priority-only persisted router', () => {
 
     await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'reason' }, { data })).resolves.toMatchObject({
       actionSlug: 'reason',
-      modelSlug: 'openai.text-embedding-3-large',
+      modelSlug: 'openai.text-embedding-3-small',
       providerSlug: 'openai',
       credentialSource: 'environment',
     });
