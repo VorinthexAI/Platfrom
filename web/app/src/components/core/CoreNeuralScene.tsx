@@ -124,7 +124,7 @@ export function CoreNeuralScene() {
       const height = host.clientHeight;
       renderer.setSize(width, height, false);
       const aspect = width / height;
-      const verticalSpan = 26;
+      const verticalSpan = 23;
       camera.left = (-verticalSpan * aspect) / 2;
       camera.right = (verticalSpan * aspect) / 2;
       camera.top = verticalSpan / 2;
