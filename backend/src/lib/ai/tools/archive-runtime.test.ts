@@ -42,8 +42,8 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async transaction(operation) { return operation(repository); },
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
-  const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding: [1], createdAt: now, updatedAt: now });
-  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, embedding, createdAt: now, updatedAt: now }); return key; };
+  const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', isFavorite: false, embedding: [1], createdAt: now, updatedAt: now });
+  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, isFavorite: false, embedding, createdAt: now, updatedAt: now }); return key; };
   return { repository, context, folders, documents, shares, versions, patches, scopeKey, folderKey, addDocument };
 }
 
@@ -227,6 +227,24 @@ describe('Archive runtime', () => {
     expect(output.results[0]?.success).toBe(true);
     expect(actions).toEqual(['document-generate-html', 'document-generate-content', 'document-embed']);
     expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding: [0.5] });
+  });
+
+  test('updates favorites atomically without embedding, canonicalizing, or versioning', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Unchanged body');
+    let actions = 0;
+    const documentOutput = await runArchiveTool('document.update', {
+      updates: [{ documentKey, isFavorite: true }], atomic: true,
+    }, f.context, { repository: f.repository, runAction: async () => { actions += 1; throw new Error('unexpected action'); } });
+    expect(documentOutput.results[0]).toMatchObject({ success: true, data: { document: { isFavorite: true } } });
+    expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>Unchanged body</p>', content: 'Unchanged body', isFavorite: true });
+    expect(f.versions.size).toBe(0);
+
+    const folderOutput = await runArchiveTool('folder.update', {
+      updates: [{ folderKey: f.folderKey, isFavorite: true }], atomic: true,
+    }, f.context, { repository: f.repository, embed: async () => { actions += 1; throw new Error('unexpected embed'); } });
+    expect(folderOutput.results[0]).toMatchObject({ success: true, data: { folder: { isFavorite: true } } });
+    expect(actions).toBe(0);
   });
 
   test('sanitizes HTML updates and persists canonical agreeing representations', async () => {

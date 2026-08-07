@@ -52,6 +52,23 @@ describe('scoped Archive persistence', () => {
     expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: [1] })).toThrow('Document representations must be canonical and agreeing.');
   });
 
+  test('persists favorite-only folder and document patches without representation fields', async () => {
+    const calls: Array<{ bindVars?: Record<string, unknown> }> = [];
+    const executor: ArchiveQueryExecutor = {
+      async query(_query, bindVars) {
+        calls.push({ bindVars });
+        return { async next() { return undefined; } };
+      },
+    };
+    const persistence = createArchivePersistence(executor);
+    await persistence.updateFolder(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
+    await persistence.updateDocument(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
+    expect(calls.map(({ bindVars }) => bindVars?.patch)).toEqual([
+      { isFavorite: true, updatedAt: timestamp },
+      { isFavorite: true, updatedAt: timestamp },
+    ]);
+  });
+
   test('only the marker owner can unfreeze a pending deletion', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ArchiveQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return undefined; } }; } };

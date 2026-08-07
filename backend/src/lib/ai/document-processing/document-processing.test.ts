@@ -23,7 +23,7 @@ const scopeKey = 'cmrnlzf640000qc7k4p5zem5w';
 const folderKey = 'cmrnlzf640001qc7k4p5zem5w';
 const documentKey = 'cmrnlzf640002qc7k4p5zem5w';
 const timestamp = '2026-07-22T00:00:00.000Z';
-const folder = { key: folderKey, scopeKey, name: 'Folder', embedding: [], deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
+const folder = { key: folderKey, scopeKey, name: 'Folder', isFavorite: false, embedding: [], deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const quiet = () => undefined;
 const bytes = (text: string) => new TextEncoder().encode(text);
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);

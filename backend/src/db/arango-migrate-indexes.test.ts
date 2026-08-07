@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
-import { migrateArchiveDocuments, migrateArchiveVersions } from './arango-migrate';
+import { migrateArchiveDocuments, migrateArchiveFavorites, migrateArchiveVersions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS } from '../lib/openai-embeddings';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
@@ -81,6 +81,26 @@ describe('Arango migration indexes', () => {
     expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', html: '<p>Historical body</p>', content: 'Historical body', embedding }]);
     expect(versionMigration.update?.query).toContain('"json", "storageKey", "sizeBytes", "updatedAt"');
     expect(versionMigration.update?.query).toContain('migration must not infer deletion ownership');
+  });
+  test('physically normalizes and verifies folder and document favorites idempotently', async () => {
+    for (const collection of ['folders', 'documents'] as const) {
+      const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+      const database = {
+        async query(query: string, bindVars?: Record<string, unknown>) {
+          calls.push({ query, bindVars });
+          return { async all() { return []; }, async next() { return 0; } };
+        },
+        async beginTransaction() {
+          return { async step(run: () => Promise<void>) { await run(); }, async commit() {}, async abort() {} };
+        },
+      };
+      await migrateArchiveFavorites(database as never, collection);
+      await migrateArchiveFavorites(database as never, collection);
+      expect(calls.filter(({ query }) => query.includes('UPDATE resource WITH { isFavorite: false }'))).toHaveLength(2);
+      expect(calls.every(({ query }) => !query.includes('isFavorite') || query.includes('!IS_BOOL(resource.isFavorite)'))).toBe(true);
+      expect(calls.filter(({ query }) => query.includes('RETURN LENGTH'))).toHaveLength(2);
+      expect(calls.every(({ bindVars }) => bindVars?.['@collection'] === collection)).toBe(true);
+    }
   });
   test('preflights every share and orders index removal before plaintext removal and hash index creation', async () => {
     const staged = stageLegacyDocumentShares([

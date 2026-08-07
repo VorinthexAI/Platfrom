@@ -88,6 +88,9 @@ describe('Archive input contracts', () => {
     expect(() => archiveToolInputSchemas['document.unshare'].parse({ shareKeys: [key], documentKeys: [newId()] })).toThrow();
     expect(() => archiveToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, html: '<p>x</p>', content: 'x' }] })).toThrow();
     expect(() => archiveToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, createVersion: true }] })).toThrow();
+    expect(archiveToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true }] })).toMatchObject({ updates: [{ isFavorite: true }] });
+    expect(() => archiveToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true, createVersion: true }] })).toThrow();
+    expect(archiveToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, isFavorite: true }] })).toMatchObject({ updates: [{ isFavorite: true }] });
   });
 
   test('validates version label keys and lengths at the contract boundary', () => {
@@ -126,7 +129,7 @@ describe('Archive input contracts', () => {
     const definitions = Object.fromEntries(ARCHIVE_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
     expect(definitions['document.parse'].properties.file).toMatchObject({ type: 'object' });
     expect(definitions['document.unshare'].oneOf).toHaveLength(2);
-    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(2);
+    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(3);
     expect(definitions['document.read'].description).toContain('endOffset');
   });
 });

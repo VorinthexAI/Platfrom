@@ -67,6 +67,21 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
   }
 }
 
+export async function migrateArchiveFavorites(targetDb: Database, collectionName: 'folders' | 'documents') {
+  await runMigrationTransaction(targetDb, collectionName, `
+    FOR resource IN @@collection
+      FILTER !IS_BOOL(resource.isFavorite)
+      UPDATE resource WITH { isFavorite: false } IN @@collection
+  `, { '@collection': collectionName });
+  const verification = await targetDb.query<number>(`
+    RETURN LENGTH(FOR resource IN @@collection
+      FILTER !IS_BOOL(resource.isFavorite)
+      RETURN 1)
+  `, { '@collection': collectionName });
+  const invalid = await verification.next() ?? 0;
+  if (invalid > 0) throw new Error(`${collectionName} favorite migration verification failed for ${invalid} row(s).`);
+}
+
 export async function migrateArchiveVersions(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
@@ -732,6 +747,9 @@ async function main() {
         `FOR doc IN @@collection FILTER !HAS(doc, "deletedAt") UPDATE doc WITH { deletedAt: null } IN @@collection`,
         { '@collection': spec.name },
       );
+    }
+    if (spec.name === 'folders' || spec.name === 'documents') {
+      await migrateArchiveFavorites(targetDb, spec.name);
     }
     if (spec.name === 'actions') {
       await targetDb.query(`

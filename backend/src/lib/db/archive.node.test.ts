@@ -29,6 +29,10 @@ describe('Archive node contracts', () => {
       expect(schema.shape.deletedAt.parse('2026-07-22T00:00:00.000Z')).toBe('2026-07-22T00:00:00.000Z');
       expect(() => schema.shape.deletedAt.parse('yesterday')).toThrow();
     }
+    expect(folderSchema.shape.isFavorite.parse(undefined)).toBe(false);
+    expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);
+    expect(() => folderSchema.shape.isFavorite.parse('yes')).toThrow();
+    expect(() => documentSchema.shape.isFavorite.parse(1)).toThrow();
   });
 
   test('versions contain complete immutable HTML snapshots', () => {
