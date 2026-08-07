@@ -56,6 +56,16 @@
   background-clip: text;
   color: transparent;
 }
+.titleWord { display: inline-block; }
+.titleWord:not(:last-child) { margin-right: 0.28em; }
+.titleCharacter {
+  opacity: 0;
+  animation: titleCharacterIn 1ms step-end forwards;
+}
+
+@keyframes titleCharacterIn {
+  to { opacity: 1; }
+}
 
 .heroLead {
   max-width: 390px;
@@ -227,5 +237,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .titleCharacter { opacity: 1; animation: none; }
   .capabilityPanel { backdrop-filter: none; }
 }

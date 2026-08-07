@@ -8,6 +8,34 @@ import { CoreNeuralScene } from "./CoreNeuralScene";
 import { DownloadAppCta } from "./DownloadAppCta";
 import styles from "./CorePage.module.css";
 
+const HERO_TITLE_WORDS = ["Your", "personal", "AI."] as const;
+
+function HeroTitle() {
+  return (
+    <h1 aria-label="Your personal AI.">
+      {HERO_TITLE_WORDS.map((word, wordIndex) => {
+        const characterOffset = HERO_TITLE_WORDS
+          .slice(0, wordIndex)
+          .reduce((total, item) => total + item.length, 0);
+
+        return (
+          <span aria-hidden="true" className={styles.titleWord} key={word}>
+            {Array.from(word).map((character, characterIndex) => (
+              <span
+                className={styles.titleCharacter}
+                key={`${character}-${characterIndex}`}
+                style={{ animationDelay: `${240 + (characterOffset + characterIndex) * 72}ms` }}
+              >
+                {character}
+              </span>
+            ))}
+          </span>
+        );
+      })}
+    </h1>
+  );
+}
+
 export function CorePage() {
   return (
     <div className={styles.page}>
@@ -20,11 +48,11 @@ export function CorePage() {
       <main id="main-content" tabIndex={-1}>
         <section className={styles.hero} id="overview">
           <div className={styles.heroCopy}>
-            <h1>Your personal AI.</h1>
+            <HeroTitle />
             <p className={styles.heroLead}>Everything. Intelligently connected.</p>
             <div className={styles.rule} />
             <p className={styles.heroBody}>
-              Vorinthex Core is your personal AI that remembers, understands and
+              Vorinthex AI is your personal AI that remembers, understands and
               connects everything that matters to you.
             </p>
             <DownloadAppCta />
