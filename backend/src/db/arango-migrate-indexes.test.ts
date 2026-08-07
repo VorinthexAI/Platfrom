@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
-import { migrateArchiveDocuments, migrateArchiveFavorites, migrateArchiveVersions } from './arango-migrate';
+import { migrateArchiveDocuments, migrateArchiveFavorites, migrateArchiveVersions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
@@ -28,6 +28,24 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('retires removed action relations before their fixed seed keys are reused', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = {
+      async query(query: string, bindVars?: Record<string, unknown>) {
+        calls.push({ query, bindVars });
+        return { async all() { return []; }, async next() { return undefined; } };
+      },
+    };
+
+    await retireRemovedActions(database as never);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.query).toContain('REMOVE relation IN modelActions');
+    expect(calls[1]?.query).toContain('REMOVE action IN actions');
+    expect(calls[0]?.bindVars).toEqual({ slugs: ['document-generate-json'] });
+    expect(calls[1]?.bindVars).toEqual({ slugs: ['document-generate-json'] });
+  });
+
   test('normalizes legacy share permissions without granting additional access', () => {
     expect(normalizeLegacyDocumentSharePermission('read')).toBe('read');
     expect(normalizeLegacyDocumentSharePermission('view')).toBe('read');
