@@ -9,8 +9,6 @@ export const durations = {
   splashHold: 2200,
   cardExit: 280,
   dustBurst: 480,
-  buildTotal: 4200,
-  buildExitDelay: 4800,
   /** Web .vui-button background-position transition (800ms luxury). */
   chromeSlide: 800,
   /** Web .vui-button color/border/shadow transition (400ms luxury). */

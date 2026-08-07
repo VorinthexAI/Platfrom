@@ -38,6 +38,7 @@
           ]
         }
       ],
+      "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
@@ -48,14 +49,6 @@
           "backgroundColor": "#030507",
           "image": "./assets/brand/vorinthex-mark.png",
           "imageWidth": 96
-        }
-      ],
-      [
-        "expo-audio",
-        {
-          "enableBackgroundPlayback": false,
-          "recordAudioAndroid": false,
-          "microphonePermission": false
         }
       ]
     ],

@@ -12,7 +12,6 @@ import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
-import { AppAudioProvider } from "@/lib/app-audio";
 import { AppQueryProvider } from "@/lib/query-client";
 import { palette } from "@/theme/tokens";
 
@@ -39,18 +38,16 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.page }}>
       <SafeAreaProvider>
-        <AppAudioProvider>
-          <AppQueryProvider>
-            <StatusBar style="light" />
-            <Stack
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: palette.page },
-                animation: "fade",
-              }}
-            />
-          </AppQueryProvider>
-        </AppAudioProvider>
+        <AppQueryProvider>
+          <StatusBar style="light" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: palette.page },
+              animation: "fade",
+            }}
+          />
+        </AppQueryProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

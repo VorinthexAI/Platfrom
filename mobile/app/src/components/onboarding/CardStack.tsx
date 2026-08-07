@@ -20,7 +20,6 @@ import {
   type Capability,
   type CapabilitySlug,
 } from "@/data/registry";
-import { useAppAudio } from "@/lib/app-audio";
 import { completionHaptic, decisionHaptic } from "@/lib/haptics";
 import { createRandom } from "@/lib/random";
 import { durations, springs, swipe } from "@/theme/motion";
@@ -148,8 +147,6 @@ type SwipeCardProps = {
   height: number;
   onCommit: (slug: CapabilitySlug, decision: CapabilityDecision) => void;
   registerExit: (fn: ExitFn) => void;
-  briefingPlaying: boolean;
-  onToggleBriefing: () => void;
 };
 
 function SwipeCard({
@@ -161,8 +158,6 @@ function SwipeCard({
   height,
   onCommit,
   registerExit,
-  briefingPlaying,
-  onToggleBriefing,
 }: SwipeCardProps) {
   const tx = useSharedValue(0);
   const ty = useSharedValue(0);
@@ -287,8 +282,6 @@ function SwipeCard({
             index={index}
             width={width}
             height={height}
-            briefingPlaying={briefingPlaying}
-            onToggleBriefing={onToggleBriefing}
           />
           <Animated.View pointerEvents="none" style={[styles.dim, dimStyle]} />
         </Animated.View>
@@ -319,8 +312,6 @@ export function CardStack({ onComplete }: CardStackProps) {
 
   const activeIndex = useOnboardingStore((state) => state.activeIndex);
   const decide = useOnboardingStore((state) => state.decide);
-  const { playingBriefing, stopBriefing, toggleBriefing } = useAppAudio();
-
   const exitRef = useRef<ExitFn | null>(null);
   const completedRef = useRef(false);
 
@@ -330,7 +321,6 @@ export function CardStack({ onComplete }: CardStackProps) {
 
   const handleCommit = useCallback(
     (slug: CapabilitySlug, decision: CapabilityDecision) => {
-      stopBriefing();
       decide(slug, decision);
       if (
         useOnboardingStore.getState().activeIndex >= CAPABILITIES.length &&
@@ -341,7 +331,7 @@ export function CardStack({ onComplete }: CardStackProps) {
         setTimeout(onComplete, 420);
       }
     },
-    [decide, onComplete, stopBriefing],
+    [decide, onComplete],
   );
 
   const activeCapability = CAPABILITIES[activeIndex];
@@ -381,8 +371,6 @@ export function CardStack({ onComplete }: CardStackProps) {
               height={cardHeight}
               onCommit={handleCommit}
               registerExit={registerExit}
-              briefingPlaying={playingBriefing === capability.slug}
-              onToggleBriefing={() => toggleBriefing(capability.slug)}
             />
           ))}
       </View>

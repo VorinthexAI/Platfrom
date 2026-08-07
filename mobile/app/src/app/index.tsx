@@ -67,7 +67,7 @@ export default function SplashRoute() {
       </Animated.View>
 
       <Animated.Text style={[styles.tagline, taglineStyle]}>
-        {"THE NEXUS\nOF INTELLIGENCE"}
+        YOUR PERSONAL AI
       </Animated.Text>
     </View>
   );

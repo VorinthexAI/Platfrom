@@ -12,7 +12,7 @@ export default function OnboardingRoute() {
   const insets = useSafeAreaInsets();
 
   const handleComplete = useCallback(() => {
-    router.replace("/building");
+    router.replace("/brain");
   }, [router]);
 
   return (

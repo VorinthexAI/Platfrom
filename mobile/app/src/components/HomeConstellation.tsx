@@ -1,389 +1,140 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BackHandler,
+  Keyboard,
+  KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  Text,
   View,
-  useWindowDimensions,
+  type LayoutChangeEvent,
 } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { useSharedValue } from "react-native-reanimated";
-import { scheduleOnRN } from "react-native-worklets";
+import { useCallback, useEffect, useState } from "react";
+import Animated, { FadeIn } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as THREE from "three";
-import { ChevronLeftIcon, VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Button } from "@vorinthex/shared/ui/button";
 
-import {
-  CAPABILITY_CAROUSEL_HEIGHT,
-  CapabilityArcCarousel,
-} from "@/components/CapabilityArcCarousel";
-import { CapabilityDrawer } from "@/components/CapabilityDrawer";
-import {
-  capabilityPositions,
-  galaxyCamera,
-  SYSTEM_PITCH_LIMIT,
-  SYSTEM_ZOOM_MAX,
-  SYSTEM_ZOOM_MIN,
-  systemDragging,
-  systemPinching,
-  systemPitch,
-  systemPitchLive,
-  systemYaw,
-  systemYawLive,
-  systemZoom,
-} from "@/components/galaxy/galaxy-refs";
-import { GalaxyScene } from "@/components/galaxy/GalaxyScene";
-import { InteriorEmblem } from "@/components/InteriorEmblem";
-import {
-  CAPABILITIES,
-  type Capability,
-  type CapabilitySlug,
-} from "@/data/registry";
-import { useAppAudio } from "@/lib/app-audio";
-import { useGalaxyStore } from "@/state/galaxy";
+import { ChromeIcon } from "@/components/ChromeIcon";
+import { SearchBar } from "@/components/SearchBar";
+import { PersonalAIStar3D } from "@/components/three/PersonalAIStar3D";
+import { capabilityIconSource, vorinthexMarkSource } from "@/data/capability-icons";
+import { CAPABILITIES, type CapabilitySlug } from "@/data/registry";
+import { fonts, palette, tracking } from "@/theme/tokens";
 
-/** Full-width horizontal swipe spins the system well past half a turn. */
-const YAW_PER_WIDTH = Math.PI * 1.35;
-/** Full-height vertical swipe covers the whole tilt range. */
-const PITCH_PER_HEIGHT = 2.6;
-/** How much of the release velocity carries on as momentum. */
-const FLING_CARRY = 0.18;
-/** Screen-space radius (dp) a tap may land from a planet's center. */
-const PLANET_TAP_RADIUS = 44;
-/** A touch that travelled less than this on release is a tap, not a pan. */
-const TAP_TRAVEL = 9;
-
-const scratchProjection = new THREE.Vector3();
+const CORE_SIZE = 144;
+const PROMPT_KEYBOARD_GAP = 10;
+const NODE_POSITIONS: Record<
+  CapabilitySlug,
+  { top: `${number}%`; left: `${number}%` }
+> = {
+  archive: { top: "30%", left: "8%" },
+  gallery: { top: "30%", left: "72%" },
+  signal: { top: "60%", left: "5%" },
+  compass: { top: "60%", left: "75%" },
+  ascend: { top: "75.5%", left: "40%" },
+};
 
 export type HomeConstellationProps = {
   enabledSlugs: readonly CapabilitySlug[];
   onOpen: (slug: CapabilitySlug) => void;
 };
 
-/**
- * The brain galaxy, rendered FULLSCREEN at all times — the header and
- * carousel float over it as transparent overlays, so orbits pass behind
- * them. Pans rotate the solar system (horizontal = spin, vertical = tilt),
- * a tap on a planet dives into it, and swiping the carousel commits a
- * capability the same way. Inside a biome the overlays go away and the
- * back chevron (and Android hardware back) returns to orbit.
- */
+/** Personal AI home: a neural star connects each enabled capability. */
 export function HomeConstellation({
   enabledSlugs,
   onOpen,
 }: HomeConstellationProps) {
-  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const carouselWidth = Math.min(screenWidth - 16, 390);
-  const capabilities = useMemo(
-    () =>
-      CAPABILITIES.filter((capability) =>
-        enabledSlugs.includes(capability.slug),
-      ),
-    [enabledSlugs],
+  const [keyboardVisible, setKeyboardVisible] = useState(() =>
+    Keyboard.isVisible(),
   );
-  const [selectedIndex, setSelectedIndex] = useState(0);
-
-  const phase = useGalaxyStore((state) => state.phase);
-  const targetSlug = useGalaxyStore((state) => state.targetSlug);
-  const enter = useGalaxyStore((state) => state.enter);
-  const retarget = useGalaxyStore((state) => state.retarget);
-  const warp = useGalaxyStore((state) => state.warp);
-  const exit = useGalaxyStore((state) => state.exit);
-
-  const carouselShown =
-    (phase === "overview" || phase === "fly") && capabilities.length > 0;
-
-  useEffect(() => {
-    if (selectedIndex >= capabilities.length) setSelectedIndex(0);
-  }, [capabilities.length, selectedIndex]);
-
-  // Android hardware back mirrors the chevron anywhere off the overview.
-  useEffect(() => {
-    if (Platform.OS !== "android" || phase === "overview") return;
-    const subscription = BackHandler.addEventListener(
-      "hardwareBackPress",
-      () => {
-        exit();
-        return true;
-      },
-    );
-    return () => subscription.remove();
-  }, [exit, phase]);
-
-  // Arriving inside a biome auto-plays its briefing (over the still-running
-  // soundtrack); returning to orbit lets it go quiet again. Warping biome
-  // to biome re-fires with the new target. Depends ONLY on the transition —
-  // going through a ref keeps a naturally-finished briefing from
-  // restarting itself.
-  const audio = useAppAudio();
-  const audioRef = useRef(audio);
-  audioRef.current = audio;
-  useEffect(() => {
-    if (phase === "inside" && targetSlug) {
-      audioRef.current.playBriefing(targetSlug);
-    } else if (phase === "overview") {
-      audioRef.current.stopBriefing();
-    }
-  }, [phase, targetSlug]);
-
-  const selected = capabilities[selectedIndex];
-  const targetCapability =
-    capabilities.find((capability) => capability.slug === targetSlug) ?? null;
-  const open = useCallback(
-    (capability: Capability) => onOpen(capability.slug),
-    [onOpen],
-  );
-
-  const select = useCallback(
-    (index: number) => {
-      setSelectedIndex(index);
-      const capability = capabilities[index];
-      if (!capability) return;
-      const current = useGalaxyStore.getState().phase;
-      if (current === "overview") {
-        enter(capability.slug);
-      } else if (current === "fly") {
-        retarget(capability.slug);
-      } else {
-        warp(capability.slug);
-      }
-    },
-    [capabilities, enter, retarget, warp],
-  );
-
-  // Stable across renders so the memoized gestures never go stale — a
-  // gesture rebuilt mid-swipe has crashed native before.
-  const gestureStateRef = useRef({
-    capabilities,
-    fieldHeight: screenHeight,
-    fieldWidth: screenWidth,
-    select,
-  });
-  gestureStateRef.current = {
-    capabilities,
-    fieldHeight: screenHeight,
-    fieldWidth: screenWidth,
-    select,
-  };
-
-  // UI-thread mirrors for the pan worklet — it must never hop to the JS
-  // thread (that queue is busy rendering frames, and hopping made swipes
-  // feel dead unless they were slow and axis-aligned).
-  const panEnabled = useSharedValue(phase === "overview" ? 1 : 0);
-  const fieldSize = useSharedValue({ width: screenWidth, height: screenHeight });
-  const panStartYaw = useSharedValue(0);
-  const panStartPitch = useSharedValue(0);
-  const pinchStartZoom = useSharedValue(1);
-  useEffect(() => {
-    panEnabled.value = phase === "overview" ? 1 : 0;
-  }, [panEnabled, phase]);
-  useEffect(() => {
-    fieldSize.value = { width: screenWidth, height: screenHeight };
-  }, [fieldSize, screenHeight, screenWidth]);
-
-  // Stable identity (the memoized tap worklet captures it): projects every
-  // live planet position into field pixels and dives into the nearest one
-  // within thumb range.
-  const handleFieldTap = useCallback((tapX: number, tapY: number) => {
-    if (useGalaxyStore.getState().phase !== "overview") return;
-    const camera = galaxyCamera.current;
-    const state = gestureStateRef.current;
-    if (!camera) return;
-    let bestSlug: CapabilitySlug | null = null;
-    let bestDistance = PLANET_TAP_RADIUS;
-    for (const capability of state.capabilities) {
-      const world = capabilityPositions.get(capability.slug);
-      if (!world) continue;
-      const projected = scratchProjection.copy(world).project(camera);
-      if (projected.z > 1 || projected.z < -1) continue;
-      const px = ((projected.x + 1) / 2) * state.fieldWidth;
-      const py = ((1 - projected.y) / 2) * state.fieldHeight;
-      const distance = Math.hypot(px - tapX, py - tapY);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        bestSlug = capability.slug;
-      }
-    }
-    if (!bestSlug) return;
-    const index = state.capabilities.findIndex(
-      (capability) => capability.slug === bestSlug,
-    );
-    if (index >= 0) state.select(index);
+  const [sceneSize, setSceneSize] = useState({ width: 0, height: 0 });
+  const captureFullSceneSize = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setSceneSize((current) => {
+      const next = {
+        width: Math.max(current.width, width),
+        height: Math.max(current.height, height),
+      };
+      return next.width === current.width && next.height === current.height
+        ? current
+        : next;
+    });
   }, []);
+  const capabilities = CAPABILITIES.filter((capability) =>
+    enabledSlugs.includes(capability.slug),
+  );
 
-  const fieldGesture = useMemo(() => {
-    // Pure worklet pan: every event lands on the UI thread and writes the
-    // rotation targets directly — any direction, any speed, no waiting on
-    // the JS thread. Manual activation grabs the globe the instant the
-    // finger touches the glass (no minDistance dead zone — that dead zone
-    // was why starting a rotation felt sticky); in a biome the gesture
-    // fails immediately so the chrome buttons keep their touches.
-    const pan = Gesture.Pan()
-      .manualActivation(true)
-      .onTouchesDown((_event, manager) => {
-        if (!panEnabled.value) {
-          manager.fail();
-          return;
-        }
-        manager.activate();
-      })
-      .onStart(() => {
-        // GRAB the rendered orientation and kill leftover momentum — a
-        // finger on the glass stops the globe instantly; without this a
-        // re-swipe fights the previous fling's still-gliding target and
-        // feels stuck for seconds. While dragging the rig applies the
-        // targets verbatim (no damping), so the field is glued to the
-        // finger.
-        panStartYaw.value = systemYawLive.value;
-        panStartPitch.value = systemPitchLive.value;
-        systemYaw.value = systemYawLive.value;
-        systemPitch.value = systemPitchLive.value;
-        systemDragging.value = 1;
-      })
-      .onChange((event) => {
-        if (!panEnabled.value) return;
-        const size = fieldSize.value;
-        systemYaw.value =
-          panStartYaw.value + (event.translationX / size.width) * YAW_PER_WIDTH;
-        const pitch =
-          panStartPitch.value +
-          (event.translationY / size.height) * PITCH_PER_HEIGHT;
-        systemPitch.value = Math.max(
-          -SYSTEM_PITCH_LIMIT,
-          Math.min(SYSTEM_PITCH_LIMIT, pitch),
-        );
-      })
-      .onEnd((event) => {
-        if (!panEnabled.value) return;
-        // The pan owns every touch now, so a touch that never travelled
-        // is a tap — hit-test it against the planets on the JS thread
-        // (scheduleOnRN is the react-native-worklets successor to
-        // Reanimated's deprecated JS-scheduling API).
-        const travel = Math.hypot(event.translationX, event.translationY);
-        if (travel < TAP_TRAVEL) {
-          scheduleOnRN(handleFieldTap, event.x, event.y);
-          return;
-        }
-        const size = fieldSize.value;
-        // Momentum: the fling keeps carrying, the rig damps it out.
-        systemYaw.value +=
-          (event.velocityX / size.width) * YAW_PER_WIDTH * FLING_CARRY;
-        const pitch =
-          systemPitch.value +
-          (event.velocityY / size.height) * PITCH_PER_HEIGHT * FLING_CARRY;
-        systemPitch.value = Math.max(
-          -SYSTEM_PITCH_LIMIT,
-          Math.min(SYSTEM_PITCH_LIMIT, pitch),
-        );
-      })
-      .onFinalize(() => {
-        // Covers end AND cancellation — the rig must never stay glued.
-        systemDragging.value = 0;
-      });
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, () =>
+      setKeyboardVisible(true),
+    );
+    const hideSubscription = Keyboard.addListener(hideEvent, () =>
+      setKeyboardVisible(false),
+    );
 
-    // Two-finger zoom: scales the overview camera's standoff. Runs
-    // simultaneously with the pan, so rotating while zooming just works.
-    const pinch = Gesture.Pinch()
-      .onStart(() => {
-        pinchStartZoom.value = systemZoom.value;
-        systemPinching.value = 1;
-      })
-      .onUpdate((event) => {
-        if (!panEnabled.value) return;
-        const scale = Math.max(0.05, event.scale);
-        systemZoom.value = Math.min(
-          SYSTEM_ZOOM_MAX,
-          Math.max(SYSTEM_ZOOM_MIN, pinchStartZoom.value / scale),
-        );
-      })
-      .onFinalize(() => {
-        systemPinching.value = 0;
-      });
-
-    return Gesture.Simultaneous(pan, pinch);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
   }, []);
 
   return (
-    <View style={styles.root}>
-      <GestureDetector gesture={fieldGesture}>
-        <View collapsable={false} style={styles.field}>
-          <GalaxyScene
-            enabledSlugs={enabledSlugs}
-            selectedSlug={selected?.slug ?? null}
-            style={StyleSheet.absoluteFill}
-          />
-          <InteriorEmblem capability={targetCapability} />
-          <CapabilityDrawer capability={targetCapability} onOpen={open} />
-          {phase !== "overview" ? (
-            <View style={[styles.backButton, { top: insets.top + 8 }]}>
-              <Button
-                accessibilityRole="button"
-                accessibilityLabel="Return to orbit"
-                contentMode="raw"
-                hitSlop={12}
-                onPress={exit}
-                size="md"
-                style={styles.backPress}
-                variant="icon"
-              >
-                <ChevronLeftIcon size="md" variant="accent" />
-              </Button>
-            </View>
-          ) : null}
-          {phase === "inside" && targetCapability ? (
-            // The biome's voice control — the round header sibling of the
-            // back chevron. Icon only; arrival auto-plays the briefing, so
-            // this mostly reads as "mute".
-            <View style={[styles.voiceButton, { top: insets.top + 8 }]}>
-              <Button
-                accessibilityRole="button"
-                accessibilityLabel={
-                  audio.playingBriefing === targetCapability.slug
-                    ? `Stop ${targetCapability.name} briefing`
-                    : `Play ${targetCapability.name} briefing`
-                }
-                contentMode="raw"
-                hitSlop={12}
-                onPress={() => audio.toggleBriefing(targetCapability.slug)}
-                size="md"
-                style={[
-                  styles.backPress,
-                  audio.playingBriefing === targetCapability.slug
-                    ? styles.voicePressLive
-                    : null,
-                ]}
-                variant="icon"
-              >
-                <VolumeIcon size="md" variant="accent" />
-              </Button>
-            </View>
-          ) : null}
-        </View>
-      </GestureDetector>
+    <View onLayout={captureFullSceneSize} style={styles.root}>
+      <View style={[styles.scene, sceneSize]}>
+        <PersonalAIStar3D style={StyleSheet.absoluteFill} />
 
-      {carouselShown ? (
-        <View
-          pointerEvents="box-none"
+        <View pointerEvents="none" style={styles.centerLogo}>
+          <ChromeIcon glow={0.9} size={CORE_SIZE} source={vorinthexMarkSource} />
+        </View>
+
+        {capabilities.map((capability, index) => (
+          <Animated.View
+            entering={FadeIn.delay(160 + index * 90).duration(500)}
+            key={capability.slug}
+            style={[styles.node, NODE_POSITIONS[capability.slug]]}
+          >
+            <Button
+              accessibilityLabel={`Open ${capability.name}`}
+              contentMode="raw"
+              onPress={() => onOpen(capability.slug)}
+              size="lg"
+              style={styles.nodeButton}
+              variant="icon"
+            >
+              <ChromeIcon
+                glow={0.75}
+                size={42}
+                source={capabilityIconSource[capability.slug]}
+              />
+            </Button>
+            <Text pointerEvents="none" style={styles.nodeLabel}>
+              {capability.name.toUpperCase()}
+            </Text>
+          </Animated.View>
+        ))}
+      </View>
+
+      <KeyboardAvoidingView
+        behavior="padding"
+        pointerEvents="box-none"
+        style={styles.promptLayer}
+      >
+        <SearchBar
+          mode="prompt"
+          placeholder="Ask Core anything..."
           style={[
-            styles.carousel,
+            styles.prompt,
             {
-              bottom: insets.bottom + 6,
-              height: CAPABILITY_CAROUSEL_HEIGHT,
+              marginBottom: keyboardVisible
+                ? PROMPT_KEYBOARD_GAP
+                : insets.bottom + 14,
             },
           ]}
-        >
-          <CapabilityArcCarousel
-            capabilities={capabilities}
-            selectedIndex={selectedIndex}
-            width={carouselWidth}
-            onOpen={open}
-            onSelect={select}
-          />
-        </View>
-      ) : null}
+        />
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -395,42 +146,56 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
+    backgroundColor: palette.page,
   },
-  field: {
+  scene: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    backgroundColor: palette.page,
+  },
+  centerLogo: {
+    position: "absolute",
+    top: "49%",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    transform: [{ translateY: -CORE_SIZE / 2 }],
+  },
+  node: {
+    position: "absolute",
+    width: 78,
+    alignItems: "center",
+  },
+  nodeButton: {
+    borderColor: "rgba(215, 235, 245, 0.28)",
+    backgroundColor: "rgba(5, 9, 12, 0.82)",
+    shadowColor: "#bde9ff",
+    shadowOpacity: 0.26,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  nodeLabel: {
+    marginTop: 7,
+    color: palette.silver300,
+    fontFamily: fonts.medium,
+    fontSize: 9,
+    letterSpacing: tracking.micro,
+    paddingLeft: tracking.micro,
+  },
+  prompt: {
+    marginHorizontal: 20,
+    height: 44,
+    borderRadius: 999,
+    backgroundColor: "rgba(9, 13, 17, 0.9)",
+    borderColor: "rgba(215, 235, 245, 0.12)",
+  },
+  promptLayer: {
     position: "absolute",
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
-  },
-  carousel: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-  },
-  backButton: {
-    position: "absolute",
-    left: 10,
-    zIndex: 30,
-  },
-  voiceButton: {
-    position: "absolute",
-    right: 10,
-    zIndex: 30,
-  },
-  voicePressLive: {
-    borderColor: "rgba(221, 226, 229, 0.42)",
-    backgroundColor: "rgba(12, 16, 19, 0.7)",
-  },
-  backPress: {
-    width: 40,
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(221, 226, 229, 0.18)",
-    backgroundColor: "rgba(3, 5, 7, 0.55)",
+    justifyContent: "flex-end",
   },
 });

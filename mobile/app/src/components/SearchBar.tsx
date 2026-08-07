@@ -1,20 +1,21 @@
 import { useState } from "react";
 import { StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from "react-native";
-import { SearchIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { MicrophoneIcon, SearchIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { fonts, palette, radii } from "@/theme/tokens";
 
 export type SearchBarProps = {
+  mode?: "prompt" | "search";
   placeholder: string;
   style?: StyleProp<ViewStyle>;
 };
 
-/** Visual search field — local state only, wired to nothing in this mockup. */
-export function SearchBar({ placeholder, style }: SearchBarProps) {
+/** Local-only text field with search or voice-prompt chrome. */
+export function SearchBar({ mode = "search", placeholder, style }: SearchBarProps) {
   const [value, setValue] = useState("");
   return (
     <View style={[styles.root, style]}>
-      <SearchIcon size="sm" variant="muted" />
+      {mode === "search" ? <SearchIcon size="sm" variant="muted" /> : null}
       <TextInput
         value={value}
         onChangeText={setValue}
@@ -24,6 +25,7 @@ export function SearchBar({ placeholder, style }: SearchBarProps) {
         style={styles.input}
         accessibilityLabel={placeholder}
       />
+      {mode === "prompt" ? <MicrophoneIcon size="sm" variant="accent" /> : null}
     </View>
   );
 }

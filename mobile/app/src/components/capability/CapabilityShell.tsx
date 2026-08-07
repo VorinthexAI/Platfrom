@@ -36,7 +36,7 @@ export function CapabilityShell({ capability, children }: CapabilityShellProps) 
       <View style={styles.header}>
         <Button
           accessibilityRole="button"
-          accessibilityLabel="Back to your brain"
+          accessibilityLabel="Back to your personal AI"
           contentMode="raw"
           onPress={() => router.back()}
           size="md"
@@ -50,7 +50,9 @@ export function CapabilityShell({ capability, children }: CapabilityShellProps) 
       </View>
 
       <ScrollView
+        automaticallyAdjustKeyboardInsets
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 32 }]}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <Animated.View entering={FadeIn.duration(durations.reveal)} style={styles.hero}>

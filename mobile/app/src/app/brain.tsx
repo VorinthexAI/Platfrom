@@ -7,22 +7,16 @@ import { SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Button } from "@vorinthex/shared/ui/button";
 
 import { HomeConstellation } from "@/components/HomeConstellation";
-import { TransitionVeil } from "@/components/TransitionVeil";
 import { MOCK_USER, greetingForHour } from "@/data/mock";
 import { CAPABILITIES, type CapabilitySlug } from "@/data/registry";
-import { useGalaxyStore } from "@/state/galaxy";
 import { useOnboardingStore } from "@/state/onboarding";
 import { durations } from "@/theme/motion";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
-/** The AI brain home screen — capabilities orbit the neural core. */
+/** The personal AI home screen. */
 export default function BrainRoute() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const phase = useGalaxyStore((state) => state.phase);
-  // Inside a biome the scene owns the WHOLE screen: no header, no padding.
-  // The swap happens while the TransitionVeil below is fully dark.
-  const immersed = phase === "inside" || phase === "exit";
   const greeting = greetingForHour(new Date().getHours());
   const decisions = useOnboardingStore((state) => state.decisions);
   const enabledSlugs = useMemo(
@@ -64,38 +58,28 @@ export default function BrainRoute() {
 
   return (
     <View style={styles.root}>
-      {/* The galaxy owns the whole screen; every overlay floats above it. */}
       <HomeConstellation enabledSlugs={enabledSlugs} onOpen={openCapability} />
 
-      {immersed ? null : (
-        <Animated.View
-          entering={FadeInDown.duration(durations.base)}
-          // Transparent overlay — orbits pass BEHIND the greeting; empty
-          // header space stays swipeable (box-none), only the texts and
-          // the settings button catch touches.
-          pointerEvents="box-none"
-          style={[styles.header, { paddingTop: insets.top + 10 }]}
+      <Animated.View
+        entering={FadeInDown.duration(durations.base)}
+        pointerEvents="box-none"
+        style={[styles.header, { paddingTop: insets.top + 10 }]}
+      >
+        <View pointerEvents="none">
+          <Text style={styles.greeting}>{typedGreeting}</Text>
+          <Text style={styles.name}>{typedName}</Text>
+        </View>
+        <Button
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          contentMode="raw"
+          size="md"
+          style={styles.settingsButton}
+          variant="icon"
         >
-          <View pointerEvents="none">
-            <Text style={styles.greeting}>{typedGreeting}</Text>
-            <Text style={styles.name}>{typedName}</Text>
-          </View>
-          <Button
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-            contentMode="raw"
-            size="md"
-            style={styles.settingsButton}
-            variant="icon"
-          >
-            <SettingsIcon size="md" variant="accent" />
-          </Button>
-        </Animated.View>
-      )}
-
-      {/* Route-level veil: covers header AND scene, so every teleport
-          happens in total darkness. */}
-      <TransitionVeil />
+          <SettingsIcon size="md" variant="accent" />
+        </Button>
+      </Animated.View>
     </View>
   );
 }

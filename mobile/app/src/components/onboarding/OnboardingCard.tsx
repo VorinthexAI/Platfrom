@@ -1,6 +1,4 @@
 import { StyleSheet, Text, View } from "react-native";
-import { VolumeIcon } from "@vorinthex/shared/ui/icons-mobile";
-import { Button } from "@vorinthex/shared/ui/button";
 
 import { ChromePanel } from "@/components/ChromePanel";
 import { ChromeIcon } from "@/components/ChromeIcon";
@@ -15,8 +13,6 @@ export type OnboardingCardProps = {
   index: number;
   width: number;
   height: number;
-  briefingPlaying: boolean;
-  onToggleBriefing: () => void;
 };
 
 /**
@@ -29,8 +25,6 @@ export function OnboardingCard({
   index,
   width,
   height,
-  briefingPlaying,
-  onToggleBriefing,
 }: OnboardingCardProps) {
   return (
     <ChromePanel radius={radii.xl} style={[styles.card, { width, height }]}>
@@ -44,16 +38,6 @@ export function OnboardingCard({
         <Text style={styles.description}>
           {capability.onboardingDescription}
         </Text>
-        <Button
-          accessibilityLabel={`${briefingPlaying ? "Stop" : "Play"} ${capability.name} briefing`}
-          icon={<VolumeIcon size="sm" variant="inverse" />}
-          onPress={onToggleBriefing}
-          size="sm"
-          style={styles.briefingButton}
-          variant="primary"
-        >
-          {briefingPlaying ? "Stop Briefing" : "Play Briefing"}
-        </Button>
       </View>
       <ProgressDots
         count={CAPABILITIES.length}
@@ -92,10 +76,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     textAlign: "center",
-  },
-  briefingButton: {
-    minWidth: 156,
-    marginTop: 24,
   },
   dots: {
     position: "absolute",
