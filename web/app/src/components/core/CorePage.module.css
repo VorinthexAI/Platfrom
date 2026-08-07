@@ -61,8 +61,8 @@
 .titleWord:not(:last-child) { margin-right: 0.28em; }
 .titleCharacter {
   display: inline-block;
-  opacity: 0;
-  animation: titleCharacterIn 1ms step-end forwards;
+  opacity: 1;
+  animation: titleCharacterIn 1ms step-end backwards;
 }
 .titleWord:last-child .titleCharacter:last-child::after {
   display: inline-block;
@@ -76,6 +76,7 @@
 }
 
 @keyframes titleCharacterIn {
+  from { opacity: 0; }
   to { opacity: 1; }
 }
 
@@ -233,7 +234,10 @@
   .hero { min-height: auto; padding-top: 52px; }
   .hero h1 {
     background: none;
+    -webkit-background-clip: border-box;
+    background-clip: border-box;
     color: #d9dcdd;
+    -webkit-text-fill-color: #d9dcdd;
     font-size: clamp(43px, 14vw, 62px);
     letter-spacing: 0.08em;
   }
