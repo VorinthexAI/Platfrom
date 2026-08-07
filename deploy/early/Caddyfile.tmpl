@@ -1,8 +1,8 @@
 # Caddy reverse proxy for the single-box early-infra app host.
 # Rendered by deploy.sh with __COLOR__ replaced by the active color (blue|green).
 #
-# Cloudflare is the client (proxied). Only the apex is public: backend v1 API
-# paths go to Bun (:3001), and every other path goes to Next.js (:3000).
+# Cloudflare is the client (proxied). The apex serves the app and www redirects
+# to it. Backend v1 API paths go to Bun (:3001), and all other paths go to Next.js.
 #
 # Serves the apex on :80 AND :443 with a self-signed internal certificate
 # (Cloudflare "Full", non-strict). local_certs
@@ -28,6 +28,15 @@
 }
 
 http://vorinthex.com {
+	redir https://vorinthex.com{uri} permanent
+}
+
+http://www.vorinthex.com {
+	redir https://vorinthex.com{uri} permanent
+}
+
+https://www.vorinthex.com {
+	tls internal
 	redir https://vorinthex.com{uri} permanent
 }
 

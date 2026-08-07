@@ -151,7 +151,7 @@ export function CoreNeuralScene() {
     observer.observe(host);
     resize();
 
-    renderer.setAnimationLoop(() => {
+    const render = () => {
       const elapsed = clock.getElapsedTime();
       if (!reducedMotion.matches) {
         const breath = 1 + Math.sin(elapsed * 0.7) * 0.012;
@@ -163,10 +163,25 @@ export function CoreNeuralScene() {
         for (const particle of particles) particle.mesh.position.copy(particle.curve.getPointAt((elapsed * particle.speed + particle.offset) % 1));
       }
       renderer.render(scene, camera);
-    });
+    };
+    let isVisible = false;
+    const syncAnimation = () => {
+      renderer.setAnimationLoop(isVisible && !reducedMotion.matches ? render : null);
+      if (isVisible) render();
+    };
+    const intersectionObserver = new IntersectionObserver(([entry]) => {
+      isVisible = Boolean(entry?.isIntersecting);
+      syncAnimation();
+    }, { rootMargin: "80px" });
+    const handleMotionChange = syncAnimation;
+    intersectionObserver.observe(host);
+    reducedMotion.addEventListener("change", handleMotionChange);
+    render();
 
     return () => {
       observer.disconnect();
+      intersectionObserver.disconnect();
+      reducedMotion.removeEventListener("change", handleMotionChange);
       renderer.setAnimationLoop(null);
       renderer.dispose();
       scene.traverse((object) => {
