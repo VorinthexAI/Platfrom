@@ -109,10 +109,25 @@ export function CoreNeuralScene() {
     }
 
     const core = new THREE.Group();
+    const coreBackdropMaterial = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      depthTest: false,
+      depthWrite: false,
+      opacity: 0.92,
+      transparent: true,
+    });
+    const coreBackdrop = new THREE.Mesh(
+      new THREE.CircleGeometry(1.32, 64),
+      coreBackdropMaterial,
+    );
+    coreBackdrop.position.z = 0.45;
+    coreBackdrop.renderOrder = 2;
+    core.add(coreBackdrop);
     const logoTexture = new THREE.TextureLoader().load("/logos/vorinthex-mark.png");
     logoTexture.colorSpace = THREE.SRGBColorSpace;
     const logo = new THREE.Sprite(new THREE.SpriteMaterial({ map: logoTexture, transparent: true, depthTest: false }));
     logo.position.z = 0.55;
+    logo.renderOrder = 3;
     logo.scale.set(2.05, 2.05, 1);
     core.add(logo);
     root.add(core);
@@ -124,7 +139,7 @@ export function CoreNeuralScene() {
       const height = host.clientHeight;
       renderer.setSize(width, height, false);
       const aspect = width / height;
-      const verticalSpan = 23;
+      const verticalSpan = width > 640 ? 20.5 : 21.5;
       camera.left = (-verticalSpan * aspect) / 2;
       camera.right = (verticalSpan * aspect) / 2;
       camera.top = verticalSpan / 2;
@@ -162,6 +177,8 @@ export function CoreNeuralScene() {
       trunkMaterial.dispose();
       nodeMaterial.dispose();
       particleMaterial.dispose();
+      coreBackdropMaterial.dispose();
+      logo.material.dispose();
       logoTexture.dispose();
       host.removeChild(renderer.domElement);
     };
