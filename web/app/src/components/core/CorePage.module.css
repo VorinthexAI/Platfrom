@@ -216,6 +216,8 @@
   .principles { width: var(--site-content-width); }
   .hero { min-height: auto; padding-top: 52px; }
   .hero h1 { font-size: clamp(43px, 14vw, 62px); letter-spacing: 0.08em; }
+  .titleWord { display: block; width: max-content; }
+  .titleWord:not(:last-child) { margin-right: 0; }
   .heroLead { font-size: 13px; line-height: 1.75; }
   .storeButtons { display: grid; }
   .storeButtons > span,
