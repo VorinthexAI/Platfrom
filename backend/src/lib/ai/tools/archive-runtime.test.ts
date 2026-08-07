@@ -247,6 +247,22 @@ describe('Archive runtime', () => {
     expect(actions).toBe(0);
   });
 
+  test('initializes folder and copied document favorites sensibly', async () => {
+    const f = fixture('moderator');
+    const created = await runArchiveTool('folder.create', { folders: [
+      { scopeKey: f.scopeKey, name: 'Default' },
+      { scopeKey: f.scopeKey, name: 'Pinned', isFavorite: true },
+    ] }, f.context, { repository: f.repository, embed: async () => [1] });
+    expect(created.results.map((result) => result.data?.folder.isFavorite)).toEqual([false, true]);
+
+    const documentKey = f.addDocument('Favorite source');
+    f.documents.get(documentKey).isFavorite = true;
+    const copied = await runArchiveTool('document.copy', {
+      copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }],
+    }, f.context, { repository: f.repository, storage: { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input) { return { storageKey: input.destinationKey }; }, async delete() {} } });
+    expect(copied.results[0]?.data?.document.isFavorite).toBe(false);
+  });
+
   test('sanitizes HTML updates and persists canonical agreeing representations', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
@@ -265,6 +281,7 @@ describe('Archive runtime', () => {
   test('embeds the final derived name for persisted AI copies', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Source body');
+    f.documents.get(documentKey).isFavorite = true;
     const embeddedNames: string[] = [];
     const storage: any = { async upload(input: any) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } };
     const output = await runArchiveTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy' }, f.context, {
@@ -283,6 +300,8 @@ describe('Archive runtime', () => {
     });
     expect(output.results[0]?.success).toBe(true);
     expect(embeddedNames).toEqual(['Notes (translate)']);
+    const persistedDocumentKey = output.results[0]?.data?.persistedDocumentKey;
+    expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)?.isFavorite).toBe(false);
   });
 
   test('precomputes atomic exports and throws without returning partial success', async () => {
