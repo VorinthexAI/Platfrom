@@ -67,6 +67,21 @@ async function runMigrationTransaction(targetDb: Database, collectionName: strin
   }
 }
 
+export async function retireRemovedActions(targetDb: Database): Promise<void> {
+  const slugs = ['document-generate-json'];
+  await targetDb.query(`
+    FOR relation IN modelActions
+      LET action = DOCUMENT(actions, relation.actionKey)
+      FILTER action != null && action.slug IN @slugs
+      REMOVE relation IN modelActions
+  `, { slugs });
+  await targetDb.query(`
+    FOR action IN actions
+      FILTER action.slug IN @slugs
+      REMOVE action IN actions
+  `, { slugs });
+}
+
 export async function migrateArchiveFavorites(targetDb: Database, collectionName: 'folders' | 'documents') {
   await runMigrationTransaction(targetDb, collectionName, `
     FOR resource IN @@collection
@@ -884,6 +899,10 @@ async function main() {
       });
     }
   }
+
+  // Removed action slugs can occupy fixed seed keys. Retire them before the
+  // strict seed reader resolves those keys into current action definitions.
+  await retireRemovedActions(targetDb);
 
   // Existing users predate country tracking. Sweden is the historical fallback;
   // new web signups provide their detected code.
