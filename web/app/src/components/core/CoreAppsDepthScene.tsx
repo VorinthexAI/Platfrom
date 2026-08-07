@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { CORE_CAPABILITIES } from "@/lib/core";
 
+const GATE_SPACING = 18;
+
 export function CoreAppsDepthScene() {
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -13,30 +15,34 @@ export function CoreAppsDepthScene() {
     if (!host || !journey) return;
 
     const scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x020406, 0.035);
+    scene.fog = new THREE.FogExp2(0x020406, 0.026);
     const camera = new THREE.PerspectiveCamera(48, 1, 0.1, 180);
-    camera.position.set(0, 0, 10);
+    camera.position.set(0, 0, 12);
 
+    const mobileAtMount = window.innerWidth <= 640;
     const renderer = new THREE.WebGLRenderer({
       alpha: true,
-      antialias: true,
+      antialias: !mobileAtMount,
       powerPreference: "high-performance",
     });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     host.appendChild(renderer.domElement);
 
     const tunnel = new THREE.Group();
     scene.add(tunnel);
     const textures: THREE.Texture[] = [];
+    const outerGeometry = new THREE.TorusGeometry(6.2, 0.022, 5, 96);
+    const innerGeometry = new THREE.TorusGeometry(4.65, 0.012, 4, 72);
     const gates: Array<{
       emblemMaterial: THREE.SpriteMaterial;
       group: THREE.Group;
       materials: THREE.MeshBasicMaterial[];
     }> = [];
+    let disposed = false;
+
     CORE_CAPABILITIES.forEach((capability, index) => {
       const gate = new THREE.Group();
-      gate.position.set(index % 2 === 0 ? 2.6 : -2.6, 0, 0);
+      gate.position.z = -index * GATE_SPACING;
       gate.rotation.z = index * 0.18;
 
       const outerMaterial = new THREE.MeshBasicMaterial({
@@ -47,28 +53,30 @@ export function CoreAppsDepthScene() {
         transparent: true,
       });
       const innerMaterial = outerMaterial.clone();
-
-      const outerRing = new THREE.Mesh(
-        new THREE.TorusGeometry(6.2, 0.022, 5, 128),
-        outerMaterial,
-      );
-      const innerRing = new THREE.Mesh(
-        new THREE.TorusGeometry(4.65, 0.012, 4, 96),
-        innerMaterial,
-      );
+      const outerRing = new THREE.Mesh(outerGeometry, outerMaterial);
+      const innerRing = new THREE.Mesh(innerGeometry, innerMaterial);
       innerRing.rotation.x = 0.42;
       innerRing.rotation.y = 0.28;
       gate.add(outerRing, innerRing);
 
-      const texture = new THREE.TextureLoader().load(capability.icon);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      textures.push(texture);
       const emblemMaterial = new THREE.SpriteMaterial({
-        map: texture,
         opacity: 0,
         transparent: true,
         depthWrite: false,
       });
+      const texture = new THREE.TextureLoader().load(capability.icon, (loaded) => {
+        if (disposed) {
+          loaded.dispose();
+          return;
+        }
+        loaded.colorSpace = THREE.SRGBColorSpace;
+        emblemMaterial.map = loaded;
+        emblemMaterial.needsUpdate = true;
+        render();
+      });
+      texture.colorSpace = THREE.SRGBColorSpace;
+      textures.push(texture);
+      emblemMaterial.map = texture;
       const emblem = new THREE.Sprite(emblemMaterial);
       emblem.scale.set(2.7, 2.7, 1);
       emblem.rotation.z = -gate.rotation.z;
@@ -85,102 +93,127 @@ export function CoreAppsDepthScene() {
     const steps = Array.from(
       journey.querySelectorAll<HTMLElement>("[data-core-app-step]"),
     );
+    const strengths = gates.map(() => 0);
     let targetProgress = 0;
     let progress = 0;
-    const clock = new THREE.Clock();
-    const getActiveStep = () => {
-      let index = 0;
-      let distance = Number.POSITIVE_INFINITY;
-      steps.forEach((step, stepIndex) => {
-        const rect = step.getBoundingClientRect();
-        const stepDistance = Math.abs(
-          rect.top + rect.height / 2 - window.innerHeight / 2,
-        );
-        if (stepDistance < distance) {
-          distance = stepDistance;
-          index = stepIndex;
-        }
-      });
-      return { distance, index };
-    };
-    const render = () => {
-      const elapsed = clock.getElapsedTime();
+    let isIntersecting = false;
+    let isMobile = mobileAtMount;
+    let measurementFrame = 0;
+    let lastFrameTime = 0;
+
+    function render(time = performance.now()) {
+      const delta = lastFrameTime
+        ? Math.min((time - lastFrameTime) / 1000, 0.05)
+        : 1 / 60;
+      lastFrameTime = time;
       progress = reducedMotion.matches
-        ? targetProgress
-        : THREE.MathUtils.lerp(progress, targetProgress, 0.065);
-      camera.position.z = 12 - progress * 5;
-      camera.position.x = Math.sin(progress * Math.PI * 4) * 0.65;
-      camera.position.y = Math.cos(progress * Math.PI * 3) * 0.32;
-      camera.lookAt(camera.position.x * 0.15, camera.position.y * 0.15, camera.position.z - 12);
-      if (!reducedMotion.matches) {
-        tunnel.rotation.z = Math.sin(elapsed * 0.11) * 0.045;
-      }
-      const active = getActiveStep();
+        ? 0
+        : THREE.MathUtils.damp(progress, targetProgress, 5.5, delta);
+      camera.position.z = 12 - progress * GATE_SPACING * (gates.length - 1);
+      camera.position.x = reducedMotion.matches ? 0 : Math.sin(progress * Math.PI * 4) * (isMobile ? 0.18 : 0.72);
+      camera.position.y = (isMobile ? 0.75 : 0) + (reducedMotion.matches ? 0 : Math.cos(progress * Math.PI * 3) * (isMobile ? 0.12 : 0.3));
+      camera.lookAt(camera.position.x * 0.12, isMobile ? 0.85 : camera.position.y * 0.12, camera.position.z - 12);
+      tunnel.rotation.z = reducedMotion.matches ? 0 : Math.sin(time * 0.00011) * 0.04;
+
       gates.forEach((gate, index) => {
-        const strength = index === active.index
-          ? THREE.MathUtils.smoothstep(
-              1 - active.distance / (window.innerHeight * 0.5),
-              0,
-              1,
-            )
-          : 0;
+        const strength = reducedMotion.matches
+          ? 0
+          : strengths[index] ?? 0;
         gate.group.visible = strength > 0.01;
-        gate.materials[0]!.opacity = strength * 0.17;
-        gate.materials[1]!.opacity = strength * 0.1;
-        gate.emblemMaterial.opacity = strength * 0.11;
+        gate.materials[0]!.opacity = strength * 0.22;
+        gate.materials[1]!.opacity = strength * 0.13;
+        gate.emblemMaterial.opacity = strength * 0.18;
       });
       renderer.render(scene, camera);
+    }
+
+    const measure = () => {
+      measurementFrame = 0;
+      if (steps.length === 0) return;
+      const viewportCenter = window.innerHeight / 2;
+      const centers = steps.map((step) => {
+        const rect = step.getBoundingClientRect();
+        return rect.top + rect.height / 2;
+      });
+      const firstCenter = centers[0] ?? viewportCenter;
+      const lastCenter = centers.at(-1) ?? firstCenter;
+      targetProgress = THREE.MathUtils.clamp(
+        (viewportCenter - firstCenter) / Math.max(lastCenter - firstCenter, 1),
+        0,
+        1,
+      );
+      centers.forEach((center, index) => {
+        strengths[index] = THREE.MathUtils.smoothstep(
+          1 - Math.abs(center - viewportCenter) / (window.innerHeight * 0.82),
+          0,
+          1,
+        );
+      });
+      if (reducedMotion.matches && isIntersecting) render();
     };
-    const updateProgress = () => {
-      const active = getActiveStep();
-      const activeRect = steps[active.index]?.getBoundingClientRect();
-      const localProgress = activeRect
-        ? THREE.MathUtils.clamp(
-            (window.innerHeight / 2 - activeRect.top) / activeRect.height,
-            0,
-            1,
-          )
-        : 0;
-      targetProgress = localProgress;
-      if (reducedMotion.matches) render();
+    const scheduleMeasure = () => {
+      if (!measurementFrame) measurementFrame = window.requestAnimationFrame(measure);
     };
+
     const resize = () => {
       const width = host.clientWidth;
       const height = host.clientHeight;
+      isMobile = width <= 640;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1 : 1.35));
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
+      camera.fov = isMobile ? 66 : 48;
       camera.updateProjectionMatrix();
-      updateProgress();
+      gates.forEach((gate, index) => {
+        gate.group.position.x = (index % 2 === 0 ? 1 : -1) * (isMobile ? 0.7 : 2.35);
+        gate.group.position.y = isMobile ? 1.5 : 0;
+        gate.group.scale.setScalar(isMobile ? 0.62 : 1);
+      });
+      scheduleMeasure();
     };
+    const syncAnimation = () => {
+      lastFrameTime = 0;
+      renderer.setAnimationLoop(isIntersecting && !reducedMotion.matches ? render : null);
+      if (isIntersecting) render();
+    };
+    const handleMotionChange = () => {
+      progress = targetProgress;
+      measure();
+      syncAnimation();
+    };
+
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(host);
-    window.addEventListener("scroll", updateProgress, { passive: true });
-    resize();
+    window.addEventListener("scroll", scheduleMeasure, { passive: true });
+    reducedMotion.addEventListener("change", handleMotionChange);
 
     const intersectionObserver = new IntersectionObserver(([entry]) => {
-      renderer.setAnimationLoop(
-        entry?.isIntersecting && !reducedMotion.matches ? render : null,
-      );
-      if (entry?.isIntersecting) render();
+      isIntersecting = Boolean(entry?.isIntersecting);
+      if (isIntersecting) measure();
+      syncAnimation();
     }, { rootMargin: "120px" });
     intersectionObserver.observe(journey);
+    resize();
+    measure();
     render();
 
     return () => {
+      disposed = true;
       intersectionObserver.disconnect();
       resizeObserver.disconnect();
-      window.removeEventListener("scroll", updateProgress);
+      window.removeEventListener("scroll", scheduleMeasure);
+      reducedMotion.removeEventListener("change", handleMotionChange);
+      if (measurementFrame) window.cancelAnimationFrame(measurementFrame);
       renderer.setAnimationLoop(null);
-      scene.traverse((object) => {
-        if (object instanceof THREE.Mesh || object instanceof THREE.Points) {
-          object.geometry.dispose();
-        }
-        if (object instanceof THREE.Sprite) object.material.dispose();
-      });
       textures.forEach((texture) => texture.dispose());
-      gates.forEach((gate) => gate.materials.forEach((material) => material.dispose()));
+      gates.forEach((gate) => {
+        gate.emblemMaterial.dispose();
+        gate.materials.forEach((material) => material.dispose());
+      });
+      outerGeometry.dispose();
+      innerGeometry.dispose();
       renderer.dispose();
-      host.removeChild(renderer.domElement);
+      renderer.domElement.remove();
     };
   }, []);
 
