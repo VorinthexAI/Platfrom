@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { BrainIcon, ShieldIcon, StarIcon } from "@vorinthex/shared/ui/icons";
 import { SiteFooter, SiteHeader } from "@/components/site/SiteChrome";
+import { SiteNeuralBackdrop } from "@/components/site/SiteNeuralBackdrop";
 import { CoreAppsDepthScene } from "./CoreAppsDepthScene";
 import { CoreAppsJourney } from "./CoreAppsJourney";
 import { CoreNeuralScene } from "./CoreNeuralScene";
@@ -11,6 +12,7 @@ export function CorePage() {
   return (
     <div className={styles.page}>
       <SiteHeader />
+      <SiteNeuralBackdrop />
       <div className={styles.neuralBackdrop} aria-hidden="true">
         <CoreNeuralScene />
       </div>
