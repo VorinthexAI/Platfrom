@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { coreChatInputSchema, type CoreChatInput } from '@/lib/ai/actions';
 import { ProviderExecutionError, selectRoute, streamRoute, type RouterDependencies } from '@/lib/ai/router';
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
-import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
+import type { DocumentParseDependencies } from '@/lib/ai/document-processing';
 import { isAiError } from '@/lib/ai/shared/result';
 import { embedText } from '@/lib/openai-embeddings';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
@@ -12,7 +12,7 @@ export const orchestratorChatToolInputSchema = z.object({
   message: sanitizedAgentMessageSchema,
 }).strict();
 
-export interface OrchestratorChatToolDependencies extends RouterDependencies, DocumentProcessingDependencies, RetrievalDependencies {
+export interface OrchestratorChatToolDependencies extends RouterDependencies, DocumentParseDependencies, RetrievalDependencies {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   selectRoute?: typeof selectRoute;

@@ -8,7 +8,6 @@ import { documentEmbedAction } from './document-embed';
 import { documentExtractAction } from './document-extract';
 import { documentGenerateContentAction } from './document-generate-content';
 import { documentGenerateHtmlAction } from './document-generate-html';
-import { documentGenerateJsonAction } from './document-generate-json';
 import { documentInsertAction } from './document-insert';
 import { documentValidateAction } from './document-validate';
 import { editImageAction } from './edit-image';
@@ -43,7 +42,6 @@ export { documentEmbedAction } from './document-embed';
 export { documentExtractAction } from './document-extract';
 export { documentGenerateContentAction } from './document-generate-content';
 export { documentGenerateHtmlAction } from './document-generate-html';
-export { documentGenerateJsonAction } from './document-generate-json';
 export { documentInsertAction } from './document-insert';
 export { documentValidateAction } from './document-validate';
 export { editImageAction } from './edit-image';
@@ -85,7 +83,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentGenerateHtmlAction,
-  documentGenerateJsonAction, documentGenerateContentAction, documentEmbedAction, documentInsertAction,
+  documentGenerateContentAction, documentEmbedAction, documentInsertAction,
 ];
 export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 

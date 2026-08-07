@@ -3,7 +3,7 @@ import type { CoreChatInput } from '@/lib/ai/actions';
 import type { RouterDependencies } from '@/lib/ai/router';
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk, TranscribeInput, TranscriptionOutput } from '@/lib/ai/providers';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
-import type { DocumentProcessingDependencies } from '@/lib/ai/document-processing';
+import type { DocumentParseDependencies } from '@/lib/ai/document-processing';
 import type { ArchiveToolDependencies } from './archive-runtime';
 import type { ArchiveToolInput, ArchiveToolName, ArchiveToolOutput } from './archive-schemas';
 import type { DomainActionSlug } from './domain-schemas';
@@ -30,7 +30,7 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
 export { orchestratorChatToolInputSchema };
 
-export interface ToolDependencies extends RouterDependencies, DocumentProcessingDependencies, RetrievalDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'> {
+export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, RetrievalDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'> {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;

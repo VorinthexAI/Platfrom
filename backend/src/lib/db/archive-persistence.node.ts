@@ -5,16 +5,23 @@ import { documentVersionSchema, type DocumentVersion } from './document-versions
 import { newId } from '@/lib/ids';
 import { toArangoDoc, withArangoKey } from './base';
 import { db, withTransaction } from './client';
+import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 
 type QueryCursor = { next(): Promise<unknown>; all?(): Promise<unknown[]> };
 export interface ArchiveQueryExecutor {
   query(query: string, bindVars?: Record<string, unknown>): Promise<QueryCursor>;
 }
 
-type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'json' | 'content' | 'embedding' | 'speechStorageKeys' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
+type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'isFavorite' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'content' | 'isFavorite' | 'embedding' | 'speechStorageKeys' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
+
+function canonicalRepresentations(html: string, content: string) {
+  const canonical = canonicalDocumentRepresentations(html);
+  if (html !== canonical.html || content !== canonical.content) throw new Error('Document representations must be canonical and agreeing.');
+  return canonical;
+}
 
 function splitPatch(patch: Record<string, unknown>) {
   const set: Record<string, unknown> = {};
@@ -41,9 +48,10 @@ async function scopedUpdate<T>(
       FILTER destination == null || (destination.scopeKey == @scopeKey && (!HAS(destination, "_internalDeletion") || destination._internalDeletion == null))
   ` : collection === 'documents' ? `
       FILTER !HAS(current, "_internalDeletion") || current._internalDeletion == null
-      LET destination = DOCUMENT(folders, @destinationKey == null ? current.folderKey : @destinationKey)
-      FILTER destination != null && destination.scopeKey == @scopeKey
-      FILTER !HAS(destination, "_internalDeletion") || destination._internalDeletion == null
+      LET destinationKey = @changesLocation ? @destinationKey : (HAS(current, "folderKey") ? current.folderKey : null)
+      LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
+      FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
+      FILTER destinationKey == null || ((!HAS(destination, "_internalDeletion") || destination._internalDeletion == null) && destination.deletedAt == null)
   ` : `
       LET owner = DOCUMENT(documents, current.documentKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
@@ -61,7 +69,12 @@ async function scopedUpdate<T>(
     '@collection': collection,
     key,
     scopeKey,
-    ...(collection === 'documentShares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
+    ...(collection === 'documentShares' ? {} : {
+      destinationKey: set.parentFolderKey ?? set.folderKey ?? null,
+      changesLocation: collection === 'folders'
+        ? Object.prototype.hasOwnProperty.call(patch, 'parentFolderKey')
+        : Object.prototype.hasOwnProperty.call(patch, 'folderKey'),
+    }),
     patch: set,
     unset,
   });
@@ -143,11 +156,11 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       return folderSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
     async insertDocument(document: Document): Promise<Document> {
-      const parsed = documentSchema.parse(document);
+      const parsed = documentSchema.parse({ ...document, ...canonicalRepresentations(document.html, document.content) });
       const cursor = await executor.query(
-        `LET folder = DOCUMENT(folders, @folderKey)
-         FILTER folder != null && folder.scopeKey == @scopeKey
-         FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+        `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
+         FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
+         FILTER @folderKey == null || ((!HAS(folder, "_internalDeletion") || folder._internalDeletion == null) && folder.deletedAt == null)
          INSERT @document INTO documents RETURN NEW`,
         { document: toArangoDoc(parsed), folderKey: parsed.folderKey, scopeKey: parsed.scopeKey },
       );
@@ -155,15 +168,15 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       if (!created) throw new Error('Document destination is pending deletion.');
       return documentSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
-    async insertShare(share: Omit<DocumentShare, 'embedding' | 'deletedAt'>): Promise<DocumentShare> {
-      const parsed = documentShareSchema.parse({ ...share, embedding: [] });
+    async insertShare(share: Omit<DocumentShare, 'deletedAt'>): Promise<DocumentShare> {
+      const parsed = documentShareSchema.parse(share);
       const cursor = await executor.query(
         `LET document = DOCUMENT(documents, @documentKey)
          FILTER document != null && document.scopeKey == @scopeKey
          FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-         LET folder = DOCUMENT(folders, document.folderKey)
-         FILTER folder != null && folder.scopeKey == @scopeKey
-         FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(folders, document.folderKey) : null
+         FILTER folder == null || folder.scopeKey == @scopeKey
+         FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
          INSERT @share INTO documentShares RETURN NEW`,
         { share: toArangoDoc(parsed), documentKey: parsed.documentKey, scopeKey: parsed.scopeKey },
       );
@@ -171,9 +184,10 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       if (!created) throw new Error('Share owner is pending deletion.');
       return documentShareSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
-    async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'updatedAt' | 'deletedAt'>): Promise<DocumentVersion> {
+    async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion> {
       const snapshot = documentVersionSchema.omit({ version: true }).parse({
         ...version,
+        ...canonicalRepresentations(version.html, version.content),
         key: newId(),
         createdAt: new Date().toISOString(),
       });
@@ -181,9 +195,9 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
         LET document = DOCUMENT(documents, @documentKey)
         FILTER document != null && document.scopeKey == @scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-        LET folder = DOCUMENT(folders, document.folderKey)
-        FILTER folder != null && folder.scopeKey == @scopeKey
-        FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(folders, document.folderKey) : null
+         FILTER folder == null || folder.scopeKey == @scopeKey
+         FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
         LET nextVersion = FIRST(
           FOR existing IN documentVersions
             FILTER existing.documentKey == @documentKey
@@ -201,7 +215,11 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       return scopedUpdate(executor, 'folders', scopeKey, key, patch, (value) => folderSchema.parse(value));
     },
     updateDocument(scopeKey: string, key: string, patch: ScopedDocumentPatch) {
-      return scopedUpdate(executor, 'documents', scopeKey, key, patch, (value) => documentSchema.parse(value));
+      if (patch.content !== undefined && patch.html === undefined) throw new Error('Document content must be updated through HTML.');
+      if (patch.html !== undefined && patch.embedding === undefined) throw new Error('Document HTML updates require a fresh embedding.');
+      if (patch.html !== undefined && patch.content === undefined) throw new Error('Document HTML updates require derived content.');
+      const preparedPatch = patch.html === undefined ? patch : { ...patch, ...canonicalRepresentations(patch.html, patch.content!) };
+      return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value));
     },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {
       return scopedUpdate(executor, 'documentShares', scopeKey, key, patch, (value) => documentShareSchema.parse(value));

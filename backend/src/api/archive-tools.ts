@@ -33,12 +33,12 @@ function normalizeDocumentUpload(input: unknown, maxBytes: number) {
     filename: z.string().trim().min(1).max(255), mimeType: z.string().trim().min(1).max(255),
     sizeBytes: z.number().int().positive(), encoding: z.literal('base64'), content: z.string().min(1),
   }).strict().parse(record.file);
-  if (upload.sizeBytes > maxBytes || upload.content.length > Math.ceil(maxBytes / 3) * 4) throw new ArchiveError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document.processing', { action: 'parse' });
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(upload.content)) throw new ArchiveError('ARCHIVE_INVALID_INPUT', 'Document content must be canonical base64.', 'document.processing', { action: 'parse' });
+  if (upload.sizeBytes > maxBytes || upload.content.length > Math.ceil(maxBytes / 3) * 4) throw new ArchiveError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document.parse', { action: 'parse' });
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(upload.content)) throw new ArchiveError('ARCHIVE_INVALID_INPUT', 'Document content must be canonical base64.', 'document.parse', { action: 'parse' });
   const padding = upload.content.endsWith('==') ? 2 : upload.content.endsWith('=') ? 1 : 0;
   const decodedSize = upload.content.length / 4 * 3 - padding;
-  if (decodedSize > maxBytes) throw new ArchiveError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document.processing', { action: 'parse' });
-  if (decodedSize !== upload.sizeBytes) throw new ArchiveError('ARCHIVE_INVALID_INPUT', 'Document size does not match its content.', 'document.processing', { action: 'parse' });
+  if (decodedSize > maxBytes) throw new ArchiveError('DOCUMENT_TOO_LARGE', 'The document exceeds the maximum allowed size.', 'document.parse', { action: 'parse' });
+  if (decodedSize !== upload.sizeBytes) throw new ArchiveError('ARCHIVE_INVALID_INPUT', 'Document size does not match its content.', 'document.parse', { action: 'parse' });
   return { ...record, file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: upload.sizeBytes, bytes: new Uint8Array(Buffer.from(upload.content, 'base64')) } };
 }
 
@@ -54,7 +54,7 @@ export function createArchiveToolHandler(dependencies: ArchiveToolHandlerDepende
     try {
       const body = await parseJson(c, bodySchema);
       const maximum = dependencies.maxDocumentBytes ?? Number(process.env.ARCHIVE_MAX_DOCUMENT_BYTES ?? DEFAULT_MAX_DOCUMENT_BYTES);
-      let input = tool === 'document.processing' ? normalizeDocumentUpload(body.input, maximum) : body.input;
+      let input = tool === 'document.parse' ? normalizeDocumentUpload(body.input, maximum) : body.input;
       input = archiveToolInputSchemas[tool].parse(input);
       const idempotencyKey = c.req.header('idempotency-key')?.trim();
       if (idempotencyKey && idempotencyKey.length > 200) throw new ArchiveError('ARCHIVE_INVALID_INPUT', 'Idempotency-Key is too long.', tool, { action: 'parse' });

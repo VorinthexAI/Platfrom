@@ -2,23 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import mammoth from 'mammoth';
 import {
   documentGenerateHtml,
-  editorDocumentJsonToDocx,
-  editorDocumentJsonToMarkdown,
   generateDocumentExport,
-  htmlToEditorDocumentJson,
-  type EditorDocumentJson,
+  htmlToDocx,
+  htmlToMarkdown,
+  sanitizeDocumentHtml,
 } from '.';
 
 const quiet = () => undefined;
 const decoder = new TextDecoder();
-const json: EditorDocumentJson = {
-  type: 'doc',
-  content: [
-    { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Safe <Title>' }] },
-    { type: 'paragraph', content: [{ type: 'text', text: 'Bold', marks: [{ type: 'bold' }] }, { type: 'text', text: ' body' }] },
-    { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'One' }] }] }] },
-  ],
-};
+const html = '<h2>Safe &lt;Title&gt;</h2><p><strong>Bold</strong> body</p><ul><li>One</li></ul>';
 
 function zipEntries(bytes: Uint8Array): Map<string, Uint8Array> {
   const entries = new Map<string, Uint8Array>();
@@ -36,27 +28,24 @@ function zipEntries(bytes: Uint8Array): Map<string, Uint8Array> {
 }
 
 describe('canonical document representations', () => {
-  test('document-generate-html accepts extraction, editor JSON, and normalized content', async () => {
+  test('document-generate-html accepts extraction and normalized content', async () => {
     const extraction = await documentGenerateHtml({ extractedText: 'A', blocks: [{ type: 'paragraph', text: '<script>A</script>' }] }, { logger: quiet });
-    const editor = await documentGenerateHtml({ json }, { logger: quiet });
     const content = await documentGenerateHtml({ content: ' First  line\r\n\r\n<script>bad</script> ' }, { logger: quiet });
     expect(extraction.html).toBe('<p>&lt;script&gt;A&lt;/script&gt;</p>');
-    expect(editor.html).toContain('<h2>Safe &lt;Title&gt;</h2>');
-    expect(editor.html).toContain('<strong>Bold</strong>');
     expect(content.html).toBe('<p>First line</p><p>&lt;script&gt;bad&lt;/script&gt;</p>');
   });
 
   test('HTML conversion strips active content and unsafe links deterministically', () => {
     const input = '<section><p onclick="bad()"><a href="https://example.com" target="_blank">safe</a> <a href="javascript:bad">bad</a></p><script>stolen()</script><iframe src="https://bad.example">hidden</iframe></section>';
-    const first = htmlToEditorDocumentJson(input);
-    const second = htmlToEditorDocumentJson(input);
+    const first = sanitizeDocumentHtml(input);
+    const second = sanitizeDocumentHtml(input);
     expect(first).toEqual(second);
-    expect(JSON.stringify(first)).toContain('https://example.com');
-    expect(JSON.stringify(first)).not.toMatch(/javascript|onclick|stolen|hidden|iframe/);
+    expect(first).toContain('https://example.com');
+    expect(first).not.toMatch(/javascript|onclick|stolen|hidden|iframe/);
   });
 
   test('renders real Markdown structure and marks', () => {
-    expect(editorDocumentJsonToMarkdown(json)).toBe('## Safe \\<Title\\>\n\n**Bold** body\n\n- One');
+    expect(htmlToMarkdown(html)).toBe('## Safe \\<Title\\>\n\n**Bold** body\n\n- One');
   });
 });
 
@@ -85,8 +74,8 @@ describe('derived document exports', () => {
   });
 
   test('generates a deterministic valid minimal DOCX ZIP with escaped document XML', async () => {
-    const direct = editorDocumentJsonToDocx(json);
-    const exported = await generateDocumentExport({ format: 'docx', json });
+    const direct = htmlToDocx(html);
+    const exported = await generateDocumentExport({ format: 'docx', html });
     expect(exported.bytes).toEqual(direct);
     expect(Array.from(direct.slice(0, 4))).toEqual([0x50, 0x4b, 0x03, 0x04]);
     expect(Array.from(direct.slice(-22, -18))).toEqual([0x50, 0x4b, 0x05, 0x06]);
@@ -103,6 +92,6 @@ describe('derived document exports', () => {
 
   test('rejects ambiguous or invalid source representations', async () => {
     await expect(generateDocumentExport({ format: 'txt', html: '<p>x</p>', content: 'x' })).rejects.toThrow('Exactly one');
-    await expect(generateDocumentExport({ format: 'html', json: { type: 'paragraph' } as EditorDocumentJson })).rejects.toThrow();
+    await expect(generateDocumentExport({ format: 'html' })).rejects.toThrow('Exactly one');
   });
 });

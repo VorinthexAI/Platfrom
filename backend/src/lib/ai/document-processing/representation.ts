@@ -1,19 +1,12 @@
 import { z } from 'zod';
-import {
-  editorDocumentJsonSchema,
-  extractionResultSchema,
-  type EditorDocumentJson,
-  type EditorNodeJson,
-  type ExtractedBlock,
-  type ExtractionResult,
-} from './schemas';
+import { extractionResultSchema, type ExtractedBlock, type ExtractionResult } from './schemas';
 
-const plainContentSchema = z.string().max(10_000_000).refine((value) => !value.includes('\0'), 'Document content cannot contain null bytes.');
+const documentStringSchema = z.string().max(10_000_000).refine((value) => !value.includes('\0'), 'Document content cannot contain null bytes.');
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
 const normalizedText = (value = '') => value.replace(/\r\n?/g, '\n').replace(/[\t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 
 function extractedBlockHtml(block: ExtractedBlock): string {
-  const text = escapeHtml(normalizedText(block.text));
+  const text = typeof block.attrs?.html === 'string' ? block.attrs.html : escapeHtml(normalizedText(block.text));
   switch (block.type) {
     case 'heading': return `<h${block.level ?? 1}>${text}</h${block.level ?? 1}>`;
     case 'paragraph': return `<p>${text}</p>`;
@@ -29,223 +22,166 @@ function extractedBlockHtml(block: ExtractedBlock): string {
   }
 }
 
-function editorInlineHtml(node: EditorNodeJson): string {
-  let value = node.type === 'text' ? escapeHtml(node.text ?? '').replace(/\n/g, '<br>') : (node.content ?? []).map(editorInlineHtml).join('');
-  for (const mark of node.marks ?? []) {
-    if (mark.type === 'bold') value = `<strong>${value}</strong>`;
-    else if (mark.type === 'italic') value = `<em>${value}</em>`;
-    else value = `<a href="${escapeHtml(mark.attrs.href)}"${mark.attrs.target ? ` target="${mark.attrs.target}"` : ''}>${value}</a>`;
-  }
-  return value;
-}
-
-function editorNodeHtml(node: EditorNodeJson): string {
-  const inline = () => (node.content ?? []).map(editorInlineHtml).join('');
-  const blocks = () => (node.content ?? []).map(editorNodeHtml).join('');
-  switch (node.type) {
-    case 'doc': return blocks();
-    case 'heading': return `<h${Number(node.attrs?.level)}>${inline()}</h${Number(node.attrs?.level)}>`;
-    case 'paragraph': return `<p>${inline()}</p>`;
-    case 'text': return editorInlineHtml(node);
-    case 'bulletList': return `<ul>${blocks()}</ul>`;
-    case 'orderedList': return `<ol>${blocks()}</ol>`;
-    case 'listItem': return `<li>${blocks()}</li>`;
-    case 'blockquote': return `<blockquote>${blocks()}</blockquote>`;
-    case 'codeBlock': return `<pre><code>${escapeHtml((node.content ?? []).map((child) => child.text ?? '').join(''))}</code></pre>`;
-    case 'horizontalRule': return '<hr>';
-    case 'table': return `<table><tbody>${blocks()}</tbody></table>`;
-    case 'tableRow': return `<tr>${blocks()}</tr>`;
-    case 'tableCell': return `<td>${blocks()}</td>`;
-  }
-}
-
 export function extractionResultToHtml(input: ExtractionResult): string {
   return extractionResultSchema.parse(input).blocks.map(extractedBlockHtml).join('');
 }
 
-export function editorDocumentJsonToHtml(input: EditorDocumentJson): string {
-  return editorNodeHtml(editorDocumentJsonSchema.parse(input));
-}
-
 export function plainContentToHtml(input: string): string {
-  const content = normalizedText(plainContentSchema.parse(input));
+  const content = normalizedText(documentStringSchema.parse(input));
   return content ? content.split(/\n{2,}/).map((part) => `<p>${escapeHtml(part).replace(/\n/g, '<br>')}</p>`).join('') : '';
 }
 
-type HtmlTree = { tag: string; attrs: Record<string, string>; children: Array<HtmlTree | string> };
-const VOID_TAGS = new Set(['br', 'hr']);
-const ALLOWED_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'strong', 'b', 'em', 'i', 'a', 'blockquote', 'pre', 'code', 'ul', 'ol', 'li', 'table', 'tbody', 'thead', 'tr', 'td', 'th', 'br', 'hr']);
+type HtmlNode = { tag: string; attrs: Record<string, string>; children: Array<HtmlNode | string> };
+const VOID_TAGS = new Set(['br', 'hr', 'img']);
+const HTML_VOID_TAGS = new Set([...VOID_TAGS, 'area', 'base', 'col', 'embed', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
+const ALLOWED_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'strong', 'b', 'em', 'i', 'u', 's', 'a', 'blockquote', 'pre', 'code', 'ul', 'ol', 'li', 'table', 'tbody', 'thead', 'tr', 'td', 'th', 'br', 'hr', 'img']);
+const TRANSPARENT_TAGS = new Set(['section', 'article', 'main', 'header', 'footer', 'div', 'span']);
+const DANGEROUS_TAGS = new Set(['script', 'style', 'iframe', 'object', 'svg']);
+const BLOCK_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'blockquote', 'pre', 'table']);
 const decodeHtml = (value: string) => value.replace(/&(amp|lt|gt|quot|#39);/g, (_, entity: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[entity]!);
 
-function parseHtml(htmlInput: string): HtmlTree {
-  const html = plainContentSchema.parse(htmlInput);
+function parseDocumentHtml(input: string): HtmlNode {
+  const html = documentStringSchema.parse(input);
   const safe = html.replace(/<(script|style|iframe|object|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
-  const root: HtmlTree = { tag: 'root', attrs: {}, children: [] };
+  const root: HtmlNode = { tag: 'root', attrs: {}, children: [] };
   const stack = [root];
   for (const token of safe.match(/<[^>]*>|[^<]+/g) ?? []) {
     if (!token.startsWith('<')) { stack.at(-1)!.children.push(decodeHtml(token)); continue; }
     if (/^<\s*!/.test(token)) continue;
     const closing = /^<\s*\/\s*([a-z0-9]+)\s*>$/i.exec(token);
     if (closing) {
-      const tag = closing[1]!.toLowerCase();
-      if (!ALLOWED_TAGS.has(tag) || VOID_TAGS.has(tag)) continue;
-      if (stack.length === 1 || stack.at(-1)!.tag !== tag) throw new Error(`Malformed HTML near closing ${tag}.`);
+      const sourceTag = closing[1]!.toLowerCase();
+      if (HTML_VOID_TAGS.has(sourceTag)) continue;
+      if (stack.length === 1 || stack.at(-1)!.tag !== sourceTag) throw new Error(`Malformed HTML near closing ${sourceTag}.`);
       stack.pop();
       continue;
     }
     const opening = /^<\s*([a-z0-9]+)([^>]*)>$/i.exec(token);
     if (!opening) throw new Error('Malformed HTML.');
-    const tag = opening[1]!.toLowerCase();
-    if (!ALLOWED_TAGS.has(tag)) continue;
+    const sourceTag = opening[1]!.toLowerCase();
     const attrs: Record<string, string> = {};
     for (const match of opening[2]!.matchAll(/([a-z][a-z0-9-]*)\s*=\s*["']([^"']*)["']/gi)) attrs[match[1]!.toLowerCase()] = decodeHtml(match[2]!);
-    const node: HtmlTree = { tag, attrs, children: [] };
+    const node: HtmlNode = { tag: sourceTag, attrs, children: [] };
     stack.at(-1)!.children.push(node);
-    if (!VOID_TAGS.has(tag) && !/\/\s*>$/.test(token)) stack.push(node);
+    if (!HTML_VOID_TAGS.has(sourceTag) && !/\/\s*>$/.test(token)) stack.push(node);
   }
   if (stack.length !== 1) throw new Error('Malformed HTML contains unclosed elements.');
   return root;
 }
 
-type Mark = NonNullable<EditorNodeJson['marks']>[number];
-function inlineNodes(children: Array<HtmlTree | string>, marks: Mark[] = []): EditorNodeJson[] {
-  const output: EditorNodeJson[] = [];
-  for (const child of children) {
-    if (typeof child === 'string') {
-      const text = child.replace(/\s+/g, ' ');
-      if (text) output.push({ type: 'text', text, ...(marks.length ? { marks } : {}) });
-      continue;
-    }
-    if (child.tag === 'br') { output.push({ type: 'text', text: '\n', ...(marks.length ? { marks } : {}) }); continue; }
-    let nextMarks = marks;
-    if (child.tag === 'strong' || child.tag === 'b') nextMarks = [...marks, { type: 'bold' }];
-    if (child.tag === 'em' || child.tag === 'i') nextMarks = [...marks, { type: 'italic' }];
-    if (child.tag === 'a' && /^https?:\/\//i.test(child.attrs.href ?? '')) nextMarks = [...marks, { type: 'link', attrs: { href: child.attrs.href!, ...(['_blank', '_self'].includes(child.attrs.target ?? '') ? { target: child.attrs.target as '_blank' | '_self' } : {}) } }];
-    output.push(...inlineNodes(child.children, nextMarks));
-  }
-  return output;
+function serializeNode(node: HtmlNode | string): string {
+  if (typeof node === 'string') return escapeHtml(node);
+  if (node.tag === 'root') return node.children.filter((child) => typeof child !== 'string' || child.trim()).map(serializeNode).join('');
+  if (DANGEROUS_TAGS.has(node.tag)) return '';
+  if (TRANSPARENT_TAGS.has(node.tag)) return node.children.filter((child) => typeof child !== 'string' || child.trim()).map(serializeNode).join('');
+  if (!ALLOWED_TAGS.has(node.tag)) return node.children.filter((child) => typeof child !== 'string' || child.trim()).map(serializeNode).join('');
+  const attrs = node.tag === 'a' && /^https?:\/\//i.test(node.attrs.href ?? '')
+    ? ` href="${escapeHtml(node.attrs.href!)}"${['_blank', '_self'].includes(node.attrs.target ?? '') ? ` target="${node.attrs.target}"` : ''}`
+    : node.tag === 'img' && /^\/(?!\/)/.test(node.attrs.src ?? '')
+      ? ` src="${escapeHtml(node.attrs.src!)}"${node.attrs.alt ? ` alt="${escapeHtml(node.attrs.alt)}"` : ''}${node.attrs.title ? ` title="${escapeHtml(node.attrs.title)}"` : ''}`
+    : '';
+  const tag = node.tag === 'b' ? 'strong' : node.tag === 'i' ? 'em' : node.tag;
+  if (VOID_TAGS.has(node.tag)) return `<${tag}${attrs}>`;
+  return `<${tag}${attrs}>${node.children.map(serializeNode).join('')}</${tag}>`;
 }
 
-function blockNode(node: HtmlTree): EditorNodeJson[] {
-  if (/^h[1-6]$/.test(node.tag)) return [{ type: 'heading', attrs: { level: Number(node.tag[1]) }, content: inlineNodes(node.children) }];
-  if (node.tag === 'p') return [{ type: 'paragraph', content: inlineNodes(node.children) }];
-  if (node.tag === 'blockquote') return [{ type: 'blockquote', content: node.children.flatMap((child) => typeof child === 'string' ? [{ type: 'paragraph', content: inlineNodes([child]) } as EditorNodeJson] : blockNode(child)) }];
-  if (node.tag === 'pre') return [{ type: 'codeBlock', content: [{ type: 'text', text: treeText(node, false) }] }];
+function treeText(node: HtmlNode | string, preserveWhitespace = false): string {
+  if (typeof node === 'string') return preserveWhitespace ? node : node.replace(/\s+/g, ' ');
+  if (node.tag === 'br') return '\n';
+  if (node.tag === 'hr') return '\n---\n';
+  if (node.tag === 'img') return node.attrs.alt ?? '';
+  if (node.tag === 'tr') return `${node.children.map((child) => treeText(child).trim()).filter(Boolean).join('\t')}\n`;
+  if (node.tag === 'td' || node.tag === 'th') return node.children.map((child) => treeText(child, preserveWhitespace)).join('');
+  if (node.tag === 'li') return `${node.children.map((child) => treeText(child, preserveWhitespace)).join('').trim()}\n`;
+  const value = node.children.map((child) => treeText(child, preserveWhitespace || node.tag === 'pre')).join('');
+  if (node.tag === 'ul' || node.tag === 'ol') return `${value.trimEnd()}\n\n`;
+  return BLOCK_TAGS.has(node.tag) ? `${value}\n\n` : value;
+}
+
+export function sanitizeDocumentHtml(input: string): string {
+  return serializeNode(parseDocumentHtml(input));
+}
+
+export function htmlToPlainText(input: string): string {
+  return treeText(parseDocumentHtml(input)).replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export function canonicalDocumentRepresentations(input: string): { html: string; content: string } {
+  const html = sanitizeDocumentHtml(input);
+  return { html, content: htmlToPlainText(html) };
+}
+
+function directText(node: HtmlNode): string {
+  return node.children.filter((child) => typeof child === 'string' || !['ul', 'ol'].includes(child.tag)).map((child) => treeText(child)).join('').replace(/\s+/g, ' ').trim();
+}
+
+function extracted(node: HtmlNode): ExtractedBlock[] {
+  if (/^h[1-6]$/.test(node.tag)) return [{ type: 'heading', level: Number(node.tag[1]), text: directText(node) }];
+  if (node.tag === 'p') return [{ type: 'paragraph', text: directText(node) }];
+  if (node.tag === 'blockquote') return [{ type: 'blockquote', text: treeText(node).trim() }];
+  if (node.tag === 'pre') return [{ type: 'codeBlock', text: treeText(node, true).trimEnd() }];
   if (node.tag === 'hr') return [{ type: 'horizontalRule' }];
-  if (node.tag === 'ul' || node.tag === 'ol') return [{ type: node.tag === 'ul' ? 'bulletList' : 'orderedList', content: node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }];
-  if (node.tag === 'li') {
-    const nested = node.children.filter((child): child is HtmlTree => typeof child !== 'string' && (child.tag === 'ul' || child.tag === 'ol')).flatMap(blockNode);
-    const inline = node.children.filter((child) => typeof child === 'string' || !['ul', 'ol'].includes(child.tag));
-    return [{ type: 'listItem', content: [{ type: 'paragraph', content: inlineNodes(inline) }, ...nested] }];
-  }
-  if (node.tag === 'table') return [{ type: 'table', content: node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }];
-  if (node.tag === 'tbody' || node.tag === 'thead') return node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child));
-  if (node.tag === 'tr') return [{ type: 'tableRow', content: node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) }];
-  if (node.tag === 'td' || node.tag === 'th') return [{ type: 'tableCell', content: [{ type: 'paragraph', content: inlineNodes(node.children) }] }];
-  return node.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child));
-}
-
-function treeText(node: HtmlTree, normalize = true): string {
-  const value = node.children.map((child) => typeof child === 'string' ? child : treeText(child, normalize)).join('');
-  return normalize ? value.replace(/\s+/g, ' ').trim() : value;
-}
-
-export function htmlToEditorDocumentJson(input: string): EditorDocumentJson {
-  const root = parseHtml(input);
-  return editorDocumentJsonSchema.parse({ type: 'doc', content: root.children.flatMap((child) => typeof child === 'string' ? [] : blockNode(child)) });
-}
-
-function editorNodeToExtracted(node: EditorNodeJson): ExtractedBlock[] {
-  const text = nodeText(node).replace(/\n+/g, ' ').trim();
-  if (node.type === 'heading') return [{ type: 'heading', level: Number(node.attrs?.level), text }];
-  if (node.type === 'paragraph') return [{ type: 'paragraph', text }];
-  if (node.type === 'blockquote') return [{ type: 'blockquote', text }];
-  if (node.type === 'codeBlock') return [{ type: 'codeBlock', text: nodeText(node) }];
-  if (node.type === 'horizontalRule') return [{ type: 'horizontalRule' }];
-  if (node.type === 'bulletList' || node.type === 'orderedList') return [{ type: node.type, children: (node.content ?? []).flatMap(editorNodeToExtracted) }];
-  if (node.type === 'listItem') return [{ type: 'listItem', text: node.content?.[0] ? nodeText(node.content[0]).replace(/\n+/g, ' ').trim() : '', children: (node.content ?? []).slice(1).flatMap(editorNodeToExtracted) }];
-  if (node.type === 'table') return [{ type: 'table', children: (node.content ?? []).flatMap(editorNodeToExtracted) }];
-  if (node.type === 'tableRow') return [{ type: 'tableRow', children: (node.content ?? []).flatMap(editorNodeToExtracted) }];
-  if (node.type === 'tableCell') return [{ type: 'tableCell', text }];
-  return (node.content ?? []).flatMap(editorNodeToExtracted);
+  if (node.tag === 'ul' || node.tag === 'ol') return [{ type: node.tag === 'ul' ? 'bulletList' : 'orderedList', children: node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child)) }];
+  if (node.tag === 'li') return [{ type: 'listItem', text: directText(node), children: node.children.filter((child): child is HtmlNode => typeof child !== 'string' && ['ul', 'ol'].includes(child.tag)).flatMap(extracted) }];
+  if (node.tag === 'table') return [{ type: 'table', children: node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child)) }];
+  if (node.tag === 'tbody' || node.tag === 'thead') return node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child));
+  if (node.tag === 'tr') return [{ type: 'tableRow', children: node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child)) }];
+  if (node.tag === 'td' || node.tag === 'th') return [{ type: 'tableCell', text: treeText(node).trim() }];
+  return node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child));
 }
 
 export function htmlToExtractedBlocks(input: string): ExtractedBlock[] {
-  return (htmlToEditorDocumentJson(input).content ?? []).flatMap(editorNodeToExtracted);
-}
-
-function nodeText(node: EditorNodeJson): string {
-  if (node.type === 'text') return node.text ?? '';
-  const children = (node.content ?? []).map(nodeText).filter(Boolean);
-  if (node.type === 'tableRow') return children.join('\t');
-  if (node.type === 'listItem') return `- ${children.join('\n')}`;
-  return children.join(['doc', 'blockquote', 'table', 'bulletList', 'orderedList'].includes(node.type) ? '\n\n' : '');
-}
-
-export function editorDocumentJsonToPlainText(input: EditorDocumentJson): string {
-  return nodeText(editorDocumentJsonSchema.parse(input)).replace(/\n{3,}/g, '\n\n').trim();
+  return parseDocumentHtml(input).children.flatMap((child) => typeof child === 'string' ? [] : extracted(child));
 }
 
 const escapeMarkdown = (value: string) => value.replace(/([\\`*_[\]<>])/g, '\\$1');
-function inlineMarkdown(node: EditorNodeJson): string {
-  let value = node.type === 'text' ? escapeMarkdown(node.text ?? '') : (node.content ?? []).map(inlineMarkdown).join('');
-  for (const mark of node.marks ?? []) {
-    if (mark.type === 'bold') value = `**${value}**`;
-    else if (mark.type === 'italic') value = `_${value}_`;
-    else value = `[${value}](${mark.attrs.href})`;
-  }
+function inlineMarkdown(node: HtmlNode | string): string {
+  if (typeof node === 'string') return escapeMarkdown(node.replace(/\s+/g, ' '));
+  const value = node.children.map(inlineMarkdown).join('');
+  if (node.tag === 'br') return '\n';
+  if (node.tag === 'strong' || node.tag === 'b') return `**${value}**`;
+  if (node.tag === 'em' || node.tag === 'i') return `_${value}_`;
+  if (node.tag === 'a' && /^https?:\/\//i.test(node.attrs.href ?? '')) return `[${value}](${node.attrs.href})`;
   return value;
 }
 
-function markdownBlocks(node: EditorNodeJson, depth = 0): string {
-  const inline = () => (node.content ?? []).map(inlineMarkdown).join('');
-  switch (node.type) {
-    case 'doc': return (node.content ?? []).map((child) => markdownBlocks(child, depth)).filter(Boolean).join('\n\n');
-    case 'heading': return `${'#'.repeat(Number(node.attrs?.level))} ${inline()}`;
-    case 'paragraph': return inline();
-    case 'text': return inlineMarkdown(node);
-    case 'blockquote': return markdownBlocks({ type: 'doc', content: node.content }, depth).split('\n').map((line) => `> ${line}`).join('\n');
-    case 'codeBlock': return `\`\`\`\n${(node.content ?? []).map((child) => child.text ?? '').join('')}\n\`\`\``;
-    case 'horizontalRule': return '---';
-    case 'bulletList':
-    case 'orderedList': return (node.content ?? []).map((child, index) => `${'  '.repeat(depth)}${node.type === 'bulletList' ? '-' : `${index + 1}.`} ${markdownListItem(child, depth)}`).join('\n');
-    case 'listItem': return markdownListItem(node, depth);
-    case 'table': {
-      const rows = node.content ?? [];
-      if (rows.length === 0) return '';
-      const columns = rows[0]!.content?.length ?? 1;
-      return [markdownBlocks(rows[0]!, depth), `| ${Array.from({ length: columns }, () => '---').join(' | ')} |`, ...rows.slice(1).map((child) => markdownBlocks(child, depth))].join('\n');
-    }
-    case 'tableRow': return `| ${(node.content ?? []).map((child) => markdownBlocks(child, depth).replace(/\|/g, '\\|')).join(' | ')} |`;
-    case 'tableCell': return (node.content ?? []).map((child) => markdownBlocks(child, depth)).join(' ');
+function markdown(node: HtmlNode, depth = 0): string {
+  if (node.tag === 'root') return node.children.map((child) => typeof child === 'string' ? '' : markdown(child, depth)).filter(Boolean).join('\n\n');
+  if (/^h[1-6]$/.test(node.tag)) return `${'#'.repeat(Number(node.tag[1]))} ${inlineMarkdown(node)}`;
+  if (node.tag === 'p') return inlineMarkdown(node);
+  if (node.tag === 'blockquote') return node.children.map((child) => typeof child === 'string' ? escapeMarkdown(child) : markdown(child, depth)).join('\n').split('\n').map((line) => `> ${line}`).join('\n');
+  if (node.tag === 'pre') return `\`\`\`\n${treeText(node, true).trimEnd()}\n\`\`\``;
+  if (node.tag === 'hr') return '---';
+  if (node.tag === 'ul' || node.tag === 'ol') return node.children.filter((child): child is HtmlNode => typeof child !== 'string' && child.tag === 'li').map((child, index) => `${'  '.repeat(depth)}${node.tag === 'ul' ? '-' : `${index + 1}.`} ${markdown(child, depth)}`).join('\n');
+  if (node.tag === 'li') {
+    const initial = inlineMarkdown({ ...node, children: node.children.filter((child) => typeof child === 'string' || !['ul', 'ol'].includes(child.tag)) }).trim();
+    const nested = node.children.filter((child): child is HtmlNode => typeof child !== 'string' && ['ul', 'ol'].includes(child.tag)).map((child) => markdown(child, depth + 1));
+    return [initial, ...nested].filter(Boolean).join('\n');
   }
+  if (node.tag === 'table') {
+    const rows = node.children.flatMap((child) => typeof child === 'string' ? [] : ['tbody', 'thead'].includes(child.tag) ? child.children.filter((row): row is HtmlNode => typeof row !== 'string' && row.tag === 'tr') : child.tag === 'tr' ? [child] : []);
+    if (!rows.length) return '';
+    const columns = rows[0]!.children.filter((child) => typeof child !== 'string').length || 1;
+    return [markdown(rows[0]!), `| ${Array.from({ length: columns }, () => '---').join(' | ')} |`, ...rows.slice(1).map(markdown)].join('\n');
+  }
+  if (node.tag === 'tr') return `| ${node.children.filter((child): child is HtmlNode => typeof child !== 'string').map((child) => markdown(child).replace(/\|/g, '\\|')).join(' | ')} |`;
+  if (node.tag === 'td' || node.tag === 'th') return inlineMarkdown(node).trim();
+  return node.children.map((child) => typeof child === 'string' ? escapeMarkdown(child) : markdown(child, depth)).join('');
 }
 
-function markdownListItem(node: EditorNodeJson, depth: number): string {
-  const [first, ...rest] = node.content ?? [];
-  const initial = first ? markdownBlocks(first, depth) : '';
-  const nested = rest.map((child) => markdownBlocks(child, depth + 1)).filter(Boolean);
-  return [initial, ...nested].join('\n');
+export function htmlToMarkdown(input: string): string {
+  return markdown(parseDocumentHtml(input)).trim();
 }
 
-export function editorDocumentJsonToMarkdown(input: EditorDocumentJson): string {
-  return markdownBlocks(editorDocumentJsonSchema.parse(input)).trim();
-}
-
-export type DocumentHtmlInput = ExtractionResult | { json: EditorDocumentJson } | { content: string };
+export type DocumentHtmlInput = ExtractionResult | { html: string } | { content: string };
 const documentHtmlInputSchema = z.union([
   extractionResultSchema,
-  z.object({ json: editorDocumentJsonSchema }).strict(),
-  z.object({ content: plainContentSchema }).strict(),
+  z.object({ html: documentStringSchema }).strict(),
+  z.object({ content: documentStringSchema }).strict(),
 ]);
 
 export function documentInputToHtml(input: DocumentHtmlInput): string {
   const parsed = documentHtmlInputSchema.parse(input);
-  if ('json' in parsed) return editorDocumentJsonToHtml(parsed.json);
-  if ('content' in parsed) return plainContentToHtml(parsed.content);
-  return extractionResultToHtml(parsed);
-}
-
-export function sanitizeDocumentHtml(input: string): string {
-  return editorDocumentJsonToHtml(htmlToEditorDocumentJson(input));
+  if ('html' in parsed) return parsed.html;
+  return 'content' in parsed ? plainContentToHtml(parsed.content) : extractionResultToHtml(parsed);
 }

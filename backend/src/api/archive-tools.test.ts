@@ -59,11 +59,11 @@ describe('Archive tool API', () => {
 
   test('normalizes document base64 without retaining encoded content and enforces size', async () => {
     let input: any; const user = { key: newId(), identityType: 'user' as const };
-    const valid = await request({ getIdentity: async () => user, maxDocumentBytes: 4, run: async (requestInput) => { input = requestInput.input; return {}; } }, 'document.processing', { organizationKey, agentKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
+    const valid = await request({ getIdentity: async () => user, maxDocumentBytes: 4, run: async (requestInput) => { input = requestInput.input; return {}; } }, 'document.parse', { organizationKey, agentKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
     expect(valid.status).toBe(200);
     expect(input.file.bytes).toEqual(new Uint8Array([97, 98, 99]));
     expect(input.file.content).toBeUndefined();
-    const tooLarge = await request({ getIdentity: async () => user, maxDocumentBytes: 2, run: async () => ({}) }, 'document.processing', { organizationKey, agentKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
+    const tooLarge = await request({ getIdentity: async () => user, maxDocumentBytes: 2, run: async () => ({}) }, 'document.parse', { organizationKey, agentKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
     expect(tooLarge.status).toBe(400);
     expect(await tooLarge.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
   });

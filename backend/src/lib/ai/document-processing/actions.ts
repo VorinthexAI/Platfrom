@@ -11,7 +11,6 @@ import {
   extractionResultSchema,
   normalizedDocumentSchema,
   type DocumentActionName,
-  type EditorDocumentJson,
   type ExtractedBlock,
   type ExtractionResult,
   type NormalizedDocument,
@@ -21,9 +20,9 @@ import { documentStorage, type DocumentStorage } from './storage';
 import { awsTextractDocumentOcr, type DocumentOcr } from './textract';
 import {
   documentInputToHtml,
-  editorDocumentJsonToPlainText,
   htmlToExtractedBlocks,
-  htmlToEditorDocumentJson,
+  htmlToPlainText,
+  sanitizeDocumentHtml,
   type DocumentHtmlInput,
 } from './representation';
 
@@ -118,7 +117,7 @@ function validateSignature(extension: DocumentExtension, bytes: Uint8Array): boo
 export async function documentValidate(input: {
   file: UploadedDocumentFile;
   scopeKey: string;
-  folderKey: string;
+  folderKey?: string;
   name?: string;
 }, options: { maxBytes?: number; logger?: DocumentActionLogger } = {}): Promise<NormalizedDocument> {
   return observed('document-validate', { scopeKey: input.scopeKey, folderKey: input.folderKey }, options.logger ?? defaultLogger, async () => {
@@ -157,7 +156,7 @@ export async function storageUpload(input: NormalizedDocument & { documentKey: s
   return observed('storage-upload', { documentKey: input.documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
       const contentHash = createHash('sha256').update(input.fileInput).digest('hex').slice(0, 16);
-      const storageKey = `archive/${input.scopeKey}/${input.folderKey}/${input.documentKey}/${contentHash}/original.${input.extension}`;
+      const storageKey = `archive/${input.scopeKey}/${input.folderKey ?? 'root'}/${input.documentKey}/${contentHash}/original.${input.extension}`;
       return await (options.storage ?? documentStorage).upload({ key: storageKey, bytes: input.fileInput, mimeType: input.mimeType });
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_UPLOAD_FAILED', 'The document could not be uploaded.', 'storage-upload', true);
@@ -169,33 +168,59 @@ function paragraphs(text: string): ExtractedBlock[] {
   return text.replace(/\r\n?/g, '\n').split(/\n{2,}/).map((part) => part.trim()).filter(Boolean).map((text) => ({ type: 'paragraph', text }));
 }
 
+function markdownInlineHtml(value: string): string {
+  const code: string[] = [];
+  const protectedValue = value.replace(/[\uE000\uE001]/g, '').replace(/`([^`\n]+)`/g, (_match, content: string) => {
+    code.push(content.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!));
+    return `\uE000${code.length - 1}\uE001`;
+  });
+  return protectedValue
+    .replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!)
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([^*\n]+)\*\*|__([^_\n]+)__/g, '<strong>$1$2</strong>')
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)|(^|[^_])_([^_\n]+)_(?!_)/g, '$1$3<em>$2$4</em>')
+    .replace(/\uE000(\d+)\uE001/g, (_match, index: string) => `<code>${code[Number(index)]}</code>`);
+}
+
 function parseMarkdown(markdown: string): ExtractedBlock[] {
   const blocks: ExtractedBlock[] = [];
   const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
   let code: string[] | null = null;
   let list: ExtractedBlock | null = null;
+  let paragraph: string[] = [];
   const flushList = () => { if (list) blocks.push(list); list = null; };
+  const flushParagraph = () => {
+    if (paragraph.length) {
+      const text = paragraph.join(' ').trim();
+      blocks.push({ type: 'paragraph', text, attrs: { html: markdownInlineHtml(text) } });
+    }
+    paragraph = [];
+  };
   for (const raw of lines) {
     if (/^```/.test(raw)) {
+      flushParagraph();
       flushList();
       if (code) { blocks.push({ type: 'codeBlock', text: code.join('\n') }); code = null; } else code = [];
       continue;
     }
     if (code) { code.push(raw); continue; }
     const heading = /^(#{1,6})\s+(.+)$/.exec(raw);
-    if (heading) { flushList(); blocks.push({ type: 'heading', level: heading[1]!.length, text: heading[2]!.trim() }); continue; }
+    if (heading) { flushParagraph(); flushList(); const text = heading[2]!.trim(); blocks.push({ type: 'heading', level: heading[1]!.length, text, attrs: { html: markdownInlineHtml(text) } }); continue; }
     const item = /^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/.exec(raw);
     if (item) {
+      flushParagraph();
       const type = item[1] ? 'bulletList' : 'orderedList';
       if (!list || list.type !== type) { flushList(); list = { type, children: [] }; }
-      list.children!.push({ type: 'listItem', text: item[3]!.trim() });
+      const text = item[3]!.trim();
+      list.children!.push({ type: 'listItem', text, attrs: { html: markdownInlineHtml(text) } });
       continue;
     }
-    flushList();
-    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(raw)) blocks.push({ type: 'horizontalRule' });
-    else if (/^>\s?/.test(raw)) blocks.push({ type: 'blockquote', text: raw.replace(/^>\s?/, '').trim() });
-    else if (raw.trim()) blocks.push({ type: 'paragraph', text: raw.trim() });
+    if (!raw.trim()) { flushParagraph(); flushList(); continue; }
+    if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(raw)) { flushParagraph(); flushList(); blocks.push({ type: 'horizontalRule' }); }
+    else if (/^>\s?/.test(raw)) { flushParagraph(); flushList(); const text = raw.replace(/^>\s?/, '').trim(); blocks.push({ type: 'blockquote', text, attrs: { html: markdownInlineHtml(text) } }); }
+    else { flushList(); paragraph.push(raw.trim()); }
   }
+  flushParagraph();
   flushList();
   if (code) blocks.push({ type: 'codeBlock', text: code.join('\n') });
   return blocks;
@@ -245,27 +270,17 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
 export async function documentGenerateHtml(input: DocumentHtmlInput, options: { logger?: DocumentActionLogger } = {}): Promise<{ html: string }> {
   return observed('document-generate-html', {}, options.logger ?? defaultLogger, async () => {
     try {
-      return { html: documentInputToHtml(input) };
+      return { html: sanitizeDocumentHtml(documentInputToHtml(input)) };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_HTML_GENERATION_FAILED', 'Document HTML generation failed.', 'document-generate-html');
     }
   });
 }
 
-export async function documentGenerateJson(input: { html: string }, options: { logger?: DocumentActionLogger } = {}): Promise<{ json: EditorDocumentJson }> {
-  return observed('document-generate-json', {}, options.logger ?? defaultLogger, async () => {
-    try {
-      return { json: htmlToEditorDocumentJson(input.html) };
-    } catch (error) {
-      throw documentActionError(error, 'DOCUMENT_JSON_GENERATION_FAILED', 'Document JSON generation failed.', 'document-generate-json');
-    }
-  });
-}
-
-export async function documentGenerateContent(input: { json: EditorDocumentJson }, options: { logger?: DocumentActionLogger } = {}): Promise<{ content: string }> {
+export async function documentGenerateContent(input: { html: string }, options: { logger?: DocumentActionLogger } = {}): Promise<{ content: string }> {
   return observed('document-generate-content', {}, options.logger ?? defaultLogger, async () => {
     try {
-      return { content: editorDocumentJsonToPlainText(input.json) };
+      return { content: htmlToPlainText(sanitizeDocumentHtml(input.html)) };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_CONTENT_GENERATION_FAILED', 'Document content generation failed.', 'document-generate-content');
     }
@@ -300,9 +315,11 @@ export async function documentInsert(input: Document, options: DocumentInsertDep
     try {
       const document = documentSchema.parse(input);
       if (document.embedding.length === 0) throw new Error('A document embedding is required.');
-      const folder = await (options.getFolder ?? getFolderById)(document.folderKey);
-      if (!folder || folder.scopeKey !== document.scopeKey) throw new Error('The Archive folder does not exist in the requested scope.');
-      if (folder.deletedAt !== null) throw new Error('The Archive folder is archived.');
+      if (document.folderKey) {
+        const folder = await (options.getFolder ?? getFolderById)(document.folderKey);
+        if (!folder || folder.scopeKey !== document.scopeKey) throw new Error('The Archive folder does not exist in the requested scope.');
+        if (folder.deletedAt !== null) throw new Error('The Archive folder is archived.');
+      }
       const existing = await (options.getDocument ?? getDocumentById)(document.key);
       if (existing) {
         if (existing.deletedAt !== null) throw new Error('The idempotent Archive document is archived.');
@@ -315,9 +332,9 @@ export async function documentInsert(input: Document, options: DocumentInsertDep
   });
 }
 
-export function documentKeyForRequest(scopeKey: string, folderKey: string, idempotencyKey: string | undefined): string {
+export function documentKeyForRequest(scopeKey: string, folderKey: string | undefined, idempotencyKey: string | undefined): string {
   if (!idempotencyKey) return newId();
-  const digest = createHash('sha256').update(scopeKey).update('\0').update(folderKey).update('\0').update(idempotencyKey).digest('hex');
+  const digest = createHash('sha256').update(scopeKey).update('\0').update(folderKey ?? 'root').update('\0').update(idempotencyKey).digest('hex');
   return `c${digest.slice(0, 24)}`;
 }
 
@@ -326,7 +343,6 @@ export const DOCUMENT_ACTIONS = {
   'storage-upload': storageUpload,
   'document-extract': documentExtract,
   'document-generate-html': documentGenerateHtml,
-  'document-generate-json': documentGenerateJson,
   'document-generate-content': documentGenerateContent,
   'document-embed': documentEmbed,
   'document-insert': documentInsert,

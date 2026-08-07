@@ -1,20 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { processDocument } from '.';
+import { parseDocument } from '.';
 import type { Document } from '@/lib/db/documents.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
 import {
+  canonicalDocumentRepresentations,
   documentEmbed,
   documentExtract,
   documentGenerateContent,
   documentGenerateHtml,
-  documentGenerateJson,
   documentInsert,
   documentKeyForRequest,
   documentValidate,
   storageUpload,
-  editorDocumentJsonSchema,
   type DocumentPipelineActions,
-  type DocumentProcessingResult,
+  type DocumentParseResult,
   type DocumentStorage,
   type ExtractedBlock,
   type NormalizedDocument,
@@ -24,7 +23,7 @@ const scopeKey = 'cmrnlzf640000qc7k4p5zem5w';
 const folderKey = 'cmrnlzf640001qc7k4p5zem5w';
 const documentKey = 'cmrnlzf640002qc7k4p5zem5w';
 const timestamp = '2026-07-22T00:00:00.000Z';
-const folder = { key: folderKey, scopeKey, name: 'Folder', embedding: [], deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
+const folder = { key: folderKey, scopeKey, name: 'Folder', isFavorite: false, embedding: [], deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const quiet = () => undefined;
 const bytes = (text: string) => new TextEncoder().encode(text);
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
@@ -69,16 +68,11 @@ const normalized = (extension: 'txt' | 'md' | 'doc' | 'docx' | 'pdf', fileInput 
   scopeKey, folderKey, fileInput: new Uint8Array(fileInput),
 });
 
-const editorJson = {
-  type: 'doc' as const,
-  content: [{ type: 'heading' as const, attrs: { level: 1 }, content: [{ type: 'text' as const, text: 'Report' }] }, { type: 'paragraph' as const, content: [{ type: 'text' as const, text: 'Body' }] }],
-};
-
 const completeDocument = (overrides: Partial<Document> = {}): Document => ({
   key: documentKey, scopeKey, folderKey, name: 'Report', extension: 'txt', mimeType: 'text/plain',
   storageKey: `archive/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
-  html: '<h1>Report</h1><p>Body</p>', json: editorJson, content: 'Report\n\nBody', embedding,
-  deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
+  html: '<h1>Report</h1><p>Body</p>', content: 'Report\n\nBody', embedding,
+  isFavorite: false, deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
 });
 
 describe('document-validate action', () => {
@@ -110,6 +104,13 @@ describe('document-extract action', () => {
     expect(txt.blocks.map(({ type }) => type)).toEqual(['paragraph', 'paragraph']);
     const md = await documentExtract({ ...normalized('md', bytes('# Title\n- One\n- Two')), storageKey: 'md' }, { logger: quiet });
     expect(md.blocks.map(({ type }) => type)).toEqual(['heading', 'bulletList']);
+  });
+
+  test('preserves common Markdown inline semantics and joins paragraph lines', async () => {
+    const source = '# **Core**\nFirst line with [Archive](https://vorinthex.com/archive)\ncontinues with `**literal**` and *emphasis*.';
+    const extracted = await documentExtract({ ...normalized('md', bytes(source)), storageKey: 'md' }, { logger: quiet });
+    const { html } = await documentGenerateHtml(extracted, { logger: quiet });
+    expect(html).toBe('<h1><strong>Core</strong></h1><p>First line with <a href="https://vorinthex.com/archive">Archive</a> continues with <code>**literal**</code> and <em>emphasis</em>.</p>');
   });
 
   test('uses format adapters for DOC and DOCX', async () => {
@@ -161,19 +162,27 @@ describe('document generation actions', () => {
     expect(html).not.toContain('<script>');
   });
 
-  test('generates and validates editor JSON while removing unsafe and unsupported HTML', async () => {
-    const result = await documentGenerateJson({ html: '<section><h1>Title</h1><p><strong>Bold</strong> <a href="javascript:bad">bad</a></p><table><tbody><tr><td>Cell</td></tr></tbody></table><script>alert(1)</script></section>' }, { logger: quiet });
-    expect(() => editorDocumentJsonSchema.parse(result.json)).not.toThrow();
-    expect(JSON.stringify(result.json)).not.toContain('javascript:');
-    expect(JSON.stringify(result.json)).not.toContain('alert');
-    expect(JSON.stringify(result.json)).toContain('tableCell');
-    await expect(documentGenerateJson({ html: '<p>unclosed' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_JSON_GENERATION_FAILED' });
-  });
-
   test('generates normalized plain text with block separation and no tags', async () => {
-    const { content } = await documentGenerateContent({ json: editorJson }, { logger: quiet });
+    const { content } = await documentGenerateContent({ html: '<h1>Report</h1><p>Body</p>' }, { logger: quiet });
     expect(content).toBe('Report\n\nBody');
     expect(content).not.toMatch(/<[^>]+>/);
+  });
+
+  test('sanitizes the editor subset and derives list and table text from canonical HTML', () => {
+    const result = canonicalDocumentRepresentations(`
+      <div><h1 onclick="bad()">Vorinthex Core</h1><script>alert(1)</script>
+      <p>Core has <b>five</b> apps.</p><ul><li>Archive</li><li>Gallery</li></ul>
+      <table><tr><th>App</th><th>Status</th></tr><tr><td>Core</td><td>Ready</td></tr></table>
+      <img src="/core.png" alt="Core map" onerror="bad()"></div>
+    `);
+    expect(result.html).toBe('<h1>Vorinthex Core</h1><p>Core has <strong>five</strong> apps.</p><ul><li>Archive</li><li>Gallery</li></ul><table><tr><th>App</th><th>Status</th></tr><tr><td>Core</td><td>Ready</td></tr></table><img src="/core.png" alt="Core map">');
+    expect(result.content).toBe('Vorinthex Core\n\nCore has five apps.\n\nArchive\nGallery\n\nApp\tStatus\nCore\tReady\n\nCore map');
+  });
+
+  test('removes unsafe links and rejects malformed allowed HTML', async () => {
+    const { html } = await documentGenerateHtml({ html: '<p><a href="javascript:alert(1)" style="color:red">Unsafe</a> <u>underline</u> <s>old</s></p>' }, { logger: quiet });
+    expect(html).toBe('<p><a>Unsafe</a> <u>underline</u> <s>old</s></p>');
+    await expect(documentGenerateHtml({ html: '<p>broken</strong>' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_HTML_GENERATION_FAILED' });
   });
 });
 
@@ -214,7 +223,7 @@ describe('document-insert action', () => {
   });
 });
 
-describe('document.processing tool', () => {
+describe('document.parse tool', () => {
   function harness(failAt?: keyof DocumentPipelineActions) {
     const calls: string[] = [];
     let persisted: Document | null = null;
@@ -228,7 +237,6 @@ describe('document.processing tool', () => {
       upload: async (input, options) => options!.storage!.upload({ key: `archive/${input.documentKey}`, bytes: input.fileInput, mimeType: input.mimeType }),
       extract: async () => { calls.push('document-extract'); fail('extract'); return { extractedText: 'Body', blocks: [{ type: 'paragraph', text: 'Body' }] }; },
       generateHtml: async () => { calls.push('document-generate-html'); fail('generateHtml'); return { html: '<p>Body</p>' }; },
-      generateJson: async () => { calls.push('document-generate-json'); fail('generateJson'); return { json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Body' }] }] } }; },
       generateContent: async () => { calls.push('document-generate-content'); fail('generateContent'); return { content: 'Body' }; },
       embed: async () => { calls.push('document-embed'); fail('embed'); return { embedding: [1, 2] }; },
       insert: async (document) => { calls.push('document-insert'); fail('insert'); persisted = document; return { document }; },
@@ -240,25 +248,33 @@ describe('document.processing tool', () => {
 
   test('runs every real action in order and inserts only after embedding', async () => {
     const context = harness();
-    const result = await processDocument(input, { ...context, logger: quiet }) as DocumentProcessingResult;
+    const result = await parseDocument(input, { ...context, logger: quiet }) as DocumentParseResult;
     expect(result.document.content).toBe('Body');
-    expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-json', 'document-generate-content', 'document-embed', 'document-insert']);
+    expect(result.document.isFavorite).toBe(false);
+    expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
     expect(context.calls.indexOf('document-embed')).toBeLessThan(context.calls.indexOf('document-insert'));
+  });
+
+  test('rejects action output when content drifts from generated HTML', async () => {
+    const context = harness();
+    context.actions.generateContent = async () => ({ content: 'Drifted' });
+    await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CONTENT_GENERATION_FAILED' });
+    expect(context.calls.at(-1)).toBe('storage-delete');
   });
 
   test('stops on validation and upload failures without inserting', async () => {
     for (const step of ['validate', 'upload'] as const) {
       const context = harness(step);
-      await expect(processDocument(input, { ...context, logger: quiet })).rejects.toThrow();
+      await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toThrow();
       expect(context.calls).not.toContain('document-insert');
       expect(context.calls).not.toContain('storage-delete');
     }
   });
 
   test('cleans S3 after every post-upload stage failure', async () => {
-    for (const step of ['extract', 'generateHtml', 'generateJson', 'generateContent', 'embed', 'insert'] as const) {
+    for (const step of ['extract', 'generateHtml', 'generateContent', 'embed', 'insert'] as const) {
       const context = harness(step);
-      await expect(processDocument(input, { ...context, logger: quiet })).rejects.toThrow();
+      await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toThrow();
       expect(context.calls.at(-1)).toBe('storage-delete');
       if (step !== 'insert') expect(context.calls).not.toContain('document-insert');
     }
@@ -266,9 +282,9 @@ describe('document.processing tool', () => {
 
   test('returns the existing document on an idempotent retry without another upload', async () => {
     const context = harness();
-    const first = await processDocument(input, { ...context, logger: quiet }) as DocumentProcessingResult;
+    const first = await parseDocument(input, { ...context, logger: quiet }) as DocumentParseResult;
     const beforeRetry = context.calls.length;
-    const second = await processDocument(input, { ...context, logger: quiet }) as DocumentProcessingResult;
+    const second = await parseDocument(input, { ...context, logger: quiet }) as DocumentParseResult;
     expect(second.document.key).toBe(first.document.key);
     expect(context.calls.slice(beforeRetry)).toEqual(['document-validate']);
   });
@@ -276,7 +292,7 @@ describe('document.processing tool', () => {
   test('rejects an archived document on an idempotent retry without uploading', async () => {
     const context = harness();
     const key = documentKeyForRequest(scopeKey, folderKey, input.idempotencyKey);
-    await expect(processDocument(input, {
+    await expect(parseDocument(input, {
       ...context,
       logger: quiet,
       getDocument: async () => completeDocument({ key, deletedAt: timestamp }),
@@ -286,7 +302,7 @@ describe('document.processing tool', () => {
 
   test('rejects an archived folder before idempotency lookup or upload', async () => {
     const context = harness();
-    await expect(processDocument(input, {
+    await expect(parseDocument(input, {
       ...context,
       logger: quiet,
       getFolder: async () => ({ ...folder, deletedAt: timestamp }),
@@ -299,11 +315,11 @@ describe('document.processing tool', () => {
     const key = documentKeyForRequest(scopeKey, folderKey, input.idempotencyKey);
     let lookups = 0;
     const existing = completeDocument({ key, storageKey: `archive/${key}` });
-    const result = await processDocument(input, {
+    const result = await parseDocument(input, {
       ...context,
       logger: quiet,
       getDocument: async () => (++lookups === 1 ? null : existing),
-    }) as DocumentProcessingResult;
+    }) as DocumentParseResult;
     expect(result.document.key).toBe(key);
     expect(context.calls).not.toContain('storage-delete');
   });
@@ -311,7 +327,7 @@ describe('document.processing tool', () => {
   test('retains the object when database ownership cannot be determined safely', async () => {
     const context = harness('insert');
     let lookups = 0;
-    await expect(processDocument(input, {
+    await expect(parseDocument(input, {
       ...context,
       logger: quiet,
       getDocument: async () => {
@@ -325,6 +341,6 @@ describe('document.processing tool', () => {
   test('returns a structured error when compensating cleanup cannot complete', async () => {
     const context = harness('extract');
     context.storage.delete = async () => { throw new Error('delete failed'); };
-    await expect(processDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CLEANUP_FAILED', action: 'document.processing', retryable: true });
+    await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CLEANUP_FAILED', action: 'document.parse', retryable: true });
   });
 });

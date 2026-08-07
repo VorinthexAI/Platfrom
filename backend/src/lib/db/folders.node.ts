@@ -11,6 +11,7 @@ export const folderSchema = z.object({
   parentFolderKey: z.string().cuid().optional(),
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
+  isFavorite: z.boolean().default(false),
   embedding: z.array(z.number().finite()).default([]),
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({

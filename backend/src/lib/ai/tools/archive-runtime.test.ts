@@ -3,11 +3,10 @@ import { newId } from '@/lib/ids';
 import type { ArchiveRepository } from './archive-runtime';
 import { ARCHIVE_TOOL_NAMES, ArchiveError, runArchiveTool, type ArchiveIdempotencyStore } from '.';
 import { DocumentProcessingError } from '@/lib/ai/document-processing';
-import { documentEmbed, documentGenerateContent, documentGenerateHtml, documentGenerateJson } from '@/lib/ai/document-processing';
+import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
 
 const now = '2026-07-22T12:00:00.000Z';
-const json = { type: 'doc' as const, content: [{ type: 'paragraph' as const, content: [{ type: 'text' as const, text: 'Body' }] }] };
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
 function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
@@ -32,7 +31,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async deleteDocument(key) { documents.delete(key); },
     async getShare(key) { return shares.get(key) ?? null; },
     async listShares(_scopeKey, keys) { return [...shares.values()].filter((value) => keys.includes(value.documentKey)); },
-    async insertShare(value) { const share = { ...value, embedding: [], deletedAt: null }; shares.set(share.key, share); return share; },
+    async insertShare(value) { const share = { ...value, deletedAt: null }; shares.set(share.key, share); return share; },
     async updateShare(key, patch) { const value = { ...shares.get(key), ...patch }; shares.set(key, value); return value; },
     async deleteShare(key) { shares.delete(key); },
     async getVersion(key) { return versions.get(key) ?? null; },
@@ -43,8 +42,8 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async transaction(operation) { return operation(repository); },
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
-  const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding: [1], createdAt: now, updatedAt: now });
-  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, json, content, embedding, createdAt: now, updatedAt: now }); return key; };
+  const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', isFavorite: false, embedding: [1], createdAt: now, updatedAt: now });
+  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, isFavorite: false, embedding, createdAt: now, updatedAt: now }); return key; };
   return { repository, context, folders, documents, shares, versions, patches, scopeKey, folderKey, addDocument };
 }
 
@@ -82,9 +81,28 @@ describe('Archive runtime', () => {
     const cycle = await runArchiveTool('folder.move', { moves: [{ folderKey: f.folderKey, targetParentFolderKey: child }] }, f.context, { repository: f.repository });
     expect(cycle.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_CYCLE_DETECTED' } });
     const documentKey = f.addDocument();
-    await runArchiveTool('document.move', { moves: [{ documentKey, targetFolderKey: child }] }, f.context, { repository: f.repository });
+    await runArchiveTool('document.move', { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: child }] }, f.context, { repository: f.repository });
     expect(f.patches.at(-1)).toMatchObject({ folderKey: child });
     expect(f.patches.at(-1)).not.toHaveProperty('embedding');
+  });
+
+  test('supports root documents as an explicit scoped location', async () => {
+    const f = fixture('owner');
+    const rootKey = f.addDocument('Root content');
+    delete f.documents.get(rootKey).folderKey;
+
+    const listed = await runArchiveTool('document.list', { scopeKey: f.scopeKey }, f.context, { repository: f.repository });
+    expect(listed.documents.map((document) => document.key)).toContain(rootKey);
+
+    const moved = await runArchiveTool('document.move', { moves: [{ documentKey: rootKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }] }, f.context, { repository: f.repository });
+    expect(moved.results[0]?.success).toBe(true);
+    await runArchiveTool('document.move', { moves: [{ documentKey: rootKey, targetScopeKey: f.scopeKey }] }, f.context, { repository: f.repository });
+    expect(f.documents.get(rootKey).folderKey).toBeUndefined();
+
+    const shared = await runArchiveTool('document.share', { shares: [{ documentKey: rootKey, permission: 'read' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(3) });
+    expect(shared.results[0]?.success).toBe(true);
+    const versioned = await runArchiveTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository });
+    expect(versioned.results[0]?.success).toBe(true);
   });
 
   test('rejects cross-scope document moves instead of performing a partial transfer', async () => {
@@ -94,7 +112,7 @@ describe('Archive runtime', () => {
     f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: foreignScopeKey, name: 'Foreign', embedding: [1], createdAt: now, updatedAt: now });
     const originalGetScope = f.repository.getScope;
     f.repository.getScope = async (key) => key === foreignScopeKey ? { key, organizationKey: f.context.organizationKey } : originalGetScope(key);
-    const output = await runArchiveTool('document.move', { moves: [{ documentKey: f.addDocument(), targetFolderKey }] }, f.context, { repository: f.repository });
+    const output = await runArchiveTool('document.move', { moves: [{ documentKey: f.addDocument(), targetScopeKey: foreignScopeKey, targetFolderKey }] }, f.context, { repository: f.repository });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_MOVE_FORBIDDEN' } });
   });
 
@@ -121,9 +139,9 @@ describe('Archive runtime', () => {
   test('maps document processing failures into Archive taxonomy and retryability', async () => {
     const f = fixture('moderator');
     const file = { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new TextEncoder().encode('text') };
-    await expect(runArchiveTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, {
+    await expect(runArchiveTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, {
       repository: f.repository,
-      processDocument: async () => { throw new DocumentProcessingError('DOCUMENT_EMBEDDING_FAILED', 'Embedding failed.', 'document-embed', { retryable: true }); },
+      parseDocument: async () => { throw new DocumentProcessingError('DOCUMENT_EMBEDDING_FAILED', 'Embedding failed.', 'document-embed', { retryable: true }); },
     })).rejects.toMatchObject({ code: 'DOCUMENT_EMBEDDING_FAILED', action: 'document-embed', retryable: true });
   });
 
@@ -207,8 +225,42 @@ describe('Archive runtime', () => {
       },
     });
     expect(output.results[0]?.success).toBe(true);
-    expect(actions).toEqual(['document-generate-html', 'document-generate-json', 'document-generate-html', 'document-generate-content', 'document-embed']);
+    expect(actions).toEqual(['document-generate-html', 'document-generate-content', 'document-embed']);
     expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding: [0.5] });
+  });
+
+  test('updates favorites atomically without embedding, canonicalizing, or versioning', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Unchanged body');
+    let actions = 0;
+    const documentOutput = await runArchiveTool('document.update', {
+      updates: [{ documentKey, isFavorite: true }], atomic: true,
+    }, f.context, { repository: f.repository, runAction: async () => { actions += 1; throw new Error('unexpected action'); } });
+    expect(documentOutput.results[0]).toMatchObject({ success: true, data: { document: { isFavorite: true } } });
+    expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>Unchanged body</p>', content: 'Unchanged body', isFavorite: true });
+    expect(f.versions.size).toBe(0);
+
+    const folderOutput = await runArchiveTool('folder.update', {
+      updates: [{ folderKey: f.folderKey, isFavorite: true }], atomic: true,
+    }, f.context, { repository: f.repository, embed: async () => { actions += 1; throw new Error('unexpected embed'); } });
+    expect(folderOutput.results[0]).toMatchObject({ success: true, data: { folder: { isFavorite: true } } });
+    expect(actions).toBe(0);
+  });
+
+  test('initializes folder and copied document favorites sensibly', async () => {
+    const f = fixture('moderator');
+    const created = await runArchiveTool('folder.create', { folders: [
+      { scopeKey: f.scopeKey, name: 'Default' },
+      { scopeKey: f.scopeKey, name: 'Pinned', isFavorite: true },
+    ] }, f.context, { repository: f.repository, embed: async () => [1] });
+    expect(created.results.map((result) => result.data?.folder.isFavorite)).toEqual([false, true]);
+
+    const documentKey = f.addDocument('Favorite source');
+    f.documents.get(documentKey).isFavorite = true;
+    const copied = await runArchiveTool('document.copy', {
+      copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }],
+    }, f.context, { repository: f.repository, storage: { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input) { return { storageKey: input.destinationKey }; }, async delete() {} } });
+    expect(copied.results[0]?.data?.document.isFavorite).toBe(false);
   });
 
   test('sanitizes HTML updates and persists canonical agreeing representations', async () => {
@@ -219,9 +271,9 @@ describe('Archive runtime', () => {
     }, f.context, { repository: f.repository, embed: async () => [1], ingestion: { embeddingDimensions: 1 } });
     expect(output.results[0]?.success).toBe(true);
     const stored = f.documents.get(documentKey);
-    expect(stored.html).toBe('<p>Safe text</p>');
-    expect(stored.content).toBe('Safe text');
-    expect(JSON.stringify(stored.json)).not.toContain('script');
+    expect(stored.html).toBe('<p>Safe text</p>drop');
+    expect(stored.content).toBe('Safe text\n\ndrop');
+    expect(stored).not.toHaveProperty('json');
     expect(stored.html).not.toContain('onclick');
     expect(stored.html).not.toContain('custom');
   });
@@ -229,6 +281,7 @@ describe('Archive runtime', () => {
   test('embeds the final derived name for persisted AI copies', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Source body');
+    f.documents.get(documentKey).isFavorite = true;
     const embeddedNames: string[] = [];
     const storage: any = { async upload(input: any) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } };
     const output = await runArchiveTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy' }, f.context, {
@@ -237,7 +290,6 @@ describe('Archive runtime', () => {
       runAction: async (action, input) => {
         if (action === 'reason') return { text: 'Texte traduit' };
         if (action === 'document-generate-html') return documentGenerateHtml(input as never);
-        if (action === 'document-generate-json') return documentGenerateJson(input as never);
         if (action === 'document-generate-content') return documentGenerateContent(input as never);
         if (action === 'document-embed') {
           embeddedNames.push(String(input.name));
@@ -248,6 +300,8 @@ describe('Archive runtime', () => {
     });
     expect(output.results[0]?.success).toBe(true);
     expect(embeddedNames).toEqual(['Notes (translate)']);
+    const persistedDocumentKey = output.results[0]?.data?.persistedDocumentKey;
+    expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)?.isFavorite).toBe(false);
   });
 
   test('precomputes atomic exports and throws without returning partial success', async () => {
@@ -286,7 +340,7 @@ describe('Archive runtime', () => {
     f.documents.get(documentKey).deletedAt = now;
     f.documents.get(documentKey).speechStorageKeys = ['speech/shared', 'speech/second'];
     const version = await f.repository.createVersion({
-      scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', json, content: 'old', embedding: [1], storageKey: 'speech/shared',
+      scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding: [1],
     });
     const calls: string[] = [];
     const originalDelete = f.repository.deleteDocument;
@@ -337,28 +391,18 @@ describe('Archive runtime', () => {
     expect(deleted).toEqual([`docs/${documentKey}`, `docs/${documentKey}`]);
   });
 
-  test('keeps a version cleanup manifest on its document until metadata deletion commits', async () => {
+  test('deletes logical version snapshots without storage side effects', async () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
     f.documents.get(documentKey).deletedAt = now;
-    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', json, content: 'old', embedding: [1], storageKey: 'versions/old' });
-    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() {} };
-    const normalTransaction = f.repository.transaction!;
-    let transactions = 0;
-    f.repository.transaction = async (operation) => {
-      transactions += 1;
-      if (transactions === 2) throw new Error('metadata commit failed');
-      return normalTransaction(operation);
-    };
-    const failed = await runArchiveTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
-    expect(failed.results[0]?.success).toBe(false);
-    expect(f.documents.get(documentKey)._internalDeletion).toMatchObject({ kind: 'version', versionKey: version.key, objectKeys: ['versions/old'] });
-    expect(f.versions.has(version.key)).toBe(true);
-    f.repository.transaction = normalTransaction;
-    const retried = await runArchiveTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
-    expect(retried.results[0]?.success).toBe(true);
+    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding: [1] });
+    let storageDeletes = 0;
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() { storageDeletes += 1; } };
+    const deleted = await runArchiveTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
+    expect(deleted.results[0]?.success).toBe(true);
     expect(f.versions.has(version.key)).toBe(false);
     expect(f.documents.get(documentKey)._internalDeletion).toBeUndefined();
+    expect(storageDeletes).toBe(0);
   });
 
   test('rejects descendant creation, sharing, versioning, move, and copy after a subtree freeze', async () => {
@@ -382,8 +426,8 @@ describe('Archive runtime', () => {
         const calls = await Promise.all([
           runArchiveTool('document.share', { shares: [{ documentKey: doomedKey, permission: 'read' }] }, f.context, { repository: f.repository }),
           runArchiveTool('document.create-version', { documentKeys: [doomedKey] }, f.context, { repository: f.repository }),
-          runArchiveTool('document.move', { moves: [{ documentKey: movableKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
-          runArchiveTool('document.copy', { copies: [{ documentKey: movableKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
+          runArchiveTool('document.move', { moves: [{ documentKey: movableKey, targetScopeKey: f.scopeKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
+          runArchiveTool('document.copy', { copies: [{ documentKey: movableKey, targetScopeKey: f.scopeKey, targetFolderKey: childKey }] }, f.context, { repository: f.repository }),
         ]);
         for (const call of calls) attempted.push(call.results[0] as { success: boolean });
       }
@@ -471,7 +515,7 @@ describe('Archive runtime', () => {
     const f = fixture('moderator');
     const seen: string[] = [];
     const file = { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new TextEncoder().encode('text') };
-    const processDocument = async (input: any) => {
+    const parseDocument = async (input: any) => {
       seen.push(input.idempotencyKey);
       return { document: f.documents.get(f.addDocument()) };
     };
@@ -480,9 +524,9 @@ describe('Archive runtime', () => {
       async complete() {},
       async release() {},
     };
-    await runArchiveTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, f.context, { repository: f.repository, processDocument, idempotency: ledger });
+    await runArchiveTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, f.context, { repository: f.repository, parseDocument, idempotency: ledger });
     const otherActor = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
-    await runArchiveTool('document.processing', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, otherActor, { repository: f.repository, processDocument, idempotency: ledger });
+    await runArchiveTool('document.parse', { file, scopeKey: f.scopeKey, folderKey: f.folderKey, idempotencyKey: 'caller-key' }, otherActor, { repository: f.repository, parseDocument, idempotency: ledger });
     expect(seen).toHaveLength(2);
     expect(seen[0]).not.toBe(seen[1]);
     expect(seen.every((key) => key !== 'caller-key')).toBe(true);
@@ -541,12 +585,11 @@ describe('Archive runtime', () => {
         clock: () => new Date(now),
         canPermanentlyDelete: () => true,
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
-        processDocument: async () => ({ document: f.documents.get(documentKey) }),
+        parseDocument: async () => ({ document: f.documents.get(documentKey) }),
         runAction: async (action: string, input: any) => {
           if (action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
           if (action === 'document-generate-html') return documentGenerateHtml(input);
-          if (action === 'document-generate-json') return documentGenerateJson(input);
           if (action === 'document-generate-content') return documentGenerateContent(input);
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);
@@ -562,14 +605,14 @@ describe('Archive runtime', () => {
       else if (name === 'folder.archive') input = { folderKeys: [childKey] };
       else if (name === 'folder.restore') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
-      else if (name === 'document.processing') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
+      else if (name === 'document.parse') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
-      else if (name === 'document.list') input = { folderKey: f.folderKey };
+      else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
       else if (name === 'document.update') input = { updates: [{ documentKey, content: 'Updated body' }] };
       else if (name === 'document.rename') input = { renames: [{ documentKey, name: 'Renamed' }] };
-      else if (name === 'document.move') input = { moves: [{ documentKey, targetFolderKey: siblingKey }] };
-      else if (name === 'document.copy') input = { copies: [{ documentKey, targetFolderKey: siblingKey }] };
+      else if (name === 'document.move') input = { moves: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };
+      else if (name === 'document.copy') input = { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: siblingKey }] };
       else if (name === 'document.archive') input = { documentKeys: [documentKey] };
       else if (name === 'document.restore') { f.documents.get(documentKey).deletedAt = now; input = { documentKeys: [documentKey] }; }
       else if (name === 'document.delete') { f.documents.get(documentKey).deletedAt = now; input = { documentKeys: [documentKey], deleteVersions: true, deleteShares: true }; }
@@ -578,13 +621,13 @@ describe('Archive runtime', () => {
       else if (name === 'document.share') input = { shares: [{ documentKey, permission: 'read' }] };
       else if (name === 'document.unshare') {
         const shareKey = newId();
-        f.shares.set(shareKey, { key: shareKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), embedding: [], createdAt: now, updatedAt: now });
+        f.shares.set(shareKey, { key: shareKey, scopeKey: f.scopeKey, documentKey, permission: 'read', tokenHash: 'a'.repeat(64), createdAt: now, updatedAt: now });
         input = { shareKeys: [shareKey] };
       } else if (name === 'document.list-shares') input = { documentKeys: [documentKey] };
       else if (name === 'document.create-version') input = { documentKeys: [documentKey], labels: { [documentKey]: 'Release' } };
       else if (name === 'document.find-version' || name === 'document.list-versions' || name === 'document.restore-version' || name === 'document.delete-version') {
         const current = f.documents.get(documentKey);
-        const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: current.html, json: current.json, content: current.content, embedding: current.embedding });
+        const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: current.html, content: current.content, embedding: current.embedding });
         if (name === 'document.find-version') input = { versionKeys: [version.key] };
         else if (name === 'document.list-versions') input = { documentKeys: [documentKey] };
         else if (name === 'document.restore-version') input = { restores: [{ documentKey, versionKey: version.key }] };

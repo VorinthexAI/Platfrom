@@ -2,9 +2,9 @@ import { AiError } from '@/lib/ai/shared/result';
 import type { DocumentActionName } from './schemas';
 
 export class DocumentProcessingError extends AiError {
-  readonly action: DocumentActionName | 'document.processing';
+  readonly action: DocumentActionName | 'document.parse';
 
-  constructor(code: string, message: string, action: DocumentActionName | 'document.processing', options?: { retryable?: boolean; cause?: unknown }) {
+  constructor(code: string, message: string, action: DocumentActionName | 'document.parse', options?: { retryable?: boolean; cause?: unknown }) {
     super(code, message, options);
     this.action = action;
   }

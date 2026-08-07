@@ -15,7 +15,7 @@ export const archiveToolOutputSchemas = Object.fromEntries(
 
 function providerInputSchema(name: ArchiveToolName) {
   const schema = archiveZodToJsonSchema(archiveToolContracts[name].input);
-  if (name === 'document.processing') {
+  if (name === 'document.parse') {
     const properties = schema.properties as Record<string, unknown>;
     properties.file = {
       type: 'object',
@@ -31,9 +31,9 @@ function providerInputSchema(name: ArchiveToolName) {
   if (name === 'document.update') {
     const properties = schema.properties as Record<string, any>;
     properties.updates.items.oneOf = [
-      { required: ['html'], not: { anyOf: [{ required: ['json'] }, { required: ['content'] }] } },
-      { required: ['json'], not: { anyOf: [{ required: ['html'] }, { required: ['content'] }] } },
-      { required: ['content'], not: { anyOf: [{ required: ['html'] }, { required: ['json'] }] } },
+      { required: ['html'], not: { required: ['content'] } },
+      { required: ['content'], not: { required: ['html'] } },
+      { required: ['isFavorite'], not: { anyOf: [{ required: ['html'] }, { required: ['content'] }, { required: ['createVersion'] }] } },
     ];
   }
   if (name === 'document.read') {
