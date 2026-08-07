@@ -11,7 +11,7 @@ typed Axios client are wired for the future API but never hit the network.
 ## Flow
 
 Splash → five-card onboarding (swipe left = skip, right = enable; state in
-Zustand) → Building Your Brain → AI brain home → capability screens
+Zustand) → Building Your Personal AI → personal AI tree → capability screens
 (Archive, Gallery, Signal, Compass, Ascend). No bottom navigation.
 
 ## Run
@@ -38,9 +38,8 @@ Founder MFA links use `https://vorinthex.com/auth/mfa`.
 - `src/components` — card stack, capability shell, chrome icon treatment
   (UI animation via Reanimated)
 - `src/components/three` — all 3D rendered with three.js via
-  @react-three/fiber (expo-gl on native, DOM canvas on web), mirroring
-  web/app's galaxy language: the neural brain build scene and the
-  rotating neural constellation fields
+  @react-three/fiber (expo-gl on native, DOM canvas on web), including the
+  luminous personal AI tree and capability detail fields
 - `src/data` — Zod-validated capability registry + mock content
 - `src/state` — Zustand stores (onboarding decisions, local UI state)
 - `src/theme` — tokens extending `@vorinthex/shared/ui/tokens`, motion vocabulary

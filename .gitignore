@@ -32,3 +32,6 @@ Thumbs.db
 
 # expo CLI run at the repo root regenerates a stub app.json — never track it
 /app.json
+/.expo/
+/android/
+/tsconfig.json
