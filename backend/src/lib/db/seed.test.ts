@@ -112,14 +112,14 @@ describe('model and routing relation seeds', () => {
       'openai.gpt-realtime-2',
       'openai.gpt-4o-mini-transcribe',
       'amazon.polly-generative',
-      'openai.text-embedding-3-small',
+      'qwen.qwen3-embedding-8b',
       'aws.transcribe-standard',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
       .toEqual(['amazon.nova-lite', 'amazon.nova-pro']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'transcribe').map(({ modelSlug }) => modelSlug))
       .toEqual(['openai.gpt-realtime-2']);
-    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('openai.text-embedding-3-small');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('qwen.qwen3-embedding-8b');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:false',
@@ -130,10 +130,11 @@ describe('model and routing relation seeds', () => {
       'amazon.nova-lite:aws-bedrock:us.amazon.nova-lite-v1:0:true',
       'openai.gpt-realtime-2:openai:gpt-realtime-2:true',
       'openai.gpt-4o-mini-transcribe:openai:gpt-4o-mini-transcribe:true',
-      'openai.text-embedding-3-small:openai:text-embedding-3-small:true',
+      'qwen.qwen3-embedding-8b:openrouter:qwen/qwen3-embedding-8b:true',
       'amazon.polly-generative:aws-polly:generative:true',
       'aws.transcribe-standard:aws-transcribe:standard:true',
     ]);
+    expect(SEEDED_MODEL_PROVIDERS.filter((route) => route.modelSlug.includes('embedding')).map((route) => route.modelSlug)).toEqual(['qwen.qwen3-embedding-8b']);
   });
 });
 
@@ -312,5 +313,23 @@ describe('AI runtime seed orchestration', () => {
       'modelActions:legacy-binding',
       'modelProviders:legacy-route',
     ]);
+  });
+
+  test('retires the persisted OpenAI embedding model, binding, and route while Qwen remains seeded', async () => {
+    const model = { key: 'legacy-openai', enabled: true };
+    const binding = { key: 'legacy-openai-binding', enabled: true };
+    const route = { key: 'legacy-openai-route', enabled: true };
+    await reconcileObsoleteSeededModelActions({
+      getModelBySlug: async (slug) => slug === 'openai.text-embedding-3-small' ? model : null,
+      updateModel: async (_key, patch) => { model.enabled = patch.enabled; },
+      getActionBySlug: async (slug) => slug === 'embed' ? { key: 'embed-action' } : null,
+      getModelActionByPair: async () => binding,
+      updateModelAction: async (_key, patch) => { binding.enabled = patch.enabled; },
+      getProviderBySlug: async (slug) => slug === 'openai' ? { key: 'openai-provider' } : null,
+      getModelProviderByPair: async () => route,
+      updateModelProvider: async (_key, patch) => { route.enabled = patch.enabled; },
+    });
+    expect({ model: model.enabled, binding: binding.enabled, route: route.enabled }).toEqual({ model: false, binding: false, route: false });
+    expect(SEEDED_MODEL_ACTIONS.find((seed) => seed.actionSlug === 'embed')).toMatchObject({ modelSlug: 'qwen.qwen3-embedding-8b', enabled: true });
   });
 });

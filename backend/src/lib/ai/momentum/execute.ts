@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { embedText } from '@/lib/openai-embeddings';
+import { embedText } from '@/lib/embeddings';
 import type { Folder } from '@/lib/db/folders.node';
 import type { Milestone } from '@/lib/db/milestones.node';
 import type { Project } from '@/lib/db/projects.node';
@@ -267,7 +267,7 @@ export async function executeMomentumTool(
   const authorize = dependencies.authorize;
   const key = dependencies.createKey ?? newId;
   const now = dependencies.now ?? (() => new Date().toISOString());
-  const generateEmbedding = dependencies.generateEmbedding ?? (async (text: string) => embedText({ text }));
+  const generateEmbedding = dependencies.generateEmbedding ?? (async (text: string) => embedText({ text, purpose: 'document' }));
   const embeddingCache = new Map<string, Promise<number[]>>();
   const embeddingFor = (node: Parameters<typeof semanticText>[0]) => {
     const text = semanticText(node);
@@ -515,7 +515,9 @@ export async function executeMomentumTool(
   });
 
   if (action === 'scope.project.search' || action === 'organization.project.search') {
-    const queryEmbedding = validEmbedding(await generateEmbedding(input.query));
+    const queryEmbedding = validEmbedding(await (dependencies.generateEmbedding
+      ? dependencies.generateEmbedding(input.query)
+      : embedText({ text: input.query, purpose: 'query' })));
     const projects = action === 'scope.project.search'
       ? (await authorize(input.scopeKey, READ_ROLES), await repository.listProjects(input.scopeKey))
       : dependencies.organizationScopeKeys

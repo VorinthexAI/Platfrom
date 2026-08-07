@@ -13,7 +13,7 @@ import { userMentionSchema } from '@/lib/db/user-mentions.node';
 import { userReactionSchema } from '@/lib/db/user-reactions.node';
 import { isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
-import { embeddingMetadata, embedText } from '@/lib/openai-embeddings';
+import { embeddingMetadata, embedText } from '@/lib/embeddings';
 
 export interface MentionCandidate {
   participantKey: string;
@@ -158,7 +158,6 @@ async function indexMessage(message: Message): Promise<void> {
     await updateMessageIndex(message, {
       embedding,
       embeddingState: 'ready',
-      embeddingDimensions: embedding.length,
       embeddedAt: new Date().toISOString(),
       ...embeddingMetadata(),
     });

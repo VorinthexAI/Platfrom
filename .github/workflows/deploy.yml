@@ -3,8 +3,8 @@ name: Unified Deploy
 # Unified CI and production deployment pipeline.
 #
 # Active flow: PR verification, or a merged PR/manual run -> CI -> Docker
-# validation -> ECR image push -> database migration -> one SSM blue-green
-# deployment to the early-infra app box -> Cloudflare cache purge.
+# validation -> ECR image push -> compatibility API rollout -> database
+# migration/seed/semantic backfill -> Cloudflare cache purge.
 #
 # Terraform remains in infra.yml because infrastructure provisioning is not an
 # application deploy. The former ECS rollout jobs are intentionally retained as
@@ -465,8 +465,14 @@ jobs:
   backend-db:
     name: Deploy graph database
     runs-on: ubuntu-latest
-    needs: [changes, backend-secrets]
-    if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
+    timeout-minutes: 60
+    needs: [changes, backend-secrets, early-deploy]
+    if: >-
+      always()
+      && needs.changes.outputs.backend == 'true'
+      && (github.event.pull_request.merged == true || inputs.deploy)
+      && needs.backend-secrets.result == 'success'
+      && needs.early-deploy.result == 'success'
     environment: production
     env:
       EC2_HOST: ${{ secrets.GRAPH_DB_EC2_HOST }}
@@ -600,33 +606,43 @@ jobs:
           bedrock_aws_access_key_id=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_ACCESS_KEY_ID")) | .v')
           bedrock_aws_secret_access_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_SECRET_ACCESS_KEY")) | .v')
           openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
+          openrouter_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_API_KEY")) | .v')
+          openrouter_base_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_BASE_URL")) | .v')
+          openrouter_site_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_SITE_URL")) | .v')
+          openrouter_app_name=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_APP_NAME")) | .v')
           openai_base_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_BASE_URL")) | .v')
           openai_organization=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_ORGANIZATION")) | .v')
           openai_project=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_PROJECT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH"; exit 1; }
-          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; OpenAI embeddings cannot run"; exit 1; }
+          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; non-embedding OpenAI functions cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Qwen embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"
           echo "::add-mask::$openai_api_key"
+          echo "::add-mask::$openrouter_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
           echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
+          echo "OPENROUTER_API_KEY=$openrouter_api_key" >> "$GITHUB_ENV"
+          test -z "$openrouter_base_url" || echo "OPENROUTER_BASE_URL=$openrouter_base_url" >> "$GITHUB_ENV"
+          test -z "$openrouter_site_url" || echo "OPENROUTER_SITE_URL=$openrouter_site_url" >> "$GITHUB_ENV"
+          test -z "$openrouter_app_name" || echo "OPENROUTER_APP_NAME=$openrouter_app_name" >> "$GITHUB_ENV"
           test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
           test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
           test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
-      - name: Apply migrations, seed nodes, and backfill messages
+      - name: Apply migrations, cut over Qwen seed routes, and backfill semantic data
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
         run: |
           bun run --cwd backend db:migrate:ci
           bun run --cwd backend seed.ts
-          bun run --cwd backend db:backfill-message-embeddings:ci
+          bun run --cwd backend db:backfill-semantic-embeddings:ci
       - name: Close SSH ingress for this runner
         if: always()
         run: |
@@ -893,22 +909,26 @@ jobs:
           bedrock_aws_access_key_id=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_ACCESS_KEY_ID")) | .v')
           bedrock_aws_secret_access_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/BEDROCK_AWS_SECRET_ACCESS_KEY")) | .v')
           openai_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_API_KEY")) | .v')
+          openrouter_api_key=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENROUTER_API_KEY")) | .v')
           openai_base_url=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_BASE_URL")) | .v')
           openai_organization=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_ORGANIZATION")) | .v')
           openai_project=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/OPENAI_PROJECT")) | .v')
           test -n "$arango_password" || { echo "::error::ARANGO_ROOT_PASSWORD not found under $SSM_PATH"; exit 1; }
           test -n "$bedrock_aws_access_key_id" || { echo "::error::BEDROCK_AWS_ACCESS_KEY_ID not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
           test -n "$bedrock_aws_secret_access_key" || { echo "::error::BEDROCK_AWS_SECRET_ACCESS_KEY not found under $SSM_PATH; Bedrock models cannot run"; exit 1; }
-          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; OpenAI embeddings cannot run"; exit 1; }
+          test -n "$openai_api_key" || { echo "::error::OPENAI_API_KEY not found under $SSM_PATH; non-embedding OpenAI functions cannot run"; exit 1; }
+          test -n "$openrouter_api_key" || { echo "::error::OPENROUTER_API_KEY not found under $SSM_PATH; Qwen embeddings cannot run"; exit 1; }
           echo "::add-mask::$arango_password"
           echo "::add-mask::$bedrock_aws_access_key_id"
           echo "::add-mask::$bedrock_aws_secret_access_key"
           echo "::add-mask::$openai_api_key"
+          echo "::add-mask::$openrouter_api_key"
           echo "ARANGO_ROOT_PASSWORD=$arango_password" >> "$GITHUB_ENV"
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
           echo "OPENAI_API_KEY=$openai_api_key" >> "$GITHUB_ENV"
+          echo "OPENROUTER_API_KEY=$openrouter_api_key" >> "$GITHUB_ENV"
           test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
           test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
           test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
@@ -1067,20 +1087,19 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # EARLY-INFRA: the active production deployment. It performs one SSM
-  # blue-green swap on the single app box for every changed web or backend
-  # service after its image and required graph migration are ready.
+  # blue-green swap on the single app box before graph migration. This first
+  # deploys the API version that can read both legacy and current vectors.
   # ---------------------------------------------------------------------------
   early-deploy:
     name: Blue-green deploy to early-infra box
     runs-on: ubuntu-latest
-    # Images are pushed and graph migrations complete before the live swap.
-    needs: [changes, deploy-web, backend-migrate]
+    needs: [changes, deploy-web, backend-image, backend-secrets]
     if: >-
       always()
       && (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event.pull_request.merged == true || inputs.deploy)
       && (needs.changes.outputs.web != 'true' || needs.deploy-web.result == 'success')
-      && (needs.changes.outputs.backend != 'true' || needs.backend-migrate.result == 'success')
+      && (needs.changes.outputs.backend != 'true' || (needs.backend-image.result == 'success' && needs.backend-secrets.result == 'success'))
     environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app

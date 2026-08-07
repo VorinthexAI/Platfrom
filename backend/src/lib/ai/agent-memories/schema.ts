@@ -14,6 +14,9 @@ export const agentMemorySchema = z.object({
   memoryType: z.enum(AGENT_MEMORY_TYPES),
   importance: z.number().min(0).max(1),
   embedding: z.array(z.number().finite()).default([]),
+  embeddingProvider: z.string().trim().min(1).optional(),
+  embeddingModel: z.string().trim().min(1).optional(),
+  embeddingDimensions: z.number().int().positive().optional(),
   createdAt: z.string().datetime(),
 }).strict();
 export type AgentMemory = z.infer<typeof agentMemorySchema>;

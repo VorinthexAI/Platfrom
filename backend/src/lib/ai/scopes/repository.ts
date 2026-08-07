@@ -1,7 +1,7 @@
 import { db } from '@/lib/db/client';
 import { buildEmbeddingText, isArangoNotFoundError, isArangoUniqueConstraintError, toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { newId } from '@/lib/ids';
-import { embedText, embeddingMetadata } from '@/lib/openai-embeddings';
+import { embedText, embeddingMetadata } from '@/lib/embeddings';
 import {
   SCOPE_SCOPES_COLLECTION,
   SCOPE_MEMBERS_COLLECTION,

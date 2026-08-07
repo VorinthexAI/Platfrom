@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { OpenAIRealtimeWebSocket } from 'openai/realtime/websocket';
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
-import { EMBEDDING_DIMENSIONS, OPENAI_EMBEDDING_MODEL_ID } from '@/lib/openai-embeddings';
+import { LEGACY_EMBEDDING_DIMENSIONS, LEGACY_EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
 import { normalizeProviderError, ProviderError } from './errors';
 import {
   CHAT_ACTION_IDS,
@@ -21,10 +21,10 @@ import {
   type ChatOutput,
   type EmbeddingOutput,
   type ProviderAdapter,
-  type ProviderEmbedRequest,
-  type ProviderEmbedResponse,
   type ProviderExecuteRequest,
   type ProviderExecuteResponse,
+  type ProviderEmbedRequest,
+  type ProviderEmbedResponse,
   type ProviderFactory,
   type SpeechOutput,
   type TranscriptionOutput,
@@ -87,6 +87,27 @@ async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<
   finally { removeAbort(); }
 }
 
+/** Rollout-only compatibility for persisted legacy routes. Current seeds disable every OpenAI embedding binding and route. */
+async function createLegacyEmbeddings(client: OpenAI, request: ProviderEmbedRequest): Promise<ProviderEmbedResponse> {
+  try {
+    if (request.externalModelId !== LEGACY_EXTERNAL_EMBEDDING_MODEL_ID) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `Legacy OpenAI embeddings require ${LEGACY_EXTERNAL_EMBEDDING_MODEL_ID}`);
+    const raw = await client.embeddings.create({
+      model: request.externalModelId,
+      input: request.input,
+      dimensions: LEGACY_EMBEDDING_DIMENSIONS,
+      encoding_format: 'float',
+    }, { signal: resolveRequestSignal(request) });
+    const expectedCount = typeof request.input === 'string' ? 1 : request.input.length;
+    const ordered = [...raw.data].sort((left, right) => left.index - right.index);
+    if (ordered.length !== expectedCount || ordered.some((item, index) => item.index !== index || item.embedding.length !== LEGACY_EMBEDDING_DIMENSIONS || item.embedding.some((value) => !Number.isFinite(value)))) {
+      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'legacy openai embeddings returned invalid vectors');
+    }
+    return { embeddings: ordered.map((item) => item.embedding), usage: tokenUsage(raw.usage.prompt_tokens, 0, raw.usage.total_tokens), providerId: PROVIDER_ID, externalModelId: request.externalModelId, rawResponse: raw };
+  } catch (error) {
+    throw normalizeProviderError(PROVIDER_ID, error);
+  }
+}
+
 async function executeRealtimeChat<TInput, TOutput>(client: OpenAI, request: ProviderExecuteRequest<TInput>): Promise<ProviderExecuteResponse<TOutput>> {
   let text = '';
   let usage = tokenUsage(0, 0, 0);
@@ -133,42 +154,6 @@ async function* streamRealtimeChat<TInput>(client: OpenAI, request: ProviderExec
   } finally {
     realtimeRequest.remove();
     realtime.close();
-  }
-}
-
-async function createEmbeddings(client: OpenAI, request: ProviderEmbedRequest): Promise<ProviderEmbedResponse> {
-  try {
-    const raw = await client.embeddings.create(
-      {
-        model: request.externalModelId,
-        input: request.input,
-        encoding_format: 'float',
-        ...(request.dimensions ? { dimensions: request.dimensions } : {}),
-      },
-      { signal: resolveRequestSignal(request) },
-    );
-    const embeddings = [...raw.data]
-      .sort((left, right) => left.index - right.index)
-      .map((item) => item.embedding);
-    if (embeddings.length === 0) {
-      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai embeddings returned no vectors');
-    }
-    const expectedCount = typeof request.input === 'string' ? 1 : request.input.length;
-    const expectedDimensions = request.dimensions;
-    if (embeddings.length !== expectedCount || embeddings.some((embedding) =>
-      (expectedDimensions !== undefined && embedding.length !== expectedDimensions)
-      || embedding.some((value) => !Number.isFinite(value)))) {
-      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'openai embeddings returned invalid vector dimensions or values');
-    }
-    return {
-      embeddings,
-      usage: tokenUsage(raw.usage.prompt_tokens, 0, raw.usage.total_tokens),
-      providerId: PROVIDER_ID,
-      externalModelId: request.externalModelId,
-      rawResponse: raw,
-    };
-  } catch (err) {
-    throw normalizeProviderError(PROVIDER_ID, err);
   }
 }
 
@@ -329,11 +314,10 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
       }
       try {
         if (request.actionId === 'embed') {
-          if (request.externalModelId !== OPENAI_EMBEDDING_MODEL_ID) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenAI embeddings require ${OPENAI_EMBEDDING_MODEL_ID}`);
           const input = embeddingInputSchema.parse(request.input);
-          const result = await createEmbeddings(client, { externalModelId: request.externalModelId, input: input.text, dimensions: EMBEDDING_DIMENSIONS, timeoutMs: request.timeoutMs, signal: request.signal });
-          const output: EmbeddingOutput = { embedding: result.embeddings[0]! };
-          return { output: output as TOutput, usage: result.usage, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: result.rawResponse };
+          const embedded = await createLegacyEmbeddings(client, { externalModelId: request.externalModelId, input: input.text, dimensions: LEGACY_EMBEDDING_DIMENSIONS, timeoutMs: request.timeoutMs, signal: request.signal });
+          const output: EmbeddingOutput = { embedding: embedded.embeddings[0]! };
+          return { output: output as TOutput, usage: embedded.usage, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: embedded.rawResponse };
         }
         if (request.actionId === 'generate-image') return await executeImageGenerate(client, request);
         if (request.actionId === 'transcribe' && request.externalModelId === OPENAI_REALTIME_MODEL) return await executeRealtimeTranscribe(client, request);
@@ -352,8 +336,9 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): ProviderAdap
     },
 
     embed(request) {
-      return createEmbeddings(client, request);
+      return createLegacyEmbeddings(client, request);
     },
+
   };
 }
 

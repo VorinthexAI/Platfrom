@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { parseDocument } from '.';
 import type { Document } from '@/lib/db/documents.node';
-import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import {
   canonicalDocumentRepresentations,
   documentEmbed,

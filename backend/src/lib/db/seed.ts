@@ -654,10 +654,10 @@ export const SEEDED_MODELS = [
     enabled: true,
   },
   {
-    key: 'cmopenaiembed3model000001',
-    slug: 'openai.text-embedding-3-small',
-    name: 'OpenAI Text Embedding 3 Small',
-    description: 'OpenAI embedding model configured at its full 1536 dimensions for efficient semantic retrieval.',
+    key: 'cmqwen3embedmodel0000001',
+    slug: 'qwen.qwen3-embedding-8b',
+    name: 'Qwen3 Embedding 8B',
+    description: 'Qwen3 8B embedding model at 4096 dimensions, strictly routed through OpenRouter to DeepInfra.',
     supportedUseCases: 'Retrieval-augmented generation, semantic search, vector retrieval, classification, and document similarity.',
     enabled: true,
   },
@@ -751,10 +751,10 @@ export const SEEDED_MODEL_PROVIDERS = [
     enabled: true,
   },
   {
-    key: 'cmopenaiembed3route000001',
-    modelSlug: 'openai.text-embedding-3-small',
-    providerSlug: 'openai',
-    providerModelId: 'text-embedding-3-small',
+    key: 'cmqwen3embedroute0000001',
+    modelSlug: 'qwen.qwen3-embedding-8b',
+    providerSlug: 'openrouter',
+    providerModelId: 'qwen/qwen3-embedding-8b',
     enabled: true,
   },
   {
@@ -1184,6 +1184,24 @@ export async function reconcileObsoleteSeededModelActions(store: ObsoleteModelAc
     }
     const bedrock = await store.getProviderBySlug?.('aws-bedrock');
     const legacyRoute = bedrock ? await store.getModelProviderByPair?.(titan.key, bedrock.key) : null;
+    if (legacyRoute?.enabled && store.updateModelProvider) {
+      await store.updateModelProvider(legacyRoute.key, { enabled: false });
+      results.push({ collection: 'modelProviders', key: legacyRoute.key, status: 'updated' });
+    }
+  }
+
+  const legacyOpenAIEmbedding = await store.getModelBySlug('openai.text-embedding-3-small');
+  if (legacyOpenAIEmbedding) {
+    await store.updateModel(legacyOpenAIEmbedding.key, { enabled: false });
+    results.push({ collection: 'models', key: legacyOpenAIEmbedding.key, status: 'updated' });
+    const embed = await store.getActionBySlug('embed');
+    const legacyAction = embed ? await store.getModelActionByPair(legacyOpenAIEmbedding.key, embed.key) : null;
+    if (legacyAction?.enabled) {
+      await store.updateModelAction(legacyAction.key, { enabled: false });
+      results.push({ collection: 'modelActions', key: legacyAction.key, status: 'updated' });
+    }
+    const openai = await store.getProviderBySlug?.('openai');
+    const legacyRoute = openai ? await store.getModelProviderByPair?.(legacyOpenAIEmbedding.key, openai.key) : null;
     if (legacyRoute?.enabled && store.updateModelProvider) {
       await store.updateModelProvider(legacyRoute.key, { enabled: false });
       results.push({ collection: 'modelProviders', key: legacyRoute.key, status: 'updated' });

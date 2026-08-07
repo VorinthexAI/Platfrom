@@ -228,7 +228,7 @@ variable "kms_key_arns" {
 
 variable "api_secret_keys" {
   type        = list(string)
-  description = "SSM keys (/vorinthex/prod/*) injected into the api task as container secrets — the backend's full runtime env. AWS creds/AI keys are intentionally absent (task role / stubs)."
+  description = "SSM keys (/vorinthex/prod/*) injected into the API task as container secrets. OpenRouter is required for current embeddings; other provider credentials remain managed separately."
   default = [
     "ACCESS_TOKEN_SECRET",
     "ADMIN_EMAIL",
@@ -240,6 +240,7 @@ variable "api_secret_keys" {
     "CORS_ORIGINS",
     "FRONTEND_URL",
     "NO_REPLY_EMAIL",
+    "OPENROUTER_API_KEY",
     "RATE_LIMIT_ENABLED",
     "RATE_LIMIT_REQ_PER_MIN",
     "REDIS_URL",
