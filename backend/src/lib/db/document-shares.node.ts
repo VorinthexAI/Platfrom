@@ -15,7 +15,6 @@ export const documentShareSchema = z.object({
   passwordHash: z.string().trim().min(20).optional(),
   expiresAt: z.string().datetime().optional(),
   revokedAt: z.string().datetime().optional(),
-  embedding: z.array(z.number().finite()).length(0).default([]),
   deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -23,8 +22,8 @@ export const documentShareSchema = z.object({
 
 export type DocumentShare = z.infer<typeof documentShareSchema>;
 export const documentSharesEmbeddingFields = [] as const;
-const helpers = createNodeHelpers(DOCUMENT_SHARES_COLLECTION, documentShareSchema, documentSharesEmbeddingFields);
-export async function insertDocumentShare(share: Omit<DocumentShare, 'embedding' | 'deletedAt'>): Promise<DocumentShare> {
+const helpers = createNodeHelpers(DOCUMENT_SHARES_COLLECTION, documentShareSchema, documentSharesEmbeddingFields, { requireEmbedding: false });
+export async function insertDocumentShare(share: Omit<DocumentShare, 'deletedAt'>): Promise<DocumentShare> {
   const { archivePersistence } = await import('./archive-persistence.node');
   return archivePersistence.insertShare(share);
 }
@@ -63,10 +62,10 @@ export async function getActiveDocumentShareByTokenHash(tokenHash: string, at = 
       FILTER document != null && document.scopeKey == share.scopeKey
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
       FILTER document.deletedAt == null
-      LET folder = DOCUMENT(${db.collection('folders')}, document.folderKey)
-      FILTER folder != null && folder.scopeKey == share.scopeKey
-      FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-      FILTER folder.deletedAt == null
+      LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
+      FILTER folder == null || folder.scopeKey == share.scopeKey
+      FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+      FILTER folder == null || folder.deletedAt == null
       LIMIT 1
       RETURN share
   `);

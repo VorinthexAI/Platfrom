@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { editorDocumentJsonSchema } from '@/lib/ai/document-processing/schemas';
 import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { db } from './client';
 import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
+import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 
 export const DOCUMENT_VERSIONS_COLLECTION = 'documentVersions';
 
@@ -20,15 +20,10 @@ export const documentVersionSchema = z.object({
   version: z.number().int().positive(),
   label: z.string().trim().min(1).max(120).optional(),
   html: z.string().min(1).refine((value) => value.trim().length > 0, 'HTML must not be blank.'),
-  json: editorDocumentJsonSchema,
   content: z.string().trim().min(1),
   embedding: configuredEmbeddingSchema,
-  // Legacy uploaded versions may retain their object reference; new snapshots do not require one.
-  storageKey: z.string().trim().min(1).optional(),
-  sizeBytes: z.number().int().nonnegative().optional(),
   deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime().optional(),
 });
 
 export type DocumentVersion = z.infer<typeof documentVersionSchema>;
@@ -46,15 +41,17 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
 
 /** Prepared snapshots preserve the exact embedding that belonged to the saved content. */
 export async function insertDocumentVersion(input: DocumentVersion): Promise<DocumentVersion> {
+  const canonical = canonicalDocumentRepresentations(input.html);
+  if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
   const snapshot = documentVersionSchema.parse(input);
   assertConfiguredEmbeddingDimensions(snapshot.embedding);
   const cursor = await db.query(`
     LET document = DOCUMENT(documents, @documentKey)
     FILTER document != null && document.scopeKey == @scopeKey
     FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
-    LET folder = DOCUMENT(folders, document.folderKey)
-    FILTER folder != null && folder.scopeKey == @scopeKey
-    FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+    LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(folders, document.folderKey) : null
+    FILTER folder == null || folder.scopeKey == @scopeKey
+    FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
     INSERT @snapshot INTO documentVersions RETURN NEW
   `, { documentKey: snapshot.documentKey, scopeKey: snapshot.scopeKey, snapshot: toArangoDoc(snapshot) });
   const created = await cursor.next();
@@ -64,6 +61,8 @@ export async function insertDocumentVersion(input: DocumentVersion): Promise<Doc
 
 /** Migration/import-only keyed replacement; normal writes use createDocumentVersion. */
 export async function upsertDocumentVersionByKey(input: DocumentVersion): Promise<DocumentVersion> {
+  const canonical = canonicalDocumentRepresentations(input.html);
+  if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
   const snapshot = documentVersionSchema.parse(input);
   assertConfiguredEmbeddingDimensions(snapshot.embedding);
   const result = await db.collection(DOCUMENT_VERSIONS_COLLECTION).save(toArangoDoc(snapshot), { returnNew: true, overwriteMode: 'replace' });
@@ -142,14 +141,13 @@ export async function deleteDocumentVersionInScope(scopeKey: string, versionKey:
   return archivePersistence.deleteVersion(scopeKey, versionKey);
 }
 
-type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'updatedAt' | 'deletedAt'>;
+type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>;
 
 /** Exclusive collection transaction makes MAX(version)+1 monotonic under concurrent writers. */
 export async function createDocumentVersion(input: NewDocumentVersion): Promise<DocumentVersion> {
-  const { storageKey: _storageKey, sizeBytes: _sizeBytes, ...logicalSnapshot } = input;
-  assertConfiguredEmbeddingDimensions(logicalSnapshot.embedding);
+  assertConfiguredEmbeddingDimensions(input.embedding);
   const { withArchivePersistenceTransaction } = await import('./archive-persistence.node');
-  return withArchivePersistenceTransaction((persistence) => persistence.createVersion(logicalSnapshot));
+  return withArchivePersistenceTransaction((persistence) => persistence.createVersion(input));
 }
 
 export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ArchiveSemanticSearchInput, 'sources'>) {
@@ -157,7 +155,7 @@ export async function semanticSearchDocumentVersions(input: Omit<import('./docum
   return semanticSearchArchive({ ...input, sources: ['version'] });
 }
 
-export async function updateDocumentVersion(key: string, patch: Partial<Pick<DocumentVersion, 'deletedAt' | 'updatedAt'>>): Promise<DocumentVersion> {
+export async function updateDocumentVersion(key: string, patch: Pick<DocumentVersion, 'deletedAt'>): Promise<DocumentVersion> {
   const updated = await helpers.updateById(key, patch);
   if (!updated) throw new Error(`Document version ${key} was not found.`);
   return updated;
@@ -165,10 +163,9 @@ export async function updateDocumentVersion(key: string, patch: Partial<Pick<Doc
 
 export async function archiveDocumentVersion(key: string): Promise<DocumentVersion> {
   const timestamp = new Date().toISOString();
-  return updateDocumentVersion(key, { deletedAt: timestamp, updatedAt: timestamp });
+  return updateDocumentVersion(key, { deletedAt: timestamp });
 }
 
 export async function restoreDocumentVersion(key: string): Promise<DocumentVersion> {
-  const timestamp = new Date().toISOString();
-  return updateDocumentVersion(key, { deletedAt: null, updatedAt: timestamp });
+  return updateDocumentVersion(key, { deletedAt: null });
 }

@@ -6,7 +6,6 @@ export const DOCUMENT_ACTION_NAMES = [
   'storage-upload',
   'document-extract',
   'document-generate-html',
-  'document-generate-json',
   'document-generate-content',
   'document-embed',
   'document-insert',
@@ -31,15 +30,15 @@ export const uploadedDocumentFileSchema = z.custom<File | {
 
 export type UploadedDocumentFile = z.infer<typeof uploadedDocumentFileSchema>;
 
-export const documentProcessingInputSchema = z.object({
+export const documentParseInputSchema = z.object({
   file: uploadedDocumentFileSchema,
   scopeKey: z.string().cuid(),
-  folderKey: z.string().cuid(),
+  folderKey: z.string().cuid().optional(),
   name: z.string().trim().min(1).max(255).optional(),
   idempotencyKey: z.string().trim().min(1).max(200).optional(),
 }).strict();
 
-export type DocumentProcessingInput = z.infer<typeof documentProcessingInputSchema>;
+export type DocumentParseInput = z.infer<typeof documentParseInputSchema>;
 
 export const extractedBlockTypeSchema = z.enum([
   'heading', 'paragraph', 'blockquote', 'bulletList', 'orderedList', 'listItem',
@@ -70,47 +69,13 @@ export const extractionResultSchema = z.object({
 
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;
 
-const editorMarkSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('bold') }).strict(),
-  z.object({ type: z.literal('italic') }).strict(),
-  z.object({ type: z.literal('link'), attrs: z.object({ href: z.string().url().refine((href) => /^https?:\/\//i.test(href), 'Links must use HTTP or HTTPS.'), target: z.enum(['_blank', '_self']).optional() }).strict() }).strict(),
-]);
-
-export type EditorNodeJson = {
-  type: 'doc' | 'heading' | 'paragraph' | 'text' | 'bulletList' | 'orderedList' | 'listItem'
-    | 'blockquote' | 'codeBlock' | 'horizontalRule' | 'table' | 'tableRow' | 'tableCell';
-  attrs?: Record<string, unknown>;
-  content?: EditorNodeJson[];
-  text?: string;
-  marks?: Array<z.infer<typeof editorMarkSchema>>;
-};
-
-export const editorNodeJsonSchema: z.ZodType<EditorNodeJson> = z.lazy(() => z.object({
-  type: z.enum(['doc', 'heading', 'paragraph', 'text', 'bulletList', 'orderedList', 'listItem', 'blockquote', 'codeBlock', 'horizontalRule', 'table', 'tableRow', 'tableCell']),
-  attrs: z.record(z.unknown()).optional(),
-  content: z.array(editorNodeJsonSchema).optional(),
-  text: z.string().optional(),
-  marks: z.array(editorMarkSchema).optional(),
-}).strict().superRefine((node, context) => {
-  if (node.type === 'text' && node.text === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Text nodes require text.' });
-  if (node.type !== 'text' && node.text !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Only text nodes may contain text.' });
-  if (node.type === 'heading') {
-    const level = node.attrs?.level;
-    if (!Number.isInteger(level) || Number(level) < 1 || Number(level) > 6) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Headings require a level from 1 to 6.' });
-  }
-  if (node.type !== 'heading' && node.attrs && Object.keys(node.attrs).length > 0) context.addIssue({ code: z.ZodIssueCode.custom, message: `${node.type} does not support attributes.` });
-}));
-
-export const editorDocumentJsonSchema = editorNodeJsonSchema.refine((node) => node.type === 'doc', 'Editor document root must have type doc.');
-export type EditorDocumentJson = EditorNodeJson;
-
 export const normalizedDocumentSchema = z.object({
   name: z.string().trim().min(1).max(255),
   extension: documentExtensionSchema,
   mimeType: z.string().trim().min(1),
   sizeBytes: z.number().int().positive(),
   scopeKey: z.string().cuid(),
-  folderKey: z.string().cuid(),
+  folderKey: z.string().cuid().optional(),
   fileInput: z.instanceof(Uint8Array),
 }).strict();
 

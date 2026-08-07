@@ -22,6 +22,7 @@ import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
+import { canonicalDocumentRepresentations } from '../lib/ai/document-processing/representation';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
 const databaseName = process.env.ARANGO_DATABASE ?? 'vorinthex';
@@ -49,7 +50,7 @@ function generateEmbedding(text: string) {
 }
 
 function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
 
 async function runMigrationTransaction(targetDb: Database, collectionName: string, query: string, bindVars: Record<string, unknown>) {
@@ -73,8 +74,8 @@ export async function migrateArchiveVersions(targetDb: Database) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR snapshot IN documentVersions
         FILTER snapshot._key > @after
-        FILTER !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
-          || !IS_OBJECT(snapshot.json) || snapshot.json.type != "doc"
+        FILTER HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
+          || !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
           || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
           || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
           || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
@@ -87,14 +88,14 @@ export async function migrateArchiveVersions(targetDb: Database) {
     if (snapshots.length === 0) break;
     const updates: Array<Record<string, unknown>> = [];
     for (const snapshot of snapshots) {
-      const content = nonEmptyString(snapshot.content);
-      if (!content) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} has no nonempty historical content.`);
-      const hasHtml = nonEmptyString(snapshot.html) !== null;
-      const hasJson = snapshot.json !== null && typeof snapshot.json === 'object' && (snapshot.json as Record<string, unknown>).type === 'doc';
-      const representations = hasHtml && hasJson ? {} : legacyContentRepresentations(content);
+      const historicalContent = nonEmptyString(snapshot.content);
+      const sourceHtml = nonEmptyString(snapshot.html) ?? (historicalContent ? legacyContentRepresentations(historicalContent).html : null);
+      if (!sourceHtml) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} has no nonempty historical representation.`);
+      const representations = canonicalDocumentRepresentations(sourceHtml);
+      if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} canonicalized to an empty representation.`);
       let embedding = snapshot.embedding;
-      if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        embedding = await generateEmbedding(content);
+      if (historicalContent !== representations.content || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        embedding = await generateEmbedding(representations.content);
       }
       if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
         throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} could not produce a valid historical-content embedding.`);
@@ -103,14 +104,17 @@ export async function migrateArchiveVersions(targetDb: Database) {
     }
     await runMigrationTransaction(targetDb, 'documentVersions', `
       FOR patch IN @updates
-        UPDATE patch._key WITH UNSET(patch, "_key") IN documentVersions
+        LET snapshot = DOCUMENT(documentVersions, patch._key)
+        /* Legacy version objects are intentionally retired as metadata-only orphans here.
+           Object lifecycle reconciliation is external; migration must not infer deletion ownership. */
+        REPLACE snapshot WITH UNSET(MERGE(snapshot, UNSET(patch, "_key")), "json", "storageKey", "sizeBytes", "updatedAt") IN documentVersions
     `, { updates });
     after = String(snapshots.at(-1)!._key);
   }
   const verification = await targetDb.query<number>(`
     RETURN LENGTH(FOR snapshot IN documentVersions
-      FILTER !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
-        || !IS_OBJECT(snapshot.json) || snapshot.json.type != "doc"
+      FILTER HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
+        || !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
         || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
         || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
         || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
@@ -119,6 +123,63 @@ export async function migrateArchiveVersions(targetDb: Database) {
   `, { dimensions });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`documentVersions migration verification failed for ${invalid} row(s).`);
+}
+
+export async function migrateArchiveDocuments(targetDb: Database) {
+  const dimensions = EMBEDDING_DIMENSIONS;
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<Record<string, unknown>>(`
+      FOR document IN documents
+        FILTER document._key > @after
+        FILTER HAS(document, "json")
+          || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0
+          || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
+          || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
+          || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+          || (@dimensions > 0 && LENGTH(document.embedding) != @dimensions)
+        SORT document._key
+        LIMIT 50
+        RETURN document
+    `, { after, dimensions });
+    const documents = await cursor.all();
+    if (documents.length === 0) break;
+    const updates: Array<Record<string, unknown>> = [];
+    for (const document of documents) {
+      const historicalContent = nonEmptyString(document.content);
+      const sourceHtml = nonEmptyString(document.html) ?? (historicalContent ? legacyContentRepresentations(historicalContent).html : null);
+      if (!sourceHtml) throw new Error(`Cannot migrate documents: ${String(document._key)} has no nonempty representation.`);
+      const representations = canonicalDocumentRepresentations(sourceHtml);
+      if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documents: ${String(document._key)} canonicalized to an empty representation.`);
+      const embeddingText = `${String(document.name ?? '').trim()}\n\n${representations.content}`.trim();
+      let embedding = document.embedding;
+      if (document.content !== representations.content || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        embedding = await generateEmbedding(embeddingText);
+      }
+      if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        throw new Error(`Cannot migrate documents: ${String(document._key)} could not produce a valid embedding.`);
+      }
+      updates.push({ _key: document._key, ...representations, embedding });
+    }
+    await runMigrationTransaction(targetDb, 'documents', `
+      FOR patch IN @updates
+        LET document = DOCUMENT(documents, patch._key)
+        REPLACE document WITH UNSET(MERGE(document, UNSET(patch, "_key")), "json") IN documents
+    `, { updates });
+    after = String(documents.at(-1)!._key);
+  }
+  const verification = await targetDb.query<number>(`
+    RETURN LENGTH(FOR document IN documents
+      FILTER HAS(document, "json")
+        || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0
+        || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
+        || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
+        || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || (@dimensions > 0 && LENGTH(document.embedding) != @dimensions)
+      RETURN 1)
+  `, { dimensions });
+  const invalid = await verification.next() ?? 0;
+  if (invalid > 0) throw new Error(`documents migration verification failed for ${invalid} row(s).`);
 }
 
 export async function migrateArchiveShares(targetDb: Database) {
@@ -189,7 +250,7 @@ export async function migrateArchiveShares(targetDb: Database) {
       FOR share IN documentShares
         FILTER share._key > @after
         FILTER HAS(share, "token") || !REGEX_TEST(share.tokenHash, "^[a-f0-9]{64}$")
-          || share.permission == "edit" || !IS_ARRAY(share.embedding) || LENGTH(share.embedding) != 0
+          || share.permission == "edit" || HAS(share, "embedding")
         SORT share._key
         LIMIT 100
         RETURN share
@@ -199,13 +260,14 @@ export async function migrateArchiveShares(targetDb: Database) {
     const updates = stageLegacyDocumentShares(shares);
     await runMigrationTransaction(targetDb, 'documentShares', `
       FOR patch IN @updates
-        UPDATE patch._key WITH MERGE(UNSET(patch, "_key"), { token: null }) IN documentShares OPTIONS { keepNull: false }
+        LET share = DOCUMENT(documentShares, patch._key)
+        REPLACE share WITH UNSET(MERGE(share, UNSET(patch, "_key")), "token", "embedding") IN documentShares
     `, { updates });
     after = String(shares.at(-1)!._key);
   }
   const verification = await targetDb.query<number>(`
     LET malformed = LENGTH(FOR share IN documentShares
-      FILTER HAS(share, "token") || !REGEX_TEST(share.tokenHash, "^[a-f0-9]{64}$")
+      FILTER HAS(share, "token") || HAS(share, "embedding") || !REGEX_TEST(share.tokenHash, "^[a-f0-9]{64}$")
       RETURN 1)
     LET duplicates = LENGTH(FOR share IN documentShares
       COLLECT hash = share.tokenHash WITH COUNT INTO count
@@ -734,13 +796,8 @@ async function main() {
         RETURN LENGTH(
           FOR document IN documents
             FILTER !HAS(document, "scopeKey")
-              || !HAS(document, "folderKey")
-              || !HAS(document, "storageKey")
-              || !HAS(document, "sizeBytes")
-              || !HAS(document, "html")
-              || !HAS(document, "json")
-              || !HAS(document, "content")
-              || !HAS(document, "embedding")
+              || ((!HAS(document, "html") || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0)
+                && (!HAS(document, "content") || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0))
             RETURN 1
         )
       `);
@@ -748,6 +805,7 @@ async function main() {
       if (incompatibleDocuments > 0) {
         throw new Error(`Cannot migrate documents: ${incompatibleDocuments} existing row(s) lack required Archive ingestion fields.`);
       }
+      await migrateArchiveDocuments(targetDb);
     }
     if (spec.name === 'documentVersions') {
       await migrateArchiveVersions(targetDb);

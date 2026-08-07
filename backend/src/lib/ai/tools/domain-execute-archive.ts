@@ -51,12 +51,12 @@ async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'document
   const guard = resource === 'folders'
     ? 'LET parent = node.parentFolderKey != null ? DOCUMENT("folders", node.parentFolderKey) : null LET project = FIRST(FOR candidate IN projects FILTER candidate.archiveFolderKey == node._key LIMIT 1 RETURN candidate) FILTER project == null FILTER !@restoring || parent == null || parent.deletedAt == null'
     : resource === 'documents'
-      ? 'LET parent = DOCUMENT("folders", node.folderKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)'
+      ? 'LET parent = HAS(node, "folderKey") && node.folderKey != null ? DOCUMENT("folders", node.folderKey) : null FILTER !@restoring || parent == null || parent.deletedAt == null'
       : 'LET parent = DOCUMENT("documents", node.documentKey) FILTER !@restoring || (parent != null && parent.deletedAt == null)';
   return withTransaction([resource, ...parentCollections, 'scopes'], async (transaction) => {
     const cursor = await transaction.query<Record<string, unknown>>(
-      `FOR node IN @@collection FILTER node._key IN @keys FILTER @restoring ? node.deletedAt != null : node.deletedAt == null LET scope = DOCUMENT("scopes", node.scopeKey) FILTER scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null ${guard} UPDATE node WITH { deletedAt: @deletedAt, updatedAt: @timestamp } IN @@collection RETURN NEW`,
-      { keys, deletedAt, timestamp, restoring: deletedAt === null, organizationKey: context.organizationKey, '@collection': resource },
+      `FOR node IN @@collection FILTER node._key IN @keys FILTER @restoring ? node.deletedAt != null : node.deletedAt == null LET scope = DOCUMENT("scopes", node.scopeKey) FILTER scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null ${guard} UPDATE node WITH (@hasUpdatedAt ? { deletedAt: @deletedAt, updatedAt: @timestamp } : { deletedAt: @deletedAt }) IN @@collection RETURN NEW`,
+      { keys, deletedAt, timestamp, restoring: deletedAt === null, hasUpdatedAt: resource !== 'documentVersions', organizationKey: context.organizationKey, '@collection': resource },
     );
     const values = (await cursor.all()).map((node) => schema.parse(withArangoKey(node)) as ArchiveNode);
     if (values.length !== keys.length) throw new ArchiveLifecycleError('archive_state_changed', 'Archive lifecycle state changed before the transaction committed.');
@@ -111,8 +111,11 @@ export async function executeArchiveLifecycleTool(
       if (!parent || parent.deletedAt !== null) throw new ArchiveLifecycleError('archive_parent_archived', 'The parent folder must be active before restore.');
     }
     if (restoring && resource.type === 'documents') {
-      const folder = await getFolder((node as Document).folderKey);
-      if (!folder || folder.deletedAt !== null) throw new ArchiveLifecycleError('archive_parent_archived', 'The document folder must be active before restore.');
+      const folderKey = (node as Document).folderKey;
+      if (folderKey) {
+        const folder = await getFolder(folderKey);
+        if (!folder || folder.deletedAt !== null) throw new ArchiveLifecycleError('archive_parent_archived', 'The document folder must be active before restore.');
+      }
     }
     if (restoring && (resource.type === 'documentVersions' || resource.type === 'documentShares')) {
       const document = await getDocument((node as DocumentVersion | DocumentShare).documentKey);

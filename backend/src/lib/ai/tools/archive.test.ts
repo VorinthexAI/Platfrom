@@ -12,7 +12,7 @@ import {
 
 const expectedNames = [
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.processing', 'document.find', 'document.list', 'document.read', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'document.parse', 'document.find', 'document.list', 'document.read', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
   'scope.document.search', 'organization.document.search',
 ] as const;
 
@@ -48,7 +48,7 @@ describe('Archive input contracts', () => {
     expect(archiveToolInputSchemas['document.translate'].parse({ documentKeys: [key], targetLanguage: 'French' })).toMatchObject({ mode: 'preview', atomic: false });
     expect(archiveToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });
     expect(archiveToolInputSchemas['document.restore-version'].parse({ restores: [{ documentKey: key, versionKey: newId() }] })).toMatchObject({ atomic: false, restores: [{ createBackupVersion: true }] });
-    expect(archiveToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false, includeShares: false }] });
+    expect(archiveToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false, includeShares: false }] });
   });
 
   test('preserves specified optional controls', () => {
@@ -105,8 +105,8 @@ describe('Archive input contracts', () => {
       ['folder.archive', { folderKeys: [key] }], ['folder.restore', { folderKeys: [key] }], ['folder.delete', { folderKeys: [key] }],
       ['document.update', { updates: [{ documentKey: key, content: 'text' }] }],
       ['document.rename', { renames: [{ documentKey: key, name: 'Name' }] }],
-      ['document.move', { moves: [{ documentKey: key, targetFolderKey: newId() }] }],
-      ['document.copy', { copies: [{ documentKey: key, targetFolderKey: newId() }] }],
+      ['document.move', { moves: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
+      ['document.copy', { copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] }],
       ['document.archive', { documentKeys: [key] }], ['document.restore', { documentKeys: [key] }], ['document.delete', { documentKeys: [key] }],
       ['document.share', { shares: [{ documentKey: key, permission: 'read' }] }],
       ['document.unshare', { shareKeys: [key] }], ['document.create-version', { documentKeys: [key] }],
@@ -124,9 +124,9 @@ describe('Archive input contracts', () => {
 
   test('publishes provider-visible parity for file and cross-field constraints', () => {
     const definitions = Object.fromEntries(ARCHIVE_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
-    expect(definitions['document.processing'].properties.file).toMatchObject({ type: 'object' });
+    expect(definitions['document.parse'].properties.file).toMatchObject({ type: 'object' });
     expect(definitions['document.unshare'].oneOf).toHaveLength(2);
-    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(3);
+    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(2);
     expect(definitions['document.read'].description).toContain('endOffset');
   });
 });

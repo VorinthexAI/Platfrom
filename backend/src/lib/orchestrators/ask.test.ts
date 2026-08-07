@@ -51,7 +51,7 @@ describe('orchestrator chat tool', () => {
   });
 
   test('requires archive context for document processing and every Archive tool', async () => {
-    await expect(runTool('document.processing', '', {} as never)).rejects.toThrow('requires archiveContext');
+    await expect(runTool('document.parse', '', {} as never)).rejects.toThrow('requires archiveContext');
     await expect(runTool('folder.find', '', { folderKeys: [] } as never)).rejects.toThrow('requires archiveContext');
   });
 

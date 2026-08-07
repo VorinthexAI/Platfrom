@@ -33,6 +33,25 @@ describe('scoped Archive persistence', () => {
     expect(await createArchivePersistence(executor).deleteDocument(scopeKey, folderKey)).toBe(false);
   });
 
+  test('canonicalizes HTML and derives content at the document write boundary', async () => {
+    const calls: Array<{ bindVars?: Record<string, unknown> }> = [];
+    const executor: ArchiveQueryExecutor = {
+      async query(_query, bindVars) {
+        calls.push({ bindVars });
+        return { async next() { return undefined; } };
+      },
+    };
+    await createArchivePersistence(executor).updateDocument(scopeKey, folderKey, {
+      html: '<p>Hello <strong>Core</strong></p>',
+      content: 'Hello Core',
+      embedding: [1],
+    });
+    expect(calls[0]?.bindVars?.patch).toMatchObject({ html: '<p>Hello <strong>Core</strong></p>', content: 'Hello Core' });
+    expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content must be updated through HTML.');
+    expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p>Detached</p>' })).toThrow('Document HTML updates require a fresh embedding.');
+    expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: [1] })).toThrow('Document representations must be canonical and agreeing.');
+  });
+
   test('only the marker owner can unfreeze a pending deletion', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ArchiveQueryExecutor = { async query(query, bindVars) { calls.push({ query, bindVars }); return { async next() { return undefined; } }; } };

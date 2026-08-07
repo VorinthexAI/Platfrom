@@ -82,8 +82,6 @@ describe('node registry schema contracts', () => {
       pollOptionSchema,
       pollVoteSchema,
       folderSchema,
-      documentVersionSchema,
-      documentShareSchema,
     ]) {
       const object = schema instanceof z.ZodEffects ? schema.innerType() : schema;
       expect(object.shape).toHaveProperty('key');
@@ -93,12 +91,22 @@ describe('node registry schema contracts', () => {
       expect(object.shape).toHaveProperty('embedding');
     }
     expect(documentSchema.shape).toHaveProperty('html');
-    expect(documentSchema.shape).toHaveProperty('json');
+    expect(documentSchema.shape).not.toHaveProperty('json');
     expect(documentSchema.shape).toHaveProperty('content');
     expect(documentSchema.shape).toHaveProperty('scopeKey');
     expect(documentSchema.shape).toHaveProperty('folderKey');
     expect(documentSchema.shape).toHaveProperty('storageKey');
     expect(documentSchema.shape).toHaveProperty('sizeBytes');
+    expect(documentVersionSchema.shape).toHaveProperty('key');
+    expect(documentVersionSchema.shape).toHaveProperty('scopeKey');
+    expect(documentVersionSchema.shape).toHaveProperty('createdAt');
+    expect(documentVersionSchema.shape).toHaveProperty('embedding');
+    expect(documentVersionSchema.shape).not.toHaveProperty('updatedAt');
+    expect(documentShareSchema.shape).toHaveProperty('key');
+    expect(documentShareSchema.shape).toHaveProperty('scopeKey');
+    expect(documentShareSchema.shape).toHaveProperty('createdAt');
+    expect(documentShareSchema.shape).toHaveProperty('updatedAt');
+    expect(documentShareSchema.shape).not.toHaveProperty('embedding');
     for (const schema of [projectSchema, milestoneSchema, taskSchema]) {
       expect(schema.shape).toHaveProperty('key');
       expect(schema.shape).toHaveProperty('scopeKey');

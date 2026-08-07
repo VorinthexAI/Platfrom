@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { documentProcessingInputSchema } from '@/lib/ai/document-processing/schemas';
-import { editorDocumentJsonSchema, documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
+import { documentParseInputSchema } from '@/lib/ai/document-processing/schemas';
+import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
 import { archiveErrorSchema } from './archive-errors';
 
 const keySchema = z.string().cuid();
@@ -21,6 +21,7 @@ export const archiveFolderSchema = z.object({
   parentFolderKey: keySchema.optional(),
   name: nameSchema,
   description: textSchema.optional(),
+  isFavorite: z.boolean(),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
@@ -46,16 +47,12 @@ export const archiveDocumentVersionSchema = z.object({
   documentKey: keySchema,
   version: z.number().int().positive(),
   label: z.string().trim().min(1).max(120).optional(),
-  storageKey: textSchema.optional(),
-  sizeBytes: z.number().int().nonnegative().optional(),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
-  updatedAt: dateTimeSchema.optional(),
 }).strict();
 
 export const archiveProjectedDocumentVersionSchema = archiveDocumentVersionSchema.extend({
   html: z.string().optional(),
-  json: editorDocumentJsonSchema.optional(),
   content: z.string().optional(),
   embedding: z.array(z.number().finite()).min(1).optional(),
 }).strict();
@@ -63,11 +60,12 @@ export const archiveProjectedDocumentVersionSchema = archiveDocumentVersionSchem
 export const archiveDocumentSchema = z.object({
   key: keySchema,
   scopeKey: keySchema,
-  folderKey: keySchema,
+  folderKey: keySchema.optional(),
   name: nameSchema,
-  extension: documentExtensionSchema,
-  mimeType: textSchema,
-  sizeBytes: z.number().int().positive(),
+  extension: documentExtensionSchema.optional(),
+  mimeType: textSchema.optional(),
+  sizeBytes: z.number().int().positive().optional(),
+  isFavorite: z.boolean(),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
@@ -75,7 +73,6 @@ export const archiveDocumentSchema = z.object({
 
 export const archiveProjectedDocumentSchema = archiveDocumentSchema.extend({
   html: z.string().optional(),
-  json: editorDocumentJsonSchema.optional(),
   content: z.string().optional(),
   embedding: z.array(z.number().finite()).min(1).optional(),
   folder: archiveFolderSchema.optional(),
@@ -131,18 +128,19 @@ const projectedVersionDataSchema = z.object({ version: archiveProjectedDocumentV
 const fileDataSchema = z.object({ documentKey: keySchema, format: z.string().trim().min(1), fileName: nameSchema, mimeType: textSchema, encoding: z.literal('base64'), content: z.string() }).strict();
 const generatedTextDataSchema = z.object({ documentKey: keySchema, text: z.string(), language: z.string().trim().min(1).optional(), persistedDocumentKey: keySchema.optional() }).strict();
 
-const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional() }).strict()
-  .refine((value) => value.name !== undefined || value.description !== undefined, 'name or description is required');
+const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional(), isFavorite: z.boolean().optional() }).strict()
+  .refine((value) => value.name !== undefined || value.description !== undefined || value.isFavorite !== undefined, 'name, description, or isFavorite is required');
 const documentUpdateSchema = z.object({
   documentKey: keySchema,
   html: z.string().min(1).optional(),
-  json: editorDocumentJsonSchema.optional(),
   content: z.string().min(1).optional(),
+  isFavorite: z.boolean().optional(),
   createVersion: z.boolean().optional(),
 }).strict().superRefine((value, context) => {
-  const representations = [value.html, value.json, value.content].filter((item) => item !== undefined).length;
-  if (representations === 0) context.addIssue({ code: z.ZodIssueCode.custom, message: 'one document representation is required' });
-  if (representations > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: 'html, json, and content are mutually exclusive' });
+  const representations = [value.html, value.content].filter((item) => item !== undefined).length;
+  if (representations === 0 && value.isFavorite === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: 'one document representation or isFavorite is required' });
+  if (representations > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: 'html and content are mutually exclusive' });
+  if (value.createVersion && representations === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['createVersion'], message: 'createVersion requires a document representation' });
 });
 
 export const archiveSearchSourceSchema = z.discriminatedUnion('type', [
@@ -184,7 +182,7 @@ export const archiveSearchResultSchema = z.object({
   documentKey: keySchema,
   name: nameSchema,
   scopeKey: keySchema,
-  folderKey: keySchema,
+  folderKey: keySchema.optional(),
   score: normalizedScoreSchema,
   snippet: z.string().optional(),
   content: z.string().optional(),
@@ -199,7 +197,6 @@ export const archiveSearchOutputSchema = z.object({ query: textSchema, results: 
 const documentReadDataSchema = z.union([
   z.object({ documentKey: keySchema, title: nameSchema, content: z.string() }).strict(),
   z.object({ documentKey: keySchema, title: nameSchema, html: z.string() }).strict(),
-  z.object({ documentKey: keySchema, title: nameSchema, json: editorDocumentJsonSchema }).strict(),
   z.object({
     documentKey: keySchema,
     title: nameSchema,
@@ -209,7 +206,7 @@ const documentReadDataSchema = z.union([
 ]);
 
 export const archiveToolContracts = {
-  'folder.create': { description: 'Create one or more Archive folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(folderDataSchema) },
+  'folder.create': { description: 'Create one or more Archive folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional(), isFavorite: z.boolean().optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(folderDataSchema) },
   'folder.find': { description: 'Find Archive folders by key.', input: z.object({ folderKeys: keysSchema, includeArchived: z.boolean().optional(), includeChildrenCount: z.boolean().optional(), includeDocumentCount: z.boolean().optional() }).strict(), output: archiveBatchOutputSchema(folderDataSchema) },
   'folder.list': { description: 'List folders under a scope or parent folder.', input: z.object({ scopeKey: keySchema, parentFolderKey: keySchema.optional(), includeArchived: z.boolean().optional(), includeDocuments: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: folderSortSchema.optional() }).strict(), output: z.object({ folders: z.array(archiveFolderSchema), documents: z.array(archiveDocumentSchema).optional(), cursor: cursorSchema.optional() }).strict() },
   'folder.update': { description: 'Update folder metadata.', input: z.object({ updates: z.array(folderUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(folderDataSchema) },
@@ -218,10 +215,10 @@ export const archiveToolContracts = {
   'folder.archive': { description: 'Archive folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(folderDataSchema) },
   'folder.restore': { description: 'Restore archived folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(folderDataSchema) },
   'folder.delete': { description: 'Permanently delete folders.', input: z.object({ folderKeys: keysSchema, recursive: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(emptyDataSchema) },
-  'document.processing': { description: 'Validate, store, extract, transform, embed, and insert a document.', input: documentProcessingInputSchema.extend(idempotencyShape), output: z.object({ document: archiveDocumentSchema }).strict() },
-  'document.find': { description: 'Find documents by key.', input: z.object({ documentKeys: keysSchema, includeArchived: z.boolean().optional(), include: z.array(z.enum(['html', 'json', 'content', 'embedding', 'folder', 'shares', 'latestVersion'])).min(1).optional() }).strict(), output: archiveBatchOutputSchema(projectedDocumentDataSchema) },
-  'document.list': { description: 'List documents in a folder.', input: z.object({ folderKey: keySchema, includeArchived: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: documentSortSchema.optional(), extensions: z.array(documentExtensionSchema).min(1).optional() }).strict(), output: z.object({ documents: z.array(archiveDocumentSchema), cursor: cursorSchema.optional() }).strict() },
-  'document.read': { description: 'Read document content or generate chunked audio.', input: z.object({ documentKeys: keysSchema, mode: z.enum(['content', 'html', 'json', 'audio']).default('content'), language: textSchema.optional(), voice: textSchema.optional(), speakingRate: z.number().min(0.25).max(4).optional(), startOffset: z.number().int().nonnegative().optional(), endOffset: z.number().int().positive().optional(), includeTitle: z.boolean().optional(), includeCode: z.boolean().optional(), persistAudio: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
+  'document.parse': { description: 'Parse a TXT, Markdown, DOC, DOCX, or PDF file into canonical HTML, derived plain text, and an embedding.', input: documentParseInputSchema.extend(idempotencyShape), output: z.object({ document: archiveDocumentSchema }).strict() },
+  'document.find': { description: 'Find documents by key.', input: z.object({ documentKeys: keysSchema, includeArchived: z.boolean().optional(), include: z.array(z.enum(['html', 'content', 'embedding', 'folder', 'shares', 'latestVersion'])).min(1).optional() }).strict(), output: archiveBatchOutputSchema(projectedDocumentDataSchema) },
+  'document.list': { description: 'List documents at a scope location; omit folderKey for the Archive root.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), includeArchived: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: documentSortSchema.optional(), extensions: z.array(documentExtensionSchema).min(1).optional() }).strict(), output: z.object({ documents: z.array(archiveDocumentSchema), cursor: cursorSchema.optional() }).strict() },
+  'document.read': { description: 'Read document content or generate chunked audio.', input: z.object({ documentKeys: keysSchema, mode: z.enum(['content', 'html', 'audio']).default('content'), language: textSchema.optional(), voice: textSchema.optional(), speakingRate: z.number().min(0.25).max(4).optional(), startOffset: z.number().int().nonnegative().optional(), endOffset: z.number().int().positive().optional(), includeTitle: z.boolean().optional(), includeCode: z.boolean().optional(), persistAudio: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
     if (value.endOffset !== undefined && value.startOffset !== undefined && value.endOffset <= value.startOffset) context.addIssue({ code: z.ZodIssueCode.custom, message: 'endOffset must be greater than startOffset' });
     if (value.mode !== 'audio') {
       for (const field of ['language', 'voice', 'speakingRate', 'startOffset', 'endOffset', 'includeTitle', 'includeCode', 'persistAudio'] as const) {
@@ -231,8 +228,8 @@ export const archiveToolContracts = {
   }), output: archiveBatchOutputSchema(documentReadDataSchema) },
   'document.update': { description: 'Update document content.', input: z.object({ updates: z.array(documentUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(documentDataSchema) },
   'document.rename': { description: 'Rename documents.', input: z.object({ renames: z.array(z.object({ documentKey: keySchema, name: nameSchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(documentDataSchema) },
-  'document.move': { description: 'Move documents to another folder.', input: z.object({ moves: z.array(z.object({ documentKey: keySchema, targetFolderKey: keySchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(documentDataSchema) },
-  'document.copy': { description: 'Copy documents.', input: z.object({ copies: z.array(z.object({ documentKey: keySchema, targetFolderKey: keySchema, newName: nameSchema.optional(), includeVersions: z.boolean().default(false), includeShares: z.boolean().default(false) }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(copiedDocumentDataSchema) },
+  'document.move': { description: 'Move documents to a scoped folder or the Archive root.', input: z.object({ moves: z.array(z.object({ documentKey: keySchema, targetScopeKey: keySchema, targetFolderKey: keySchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(documentDataSchema) },
+  'document.copy': { description: 'Copy documents to a scoped folder or the Archive root.', input: z.object({ copies: z.array(z.object({ documentKey: keySchema, targetScopeKey: keySchema, targetFolderKey: keySchema.optional(), newName: nameSchema.optional(), includeVersions: z.boolean().default(false), includeShares: z.boolean().default(false) }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(copiedDocumentDataSchema) },
   'document.archive': { description: 'Archive documents.', input: z.object({ documentKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(documentDataSchema) },
   'document.restore': { description: 'Restore archived documents.', input: z.object({ documentKeys: keysSchema, restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(documentDataSchema) },
   'document.delete': { description: 'Permanently delete documents and optionally their versions and shares.', input: z.object({ documentKeys: keysSchema, deleteVersions: z.boolean().optional(), deleteShares: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(emptyDataSchema) },
@@ -244,7 +241,7 @@ export const archiveToolContracts = {
   'document.create-version': { description: 'Create document versions.', input: z.object({ documentKeys: keysSchema, labels: z.record(z.string().trim().min(1).max(120)).optional(), atomic: atomicSchema, ...idempotencyShape }).strict().superRefine((value, context) => {
     for (const key of Object.keys(value.labels ?? {})) if (!value.documentKeys.includes(key)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['labels', key], message: 'label key must be one of documentKeys' });
   }), output: archiveBatchOutputSchema(versionDataSchema) },
-  'document.find-version': { description: 'Find document versions by key.', input: z.object({ versionKeys: keysSchema, include: z.array(z.enum(['html', 'json', 'content', 'embedding'])).min(1).optional() }).strict(), output: archiveBatchOutputSchema(projectedVersionDataSchema) },
+  'document.find-version': { description: 'Find document versions by key.', input: z.object({ versionKeys: keysSchema, include: z.array(z.enum(['html', 'content', 'embedding'])).min(1).optional() }).strict(), output: archiveBatchOutputSchema(projectedVersionDataSchema) },
   'document.list-versions': { description: 'List ordered versions grouped by document.', input: z.object({ documentKeys: keysSchema, cursor: cursorSchema.optional(), limit: limitSchema.optional() }).strict(), output: archiveBatchOutputSchema(z.object({ documentKey: keySchema, versions: z.array(archiveDocumentVersionSchema), cursor: cursorSchema.optional() }).strict()) },
   'document.restore-version': { description: 'Restore document versions.', input: z.object({ restores: z.array(z.object({ documentKey: keySchema, versionKey: keySchema, createBackupVersion: z.boolean().default(true) }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(documentDataSchema) },
   'document.delete-version': { description: 'Delete document versions.', input: z.object({ versionKeys: keysSchema, atomic: atomicSchema, ...idempotencyShape }).strict(), output: archiveBatchOutputSchema(emptyDataSchema) },

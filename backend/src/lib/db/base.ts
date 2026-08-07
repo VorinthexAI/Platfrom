@@ -170,9 +170,11 @@ function assertNodeSchemaShape(schema: z.ZodTypeAny, embedKeys: readonly string[
 export function createNodeHelpers<
   Schema extends z.ZodTypeAny,
   Keys extends readonly Extract<keyof z.infer<Schema>, string>[] = [],
->(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys) {
+>(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys, options: { requireEmbedding?: boolean } = {}) {
   type T = z.infer<Schema>;
-  assertNodeSchemaShape(schema, embedKeys);
+  const requireEmbedding = options.requireEmbedding ?? true;
+  assertNodeSchemaShape(schema, embedKeys, requireEmbedding);
+  const hasEmbeddingField = Object.keys(unwrapObjectSchema(schema).shape).includes('embedding');
   const retrievalMetadata = buildNodeRetrievalMetadata(collectionName, schema, embedKeys);
   const getAllChunked = createChunkedScanner<T>(collectionName, schema);
   const listPage = createPageReader<T>(collectionName, schema);
@@ -185,9 +187,11 @@ export function createNodeHelpers<
     schema,
     embedKeys,
     async insert(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
-      const doc = schema.parse({ ...input, embedding: [] });
-      const embedding = await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>);
-      const result = await collection().save(toArangoDoc({ ...doc, embedding, ...embeddingMetadata() } as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
+      const doc = schema.parse(hasEmbeddingField ? { ...input, embedding: [] } : input);
+      const saved = hasEmbeddingField
+        ? { ...doc, embedding: await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>), ...embeddingMetadata() }
+        : doc;
+      const result = await collection().save(toArangoDoc(saved as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     async getById(id: string): Promise<T | null> {
@@ -222,9 +226,11 @@ export function createNodeHelpers<
     },
     /** Insert-or-replace by key, for idempotent seed scripts and fixed-id upserts. */
     async upsertByKey(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
-      const doc = schema.parse({ ...input, embedding: [] });
-      const embedding = await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>);
-      const result = await collection().save(toArangoDoc({ ...doc, embedding, ...embeddingMetadata() } as unknown as Record<string, unknown> & { key: string }), { returnNew: true, overwriteMode: 'replace' });
+      const doc = schema.parse(hasEmbeddingField ? { ...input, embedding: [] } : input);
+      const saved = hasEmbeddingField
+        ? { ...doc, embedding: await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>), ...embeddingMetadata() }
+        : doc;
+      const result = await collection().save(toArangoDoc(saved as unknown as Record<string, unknown> & { key: string }), { returnNew: true, overwriteMode: 'replace' });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
     /** Streams the entire collection in chunks of `chunkSize` (default 500) instead of loading it all into memory at once. */

@@ -1,6 +1,31 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
+import { migrateArchiveDocuments, migrateArchiveVersions } from './arango-migrate';
+import { EMBEDDING_DIMENSIONS } from '../lib/openai-embeddings';
+
+function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
+  let page = 0;
+  let update: { query: string; bindVars?: Record<string, unknown> } | undefined;
+  const database = {
+    async query(query: string, bindVars?: Record<string, unknown>) {
+      if (query.includes(`RETURN ${collection === 'documents' ? 'document' : 'snapshot'}`) && !query.includes('RETURN LENGTH')) {
+        const rows = page++ === 0 ? [row] : [];
+        return { async all() { return rows; }, async next() { return undefined; } };
+      }
+      if (query.includes('FOR patch IN @updates')) {
+        update = { query, bindVars };
+        return { async all() { return []; }, async next() { return undefined; } };
+      }
+      if (query.includes('RETURN LENGTH')) return { async all() { return []; }, async next() { return 0; } };
+      throw new Error(`Unexpected migration query: ${query}`);
+    },
+    async beginTransaction() {
+      return { async step(run: () => Promise<void>) { await run(); }, async commit() {}, async abort() {} };
+    },
+  };
+  return { database: database as never, get update() { return update; } };
+}
 
 describe('Arango migration indexes', () => {
   test('normalizes legacy share permissions without granting additional access', () => {
@@ -29,23 +54,33 @@ describe('Arango migration indexes', () => {
   test('derives deterministic historical representations from version content', () => {
     expect(legacyContentRepresentations('First <line>\n\nSecond')).toEqual({
       html: '<p>First &lt;line&gt;</p><p>Second</p>',
-      json: { type: 'doc', content: [
-        { type: 'paragraph', content: [{ type: 'text', text: 'First <line>' }] },
-        { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] },
-      ] },
     });
     expect(() => legacyContentRepresentations('   ')).toThrow('must not be blank');
   });
-  test('migration never hashes missing data or borrows current document representations', async () => {
+  test('migration never hashes missing data or borrows current documents for version history', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const helperSource = await Bun.file(new URL('./archive-migration.ts', import.meta.url)).text();
     expect(source).toContain('FILTER !IS_STRING(share.token) || LENGTH(share.token) == 0');
     expect(source).toContain('RETURN { key: share._key, hash: SHA256(share.token) }');
-    expect(source).not.toContain('document.html');
-    expect(source).not.toContain('document.json');
+    expect(source).toContain('nonEmptyString(snapshot.html)');
+    expect(source).not.toContain('DOCUMENT(documents, snapshot.documentKey)');
     expect(helperSource).toContain('has neither a valid tokenHash nor a plaintext token');
     expect(source).toContain('beginTransaction');
     expect(source).toContain('migration verification failed');
+  });
+  test('repairs recoverable document and version representations without borrowing data', async () => {
+    const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
+    const documentMigration = migrationDatabase('documents', { _key: 'document-1', name: 'Current', html: '   ', content: 'Current body', embedding, json: {} });
+    await migrateArchiveDocuments(documentMigration.database);
+    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', html: '<p>Current body</p>', content: 'Current body', embedding }]);
+    expect(documentMigration.update?.query).toContain('UNSET(MERGE(document');
+    expect(documentMigration.update?.query).not.toContain('"storageKey", "sizeBytes"');
+
+    const versionMigration = migrationDatabase('documentVersions', { _key: 'version-1', html: '\n\t', content: 'Historical body', embedding, json: {}, storageKey: 'legacy', sizeBytes: 12, updatedAt: '2026-01-01T00:00:00.000Z' });
+    await migrateArchiveVersions(versionMigration.database);
+    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', html: '<p>Historical body</p>', content: 'Historical body', embedding }]);
+    expect(versionMigration.update?.query).toContain('"json", "storageKey", "sizeBytes", "updatedAt"');
+    expect(versionMigration.update?.query).toContain('migration must not infer deletion ownership');
   });
   test('preflights every share and orders index removal before plaintext removal and hash index creation', async () => {
     const staged = stageLegacyDocumentShares([

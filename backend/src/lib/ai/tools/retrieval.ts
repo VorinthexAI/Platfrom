@@ -104,7 +104,7 @@ export async function retrieveNodeDocuments(node: string, embedding: number[] | 
       FILTER !@hasDeletedAt || document.deletedAt == null
       FILTER !@hasArchivedAt || document.archivedAt == null
       FILTER !@hasInternalDeletion || document._internalDeletion == null
-      FILTER !@hasFolderKey || (parentFolder != null && parentFolder.scopeKey IN authorizedScopeKeys && parentFolder.deletedAt == null && parentFolder._internalDeletion == null)
+      FILTER !@hasFolderKey || ((!HAS(document, "folderKey") || document.folderKey == null) ? document.scopeKey IN authorizedScopeKeys : (parentFolder != null && parentFolder.scopeKey IN authorizedScopeKeys && parentFolder.deletedAt == null && parentFolder._internalDeletion == null))
       FILTER @access != "channel" || document.channelKey IN authorizedChannelKeys
       FILTER @access != "channel-self" || document._key IN authorizedChannelKeys
       FILTER @access != "scope" || document.scopeKey IN authorizedScopeKeys

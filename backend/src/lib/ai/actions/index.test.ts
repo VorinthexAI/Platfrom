@@ -19,13 +19,13 @@ describe('action registry', () => {
       'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
       'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
       'document-validate', 'storage-upload', 'document-extract', 'document-generate-html',
-      'document-generate-json', 'document-generate-content', 'document-embed', 'document-insert',
+      'document-generate-content', 'document-embed', 'document-insert',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
       .toEqual([
         'traverse', 'read', 'insert', 'upsert', 'update', 'delete',
         'document-validate', 'storage-upload', 'document-extract', 'document-generate-html',
-        'document-generate-json', 'document-generate-content', 'document-embed', 'document-insert',
+        'document-generate-content', 'document-embed', 'document-insert',
       ]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'chat')?.models.map(({ model }) => model))
       .toEqual(['amazon.nova-pro', 'amazon.nova-lite']);
