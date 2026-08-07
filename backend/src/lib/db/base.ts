@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
-import { embedText, embeddingMetadata } from '@/lib/openai-embeddings';
+import { embedText, embeddingMetadata } from '@/lib/embeddings';
 
 const DEFAULT_CHUNK_SIZE = 500;
 const DEFAULT_PAGE_SIZE = 50;

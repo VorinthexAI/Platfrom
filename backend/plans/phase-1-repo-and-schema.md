@@ -225,7 +225,7 @@ slug            text not null
 entity_type     text
 category        text
 data            jsonb
-embedding       vector(1536)
+embedding       vector(4096)
 created_at      timestamptz not null default now()
 ```
 Indexes: `(role, created_at desc)`, `(category, created_at desc)`, `(slug, created_at desc)`, HNSW on `embedding`.
@@ -245,7 +245,7 @@ type            text not null     -- 'OUTPUT_HOOK' | 'OUTPUT_IMAGE' | 'OUTPUT_PO
 data            jsonb
 storage_path    text
 usage_count     integer not null default 0
-embedding       vector(1536)
+embedding       vector(4096)
 created_at      timestamptz not null default now()
 ```
 Index on `(type, created_at desc)`, HNSW on `embedding`.

@@ -4,7 +4,7 @@ import { ProviderExecutionError, selectRoute, streamRoute, type RouterDependenci
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk } from '@/lib/ai/providers';
 import type { DocumentParseDependencies } from '@/lib/ai/document-processing';
 import { isAiError } from '@/lib/ai/shared/result';
-import { embedText } from '@/lib/openai-embeddings';
+import { embedText } from '@/lib/embeddings';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import { retrievalTool, type RetrievalContext, type RetrievalDependencies, type RetrievalNodeResult } from './retrieval';
 
@@ -135,7 +135,7 @@ async function retrieveChatContext(message: string, dependencies: OrchestratorCh
   dependencies.signal?.addEventListener('abort', abort, { once: true });
   try {
     const results = await withTimeout((async () => {
-      const embedding = await (dependencies.embedRetrievalQuery ?? ((text, signal) => embedText({ text, signal })))(message, controller.signal);
+      const embedding = await (dependencies.embedRetrievalQuery ?? ((text, signal) => embedText({ text, purpose: 'query', signal })))(message, controller.signal);
       return retrievalTool.execute({ nodes: [{ node: 'messages', ...(embedding.length ? { embedding } : {}), filters: { organizationKey: dependencies.retrievalContext!.organizationKey } }], limit: 50 }, dependencies.retrievalContext!, dependencies);
     })(), dependencies.retrievalTimeoutMs ?? 8_000, () => controller.abort(new Error('retrieval timed out')));
     return formatRetrievalContext(results);

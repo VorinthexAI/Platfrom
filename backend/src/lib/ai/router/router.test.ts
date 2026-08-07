@@ -79,17 +79,17 @@ describe('priority-only persisted router', () => {
   test('routes every action supported by a static provider without an organization provider', async () => {
     const embed = action('embed');
     const reason = action('reason');
-    const embeddingModel = model('openai.text-embedding-3-small');
-    const openai = providerSchema.parse({ key: newId(), slug: 'openai', name: 'OpenAI', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openai', enabled: true });
+    const embeddingModel = model('qwen.qwen3-embedding-8b');
+    const openrouter = providerSchema.parse({ key: newId(), slug: 'openrouter', name: 'OpenRouter', description: 'Provider', supportedUseCases: 'AI', handlerKey: 'openrouter', enabled: true });
     const actions = [embed, reason];
     const modelActions = actions.map((entry) => modelActionSchema.parse({ key: newId(), modelKey: embeddingModel.key, actionKey: entry.key, priority: 100, enabled: true }));
-    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openai.key, providerModelId: 'text-embedding-3-small', enabled: true });
+    const modelProvider = modelProviderSchema.parse({ key: newId(), modelKey: embeddingModel.key, providerKey: openrouter.key, providerModelId: 'qwen/qwen3-embedding-8b', enabled: true });
     const data: RouterDataSource = {
       async getActionBySlug(slug) { return actions.find((entry) => entry.slug === slug) ?? null; },
       async getModelBySlug(slug) { return slug === embeddingModel.slug ? embeddingModel : null; },
       async getModelByKey(key) { return key === embeddingModel.key ? embeddingModel : null; },
-      async getProviderBySlug(slug) { return slug === openai.slug ? openai : null; },
-      async getProviderByKey(key) { return key === openai.key ? openai : null; },
+      async getProviderBySlug(slug) { return slug === openrouter.slug ? openrouter : null; },
+      async getProviderByKey(key) { return key === openrouter.key ? openrouter : null; },
       async listModelActions(actionKey) { return modelActions.filter((entry) => entry.actionKey === actionKey); },
       async listModelProviders(modelKey) { return modelKey === embeddingModel.key ? [modelProvider] : []; },
       async listOrganizationProviderKeys() { return []; },
@@ -97,8 +97,8 @@ describe('priority-only persisted router', () => {
 
     await expect(selectRoute({ mode: 'auto', organizationKey, actionSlug: 'reason' }, { data })).resolves.toMatchObject({
       actionSlug: 'reason',
-      modelSlug: 'openai.text-embedding-3-small',
-      providerSlug: 'openai',
+      modelSlug: 'qwen.qwen3-embedding-8b',
+      providerSlug: 'openrouter',
       credentialSource: 'environment',
     });
   });

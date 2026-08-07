@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
 import { migrateArchiveDocuments, migrateArchiveFavorites, migrateArchiveVersions } from './arango-migrate';
-import { EMBEDDING_DIMENSIONS } from '../lib/openai-embeddings';
+import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
   let page = 0;
@@ -70,17 +70,35 @@ describe('Arango migration indexes', () => {
   });
   test('repairs recoverable document and version representations without borrowing data', async () => {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
-    const documentMigration = migrationDatabase('documents', { _key: 'document-1', name: 'Current', html: '   ', content: 'Current body', embedding, json: {} });
+    const documentMigration = migrationDatabase('documents', { _key: 'document-1', _rev: 'document-rev', name: 'Current', html: '   ', content: 'Current body', embedding, ...embeddingMetadata(), json: {} });
     await migrateArchiveDocuments(documentMigration.database);
-    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', html: '<p>Current body</p>', content: 'Current body', embedding }]);
+    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, html: '<p>Current body</p>', content: 'Current body', embedding, ...embeddingMetadata() }]);
     expect(documentMigration.update?.query).toContain('UNSET(MERGE(document');
+    expect(documentMigration.update?.query).toContain('document._rev == patch._rev');
+    expect(documentMigration.update?.query).toContain('UNSET(patch, "_key", "_rev", "source")');
     expect(documentMigration.update?.query).not.toContain('"storageKey", "sizeBytes"');
 
-    const versionMigration = migrationDatabase('documentVersions', { _key: 'version-1', html: '\n\t', content: 'Historical body', embedding, json: {}, storageKey: 'legacy', sizeBytes: 12, updatedAt: '2026-01-01T00:00:00.000Z' });
+    const versionMigration = migrationDatabase('documentVersions', { _key: 'version-1', _rev: 'version-rev', html: '\n\t', content: 'Historical body', embedding, ...embeddingMetadata(), json: {}, storageKey: 'legacy', sizeBytes: 12, updatedAt: '2026-01-01T00:00:00.000Z' });
     await migrateArchiveVersions(versionMigration.database);
-    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', html: '<p>Historical body</p>', content: 'Historical body', embedding }]);
+    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, html: '<p>Historical body</p>', content: 'Historical body', embedding, ...embeddingMetadata() }]);
+    expect(versionMigration.update?.query).toContain('snapshot._rev == patch._rev');
     expect(versionMigration.update?.query).toContain('"json", "storageKey", "sizeBytes", "updatedAt"');
     expect(versionMigration.update?.query).toContain('migration must not infer deletion ownership');
+  });
+  test('regenerates legacy 1536 embeddings without allowing a concurrent replacement', async () => {
+    const previous = process.env.ARCHIVE_E2E;
+    process.env.ARCHIVE_E2E = 'true';
+    try {
+      const migration = migrationDatabase('documents', { _key: 'legacy-document', _rev: 'legacy-rev', name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body', embedding: Array(1_536).fill(0.1) });
+      await migrateArchiveDocuments(migration.database);
+      const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;
+      expect(patch.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+      expect(patch).toMatchObject({ _key: 'legacy-document', _rev: 'legacy-rev', source: { name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body' }, ...embeddingMetadata() });
+      expect(migration.update?.query).toContain('FILTER document != null && document._rev == patch._rev');
+    } finally {
+      if (previous === undefined) delete process.env.ARCHIVE_E2E;
+      else process.env.ARCHIVE_E2E = previous;
+    }
   });
   test('physically normalizes and verifies folder and document favorites idempotently', async () => {
     for (const collection of ['folders', 'documents'] as const) {

@@ -15,7 +15,7 @@ import {
 import { DocumentProcessingError } from './errors';
 import { documentStorage, type DocumentStorage } from './storage';
 import type { DocumentOcr } from './textract';
-import type { embedText } from '@/lib/openai-embeddings';
+import type { embedText } from '@/lib/embeddings';
 import { htmlToPlainText, sanitizeDocumentHtml } from './representation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {

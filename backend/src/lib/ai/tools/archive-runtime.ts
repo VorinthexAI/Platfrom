@@ -15,6 +15,7 @@ import type { ArchiveToolName, ArchiveToolOutput } from './archive-schemas';
 import { ArchiveError, type ArchiveErrorCode } from './archive-errors';
 import { archiveToolInputSchemas, archiveToolOutputSchemas, isArchiveToolName } from './archive-registry';
 import { htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
@@ -120,7 +121,7 @@ function folderView(folder: Folder) {
 }
 
 function documentView(document: Document) {
-  const { html: _html, content: _content, embedding: _embedding, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  const { html: _html, content: _content, embedding: _embedding, embeddingProvider: _embeddingProvider, embeddingModel: _embeddingModel, embeddingDimensions: _embeddingDimensions, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
   return safe;
 }
 
@@ -130,7 +131,7 @@ function shareView(share: DocumentShare) {
 }
 
 function versionView(version: DocumentVersion, include: string[] = []) {
-  const { embedding, html, content, ...safe } = version;
+  const { embedding, embeddingProvider: _embeddingProvider, embeddingModel: _embeddingModel, embeddingDimensions: _embeddingDimensions, html, content, ...safe } = version;
   return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('content') ? { content } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
 }
 
@@ -260,7 +261,7 @@ interface RuntimeDefaults {
   id: () => string;
   clock: () => Date;
   random: (size: number) => Uint8Array;
-  embed: (text: string) => Promise<number[]>;
+  embed: (text: string, purpose?: 'document' | 'query') => Promise<number[]>;
   runAction: NonNullable<ArchiveToolDependencies['runAction']>;
   idempotency: ArchiveIdempotencyStore;
   generateExport: typeof generateDocumentExport;
@@ -271,12 +272,12 @@ async function defaults(deps: ArchiveToolDependencies, context: DomainToolContex
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
-    import('@/lib/openai-embeddings'),
+    import('@/lib/embeddings'),
     import('@/lib/ai/router'),
     import('@/lib/db/archive-idempotency.node'),
     import('@/lib/ai/document-processing/exports'),
   ]);
-  const embedding = deps.embed ? (text: string) => deps.embed!(text) : (text: string) => embeddings.embedText({ text });
+  const embedding = deps.embed ? (text: string) => deps.embed!(text) : (text: string, purpose: 'document' | 'query' = 'document') => embeddings.embedText({ text, purpose });
   return {
     repository: deps.repository ?? await productionRepository(), storage: deps.storage ?? storage.documentStorage,
     parseDocument: deps.parseDocument ?? processing.parseDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
@@ -467,11 +468,11 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
       throw error;
     }
   };
-  const embed = async (text: string, resourceKey?: string, scopeKey?: string) => {
+  const embed = async (text: string, resourceKey?: string, scopeKey?: string, purpose: 'document' | 'query' = 'document') => {
     const started = performance.now();
     await event('embedding', 'started', 'embed', resourceKey, scopeKey);
     try {
-      const embedding = z.array(z.number().finite()).min(1).parse(await d.embed(text));
+      const embedding = z.array(z.number().finite()).min(1).parse(await d.embed(text, purpose));
       await event('embedding', 'succeeded', 'embed', resourceKey, scopeKey, Math.round(performance.now() - started));
       return embedding;
     } catch (error) {
@@ -599,6 +600,11 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
     const embedding = z.array(z.number().finite()).min(1).parse(embedded.embedding);
     return { html, content, embedding };
   };
+  const isCurrentEmbedding = (embedding: readonly number[]) => embedding.length === EMBEDDING_DIMENSIONS && embedding.every(Number.isFinite);
+  const currentDocumentEmbedding = (source: Pick<Document, 'embedding' | 'name' | 'content' | 'key' | 'scopeKey'>, name = source.name) =>
+    isCurrentEmbedding(source.embedding) ? Promise.resolve(source.embedding) : embed(`${name.trim()}\n\n${source.content.trim()}`, source.key, source.scopeKey);
+  const currentVersionEmbedding = (source: Pick<DocumentVersion, 'embedding' | 'content' | 'key' | 'scopeKey'> | Pick<Document, 'embedding' | 'content' | 'key' | 'scopeKey'>) =>
+    isCurrentEmbedding(source.embedding) ? Promise.resolve(source.embedding) : embed(source.content, source.key, source.scopeKey);
   const persistGenerated = async (source: Document, text: string, mode: 'copy' | 'replace', suffix: string) => {
     const finalName = mode === 'copy' ? `${source.name} (${suffix})` : source.name;
     const transformed = await representations({ content: text }, finalName, source.key, source.scopeKey);
@@ -608,7 +614,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         documentKey: source.key,
         html: source.html,
         content: source.content,
-        embedding: source.embedding,
+        embedding: await currentVersionEmbedding(source),
       });
       try {
         await repo.updateDocument(source.key, { ...transformed, updatedAt: now() });
@@ -782,15 +788,14 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           if (restore && !input.restoreAncestors && ancestors.some((ancestor) => ancestor.deletedAt)) fail('FOLDER_ARCHIVED', 'Restore the archived ancestor hierarchy first.', tool, 'update', key);
           const affectedFolders = [root, ...(input.includeDescendants ? children : [])];
           const affectedFolderKeys = new Set(affectedFolders.map((item) => item.key));
-            const affectedDocuments = (await repo.listDocuments(root.scopeKey, true))
+          const affectedDocuments = (await repo.listDocuments(root.scopeKey, true))
             .filter((item) => item.folderKey !== undefined && affectedFolderKeys.has(item.folderKey));
           const timestamp = now();
-          for (const item of affectedFolders) {
-            await mutationRepository.updateFolder(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp });
-          }
-          for (const item of affectedDocuments) {
-            await mutationRepository.updateDocument(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp });
-          }
+          const updateFolders = async () => { for (const item of affectedFolders) await mutationRepository.updateFolder(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
+          const updateDocuments = async () => { for (const item of affectedDocuments) await mutationRepository.updateDocument(item.key, { deletedAt: restore ? null : timestamp, updatedAt: timestamp }); };
+          // Document destination guards require active folders in both directions.
+          if (restore) { await updateFolders(); await updateDocuments(); }
+          else { await updateDocuments(); await updateFolders(); }
           if (restore && input.restoreAncestors) for (const ancestor of ancestors) {
             await mutationRepository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: timestamp });
           }
@@ -1045,7 +1050,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               documentKey: current.key,
               html: current.html,
               content: current.content,
-              embedding: current.embedding,
+              embedding: await currentVersionEmbedding(current),
             });
           }
           try {
@@ -1109,8 +1114,8 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
           let insertedDocument = false;
           if (storageKey && source.storageKey) await storageOperation('copy', key, item.targetScopeKey, () => d.storage.copy({ sourceKey: source.storageKey!, destinationKey: storageKey, mimeType: source.mimeType }));
           try {
-            let embedding = source.embedding;
-            if (name !== source.name) {
+            let embedding = await currentDocumentEmbedding(source, name);
+            if (name !== source.name && isCurrentEmbedding(source.embedding)) {
               const embedded = await action('document-embed', { name, content: source.content }, source.key, item.targetScopeKey);
               embedding = z.array(z.number().finite()).min(1).parse(embedded.embedding);
             }
@@ -1138,7 +1143,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
                   label: version.label,
                   html: version.html,
                   content: version.content,
-                  embedding: version.embedding,
+                   embedding: await currentVersionEmbedding(version),
                 });
                 insertedVersionKeys.push(created.key);
               }
@@ -1376,7 +1381,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
             label: input.labels?.[key],
             html: current.html,
             content: current.content,
-            embedding: current.embedding,
+            embedding: await currentVersionEmbedding(current),
           });
           return { version: versionView(version) };
         },
@@ -1428,14 +1433,14 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
               documentKey: current.key,
               html: current.html,
               content: current.content,
-              embedding: current.embedding,
+              embedding: await currentVersionEmbedding(current),
             });
           }
           try {
             const restored = await mutationRepository.updateDocument(current.key, {
               html: version.html,
               content: version.content,
-              embedding: version.embedding,
+              embedding: await currentDocumentEmbedding({ ...version, name: current.name }),
               updatedAt: now(),
             });
             return { document: documentView(restored) };
@@ -1564,7 +1569,7 @@ export async function runArchiveTool<Name extends ArchiveToolName>(name: Name, r
         }
       }
       let embedding: number[];
-      try { embedding = await embed(input.query); }
+      try { embedding = await embed(input.query, undefined, undefined, 'query'); }
       catch (error) { fail('ARCHIVE_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
       const candidates = new Map<string, { score: number; document: Document; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
       for (const source of resolvedSources) {

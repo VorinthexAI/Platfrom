@@ -10,7 +10,7 @@ export const MODEL_SLUGS = [
   'openai.gpt-realtime-2',
   'openai.gpt-4o-mini-transcribe',
   'amazon.polly-generative',
-  'openai.text-embedding-3-small',
+  'qwen.qwen3-embedding-8b',
   'aws.transcribe-standard',
 ] as const;
 export const modelSlugSchema = z.string().trim().min(1).max(200).regex(/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, 'Model slug must use lowercase dot or hyphen notation');

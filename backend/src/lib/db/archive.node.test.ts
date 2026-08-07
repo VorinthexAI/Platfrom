@@ -4,7 +4,7 @@ import { documentExtensionSchema, documentSchema, documentsEmbeddingFields } fro
 import { documentShareSchema, documentSharesEmbeddingFields } from './document-shares.node';
 import { folderSchema, foldersEmbeddingFields } from './folders.node';
 import { documentVersionSchema, documentVersionsEmbeddingFields } from './document-versions.node';
-import { EMBEDDING_DIMENSIONS } from '../openai-embeddings';
+import { EMBEDDING_DIMENSIONS } from '../embeddings';
 
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 

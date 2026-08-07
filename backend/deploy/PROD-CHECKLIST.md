@@ -39,6 +39,8 @@ Expected parameters include:
 - `REDIS_URL` for the app and render service to reach the production Redis endpoint
 - `ANTHROPIC_API_KEY`
 - `OPENAI_API_KEY`
+- `OPENROUTER_API_KEY` (required for Qwen embeddings; production routes strictly to DeepInfra)
+- Optional `OPENROUTER_BASE_URL`, `OPENROUTER_SITE_URL`, and `OPENROUTER_APP_NAME`
 - `GROK_API_KEY`
 - `PERPLEXITY_API_KEY`
 - `GOOGLE_API_KEY`
@@ -48,6 +50,7 @@ Expected parameters include:
 
 - Merges to `main` through a closed pull request trigger the production workflow.
 - Manual `workflow_dispatch` can build-only or build-and-deploy.
+- The compatibility API is deployed to the active early-infra box before the 4096-dimension migration, Qwen seed cutover, and semantic backfill. It reads legacy 1536 and current 4096 vectors while writing only current vectors.
 - The graph-db host receives `deploy/docker-compose.db.yml` and is brought up with `docker compose up -d` before migrations run.
 - The app host receives `deploy/docker-compose.app.yml` and `deploy/deploy-app.sh`.
 - App deploy starts the idle color, waits for health, flips Caddy, then stops the old color.

@@ -4,7 +4,7 @@ import type { ArchiveRepository } from './archive-runtime';
 import { ARCHIVE_TOOL_NAMES, ArchiveError, runArchiveTool, type ArchiveIdempotencyStore } from '.';
 import { DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
-import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
+import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 
 const now = '2026-07-22T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
@@ -229,6 +229,60 @@ describe('Archive runtime', () => {
     expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding: [0.5] });
   });
 
+  test('re-embeds legacy vectors for every new document and version rollout path', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Legacy body');
+    const legacy = Array(1_536).fill(0.1);
+    f.documents.get(documentKey).embedding = legacy;
+    const embeddedTexts: string[] = [];
+    const dependencies: any = {
+      repository: f.repository,
+      embeddingDimensions: EMBEDDING_DIMENSIONS,
+      ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS },
+      embed: async (text: string) => { embeddedTexts.push(text); return embedding; },
+      storage: { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input: any) { return { storageKey: input.destinationKey }; }, async delete() {} },
+    };
+
+    const created = await runArchiveTool('document.create-version', { documentKeys: [documentKey] }, f.context, dependencies);
+    expect(created.results[0]?.success).toBe(true);
+    expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+    expect(embeddedTexts).toContain('Legacy body');
+
+    f.documents.get(documentKey).embedding = legacy;
+    const updated = await runArchiveTool('document.update', { updates: [{ documentKey, content: 'Updated body', createVersion: true }] }, f.context, dependencies);
+    expect(updated.results[0]?.success).toBe(true);
+    expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+
+    const legacyVersion = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>Historical exact body</p>', content: 'Historical exact body', embedding: legacy });
+    f.documents.get(documentKey).embedding = legacy;
+    const copied = await runArchiveTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey, includeVersions: true }] }, f.context, dependencies);
+    expect(copied.results[0]?.success).toBe(true);
+    const copiedKey = copied.results[0]?.data?.document.key;
+    expect(copiedKey).toBeDefined();
+    expect(f.documents.get(copiedKey!)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+    expect([...f.versions.values()].filter((version) => version.documentKey === copiedKey!).every((version) => version.embedding.length === EMBEDDING_DIMENSIONS)).toBe(true);
+
+    f.documents.get(documentKey).embedding = legacy;
+    const restored = await runArchiveTool('document.restore-version', { restores: [{ documentKey, versionKey: legacyVersion.key, createBackupVersion: true }] }, f.context, dependencies);
+    expect(restored.results[0]?.success).toBe(true);
+    expect(f.documents.get(documentKey)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+    expect(embeddedTexts).toContain('Notes\n\nHistorical exact body');
+
+    f.documents.get(documentKey).embedding = legacy;
+    const generated = await runArchiveTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'replace' }, f.context, {
+      ...dependencies,
+      runAction: async (action: string, input: any) => {
+        if (action === 'reason') return { text: 'Corps traduit' };
+        if (action === 'document-generate-html') return documentGenerateHtml(input);
+        if (action === 'document-generate-content') return documentGenerateContent(input);
+        if (action === 'document-embed') return documentEmbed(input, { embed: async ({ text }) => { embeddedTexts.push(text); return embedding; }, dimensions: EMBEDDING_DIMENSIONS });
+        throw new Error(`Unexpected action ${action}`);
+      },
+    });
+    expect(generated.results[0]?.success).toBe(true);
+    expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+  });
+
   test('updates favorites atomically without embedding, canonicalizing, or versioning', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Unchanged body');
@@ -320,18 +374,31 @@ describe('Archive runtime', () => {
     expect(output.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
   });
 
-  test('archives and restores documents with a selected folder subtree', async () => {
+  test('orders subtree document and folder lifecycle updates around active destination guards', async () => {
     const f = fixture('moderator');
     const child = newId();
     f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], createdAt: now, updatedAt: now });
     const documentKey = f.addDocument();
     f.documents.get(documentKey).folderKey = child;
+    const updates: string[] = [];
+    const updateFolder = f.repository.updateFolder.bind(f.repository);
+    const updateDocument = f.repository.updateDocument.bind(f.repository);
+    f.repository.updateFolder = async (key, patch) => { updates.push(`folder:${key}`); return updateFolder(key, patch); };
+    f.repository.updateDocument = async (key, patch) => {
+      const document = f.documents.get(key);
+      if (document?.folderKey && f.folders.get(document.folderKey)?.deletedAt) throw new Error('document destination folder is archived');
+      updates.push(`document:${key}`);
+      return updateDocument(key, patch);
+    };
     await runArchiveTool('folder.archive', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
     expect(f.folders.get(child).deletedAt).toBe(now);
     expect(f.documents.get(documentKey).deletedAt).toBe(now);
+    expect(updates).toEqual([`document:${documentKey}`, `folder:${f.folderKey}`, `folder:${child}`]);
+    updates.length = 0;
     await runArchiveTool('folder.restore', { folderKeys: [f.folderKey], includeDescendants: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
     expect(f.folders.get(child).deletedAt).toBeNull();
     expect(f.documents.get(documentKey).deletedAt).toBeNull();
+    expect(updates).toEqual([`folder:${f.folderKey}`, `folder:${child}`, `document:${documentKey}`]);
   });
 
   test('deletes storage before transaction-bound document metadata and retains pointers on failure', async () => {

@@ -6,6 +6,7 @@ import { newId } from '@/lib/ids';
 import { toArangoDoc, withArangoKey } from './base';
 import { db, withTransaction } from './client';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
+import { currentEmbeddingSchema, embeddingMetadata } from '@/lib/embeddings';
 
 type QueryCursor = { next(): Promise<unknown>; all?(): Promise<unknown[]> };
 export interface ArchiveQueryExecutor {
@@ -13,7 +14,7 @@ export interface ArchiveQueryExecutor {
 }
 
 type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'isFavorite' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'content' | 'isFavorite' | 'embedding' | 'speechStorageKeys' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'content' | 'isFavorite' | 'embedding' | 'embeddingProvider' | 'embeddingModel' | 'embeddingDimensions' | 'speechStorageKeys' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
 
@@ -69,12 +70,8 @@ async function scopedUpdate<T>(
     '@collection': collection,
     key,
     scopeKey,
-    ...(collection === 'documentShares' ? {} : {
-      destinationKey: set.parentFolderKey ?? set.folderKey ?? null,
-      changesLocation: collection === 'folders'
-        ? Object.prototype.hasOwnProperty.call(patch, 'parentFolderKey')
-        : Object.prototype.hasOwnProperty.call(patch, 'folderKey'),
-    }),
+    ...(collection === 'documentShares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
+    ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
     patch: set,
     unset,
   });
@@ -145,18 +142,21 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
     },
     async insertFolder(folder: Folder): Promise<Folder> {
       const parsed = folderSchema.parse(folder);
+      if (parsed.embedding.length) currentEmbeddingSchema.parse(parsed.embedding);
+      const stored = parsed.embedding.length ? { ...parsed, ...embeddingMetadata() } : parsed;
       const cursor = await executor.query(
         `LET parent = @parentKey == null ? {} : DOCUMENT(folders, @parentKey)
          FILTER @parentKey == null || (parent != null && parent.scopeKey == @scopeKey && (!HAS(parent, "_internalDeletion") || parent._internalDeletion == null))
          INSERT @folder INTO folders RETURN NEW`,
-        { folder: toArangoDoc(parsed), parentKey: parsed.parentFolderKey ?? null, scopeKey: parsed.scopeKey },
+        { folder: toArangoDoc(stored), parentKey: parsed.parentFolderKey ?? null, scopeKey: parsed.scopeKey },
       );
       const created = await cursor.next();
       if (!created) throw new Error('Folder destination is pending deletion.');
       return folderSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
     async insertDocument(document: Document): Promise<Document> {
-      const parsed = documentSchema.parse({ ...document, ...canonicalRepresentations(document.html, document.content) });
+      currentEmbeddingSchema.parse(document.embedding);
+      const parsed = documentSchema.parse({ ...document, ...canonicalRepresentations(document.html, document.content), ...embeddingMetadata() });
       const cursor = await executor.query(
         `LET folder = @folderKey == null ? null : DOCUMENT(folders, @folderKey)
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
@@ -185,11 +185,13 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       return documentShareSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
     async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion> {
+      currentEmbeddingSchema.parse(version.embedding);
       const snapshot = documentVersionSchema.omit({ version: true }).parse({
         ...version,
         ...canonicalRepresentations(version.html, version.content),
         key: newId(),
         createdAt: new Date().toISOString(),
+        ...embeddingMetadata(),
       });
       const cursor = await executor.query(`
         LET document = DOCUMENT(documents, @documentKey)
@@ -212,13 +214,17 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       return documentVersionSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
     updateFolder(scopeKey: string, key: string, patch: ScopedFolderPatch) {
-      return scopedUpdate(executor, 'folders', scopeKey, key, patch, (value) => folderSchema.parse(value));
+      if (patch.embedding !== undefined && patch.embedding.length) currentEmbeddingSchema.parse(patch.embedding);
+      const prepared = patch.embedding?.length ? { ...patch, ...embeddingMetadata() } : patch;
+      return scopedUpdate(executor, 'folders', scopeKey, key, prepared, (value) => folderSchema.parse(value));
     },
     updateDocument(scopeKey: string, key: string, patch: ScopedDocumentPatch) {
       if (patch.content !== undefined && patch.html === undefined) throw new Error('Document content must be updated through HTML.');
       if (patch.html !== undefined && patch.embedding === undefined) throw new Error('Document HTML updates require a fresh embedding.');
       if (patch.html !== undefined && patch.content === undefined) throw new Error('Document HTML updates require derived content.');
-      const preparedPatch = patch.html === undefined ? patch : { ...patch, ...canonicalRepresentations(patch.html, patch.content!) };
+      if (patch.embedding !== undefined) currentEmbeddingSchema.parse(patch.embedding);
+      const metadata = patch.embedding === undefined ? {} : embeddingMetadata();
+      const preparedPatch = patch.html === undefined ? { ...patch, ...metadata } : { ...patch, ...canonicalRepresentations(patch.html, patch.content!), ...metadata };
       return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value));
     },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {

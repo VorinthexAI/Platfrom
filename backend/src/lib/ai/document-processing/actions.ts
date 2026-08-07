@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { basename, extname } from 'node:path';
 import mammoth from 'mammoth';
 import WordExtractor from 'word-extractor';
-import { EMBEDDING_DIMENSIONS, embedText } from '@/lib/openai-embeddings';
+import { EMBEDDING_DIMENSIONS, embedText } from '@/lib/embeddings';
 import { getDocumentById, insertPreparedDocument, documentSchema, type Document, type DocumentExtension } from '@/lib/db/documents.node';
 import { getFolderById } from '@/lib/db/folders.node';
 import { newId } from '@/lib/ids';

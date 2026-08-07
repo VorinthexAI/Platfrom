@@ -3,7 +3,7 @@ import { createStaticProviderAdapter, isStaticProvider, resolveStaticBedrockEnvi
 
 describe('static provider routes', () => {
   test('registers each environment-backed provider', () => {
-    expect(STATIC_PROVIDER_IDS).toEqual(['openai', 'aws-bedrock', 'aws-bedrock-mantle', 'aws-polly', 'aws-transcribe']);
+    expect(STATIC_PROVIDER_IDS).toEqual(['openai', 'openrouter', 'aws-bedrock', 'aws-bedrock-mantle', 'aws-polly', 'aws-transcribe']);
     expect(isStaticProvider('aws-bedrock')).toBe(true);
     expect(isStaticProvider('aws-bedrock-mantle')).toBe(true);
     expect(isStaticProvider('openai')).toBe(true);

@@ -2,16 +2,10 @@ import { z } from 'zod';
 import { aql } from 'arangojs';
 import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { db } from './client';
-import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embeddingMetadata, rolloutEmbeddingSchema } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 
 export const DOCUMENT_VERSIONS_COLLECTION = 'documentVersions';
-
-const configuredEmbeddingSchema = z.array(z.number().finite()).min(1).superRefine((embedding, context) => {
-  if (embedding.length !== EMBEDDING_DIMENSIONS) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: `Embedding must contain ${EMBEDDING_DIMENSIONS} dimensions.` });
-  }
-});
 
 export const documentVersionSchema = z.object({
   key: z.string().cuid(),
@@ -21,7 +15,10 @@ export const documentVersionSchema = z.object({
   label: z.string().trim().min(1).max(120).optional(),
   html: z.string().min(1).refine((value) => value.trim().length > 0, 'HTML must not be blank.'),
   content: z.string().trim().min(1),
-  embedding: configuredEmbeddingSchema,
+  embedding: rolloutEmbeddingSchema,
+  embeddingProvider: z.string().trim().min(1).optional(),
+  embeddingModel: z.string().trim().min(1).optional(),
+  embeddingDimensions: z.number().int().positive().optional(),
   deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
 });
@@ -43,8 +40,8 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
 export async function insertDocumentVersion(input: DocumentVersion): Promise<DocumentVersion> {
   const canonical = canonicalDocumentRepresentations(input.html);
   if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
-  const snapshot = documentVersionSchema.parse(input);
-  assertConfiguredEmbeddingDimensions(snapshot.embedding);
+  const snapshot = documentVersionSchema.parse({ ...input, ...embeddingMetadata() });
+  currentEmbeddingSchema.parse(snapshot.embedding);
   const cursor = await db.query(`
     LET document = DOCUMENT(documents, @documentKey)
     FILTER document != null && document.scopeKey == @scopeKey
@@ -63,8 +60,8 @@ export async function insertDocumentVersion(input: DocumentVersion): Promise<Doc
 export async function upsertDocumentVersionByKey(input: DocumentVersion): Promise<DocumentVersion> {
   const canonical = canonicalDocumentRepresentations(input.html);
   if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
-  const snapshot = documentVersionSchema.parse(input);
-  assertConfiguredEmbeddingDimensions(snapshot.embedding);
+  const snapshot = documentVersionSchema.parse({ ...input, ...embeddingMetadata() });
+  currentEmbeddingSchema.parse(snapshot.embedding);
   const result = await db.collection(DOCUMENT_VERSIONS_COLLECTION).save(toArangoDoc(snapshot), { returnNew: true, overwriteMode: 'replace' });
   return documentVersionSchema.parse(withArangoKey(result.new as Record<string, unknown>));
 }
@@ -145,9 +142,9 @@ type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' 
 
 /** Exclusive collection transaction makes MAX(version)+1 monotonic under concurrent writers. */
 export async function createDocumentVersion(input: NewDocumentVersion): Promise<DocumentVersion> {
-  assertConfiguredEmbeddingDimensions(input.embedding);
+  currentEmbeddingSchema.parse(input.embedding);
   const { withArchivePersistenceTransaction } = await import('./archive-persistence.node');
-  return withArchivePersistenceTransaction((persistence) => persistence.createVersion(input));
+  return withArchivePersistenceTransaction((persistence) => persistence.createVersion({ ...input, ...embeddingMetadata() }));
 }
 
 export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ArchiveSemanticSearchInput, 'sources'>) {

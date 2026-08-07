@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createArchivePersistence, type ArchiveQueryExecutor } from './archive-persistence.node';
+import { EMBEDDING_DIMENSIONS } from '../embeddings';
 
 const scopeKey = 'cm00000000000000000000001';
 const folderKey = 'cm00000000000000000000002';
@@ -26,6 +27,7 @@ describe('scoped Archive persistence', () => {
     expect(calls[0]?.query).toContain('DOCUMENT(folders, @destinationKey)');
     expect(calls[0]?.query).toContain('REPLACE current WITH UNSET');
     expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description'], patch: { deletedAt: null, updatedAt: timestamp } });
+    expect(calls[0]?.bindVars).not.toHaveProperty('changesLocation');
   });
 
   test('returns false when a scope-bounded delete matches nothing', async () => {
@@ -44,12 +46,13 @@ describe('scoped Archive persistence', () => {
     await createArchivePersistence(executor).updateDocument(scopeKey, folderKey, {
       html: '<p>Hello <strong>Core</strong></p>',
       content: 'Hello Core',
-      embedding: [1],
+      embedding: Array(EMBEDDING_DIMENSIONS).fill(1),
     });
     expect(calls[0]?.bindVars?.patch).toMatchObject({ html: '<p>Hello <strong>Core</strong></p>', content: 'Hello Core' });
+    expect(calls[0]?.bindVars).toMatchObject({ changesLocation: false });
     expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content must be updated through HTML.');
     expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p>Detached</p>' })).toThrow('Document HTML updates require a fresh embedding.');
-    expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: [1] })).toThrow('Document representations must be canonical and agreeing.');
+    expect(() => createArchivePersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: Array(EMBEDDING_DIMENSIONS).fill(1) })).toThrow('Document representations must be canonical and agreeing.');
   });
 
   test('persists favorite-only folder and document patches without representation fields', async () => {

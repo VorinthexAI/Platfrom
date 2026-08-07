@@ -3,17 +3,11 @@ import { aql } from 'arangojs';
 import { db } from './client';
 import { createNodeHelpers, withArangoKey } from './base';
 import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
-import { EMBEDDING_DIMENSIONS } from '@/lib/openai-embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embeddingMetadata, rolloutEmbeddingSchema } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 
 export const DOCUMENTS_COLLECTION = 'documents';
 export { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
-
-const configuredEmbeddingSchema = z.array(z.number().finite()).min(1).superRefine((embedding, context) => {
-  if (embedding.length !== EMBEDDING_DIMENSIONS) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: `Embedding must contain ${EMBEDDING_DIMENSIONS} dimensions.` });
-  }
-});
 
 export const documentSchema = z.object({
   key: z.string().cuid(),
@@ -27,7 +21,10 @@ export const documentSchema = z.object({
   sizeBytes: z.number().int().positive().optional(),
   content: z.string().trim().min(1),
   isFavorite: z.boolean().default(false),
-  embedding: configuredEmbeddingSchema,
+  embedding: rolloutEmbeddingSchema,
+  embeddingProvider: z.string().trim().min(1).optional(),
+  embeddingModel: z.string().trim().min(1).optional(),
+  embeddingDimensions: z.number().int().positive().optional(),
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
@@ -96,8 +93,8 @@ export async function restoreDocument(key: string): Promise<Document> {
 
 /** Inserts an already embedded document without invoking the generic auto-embed path. */
 export async function insertPreparedDocument(input: Document): Promise<Document> {
-  const document = documentSchema.parse(input);
-  assertConfiguredEmbeddingDimensions(document.embedding);
+  const document = documentSchema.parse({ ...input, ...embeddingMetadata() });
+  currentEmbeddingSchema.parse(document.embedding);
   const { archivePersistence } = await import('./archive-persistence.node');
   return archivePersistence.insertDocument(document);
 }

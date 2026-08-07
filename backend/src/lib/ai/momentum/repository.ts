@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { embeddingMetadata } from '@/lib/embeddings';
 import { db, withTransaction } from '@/lib/db/client';
 import { toArangoDoc, withArangoKey } from '@/lib/db/base';
 import { FOLDERS_COLLECTION, folderSchema, type Folder } from '@/lib/db/folders.node';
@@ -66,9 +67,10 @@ export function createMomentumRepository(
   ): Promise<z.output<Schema>> {
     requireSuppliedEmbedding(input);
     const document = schema.parse(input);
+    const stored = { ...document, ...embeddingMetadata() };
     const cursor = await database.query(
       'INSERT @document IN @@collection RETURN NEW',
-      { '@collection': collection, document: toArangoDoc(document as Record<string, unknown> & { key: string }) },
+      { '@collection': collection, document: toArangoDoc(stored as Record<string, unknown> & { key: string }) },
     );
     const [saved] = await cursor.all();
     return schema.parse(withArangoKey(saved as Record<string, unknown>));
@@ -105,7 +107,7 @@ export function createMomentumRepository(
       throw new MomentumConcurrentUpdateError(collection, validKey);
     }
     const parsed = schema.parse({ ...current, ...patch });
-    const { key: _key, ...replacement } = parsed as Record<string, unknown> & { key: string };
+    const { key: _key, ...replacement } = { ...parsed, ...embeddingMetadata() } as Record<string, unknown> & { key: string };
     for (const [field, value] of Object.entries(replacement)) if (value === undefined) delete replacement[field];
     const cursor = await database.query(
       'REPLACE @key WITH @document IN @@collection RETURN NEW',
