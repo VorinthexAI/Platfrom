@@ -251,6 +251,7 @@ jobs:
         run: bun run mobile:typecheck
 
       - name: Queue EAS internal distribution build (Android APK)
+        if: ${{ false }} # TEMP: pause deploy-triggered EAS submissions; remove to re-enable.
         working-directory: mobile/app
         run: bunx eas-cli@latest build --platform android --profile preview --non-interactive --no-wait
 
