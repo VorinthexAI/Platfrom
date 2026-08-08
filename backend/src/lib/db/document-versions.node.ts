@@ -40,7 +40,7 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
 
 function storedSnapshot(snapshot: DocumentVersion) {
   const { content, ...fields } = snapshot;
-  return toArangoDoc({ ...fields, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED === 'true' ? chunkDocumentContent(content) : content });
+  return toArangoDoc({ ...fields, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED !== 'false' ? chunkDocumentContent(content) : content });
 }
 
 export async function prepareDocumentVersionSemantics(content: string, label?: string) {

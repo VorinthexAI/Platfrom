@@ -247,7 +247,7 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
 
 export async function migrateContentVersions(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
-  const storeContentArray = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED === 'true';
+  const storeContentArray = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED !== 'false';
   let after = '';
   while (true) {
     const cursor = await targetDb.query<Record<string, unknown>>(`

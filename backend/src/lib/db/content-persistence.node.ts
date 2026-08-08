@@ -272,7 +272,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       `, {
         documentKey: version.documentKey,
         scopeKey: version.scopeKey,
-        snapshot: toArangoDoc({ ...snapshot, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED === 'true' ? contentChunks : snapshot.content }),
+        snapshot: toArangoDoc({ ...snapshot, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED !== 'false' ? contentChunks : snapshot.content }),
       });
       const created = await cursor.next();
       if (!created) throw new Error('Version owner is pending deletion.');
