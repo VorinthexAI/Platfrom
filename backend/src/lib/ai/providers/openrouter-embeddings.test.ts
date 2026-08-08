@@ -42,6 +42,30 @@ describe('OpenRouter Qwen embeddings', () => {
     await expect(provider.embed!({ externalModelId: EXTERNAL_EMBEDDING_MODEL_ID, input: 'bad dimensions' })).rejects.toMatchObject({ code: 'response_invalid' });
   });
 
+  test('uses a fresh timeout signal for each retry attempt', async () => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      if (attempts === 1) throw new DOMException('timed out', 'TimeoutError');
+      return Response.json({ provider: 'DeepInfra', data: [{ index: 0, embedding: vector(1) }] });
+    }) as unknown as typeof fetch;
+
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).embed!({ externalModelId: EXTERNAL_EMBEDDING_MODEL_ID, input: 'retry timeout' })).resolves.toBeDefined();
+    expect(attempts).toBe(2);
+  });
+
+  test('retains retries for normalized fetch network failures', async () => {
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError('network unavailable');
+      return Response.json({ provider: 'DeepInfra', data: [{ index: 0, embedding: vector(1) }] });
+    }) as unknown as typeof fetch;
+
+    await expect(createOpenRouterProvider({ apiKey: 'test-key' }).embed!({ externalModelId: EXTERNAL_EMBEDDING_MODEL_ID, input: 'retry network' })).resolves.toBeDefined();
+    expect(attempts).toBe(2);
+  });
+
   test('aborts bounded retry backoff immediately', async () => {
     globalThis.fetch = (async () => new Response(null, { status: 503 })) as unknown as typeof fetch;
     const controller = new AbortController();

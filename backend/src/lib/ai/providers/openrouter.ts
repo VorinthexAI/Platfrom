@@ -74,7 +74,7 @@ function retryDelay(response: Response): number | undefined {
 }
 
 function isRetryable(error: unknown): boolean {
-  if (error instanceof ProviderError) return error.status === 408 || error.status === 429 || (error.status !== undefined && error.status >= 500);
+  if (error instanceof ProviderError) return error.code === 'timeout' || error.cause instanceof TypeError || error.status === 408 || error.status === 429 || (error.status !== undefined && error.status >= 500);
   return error instanceof TypeError;
 }
 
@@ -83,13 +83,13 @@ async function createEmbeddings(config: OpenRouterProviderConfig, request: Provi
   if (request.dimensions !== undefined && request.dimensions !== EMBEDDING_DIMENSIONS) throw new ProviderError(PROVIDER_ID, 'invalid_input', `OpenRouter embeddings require ${EMBEDDING_DIMENSIONS} dimensions`);
   const inputs = typeof request.input === 'string' ? [request.input] : request.input;
   if (inputs.length === 0 || inputs.some((text) => !text.trim())) throw new ProviderError(PROVIDER_ID, 'invalid_input', 'OpenRouter embedding input must be non-empty');
-  const timeout = AbortSignal.timeout(request.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
   const headers: Record<string, string> = { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' };
   if (config.siteUrl) headers['HTTP-Referer'] = config.siteUrl;
   if (config.appName) headers['X-Title'] = config.appName;
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const timeout = AbortSignal.timeout(request.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
     let requestedDelay: number | undefined;
     try {
       const response = await fetch(`${config.baseUrl.replace(/\/$/, '')}/embeddings`, {
@@ -114,10 +114,10 @@ async function createEmbeddings(config: OpenRouterProviderConfig, request: Provi
       return { embeddings, usage: tokenUsage(raw.usage?.prompt_tokens, 0, raw.usage?.total_tokens), providerId: PROVIDER_ID, externalModelId: request.externalModelId, rawResponse: raw };
     } catch (error) {
       const normalized = normalizeProviderError(PROVIDER_ID, error);
-      if (signal.aborted || !isRetryable(error) || attempt === MAX_ATTEMPTS) throw normalized;
+      if (request.signal?.aborted || !isRetryable(normalized) || attempt === MAX_ATTEMPTS) throw normalized;
       lastError = normalized;
       try {
-        await delay(requestedDelay ?? Math.min(250 * 2 ** (attempt - 1), 1_000), signal);
+        await delay(requestedDelay ?? Math.min(250 * 2 ** (attempt - 1), 1_000), request.signal);
       } catch (backoffError) {
         throw normalizeProviderError(PROVIDER_ID, backoffError);
       }
