@@ -29,7 +29,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     borderWidth: 1,
     color: colors.text,
-    fontFamily: "Fraunces",
+    fontFamily: "Geist_400Regular",
     fontSize: 16,
     minHeight: 42,
     paddingHorizontal: 12,
