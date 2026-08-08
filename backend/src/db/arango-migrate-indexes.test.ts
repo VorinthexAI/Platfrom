@@ -156,7 +156,7 @@ describe('Arango migration indexes', () => {
   });
   test('keeps version content strings during the compatibility rollout phase', async () => {
     const previous = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
-    delete process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
+    process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = 'false';
     try {
       const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
       const migration = migrationDatabase('documentVersions', { _key: 'version-rollout', _rev: 'version-rev', html: '<p>Historical body</p>', content: 'Historical body', embedding });
