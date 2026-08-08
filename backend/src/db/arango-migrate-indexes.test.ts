@@ -68,6 +68,8 @@ describe('Arango migration indexes', () => {
     expect(source).toContain("{ fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }");
     expect(source).toContain("fields[0] === 'scopeKey' && fields[1] === 'name'");
     expect(source).toContain('Dropped obsolete unique channel-name index');
+    expect(source).toContain('@isImage && (HAS(resource, "ownerKey") || HAS(resource, "requestHash"))');
+    expect(source).not.toContain('@collection == "images"');
   });
   test('declares travel and book-generation collection indexes', () => {
     expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'trips', 'tripPlaces', 'placeVisits']);

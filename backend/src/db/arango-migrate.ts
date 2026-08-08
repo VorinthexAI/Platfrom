@@ -182,11 +182,11 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
           || LENGTH(resource.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || HAS(resource, "embeddingProvider") || HAS(resource, "embeddingModel") || HAS(resource, "embeddingDimensions")
           || HAS(resource, "embeddingState") || HAS(resource, "embeddedAt")
-          || (@collection == "images" && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
+          || (@isImage && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
         SORT resource._key
         LIMIT 50
         RETURN resource
-    `, { '@collection': collectionName, after, dimensions });
+    `, { '@collection': collectionName, after, dimensions, isImage: collectionName === 'images' });
     const resources = await cursor.all();
     if (resources.length === 0) break;
     const updates: Array<Record<string, unknown>> = [];
@@ -214,9 +214,9 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
         || LENGTH(resource.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || HAS(resource, "embeddingProvider") || HAS(resource, "embeddingModel") || HAS(resource, "embeddingDimensions")
         || HAS(resource, "embeddingState") || HAS(resource, "embeddedAt")
-        || (@collection == "images" && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
+        || (@isImage && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
       RETURN 1)
-  `, { '@collection': collectionName, dimensions });
+  `, { '@collection': collectionName, dimensions, isImage: collectionName === 'images' });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
 }
