@@ -17,4 +17,9 @@ describe('Content share migration staging', () => {
     expect(source).toContain("const fields = ['scopeKey', 'sourceType', 'sourceKey', 'permission', 'tokenHash', 'passwordHash', 'expiresAt', 'revokedAt', 'deletedAt', 'createdAt', 'updatedAt']");
     expect(source).toContain('if (!copied || !equal(copied, prepared))');
   });
+  test('creates private indexed search history and cache storage', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain("name: 'contentSearchQueries'");
+    expect(source).toContain("fields: ['actorKey', 'scopeKey', 'normalizedQuery'], unique: true");
+  });
 });

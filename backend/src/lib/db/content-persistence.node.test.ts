@@ -37,10 +37,10 @@ describe('scoped Content persistence', () => {
   });
 
   test('canonicalizes HTML and derives content at the document write boundary', async () => {
-    const calls: Array<{ bindVars?: Record<string, unknown> }> = [];
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = {
-      async query(_query, bindVars) {
-        calls.push({ bindVars });
+      async query(query, bindVars) {
+        calls.push({ query, bindVars });
         return { async next() { return undefined; } };
       },
     };
@@ -51,6 +51,7 @@ describe('scoped Content persistence', () => {
     });
     expect(calls[0]?.bindVars?.patch).toMatchObject({ html: '<p>Hello <strong>Core</strong></p>', content: 'Hello Core' });
     expect(calls[0]?.bindVars).toMatchObject({ changesLocation: false });
+    expect(calls[0]?.query).toContain('current.updatedAt == @expectedUpdatedAt');
     expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { content: 'detached' })).toThrow('Document content must be updated through HTML.');
     expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p>Detached</p>' })).toThrow('Document HTML updates require a fresh embedding.');
     expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: Array(EMBEDDING_DIMENSIONS).fill(1) })).toThrow('Document representations must be canonical and agreeing.');

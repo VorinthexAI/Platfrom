@@ -51,7 +51,7 @@ export interface ContentRepository {
   getDocument(key: string): Promise<Document | null>;
   listDocuments(scopeKey: string, includeArchived?: boolean, includePendingDeletion?: boolean): Promise<Document[]>;
   insertDocument(document: Document): Promise<Document>;
-  updateDocument(key: string, patch: Partial<Document>): Promise<Document>;
+  updateDocument(key: string, patch: Partial<Document>, options?: { expectedUpdatedAt?: string }): Promise<Document>;
   setDocumentDeletion(key: string, marker: Document['_internalDeletion'] | undefined, owner?: string): Promise<Document | null>;
   deleteDocument(key: string): Promise<void>;
   getShare(key: string): Promise<DocumentShare | null>;
@@ -63,8 +63,15 @@ export interface ContentRepository {
   listVersions(scopeKey: string, documentKeys: string[], includeArchived?: boolean): Promise<DocumentVersion[]>;
   createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion>;
   deleteVersion(key: string): Promise<void>;
-  semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document }>>;
+  semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
+  semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
+}
+
+export interface ContentSearchQueryStore {
+  get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; cacheVersion: number; now: string }): Promise<{ output: unknown } | null>;
+  record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; cacheVersion: number; output: unknown; now: string; expiresAt: string }): Promise<void>;
+  list(input: { actorKey: string; scopeKey: string; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number }>>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
@@ -86,12 +93,13 @@ export interface ContentToolDependencies extends RouterDependencies {
   idempotency?: ContentIdempotencyStore;
   maxDownloadBytes?: number;
   generateExport?: typeof generateDocumentExport;
+  searchQueries?: ContentSearchQueryStore;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -138,8 +146,9 @@ function versionView(version: DocumentVersion, include: string[] = []) {
 }
 
 async function productionRepository(): Promise<ContentRepository> {
-  const [documents, client, scopes, content] = await Promise.all([
+  const [documents, folders, client, scopes, content] = await Promise.all([
     import('@/lib/db/documents.node'),
+    import('@/lib/db/folders.node'),
     import('@/lib/db/client'),
     import('@/lib/ai/scopes/repository'),
     import('@/lib/db/content-persistence.node'),
@@ -206,11 +215,11 @@ async function productionRepository(): Promise<ContentRepository> {
     getDocument: persistence.getDocument,
     async listDocuments(scopeKey, includeArchived, includePendingDeletion) { return persistence.listDocuments(scopeKey, includeArchived, includePendingDeletion); },
     insertDocument: persistence.insertDocument,
-    async updateDocument(key, patch) {
+    async updateDocument(key, patch, options) {
       const current = await persistence.getDocument(key);
       if (!current) throw new Error('Document was not found for scoped update.');
-      const updated = await persistence.updateDocument(current.scopeKey, key, patch);
-      if (!updated) throw new Error('Document scope changed during update.');
+      const updated = await persistence.updateDocument(current.scopeKey, key, patch, options);
+      if (!updated) throw new Error(options?.expectedUpdatedAt ? 'Document update conflict.' : 'Document scope changed during update.');
       return updated;
     },
     async setDocumentDeletion(key, marker, owner) {
@@ -251,6 +260,7 @@ async function productionRepository(): Promise<ContentRepository> {
       if (!current || !await persistence.deleteVersion(current.scopeKey, key)) throw new Error('Version was not found for scoped deletion.');
     },
     semanticSearch: documents.semanticSearchDocuments,
+    semanticSearchFolders: folders.semanticSearchFolders,
     transaction: (operation) => content.withContentPersistenceTransaction((bound) => operation(makeRepository(bound))),
   });
   return makeRepository(content.contentPersistence);
@@ -438,6 +448,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const invocationKey = d.id();
   const invocationStarted = performance.now();
   const now = () => d.clock().toISOString();
+  const nextUpdatedAt = (current: string) => new Date(Math.max(d.clock().getTime(), Date.parse(current) + 1)).toISOString();
   const event = (type: SafeEvent['type'], status: SafeEvent['status'], action?: string, resourceKey?: string, scopeKey?: string, durationMs?: number) => observe(dependencies, { type, status, tool, invocationKey, action, resourceKey, scopeKey, durationMs });
   await event('action', 'started', 'tool', undefined, context.runtimeScopeKey);
   const observeRepository = (target: ContentRepository): ContentRepository => new Proxy(target, {
@@ -975,6 +986,22 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         },
       });
       result = { document: documentView(processed.document) };
+    } else if (tool === 'document.create') {
+      await location(input.scopeKey, input.folderKey, 'moderator');
+      const key = d.id();
+      const transformed = await representations(input.representation, input.name, key, input.scopeKey);
+      const timestamp = now();
+      const created = await repo.insertDocument({
+        key,
+        scopeKey: input.scopeKey,
+        ...(input.folderKey ? { folderKey: input.folderKey } : {}),
+        name: input.name,
+        ...transformed,
+        deletedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+      result = { document: documentView(created) };
     } else if (tool === 'document.find') {
       result = await batch(tool, input.documentKeys.map((key: string) => ({
         key,
@@ -1078,6 +1105,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'moderator', false);
+          if (item.expectedUpdatedAt && current.updatedAt !== item.expectedUpdatedAt) fail('DOCUMENT_VERSION_CONFLICT', 'Document changed after it was read.', tool, 'update', current.key);
           const hasRepresentation = item.html !== undefined || item.content !== undefined;
           const transformed = hasRepresentation ? await representations(item, current.name, current.key, current.scopeKey) : undefined;
           let backup: DocumentVersion | undefined;
@@ -1093,14 +1121,15 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             const updated = await mutationRepository.updateDocument(current.key, {
               ...(transformed ?? {}),
-              updatedAt: now(),
-            });
+              updatedAt: nextUpdatedAt(current.updatedAt),
+            }, { expectedUpdatedAt: item.expectedUpdatedAt });
             return { document: documentView(updated) };
           } catch (error) {
             if (backup) {
               try { await mutationRepository.deleteVersion(backup.key); }
               catch (cleanupError) { throw new ContentError('CONTENT_CONFLICT', 'Document update failed and version compensation requires retry.', tool, { action: 'cleanup', resourceKey: current.key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
             }
+            if (item.expectedUpdatedAt && error instanceof Error && error.message === 'Document update conflict.') fail('DOCUMENT_VERSION_CONFLICT', 'Document changed after it was read.', tool, 'update', current.key);
             throw error;
           }
         },
@@ -1114,7 +1143,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'moderator', false);
           const semantics = await generatedSemantics(item.name, current.content, current.key, current.scopeKey);
-          const renamed = await mutationRepository.updateDocument(current.key, { name: item.name, ...semantics, updatedAt: now() });
+          const renamed = await mutationRepository.updateDocument(current.key, { name: item.name, ...semantics, updatedAt: nextUpdatedAt(current.updatedAt) });
           return { document: documentView(renamed) };
         },
       })), input.atomic, repo);
@@ -1553,6 +1582,78 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             };
           },
         })), false, repo);
+      }
+    } else if (tool === 'scope.content.search-history') {
+      await roleFor(input.scopeKey, 'viewer');
+      const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
+      result = { history: await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, limit: input.limit }) };
+    } else if (tool === 'scope.content.search') {
+      await roleFor(input.scopeKey, 'viewer');
+      const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
+      if (!allowed.includes(input.scopeKey)) fail('CONTENT_FORBIDDEN', 'The principal lacks access to the requested scope.', tool, 'authorization', input.scopeKey);
+      const normalizedQuery = input.query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
+      const cacheVersion = 1;
+      const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
+      const scopeContent = await Promise.all([repo.listFolders(input.scopeKey, true), repo.listDocuments(input.scopeKey, true)]);
+      const scopeRevision = createHash('sha256').update(scopeContent.flat().map((item) => `${item.key}:${item.updatedAt}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`).sort().join('\n')).digest('hex');
+      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, cacheVersion, now: now() });
+      const cachedValue = cached?.output as { result?: unknown; scopeRevision?: string; minimumScore?: number; revisions?: Array<{ type: 'folder' | 'document'; key: string; updatedAt: string }> } | undefined;
+      let reusable = Boolean(cachedValue?.result && cachedValue.revisions && cachedValue.scopeRevision === scopeRevision && cachedValue.minimumScore === input.minimumScore);
+      if (reusable) {
+        for (const revision of cachedValue!.revisions!) {
+          const current = revision.type === 'folder' ? await repo.getFolder(revision.key) : await repo.getDocument(revision.key);
+          if (!current || current.scopeKey !== input.scopeKey || current.updatedAt !== revision.updatedAt || current.deletedAt || current._internalDeletion) { reusable = false; break; }
+        }
+      }
+      if (reusable) {
+        const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, cacheVersion, output: cachedValue, now: now(), expiresAt: new Date(d.clock().getTime() + 60 * 60 * 1000).toISOString() });
+        result = parsed;
+      } else {
+        let queryEmbedding: number[];
+        try { queryEmbedding = await embed(input.query, undefined, input.scopeKey, 'query'); }
+        catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
+        const [folderMatches, documentMatches] = await Promise.all([
+          repo.semanticSearchFolders!({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], minScore: input.minimumScore, limit: 40 }),
+          repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], minScore: input.minimumScore, limit: 100 }),
+        ]);
+        const selectedFolders = [];
+        for (const match of folderMatches) {
+          if (match.score >= input.minimumScore && await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) selectedFolders.push(match);
+          if (selectedFolders.length === 4) break;
+        }
+        const folders = selectedFolders.map(({ folder: current, score }) => ({
+          key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), score: Math.max(0, Math.min(1, score)),
+        }));
+        const selectedDocuments = [];
+        for (const match of documentMatches) {
+          if (match.score >= input.minimumScore && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
+          if (selectedDocuments.length === 10) break;
+        }
+        const documents = [];
+        let summariesComplete = true;
+        for (const { document: current, matchedContent, score } of selectedDocuments) {
+          let summary: string;
+          try {
+            const generatedSummary = await action('reason', {
+              instruction: `Summarize only how this document relates to the search query: ${input.query}`,
+              title: current.name,
+              content: (matchedContent ?? current.content).slice(0, 16_000),
+            }, current.key, current.scopeKey);
+            summary = z.string().trim().min(1).parse(generatedSummary.text);
+          } catch {
+            summariesComplete = false;
+            summary = `This document contains semantically relevant information for "${input.query}".`;
+          }
+          documents.push({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, score: Math.max(0, Math.min(1, score)), summary });
+        }
+        const freshResult = { query: input.query, folders, documents, cached: false };
+        const revisions = [
+          ...selectedFolders.map(({ folder: current }) => ({ type: 'folder' as const, key: current.key, updatedAt: current.updatedAt })),
+          ...selectedDocuments.map(({ document: current }) => ({ type: 'document' as const, key: current.key, updatedAt: current.updatedAt })),
+        ];
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, cacheVersion, output: { result: freshResult, revisions, scopeRevision, minimumScore: input.minimumScore }, now: now(), expiresAt: summariesComplete ? new Date(d.clock().getTime() + 60 * 60 * 1000).toISOString() : now() });
+        result = freshResult;
       }
     } else {
       const organizationSearch = tool === 'organization.document.search';

@@ -11,6 +11,7 @@ import { agentMemberRevokeTool } from './agent-member-revoke';
 import { agentMemberSyncTool } from './agent-member-sync';
 import { artifactCreateTool } from './artifact-create';
 import { documentContentToolDefinition } from './document-content';
+import { documentCreateToolDefinition } from './document-create';
 import { documentCopyToolDefinition } from './document-copy';
 import { documentCreateVersionToolDefinition } from './document-create-version';
 import { documentDeleteToolDefinition } from './document-delete';
@@ -97,6 +98,8 @@ import { scopeAgentReadTool } from './scope-agent-read';
 import { scopeAgentRemoveTool } from './scope-agent-remove';
 import { scopeAgentRestoreTool } from './scope-agent-restore';
 import { scopeContentTool } from './scope-content';
+import { scopeContentSearchToolDefinition } from './scope-content-search';
+import { scopeContentSearchHistoryToolDefinition } from './scope-content-search-history';
 import { scopeCreateTool } from './scope-create';
 import { scopeDocumentSearchToolDefinition } from './scope-document-search';
 import { scopeListTool } from './scope-list';
@@ -136,11 +139,11 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   transcribeTool,
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
   agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,
-  documentContentToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
+  documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
   folderContentToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
   milestoneContentTool, milestoneChangeStatusTool, milestoneCompleteTool, milestoneCreateTool, milestoneDeleteTool, milestoneFindTool, milestoneListTool, milestoneMoveTool, milestoneRenameTool, milestoneReopenTool, milestoneRestoreTool, milestoneScheduleTool, milestoneUpdateTool,
   organizationContentTool, organizationDocumentSearchToolDefinition, organizationMemberActivateTool, organizationMemberAddTool, organizationMemberListTool, organizationMemberReadTool, organizationMemberRemoveTool, organizationMemberRoleUpdateTool, organizationMemberSuspendTool, organizationProjectSearchTool, organizationProviderDisableTool, organizationProviderEnableTool, organizationProviderListTool, organizationProviderReadTool, organizationProviderTestTool, organizationReadTool, organizationRestoreTool, organizationUpdateTool,
   projectContentTool, projectCreateTool, projectDeleteTool, projectFindTool, projectListTool, projectMoveTool, projectRenameTool, projectRestoreTool, projectUpdateTool,
-  scopeAgentAccessThresholdUpdateTool, scopeAgentAddTool, scopeAgentContentTool, scopeAgentListTool, scopeAgentMoveTool, scopeAgentReadTool, scopeAgentRemoveTool, scopeAgentRestoreTool, scopeContentTool, scopeCreateTool, scopeDocumentSearchToolDefinition, scopeListTool, scopeMemberActivateTool, scopeMemberAddTool, scopeMemberListTool, scopeMemberReadTool, scopeMemberRemoveTool, scopeMemberRoleUpdateTool, scopeMemberSuspendTool, scopeMoveTool, scopeProjectSearchTool, scopeReadTool, scopeRemoveTool, scopeRestoreTool, scopeUpdateTool,
+  scopeAgentAccessThresholdUpdateTool, scopeAgentAddTool, scopeAgentContentTool, scopeAgentListTool, scopeAgentMoveTool, scopeAgentReadTool, scopeAgentRemoveTool, scopeAgentRestoreTool, scopeContentTool, scopeContentSearchToolDefinition, scopeContentSearchHistoryToolDefinition, scopeCreateTool, scopeDocumentSearchToolDefinition, scopeListTool, scopeMemberActivateTool, scopeMemberAddTool, scopeMemberListTool, scopeMemberReadTool, scopeMemberRemoveTool, scopeMemberRoleUpdateTool, scopeMemberSuspendTool, scopeMoveTool, scopeProjectSearchTool, scopeReadTool, scopeRemoveTool, scopeRestoreTool, scopeUpdateTool,
   taskContentTool, taskChangeStatusTool, taskCompleteTool, taskCreateTool, taskDeleteTool, taskFindTool, taskListTool, taskMoveTool, taskReopenTool, taskReorderTool, taskRenameTool, taskRestoreTool, taskRewriteTool, taskSummarizeTool, taskTranslateTool, taskUpdateTool,
 ] as const);

@@ -19,8 +19,8 @@ export function UploadIcon({ variant = "default", size = "md", strokeWidth = 1.4
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path d="m7 9 5-5 5 5M12 4v12" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+      <Path d="M5 15v4h14v-4" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }

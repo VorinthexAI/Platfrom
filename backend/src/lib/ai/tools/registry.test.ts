@@ -6,8 +6,8 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(132);
-    expect(TOOL_DEFINITIONS).toHaveLength(132);
+    expect(TOOL_NAMES).toHaveLength(135);
+    expect(TOOL_DEFINITIONS).toHaveLength(135);
     expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 97);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES.filter((name) => name === 'chat')).toHaveLength(1);
