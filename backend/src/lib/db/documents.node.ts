@@ -67,9 +67,9 @@ export async function updateDocument(documentKey: string, patch: import('./conte
   return scoped;
 }
 
-export async function updateDocumentInScope(scopeKey: string, documentKey: string, patch: import('./content-persistence.node').ScopedDocumentPatch) {
+export async function updateDocumentInScope(scopeKey: string, documentKey: string, patch: import('./content-persistence.node').ScopedDocumentPatch, options?: { expectedUpdatedAt?: string }) {
   const { contentPersistence } = await import('./content-persistence.node');
-  return contentPersistence.updateDocument(scopeKey, documentKey, patch);
+  return contentPersistence.updateDocument(scopeKey, documentKey, patch, options);
 }
 
 export async function deleteDocumentInScope(scopeKey: string, documentKey: string): Promise<boolean> {
@@ -187,6 +187,7 @@ export interface ContentSemanticMatch {
   source: 'document' | 'version';
   score: number;
   document: Document;
+  matchedContent?: string;
   version?: import('./document-versions.node').DocumentVersion;
 }
 
@@ -211,6 +212,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
         LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(${db.collection('folders')}, document.folderKey) : null
         FILTER folder == null || folder.scopeKey == document.scopeKey
+        FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
         FILTER ${input.includeArchived ?? false} || document.deletedAt == null
         FILTER ${input.includeArchived ?? false} || folder == null || folder.deletedAt == null
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
@@ -222,11 +224,13 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER ${input.updatedAfter ?? null} == null || document.updatedAt >= ${input.updatedAfter ?? null}
         FILTER ${input.updatedBefore ?? null} == null || document.updatedAt <= ${input.updatedBefore ?? null}
         LET vectors = IS_ARRAY(document.chunkEmbeddings) && LENGTH(document.chunkEmbeddings) > 0 ? document.chunkEmbeddings : [document.embedding]
-        LET scores = (FOR vector IN vectors FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(${input.embedding}) && LENGTH(vector[* FILTER !IS_NUMBER(CURRENT)]) == 0 RETURN COSINE_SIMILARITY(vector, ${input.embedding}))
-        LET score = MAX(scores)
+        LET rankedVectors = (FOR index IN 0..LENGTH(vectors)-1 LET vector = vectors[index] FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(${input.embedding}) && LENGTH(vector[* FILTER !IS_NUMBER(CURRENT)]) == 0 LET vectorScore = COSINE_SIMILARITY(vector, ${input.embedding}) SORT vectorScore DESC LIMIT 1 RETURN { index, score: vectorScore })
+        LET bestVector = FIRST(rankedVectors)
+        LET score = bestVector.score
         FILTER score != null
         FILTER score >= ${input.minScore ?? 0}
-        RETURN { source: "document", score, document }
+        LET matchedContent = IS_ARRAY(document.contentChunks) && bestVector.index < LENGTH(document.contentChunks) ? document.contentChunks[bestVector.index] : LEFT(document.content, 16000)
+        RETURN { source: "document", score, document, matchedContent }
     ) : []
     LET versionMatches = ${sources.includes('version')} ? (
       FOR version IN ${db.collection('documentVersions')}
@@ -266,6 +270,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
       source,
       score: Number(match.score),
       document: documentSchema.parse(withArangoKey(match.document as Record<string, unknown>)),
+      ...(typeof match.matchedContent === 'string' ? { matchedContent: match.matchedContent } : {}),
       ...(source === 'version' ? { version: documentVersionSchema.parse(withArangoKey(match.version as Record<string, unknown>)) } : {}),
     };
   });

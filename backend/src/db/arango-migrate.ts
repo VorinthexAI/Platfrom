@@ -760,6 +760,8 @@ export const collections: CollectionSpec[] = [
   // Private replay ledger. Responses may contain one-time share tokens, so this
   // collection is deliberately not registered as a generic application node.
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
+  // Private per-user search history and replay cache. Never expose through the generic node registry.
+  { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }, { fields: ['expiresAt'] }] },
   { name: 'projects', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['contentFolderKey'], unique: true }, { fields: ['scopeKey', 'name'] }] },
   { name: 'milestones', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['projectKey', 'order'] }, { fields: ['projectKey', 'status'] }] },
   { name: 'tasks', embedKeys: ['title', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['milestoneKey', 'deletedAt'] }, { fields: ['milestoneKey', 'position'] }, { fields: ['projectKey', 'status'] }, { fields: ['priority'] }] },

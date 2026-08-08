@@ -74,6 +74,27 @@ export async function getFolderInScope(scopeKey: string, folderKey: string, incl
   return folder ? folderSchema.parse(withArangoKey(folder)) : null;
 }
 
+/** Scope authorization is applied before semantic scoring. */
+export async function semanticSearchFolders(input: { embedding: number[]; authorizedScopeKeys: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>> {
+  if (input.authorizedScopeKeys.length === 0 || input.embedding.length === 0) return [];
+  const cursor = await db.query(aql`
+    FOR folder IN ${db.collection(FOLDERS_COLLECTION)}
+      FILTER folder.scopeKey IN ${input.authorizedScopeKeys}
+      FILTER folder.deletedAt == null
+      FILTER !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
+      FILTER IS_ARRAY(folder.embedding) && LENGTH(folder.embedding) == LENGTH(${input.embedding})
+      LET score = COSINE_SIMILARITY(folder.embedding, ${input.embedding})
+      FILTER IS_NUMBER(score) && score >= ${input.minScore}
+      SORT score DESC, folder._key ASC
+      LIMIT ${Math.min(Math.max(input.limit, 1), 40)}
+      RETURN { score, folder }
+  `);
+  return (await cursor.all()).map((match: Record<string, unknown>) => ({
+    score: Number(match.score),
+    folder: folderSchema.parse(withArangoKey(match.folder as Record<string, unknown>)),
+  }));
+}
+
 export async function listFoldersByScope(
   scopeKey: string,
   options: { parentFolderKey?: string | null; includeArchived?: boolean; includePendingDeletion?: boolean } = {},

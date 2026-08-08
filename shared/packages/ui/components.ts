@@ -20,6 +20,7 @@ export * from './components/tooltip';
 export * from './components/popover';
 export * from './components/modal';
 export * from './components/drawer';
+export * from './components/bottom-sheet';
 export * from './components/toast';
 export * from './components/alert';
 export * from './components/card';
@@ -49,4 +50,3 @@ export * from './components/settings-panel';
 export * from './components/separator';
 export * from './components/toolbar';
 export * from './components/logo-mark';
-

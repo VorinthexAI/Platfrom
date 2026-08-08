@@ -35,6 +35,13 @@ function providerInputSchema(name: ContentToolName) {
       { required: ['content'], not: { required: ['html'] } },
     ];
   }
+  if (name === 'document.create') {
+    const properties = schema.properties as Record<string, any>;
+    properties.representation.oneOf = [
+      { required: ['html'], not: { required: ['content'] } },
+      { required: ['content'], not: { required: ['html'] } },
+    ];
+  }
   if (name === 'document.read') {
     schema.description = 'When both offsets are supplied, endOffset must be greater than startOffset.';
   }

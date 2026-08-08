@@ -12,14 +12,14 @@ import {
 
 const expectedNames = [
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete',
-  'document.parse', 'document.find', 'document.list', 'document.read', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
-  'scope.document.search', 'organization.document.search',
+  'document.parse', 'document.create', 'document.find', 'document.list', 'document.read', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
 ] as const;
 
 describe('Content tool registry', () => {
-  test('contains exactly the 35 dotted names and no action-style kebab names', () => {
+  test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(35);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(38);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       expect(name).toContain('.');
@@ -90,6 +90,8 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, createVersion: true }] })).toThrow();
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true }] })).toThrow();
     expect(() => contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, isFavorite: true }] })).toThrow();
+    expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: { html: '<p>x</p>', content: 'x' } })).toThrow();
+    expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: {} })).toThrow();
   });
 
   test('validates version label keys and lengths at the contract boundary', () => {

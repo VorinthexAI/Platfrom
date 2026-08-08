@@ -68,6 +68,7 @@ async function scopedUpdate<T>(
   key: string,
   patch: Record<string, unknown>,
   parse: (value: Record<string, unknown>) => T,
+  expectedUpdatedAt?: string,
 ): Promise<T | null> {
   const { set, unset } = splitPatch(patch);
   const ownership = collection === 'folders' ? `
@@ -93,6 +94,7 @@ async function scopedUpdate<T>(
   const cursor = await executor.query(`
     FOR current IN @@collection
       FILTER current._key == @key && current.scopeKey == @scopeKey
+      FILTER @expectedUpdatedAt == null || current.updatedAt == @expectedUpdatedAt
       ${ownership}
       LIMIT 1
       REPLACE current WITH UNSET(MERGE(current, @patch), APPEND(@unset, ["_id", "_rev"]))
@@ -106,6 +108,7 @@ async function scopedUpdate<T>(
     ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
     patch: set,
     unset,
+    expectedUpdatedAt: expectedUpdatedAt ?? null,
   });
   const value = await cursor.next();
   return value ? parse(withArangoKey(value as Record<string, unknown>)) : null;
@@ -282,7 +285,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (patch.embedding !== undefined && patch.embedding.length) currentEmbeddingSchema.parse(patch.embedding);
       return scopedUpdate(executor, 'folders', scopeKey, key, patch, (value) => folderSchema.parse(value));
     },
-    updateDocument(scopeKey: string, key: string, patch: ScopedDocumentPatch) {
+    updateDocument(scopeKey: string, key: string, patch: ScopedDocumentPatch, options?: { expectedUpdatedAt?: string }) {
       if (patch.content !== undefined && patch.html === undefined) throw new Error('Document content must be updated through HTML.');
       if (patch.html !== undefined && patch.embedding === undefined) throw new Error('Document HTML updates require a fresh embedding.');
       if (patch.html !== undefined && patch.content === undefined) throw new Error('Document HTML updates require derived content.');
@@ -296,7 +299,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       if (patch.embedding !== undefined) currentEmbeddingSchema.parse(patch.embedding);
       if (chunkEmbeddings !== undefined) currentEmbeddingBatchSchema.parse(chunkEmbeddings);
       const preparedPatch = patch.html === undefined ? patch : { ...patch, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks!.length, semanticContentHash: documentSemanticHash(patch.content!), _semanticChunkingSkipped: undefined, ...canonicalRepresentations(patch.html, patch.content!) };
-      return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value));
+      return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value), options?.expectedUpdatedAt);
     },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {
       return (async () => {

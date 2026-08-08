@@ -26,7 +26,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async getDocument(key) { return documents.get(key) ?? null; },
     async listDocuments(key) { return [...documents.values()].filter((value) => value.scopeKey === key); },
     async insertDocument(value) { documents.set(value.key, value); return value; },
-    async updateDocument(key, patch) { patches.push(patch); const value = { ...documents.get(key), ...patch }; documents.set(key, value); return value; },
+    async updateDocument(key, patch, options) { const current = documents.get(key); if (options?.expectedUpdatedAt && current.updatedAt !== options.expectedUpdatedAt) throw new Error('Document update conflict.'); patches.push(patch); const value = { ...current, ...patch }; documents.set(key, value); return value; },
     async setDocumentDeletion(key, marker, owner) { const current = documents.get(key); if (!current || (owner && current._internalDeletion?.owner !== owner)) return null; const value = { ...current, _internalDeletion: marker }; if (!marker) delete value._internalDeletion; documents.set(key, value); return value; },
     async deleteDocument(key) { documents.delete(key); },
     async getShare(key) { return shares.get(key) ?? null; },
@@ -45,6 +45,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async createVersion(value) { const version = { ...value, key: newId(), version: [...versions.values()].filter((item) => item.documentKey === value.documentKey).length + 1, deletedAt: null, createdAt: now }; versions.set(version.key, version); return version; },
     async deleteVersion(key) { versions.delete(key); },
     async semanticSearch() { return [...documents.values()].map((document) => ({ score: 0.8, document })); },
+    async semanticSearchFolders() { return [...folders.values()].map((folder) => ({ score: 0.8, folder })); },
     async transaction(operation) { return operation(repository); },
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
@@ -248,6 +249,88 @@ describe('Content runtime', () => {
     expect(output.results[0]?.success).toBe(true);
     expect(actions).toEqual(['document-generate-html', 'document-generate-content', 'document-embed']);
     expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding });
+  });
+
+  test('creates and autosaves live documents without versions', async () => {
+    const f = fixture('moderator');
+    const dependencies = { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } };
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Plan', representation: { content: 'Initial plan' } }, f.context, dependencies);
+    expect(created.document.name).toBe('Plan');
+    expect(f.versions.size).toBe(0);
+    const autosaved = await runContentTool('document.update', { updates: [{ documentKey: created.document.key, content: 'Autosaved plan', createVersion: false, expectedUpdatedAt: created.document.updatedAt }] }, f.context, dependencies);
+    expect(f.versions.size).toBe(0);
+    const autosavedAt = autosaved.results[0]?.data?.document.updatedAt;
+    expect(autosavedAt).toBeDefined();
+    expect(Date.parse(autosavedAt!)).toBeGreaterThan(Date.parse(created.document.updatedAt));
+    const conflict = await runContentTool('document.update', { updates: [{ documentKey: created.document.key, content: 'Stale save', expectedUpdatedAt: created.document.updatedAt }] }, f.context, dependencies);
+    expect(conflict.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_VERSION_CONFLICT' } });
+  });
+
+  test('searches folders and chunk-aware documents with caps, summaries, cache, auth, and isolated history', async () => {
+    const f = fixture('viewer');
+    for (let index = 0; index < 6; index += 1) {
+      const key = newId();
+      f.folders.set(key, { key, scopeKey: f.scopeKey, name: `Folder ${index}`, embedding, createdAt: now, updatedAt: now });
+    }
+    for (let index = 0; index < 12; index += 1) f.addDocument(`Roadmap content ${index}`);
+    let embeddingCalls = 0;
+    let summaryCalls = 0;
+    let allowed = true;
+    const rows = new Map<string, any>();
+    f.repository.allowedScopeKeys = async () => allowed ? [f.scopeKey] : [];
+    f.repository.semanticSearchFolders = async () => [...f.folders.values()].map((folder, index) => ({ score: index === 0 ? 0.54 : 0.9, folder }));
+    f.repository.semanticSearch = async () => [...f.documents.values()].map((document, index) => ({ score: index === 0 ? 0.54 : 0.9, document }));
+    const searchQueries = {
+      async get({ actorKey, scopeKey, normalizedQuery }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}`) ?? null; },
+      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
+      async list({ actorKey, scopeKey, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count })).slice(0, limit); },
+    };
+    const dependencies: any = {
+      repository: f.repository,
+      searchQueries,
+      embed: async () => { embeddingCalls += 1; return embedding; },
+      runAction: async (_action: string, input: any) => { summaryCalls += 1; expect(input.instruction).toContain('Launch Roadmap'); return { text: `Relevant to Launch Roadmap: ${input.title}` }; },
+    };
+    const first = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Launch Roadmap' }, f.context, dependencies);
+    expect(first.folders).toHaveLength(4);
+    expect(first.documents).toHaveLength(10);
+    expect(first.folders.every((item) => item.score >= 0.55)).toBe(true);
+    expect(first.documents.every((item) => item.score >= 0.55 && item.summary.includes('Launch Roadmap'))).toBe(true);
+    expect(embeddingCalls).toBe(1);
+    expect(summaryCalls).toBe(10);
+    const replay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: '  launch   roadmap  ' }, f.context, dependencies);
+    expect(replay.cached).toBe(true);
+    expect(embeddingCalls).toBe(1);
+    expect(summaryCalls).toBe(10);
+    const history = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
+    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', count: 2 }]);
+    const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
+    const isolated = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, otherContext, dependencies);
+    expect(isolated.history).toEqual([]);
+    allowed = false;
+    await expect(runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+  });
+
+  test('excludes semantic matches below archived folder ancestors before summary generation', async () => {
+    const f = fixture('viewer');
+    const archivedParentKey = newId();
+    const childKey = newId();
+    f.folders.set(archivedParentKey, { key: archivedParentKey, scopeKey: f.scopeKey, name: 'Archived', embedding, deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: archivedParentKey, name: 'Hidden child', embedding, createdAt: now, updatedAt: now });
+    const documentKey = f.addDocument('Hidden content');
+    f.documents.get(documentKey).folderKey = childKey;
+    f.repository.semanticSearchFolders = async () => [{ score: 0.9, folder: f.folders.get(childKey) }];
+    f.repository.semanticSearch = async () => [{ score: 0.9, document: f.documents.get(documentKey), matchedContent: 'Hidden content' }];
+    let summaryCalls = 0;
+    const result = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'hidden' }, f.context, {
+      repository: f.repository,
+      embed: async () => embedding,
+      runAction: async () => { summaryCalls += 1; return { text: 'Should not run' }; },
+      searchQueries: { async get() { return null; }, async record() {}, async list() { return []; } },
+    });
+    expect(result.folders).toEqual([]);
+    expect(result.documents).toEqual([]);
+    expect(summaryCalls).toBe(0);
   });
 
   test('re-embeds legacy vectors for every new document and version rollout path', async () => {
@@ -642,6 +725,7 @@ describe('Content runtime', () => {
         async download() { return { bytes: new TextEncoder().encode('original'), mimeType: 'text/plain' }; },
         async copy(input: any) { return { storageKey: input.destinationKey }; },
       };
+      const searchRows = new Map<string, any>();
       const dependencies: any = {
         repository: f.repository,
         storage,
@@ -659,6 +743,11 @@ describe('Content runtime', () => {
           if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
           throw new Error(`Unexpected action ${action}`);
         },
+        searchQueries: {
+          async get({ actorKey, scopeKey, normalizedQuery }: any) { return searchRows.get(`${actorKey}:${scopeKey}:${normalizedQuery}`) ?? null; },
+          async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = searchRows.get(identity); searchRows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
+          async list({ actorKey, scopeKey, limit }: any) { return [...searchRows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count })).slice(0, limit); },
+        },
       };
       let input: any;
       if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
@@ -671,6 +760,7 @@ describe('Content runtime', () => {
       else if (name === 'folder.restore') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'document.parse') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
+      else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', representation: { content: 'Created body' } };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.read') input = { documentKeys: [documentKey], mode: 'content' };
@@ -701,6 +791,8 @@ describe('Content runtime', () => {
       else if (name === 'document.translate') input = { documentKeys: [documentKey], targetLanguage: 'French' };
       else if (name === 'document.rewrite') input = { rewrites: [{ documentKey, instruction: 'Improve clarity' }] };
       else if (name === 'scope.document.search') input = { scopeKey: f.scopeKey, query: 'source' };
+      else if (name === 'scope.content.search') input = { scopeKey: f.scopeKey, query: 'source' };
+      else if (name === 'scope.content.search-history') input = { scopeKey: f.scopeKey };
       else input = { organizationKey: f.context.organizationKey, query: 'source' };
       const output: any = await runContentTool(name, input, f.context, dependencies);
       if (output.summary) expect(output.summary.failed, name).toBe(0);

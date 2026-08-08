@@ -327,6 +327,137 @@
   padding: clamp(24px, 3vw, 44px);
 }
 
+.vui-bottom-sheet-overlay {
+  animation: vui-bottom-sheet-overlay-in 220ms ease-out;
+  background: rgba(3, 5, 7, 0.72);
+  inset: 0;
+  position: fixed;
+  z-index: 1000;
+}
+
+.vui-bottom-sheet-overlay[data-state="closed"] {
+  animation: vui-bottom-sheet-overlay-out 180ms ease-in;
+}
+
+.vui-bottom-sheet {
+  animation: vui-bottom-sheet-in 320ms var(--vui-ease-luxury);
+  background: var(--vui-gradient-panel);
+  border: 1px solid var(--vui-color-border);
+  border-bottom: 0;
+  border-radius: var(--vui-radius-lg) var(--vui-radius-lg) 0 0;
+  bottom: 0;
+  box-shadow:
+    0 -24px 80px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: var(--vui-color-text);
+  left: 50%;
+  max-height: min(90dvh, 760px);
+  max-width: 680px;
+  overflow-y: auto;
+  padding: 0 24px max(24px, env(safe-area-inset-bottom));
+  position: fixed;
+  transform: translate(-50%, var(--vui-bottom-sheet-drag-y, 0));
+  transition: transform 220ms var(--vui-ease-luxury);
+  width: min(100%, 680px);
+  z-index: 1001;
+}
+
+.vui-bottom-sheet[data-dragging] {
+  transition: none;
+  user-select: none;
+}
+
+.vui-bottom-sheet[data-state="closed"] {
+  animation: vui-bottom-sheet-out 180ms ease-in;
+}
+
+.vui-bottom-sheet:focus {
+  outline: none;
+}
+
+.vui-bottom-sheet-drag-handle {
+  align-items: center;
+  cursor: grab;
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 14px;
+  touch-action: none;
+}
+
+.vui-bottom-sheet-drag-handle:active {
+  cursor: grabbing;
+}
+
+.vui-bottom-sheet-drag-handle span {
+  background: var(--vui-color-muted);
+  border-radius: var(--vui-radius-pill);
+  height: 4px;
+  opacity: 0.75;
+  width: 42px;
+}
+
+.vui-bottom-sheet-header {
+  padding: 0 4px 18px;
+}
+
+.vui-bottom-sheet-title {
+  font-family: var(--vui-font-ui);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0;
+}
+
+.vui-bottom-sheet-description {
+  color: var(--vui-color-muted);
+  font-family: var(--vui-font-ui);
+  font-size: 14px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+}
+
+.vui-bottom-sheet-content {
+  display: grid;
+  gap: 6px;
+}
+
+.vui-bottom-sheet-item {
+  justify-content: flex-start;
+  width: 100%;
+}
+
+@keyframes vui-bottom-sheet-in {
+  from {
+    transform: translate(-50%, 100%);
+  }
+}
+
+@keyframes vui-bottom-sheet-out {
+  to {
+    transform: translate(-50%, 100%);
+  }
+}
+
+@keyframes vui-bottom-sheet-overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes vui-bottom-sheet-overlay-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vui-bottom-sheet,
+  .vui-bottom-sheet-overlay {
+    animation-duration: 1ms;
+    transition-duration: 1ms;
+  }
+}
+
 .vui-totp-setup {
   align-items: stretch;
   background: var(--vui-gradient-panel);
