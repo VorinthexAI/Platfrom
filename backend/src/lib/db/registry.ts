@@ -36,7 +36,12 @@ import { getAllPollVotesChunked, listPollVotesPage, upsertPollVoteByKey } from '
 import { getAllFoldersChunked, listFoldersPage, upsertFolderByKey } from './folders.node';
 import { getAllDocumentsChunked, listDocumentsPage, upsertDocumentByKey } from './documents.node';
 import { getAllDocumentVersionsChunked, listDocumentVersionsPage, upsertDocumentVersionByKey } from './document-versions.node';
-import { getAllDocumentSharesChunked, listDocumentSharesPage, upsertDocumentShareByKey } from './document-shares.node';
+import { getAllImagesChunked, listImagesPage, upsertImageByKey } from './images.node';
+import { getAllCollectionsChunked, listCollectionsPage, upsertCollectionByKey } from './collections.node';
+import { getAllCollectionImagesChunked, listCollectionImagesPage, upsertCollectionImageByKey } from './collection-images.node';
+import { getAllCollectionMembersChunked, listCollectionMembersPage, upsertCollectionMemberByKey } from './collection-members.node';
+import { getAllTagsChunked, listTagsPage, upsertTagByKey } from './tags.node';
+import { getAllTagAssignmentsChunked, listTagAssignmentsPage, upsertTagAssignmentByKey } from './tag-assignments.node';
 import { getAllProjectsChunked, listProjectsPage, upsertProjectByKey } from './projects.node';
 import { getAllMilestonesChunked, listMilestonesPage, upsertMilestoneByKey } from './milestones.node';
 import { getAllTasksChunked, listTasksPage, upsertTaskByKey } from './tasks.node';
@@ -83,7 +88,12 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   folders: { listPage: listFoldersPage, getAllChunked: getAllFoldersChunked, upsertByKey: upsertFolderByKey },
   documents: { listPage: listDocumentsPage, getAllChunked: getAllDocumentsChunked, upsertByKey: upsertDocumentByKey },
   documentVersions: { listPage: listDocumentVersionsPage, getAllChunked: getAllDocumentVersionsChunked, upsertByKey: upsertDocumentVersionByKey },
-  documentShares: { listPage: listDocumentSharesPage, getAllChunked: getAllDocumentSharesChunked, upsertByKey: upsertDocumentShareByKey },
+  images: { listPage: listImagesPage, getAllChunked: getAllImagesChunked, upsertByKey: upsertImageByKey },
+  collections: { listPage: listCollectionsPage, getAllChunked: getAllCollectionsChunked, upsertByKey: upsertCollectionByKey },
+  collectionImages: { listPage: listCollectionImagesPage, getAllChunked: getAllCollectionImagesChunked, upsertByKey: upsertCollectionImageByKey },
+  collectionMembers: { listPage: listCollectionMembersPage, getAllChunked: getAllCollectionMembersChunked, upsertByKey: upsertCollectionMemberByKey },
+  tags: { listPage: listTagsPage, getAllChunked: getAllTagsChunked, upsertByKey: upsertTagByKey },
+  tagAssignments: { listPage: listTagAssignmentsPage, getAllChunked: getAllTagAssignmentsChunked, upsertByKey: upsertTagAssignmentByKey },
   projects: { listPage: listProjectsPage, getAllChunked: getAllProjectsChunked, upsertByKey: upsertProjectByKey },
   milestones: { listPage: listMilestonesPage, getAllChunked: getAllMilestonesChunked, upsertByKey: upsertMilestoneByKey },
   tasks: { listPage: listTasksPage, getAllChunked: getAllTasksChunked, upsertByKey: upsertTaskByKey },

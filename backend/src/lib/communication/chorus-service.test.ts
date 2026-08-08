@@ -34,6 +34,7 @@ function fixture() {
     listMessages: async () => [], listMessageReplies: async () => [], listThreadMessages: async () => [], listHistory: async () => [],
     getMessage: async (key: string) => messages.find((message) => message.key === key) ?? null,
     insertMessage: async (message: Message) => { messages.push(message); return message; },
+    upsertMessage: async (message: Message) => { const existing = messages.find(({ key }) => key === message.key); if (existing) return existing; messages.push(message); return message; },
     insertMentions: async (items: unknown[]) => { mentions.push(...items); },
     recordUserMentions: async (userKey: string, sourceIds: string[]) => {
       for (const sourceId of sourceIds) userMentionSchema.parse({ key: newId(), userKey, sourceId, count: 1, createdAt: now, updatedAt: now });
@@ -71,6 +72,16 @@ describe('Chorus service', () => {
     expect(result.orchestrators.map((orchestrator) => orchestrator.name)).toEqual(['Atlas']);
     await f.service.persistOrchestratorMessage(result.access, result.orchestrators[0]!, 'Reviewed.', undefined, result.message.key);
     expect(f.messages.map((message) => message.content)).toEqual(['@Atlas please review this', 'Reviewed.']);
+  });
+
+  test('upserts one response per source turn and orchestrator', async () => {
+    const f = fixture();
+    const result = await f.service.persistUserMessage(actor, f.channel.key, '@Atlas review this');
+    const first = await f.service.persistOrchestratorMessage(result.access, result.orchestrators[0]!, 'First response.', undefined, undefined, result.message.key);
+    const replay = await f.service.persistOrchestratorMessage(result.access, result.orchestrators[0]!, 'Duplicate response.', undefined, undefined, result.message.key);
+    expect(replay.key).toBe(first.key);
+    expect(replay.content).toBe('First response.');
+    expect(f.messages.filter(({ authorParticipantKey }) => authorParticipantKey === result.orchestrators[0]!.participantKey)).toHaveLength(1);
   });
 
   test('does not persist an orchestrator response after its triggering message is removed', async () => {

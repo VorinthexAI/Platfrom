@@ -28,6 +28,7 @@ describe('Chorus orchestrator chat flow', () => {
     const repository = {
       getGeneralChannelAccess: async () => access,
       insertMessage: async (message: Message) => { messages.push(message); return message; },
+      upsertMessage: async (message: Message) => { const existing = messages.find(({ key }) => key === message.key); if (existing) return existing; messages.push(message); return message; },
       insertMentions: async (mentions: unknown[]) => { persistedMentions.push(...mentions); },
       recordUserMentions: async () => {},
       getMessage: async (messageKey: string) => messages.find((message) => message.key === messageKey) ?? null,
@@ -66,6 +67,11 @@ describe('Chorus orchestrator chat flow', () => {
       listScopes: async (actor) => { expect(actor).toEqual({ organizationKey, membershipKey }); return []; },
       transcribe: async () => ({ text: '@Atlas hello' }),
       speak: async () => ({ audioBase64: 'UklGRg==', mimeType: 'audio/wav' }),
+      channelLease: {
+        acquire: async () => true,
+        refresh: async () => true,
+        release: async () => {},
+      },
     });
     const app = new Hono().post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', handlers.postMessage);
 

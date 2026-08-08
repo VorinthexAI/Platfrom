@@ -75,6 +75,7 @@ export interface CommunicationRepository {
   getMessage(messageKey: string): Promise<Message | null>;
   getThreadByRootMessage(rootMessageKey: string): Promise<Thread | null>;
   insertMessage(message: Message): Promise<Message>;
+  upsertMessage(message: Message): Promise<Message>;
   insertMentions(mentions: MessageMention[]): Promise<void>;
   recordUserMentions(userKey: string, sourceIds: string[], now: string): Promise<void>;
   recordUserReaction(userKey: string, reactionSlug: string, now: string): Promise<void>;
@@ -392,6 +393,22 @@ export const arangoCommunicationRepository: CommunicationRepository = {
     const pending = messageSchema.parse({ ...message, embedding: [], embeddingState: 'pending' });
     const result = await collection.save(toArangoDoc(pending), { returnNew: true });
     const stored = parse(messageSchema, result.new as Record<string, unknown>);
+    void indexMessage(stored);
+    return stored;
+  },
+  async upsertMessage(message) {
+    const pending = messageSchema.parse({ ...message, embedding: [], embeddingState: 'pending' });
+    let raw: Record<string, unknown> | null = null;
+    for (let attempt = 0; attempt < 5 && !raw; attempt += 1) {
+      try { raw = await first<Record<string, unknown>>('UPSERT { _key: @key } INSERT @message UPDATE {} IN messages RETURN NEW', { key: pending.key, message: toArangoDoc(pending) }); }
+      catch (error) {
+        const conflict = error && typeof error === 'object' && (('errorNum' in error && error.errorNum === 1200) || ('code' in error && error.code === 409));
+        if (!conflict || attempt === 4) throw error;
+        await Bun.sleep(5 * (attempt + 1));
+      }
+    }
+    if (!raw) throw new Error('Message upsert did not return a document.');
+    const stored = parse(messageSchema, raw);
     void indexMessage(stored);
     return stored;
   },
