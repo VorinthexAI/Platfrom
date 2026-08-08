@@ -64,24 +64,9 @@
   opacity: 1;
   animation: titleCharacterIn 1ms step-end backwards;
 }
-.titleWord:last-child .titleCharacter:last-child::after {
-  display: inline-block;
-  width: 0.06em;
-  height: 0.82em;
-  margin-left: 0.08em;
-  background: #d9dcdd;
-  content: "";
-  opacity: 0;
-  animation: titleCaret 650ms step-end 1.35s 3;
-}
-
 @keyframes titleCharacterIn {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@keyframes titleCaret {
-  50% { opacity: 1; }
 }
 
 .heroLead {
@@ -247,15 +232,16 @@
   .storeButtons { display: grid; }
   .storeButtons > span,
   .storeButtons a { width: 100%; }
-  .coreVisual { min-height: 445px; margin-top: 8px; }
-  .appsContent { padding-top: 12vh; }
+  .coreVisual { min-height: 380px; margin-top: 0; }
+  .appsContent { padding-top: 9dvh; }
   .sectionHeading { gap: 12px; }
   .sectionHeading h2 { font-size: 16px; letter-spacing: 0.19em; text-align: center; }
   .appsIntroduction { font-size: 13px; }
-  .journeyStep { min-height: 115vh; }
-  .panelAnchor { top: 0; min-height: 100dvh; align-items: end; padding-bottom: max(7vh, calc(env(safe-area-inset-bottom) + 24px)); }
+  .capabilityJourney { margin-top: 2dvh; }
+  .journeyStep { min-height: 94dvh; }
+  .panelAnchor { top: 6dvh; min-height: 86dvh; align-items: end; padding-bottom: max(4dvh, calc(env(safe-area-inset-bottom) + 18px)); }
   .capabilityPanel { width: 100%; padding: 30px 24px; text-align: left; backdrop-filter: none; }
-  .depthStage canvas { opacity: 0.75; }
+  .depthStage canvas { opacity: 0.9; }
   .capabilityDetails { align-content: center; }
   .capabilityDetails ul { grid-template-columns: 1fr; gap: 6px; }
   .coreConnection { text-align: left; }
@@ -266,6 +252,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .titleCharacter { opacity: 1; animation: none; }
-  .titleWord:last-child .titleCharacter:last-child::after { display: none; }
   .capabilityPanel { backdrop-filter: none; }
 }
