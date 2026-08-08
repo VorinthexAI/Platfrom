@@ -3,7 +3,7 @@ import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
 import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
-import { documentSemanticHash } from '../lib/ai/document-processing/chunking';
+import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
   let page = 0;
@@ -171,7 +171,7 @@ describe('Arango migration indexes', () => {
   });
   test('marks oversized legacy content for flat-vector fallback without blocking migration', async () => {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
-    const content = Array.from({ length: 65_000 }, (_, index) => `word${index}`).join(' ');
+    const content = 'word '.repeat(DOCUMENT_MAX_CHUNKS * DOCUMENT_CHUNK_MAX_WORDS + 1).trim();
     const migration = migrationDatabase('documents', { _key: 'oversized-document', _rev: 'oversized-rev', name: 'Legacy large document', html: `<p>${content}</p>`, content, embedding });
     await migrateContentDocuments(migration.database);
     const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;

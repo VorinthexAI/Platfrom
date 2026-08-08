@@ -37,8 +37,13 @@ describe('document text chunking', () => {
     expect(documentTextChunksSchema.safeParse([{ index: 0, text: 'one two', wordCount: 1 }]).success).toBe(false);
   });
 
+  test('accepts ten million characters beyond the previous 64 chunk limit', () => {
+    const expanded = 'x'.repeat(10_000_000);
+    expect(chunkDocumentContent(expanded)).toHaveLength(625);
+  });
+
   test('rejects content that would create an unbounded semantic index', () => {
-    const oversized = Array.from({ length: DOCUMENT_MAX_CHUNKS + 1 }, () => words(DOCUMENT_CHUNK_MAX_WORDS)).join('\n\n');
+    const oversized = 'x'.repeat(DOCUMENT_MAX_CHUNKS * DOCUMENT_CHUNK_MAX_CHARACTERS + 1);
     expect(() => chunkDocumentContent(oversized)).toThrow(`maximum of ${DOCUMENT_MAX_CHUNKS} semantic chunks`);
   });
 });

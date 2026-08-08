@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 export const DOCUMENT_CHUNK_MAX_WORDS = 1_000;
 export const DOCUMENT_CHUNK_MAX_CHARACTERS = 16_000;
-export const DOCUMENT_MAX_CHUNKS = 64;
+export const DOCUMENT_MAX_CHUNKS = 640;
 
 function countWords(value: string): number {
   return value.match(/\S+/g)?.length ?? 0;
@@ -54,8 +54,14 @@ export function chunkDocumentText(text: string): DocumentTextChunk[] {
 
   while (offset < source.length) {
     const remaining = source.slice(offset);
-    const words = [...remaining.matchAll(/\S+/g)];
-    const wordBoundary = words.length > DOCUMENT_CHUNK_MAX_WORDS ? words[DOCUMENT_CHUNK_MAX_WORDS]!.index : remaining.length;
+    let wordBoundary = remaining.length;
+    let scannedWordCount = 0;
+    for (const word of remaining.slice(0, DOCUMENT_CHUNK_MAX_CHARACTERS + 1).matchAll(/\S+/g)) {
+      if (scannedWordCount++ === DOCUMENT_CHUNK_MAX_WORDS) {
+        wordBoundary = word.index;
+        break;
+      }
+    }
     const hardMaximum = Math.min(remaining.length, DOCUMENT_CHUNK_MAX_CHARACTERS, wordBoundary);
     const length = hardMaximum === remaining.length ? hardMaximum : preferredBoundary(remaining, hardMaximum);
     const chunk = remaining.slice(0, Math.max(length, 1));
