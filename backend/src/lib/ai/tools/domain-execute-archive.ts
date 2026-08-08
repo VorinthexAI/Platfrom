@@ -12,6 +12,7 @@ import {
 } from '@/lib/db/document-shares.node';
 import type { ArchiveActionSlug } from './domain-archive-schemas';
 import { db, withTransaction } from '@/lib/db/client';
+import { withArchivePersistenceTransaction } from '@/lib/db/archive-persistence.node';
 import { withArangoKey } from '@/lib/db/base';
 import { folderSchema } from '@/lib/db/folders.node';
 import { documentSchema } from '@/lib/db/documents.node';
@@ -46,6 +47,20 @@ export class ArchiveLifecycleError extends Error {
 
 async function defaultAtomicMutate(resource: 'folders' | 'documents' | 'documentVersions' | 'documentShares', keys: string[], deletedAt: string | null, context: ArchiveContext): Promise<ArchiveNode[]> {
   const timestamp = new Date().toISOString();
+  if (resource === 'documentShares') {
+    return withArchivePersistenceTransaction(async (persistence) => {
+      const values: DocumentShare[] = [];
+      for (const key of keys) {
+        const current = await persistence.getShare(key);
+        if (!current || (deletedAt === null ? current.deletedAt === null : current.deletedAt !== null)) throw new ArchiveLifecycleError('archive_state_changed', 'Archive lifecycle state changed before the transaction committed.');
+        if (!await persistence.scopeBelongsToActiveOrganization(current.scopeKey, context.organizationKey)) throw new ArchiveLifecycleError('archive_state_changed', 'Archive lifecycle authorization changed before the transaction committed.');
+        const updated = await persistence.updateShare(current.scopeKey, key, { deletedAt, updatedAt: timestamp });
+        if (!updated) throw new ArchiveLifecycleError('archive_state_changed', 'Archive lifecycle state changed before the transaction committed.');
+        values.push(updated);
+      }
+      return values;
+    });
+  }
   const schema = resource === 'folders' ? folderSchema : resource === 'documents' ? documentSchema : resource === 'documentVersions' ? documentVersionSchema : documentShareSchema;
   const parentCollections = resource === 'folders' ? ['projects'] : resource === 'documents' ? ['folders'] : ['documents'];
   const guard = resource === 'folders'

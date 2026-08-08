@@ -104,4 +104,11 @@ describe('Archive lifecycle domain tools', () => {
     expect(failed.items.every(({ success }) => !success)).toBe(true);
     expect(atomic.document.deletedAt).toBeNull();
   });
+
+  test('routes document-share lifecycle batches through marker-aware Archive persistence', async () => {
+    const source = await Bun.file(new URL('./domain-execute-archive.ts', import.meta.url)).text();
+    expect(source).toContain("if (resource === 'documentShares')");
+    expect(source).toContain('withArchivePersistenceTransaction');
+    expect(source).toContain('persistence.updateShare');
+  });
 });

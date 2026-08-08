@@ -222,7 +222,7 @@ async function productionRepository(): Promise<ArchiveRepository> {
     },
     getShare: persistence.getShare,
     async listShares(scopeKey, documentKeys, options) {
-      const values = await persistence.listShares(scopeKey, documentKeys);
+      const values = await persistence.listShares(scopeKey, documentKeys, options);
       const at = options?.at ?? new Date().toISOString();
       return values.filter((share) => (options?.includeArchived || !share.deletedAt) && (options?.includeRevoked || !share.revokedAt) && (options?.includeExpired || !share.expiresAt || share.expiresAt > at));
     },

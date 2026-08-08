@@ -14,6 +14,7 @@ import { parseJson, parseQuery, strictObject } from './validation';
 import { CANONICAL_ORCHESTRATOR_NAMES } from '@/lib/orchestrators/roster';
 import type { MentionCandidate } from '@/lib/communication/repository';
 import { publishChorusTyping, subscribeChorusTyping, type ChorusTypingEvent } from '@/lib/communication/typing';
+import { randomUUID } from 'node:crypto';
 
 // Chorus identifiers are public application keys. Legacy organization records
 // may use stable opaque keys rather than generated CUIDs.
@@ -39,6 +40,8 @@ const speechBody = strictObject({ text: z.string().trim().min(1).max(8_000) });
 const CHORUS_RESPONSE_INSTRUCTION = `Reply directly to the user with a detailed, self-contained plain-text answer. Other orchestrator mentions only select independent recipients: do not address, converse with, or refer to other mentioned orchestrators or their responses. Explain the relevant reasoning, assumptions, tradeoffs, and practical next steps when useful. Use no Markdown, headings, bullets, numbering, emphasis markers, or preamble. Keep the complete response under 500 words.`;
 const CHORUS_PROVIDER_FALLBACK = 'I could not generate a response right now. Please try again.';
 const CHORUS_PARTIAL_FALLBACK = '\n\nI could not complete this response. Please try again.';
+const MAX_ORCHESTRATOR_RECIPIENTS = 4;
+const CHANNEL_LEASE_TTL_MS = 150_000;
 export const chorusMessageListQuerySchema = strictObject({ limit: z.coerce.number().int().min(1).max(200).default(100) });
 
 export interface ChorusApiDependencies {
@@ -50,6 +53,35 @@ export interface ChorusApiDependencies {
   subscribeTyping?(listener: (event: ChorusTypingEvent) => void): () => void;
   transcribe(organizationKey: string, audioBase64: string, prompt: string, signal: AbortSignal): Promise<TranscriptionOutput>;
   speak(organizationKey: string, text: string, signal: AbortSignal): Promise<SpeechOutput>;
+  channelLease?: ChorusChannelLease;
+}
+
+export interface ChorusChannelLease {
+  acquire(key: string, owner: string, ttlMs: number): Promise<boolean>;
+  refresh(key: string, owner: string, ttlMs: number): Promise<boolean>;
+  release(key: string, owner: string): Promise<void>;
+}
+
+const defaultChannelLease: ChorusChannelLease = {
+  async acquire(key, owner, ttlMs) {
+    const { redisConnection } = await import('@/lib/redis');
+    return await redisConnection.set(key, owner, 'PX', ttlMs, 'NX') === 'OK';
+  },
+  async refresh(key, owner, ttlMs) {
+    const { redisConnection } = await import('@/lib/redis');
+    return Number(await redisConnection.eval('if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("pexpire", KEYS[1], ARGV[2]) else return 0 end', 1, key, owner, String(ttlMs))) === 1;
+  },
+  async release(key, owner) {
+    const { redisConnection } = await import('@/lib/redis');
+    await redisConnection.eval('if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) else return 0 end', 1, key, owner);
+  },
+};
+
+function boundedWorkers<T>(items: readonly T[], limit: number, operation: (item: T) => Promise<void>): Promise<void>[] {
+  let next = 0;
+  return Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) await operation(items[next++]!);
+  });
 }
 
 const defaultDependencies: ChorusApiDependencies = {
@@ -216,11 +248,25 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
       if (resolved instanceof Response) return resolved;
       const channelKey = key.parse(c.req.param('channelKey'));
       const body = await parseJson(c, messageBody);
-      if (activeChannels.has(channelKey)) return c.json({ error: 'a message is already being processed for this channel' }, 409);
-      activeChannels.add(channelKey);
+      let preview;
+      try { preview = [...new Map((await dependencies.service.resolveOrchestrators(resolved, channelKey, body.content)).map((item) => [item.key, item])).values()]; }
+      catch (error) { if (error instanceof ChorusError) return c.json({ error: error.message }, statusFor(error)); throw error; }
+      if (preview.length > MAX_ORCHESTRATOR_RECIPIENTS) return c.json({ error: `at most ${MAX_ORCHESTRATOR_RECIPIENTS} orchestrators may be selected` }, 400);
+      const localChannelKey = `${resolved.organizationKey}:${channelKey}`;
+      if (activeChannels.has(localChannelKey)) return c.json({ error: 'a message is already being processed for this channel' }, 409);
+      activeChannels.add(localChannelKey);
+      const lease = dependencies.channelLease ?? defaultChannelLease;
+      const leaseKey = `chorus:channel-lease:${resolved.organizationKey}:${channelKey}`;
+      const leaseOwner = randomUUID();
+      let leaseAcquired = false;
       let streamStarted = false;
       try {
-        const { access, message, orchestrators } = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
+        leaseAcquired = await lease.acquire(leaseKey, leaseOwner, CHANNEL_LEASE_TTL_MS);
+        if (!leaseAcquired) { activeChannels.delete(localChannelKey); return c.json({ error: 'a message is already being processed for this channel' }, 409); }
+        const persisted = await dependencies.service.persistUserMessage(resolved, channelKey, body.content, body.threadKey, body.replyToMessageKey);
+        const { access, message } = persisted;
+        const orchestrators = [...new Map(persisted.orchestrators.map((item) => [item.key, item])).values()];
+        if (orchestrators.length > MAX_ORCHESTRATOR_RECIPIENTS) throw new ChorusError('conflict', `at most ${MAX_ORCHESTRATOR_RECIPIENTS} orchestrators may be selected`);
         const promptMessage = orchestratorPromptMessage(body.content, orchestrators);
         let context = '';
         try {
@@ -230,8 +276,31 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
         }
         const response = streamSSE(c, async (sse) => {
           streamStarted = true;
-          const turnMessageKeys = [message.key];
           const activeTyping = new Map<string, ChorusTypingEvent>();
+          const turnController = new AbortController();
+          const abortTurn = () => { if (!turnController.signal.aborted) turnController.abort(new DOMException('Chorus turn aborted', 'AbortError')); };
+          if (c.req.raw.signal.aborted) abortTurn();
+          else c.req.raw.signal.addEventListener('abort', abortTurn, { once: true });
+          let pendingWrite = Promise.resolve();
+          let workers: Promise<void>[] = [];
+          let leaseLost = false;
+          const write = (event: string, data: Record<string, unknown>) => {
+            const next = pendingWrite.then(() => turnController.signal.aborted ? undefined : sse.writeSSE({ event, data: JSON.stringify(data) }));
+            pendingWrite = next.catch(() => {});
+            return next;
+          };
+          const refreshLeaseOrAbort = async () => {
+            try {
+              if (!await lease.refresh(leaseKey, leaseOwner, CHANNEL_LEASE_TTL_MS)) throw new Error('lease ownership was lost');
+              return true;
+            } catch (error) {
+              leaseLost = true;
+              abortTurn();
+              console.error('chorus channel lease refresh failed', { organizationKey: resolved.organizationKey, channelKey, error });
+              return false;
+            }
+          };
+          const refreshLease = setInterval(() => { void refreshLeaseOrAbort(); }, CHANNEL_LEASE_TTL_MS / 3);
           const stopTyping = async (orchestratorKey: string) => {
             const current = activeTyping.get(orchestratorKey);
             if (!current) return;
@@ -239,38 +308,36 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
             await dependencies.publishTyping?.({ ...current, active: false, expiresAt: Date.now() });
           };
           try {
-            await sse.writeSSE({ event: 'start', data: JSON.stringify({ channelKey, userMessage: storedMessage(message) }) });
+            await write('start', { channelKey, userMessage: storedMessage(message) });
             if (!orchestrators.length && mentionsCanonicalOrchestrator(body.content)) {
-              await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'mentioned orchestrator is unavailable' }) });
+              await write('error', { error: 'mentioned orchestrator is unavailable' });
               return;
             }
             for (const orchestrator of orchestrators) {
               const typingEvent: ChorusTypingEvent = { organizationKey: resolved.organizationKey, channelKey, participantKey: orchestrator.participantKey, type: 'orchestrator', name: orchestrator.name, active: true, expiresAt: Date.now() + 120_000 };
               activeTyping.set(orchestrator.key, typingEvent);
               await dependencies.publishTyping?.(typingEvent);
-              await sse.writeSSE({ event: 'assistant-start', data: JSON.stringify({ orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } }) });
+              await write('assistant-start', { orchestrator: { participantKey: orchestrator.participantKey, key: orchestrator.key, name: orchestrator.name } });
+            }
+            workers = boundedWorkers(orchestrators, MAX_ORCHESTRATOR_RECIPIENTS, async (orchestrator) => {
               let storedContent = '';
               try {
                 const provider = dependencies.stream([orchestrator.skill, responseIdentity(orchestrator.name, orchestrator.role), context, CHORUS_RESPONSE_INSTRUCTION].filter(Boolean).join('\n\n'), { message: promptMessage }, {
                   organizationKey: resolved.organizationKey,
-                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [...turnMessageKeys] } },
-                  signal: c.req.raw.signal,
+                    retrievalContext: { organizationKey: resolved.organizationKey, membershipKey: resolved.membershipKey, exclude: { messages: [message.key] } },
+                  signal: turnController.signal,
                 });
                 for await (const chunk of provider) {
                   if (chunk.type === 'text-delta' && chunk.text) {
                     const accepted = boundedAssistantDelta(storedContent, chunk.text);
                     if (!accepted) continue;
                     storedContent += accepted;
-                    await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text: accepted }) });
+                    await write('token', { orchestratorKey: orchestrator.key, text: accepted });
                   }
                 }
                 if (!storedContent.trim()) throw new Error('orchestrator returned no valid content');
               } catch (error) {
-                if (requestWasAborted(c.req.raw.signal)) {
-                  try {
-                    await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
-                    await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });
-                  } catch {}
+                if (turnController.signal.aborted) {
                   return;
                 }
                 console.error('chorus orchestrator stream failed', { channelKey, orchestratorKey: orchestrator.key, error });
@@ -278,39 +345,56 @@ export function createChorusHandlers(dependencies: ChorusApiDependencies = defau
                 const accepted = boundedAssistantDelta(storedContent, fallback);
                 if (accepted) {
                   storedContent += accepted;
-                  await sse.writeSSE({ event: 'token', data: JSON.stringify({ orchestratorKey: orchestrator.key, text: accepted }) });
+                  await write('token', { orchestratorKey: orchestrator.key, text: accepted });
                 }
               }
               if (!storedContent.trim()) {
-                await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
+                await write('assistant-error', { orchestratorKey: orchestrator.key });
                 await stopTyping(orchestrator.key);
-                continue;
+                return;
+              }
+              if (turnController.signal.aborted || !await refreshLeaseOrAbort()) {
+                await stopTyping(orchestrator.key);
+                return;
               }
               let assistantMessage: Awaited<ReturnType<ChorusService['persistOrchestratorMessage']>>;
               try {
                 assistantMessage = await dependencies.service.persistOrchestratorMessage(access, orchestrator, storedContent, message.threadKey, body.replyToMessageKey, message.key);
               } catch (persistenceError) {
                 console.error('chorus orchestrator message persistence failed', { channelKey, orchestratorKey: orchestrator.key, error: persistenceError });
-                await sse.writeSSE({ event: 'assistant-error', data: JSON.stringify({ orchestratorKey: orchestrator.key }) });
+                await write('assistant-error', { orchestratorKey: orchestrator.key });
                 await stopTyping(orchestrator.key);
-                continue;
+                return;
               }
-              turnMessageKeys.push(assistantMessage.key);
-              await sse.writeSSE({ event: 'done', data: JSON.stringify({ orchestratorKey: orchestrator.key, message: storedMessage(assistantMessage) }) });
+              if (!await refreshLeaseOrAbort() || turnController.signal.aborted) {
+                await stopTyping(orchestrator.key);
+                return;
+              }
+              await write('done', { orchestratorKey: orchestrator.key, message: storedMessage(assistantMessage) });
               await stopTyping(orchestrator.key);
-            }
-            await sse.writeSSE({ event: 'complete', data: JSON.stringify({}) });
+            });
+            await Promise.allSettled(workers);
+            if (!leaseLost && !requestWasAborted(c.req.raw.signal) && await refreshLeaseOrAbort()) await write('complete', {});
           } catch (error) {
             console.error('chorus stream failed', { channelKey, error });
-            await sse.writeSSE({ event: 'error', data: JSON.stringify({ error: 'orchestrator stream failed' }) });
+            await write('error', { error: 'orchestrator stream failed' });
           } finally {
+            clearInterval(refreshLease);
+            abortTurn();
+            await Promise.allSettled(workers);
             await Promise.all([...activeTyping.keys()].map(stopTyping));
-            activeChannels.delete(channelKey);
+            await pendingWrite.catch(() => {});
+            await lease.release(leaseKey, leaseOwner).catch((error) => console.error('chorus channel lease release failed', { channelKey, error }));
+            leaseAcquired = false;
+            activeChannels.delete(localChannelKey);
           }
         });
         return response;
       } catch (error) {
-        if (!streamStarted) activeChannels.delete(channelKey);
+        if (!streamStarted) {
+          if (leaseAcquired) await lease.release(leaseKey, leaseOwner).catch(() => {});
+          activeChannels.delete(localChannelKey);
+        }
         if (error instanceof ChorusError) return c.json({ error: error.message }, statusFor(error));
         throw error;
       }

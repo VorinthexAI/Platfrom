@@ -30,7 +30,13 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async setDocumentDeletion(key, marker, owner) { const current = documents.get(key); if (!current || (owner && current._internalDeletion?.owner !== owner)) return null; const value = { ...current, _internalDeletion: marker }; if (!marker) delete value._internalDeletion; documents.set(key, value); return value; },
     async deleteDocument(key) { documents.delete(key); },
     async getShare(key) { return shares.get(key) ?? null; },
-    async listShares(_scopeKey, keys) { return [...shares.values()].filter((value) => keys.includes(value.documentKey)); },
+    async listShares(_scopeKey, keys, options = {}) {
+      const at = options.at ?? new Date().toISOString();
+      return [...shares.values()].filter((value) => keys.includes(value.documentKey)
+        && (options.includeArchived || !value.deletedAt)
+        && (options.includeRevoked || !value.revokedAt)
+        && (options.includeExpired || !value.expiresAt || value.expiresAt > at));
+    },
     async insertShare(value) { const share = { ...value, deletedAt: null }; shares.set(share.key, share); return share; },
     async updateShare(key, patch) { const value = { ...shares.get(key), ...patch }; shares.set(key, value); return value; },
     async deleteShare(key) { shares.delete(key); },
@@ -134,6 +140,21 @@ describe('Archive runtime', () => {
     const output = await runArchiveTool('document.share', { shares: [{ documentKey: f.addDocument(), permission: 'read', expiresAt: '2026-07-21T00:00:00.000Z' }] }, f.context, { repository: f.repository, clock: () => new Date(now) });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SHARE_INVALID' } });
     expect(f.shares.size).toBe(0);
+  });
+
+  test('lists revoked and expired shares only when explicitly requested', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument();
+    const base = { documentKey, scopeKey: f.scopeKey, permission: 'read', tokenHash: 'a'.repeat(64), deletedAt: null, createdAt: now, updatedAt: now };
+    const activeKey = newId(), revokedKey = newId(), expiredKey = newId();
+    f.shares.set(activeKey, { ...base, key: activeKey, expiresAt: '2027-07-22T12:00:00.000Z' });
+    f.shares.set(revokedKey, { ...base, key: revokedKey, revokedAt: now });
+    f.shares.set(expiredKey, { ...base, key: expiredKey, expiresAt: '2026-07-21T12:00:00.000Z' });
+
+    const active = await runArchiveTool('document.list-shares', { documentKeys: [documentKey] }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    expect(active.results[0]?.data?.shares.map((share: any) => share.key)).toEqual([activeKey]);
+    const all = await runArchiveTool('document.list-shares', { documentKeys: [documentKey], includeRevoked: true, includeExpired: true }, f.context, { repository: f.repository, clock: () => new Date(now) });
+    expect(all.results[0]?.data?.shares.map((share: any) => share.key).sort()).toEqual([activeKey, revokedKey, expiredKey].sort());
   });
 
   test('maps document processing failures into Archive taxonomy and retryability', async () => {

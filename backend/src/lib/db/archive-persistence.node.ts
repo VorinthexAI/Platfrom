@@ -1,16 +1,42 @@
 import { documentSchema, type Document } from './documents.node';
 import { folderSchema, type Folder } from './folders.node';
 import { documentShareSchema, type DocumentShare } from './document-shares.node';
+import { shareSchema, type Share } from './shares.node';
 import { documentVersionSchema, type DocumentVersion } from './document-versions.node';
 import { newId } from '@/lib/ids';
 import { toArangoDoc, withArangoKey } from './base';
 import { db, withTransaction } from './client';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 import { currentEmbeddingSchema, embeddingMetadata } from '@/lib/embeddings';
+import { z } from 'zod';
 
 type QueryCursor = { next(): Promise<unknown>; all?(): Promise<unknown[]> };
 export interface ArchiveQueryExecutor {
   query(query: string, bindVars?: Record<string, unknown>): Promise<QueryCursor>;
+}
+
+export const ARCHIVE_SHARE_CUTOVER_KEY = 'archive-document-shares-cutover';
+type ShareStorageMode = 'legacy' | 'dual' | 'global';
+
+async function shareStorageMode(executor: ArchiveQueryExecutor): Promise<ShareStorageMode> {
+  const collections = await executor.query('LET names = COLLECTIONS()[*].name RETURN { legacy: "documentShares" IN names, global: "shares" IN names }');
+  const state = await collections.next() as { legacy?: boolean; global?: boolean } | undefined;
+  if (!state?.global) return 'legacy';
+  if (!state.legacy) return 'global';
+  const marker = await executor.query('RETURN DOCUMENT(shares, @key)', { key: ARCHIVE_SHARE_CUTOVER_KEY });
+  return (await marker.next() as { state?: string } | null)?.state === 'global' ? 'global' : 'dual';
+}
+
+function globalDocumentShare(value: Record<string, unknown>): DocumentShare {
+  const share = shareSchema.parse(typeof value.key === 'string' ? value : withArangoKey(value));
+  if (share.sourceType !== 'document') throw new Error('Expected a document share.');
+  const { sourceType: _sourceType, sourceKey: documentKey, ...projected } = share;
+  return { ...projected, documentKey };
+}
+
+function toGlobalDocumentShare(share: DocumentShare): Share {
+  const { documentKey, ...fields } = share;
+  return shareSchema.parse({ ...fields, sourceType: 'document', sourceKey: documentKey });
 }
 
 type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'isFavorite' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
@@ -36,7 +62,7 @@ function splitPatch(patch: Record<string, unknown>) {
 
 async function scopedUpdate<T>(
   executor: ArchiveQueryExecutor,
-  collection: 'folders' | 'documents' | 'documentShares',
+  collection: 'folders' | 'documents' | 'documentShares' | 'shares',
   scopeKey: string,
   key: string,
   patch: Record<string, unknown>,
@@ -53,8 +79,13 @@ async function scopedUpdate<T>(
       LET destination = destinationKey == null ? null : DOCUMENT(folders, destinationKey)
       FILTER destinationKey == null || (destination != null && destination.scopeKey == @scopeKey)
       FILTER destinationKey == null || ((!HAS(destination, "_internalDeletion") || destination._internalDeletion == null) && destination.deletedAt == null)
-  ` : `
+  ` : collection === 'documentShares' ? `
       LET owner = DOCUMENT(documents, current.documentKey)
+      FILTER owner != null && owner.scopeKey == @scopeKey
+      FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
+  ` : `
+      FILTER current.sourceType == "document"
+      LET owner = DOCUMENT(documents, current.sourceKey)
       FILTER owner != null && owner.scopeKey == @scopeKey
       FILTER !HAS(owner, "_internalDeletion") || owner._internalDeletion == null
   `;
@@ -70,7 +101,7 @@ async function scopedUpdate<T>(
     '@collection': collection,
     key,
     scopeKey,
-    ...(collection === 'documentShares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
+    ...(collection === 'documentShares' || collection === 'shares' ? {} : { destinationKey: set.parentFolderKey ?? set.folderKey ?? null }),
     ...(collection === 'documents' ? { changesLocation: Object.prototype.hasOwnProperty.call(patch, 'folderKey') } : {}),
     patch: set,
     unset,
@@ -81,7 +112,7 @@ async function scopedUpdate<T>(
 
 async function scopedDelete(
   executor: ArchiveQueryExecutor,
-  collection: 'folders' | 'documents' | 'documentVersions' | 'documentShares',
+  collection: 'folders' | 'documents' | 'documentVersions' | 'documentShares' | 'shares',
   scopeKey: string,
   key: string,
 ): Promise<boolean> {
@@ -98,6 +129,10 @@ async function scopedDelete(
 /** Query-bound mutations can use either the global database or a streaming transaction executor. */
 export function createArchivePersistence(executor: ArchiveQueryExecutor) {
   return {
+    async scopeBelongsToActiveOrganization(scopeKey: string, organizationKey: string): Promise<boolean> {
+      const cursor = await executor.query('LET scope = DOCUMENT(scopes, @scopeKey) RETURN scope != null && scope.organizationKey == @organizationKey && scope.deletedAt == null', { scopeKey, organizationKey });
+      return await cursor.next() === true;
+    },
     async getFolder(key: string): Promise<Folder | null> {
       const cursor = await executor.query('RETURN DOCUMENT(folders, @key)', { key });
       const value = await cursor.next();
@@ -119,15 +154,22 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       return values.map((value) => documentSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
     async getShare(key: string): Promise<DocumentShare | null> {
-      const cursor = await executor.query('RETURN DOCUMENT(documentShares, @key)', { key });
+      const mode = await shareStorageMode(executor);
+      const cursor = await executor.query(mode === 'global'
+        ? 'LET share = DOCUMENT(shares, @key) FILTER share != null && share.sourceType == "document" RETURN share'
+        : 'RETURN DOCUMENT(documentShares, @key)', { key });
       const value = await cursor.next();
-      return value ? documentShareSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
+      return value ? mode === 'global' ? globalDocumentShare(value as Record<string, unknown>) : documentShareSchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
     },
-    async listShares(scopeKey: string, documentKeys: string[]): Promise<DocumentShare[]> {
+    async listShares(scopeKey: string, documentKeys: string[], options: { includeArchived?: boolean; includeExpired?: boolean; includeRevoked?: boolean; at?: string } = {}): Promise<DocumentShare[]> {
       if (documentKeys.length === 0) return [];
-      const cursor = await executor.query('FOR share IN documentShares FILTER share.scopeKey == @scopeKey && share.documentKey IN @documentKeys RETURN share', { scopeKey, documentKeys });
+      const at = z.string().datetime().parse(options.at ?? new Date().toISOString());
+      const mode = await shareStorageMode(executor);
+      const cursor = await executor.query(mode === 'global'
+        ? 'FOR share IN shares FILTER share.sourceType == "document" && share.scopeKey == @scopeKey && share.sourceKey IN @documentKeys FILTER @includeArchived || share.deletedAt == null FILTER @includeRevoked || share.revokedAt == null FILTER @includeExpired || share.expiresAt == null || share.expiresAt > @at RETURN share'
+        : 'FOR share IN documentShares FILTER share.scopeKey == @scopeKey && share.documentKey IN @documentKeys FILTER @includeArchived || share.deletedAt == null FILTER @includeRevoked || share.revokedAt == null FILTER @includeExpired || share.expiresAt == null || share.expiresAt > @at RETURN share', { scopeKey, documentKeys, includeArchived: options.includeArchived ?? false, includeRevoked: options.includeRevoked ?? false, includeExpired: options.includeExpired ?? false, at });
       const values = cursor.all ? await cursor.all() : [];
-      return values.map((value) => documentShareSchema.parse(withArangoKey(value as Record<string, unknown>)));
+      return values.map((value) => mode === 'global' ? globalDocumentShare(value as Record<string, unknown>) : documentShareSchema.parse(withArangoKey(value as Record<string, unknown>)));
     },
     async getVersion(key: string): Promise<DocumentVersion | null> {
       const cursor = await executor.query('RETURN DOCUMENT(documentVersions, @key)', { key });
@@ -170,6 +212,8 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
     },
     async insertShare(share: Omit<DocumentShare, 'deletedAt'>): Promise<DocumentShare> {
       const parsed = documentShareSchema.parse(share);
+      const global = toGlobalDocumentShare(parsed);
+      const mode = await shareStorageMode(executor);
       const cursor = await executor.query(
         `LET document = DOCUMENT(documents, @documentKey)
          FILTER document != null && document.scopeKey == @scopeKey
@@ -177,12 +221,16 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
          LET folder = HAS(document, "folderKey") && document.folderKey != null ? DOCUMENT(folders, document.folderKey) : null
          FILTER folder == null || folder.scopeKey == @scopeKey
          FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
-         INSERT @share INTO documentShares RETURN NEW`,
-        { share: toArangoDoc(parsed), documentKey: parsed.documentKey, scopeKey: parsed.scopeKey },
+         ${mode === 'dual'
+           ? 'INSERT @globalShare INTO shares LET created = NEW INSERT @legacyShare INTO documentShares RETURN created'
+           : 'INSERT @share INTO @@collection RETURN NEW'}`,
+        mode === 'dual'
+          ? { globalShare: toArangoDoc(global), legacyShare: toArangoDoc(parsed), documentKey: parsed.documentKey, scopeKey: parsed.scopeKey }
+          : { '@collection': mode === 'legacy' ? 'documentShares' : 'shares', share: toArangoDoc(mode === 'legacy' ? parsed : global), documentKey: parsed.documentKey, scopeKey: parsed.scopeKey },
       );
       const created = await cursor.next();
       if (!created) throw new Error('Share owner is pending deletion.');
-      return documentShareSchema.parse(withArangoKey(created as Record<string, unknown>));
+      return mode === 'legacy' ? documentShareSchema.parse(withArangoKey(created as Record<string, unknown>)) : globalDocumentShare(created as Record<string, unknown>);
     },
     async createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion> {
       currentEmbeddingSchema.parse(version.embedding);
@@ -228,7 +276,25 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
       return scopedUpdate(executor, 'documents', scopeKey, key, preparedPatch, (value) => documentSchema.parse(value));
     },
     updateShare(scopeKey: string, key: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>) {
-      return scopedUpdate(executor, 'documentShares', scopeKey, key, patch, (value) => documentShareSchema.parse(value));
+      return (async () => {
+        const mode = await shareStorageMode(executor);
+        if (mode === 'global') return scopedUpdate(executor, 'shares', scopeKey, key, patch, globalDocumentShare);
+        if (mode === 'dual') {
+          const cursor = await executor.query(`
+            LET legacy = DOCUMENT(documentShares, @key)
+            LET global = DOCUMENT(shares, @key)
+            FILTER legacy != null && global != null && legacy.scopeKey == @scopeKey
+              && global.scopeKey == @scopeKey && global.sourceType == "document"
+            UPDATE global WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN shares OPTIONS { keepNull: false }
+            LET updatedGlobal = NEW
+            UPDATE legacy WITH MERGE(@patch, ZIP(@unset, @unset[* RETURN null])) IN documentShares OPTIONS { keepNull: false }
+            RETURN updatedGlobal
+          `, { key, scopeKey, patch: splitPatch(patch).set, unset: splitPatch(patch).unset });
+          const updated = await cursor.next();
+          return updated ? globalDocumentShare(updated as Record<string, unknown>) : null;
+        }
+        return scopedUpdate(executor, 'documentShares', scopeKey, key, patch, (value) => documentShareSchema.parse(value));
+      })();
     },
     async setFolderDeletion(scopeKey: string, key: string, marker: Folder['_internalDeletion'] | undefined, owner?: string) {
       const { set, unset } = splitPatch({ _internalDeletion: marker });
@@ -259,7 +325,24 @@ export function createArchivePersistence(executor: ArchiveQueryExecutor) {
     deleteFolder(scopeKey: string, key: string) { return scopedDelete(executor, 'folders', scopeKey, key); },
     deleteDocument(scopeKey: string, key: string) { return scopedDelete(executor, 'documents', scopeKey, key); },
     deleteVersion(scopeKey: string, key: string) { return scopedDelete(executor, 'documentVersions', scopeKey, key); },
-    deleteShare(scopeKey: string, key: string) { return scopedDelete(executor, 'documentShares', scopeKey, key); },
+    async deleteShare(scopeKey: string, key: string) {
+      const mode = await shareStorageMode(executor);
+      if (mode === 'global') return scopedDelete(executor, 'shares', scopeKey, key);
+      if (mode === 'dual') {
+        const cursor = await executor.query(`
+          LET legacy = DOCUMENT(documentShares, @key)
+          LET global = DOCUMENT(shares, @key)
+          FILTER legacy != null && global != null && legacy.scopeKey == @scopeKey
+            && global.scopeKey == @scopeKey && global.sourceType == "document"
+          REMOVE global IN shares
+          LET removedGlobal = OLD
+          REMOVE legacy IN documentShares
+          RETURN removedGlobal != null
+        `, { key, scopeKey });
+        return (await cursor.next()) === true;
+      }
+      return scopedDelete(executor, 'documentShares', scopeKey, key);
+    },
   };
 }
 
@@ -268,6 +351,7 @@ export const archivePersistence = createArchivePersistence(db as unknown as Arch
 export function withArchivePersistenceTransaction<T>(
   operation: (persistence: ReturnType<typeof createArchivePersistence>) => Promise<T>,
 ): Promise<T> {
-  return withTransaction(['folders', 'documents', 'documentVersions', 'documentShares'], (transaction) =>
-    operation(createArchivePersistence(transaction as unknown as ArchiveQueryExecutor)));
+  return shareStorageMode(db as unknown as ArchiveQueryExecutor).then((mode) =>
+    withTransaction(['folders', 'documents', 'documentVersions', 'scopes', ...(mode === 'legacy' ? ['documentShares'] : mode === 'global' ? ['shares'] : ['documentShares', 'shares'])], (transaction) =>
+      operation(createArchivePersistence(transaction as unknown as ArchiveQueryExecutor))));
 }

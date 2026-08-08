@@ -28,6 +28,7 @@ describe('Chorus orchestrator chat flow', () => {
     const repository = {
       getGeneralChannelAccess: async () => access,
       insertMessage: async (message: Message) => { messages.push(message); return message; },
+      upsertMessage: async (message: Message) => { const existing = messages.find(({ key }) => key === message.key); if (existing) return existing; messages.push(message); return message; },
       insertMentions: async (mentions: unknown[]) => { persistedMentions.push(...mentions); },
       recordUserMentions: async () => {},
       getMessage: async (messageKey: string) => messages.find((message) => message.key === messageKey) ?? null,

@@ -19,7 +19,7 @@ function parseSse(text: string) {
   });
 }
 
-function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; partialFail?: boolean; abort?: boolean; failSkill?: string; failPersistence?: boolean; output?: string; gate?: Promise<void>; orchestratorCount?: 0 | 1 | 2 | 3; failScopes?: boolean; throughChatTool?: boolean } = {}) {
+function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: boolean; partialFail?: boolean; abort?: boolean; failSkill?: string; failPersistence?: boolean; failPersistenceSkill?: string; output?: string; gate?: Promise<void>; orchestratorCount?: number; failScopes?: boolean; throughChatTool?: boolean; leaseUnavailable?: boolean; leaseRefreshFails?: boolean; leaseRefreshResults?: boolean[]; duplicateResolved?: boolean } = {}) {
   const persisted: string[] = [];
   const assistantCalls: unknown[][] = [];
   const streamSkills: string[] = [];
@@ -32,14 +32,18 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   const typingEvents: unknown[] = [];
   const replyReads: string[] = [];
   const edits: Array<{ messageKey: string; content: string }> = [];
+  const leaseEvents: string[] = [];
   const access = { channel: { key: channelKey }, humanParticipant: { key: newId() }, mentions: [{ participantKey: 'everyone', type: 'everyone', key: 'everyone', name: 'everyone', mentionCount: 0 }, { participantKey: newId(), type: 'orchestrator', key: newId(), name: 'Atlas', mentionCount: 0 }] };
   const atlas = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Atlas', role: 'CEO', skill: 'Lead.' };
   const nova = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Nova', role: 'CTO', skill: 'Build.' };
   const metis = { participantKey: newId(), type: 'orchestrator' as const, key: newId(), name: 'Metis', role: 'CIO', skill: 'Analyze.' };
-  const orchestrators = [atlas, nova, metis].slice(0, options.orchestratorCount ?? 1);
+  const extras = CANONICAL_ORCHESTRATOR_NAMES.slice(3, 5).map((name) => ({ participantKey: newId(), type: 'orchestrator' as const, key: newId(), name, role: 'Executive', skill: `${name} skill.` }));
+  const orchestrators = [atlas, nova, metis, ...extras].slice(0, options.orchestratorCount ?? 1);
+  const resolvedOrchestrators = options.duplicateResolved && orchestrators[0] ? [...orchestrators, orchestrators[0]] : orchestrators;
   const service = {
-    async persistUserMessage(_actor: unknown, _channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) { persisted.push('user'); return { access, message: { key: newId(), channelKey, content, threadKey, replyToMessageKey }, orchestrators }; },
-    async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
+    async resolveOrchestrators() { return resolvedOrchestrators; },
+    async persistUserMessage(_actor: unknown, _channelKey: string, content: string, threadKey?: string, replyToMessageKey?: string) { persisted.push('user'); return { access, message: { key: newId(), channelKey, content, threadKey, replyToMessageKey }, orchestrators: resolvedOrchestrators }; },
+    async persistOrchestratorMessage(...args: unknown[]) { if (options.failPersistence || (options.failPersistenceSkill && (args[1] as { skill?: string }).skill?.includes(options.failPersistenceSkill))) throw new Error('database unavailable'); assistantCalls.push(args); persisted.push('assistant'); return { key: newId(), channelKey, content: args[2] as string, threadKey: args[3] as string, replyToMessageKey: args[4] as string }; },
     async generalChannel() { return access; },
     async requireChannel() { return access; },
     async frequentReactions() { return [{ reaction: '🔥', count: 3 }]; },
@@ -67,6 +71,11 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
     publishTyping: async (event) => { typingEvents.push(event); },
     transcribe: async (...args) => { transcriptionCalls.push(args); return { text: '@Atlas hello' }; },
     speak: async (...args) => { speechCalls.push(args); return { audioBase64: 'UklGRg==', mimeType: 'audio/wav' }; },
+    channelLease: {
+      async acquire() { leaseEvents.push('acquire'); return !options.leaseUnavailable; },
+      async refresh() { leaseEvents.push('refresh'); return options.leaseRefreshResults?.shift() ?? !options.leaseRefreshFails; },
+      async release() { leaseEvents.push('release'); },
+    },
   });
   const app = new Hono();
   app.onError((_error, c) => c.json({ error: 'invalid request' }, 400));
@@ -77,7 +86,7 @@ function appFor(options: { authenticated?: boolean; forbidden?: boolean; fail?: 
   app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/typing', handlers.typing);
   app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/replies', handlers.readReplies);
   app.patch('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey', handlers.editMessage);
-  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits };
+  return { app, persisted, assistantCalls, streamSkills, streamInputs, streamDependencies, transcriptionCalls, speechCalls, orchestrators, retrievalQueries, novaInputs, typingEvents, replyReads, edits, leaseEvents };
 }
 
 describe('Chorus SSE API', () => {
@@ -148,22 +157,18 @@ describe('Chorus SSE API', () => {
     const text = await response.text();
     const events = parseSse(text);
     expect(response.headers.get('content-type')).toContain('text/event-stream');
-    expect(events.map(({ event }) => event)).toEqual(['start', 'assistant-start', 'token', 'token', 'done', 'assistant-start', 'token', 'token', 'done', 'complete']);
-    expect(events[1]?.data).toEqual({ orchestrator: { participantKey: orchestrators[0]!.participantKey, key: orchestrators[0]!.key, name: 'Atlas' } });
-    expect(events[2]?.data).toEqual({ orchestratorKey: orchestrators[0]!.key, text: 'Hi ' });
-    expect(events[3]?.data).toEqual({ orchestratorKey: orchestrators[0]!.key, text: 'there' });
-    expect(events[4]?.data).toMatchObject({ orchestratorKey: orchestrators[0]!.key, message: { content: 'Hi there' } });
-    expect(events[5]?.data).toEqual({ orchestrator: { participantKey: orchestrators[1]!.participantKey, key: orchestrators[1]!.key, name: 'Nova' } });
-    expect(events[6]?.data).toEqual({ orchestratorKey: orchestrators[1]!.key, text: 'Hi ' });
-    expect(events[7]?.data).toEqual({ orchestratorKey: orchestrators[1]!.key, text: 'there' });
-    expect(events[8]?.data).toMatchObject({ orchestratorKey: orchestrators[1]!.key, message: { content: 'Hi there' } });
-    expect(events[9]?.data).toEqual({});
+    expect(events[0]?.event).toBe('start');
+    expect(events.at(-1)?.event).toBe('complete');
+    expect(events.filter(({ event }) => event === 'assistant-start').map(({ data }) => (data.orchestrator as { key: string }).key)).toEqual(orchestrators.map(({ key }) => key));
+    for (const orchestrator of orchestrators) {
+      expect(events.filter(({ event, data }) => event === 'token' && data.orchestratorKey === orchestrator.key).map(({ data }) => data.text).join('')).toBe('Hi there');
+      expect(events.find(({ event, data }) => event === 'done' && data.orchestratorKey === orchestrator.key)?.data).toMatchObject({ message: { content: 'Hi there' } });
+    }
     expect(persisted).toEqual(['user', 'assistant', 'assistant']);
     expect(streamInputs).toEqual([{ message: '@Vincent hello' }, { message: '@Vincent hello' }]);
     expect(events[0]?.data).toMatchObject({ userMessage: { content: '@ATLAS, @Nova; @Atlas: @Vincent hello' } });
     expect(streamDependencies[0]).toMatchObject({ organizationKey, retrievalContext: { organizationKey, membershipKey: actor.membershipKey, exclude: { messages: [expect.any(String)] } } });
-    expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([expect.any(String), expect.any(String)]);
-    expect(new Set((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).size).toBe(2);
+    expect((streamDependencies[1] as { retrievalContext: { exclude: { messages: string[] } } }).retrievalContext.exclude.messages).toEqual([(events[0]?.data.userMessage as { key: string }).key]);
     expect(assistantCalls[0]?.slice(2)).toEqual(['Hi there', threadKey, replyToMessageKey, (events[0]?.data.userMessage as { key: string }).key]);
     expect(assistantCalls[1]?.slice(2)).toEqual(['Hi there', threadKey, replyToMessageKey, (events[0]?.data.userMessage as { key: string }).key]);
     expect(streamSkills).toHaveLength(2);
@@ -171,7 +176,10 @@ describe('Chorus SSE API', () => {
     expect(streamSkills[0]).not.toContain('You are Nova');
     expect(streamSkills[1]).toContain('You are Nova, the CTO orchestrator. This invocation belongs only to Nova.');
     expect(streamSkills[1]).not.toContain('You are Atlas');
-    expect(typingEvents).toEqual(orchestrators.flatMap((orchestrator) => [expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: true }), expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: false })]));
+    for (const orchestrator of orchestrators) {
+      expect(typingEvents).toContainEqual(expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: true }));
+      expect(typingEvents).toContainEqual(expect.objectContaining({ participantKey: orchestrator.participantKey, name: orchestrator.name, type: 'orchestrator', active: false }));
+    }
     for (const skill of streamSkills) {
       expect(skill).toContain('Speak in first person from your own perspective');
       expect(skill).toContain('Any other orchestrator mentions are routing metadata, not participants in your conversation. Ignore them completely');
@@ -291,6 +299,20 @@ describe('Chorus SSE API', () => {
     expect(persisted).toEqual(['user']);
   });
 
+  test('starts mentioned orchestrators concurrently before either provider completes', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { app, streamSkills } = appFor({ orchestratorCount: 2, gate });
+    const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova compare plans' }) });
+    const consuming = response.text();
+    for (let attempt = 0; attempt < 20 && streamSkills.length < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(streamSkills).toHaveLength(2);
+    release();
+    const events = parseSse(await consuming);
+    expect(events.filter(({ event }) => event === 'done')).toHaveLength(2);
+    expect(events.at(-1)?.event).toBe('complete');
+  });
+
   test('rejects concurrent sends per channel and releases the lock after completion', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -307,6 +329,57 @@ describe('Chorus SSE API', () => {
     await retried.text();
   });
 
+  test('rejects a channel held by another process and caps provider fan-out', async () => {
+    const held = appFor({ leaseUnavailable: true });
+    const heldResponse = await held.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) });
+    expect(heldResponse.status).toBe(409);
+    expect(held.persisted).toEqual([]);
+    expect(held.leaseEvents).toEqual(['acquire']);
+
+    const capped = appFor({ orchestratorCount: 5 });
+    const mentions = CANONICAL_ORCHESTRATOR_NAMES.slice(0, 5).map((name) => `@${name}`).join(' ');
+    const cappedResponse = await capped.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: mentions }) });
+    expect(cappedResponse.status).toBe(400);
+    expect(capped.persisted).toEqual([]);
+    expect(capped.leaseEvents).toEqual([]);
+  });
+
+  test('deduplicates the resolved roster and caps the actual resolved recipients before persistence', async () => {
+    const duplicate = appFor({ orchestratorCount: 1, duplicateResolved: true });
+    const events = parseSse(await (await duplicate.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) })).text());
+    expect(events.filter(({ event }) => event === 'assistant-start')).toHaveLength(1);
+    expect(duplicate.assistantCalls).toHaveLength(1);
+
+    const overflow = appFor({ orchestratorCount: 5 });
+    const response = await overflow.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
+    expect(response.status).toBe(400);
+    expect(overflow.persisted).toEqual([]);
+    expect(overflow.leaseEvents).toEqual([]);
+  });
+
+  test('aborts and joins every worker before release when lease refresh fails', async () => {
+    const failed = appFor({ orchestratorCount: 2, leaseRefreshFails: true });
+    const events = parseSse(await (await failed.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova hello' }) })).text());
+    expect(failed.persisted).toEqual(['user']);
+    expect(events.some(({ event }) => event === 'done' || event === 'complete' || event === 'assistant-error' || event === 'error')).toBe(false);
+    expect(failed.leaseEvents.at(-1)).toBe('release');
+  });
+
+  test('suppresses done and completion when the lease is lost during persistence', async () => {
+    const lost = appFor({ leaseRefreshResults: [true, false] });
+    const events = parseSse(await (await lost.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas hello' }) })).text());
+    expect(lost.persisted).toEqual(['user', 'assistant']);
+    expect(events.some(({ event }) => event === 'done' || event === 'complete' || event === 'assistant-error' || event === 'error')).toBe(false);
+    expect(lost.leaseEvents.at(-1)).toBe('release');
+  });
+
+  test('scopes local locks by organization and settles workers before lease release', async () => {
+    const source = await Bun.file(new URL('./chorus.ts', import.meta.url)).text();
+    expect(source).toContain('const localChannelKey = `${resolved.organizationKey}:${channelKey}`');
+    expect(source).toContain('await Promise.allSettled(workers)');
+    expect(source.indexOf('await Promise.allSettled(workers)', source.indexOf('finally {'))).toBeLessThan(source.indexOf('await lease.release', source.indexOf('finally {')));
+  });
+
   test('persists a truthful response for every mentioned orchestrator when all providers fail', async () => {
     const { app, persisted, assistantCalls, streamSkills, orchestrators } = appFor({ orchestratorCount: 3, fail: true });
     const response = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'hello' }) });
@@ -320,6 +393,21 @@ describe('Chorus SSE API', () => {
     expect(streamSkills).toHaveLength(3);
     const retried = await app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'retry' }) });
     expect(retried.status).toBe(200);
+  });
+
+  test('isolates provider and persistence failures between concurrent recipients', async () => {
+    const providerFailure = appFor({ orchestratorCount: 2, failSkill: 'Lead.' });
+    const providerEvents = parseSse(await (await providerFailure.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova answer independently' }) })).text());
+    const atlasDone = providerEvents.find(({ event, data }) => event === 'done' && data.orchestratorKey === providerFailure.orchestrators[0]!.key);
+    const novaDone = providerEvents.find(({ event, data }) => event === 'done' && data.orchestratorKey === providerFailure.orchestrators[1]!.key);
+    expect((atlasDone?.data.message as { content: string }).content).toContain('could not generate');
+    expect((novaDone?.data.message as { content: string }).content).toBe('Hi there');
+
+    const persistenceFailure = appFor({ orchestratorCount: 2, failPersistenceSkill: 'Lead.' });
+    const persistenceEvents = parseSse(await (await persistenceFailure.app.request(`/founders/organizations/${organizationKey}/chorus/channels/${channelKey}/messages`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: '@Atlas @Nova persist independently' }) })).text());
+    expect(persistenceEvents.some(({ event, data }) => event === 'assistant-error' && data.orchestratorKey === persistenceFailure.orchestrators[0]!.key)).toBe(true);
+    expect(persistenceEvents.some(({ event, data }) => event === 'done' && data.orchestratorKey === persistenceFailure.orchestrators[1]!.key)).toBe(true);
+    expect(persistenceEvents.at(-1)?.event).toBe('complete');
   });
 
   test('emits assistant-error when the fallback response cannot be persisted', async () => {

@@ -1,4 +1,5 @@
 import { newId } from '@/lib/ids';
+import { createHash } from 'node:crypto';
 import { messageSchema, type Message } from '@/lib/db/messages.node';
 import { pollSchema } from '@/lib/db/polls.node';
 import { pollOptionSchema } from '@/lib/db/poll-options.node';
@@ -60,9 +61,17 @@ export class ChorusService {
     return { access, message, orchestrators: mentions.filter(({ candidate }) => candidate.type === 'orchestrator').map(({ candidate }) => candidate) };
   }
 
+  async resolveOrchestrators(actor: ChorusActor, channelKey: string, content: string) {
+    const access = await this.requireChannel(actor, channelKey);
+    return this.selectedCandidates(access, content).filter((candidate) => candidate.type === 'orchestrator');
+  }
+
   async persistOrchestratorMessage(access: GeneralChannelAccess, orchestrator: MentionCandidate, content: string, threadKey?: string, replyToMessageKey?: string, sourceMessageKey?: string) {
     if (sourceMessageKey) await this.requireMessage(access.channel.key, sourceMessageKey);
-    const message = await this.repository.insertMessage(this.message(access, orchestrator.participantKey, content, threadKey, replyToMessageKey));
+    const responseKey = sourceMessageKey ? `c${createHash('sha256').update(sourceMessageKey).update('\0').update(orchestrator.key).digest('hex').slice(0, 24)}` : undefined;
+    const message = sourceMessageKey
+      ? await this.repository.upsertMessage(this.message(access, orchestrator.participantKey, content, threadKey, replyToMessageKey, responseKey))
+      : await this.repository.insertMessage(this.message(access, orchestrator.participantKey, content, threadKey, replyToMessageKey));
     return message;
   }
 
@@ -143,6 +152,12 @@ export class ChorusService {
   }
 
   private mentions(access: GeneralChannelAccess, messageKey: string, content: string) {
+    const selected = this.selectedCandidates(access, content);
+    const now = this.now();
+    return selected.map((candidate) => ({ candidate, mention: messageMentionSchema.parse({ key: newId(), scopeKey: access.channel.scopeKey, channelKey: access.channel.key, messageKey, participantKey: candidate.participantKey, createdAt: now, updatedAt: now }) }));
+  }
+
+  private selectedCandidates(access: GeneralChannelAccess, content: string) {
     const selected = new Map<string, MentionCandidate>();
     const hasEveryone = /(^|[^\w])@everyone\b/i.test(content);
     for (const candidate of access.mentions) {
@@ -150,13 +165,12 @@ export class ChorusService {
       const pattern = new RegExp(`(^|[^\\w])@${candidate.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\w])`, 'i');
       if ((hasEveryone && candidate.type === 'user') || pattern.test(content)) selected.set(candidate.participantKey, candidate);
     }
-    const now = this.now();
-    return [...selected.values()].map((candidate) => ({ candidate, mention: messageMentionSchema.parse({ key: newId(), scopeKey: access.channel.scopeKey, channelKey: access.channel.key, messageKey, participantKey: candidate.participantKey, createdAt: now, updatedAt: now }) }));
+    return [...selected.values()];
   }
 
-  private message(access: GeneralChannelAccess, authorParticipantKey: string, content: string, threadKey?: string, replyToMessageKey?: string): Message {
+  private message(access: GeneralChannelAccess, authorParticipantKey: string, content: string, threadKey?: string, replyToMessageKey?: string, key = newId()): Message {
     const now = this.now();
-    return messageSchema.parse({ key: newId(), scopeKey: access.channel.scopeKey, channelKey: access.channel.key, authorParticipantKey, content, threadKey, replyToMessageKey, createdAt: now, updatedAt: now });
+    return messageSchema.parse({ key, scopeKey: access.channel.scopeKey, channelKey: access.channel.key, authorParticipantKey, content, threadKey, replyToMessageKey, createdAt: now, updatedAt: now });
   }
 
   private async requireMessage(channelKey: string, messageKey: string) {

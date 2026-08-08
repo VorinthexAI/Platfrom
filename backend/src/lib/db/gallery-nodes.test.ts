@@ -1,0 +1,35 @@
+import { describe, expect, test } from 'bun:test';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, currentEmbeddingSchema } from '@/lib/embeddings';
+import { imageSchema, imagesEmbeddingFields, IMAGES_COLLECTION } from './images.node';
+import { collectionSchema, collectionsEmbeddingFields, COLLECTIONS_COLLECTION } from './collections.node';
+import { COLLECTION_IMAGES_COLLECTION } from './collection-images.node';
+import { COLLECTION_MEMBERS_COLLECTION } from './collection-members.node';
+import { collectionInviteSchema, COLLECTION_INVITES_COLLECTION } from './collection-invites.node';
+import { tagSchema, tagsEmbeddingFields, TAGS_COLLECTION } from './tags.node';
+import { TAG_ASSIGNMENTS_COLLECTION } from './tag-assignments.node';
+import { shareSchema, SHARES_COLLECTION } from './shares.node';
+
+const key = 'cmrnlzf650002qc7k4p5zem5w'; const scopeKey = 'cmrnlzf640001qc7kazsr96k5'; const now = '2026-08-07T12:00:00.000Z'; const embedding = Array(EMBEDDING_DIMENSIONS).fill(0.1);
+describe('Gallery node contracts', () => {
+  test('declares exactly eight physical collections and keeps secrets private', () => {
+    expect([IMAGES_COLLECTION, COLLECTIONS_COLLECTION, COLLECTION_IMAGES_COLLECTION, COLLECTION_MEMBERS_COLLECTION, COLLECTION_INVITES_COLLECTION, TAGS_COLLECTION, TAG_ASSIGNMENTS_COLLECTION, SHARES_COLLECTION]).toEqual(['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares']);
+  });
+  test('uses the global current Qwen embedding contract', () => {
+    expect(EMBEDDING_DIMENSIONS).toBe(4096); expect(EMBEDDING_MODEL).toBe('qwen.qwen3-embedding-8b'); expect(EMBEDDING_PROVIDER_ID).toBe('openrouter');
+    expect(currentEmbeddingSchema.safeParse(embedding).success).toBe(true); expect(currentEmbeddingSchema.safeParse(embedding.slice(1)).success).toBe(false);
+    expect(imagesEmbeddingFields).toEqual(['filename', 'caption']); expect(collectionsEmbeddingFields).toEqual(['name', 'description']); expect(tagsEmbeddingFields).toEqual(['name', 'description']);
+  });
+  test('strips Arango internals and unknown persisted fields by default', () => {
+    const parsed = collectionSchema.parse({ _key: key, key, scopeKey, name: 'Launch', embedding, createdAt: now, updatedAt: now, unexpected: true });
+    expect(parsed).not.toHaveProperty('_key'); expect(parsed).not.toHaveProperty('unexpected');
+    expect(imageSchema.safeParse({ key, scopeKey, filename: 'x.png', caption: ' ', storageKey: 'x', mimeType: 'image/png', sizeBytes: 1, width: 1, height: 1, embedding, createdAt: now, updatedAt: now }).success).toBe(false);
+    expect(tagSchema.safeParse({ key, scopeKey, name: 'Tag', embedding, createdAt: now, updatedAt: now }).success).toBe(true);
+  });
+  test('validates invite and share secrets without exposing plaintext token fields', () => {
+    const invite = { key, scopeKey, collectionKey: key, invitedByKey: scopeKey, tokenHash: 'a'.repeat(64), expiresAt: now, createdAt: now, updatedAt: now };
+    expect(collectionInviteSchema.safeParse({ ...invite, email: ' PERSON@EXAMPLE.COM ' }).success).toBe(true);
+    expect(collectionInviteSchema.safeParse(invite).success).toBe(false);
+    const share = shareSchema.parse({ key, scopeKey, sourceType: 'image', sourceKey: key, permission: 'read', tokenHash: 'b'.repeat(64), token: 'plaintext', createdAt: now, updatedAt: now });
+    expect(share).not.toHaveProperty('token'); expect(share).not.toHaveProperty('embedding');
+  });
+});

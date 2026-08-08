@@ -20,6 +20,9 @@ import { milestoneSchema } from './milestones.node';
 import { taskSchema } from './tasks.node';
 import { documentVersionSchema } from './document-versions.node';
 import { documentShareSchema } from './document-shares.node';
+import { imageSchema } from './images.node';
+import { collectionSchema } from './collections.node';
+import { shareSchema } from './shares.node';
 
 describe('node registry schema contracts', () => {
   test('registry serves organizations and user links, never the retired team/platform nodes', () => {
@@ -46,7 +49,12 @@ describe('node registry schema contracts', () => {
       'folders',
       'documents',
       'documentVersions',
-      'documentShares',
+      'images',
+      'collections',
+      'collectionImages',
+      'collectionMembers',
+      'tags',
+      'tagAssignments',
       'projects',
       'milestones',
       'tasks',
@@ -102,11 +110,16 @@ describe('node registry schema contracts', () => {
     expect(documentVersionSchema.shape).toHaveProperty('createdAt');
     expect(documentVersionSchema.shape).toHaveProperty('embedding');
     expect(documentVersionSchema.shape).not.toHaveProperty('updatedAt');
+    expect(imageSchema.shape).toHaveProperty('embedding');
+    expect(collectionSchema.shape).toHaveProperty('embedding');
+    expect(NODE_NAMES).not.toContain('shares');
+    expect(NODE_NAMES).not.toContain('collectionInvites');
+    expect(NODE_NAMES).not.toContain('documentShares');
     expect(documentShareSchema.shape).toHaveProperty('key');
-    expect(documentShareSchema.shape).toHaveProperty('scopeKey');
-    expect(documentShareSchema.shape).toHaveProperty('createdAt');
-    expect(documentShareSchema.shape).toHaveProperty('updatedAt');
     expect(documentShareSchema.shape).not.toHaveProperty('embedding');
+    expect(shareSchema.shape).toHaveProperty('sourceType');
+    expect(shareSchema.shape).toHaveProperty('sourceKey');
+    expect(shareSchema.shape).not.toHaveProperty('embedding');
     for (const schema of [projectSchema, milestoneSchema, taskSchema]) {
       expect(schema.shape).toHaveProperty('key');
       expect(schema.shape).toHaveProperty('scopeKey');
@@ -115,7 +128,7 @@ describe('node registry schema contracts', () => {
       expect(schema.shape).toHaveProperty('createdAt');
       expect(schema.shape).toHaveProperty('updatedAt');
     }
-    for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema]) {
+    for (const schema of [folderSchema, documentSchema, documentVersionSchema, documentShareSchema, imageSchema, collectionSchema, shareSchema]) {
       expect(schema.shape).toHaveProperty('deletedAt');
       expect(schema.shape.deletedAt.parse(undefined)).toBeNull();
     }

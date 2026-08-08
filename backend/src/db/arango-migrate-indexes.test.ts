@@ -78,8 +78,7 @@ describe('Arango migration indexes', () => {
   test('migration never hashes missing data or borrows current documents for version history', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const helperSource = await Bun.file(new URL('./archive-migration.ts', import.meta.url)).text();
-    expect(source).toContain('FILTER !IS_STRING(share.token) || LENGTH(share.token) == 0');
-    expect(source).toContain('RETURN { key: share._key, hash: SHA256(share.token) }');
+    expect(source).toContain('stageLegacyDocumentShares([share])');
     expect(source).toContain('nonEmptyString(snapshot.html)');
     expect(source).not.toContain('DOCUMENT(documents, snapshot.documentKey)');
     expect(helperSource).toContain('has neither a valid tokenHash nor a plaintext token');
@@ -118,8 +117,8 @@ describe('Arango migration indexes', () => {
       else process.env.ARCHIVE_E2E = previous;
     }
   });
-  test('physically normalizes and verifies folder and document favorites idempotently', async () => {
-    for (const collection of ['folders', 'documents'] as const) {
+  test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
+    for (const collection of ['folders', 'documents', 'images', 'collections'] as const) {
       const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
       const database = {
         async query(query: string, bindVars?: Record<string, unknown>) {
@@ -138,7 +137,7 @@ describe('Arango migration indexes', () => {
       expect(calls.every(({ bindVars }) => bindVars?.['@collection'] === collection)).toBe(true);
     }
   });
-  test('preflights every share and orders index removal before plaintext removal and hash index creation', async () => {
+  test('uses a durable two-phase cutover and verifies before dropping legacy shares', async () => {
     const staged = stageLegacyDocumentShares([
       { _key: 'first', token: 'one', permission: 'read' },
       { _key: 'second', token: 'two', permission: 'edit' },
@@ -148,18 +147,20 @@ describe('Arango migration indexes', () => {
     expect(staged.map((share) => share.permission)).toEqual(['read', 'comment']);
 
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const preflight = source.indexOf('const invalidShare =');
-    const dropLegacy = source.indexOf("fields[0] === 'token'");
-    const removePlaintext = source.indexOf('FILTER HAS(share, "token")');
-    const createIndexes = source.indexOf('for (const index of spec.indexes ?? [])');
-    expect(preflight).toBeGreaterThan(-1);
-    expect(preflight).toBeLessThan(dropLegacy);
-    expect(dropLegacy).toBeLessThan(removePlaintext);
-    expect(removePlaintext).toBeLessThan(createIndexes);
+    const ensureIndexes = source.indexOf('await target.ensureIndex');
+    const dualMarker = source.indexOf("state: 'dual'");
+    const copy = source.indexOf('const copyAndVerify');
+    const globalMarker = source.indexOf("state: 'global'");
+    const dropLegacy = source.indexOf('await legacy.drop()');
+    expect(ensureIndexes).toBeGreaterThan(-1);
+    expect(ensureIndexes).toBeLessThan(dualMarker);
+    expect(dualMarker).toBeLessThan(copy);
+    expect(copy).toBeLessThan(globalMarker);
+    expect(globalMarker).toBeLessThan(dropLegacy);
     expect(source).toContain('LIMIT 100');
     expect(source).toContain('share._key > @after');
-    expect(source).not.toContain('LET candidates = (FOR share IN documentShares');
-    expect(source).toContain('LIMIT 1\n      RETURN hash');
+    expect(source).toContain('if (!marker) return');
+    expect(source).toContain('if (!equal(copied, prepared))');
   });
 
   test('stages more than one migration chunk without retaining prior rows or changing order', () => {

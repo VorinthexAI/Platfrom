@@ -89,4 +89,45 @@ describe('scoped Archive persistence', () => {
     expect(source.match(/DOCUMENT\(folders,/g)?.length).toBeGreaterThanOrEqual(4);
     expect(source.match(/DOCUMENT\(documents,/g)?.length).toBeGreaterThanOrEqual(3);
   });
+
+  test('pushes share lifecycle filters into both legacy and global reads', async () => {
+    for (const collections of [
+      [{ name: 'documentShares' }],
+      [{ name: 'documentShares' }, { name: 'shares' }],
+    ]) {
+      const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+      const executor: ArchiveQueryExecutor = {
+        async query(query, bindVars) {
+          calls.push({ query, bindVars });
+          if (query.includes('COLLECTIONS()')) return { async next() { return { legacy: true, global: collections.length === 2 }; } };
+          if (query.includes('DOCUMENT(shares, @key)')) return { async next() { return collections.length === 2 ? { state: 'global' } : null; } };
+          return { async next() { return undefined; } };
+        },
+      };
+      await createArchivePersistence(executor).listShares(scopeKey, [folderKey], { includeArchived: true, includeExpired: true, includeRevoked: true, at: timestamp });
+      const read = calls.at(-1)!;
+      expect(read.query).toContain(collections.length === 2 ? 'FOR share IN shares' : 'FOR share IN documentShares');
+      expect(read.query).toContain('@includeArchived');
+      expect(read.query).toContain('@includeRevoked');
+      expect(read.query).toContain('@includeExpired');
+      expect(read.bindVars).toMatchObject({ includeArchived: true, includeExpired: true, includeRevoked: true, at: timestamp });
+    }
+  });
+
+  test('keeps each dual share mutation in one atomic AQL query', async () => {
+    const source = await Bun.file(new URL('./archive-persistence.node.ts', import.meta.url)).text();
+    expect(source).toContain('INSERT @globalShare INTO shares LET created = NEW INSERT @legacyShare INTO documentShares RETURN created');
+    expect(source).toContain('UPDATE global WITH MERGE(@patch');
+    expect(source).toContain('UPDATE legacy WITH MERGE(@patch');
+    expect(source).toContain('REMOVE global IN shares');
+    expect(source).toContain('REMOVE legacy IN documentShares');
+    expect(source).not.toContain('Legacy share mirror failed after the durable global write.');
+  });
+
+  test('keeps global token revocation authoritative after cutover', async () => {
+    const source = await Bun.file(new URL('./document-shares.node.ts', import.meta.url)).text();
+    const markerGuard = source.indexOf("marker?.state === 'global'");
+    expect(markerGuard).toBeGreaterThan(0);
+    expect(markerGuard).toBeLessThan(source.indexOf('FOR share IN ${db.collection(DOCUMENT_SHARES_COLLECTION)}', markerGuard));
+  });
 });

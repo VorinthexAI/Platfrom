@@ -72,7 +72,7 @@ suite('Archive live E2E', () => {
     const agentKeys = await (await db.query('FOR agent IN agents FILTER agent.scopeKey IN @scopeKeys RETURN agent._key', { scopeKeys })).all();
     const skillKeys = await (await db.query('FOR row IN agentSkills FILTER row.agentKey IN @agentKeys RETURN DISTINCT row.skillKey', { agentKeys })).all();
     const removals: Array<[string, string, Record<string, unknown>]> = [
-      ['documentShares', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
+      ['shares', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documentVersions', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['documents', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
       ['folders', 'row.scopeKey IN @scopeKeys', { scopeKeys }],
@@ -242,7 +242,7 @@ suite('Archive live E2E', () => {
     const share = await call('document.share', { shares: [{ documentKey, permission: 'comment', password: 'correct horse battery staple', expiresAt: '2027-07-22T12:00:00.000Z' }] });
     const shareKey = share.results[0].data.share.key;
     const shareToken = share.results[0].data.token;
-    const rawShare = await db.collection('documentShares').document(shareKey);
+    const rawShare = await db.collection('shares').document(shareKey);
     expect(JSON.stringify(rawShare)).not.toContain(shareToken);
     expect(rawShare.tokenHash).toMatch(/^[a-f0-9]{64}$/);
     expect(rawShare.passwordHash).toStartWith('scrypt:');
@@ -346,10 +346,16 @@ suite('Archive live E2E', () => {
     const temporary = root.database(temporaryName);
     try {
       await temporary.createCollection('documentShares');
+      await temporary.createCollection('shares');
+      await temporary.createCollection('documents');
       await temporary.createCollection('documentVersions');
       await temporary.collection('documentShares').ensureIndex({ type: 'persistent', fields: ['token'], unique: true });
       const shareKeys = Array.from({ length: 105 }, () => newId());
-      await temporary.collection('documentShares').import(shareKeys.map((key, index) => ({ _key: key, token: `legacy-token-${index}`, permission: index % 2 ? 'read' : 'edit' })));
+      const migrationScopeKey = newId();
+      const migratedAt = '2026-07-22T12:00:00.000Z';
+      const shareDocumentKeys = Array.from({ length: 105 }, () => newId());
+      await temporary.collection('documents').import(shareDocumentKeys.map((key) => ({ _key: key, scopeKey: migrationScopeKey })));
+      await temporary.collection('documentShares').import(shareKeys.map((key, index) => ({ _key: key, scopeKey: migrationScopeKey, documentKey: shareDocumentKeys[index], token: `legacy-token-${index}`, permission: index % 2 ? 'read' : 'edit', createdAt: migratedAt, updatedAt: migratedAt })));
       const versionKeys = Array.from({ length: 55 }, () => newId());
       const legacyDocumentKey = newId();
       await temporary.collection('documentVersions').import(versionKeys.map((key, index) => ({ _key: key, documentKey: legacyDocumentKey, version: index + 1, content: `Historical paragraph ${index}\n\nSecond block`, embedding })));
@@ -357,19 +363,22 @@ suite('Archive live E2E', () => {
       await migrateArchiveShares(temporary);
       await migrateArchiveVersions(temporary);
       await migrateArchiveShares(temporary);
+      await migrateArchiveShares(temporary);
       await migrateArchiveVersions(temporary);
-      await temporary.collection('documentShares').ensureIndex({ type: 'persistent', fields: ['tokenHash'], unique: true });
+      await temporary.collection('shares').ensureIndex({ type: 'persistent', fields: ['tokenHash'], unique: true });
       await temporary.collection('documentVersions').ensureIndex({ type: 'persistent', fields: ['documentKey', 'version'], unique: true });
 
-      const shares = await (await temporary.query('FOR share IN documentShares SORT share._key RETURN share')).all();
+      const shares = await (await temporary.query('FOR share IN shares FILTER share.sourceType == "document" SORT share._key RETURN share')).all();
       expect(shares).toHaveLength(105);
       expect(shares.every((share: any) => !('token' in share) && /^[a-f0-9]{64}$/.test(share.tokenHash))).toBe(true);
       expect(new Set(shares.map((share: any) => share.tokenHash)).size).toBe(105);
       expect(shares[0].permission).toBe('comment');
+      expect(shares.every((share: any) => share.sourceType === 'document' && shareDocumentKeys.includes(share.sourceKey))).toBe(true);
+      expect(await temporary.collection('documentShares').exists()).toBe(false);
       const versions = await (await temporary.query('FOR version IN documentVersions SORT version._key RETURN version')).all();
       expect(versions).toHaveLength(55);
       expect(versions.every((version: any) => version.html.includes('<p>') && !('json' in version) && version.embedding.length === 4096)).toBe(true);
-      const shareIndexes = await temporary.collection('documentShares').indexes();
+      const shareIndexes = await temporary.collection('shares').indexes();
       const versionIndexes = await temporary.collection('documentVersions').indexes();
       expect(shareIndexes.some((index: any) => index.unique && index.fields?.join(',') === 'tokenHash')).toBe(true);
       expect(shareIndexes.some((index: any) => index.fields?.join(',') === 'token')).toBe(false);
