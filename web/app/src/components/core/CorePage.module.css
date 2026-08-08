@@ -166,6 +166,7 @@
 .capabilityPromise { color: #d2d7d8 !important; font-family: var(--font-display); font-size: 15px !important; letter-spacing: 0.04em; }
 .capabilityDetails { position: relative; display: grid; align-content: center; }
 .capabilityDetails > p:not(.capabilityLabel) { max-width: 600px; margin-top: 14px; color: #a0a3a0; font-size: 13px; line-height: 1.75; }
+.capabilityParagraphs { display: grid; gap: 14px; max-width: 600px; margin-top: 18px; color: #a0a3a0; font-size: 13px; line-height: 1.75; }
 
 .principles {
   position: relative;

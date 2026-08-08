@@ -121,7 +121,7 @@ function folderView(folder: Folder) {
 }
 
 function documentView(document: Document) {
-  const { html: _html, content: _content, embedding: _embedding, embeddingProvider: _embeddingProvider, embeddingModel: _embeddingModel, embeddingDimensions: _embeddingDimensions, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  const { html: _html, content: _content, embedding: _embedding, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
   return safe;
 }
 
@@ -131,7 +131,7 @@ function shareView(share: DocumentShare) {
 }
 
 function versionView(version: DocumentVersion, include: string[] = []) {
-  const { embedding, embeddingProvider: _embeddingProvider, embeddingModel: _embeddingModel, embeddingDimensions: _embeddingDimensions, html, content, ...safe } = version;
+  const { embedding, html, content, ...safe } = version;
   return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('content') ? { content } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
 }
 
@@ -603,8 +603,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const isCurrentEmbedding = (embedding: readonly number[]) => embedding.length === EMBEDDING_DIMENSIONS && embedding.every(Number.isFinite);
   const currentDocumentEmbedding = (source: Pick<Document, 'embedding' | 'name' | 'content' | 'key' | 'scopeKey'>, name = source.name) =>
     isCurrentEmbedding(source.embedding) ? Promise.resolve(source.embedding) : embed(`${name.trim()}\n\n${source.content.trim()}`, source.key, source.scopeKey);
-  const currentVersionEmbedding = (source: Pick<DocumentVersion, 'embedding' | 'content' | 'key' | 'scopeKey'> | Pick<Document, 'embedding' | 'content' | 'key' | 'scopeKey'>) =>
-    isCurrentEmbedding(source.embedding) ? Promise.resolve(source.embedding) : embed(source.content, source.key, source.scopeKey);
+  const currentVersionEmbedding = (source: Pick<DocumentVersion, 'content' | 'key' | 'scopeKey'> | Pick<Document, 'content' | 'key' | 'scopeKey'>, label?: string) =>
+    embed([label, source.content].filter(Boolean).join('\n\n'), source.key, source.scopeKey);
   const persistGenerated = async (source: Document, text: string, mode: 'copy' | 'replace', suffix: string) => {
     const finalName = mode === 'copy' ? `${source.name} (${suffix})` : source.name;
     const transformed = await representations({ content: text }, finalName, source.key, source.scopeKey);
@@ -633,7 +633,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       ...(source.folderKey ? { folderKey: source.folderKey } : {}),
       name: finalName,
       ...transformed,
-      isFavorite: false,
       deletedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -677,7 +676,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(item.parentFolderKey ? { parentFolderKey: item.parentFolderKey } : {}),
             name: item.name,
             ...(item.description ? { description: item.description } : {}),
-            isFavorite: item.isFavorite ?? false,
             embedding,
             deletedAt: null,
             createdAt: timestamp,
@@ -739,7 +737,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const patch = {
             ...(item.name !== undefined ? { name: item.name } : {}),
             ...(item.description !== undefined ? { description: item.description ?? undefined } : {}),
-            ...(item.isFavorite !== undefined ? { isFavorite: item.isFavorite } : {}),
             ...(embedding ? { embedding } : {}),
             updatedAt: now(),
           };
@@ -1056,7 +1053,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             const updated = await mutationRepository.updateDocument(current.key, {
               ...(transformed ?? {}),
-              ...(item.isFavorite !== undefined ? { isFavorite: item.isFavorite } : {}),
               updatedAt: now(),
             });
             return { document: documentView(updated) };
@@ -1126,7 +1122,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                scopeKey: item.targetScopeKey,
                ...(target ? { folderKey: target.key } : { folderKey: undefined }),
               name,
-              isFavorite: false,
               embedding,
                ...(storageKey ? { storageKey } : {}),
               deletedAt: null,
@@ -1381,7 +1376,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             label: input.labels?.[key],
             html: current.html,
             content: current.content,
-            embedding: await currentVersionEmbedding(current),
+            embedding: await currentVersionEmbedding(current, input.labels?.[key]),
           });
           return { version: versionView(version) };
         },
@@ -1440,7 +1435,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const restored = await mutationRepository.updateDocument(current.key, {
               html: version.html,
               content: version.content,
-              embedding: await currentDocumentEmbedding({ ...version, name: current.name }),
+              embedding: await embed(`${current.name}\n\n${version.content}`, current.key, current.scopeKey),
               updatedAt: now(),
             });
             return { document: documentView(restored) };

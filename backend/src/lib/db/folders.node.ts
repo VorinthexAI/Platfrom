@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { aql } from 'arangojs';
 import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
+import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const FOLDERS_COLLECTION = 'folders';
 
@@ -11,8 +12,7 @@ export const folderSchema = z.object({
   parentFolderKey: z.string().cuid().optional(),
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
-  isFavorite: z.boolean().default(false),
-  embedding: z.array(z.number().finite()).default([]),
+  embedding: currentEmbeddingSchema,
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
     kind: z.literal('folder'),
@@ -28,7 +28,7 @@ export const folderSchema = z.object({
 
 export type Folder = z.infer<typeof folderSchema>;
 export const foldersEmbeddingFields = ['name', 'description'] as const;
-const helpers = createNodeHelpers(FOLDERS_COLLECTION, folderSchema, foldersEmbeddingFields);
+const helpers = createNodeHelpers(FOLDERS_COLLECTION, folderSchema, foldersEmbeddingFields, { includeEmbeddingMetadata: false });
 export async function insertFolder(folder: Folder): Promise<Folder> {
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.insertFolder(folder);

@@ -21,7 +21,6 @@ export const contentFolderSchema = z.object({
   parentFolderKey: keySchema.optional(),
   name: nameSchema,
   description: textSchema.optional(),
-  isFavorite: z.boolean().default(false),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
@@ -65,7 +64,6 @@ export const contentDocumentSchema = z.object({
   extension: documentExtensionSchema.optional(),
   mimeType: textSchema.optional(),
   sizeBytes: z.number().int().positive().optional(),
-  isFavorite: z.boolean().default(false),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
@@ -128,17 +126,16 @@ const projectedVersionDataSchema = z.object({ version: contentProjectedDocumentV
 const fileDataSchema = z.object({ documentKey: keySchema, format: z.string().trim().min(1), fileName: nameSchema, mimeType: textSchema, encoding: z.literal('base64'), content: z.string() }).strict();
 const generatedTextDataSchema = z.object({ documentKey: keySchema, text: z.string(), language: z.string().trim().min(1).optional(), persistedDocumentKey: keySchema.optional() }).strict();
 
-const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional(), isFavorite: z.boolean().optional() }).strict()
-  .refine((value) => value.name !== undefined || value.description !== undefined || value.isFavorite !== undefined, 'name, description, or isFavorite is required');
+const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional() }).strict()
+  .refine((value) => value.name !== undefined || value.description !== undefined, 'name or description is required');
 const documentUpdateSchema = z.object({
   documentKey: keySchema,
   html: z.string().min(1).optional(),
   content: z.string().min(1).optional(),
-  isFavorite: z.boolean().optional(),
   createVersion: z.boolean().optional(),
 }).strict().superRefine((value, context) => {
   const representations = [value.html, value.content].filter((item) => item !== undefined).length;
-  if (representations === 0 && value.isFavorite === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: 'one document representation or isFavorite is required' });
+  if (representations === 0) context.addIssue({ code: z.ZodIssueCode.custom, message: 'one document representation is required' });
   if (representations > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: 'html and content are mutually exclusive' });
   if (value.createVersion && representations === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['createVersion'], message: 'createVersion requires a document representation' });
 });
@@ -206,7 +203,7 @@ const documentReadDataSchema = z.union([
 ]);
 
 export const contentToolContracts = {
-  'folder.create': { description: 'Create one or more Content folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional(), isFavorite: z.boolean().optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
+  'folder.create': { description: 'Create one or more Content folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.find': { description: 'Find Content folders by key.', input: z.object({ folderKeys: keysSchema, includeArchived: z.boolean().optional(), includeChildrenCount: z.boolean().optional(), includeDocumentCount: z.boolean().optional() }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.list': { description: 'List folders under a scope or parent folder.', input: z.object({ scopeKey: keySchema, parentFolderKey: keySchema.optional(), includeArchived: z.boolean().optional(), includeDocuments: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: folderSortSchema.optional() }).strict(), output: z.object({ folders: z.array(contentFolderSchema), documents: z.array(contentDocumentSchema).optional(), cursor: cursorSchema.optional() }).strict() },
   'folder.update': { description: 'Update folder metadata.', input: z.object({ updates: z.array(folderUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },

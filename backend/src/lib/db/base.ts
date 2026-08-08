@@ -170,27 +170,30 @@ function assertNodeSchemaShape(schema: z.ZodTypeAny, embedKeys: readonly string[
 export function createNodeHelpers<
   Schema extends z.ZodTypeAny,
   Keys extends readonly Extract<keyof z.infer<Schema>, string>[] = [],
->(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys, options: { requireEmbedding?: boolean } = {}) {
+>(collectionName: string, schema: Schema, embedKeys: Keys = [] as unknown as Keys, options: { requireEmbedding?: boolean; includeEmbeddingMetadata?: boolean } = {}) {
   type T = z.infer<Schema>;
   const requireEmbedding = options.requireEmbedding ?? true;
   assertNodeSchemaShape(schema, embedKeys, requireEmbedding);
-  const hasEmbeddingField = Object.keys(unwrapObjectSchema(schema).shape).includes('embedding');
+  const objectSchema = unwrapObjectSchema(schema);
+  const hasEmbeddingField = Object.keys(objectSchema.shape).includes('embedding');
+  const schemaWithoutEmbedding = hasEmbeddingField ? objectSchema.omit({ embedding: true }) : null;
   const retrievalMetadata = buildNodeRetrievalMetadata(collectionName, schema, embedKeys);
   const getAllChunked = createChunkedScanner<T>(collectionName, schema);
   const listPage = createPageReader<T>(collectionName, schema);
   nodeRetrievalMetadata.set(collectionName, retrievalMetadata);
   accessorRetrievalMetadata.set(listPage, retrievalMetadata);
   const collection = () => db.collection(collectionName);
+  const metadata = () => options.includeEmbeddingMetadata === false ? {} : embeddingMetadata();
 
   return {
     collectionName,
     schema,
     embedKeys,
     async insert(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
-      const doc = schema.parse(hasEmbeddingField ? { ...input, embedding: [] } : input);
+      const validated = hasEmbeddingField ? schemaWithoutEmbedding!.parse(input) : schema.parse(input);
       const saved = hasEmbeddingField
-        ? { ...doc, embedding: await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>), ...embeddingMetadata() }
-        : doc;
+        ? schema.parse({ ...validated, embedding: await computeEmbedding(collectionName, embedKeys, String(validated.key), validated as Record<string, unknown>), ...metadata() })
+        : validated;
       const result = await collection().save(toArangoDoc(saved as unknown as Record<string, unknown> & { key: string }), { returnNew: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
@@ -211,13 +214,14 @@ export function createNodeHelpers<
      */
     async updateById(id: string, patch: Partial<Omit<z.input<Schema>, 'embedding' | 'key'>>): Promise<T> {
       const touchesEmbedKeys = embedKeys.some((key) => Object.prototype.hasOwnProperty.call(patch, key));
+      const current = schema.parse(withArangoKey(await collection().document(id) as Record<string, unknown>));
       let finalPatch: Record<string, unknown> = patch;
       if (touchesEmbedKeys) {
-        const current = withArangoKey(await collection().document(id) as Record<string, unknown>);
         const merged = { ...current, ...patch };
         const embedding = await computeEmbedding(collectionName, embedKeys, id, merged);
-        finalPatch = { ...patch, embedding, ...embeddingMetadata() };
+        finalPatch = { ...patch, embedding, ...metadata() };
       }
+      schema.parse({ ...current, ...finalPatch });
       const result = await collection().update(id, finalPatch, { returnNew: true, mergeObjects: true });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },
@@ -226,10 +230,10 @@ export function createNodeHelpers<
     },
     /** Insert-or-replace by key, for idempotent seed scripts and fixed-id upserts. */
     async upsertByKey(input: Omit<z.input<Schema>, 'embedding'>): Promise<T> {
-      const doc = schema.parse(hasEmbeddingField ? { ...input, embedding: [] } : input);
+      const validated = hasEmbeddingField ? schemaWithoutEmbedding!.parse(input) : schema.parse(input);
       const saved = hasEmbeddingField
-        ? { ...doc, embedding: await computeEmbedding(collectionName, embedKeys, doc.key, doc as Record<string, unknown>), ...embeddingMetadata() }
-        : doc;
+        ? schema.parse({ ...validated, embedding: await computeEmbedding(collectionName, embedKeys, String(validated.key), validated as Record<string, unknown>), ...metadata() })
+        : validated;
       const result = await collection().save(toArangoDoc(saved as unknown as Record<string, unknown> & { key: string }), { returnNew: true, overwriteMode: 'replace' });
       return schema.parse(withArangoKey(result.new as Record<string, unknown>));
     },

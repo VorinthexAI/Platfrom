@@ -3,7 +3,7 @@ import { aql } from 'arangojs';
 import { db } from './client';
 import { createNodeHelpers, withArangoKey } from './base';
 import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
-import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embeddingMetadata, rolloutEmbeddingSchema } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 
 export const DOCUMENTS_COLLECTION = 'documents';
@@ -20,11 +20,7 @@ export const documentSchema = z.object({
   storageKey: z.string().trim().min(1).optional(),
   sizeBytes: z.number().int().positive().optional(),
   content: z.string().trim().min(1),
-  isFavorite: z.boolean().default(false),
-  embedding: rolloutEmbeddingSchema,
-  embeddingProvider: z.string().trim().min(1).optional(),
-  embeddingModel: z.string().trim().min(1).optional(),
-  embeddingDimensions: z.number().int().positive().optional(),
+  embedding: currentEmbeddingSchema,
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
@@ -40,7 +36,7 @@ export const documentSchema = z.object({
 export type Document = z.infer<typeof documentSchema>;
 export type DocumentExtension = z.infer<typeof documentExtensionSchema>;
 export const documentsEmbeddingFields = ['name', 'content'] as const;
-const helpers = createNodeHelpers(DOCUMENTS_COLLECTION, documentSchema, documentsEmbeddingFields);
+const helpers = createNodeHelpers(DOCUMENTS_COLLECTION, documentSchema, documentsEmbeddingFields, { includeEmbeddingMetadata: false });
 export async function insertDocument(document: Document): Promise<Document> {
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.insertDocument(document);
@@ -93,7 +89,7 @@ export async function restoreDocument(key: string): Promise<Document> {
 
 /** Inserts an already embedded document without invoking the generic auto-embed path. */
 export async function insertPreparedDocument(input: Document): Promise<Document> {
-  const document = documentSchema.parse({ ...input, ...embeddingMetadata() });
+  const document = documentSchema.parse(input);
   currentEmbeddingSchema.parse(document.embedding);
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.insertDocument(document);

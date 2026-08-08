@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
+import { buildEmbeddingText, createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { db } from './client';
-import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embeddingMetadata, rolloutEmbeddingSchema } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
 
 export const DOCUMENT_VERSIONS_COLLECTION = 'documentVersions';
@@ -15,17 +15,14 @@ export const documentVersionSchema = z.object({
   label: z.string().trim().min(1).max(120).optional(),
   html: z.string().min(1).refine((value) => value.trim().length > 0, 'HTML must not be blank.'),
   content: z.string().trim().min(1),
-  embedding: rolloutEmbeddingSchema,
-  embeddingProvider: z.string().trim().min(1).optional(),
-  embeddingModel: z.string().trim().min(1).optional(),
-  embeddingDimensions: z.number().int().positive().optional(),
+  embedding: currentEmbeddingSchema,
   deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
 });
 
 export type DocumentVersion = z.infer<typeof documentVersionSchema>;
-export const documentVersionsEmbeddingFields = ['content'] as const;
-const helpers = createNodeHelpers(DOCUMENT_VERSIONS_COLLECTION, documentVersionSchema, documentVersionsEmbeddingFields);
+export const documentVersionsEmbeddingFields = ['label', 'content'] as const;
+const helpers = createNodeHelpers(DOCUMENT_VERSIONS_COLLECTION, documentVersionSchema, documentVersionsEmbeddingFields, { includeEmbeddingMetadata: false });
 export const getDocumentVersionById = helpers.getById;
 export const getAllDocumentVersionsChunked = helpers.getAllChunked;
 export const listDocumentVersionsPage = helpers.listPage;
@@ -40,7 +37,7 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
 export async function insertDocumentVersion(input: DocumentVersion): Promise<DocumentVersion> {
   const canonical = canonicalDocumentRepresentations(input.html);
   if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
-  const snapshot = documentVersionSchema.parse({ ...input, ...embeddingMetadata() });
+  const snapshot = documentVersionSchema.parse(input);
   currentEmbeddingSchema.parse(snapshot.embedding);
   const cursor = await db.query(`
     LET document = DOCUMENT(documents, @documentKey)
@@ -60,7 +57,7 @@ export async function insertDocumentVersion(input: DocumentVersion): Promise<Doc
 export async function upsertDocumentVersionByKey(input: DocumentVersion): Promise<DocumentVersion> {
   const canonical = canonicalDocumentRepresentations(input.html);
   if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
-  const snapshot = documentVersionSchema.parse({ ...input, ...embeddingMetadata() });
+  const snapshot = documentVersionSchema.parse(input);
   currentEmbeddingSchema.parse(snapshot.embedding);
   const result = await db.collection(DOCUMENT_VERSIONS_COLLECTION).save(toArangoDoc(snapshot), { returnNew: true, overwriteMode: 'replace' });
   return documentVersionSchema.parse(withArangoKey(result.new as Record<string, unknown>));
@@ -138,13 +135,13 @@ export async function deleteDocumentVersionInScope(scopeKey: string, versionKey:
   return contentPersistence.deleteVersion(scopeKey, versionKey);
 }
 
-type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>;
+type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'embedding' | 'createdAt' | 'deletedAt'>;
 
 /** Exclusive collection transaction makes MAX(version)+1 monotonic under concurrent writers. */
 export async function createDocumentVersion(input: NewDocumentVersion): Promise<DocumentVersion> {
-  currentEmbeddingSchema.parse(input.embedding);
+  const embedding = await embedText({ text: buildEmbeddingText(documentVersionsEmbeddingFields, input)! });
   const { withContentPersistenceTransaction } = await import('./content-persistence.node');
-  return withContentPersistenceTransaction((persistence) => persistence.createVersion({ ...input, ...embeddingMetadata() }));
+  return withContentPersistenceTransaction((persistence) => persistence.createVersion({ ...input, embedding }));
 }
 
 export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ContentSemanticSearchInput, 'sources'>) {

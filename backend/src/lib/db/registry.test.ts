@@ -23,6 +23,8 @@ import { documentShareSchema } from './document-shares.node';
 import { imageSchema } from './images.node';
 import { collectionSchema } from './collections.node';
 import { shareSchema } from './shares.node';
+import { placeSchema } from './places.node';
+import { tripSchema } from './trips.node';
 
 describe('node registry schema contracts', () => {
   test('registry serves organizations and user links, never the retired team/platform nodes', () => {
@@ -55,6 +57,25 @@ describe('node registry schema contracts', () => {
       'collectionMembers',
       'tags',
       'tagAssignments',
+      'places',
+      'trips',
+      'tripPlaces',
+      'placeVisits',
+      'books',
+      'bookContexts',
+      'bookThemes',
+      'bookSources',
+      'bookParts',
+      'bookChapters',
+      'chapterContexts',
+      'bookProgress',
+      'emailAccounts',
+      'emailThreads',
+      'emailMessages',
+      'emailContacts',
+      'emailWritingProfiles',
+      'emailRules',
+      'emailReplyDrafts',
       'projects',
       'milestones',
       'tasks',
@@ -112,6 +133,8 @@ describe('node registry schema contracts', () => {
     expect(documentVersionSchema.shape).not.toHaveProperty('updatedAt');
     expect(imageSchema.shape).toHaveProperty('embedding');
     expect(collectionSchema.shape).toHaveProperty('embedding');
+    expect(placeSchema.shape).toHaveProperty('embedding');
+    expect(tripSchema.innerType().shape).toHaveProperty('embedding');
     expect(NODE_NAMES).not.toContain('shares');
     expect(NODE_NAMES).not.toContain('collectionInvites');
     expect(NODE_NAMES).not.toContain('documentShares');

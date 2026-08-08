@@ -63,7 +63,7 @@ ${PRODUCT_FACTS.name} is ${PRODUCT_FACTS.status.toLowerCase()}. ${PRODUCT_FACTS.
 
 ## Core apps
 
-${PRODUCT_FACTS.capabilities.map(({ name, description }) => `- ${name}: ${description}`).join("\n")}
+${PRODUCT_FACTS.capabilities.map(({ name, description, details }) => `- ${name}: ${description} ${details.join(" ")}`).join("\n")}
 
 ## Sparks and pricing
 

@@ -1,5 +1,5 @@
 export const CANONICAL_ORIGIN = "https://vorinthex.com" as const;
-export const CONTENT_LAST_REVIEWED = "2026-08-06" as const;
+export const CONTENT_LAST_REVIEWED = "2026-08-08" as const;
 export const CONTACT_EMAIL = "contact@vorinthex.com" as const;
 
 export type PublicRoutePath =
@@ -29,10 +29,12 @@ export const CORE_CAPABILITIES = [
     id: "archive",
     name: "Archive",
     icon: "/logos/entities/capability-archive.png",
-    description: "Store, organize and understand everything that matters.",
-    promise: "A living home for everything you know.",
-    detail:
-      "Archive connects to your personal AI to intelligently handle notes, documents, links, and research. It organizes material around meaning and brings the right context back when you need it.",
+    description: "Write, save, organize, search, and understand your knowledge.",
+    promise: "One intelligent home for everything you want to keep.",
+    details: [
+      "Capture quick thoughts, create polished documents, upload existing work, and organize notes, ideas, research, and knowledge in one simple place.",
+      "Powerful search helps you rediscover information, while built-in AI can write, rewrite, summarize, translate, explain, and transform entire documents naturally.",
+    ],
     connection:
       "Archive gives every Core app durable memory, so conversations, plans and coaching can build on saved knowledge.",
     features: [
@@ -45,10 +47,12 @@ export const CORE_CAPABILITIES = [
     id: "gallery",
     name: "Gallery",
     icon: "/logos/entities/capability-gallery.png",
-    description: "Your visual memory. Search, recall and connect images.",
-    promise: "Remember the story behind every image.",
-    detail:
-      "Gallery connects to your personal AI to intelligently organize and understand your photos. Search naturally across people, places, dates, and moments without manually sorting everything first.",
+    description: "Organize, understand, search, and share your visual library.",
+    promise: "An intelligent home for your images and memories.",
+    details: [
+      "Bring photos and images together in beautiful collections, mark favorites, and find what you need without remembering filenames or manually sorting everything.",
+      "Gallery understands what your images contain and makes them naturally searchable. Share individual images or build collections where friends, family, and collaborators can contribute.",
+    ],
     connection:
       "Gallery links visual moments to Archive knowledge, Compass places and people connected through Signal.",
     features: [
@@ -61,10 +65,12 @@ export const CORE_CAPABILITIES = [
     id: "signal",
     name: "Signal",
     icon: "/logos/entities/capability-signal.png",
-    description: "Unified communication across people and intelligences.",
-    promise: "One calm view of every important conversation.",
-    detail:
-      "Signal connects to your personal AI to intelligently handle conversations across your inboxes. It identifies priority, preserves shared context, and helps prepare responses for your approval.",
+    description: "Prioritize email, understand conversations, and write replies in your voice.",
+    promise: "Turn an endless inbox into focused communication.",
+    details: [
+      "Connect your email and Signal separates what matters from what does not, surfaces conversations that need attention, and makes important messages easier to understand.",
+      "When it is time to respond, Signal helps write replies that sound like you. It can learn your tone, style, structure, and how you communicate with different people.",
+    ],
     connection:
       "Signal draws on Core context to explain references and prepare replies without creating another isolated silo.",
     features: [
@@ -77,10 +83,12 @@ export const CORE_CAPABILITIES = [
     id: "compass",
     name: "Compass",
     icon: "/logos/entities/capability-compass.png",
-    description: "Discover knowledge and navigate infinite information.",
-    promise: "Turn curiosity into a path you can follow.",
-    detail:
-      "Compass connects to your personal AI to intelligently explore places, topics, and possibilities. It remembers why each discovery matters and turns open research into grounded plans.",
+    description: "Map past journeys, future trips, and dream destinations.",
+    promise: "Your life across the world, mapped around you.",
+    details: [
+      "Explore a 3D globe filled with places you have visited, trips you are planning, and destinations you want to experience. Save wish-list places, mark favorites, and build journeys across multiple stops.",
+      "Over time, Compass becomes a visual record of where you have been, where you are going, and what remains to be discovered.",
+    ],
     connection:
       "Compass connects discoveries to Archive knowledge, Gallery memories and goals developed in Ascend.",
     features: [
@@ -93,10 +101,12 @@ export const CORE_CAPABILITIES = [
     id: "ascend",
     name: "Ascend",
     icon: "/logos/entities/capability-ascend.png",
-    description: "Your AI coach for growth, clarity and mastery.",
-    promise: "Progress guided by your real life, not a template.",
-    detail:
-      "Ascend connects to your personal AI to intelligently support goals, habits, health, and learning. It notices patterns and adapts guidance around the context you choose to provide.",
+    description: "Personalized audiobooks researched and created around your goals.",
+    promise: "A learning experience written specifically for you.",
+    details: [
+      "Tell Ascend what you want to learn or improve. It researches the subject, understands your goals, builds a unique structure, writes every chapter, creates a cover, and turns the finished book into immersive audio.",
+      "Each new book can build on what you have already explored, avoiding repetition and taking your learning deeper over time.",
+    ],
     connection:
       "Ascend uses knowledge, communication and discoveries a user chooses to connect, grounding guidance in actual priorities.",
     features: [

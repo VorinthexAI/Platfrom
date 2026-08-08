@@ -4,7 +4,7 @@ import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
 export const SHARES_COLLECTION = 'shares';
-export const shareSourceTypeSchema = z.enum(['document', 'image', 'collection']);
+export const shareSourceTypeSchema = z.enum(['document', 'image', 'collection', 'place', 'trip']);
 export const sharePermissionSchema = z.enum(['read', 'comment']);
 export const shareSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), sourceType: shareSourceTypeSchema, sourceKey: z.string().cuid(), permission: sharePermissionSchema,
@@ -25,19 +25,20 @@ export async function listSharesByScope(scopeKey: string, sourceType?: z.infer<t
   return (await cursor.all()).map((share) => shareSchema.parse(withArangoKey(share)));
 }
 
-export async function getActiveMediaLibraryShareByTokenHash(tokenHash: string, at = new Date().toISOString()): Promise<Share | null> {
+export async function getActiveShareByTokenHash(tokenHash: string, at = new Date().toISOString()): Promise<Share | null> {
   const validatedHash = shareSchema.shape.tokenHash.parse(tokenHash);
   const validatedAt = z.string().datetime().parse(at);
   const cursor = await db.query(aql`
     FOR share IN ${db.collection(SHARES_COLLECTION)}
-      FILTER share.sourceType IN ["image", "collection"]
       FILTER share.tokenHash == ${validatedHash} && share.deletedAt == null
       FILTER (!HAS(share, "revokedAt") || share.revokedAt == null)
       FILTER (!HAS(share, "expiresAt") || share.expiresAt == null || share.expiresAt > ${validatedAt})
       LET scope = DOCUMENT(${db.collection('scopes')}, share.scopeKey)
-      LET source = share.sourceType == "image"
-        ? DOCUMENT(${db.collection('images')}, share.sourceKey)
-        : DOCUMENT(${db.collection('collections')}, share.sourceKey)
+      LET source = share.sourceType == "document" ? DOCUMENT(${db.collection('documents')}, share.sourceKey)
+        : share.sourceType == "image" ? DOCUMENT(${db.collection('images')}, share.sourceKey)
+        : share.sourceType == "collection" ? DOCUMENT(${db.collection('collections')}, share.sourceKey)
+        : share.sourceType == "place" ? DOCUMENT(${db.collection('places')}, share.sourceKey)
+        : DOCUMENT(${db.collection('trips')}, share.sourceKey)
       FILTER scope != null && scope.deletedAt == null
       FILTER source != null && source.scopeKey == share.scopeKey && source.deletedAt == null
       LIMIT 1

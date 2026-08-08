@@ -171,6 +171,56 @@ export async function migrateContentFavorites(targetDb: Database, collectionName
   if (invalid > 0) throw new Error(`${collectionName} favorite migration verification failed for ${invalid} row(s).`);
 }
 
+export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags', embedKeys: readonly string[]) {
+  const dimensions = EMBEDDING_DIMENSIONS;
+  let after = '';
+  while (true) {
+    const cursor = await targetDb.query<Record<string, unknown>>(`
+      FOR resource IN @@collection
+        FILTER resource._key > @after
+        FILTER !IS_ARRAY(resource.embedding) || LENGTH(resource.embedding) != @dimensions
+          || LENGTH(resource.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+          || HAS(resource, "embeddingProvider") || HAS(resource, "embeddingModel") || HAS(resource, "embeddingDimensions")
+          || HAS(resource, "embeddingState") || HAS(resource, "embeddedAt")
+          || (@collection == "images" && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
+        SORT resource._key
+        LIMIT 50
+        RETURN resource
+    `, { '@collection': collectionName, after, dimensions });
+    const resources = await cursor.all();
+    if (resources.length === 0) break;
+    const updates: Array<Record<string, unknown>> = [];
+    for (const resource of resources) {
+      let embedding = resource.embedding;
+      const hasEmbeddingMetadata = resource.embeddingProvider !== undefined || resource.embeddingModel !== undefined || resource.embeddingDimensions !== undefined;
+      if ((hasEmbeddingMetadata && (resource.embeddingProvider !== EMBEDDING_PROVIDER_ID || resource.embeddingModel !== EMBEDDING_MODEL || resource.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        const text = buildEmbeddingText(embedKeys, resource);
+        if (!text) throw new Error(`Cannot migrate ${collectionName}: ${String(resource._key)} has no semantic embedding input.`);
+        embedding = await generateEmbedding(text);
+      }
+      updates.push({ _key: resource._key, _rev: resource._rev, embedding });
+    }
+    await runMigrationTransaction(targetDb, collectionName, `
+      FOR patch IN @updates
+        LET resource = DOCUMENT(@@collection, patch._key)
+        FILTER resource != null && resource._rev == patch._rev
+        REPLACE resource WITH UNSET(MERGE(resource, { embedding: patch.embedding }), "ownerKey", "requestHash", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN @@collection
+    `, { '@collection': collectionName, updates });
+    after = String(resources.at(-1)!._key);
+  }
+  const verification = await targetDb.query<number>(`
+    RETURN LENGTH(FOR resource IN @@collection
+      FILTER !IS_ARRAY(resource.embedding) || LENGTH(resource.embedding) != @dimensions
+        || LENGTH(resource.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
+        || HAS(resource, "embeddingProvider") || HAS(resource, "embeddingModel") || HAS(resource, "embeddingDimensions")
+        || HAS(resource, "embeddingState") || HAS(resource, "embeddedAt")
+        || (@collection == "images" && (HAS(resource, "ownerKey") || HAS(resource, "requestHash")))
+      RETURN 1)
+  `, { '@collection': collectionName, dimensions });
+  const invalid = await verification.next() ?? 0;
+  if (invalid > 0) throw new Error(`${collectionName} exact semantic migration verification failed for ${invalid} row(s).`);
+}
+
 export async function migrateContentVersions(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
@@ -185,7 +235,9 @@ export async function migrateContentVersions(targetDb: Database) {
           || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
           || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
-          || snapshot.embeddingProvider != @provider || snapshot.embeddingModel != @model || snapshot.embeddingDimensions != @dimensions
+          || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
+          || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")
+          || (IS_STRING(snapshot.label) && LENGTH(TRIM(snapshot.label)) > 0)
         SORT snapshot._key
         LIMIT 50
         RETURN snapshot
@@ -200,8 +252,9 @@ export async function migrateContentVersions(targetDb: Database) {
       const representations = canonicalDocumentRepresentations(sourceHtml);
       if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} canonicalized to an empty representation.`);
       let embedding = snapshot.embedding;
-      if (historicalContent !== representations.content || snapshot.embeddingProvider !== EMBEDDING_PROVIDER_ID || snapshot.embeddingModel !== EMBEDDING_MODEL || snapshot.embeddingDimensions !== dimensions || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        embedding = await generateEmbedding(representations.content);
+      const hasEmbeddingMetadata = snapshot.embeddingProvider !== undefined || snapshot.embeddingModel !== undefined || snapshot.embeddingDimensions !== undefined;
+      if (nonEmptyString(snapshot.label) || historicalContent !== representations.content || (hasEmbeddingMetadata && (snapshot.embeddingProvider !== EMBEDDING_PROVIDER_ID || snapshot.embeddingModel !== EMBEDDING_MODEL || snapshot.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+        embedding = await generateEmbedding(buildEmbeddingText(['label', 'content'], { label: snapshot.label, content: representations.content })!);
       }
       if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
         throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} could not produce a valid historical-content embedding.`);
@@ -212,7 +265,6 @@ export async function migrateContentVersions(targetDb: Database) {
         source: { html: snapshot.html, content: snapshot.content },
         ...representations,
         embedding,
-        ...embeddingMetadata(),
       });
     }
     await runMigrationTransaction(targetDb, 'documentVersions', `
@@ -221,7 +273,7 @@ export async function migrateContentVersions(targetDb: Database) {
         FILTER snapshot != null && snapshot._rev == patch._rev
         /* Legacy version objects are intentionally retired as metadata-only orphans here.
            Object lifecycle reconciliation is external; migration must not infer deletion ownership. */
-        REPLACE snapshot WITH UNSET(MERGE(snapshot, UNSET(patch, "_key", "_rev", "source")), "json", "storageKey", "sizeBytes", "updatedAt") IN documentVersions
+        REPLACE snapshot WITH UNSET(MERGE(snapshot, UNSET(patch, "_key", "_rev", "source")), "json", "storageKey", "sizeBytes", "updatedAt", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documentVersions
     `, { updates });
     after = String(snapshots.at(-1)!._key);
   }
@@ -234,7 +286,8 @@ export async function migrateContentVersions(targetDb: Database) {
         || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
         || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
-        || snapshot.embeddingProvider != @provider || snapshot.embeddingModel != @model || snapshot.embeddingDimensions != @dimensions
+        || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
+        || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")
       RETURN 1)
   `, { dimensions, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL });
   const invalid = await verification.next() ?? 0;
@@ -255,7 +308,8 @@ export async function migrateContentDocuments(targetDb: Database) {
           || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
           || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || (@dimensions > 0 && LENGTH(document.embedding) != @dimensions)
-          || document.embeddingProvider != @provider || document.embeddingModel != @model || document.embeddingDimensions != @dimensions
+          || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
+          || HAS(document, "embeddingState") || HAS(document, "embeddedAt")
         SORT document._key
         LIMIT 50
         RETURN document
@@ -271,7 +325,8 @@ export async function migrateContentDocuments(targetDb: Database) {
       if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documents: ${String(document._key)} canonicalized to an empty representation.`);
       const embeddingText = `${String(document.name ?? '').trim()}\n\n${representations.content}`.trim();
       let embedding = document.embedding;
-      if (document.content !== representations.content || document.embeddingProvider !== EMBEDDING_PROVIDER_ID || document.embeddingModel !== EMBEDDING_MODEL || document.embeddingDimensions !== dimensions || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
+      const hasEmbeddingMetadata = document.embeddingProvider !== undefined || document.embeddingModel !== undefined || document.embeddingDimensions !== undefined;
+      if (document.content !== representations.content || (hasEmbeddingMetadata && (document.embeddingProvider !== EMBEDDING_PROVIDER_ID || document.embeddingModel !== EMBEDDING_MODEL || document.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
         embedding = await generateEmbedding(embeddingText);
       }
       if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
@@ -283,14 +338,13 @@ export async function migrateContentDocuments(targetDb: Database) {
         source: { name: document.name, html: document.html, content: document.content },
         ...representations,
         embedding,
-        ...embeddingMetadata(),
       });
     }
     await runMigrationTransaction(targetDb, 'documents', `
       FOR patch IN @updates
         LET document = DOCUMENT(documents, patch._key)
         FILTER document != null && document._rev == patch._rev
-        REPLACE document WITH UNSET(MERGE(document, UNSET(patch, "_key", "_rev", "source")), "json") IN documents
+        REPLACE document WITH UNSET(MERGE(document, UNSET(patch, "_key", "_rev", "source")), "json", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documents
     `, { updates });
     after = String(documents.at(-1)!._key);
   }
@@ -303,7 +357,8 @@ export async function migrateContentDocuments(targetDb: Database) {
         || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
         || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || (@dimensions > 0 && LENGTH(document.embedding) != @dimensions)
-        || document.embeddingProvider != @provider || document.embeddingModel != @model || document.embeddingDimensions != @dimensions
+        || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
+        || HAS(document, "embeddingState") || HAS(document, "embeddedAt")
       RETURN 1)
   `, { dimensions, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL });
   const invalid = await verification.next() ?? 0;
@@ -593,11 +648,30 @@ export const collections: CollectionSpec[] = [
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
   { name: 'collectionInvites', skipEmbedding: true, indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['expiresAt'] }, { fields: ['acceptedAt'], sparse: true }, { fields: ['revokedAt'], sparse: true }] },
-  { name: 'tags', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }] },
+  { name: 'tags', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'name'] }] },
   { name: 'tagAssignments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tagKey', 'sourceType', 'sourceKey'], unique: true }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'tagKey'] }] },
   { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
-  { name: 'documentVersions', embedKeys: ['content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
+  { name: 'documentVersions', embedKeys: ['label', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
   { name: 'shares', skipEmbedding: true, archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
+  { name: 'places', embedKeys: ['name', 'description', 'country', 'region', 'city'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'isWishlist', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'countryCode'] }] },
+  { name: 'trips', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'startDate'] }, { fields: ['scopeKey', 'endDate'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }] },
+  { name: 'tripPlaces', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true }, { fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'placeKey'] }] },
+  { name: 'placeVisits', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'placeKey'] }, { fields: ['scopeKey', 'tripKey'], sparse: true }, { fields: ['scopeKey', 'arrivedAt'] }] },
+  { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'status', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }] },
+  { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
+  { name: 'bookThemes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
+  { name: 'bookSources', embedKeys: ['title', 'content', 'relevance'], indexes: [{ fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'bookKey', 'sourceType'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'], sparse: true }] },
+  { name: 'bookParts', embedKeys: ['title', 'description', 'objective'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
+  { name: 'bookChapters', embedKeys: ['title', 'description', 'objective', 'content'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'partKey'], sparse: true }] },
+  { name: 'chapterContexts', embedKeys: ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'chapterKey'], unique: true }] },
+  { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'isCompleted'] }] },
+  { name: 'emailAccounts', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'provider', 'providerAccountId'], unique: true }, { fields: ['scopeKey', 'email'] }, { fields: ['scopeKey', 'syncEnabled'] }] },
+  { name: 'emailThreads', embedKeys: ['subject', 'summary', 'intent', 'action'], archive: true, indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'state', 'priority', 'deletedAt'] }] },
+  { name: 'emailMessages', embedKeys: ['subject', 'body', 'summary'], indexes: [{ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true }, { fields: ['scopeKey', 'threadKey', 'sentAt'] }, { fields: ['scopeKey', 'direction', 'sentAt'] }] },
+  { name: 'emailContacts', embedKeys: ['name', 'relationship', 'context'], indexes: [{ fields: ['scopeKey', 'email'], unique: true }, { fields: ['scopeKey', 'emailWritingProfileKey'], sparse: true }] },
+  { name: 'emailWritingProfiles', embedKeys: ['name', 'description', 'tone', 'style', 'structure', 'vocabulary', 'conventions'], indexes: [{ fields: ['scopeKey', 'name'], unique: true }] },
+  { name: 'emailRules', embedKeys: ['name', 'description', 'condition', 'instruction'], indexes: [{ fields: ['scopeKey', 'name'], unique: true }, { fields: ['scopeKey', 'isEnabled', 'action'] }] },
+  { name: 'emailReplyDrafts', embedKeys: ['generatedContent', 'finalContent'], indexes: [{ fields: ['scopeKey', 'threadKey'] }, { fields: ['scopeKey', 'messageKey'] }, { fields: ['scopeKey', 'status', 'updatedAt'] }] },
   // Private replay ledger. Responses may contain one-time share tokens, so this
   // collection is deliberately not registered as a generic application node.
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
@@ -862,8 +936,21 @@ async function main() {
         { '@collection': spec.name },
       );
     }
-    if (spec.name === 'folders' || spec.name === 'documents' || spec.name === 'images' || spec.name === 'collections') {
+    if (spec.name === 'images' || spec.name === 'collections') {
       await migrateContentFavorites(targetDb, spec.name);
+    }
+    if (spec.name === 'folders' || spec.name === 'documents') {
+      await targetDb.query(`FOR resource IN @@collection FILTER HAS(resource, "isFavorite") UPDATE resource WITH { isFavorite: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
+    }
+    if (spec.name === 'folders') await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
+    if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);
+    if (spec.name === 'collections') await migrateExactSemanticRecords(targetDb, 'collections', ['name', 'description']);
+    if (spec.name === 'tags') await migrateExactSemanticRecords(targetDb, 'tags', ['name', 'description']);
+    if (spec.name === 'tags') {
+      await targetDb.query(`FOR tag IN tags FILTER HAS(tag, "deletedAt") UPDATE tag WITH { deletedAt: null } IN tags OPTIONS { keepNull: false }`);
+    }
+    if (spec.name === 'collections' || spec.name === 'tags') {
+      await targetDb.query(`FOR resource IN @@collection FILTER IS_STRING(resource.description) && LENGTH(TRIM(resource.description)) == 0 UPDATE resource WITH { description: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
     }
     if (spec.name === 'actions') {
       await targetDb.query(`

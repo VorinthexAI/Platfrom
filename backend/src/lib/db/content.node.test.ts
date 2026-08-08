@@ -17,7 +17,7 @@ describe('Content node contracts', () => {
   test('uses only semantic Content fields to build embeddings', () => {
     expect(foldersEmbeddingFields).toEqual(['name', 'description']);
     expect(documentsEmbeddingFields).toEqual(['name', 'content']);
-    expect(documentVersionsEmbeddingFields).toEqual(['content']);
+    expect(documentVersionsEmbeddingFields).toEqual(['label', 'content']);
     expect(documentSharesEmbeddingFields).toEqual([]);
     expect(buildEmbeddingText(documentsEmbeddingFields, { name: 'Roadmap', content: 'Ship Content V1', html: '<p>Ship Content V1</p>' })).toBe('Roadmap\n\nShip Content V1');
     expect(buildEmbeddingText(documentSharesEmbeddingFields, { token: 'not-embedded' })).toBeNull();
@@ -29,10 +29,8 @@ describe('Content node contracts', () => {
       expect(schema.shape.deletedAt.parse('2026-07-22T00:00:00.000Z')).toBe('2026-07-22T00:00:00.000Z');
       expect(() => schema.shape.deletedAt.parse('yesterday')).toThrow();
     }
-    expect(folderSchema.shape.isFavorite.parse(undefined)).toBe(false);
-    expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);
-    expect(() => folderSchema.shape.isFavorite.parse('yes')).toThrow();
-    expect(() => documentSchema.shape.isFavorite.parse(1)).toThrow();
+    expect(folderSchema.shape).not.toHaveProperty('isFavorite');
+    expect(documentSchema.shape).not.toHaveProperty('isFavorite');
   });
 
   test('versions contain complete immutable HTML snapshots', () => {

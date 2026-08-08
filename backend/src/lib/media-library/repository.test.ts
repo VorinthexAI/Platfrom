@@ -9,9 +9,20 @@ describe('MediaLibrary repository transactions', () => {
     const repository = createMediaLibraryRepository(database, async (operation) => operation(database));
     await expect(repository.addImageToCollection({ key: newId(), scopeKey: newId(), collectionKey: newId(), imageKey: newId(), addedByKey: newId(), createdAt: '2026-08-08T12:00:00.000Z' })).rejects.toThrow('Source image access');
     expect(query).toContain('LET sourceAccess =');
-    expect(query).toContain('image.ownerKey == @addedByKey');
+    expect(query).toContain('scoped || elevated');
+    expect(query).not.toContain('image.ownerKey');
     expect(query).toContain('sourceCollection.deletedAt == null');
     expect(query).toContain('actor != null && sourceAccess');
+  });
+
+  test('requires write-level scope access to share standalone images', async () => {
+    let query = '';
+    const database: MediaLibraryDatabase = { async query(value) { query = value; return { async all() { return []; } }; } };
+    const repository = createMediaLibraryRepository(database, async (operation) => operation(database));
+    await repository.ownsImage(newId(), newId(), newId());
+    expect(query).toContain('LET writable = scopedRole IN ["owner", "admin", "moderator"]');
+    expect(query).toContain('FILTER writable || elevated');
+    expect(query).not.toContain('FILTER scoped || elevated');
   });
 
   test('clears a source cover in the same transaction when moving its image', async () => {

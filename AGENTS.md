@@ -102,6 +102,10 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 
 - Keep changes scoped and match the surrounding code style.
 - Add or update tests for behavior changes.
+- Never use current or future product names as code identifiers or API route
+  segments (including function, class, variable, module, and endpoint names).
+  Name code after its domain behavior or capability instead; for example, do
+  not name a function `chorus` solely because Chorus is a planned core app.
 - Do not commit secrets in plaintext. All vars/secrets (dev + prod) live git-crypt-encrypted in `.github/environments.json` — edit it locally after `git-crypt unlock`, never add a new plaintext env file.
 - Keep shared code in the top-level `shared/` folder, not nested inside `web/app/src/shared` or `backend/src/shared`.
 - Always use components and icons from `@vorinthex/shared/ui` across web and mobile. Do not create app-local UI primitives, import native button or icon primitives, render native `<button>`/`Pressable` controls, or bypass shared component styling with `vui-*` classes. This applies to bespoke controls including listbox options, reactions, poll choices, mention chips, animated controls, and link CTAs. If a required component, variant, size, or icon does not exist, create or extend it in `shared/packages/ui` first, with web and mobile implementations where applicable, then consume that shared export. All buttons must use the shared `Button` radius, one of its five sizes (`xs`, `sm`, `md`, `lg`, `xl`), and an appropriate shared variant. Disabled primary actions must remain visibly identifiable at 80% opacity; do not replace or hide their primary treatment with local disabled styles.
