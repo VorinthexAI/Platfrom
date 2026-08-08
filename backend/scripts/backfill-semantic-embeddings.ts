@@ -51,7 +51,7 @@ async function staleCount(spec: SemanticSpec): Promise<number> {
       ${inclusionFilter(spec.name)}
       ${staleFilter(spec)}
       RETURN 1)
-  `, staleBindVars(spec, { '@collection': spec.name, embedKeys: spec.embedKeys, dimensions: EMBEDDING_DIMENSIONS }));
+  `, staleBindVars(spec, { '@collection': spec.name, dimensions: EMBEDDING_DIMENSIONS, ...(spec.includeMetadata ? { embedKeys: spec.embedKeys } : {}) }));
   return await cursor.next() ?? 0;
 }
 
