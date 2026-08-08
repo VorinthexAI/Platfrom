@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Database } from 'arangojs';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, embedText, embeddingMetadata } from '../lib/embeddings';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, embedText, embedTexts, embeddingMetadata } from '../lib/embeddings';
 import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../lib/alias';
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
@@ -23,6 +23,7 @@ import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
 import { canonicalDocumentRepresentations } from '../lib/ai/document-processing/representation';
+import { chunkDocumentContent, chunkDocumentText, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { z } from 'zod';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
@@ -123,8 +124,31 @@ function generateEmbedding(text: string) {
   return embedText({ text });
 }
 
+function generateEmbeddings(texts: string[]) {
+  if (process.env.CONTENT_E2E === 'true') return Promise.all(texts.map(generateEmbedding));
+  return embedTexts({ texts });
+}
+
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function isCurrentVector(value: unknown): value is number[] {
+  return Array.isArray(value) && value.length === EMBEDDING_DIMENSIONS && value.every((item) => typeof item === 'number' && Number.isFinite(item));
+}
+
+function currentChunkEmbeddings(value: unknown, chunkCount: number): number[][] | null {
+  return Array.isArray(value) && value.length === chunkCount && value.every(isCurrentVector) ? value : null;
+}
+
+function migrationContentChunks(content: string): string[] | null {
+  try { return chunkDocumentContent(content); } catch { return null; }
+}
+
+function migrationFallbackChunk(content: string): string {
+  const chunk = chunkDocumentText(content.slice(0, 16_000))[0]?.text;
+  if (!chunk) throw new Error('Cannot produce a bounded semantic fallback chunk.');
+  return chunk;
 }
 
 async function runMigrationTransaction(targetDb: Database, collectionName: string, query: string, bindVars: Record<string, unknown>) {
@@ -223,73 +247,102 @@ export async function migrateExactSemanticRecords(targetDb: Database, collection
 
 export async function migrateContentVersions(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
+  const storeContentArray = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED === 'true';
   let after = '';
   while (true) {
     const cursor = await targetDb.query<Record<string, unknown>>(`
       FOR snapshot IN documentVersions
         FILTER snapshot._key > @after
         FILTER !HAS(snapshot, "_internalDeletion") || snapshot._internalDeletion == null
+        FILTER snapshot._semanticChunkingSkipped != true
         FILTER HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
           || !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
-          || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
+          || (@storeContentArray && (!IS_ARRAY(snapshot.content) || LENGTH(snapshot.content) == 0 || LENGTH(snapshot.content[* FILTER !IS_STRING(CURRENT) || LENGTH(TRIM(CURRENT)) == 0]) > 0))
+          || (!@storeContentArray && (!IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0))
           || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
           || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
+          || !IS_ARRAY(snapshot.chunkEmbeddings) || (@storeContentArray && LENGTH(snapshot.chunkEmbeddings) != LENGTH(snapshot.content))
+          || snapshot.semanticChunkCount != LENGTH(snapshot.chunkEmbeddings)
+          || snapshot.semanticContentHash != SHA256(@storeContentArray ? CONCAT_SEPARATOR("", snapshot.content) : snapshot.content)
+          || LENGTH(snapshot.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
+          || LENGTH(FLATTEN(snapshot.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
           || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")
-          || (IS_STRING(snapshot.label) && LENGTH(TRIM(snapshot.label)) > 0)
         SORT snapshot._key
         LIMIT 50
         RETURN snapshot
-    `, { after, dimensions });
+    `, { after, dimensions, storeContentArray });
     const snapshots = await cursor.all();
     if (snapshots.length === 0) break;
     const updates: Array<Record<string, unknown>> = [];
     for (const snapshot of snapshots) {
-      const historicalContent = nonEmptyString(snapshot.content);
+      const historicalContent = nonEmptyString(snapshot.content) ?? (Array.isArray(snapshot.content) ? snapshot.content.filter((value): value is string => typeof value === 'string').join('') : null);
       const sourceHtml = nonEmptyString(snapshot.html) ?? (historicalContent ? legacyContentRepresentations(historicalContent).html : null);
       if (!sourceHtml) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} has no nonempty historical representation.`);
       const representations = canonicalDocumentRepresentations(sourceHtml);
       if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} canonicalized to an empty representation.`);
-      let embedding = snapshot.embedding;
-      const hasEmbeddingMetadata = snapshot.embeddingProvider !== undefined || snapshot.embeddingModel !== undefined || snapshot.embeddingDimensions !== undefined;
-      if (nonEmptyString(snapshot.label) || historicalContent !== representations.content || (hasEmbeddingMetadata && (snapshot.embeddingProvider !== EMBEDDING_PROVIDER_ID || snapshot.embeddingModel !== EMBEDDING_MODEL || snapshot.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        embedding = await generateEmbedding(buildEmbeddingText(['label', 'content'], { label: snapshot.label, content: representations.content })!);
+      const contentChunks = migrationContentChunks(representations.content);
+      if (!contentChunks) {
+        const fallbackChunk = migrationFallbackChunk(representations.content);
+        const fallbackEmbedding = isCurrentVector(snapshot.embedding) ? snapshot.embedding : (await generateEmbeddings([[nonEmptyString(snapshot.label), fallbackChunk].filter(Boolean).join('\n\n')]))[0]!;
+        updates.push({
+          _key: snapshot._key, _rev: snapshot._rev, source: { html: snapshot.html, content: snapshot.content },
+          html: representations.html, content: representations.content, embedding: fallbackEmbedding,
+          semanticChunkCount: 1, semanticContentHash: documentSemanticHash(representations.content), _semanticChunkingSkipped: true,
+        });
+        continue;
       }
-      if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        throw new Error(`Cannot migrate documentVersions: ${String(snapshot._key)} could not produce a valid historical-content embedding.`);
-      }
+      const metadataCurrent = snapshot.embeddingProvider === undefined || (snapshot.embeddingProvider === EMBEDDING_PROVIDER_ID && snapshot.embeddingModel === EMBEDDING_MODEL && snapshot.embeddingDimensions === dimensions);
+      const storedChunksCurrent = Array.isArray(snapshot.content) && snapshot.content.length === contentChunks.length && snapshot.content.every((chunk, index) => chunk === contentChunks[index]);
+      const reusable = metadataCurrent && historicalContent === representations.content && (storedChunksCurrent || typeof snapshot.content === 'string')
+        ? currentChunkEmbeddings(snapshot.chunkEmbeddings, contentChunks.length) ?? (contentChunks.length === 1 && isCurrentVector(snapshot.embedding) ? [snapshot.embedding] : null)
+        : null;
+      const chunkEmbeddings = reusable ?? await generateEmbeddings(contentChunks.map((chunk) => [nonEmptyString(snapshot.label), chunk].filter(Boolean).join('\n\n')));
+      const embedding = chunkEmbeddings[0]!;
       updates.push({
         _key: snapshot._key,
         _rev: snapshot._rev,
         source: { html: snapshot.html, content: snapshot.content },
-        ...representations,
+        html: representations.html,
+        content: storeContentArray ? contentChunks : representations.content,
         embedding,
+        chunkEmbeddings,
+        semanticChunkCount: contentChunks.length,
+        semanticContentHash: documentSemanticHash(representations.content),
       });
     }
     await runMigrationTransaction(targetDb, 'documentVersions', `
       FOR patch IN @updates
         LET snapshot = DOCUMENT(documentVersions, patch._key)
         FILTER snapshot != null && snapshot._rev == patch._rev
+        LET replacement = patch._semanticChunkingSkipped == true ? UNSET(MERGE(snapshot, UNSET(patch, "_key", "_rev", "source")), "chunkEmbeddings") : MERGE(snapshot, UNSET(patch, "_key", "_rev", "source"))
         /* Legacy version objects are intentionally retired as metadata-only orphans here.
            Object lifecycle reconciliation is external; migration must not infer deletion ownership. */
-        REPLACE snapshot WITH UNSET(MERGE(snapshot, UNSET(patch, "_key", "_rev", "source")), "json", "storageKey", "sizeBytes", "updatedAt", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documentVersions
+        REPLACE snapshot WITH UNSET(replacement, "json", "storageKey", "sizeBytes", "updatedAt", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documentVersions
     `, { updates });
     after = String(snapshots.at(-1)!._key);
   }
   const verification = await targetDb.query<number>(`
     RETURN LENGTH(FOR snapshot IN documentVersions
       FILTER !HAS(snapshot, "_internalDeletion") || snapshot._internalDeletion == null
+      FILTER snapshot._semanticChunkingSkipped != true
       FILTER HAS(snapshot, "json") || HAS(snapshot, "storageKey") || HAS(snapshot, "sizeBytes") || HAS(snapshot, "updatedAt")
         || !IS_STRING(snapshot.html) || LENGTH(TRIM(snapshot.html)) == 0
-        || !IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0
+        || (@storeContentArray && (!IS_ARRAY(snapshot.content) || LENGTH(snapshot.content) == 0 || LENGTH(snapshot.content[* FILTER !IS_STRING(CURRENT) || LENGTH(TRIM(CURRENT)) == 0]) > 0))
+        || (!@storeContentArray && (!IS_STRING(snapshot.content) || LENGTH(TRIM(snapshot.content)) == 0))
         || !IS_ARRAY(snapshot.embedding) || LENGTH(snapshot.embedding) == 0
         || LENGTH(snapshot.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || (@dimensions > 0 && LENGTH(snapshot.embedding) != @dimensions)
+        || !IS_ARRAY(snapshot.chunkEmbeddings) || (@storeContentArray && LENGTH(snapshot.chunkEmbeddings) != LENGTH(snapshot.content))
+        || snapshot.semanticChunkCount != LENGTH(snapshot.chunkEmbeddings)
+        || snapshot.semanticContentHash != SHA256(@storeContentArray ? CONCAT_SEPARATOR("", snapshot.content) : snapshot.content)
+        || LENGTH(snapshot.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
+        || LENGTH(FLATTEN(snapshot.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
         || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")
       RETURN 1)
-  `, { dimensions });
+  `, { dimensions, storeContentArray });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`documentVersions migration verification failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
 }
@@ -302,12 +355,21 @@ export async function migrateContentDocuments(targetDb: Database) {
       FOR document IN documents
         FILTER document._key > @after
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+        FILTER document._semanticChunkingSkipped != true
         FILTER HAS(document, "json")
           || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0
           || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
           || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
           || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || (@dimensions > 0 && LENGTH(document.embedding) != @dimensions)
+          || !IS_ARRAY(document.contentChunks) || LENGTH(document.contentChunks) == 0
+          || LENGTH(document.contentChunks[* FILTER !IS_STRING(CURRENT) || LENGTH(TRIM(CURRENT)) == 0]) > 0
+          || !IS_ARRAY(document.chunkEmbeddings) || LENGTH(document.chunkEmbeddings) != LENGTH(document.contentChunks)
+          || CONCAT_SEPARATOR("", document.contentChunks) != document.content
+          || document.semanticChunkCount != LENGTH(document.contentChunks)
+          || document.semanticContentHash != SHA256(document.content)
+          || LENGTH(document.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
+          || LENGTH(FLATTEN(document.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
           || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
           || HAS(document, "embeddingState") || HAS(document, "embeddedAt")
         SORT document._key
@@ -323,40 +385,63 @@ export async function migrateContentDocuments(targetDb: Database) {
       if (!sourceHtml) throw new Error(`Cannot migrate documents: ${String(document._key)} has no nonempty representation.`);
       const representations = canonicalDocumentRepresentations(sourceHtml);
       if (!representations.html.trim() || !representations.content.trim()) throw new Error(`Cannot migrate documents: ${String(document._key)} canonicalized to an empty representation.`);
-      const embeddingText = `${String(document.name ?? '').trim()}\n\n${representations.content}`.trim();
-      let embedding = document.embedding;
-      const hasEmbeddingMetadata = document.embeddingProvider !== undefined || document.embeddingModel !== undefined || document.embeddingDimensions !== undefined;
-      if (document.content !== representations.content || (hasEmbeddingMetadata && (document.embeddingProvider !== EMBEDDING_PROVIDER_ID || document.embeddingModel !== EMBEDDING_MODEL || document.embeddingDimensions !== dimensions)) || !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        embedding = await generateEmbedding(embeddingText);
+      const contentChunks = migrationContentChunks(representations.content);
+      if (!contentChunks) {
+        const fallbackChunk = migrationFallbackChunk(representations.content);
+        const fallbackEmbedding = isCurrentVector(document.embedding) ? document.embedding : (await generateEmbeddings([`${String(document.name ?? '').trim()}\n\n${fallbackChunk}`.trim()]))[0]!;
+        updates.push({
+          _key: document._key, _rev: document._rev, source: { name: document.name, html: document.html, content: document.content },
+          ...representations, embedding: fallbackEmbedding, semanticChunkCount: 1,
+          semanticContentHash: documentSemanticHash(representations.content), _semanticChunkingSkipped: true,
+        });
+        continue;
       }
-      if (!Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-        throw new Error(`Cannot migrate documents: ${String(document._key)} could not produce a valid embedding.`);
-      }
+      const metadataCurrent = document.embeddingProvider === undefined || (document.embeddingProvider === EMBEDDING_PROVIDER_ID && document.embeddingModel === EMBEDDING_MODEL && document.embeddingDimensions === dimensions);
+      const storedChunksCurrent = Array.isArray(document.contentChunks) && document.contentChunks.length === contentChunks.length && document.contentChunks.every((chunk, index) => chunk === contentChunks[index]);
+      const reusable = metadataCurrent && historicalContent === representations.content && (storedChunksCurrent || document.contentChunks === undefined)
+        ? currentChunkEmbeddings(document.chunkEmbeddings, contentChunks.length) ?? (contentChunks.length === 1 && isCurrentVector(document.embedding) ? [document.embedding] : null)
+        : null;
+      const chunkEmbeddings = reusable ?? await generateEmbeddings(contentChunks.map((chunk) => `${String(document.name ?? '').trim()}\n\n${chunk}`.trim()));
+      const embedding = chunkEmbeddings[0]!;
       updates.push({
         _key: document._key,
         _rev: document._rev,
         source: { name: document.name, html: document.html, content: document.content },
         ...representations,
+        contentChunks,
         embedding,
+        chunkEmbeddings,
+        semanticChunkCount: contentChunks.length,
+        semanticContentHash: documentSemanticHash(representations.content),
       });
     }
     await runMigrationTransaction(targetDb, 'documents', `
       FOR patch IN @updates
         LET document = DOCUMENT(documents, patch._key)
         FILTER document != null && document._rev == patch._rev
-        REPLACE document WITH UNSET(MERGE(document, UNSET(patch, "_key", "_rev", "source")), "json", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documents
+        LET replacement = patch._semanticChunkingSkipped == true ? UNSET(MERGE(document, UNSET(patch, "_key", "_rev", "source")), "contentChunks", "chunkEmbeddings") : MERGE(document, UNSET(patch, "_key", "_rev", "source"))
+        REPLACE document WITH UNSET(replacement, "json", "embeddingProvider", "embeddingModel", "embeddingDimensions", "embeddingState", "embeddedAt") IN documents
     `, { updates });
     after = String(documents.at(-1)!._key);
   }
   const verification = await targetDb.query<number>(`
     RETURN LENGTH(FOR document IN documents
       FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
+      FILTER document._semanticChunkingSkipped != true
       FILTER HAS(document, "json")
         || !IS_STRING(document.html) || LENGTH(TRIM(document.html)) == 0
         || !IS_STRING(document.content) || LENGTH(TRIM(document.content)) == 0
         || !IS_ARRAY(document.embedding) || LENGTH(document.embedding) == 0
         || LENGTH(document.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || (@dimensions > 0 && LENGTH(document.embedding) != @dimensions)
+        || !IS_ARRAY(document.contentChunks) || LENGTH(document.contentChunks) == 0
+        || LENGTH(document.contentChunks[* FILTER !IS_STRING(CURRENT) || LENGTH(TRIM(CURRENT)) == 0]) > 0
+        || !IS_ARRAY(document.chunkEmbeddings) || LENGTH(document.chunkEmbeddings) != LENGTH(document.contentChunks)
+        || CONCAT_SEPARATOR("", document.contentChunks) != document.content
+        || document.semanticChunkCount != LENGTH(document.contentChunks)
+        || document.semanticContentHash != SHA256(document.content)
+        || LENGTH(document.chunkEmbeddings[* FILTER !IS_ARRAY(CURRENT) || LENGTH(CURRENT) != @dimensions]) > 0
+        || LENGTH(FLATTEN(document.chunkEmbeddings)[* FILTER !IS_NUMBER(CURRENT)]) > 0
         || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
         || HAS(document, "embeddingState") || HAS(document, "embeddedAt")
       RETURN 1)

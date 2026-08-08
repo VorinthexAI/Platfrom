@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
 import { db } from './client';
-import { createNodeHelpers, withArangoKey } from './base';
+import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
-import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingBatchSchema, currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
+import { chunkDocumentContent, documentContentChunksSchema, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 
 export const DOCUMENTS_COLLECTION = 'documents';
 export { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
@@ -21,6 +22,11 @@ export const documentSchema = z.object({
   sizeBytes: z.number().int().positive().optional(),
   content: z.string().trim().min(1),
   embedding: currentEmbeddingSchema,
+  contentChunks: documentContentChunksSchema.optional(),
+  chunkEmbeddings: currentEmbeddingBatchSchema.optional(),
+  semanticChunkCount: z.number().int().positive().optional(),
+  semanticContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  _semanticChunkingSkipped: z.boolean().optional(),
   speechStorageKeys: z.array(z.string().trim().min(1)).optional(),
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
@@ -42,8 +48,13 @@ export async function insertDocument(document: Document): Promise<Document> {
   return contentPersistence.insertDocument(document);
 }
 export const getDocumentById = helpers.getById;
-export function upsertDocumentByKey(input: Omit<z.input<typeof documentSchema>, 'embedding'>): Promise<Document> {
-  return helpers.upsertByKey({ ...input, ...canonicalDocumentRepresentations(input.html) });
+export async function upsertDocumentByKey(input: Omit<z.input<typeof documentSchema>, 'embedding' | 'contentChunks' | 'chunkEmbeddings'>): Promise<Document> {
+  const representations = canonicalDocumentRepresentations(input.html);
+  const contentChunks = chunkDocumentContent(representations.content);
+  const chunkEmbeddings = await embedTexts({ texts: contentChunks.map((chunk) => `${input.name.trim()}\n\n${chunk}`) });
+  const document = documentSchema.parse({ ...input, ...representations, contentChunks, embedding: chunkEmbeddings[0], chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(representations.content) });
+  const result = await db.collection(DOCUMENTS_COLLECTION).save(toArangoDoc(document), { returnNew: true, overwriteMode: 'replace' });
+  return documentSchema.parse(withArangoKey(result.new as Record<string, unknown>));
 }
 export const getAllDocumentsChunked = helpers.getAllChunked;
 export const listDocumentsPage = helpers.listPage;
@@ -89,8 +100,13 @@ export async function restoreDocument(key: string): Promise<Document> {
 
 /** Inserts an already embedded document without invoking the generic auto-embed path. */
 export async function insertPreparedDocument(input: Document): Promise<Document> {
-  const document = documentSchema.parse(input);
+  const expectedChunks = chunkDocumentContent(input.content);
+  if (input.contentChunks && (input.contentChunks.length !== expectedChunks.length || input.contentChunks.some((chunk, index) => chunk !== expectedChunks[index]))) throw new Error('Document chunks must be derived from canonical content.');
+  const contentChunks = input.contentChunks ?? expectedChunks;
+  const chunkEmbeddings = input.chunkEmbeddings ?? (contentChunks.length === 1 ? [input.embedding] : undefined);
+  const document = documentSchema.parse({ ...input, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(input.content), _semanticChunkingSkipped: undefined });
   currentEmbeddingSchema.parse(document.embedding);
+  if (!document.contentChunks || !document.chunkEmbeddings || document.contentChunks.length !== document.chunkEmbeddings.length) throw new Error('Prepared documents require aligned semantic chunks and embeddings.');
   const { contentPersistence } = await import('./content-persistence.node');
   return contentPersistence.insertDocument(document);
 }
@@ -205,8 +221,10 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER ${createdBefore ?? null} == null || document.createdAt <= ${createdBefore ?? null}
         FILTER ${input.updatedAfter ?? null} == null || document.updatedAt >= ${input.updatedAfter ?? null}
         FILTER ${input.updatedBefore ?? null} == null || document.updatedAt <= ${input.updatedBefore ?? null}
-        FILTER IS_ARRAY(document.embedding) && LENGTH(document.embedding) == LENGTH(${input.embedding})
-        LET score = COSINE_SIMILARITY(document.embedding, ${input.embedding})
+        LET vectors = IS_ARRAY(document.chunkEmbeddings) && LENGTH(document.chunkEmbeddings) > 0 ? document.chunkEmbeddings : [document.embedding]
+        LET scores = (FOR vector IN vectors FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(${input.embedding}) && LENGTH(vector[* FILTER !IS_NUMBER(CURRENT)]) == 0 RETURN COSINE_SIMILARITY(vector, ${input.embedding}))
+        LET score = MAX(scores)
+        FILTER score != null
         FILTER score >= ${input.minScore ?? 0}
         RETURN { source: "document", score, document }
     ) : []
@@ -219,7 +237,10 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER ${createdBefore ?? null} == null || version.createdAt <= ${createdBefore ?? null}
         FILTER ${input.updatedAfter ?? null} == null || version.createdAt >= ${input.updatedAfter ?? null}
         FILTER ${input.updatedBefore ?? null} == null || version.createdAt <= ${input.updatedBefore ?? null}
-        FILTER IS_ARRAY(version.embedding) && LENGTH(version.embedding) == LENGTH(${input.embedding})
+        LET vectors = IS_ARRAY(version.chunkEmbeddings) && LENGTH(version.chunkEmbeddings) > 0 ? version.chunkEmbeddings : [version.embedding]
+        LET scores = (FOR vector IN vectors FILTER IS_ARRAY(vector) && LENGTH(vector) == LENGTH(${input.embedding}) && LENGTH(vector[* FILTER !IS_NUMBER(CURRENT)]) == 0 RETURN COSINE_SIMILARITY(vector, ${input.embedding}))
+        LET score = MAX(scores)
+        FILTER score != null
         LET document = DOCUMENT(${db.collection(DOCUMENTS_COLLECTION)}, version.documentKey)
         FILTER document != null && document.scopeKey == version.scopeKey
         FILTER !HAS(document, "_internalDeletion") || document._internalDeletion == null
@@ -230,7 +251,6 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
         FILTER ${mimeTypes} == null || document.mimeType IN ${mimeTypes ?? []}
-        LET score = COSINE_SIMILARITY(version.embedding, ${input.embedding})
         FILTER score >= ${input.minScore ?? 0}
         RETURN { source: "version", score, document, version }
     ) : []

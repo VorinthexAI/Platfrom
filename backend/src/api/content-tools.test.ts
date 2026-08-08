@@ -68,6 +68,17 @@ describe('Content tool API', () => {
     expect(await tooLarge.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
   });
 
+  test('rejects oversized request bodies before JSON and base64 normalization', async () => {
+    const user = { key: newId(), identityType: 'user' as const };
+    const response = await request({ getIdentity: async () => user, maxDocumentBytes: 1, run: async () => ({}) }, 'document.parse', {
+      organizationKey,
+      agentKey,
+      input: { scopeKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 1, encoding: 'base64', content: 'A'.repeat(70_000) } },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
+  });
+
   test('is registered under the API route and rejects query parameters', async () => {
     const app = new Hono(); const api = app.basePath('/api/v1');
     app.onError((_error, c) => c.json({ error: 'invalid query' }, 400));

@@ -3,6 +3,7 @@ import { connect } from 'node:net';
 
 const defaults: Record<string, string> = {
   CONTENT_E2E: 'true',
+  CONTENT_VERSION_CONTENT_ARRAY_ENABLED: 'true',
   ARANGO_URL: 'http://127.0.0.1:8529',
   ARANGO_DATABASE: 'content_e2e',
   ARANGO_USERNAME: 'root',
@@ -16,9 +17,10 @@ const defaults: Record<string, string> = {
   EMBEDDING_DIMENSIONS: '4096',
   ORCHESTRATION_CREDENTIALS_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
 };
-const suppliedDatabase = Boolean(process.env.ARANGO_DATABASE);
+const suppliedDatabase = Boolean(process.env.ARANGO_DATABASE && process.env.ARANGO_DATABASE !== 'vorinthex');
 const env = { ...process.env } as Record<string, string>;
 for (const [key, value] of Object.entries(defaults)) env[key] ??= value;
+if (!suppliedDatabase) env.ARANGO_DATABASE = defaults.ARANGO_DATABASE;
 
 function run(command: string, args: string[]) {
   return new Promise<void>((resolve, reject) => {

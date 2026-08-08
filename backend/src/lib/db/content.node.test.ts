@@ -5,6 +5,7 @@ import { documentShareSchema, documentSharesEmbeddingFields } from './document-s
 import { folderSchema, foldersEmbeddingFields } from './folders.node';
 import { documentVersionSchema, documentVersionsEmbeddingFields } from './document-versions.node';
 import { EMBEDDING_DIMENSIONS } from '../embeddings';
+import { chunkDocumentContent } from '../ai/document-processing/chunking';
 
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 
@@ -37,14 +38,25 @@ describe('Content node contracts', () => {
     const snapshot = documentVersionSchema.parse({
       key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
       version: 2, label: 'Before launch', html: '<p>Launch</p>',
-      content: 'Launch', embedding, createdAt: '2026-07-22T10:00:00.000Z',
+      content: ['Launch'], embedding, chunkEmbeddings: [embedding], createdAt: '2026-07-22T10:00:00.000Z',
     });
     expect(snapshot).toMatchObject({ version: 2, label: 'Before launch', content: 'Launch' });
     expect(snapshot.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+    expect(snapshot.chunkEmbeddings).toEqual([embedding]);
     expect(snapshot).not.toHaveProperty('storageKey');
     expect(snapshot).not.toHaveProperty('sizeBytes');
     expect(() => documentVersionSchema.parse({ ...snapshot, html: '   ' })).toThrow();
     expect(() => documentVersionSchema.parse({ ...snapshot, content: '   ' })).toThrow();
+  });
+
+  test('version content arrays reconstruct canonical text exactly', () => {
+    const content = `${Array.from({ length: 1_050 }, (_, index) => `word${index}`).join(' ')}\n\nFinal paragraph.`;
+    const chunks = chunkDocumentContent(content);
+    const snapshot = documentVersionSchema.parse({
+      key: 'cm00000000000000000000001', scopeKey: 'cm00000000000000000000002', documentKey: 'cm00000000000000000000003',
+      version: 1, html: '<p>placeholder</p>', content: chunks, embedding, chunkEmbeddings: chunks.map(() => embedding), createdAt: '2026-07-22T10:00:00.000Z',
+    });
+    expect(snapshot.content).toBe(content);
   });
 
   test('shares persist hashes and strip plaintext tokens', () => {
@@ -76,6 +88,9 @@ describe('Content node contracts', () => {
     const shareSource = await Bun.file(new URL('./document-shares.node.ts', import.meta.url)).text();
     expect(searchSource).toContain("const folderKeys = input.folderKeys?.length ? input.folderKeys : null");
     expect(searchSource.match(/folder == null \|\| folder.scopeKey == document.scopeKey/g)).toHaveLength(2);
+    expect(searchSource).toContain('document.chunkEmbeddings');
+    expect(searchSource).toContain('version.chunkEmbeddings');
+    expect(searchSource).toContain('LET score = MAX(scores)');
     expect(searchSource).not.toContain('version.updatedAt');
     expect(shareSource).toContain('document != null && document.scopeKey == share.scopeKey');
     expect(shareSource).toContain('folder == null || folder.scopeKey == share.scopeKey');

@@ -1,4 +1,4 @@
-import { collections } from '../src/db/arango-migrate';
+import { collections, migrateContentDocuments, migrateContentVersions } from '../src/db/arango-migrate';
 import { buildEmbeddingText } from '../src/lib/db/base';
 import { db } from '../src/lib/db/client';
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EMBEDDING_PROVIDER_ID, embedText, embeddingMetadata } from '../src/lib/embeddings';
@@ -15,12 +15,15 @@ export const SEMANTIC_COLLECTION_ALLOWLIST = [
 
 type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };
 const authoritative = new Map(collections.map((spec) => [spec.name, spec]));
-const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.map((name) => {
+const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter((name) => name !== 'documents' && name !== 'documentVersions').map((name) => {
   const spec = authoritative.get(name);
   if (!spec || spec.skipEmbedding || !spec.embedKeys?.length) throw new Error(`Semantic allowlist entry ${name} is not an embedding collection in authoritative specs.`);
   return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions'].includes(name) };
 });
 semanticCollections.push({ name: 'agentMemories', embedKeys: ['content'], includeMetadata: true });
+
+await migrateContentDocuments(db);
+await migrateContentVersions(db);
 
 function inclusionFilter(name: string): string {
   const active = 'FILTER !HAS(doc, "_internalDeletion") || doc._internalDeletion == null';

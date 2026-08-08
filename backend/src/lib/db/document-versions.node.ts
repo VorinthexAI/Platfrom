@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { aql } from 'arangojs';
-import { buildEmbeddingText, createNodeHelpers, toArangoDoc, withArangoKey } from './base';
+import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { db } from './client';
-import { EMBEDDING_DIMENSIONS, currentEmbeddingSchema, embedText } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, currentEmbeddingBatchSchema, currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
+import { chunkDocumentContent, documentContentChunksSchema, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 
 export const DOCUMENT_VERSIONS_COLLECTION = 'documentVersions';
 
@@ -14,8 +15,12 @@ export const documentVersionSchema = z.object({
   version: z.number().int().positive(),
   label: z.string().trim().min(1).max(120).optional(),
   html: z.string().min(1).refine((value) => value.trim().length > 0, 'HTML must not be blank.'),
-  content: z.string().trim().min(1),
+  content: z.union([z.string().trim().min(1), documentContentChunksSchema]).transform((value) => typeof value === 'string' ? value : value.join('')),
   embedding: currentEmbeddingSchema,
+  chunkEmbeddings: currentEmbeddingBatchSchema.optional(),
+  semanticChunkCount: z.number().int().positive().optional(),
+  semanticContentHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  _semanticChunkingSkipped: z.boolean().optional(),
   deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(),
 });
@@ -33,12 +38,24 @@ function assertConfiguredEmbeddingDimensions(embedding: number[]): void {
   }
 }
 
+function storedSnapshot(snapshot: DocumentVersion) {
+  const { content, ...fields } = snapshot;
+  return toArangoDoc({ ...fields, content: process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED === 'true' ? chunkDocumentContent(content) : content });
+}
+
+export async function prepareDocumentVersionSemantics(content: string, label?: string) {
+  const contentChunks = chunkDocumentContent(content);
+  const chunkEmbeddings = await embedTexts({ texts: contentChunks.map((chunk) => [label, chunk].filter(Boolean).join('\n\n')) });
+  return { content, embedding: chunkEmbeddings[0]!, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(content) };
+}
+
 /** Prepared snapshots preserve the exact embedding that belonged to the saved content. */
 export async function insertDocumentVersion(input: DocumentVersion): Promise<DocumentVersion> {
   const canonical = canonicalDocumentRepresentations(input.html);
   if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
   const snapshot = documentVersionSchema.parse(input);
   currentEmbeddingSchema.parse(snapshot.embedding);
+  if (!snapshot.chunkEmbeddings || snapshot.chunkEmbeddings.length !== chunkDocumentContent(snapshot.content).length) throw new Error('Prepared document versions require aligned chunk embeddings.');
   const cursor = await db.query(`
     LET document = DOCUMENT(documents, @documentKey)
     FILTER document != null && document.scopeKey == @scopeKey
@@ -47,19 +64,20 @@ export async function insertDocumentVersion(input: DocumentVersion): Promise<Doc
     FILTER folder == null || folder.scopeKey == @scopeKey
     FILTER folder == null || !HAS(folder, "_internalDeletion") || folder._internalDeletion == null
     INSERT @snapshot INTO documentVersions RETURN NEW
-  `, { documentKey: snapshot.documentKey, scopeKey: snapshot.scopeKey, snapshot: toArangoDoc(snapshot) });
+  `, { documentKey: snapshot.documentKey, scopeKey: snapshot.scopeKey, snapshot: storedSnapshot(snapshot) });
   const created = await cursor.next();
   if (!created) throw new Error('Document version owner is pending deletion.');
   return documentVersionSchema.parse(withArangoKey(created as Record<string, unknown>));
 }
 
 /** Migration/import-only keyed replacement; normal writes use createDocumentVersion. */
-export async function upsertDocumentVersionByKey(input: DocumentVersion): Promise<DocumentVersion> {
+export async function upsertDocumentVersionByKey(input: Omit<z.input<typeof documentVersionSchema>, 'embedding' | 'chunkEmbeddings'>): Promise<DocumentVersion> {
   const canonical = canonicalDocumentRepresentations(input.html);
-  if (canonical.html !== input.html || canonical.content !== input.content) throw new Error('Document version representations must be canonical and agreeing.');
-  const snapshot = documentVersionSchema.parse(input);
-  currentEmbeddingSchema.parse(snapshot.embedding);
-  const result = await db.collection(DOCUMENT_VERSIONS_COLLECTION).save(toArangoDoc(snapshot), { returnNew: true, overwriteMode: 'replace' });
+  const sourceContent = typeof input.content === 'string' ? input.content : input.content.join('');
+  if (canonical.html !== input.html || canonical.content !== sourceContent) throw new Error('Document version representations must be canonical and agreeing.');
+  const semantics = await prepareDocumentVersionSemantics(canonical.content, input.label);
+  const snapshot = documentVersionSchema.parse({ ...input, ...canonical, ...semantics });
+  const result = await db.collection(DOCUMENT_VERSIONS_COLLECTION).save(storedSnapshot(snapshot), { returnNew: true, overwriteMode: 'replace' });
   return documentVersionSchema.parse(withArangoKey(result.new as Record<string, unknown>));
 }
 
@@ -139,9 +157,9 @@ type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'embedding' 
 
 /** Exclusive collection transaction makes MAX(version)+1 monotonic under concurrent writers. */
 export async function createDocumentVersion(input: NewDocumentVersion): Promise<DocumentVersion> {
-  const embedding = await embedText({ text: buildEmbeddingText(documentVersionsEmbeddingFields, input)! });
+  const semantics = await prepareDocumentVersionSemantics(input.content, input.label);
   const { withContentPersistenceTransaction } = await import('./content-persistence.node');
-  return withContentPersistenceTransaction((persistence) => persistence.createVersion({ ...input, embedding }));
+  return withContentPersistenceTransaction((persistence) => persistence.createVersion({ ...input, ...semantics }));
 }
 
 export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ContentSemanticSearchInput, 'sources'>) {
