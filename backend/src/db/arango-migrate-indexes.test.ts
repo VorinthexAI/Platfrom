@@ -70,6 +70,7 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('Dropped obsolete unique channel-name index');
     expect(source).toContain('@isImage && (HAS(resource, "ownerKey") || HAS(resource, "requestHash"))');
     expect(source).not.toContain('@collection == "images"');
+    expect(source).not.toContain('{ after, dimensions, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL }');
   });
   test('declares travel and book-generation collection indexes', () => {
     expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'trips', 'tripPlaces', 'placeVisits']);

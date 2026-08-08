@@ -241,7 +241,7 @@ export async function migrateContentVersions(targetDb: Database) {
         SORT snapshot._key
         LIMIT 50
         RETURN snapshot
-    `, { after, dimensions, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL });
+    `, { after, dimensions });
     const snapshots = await cursor.all();
     if (snapshots.length === 0) break;
     const updates: Array<Record<string, unknown>> = [];
@@ -289,7 +289,7 @@ export async function migrateContentVersions(targetDb: Database) {
         || HAS(snapshot, "embeddingProvider") || HAS(snapshot, "embeddingModel") || HAS(snapshot, "embeddingDimensions")
         || HAS(snapshot, "embeddingState") || HAS(snapshot, "embeddedAt")
       RETURN 1)
-  `, { dimensions, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL });
+  `, { dimensions });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`documentVersions migration verification failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
 }
@@ -313,7 +313,7 @@ export async function migrateContentDocuments(targetDb: Database) {
         SORT document._key
         LIMIT 50
         RETURN document
-    `, { after, dimensions, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL });
+    `, { after, dimensions });
     const documents = await cursor.all();
     if (documents.length === 0) break;
     const updates: Array<Record<string, unknown>> = [];
@@ -360,7 +360,7 @@ export async function migrateContentDocuments(targetDb: Database) {
         || HAS(document, "embeddingProvider") || HAS(document, "embeddingModel") || HAS(document, "embeddingDimensions")
         || HAS(document, "embeddingState") || HAS(document, "embeddedAt")
       RETURN 1)
-  `, { dimensions, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL });
+  `, { dimensions });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`documents migration verification failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
 }
