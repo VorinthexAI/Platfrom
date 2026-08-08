@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { basename, extname } from 'node:path';
 import mammoth from 'mammoth';
 import WordExtractor from 'word-extractor';
-import { EMBEDDING_DIMENSIONS, embedText } from '@/lib/embeddings';
+import { EMBEDDING_DIMENSIONS, embedText, embedTexts } from '@/lib/embeddings';
 import { getDocumentById, insertPreparedDocument, documentSchema, type Document, type DocumentExtension } from '@/lib/db/documents.node';
 import { getFolderById } from '@/lib/db/folders.node';
 import { newId } from '@/lib/ids';
@@ -18,6 +18,7 @@ import {
 } from './schemas';
 import { documentStorage, type DocumentStorage } from './storage';
 import { awsTextractDocumentOcr, type DocumentOcr } from './textract';
+import { chunkDocumentContent, documentSemanticHash } from './chunking';
 import {
   documentInputToHtml,
   htmlToExtractedBlocks,
@@ -32,6 +33,15 @@ export const DEFAULT_MAX_EXTRACTED_CHARACTERS = 10_000_000;
 const MAX_DOCX_ENTRIES = 10_000;
 const MAX_DOCX_EXPANDED_BYTES = 100 * 1024 * 1024;
 const MAX_DOCX_COMPRESSION_RATIO = 100;
+
+export function positiveDocumentLimit(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function maxExtractedCharacters(): number {
+  return positiveDocumentLimit(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS, DEFAULT_MAX_EXTRACTED_CHARACTERS);
+}
 
 const MIME_TYPES: Record<DocumentExtension, readonly string[]> = {
   txt: ['text/plain'],
@@ -108,7 +118,7 @@ function validateDocxContent(bytes: Uint8Array): boolean {
 }
 
 function validateSignature(extension: DocumentExtension, bytes: Uint8Array): boolean {
-  if (extension === 'pdf') return hasPrefix(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]);
+  if (extension === 'pdf') return hasPrefix(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]) && new TextDecoder('latin1').decode(bytes.subarray(Math.max(0, bytes.length - 1_024))).includes('%%EOF');
   if (extension === 'doc') return hasPrefix(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
   if (extension === 'docx') return hasPrefix(bytes, [0x50, 0x4b, 0x03, 0x04]) && validateDocxContent(bytes);
   return !bytes.includes(0);
@@ -122,10 +132,10 @@ export async function documentValidate(input: {
 }, options: { maxBytes?: number; logger?: DocumentActionLogger } = {}): Promise<NormalizedDocument> {
   return observed('document-validate', { scopeKey: input.scopeKey, folderKey: input.folderKey }, options.logger ?? defaultLogger, async () => {
     try {
-      const maxBytes = options.maxBytes ?? Number(process.env.CONTENT_MAX_DOCUMENT_BYTES ?? DEFAULT_MAX_DOCUMENT_BYTES);
+      const maxBytes = positiveDocumentLimit(options.maxBytes ?? process.env.CONTENT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_BYTES);
       const uploaded = await uploadedFileBytes(input.file, maxBytes);
       const safeFilename = basename(uploaded.filename.trim());
-      if (!safeFilename || safeFilename !== uploaded.filename.trim() || safeFilename === '.' || safeFilename === '..') {
+      if (!safeFilename || safeFilename !== uploaded.filename.trim() || safeFilename === '.' || safeFilename === '..' || /[\\/\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(safeFilename)) {
         throw new DocumentProcessingError('DOCUMENT_INVALID_FILENAME', 'The uploaded filename is invalid.', 'document-validate');
       }
       const extension = extname(safeFilename).slice(1).toLowerCase() as DocumentExtension;
@@ -227,8 +237,9 @@ function parseMarkdown(markdown: string): ExtractedBlock[] {
 }
 
 function extractionFromText(text: string, blocks = paragraphs(text), metadata?: Record<string, unknown>): ExtractionResult {
-  const maxCharacters = Number(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS ?? DEFAULT_MAX_EXTRACTED_CHARACTERS);
+  const maxCharacters = maxExtractedCharacters();
   if (text.length > maxCharacters) throw new Error('Extracted document content exceeds the configured limit.');
+  if (!text.trim()) throw new Error('The document contains no extractable text.');
   return extractionResultSchema.parse({ extractedText: text.trim(), blocks, metadata });
 }
 
@@ -242,12 +253,18 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
     try {
       if (input.extension === 'pdf') {
         const result = extractionResultSchema.parse(await (options.ocr ?? awsTextractDocumentOcr).extract(input.storageKey));
-        if (result.extractedText.length > Number(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS ?? DEFAULT_MAX_EXTRACTED_CHARACTERS)) throw new Error('Extracted document content exceeds the configured limit.');
+        if (result.extractedText.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
+        if (!result.extractedText.trim()) throw new Error('The document contains no extractable text.');
         return result;
       }
-      if (input.extension === 'txt') return extractionFromText(new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput));
+      if (input.extension === 'txt') {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
+        if (text.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
+        return extractionFromText(text);
+      }
       if (input.extension === 'md') {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
+        if (text.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
         return extractionFromText(text, parseMarkdown(text), { format: 'markdown' });
       }
       if (input.extension === 'docx') {
@@ -287,16 +304,21 @@ export async function documentGenerateContent(input: { html: string }, options: 
   });
 }
 
-export async function documentEmbed(input: { name: string; content: string }, options: { embed?: typeof embedText; dimensions?: number; logger?: DocumentActionLogger } = {}): Promise<{ embedding: number[] }> {
+export async function documentEmbed(input: { name: string; content: string }, options: { embed?: typeof embedText; embedBatch?: typeof embedTexts; dimensions?: number; logger?: DocumentActionLogger } = {}): Promise<{ embedding: number[]; contentChunks: string[]; chunkEmbeddings: number[][]; semanticChunkCount: number; semanticContentHash: string }> {
   return observed('document-embed', {}, options.logger ?? defaultLogger, async () => {
     try {
-      const text = `${input.name.trim()}\n\n${input.content.trim()}`;
-      const embedding = await (options.embed ?? embedText)({ text });
+      const contentChunks = chunkDocumentContent(input.content);
+      const texts = contentChunks.map((chunk) => [input.name.trim(), chunk.trim()].filter(Boolean).join('\n\n'));
+      const chunkEmbeddings = options.embedBatch
+        ? await options.embedBatch({ texts })
+        : options.embed
+          ? await Promise.all(texts.map((text) => options.embed!({ text })))
+          : await embedTexts({ texts });
       const dimensions = options.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
-      if (!Array.isArray(embedding) || embedding.length === 0 || embedding.some((value) => !Number.isFinite(value)) || embedding.length !== dimensions) {
+      if (chunkEmbeddings.length !== contentChunks.length || chunkEmbeddings.some((embedding) => !Array.isArray(embedding) || embedding.length !== dimensions || embedding.some((value) => !Number.isFinite(value)))) {
         throw new Error(`Embedding must contain ${dimensions} finite values.`);
       }
-      return { embedding };
+      return { embedding: chunkEmbeddings[0]!, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(input.content) };
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_EMBEDDING_FAILED', 'Document embedding failed.', 'document-embed', true);
     }
@@ -313,8 +335,13 @@ export interface DocumentInsertDependencies {
 export async function documentInsert(input: Document, options: DocumentInsertDependencies = {}): Promise<{ document: Document }> {
   return observed('document-insert', { documentKey: input.key, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
-      const document = documentSchema.parse(input);
+      const expectedChunks = chunkDocumentContent(input.content);
+      if (input.contentChunks && (input.contentChunks.length !== expectedChunks.length || input.contentChunks.some((chunk, index) => chunk !== expectedChunks[index]))) throw new Error('Document chunks must be derived from canonical content.');
+      const contentChunks = input.contentChunks ?? expectedChunks;
+      const chunkEmbeddings = input.chunkEmbeddings ?? (contentChunks.length === 1 ? [input.embedding] : undefined);
+      const document = documentSchema.parse({ ...input, contentChunks, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(input.content), _semanticChunkingSkipped: undefined });
       if (document.embedding.length === 0) throw new Error('A document embedding is required.');
+      if (!document.contentChunks || !document.chunkEmbeddings || document.contentChunks.length !== document.chunkEmbeddings.length) throw new Error('Aligned document chunks and embeddings are required.');
       if (document.folderKey) {
         const folder = await (options.getFolder ?? getFolderById)(document.folderKey);
         if (!folder || folder.scopeKey !== document.scopeKey) throw new Error('The Content folder does not exist in the requested scope.');

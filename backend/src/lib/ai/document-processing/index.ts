@@ -16,12 +16,14 @@ import { DocumentProcessingError } from './errors';
 import { documentStorage, type DocumentStorage } from './storage';
 import type { DocumentOcr } from './textract';
 import type { embedText } from '@/lib/embeddings';
+import type { embedTexts } from '@/lib/embeddings';
 import { htmlToPlainText, sanitizeDocumentHtml } from './representation';
 
 export interface DocumentParseDependencies extends DocumentInsertDependencies {
   storage?: DocumentStorage;
   ocr?: DocumentOcr;
   embed?: typeof embedText;
+  embedBatch?: typeof embedTexts;
   embeddingDimensions?: number;
   maxBytes?: number;
   logger?: DocumentActionLogger;
@@ -103,7 +105,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
     const canonicalContent = htmlToPlainText(html);
     const { content } = await actions.generateContent({ html }, { logger });
     if (content !== canonicalContent) throw new DocumentProcessingError('DOCUMENT_CONTENT_GENERATION_FAILED', 'Document content must be derived from canonical HTML.', 'document-generate-content');
-    const { embedding } = await actions.embed({ name: normalized.name, content }, { embed: dependencies.embed, dimensions: dependencies.embeddingDimensions, logger });
+    const semantics = await actions.embed({ name: normalized.name, content }, { embed: dependencies.embed, embedBatch: dependencies.embedBatch, dimensions: dependencies.embeddingDimensions, logger });
     const timestamp = new Date().toISOString();
     const result = await actions.insert({
       key: documentKey,
@@ -116,7 +118,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
       sizeBytes: normalized.sizeBytes,
       html,
       content,
-      embedding,
+      ...semantics,
       deletedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -163,6 +165,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
 }
 
 export * from './actions';
+export * from './chunking';
 export * from './errors';
 export * from './exports';
 export * from './representation';

@@ -2,10 +2,10 @@ import type { Context } from 'hono';
 import { z, ZodError } from 'zod';
 import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
 import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
-import { DEFAULT_MAX_DOCUMENT_BYTES } from '@/lib/ai/document-processing/actions';
+import { DEFAULT_MAX_DOCUMENT_BYTES, positiveDocumentLimit } from '@/lib/ai/document-processing/actions';
 import { ContentError, contentToolInputSchemas, contentToolNameSchema, isContentMutation, runContentAgentTool, type ContentErrorCode, type RunContentAgentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
-import { parseJson, strictObject } from './validation';
+import { strictObject } from './validation';
 
 const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), agentKey: z.string().cuid(), input: z.unknown() });
 type ContentToolRunner = (input: Parameters<typeof runContentAgentTool>[0], options: RunContentAgentToolOptions) => Promise<unknown>;
@@ -42,6 +42,30 @@ function normalizeDocumentUpload(input: unknown, maxBytes: number) {
   return { ...record, file: { filename: upload.filename, mimeType: upload.mimeType, sizeBytes: upload.sizeBytes, bytes: new Uint8Array(Buffer.from(upload.content, 'base64')) } };
 }
 
+async function parseLimitedBody(c: Context, tool: string, maxDocumentBytes: number) {
+  const maximum = Math.ceil(maxDocumentBytes / 3) * 4 + 64 * 1024;
+  const declared = c.req.header('content-length');
+  if (declared && (!/^\d+$/.test(declared) || Number(declared) > maximum)) throw new ContentError('DOCUMENT_TOO_LARGE', 'The request body exceeds the maximum allowed size.', tool, { action: 'parse' });
+  const reader = c.req.raw.body?.getReader();
+  if (!reader) throw new SyntaxError('Request body is required.');
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maximum) {
+      await reader.cancel();
+      throw new ContentError('DOCUMENT_TOO_LARGE', 'The request body exceeds the maximum allowed size.', tool, { action: 'parse' });
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bodySchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
+}
+
 export function createContentToolHandler(dependencies: ContentToolHandlerDependencies = {}) {
   return async (c: Context) => {
     const rawTool = c.req.param('tool');
@@ -52,8 +76,8 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
     if (!identity) return c.json(responseError(new ContentError('CONTENT_UNAUTHORIZED', 'Authentication required.', tool, { action: 'authorization' })), 401);
     if (identity.identityType !== 'user') return c.json(responseError(new ContentError('CONTENT_FORBIDDEN', 'A user session is required.', tool, { action: 'authorization' })), 403);
     try {
-      const body = await parseJson(c, bodySchema);
-      const maximum = dependencies.maxDocumentBytes ?? Number(process.env.CONTENT_MAX_DOCUMENT_BYTES ?? DEFAULT_MAX_DOCUMENT_BYTES);
+      const maximum = positiveDocumentLimit(dependencies.maxDocumentBytes ?? process.env.CONTENT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_BYTES);
+      const body = await parseLimitedBody(c, tool, maximum);
       let input = tool === 'document.parse' ? normalizeDocumentUpload(body.input, maximum) : body.input;
       input = contentToolInputSchemas[tool].parse(input);
       const idempotencyKey = c.req.header('idempotency-key')?.trim();

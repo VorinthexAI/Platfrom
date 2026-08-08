@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { parseDocument } from '.';
+import { generateDocumentExport } from './exports';
 import type { Document } from '@/lib/db/documents.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import {
@@ -8,8 +9,10 @@ import {
   documentExtract,
   documentGenerateContent,
   documentGenerateHtml,
+  htmlToExtractedBlocks,
   documentInsert,
   documentKeyForRequest,
+  documentSemanticHash,
   documentValidate,
   storageUpload,
   type DocumentPipelineActions,
@@ -57,7 +60,7 @@ const fileFor = (extension: string) => {
     md: { mimeType: 'text/markdown', bytes: bytes('# Markdown') },
     doc: { mimeType: 'application/msword', bytes: new Uint8Array([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 1]) },
     docx: { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytes: minimalDocxBytes() },
-    pdf: { mimeType: 'application/pdf', bytes: bytes('%PDF-1.7 test') },
+    pdf: { mimeType: 'application/pdf', bytes: bytes('%PDF-1.7\n1 0 obj\n<<>>\nendobj\n%%EOF') },
   };
   const fixture = fixtures[extension]!;
   return { filename: `report.${extension}`, mimeType: fixture.mimeType, sizeBytes: fixture.bytes.length, bytes: fixture.bytes };
@@ -96,6 +99,13 @@ describe('document-validate action', () => {
     const malformed = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1]);
     await expect(documentValidate({ file: { filename: 'x.docx', mimeType: fileFor('docx').mimeType, sizeBytes: malformed.length, bytes: malformed }, scopeKey, folderKey }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_UPLOAD_INVALID' });
   });
+
+  test('rejects truncated PDFs and unsafe cross-platform filenames', async () => {
+    const truncated = bytes('%PDF-1.7\ntruncated');
+    await expect(documentValidate({ file: { filename: 'x.pdf', mimeType: 'application/pdf', sizeBytes: truncated.length, bytes: truncated }, scopeKey }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_UPLOAD_INVALID' });
+    await expect(documentValidate({ file: { ...fileFor('txt'), filename: 'folder\\report.txt' }, scopeKey }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_INVALID_FILENAME' });
+    await expect(documentValidate({ file: { ...fileFor('txt'), filename: 'folder/report.txt' }, scopeKey }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_INVALID_FILENAME' });
+  });
 });
 
 describe('document-extract action', () => {
@@ -113,11 +123,29 @@ describe('document-extract action', () => {
     expect(html).toBe('<h1><strong>Core</strong></h1><p>First line with <a href="https://vorinthex.com/archive">Archive</a> continues with <code>**literal**</code> and <em>emphasis</em>.</p>');
   });
 
+  test('preserves sanitized inline semantics from DOCX-style HTML blocks', async () => {
+    const blocks = htmlToExtractedBlocks('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
+    const { html } = await documentGenerateHtml({ extractedText: 'Bold and italic with link.', blocks }, { logger: quiet });
+    expect(html).toBe('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
+  });
+
   test('uses format adapters for DOC and DOCX', async () => {
     const doc = await documentExtract({ ...normalized('doc'), storageKey: 'doc' }, { logger: quiet, extractDoc: async () => 'Legacy Word' });
     const docx = await documentExtract({ ...normalized('docx'), storageKey: 'docx' }, { logger: quiet, extractDocx: async () => 'Modern Word' });
     expect(doc.extractedText).toBe('Legacy Word');
     expect(docx.extractedText).toBe('Modern Word');
+  });
+
+  test('validates and extracts a real DOCX archive through Mammoth', async () => {
+    const exported = await generateDocumentExport({ format: 'docx', html: '<h1>Quarterly report</h1><p>Revenue increased.</p>' });
+    const validated = await documentValidate({
+      file: { filename: 'report.docx', mimeType: exported.mimeType, sizeBytes: exported.bytes.byteLength, bytes: exported.bytes },
+      scopeKey,
+      folderKey,
+    }, { logger: quiet });
+    const result = await documentExtract({ ...validated, storageKey: 'unused-for-docx' }, { logger: quiet });
+    expect(result.extractedText).toBe('Quarterly report\n\nRevenue increased.');
+    expect(result.blocks.map(({ type }) => type)).toEqual(['paragraph', 'paragraph']);
   });
 
   test('normalizes text-based and scanned PDFs through OCR', async () => {
@@ -199,6 +227,21 @@ describe('document-embed action', () => {
     await expect(documentEmbed({ name: 'Report', content: 'Body' }, { logger: quiet, dimensions: 2, embed: async () => [] })).rejects.toMatchObject({ code: 'DOCUMENT_EMBEDDING_FAILED' });
     await expect(documentEmbed({ name: 'Report', content: 'Body' }, { logger: quiet, dimensions: 2, embed: async () => [1] })).rejects.toMatchObject({ code: 'DOCUMENT_EMBEDDING_FAILED' });
   });
+
+  test('batch embeds every bounded chunk of a large document in order', async () => {
+    const content = Array.from({ length: 2_001 }, (_, index) => `word${index}`).join(' ');
+    let received: string[] = [];
+    const result = await documentEmbed({ name: 'Large report', content }, {
+      logger: quiet,
+      dimensions: 2,
+      embedBatch: async ({ texts }) => { received = texts; return texts.map((_, index) => [index, index + 1]); },
+    });
+    expect(result.contentChunks).toHaveLength(3);
+    expect(result.contentChunks.every((chunk) => chunk.trim().split(/\s+/).length <= 1_000)).toBe(true);
+    expect(result.chunkEmbeddings).toEqual([[0, 1], [1, 2], [2, 3]]);
+    expect(result.embedding).toEqual([0, 1]);
+    expect(received.every((text, index) => text === `Large report\n\n${result.contentChunks[index]!.trim()}`)).toBe(true);
+  });
 });
 
 describe('document-insert action', () => {
@@ -238,7 +281,7 @@ describe('document.parse tool', () => {
       extract: async () => { calls.push('document-extract'); fail('extract'); return { extractedText: 'Body', blocks: [{ type: 'paragraph', text: 'Body' }] }; },
       generateHtml: async () => { calls.push('document-generate-html'); fail('generateHtml'); return { html: '<p>Body</p>' }; },
       generateContent: async () => { calls.push('document-generate-content'); fail('generateContent'); return { content: 'Body' }; },
-      embed: async () => { calls.push('document-embed'); fail('embed'); return { embedding: [1, 2] }; },
+      embed: async () => { calls.push('document-embed'); fail('embed'); return { embedding: [1, 2], contentChunks: ['Body'], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Body') }; },
       insert: async (document) => { calls.push('document-insert'); fail('insert'); persisted = document; return { document }; },
     };
     return { calls, storage, actions, get persisted() { return persisted; }, getFolder: async () => folder, getDocument: async () => persisted };

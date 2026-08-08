@@ -3,6 +3,7 @@ import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
 import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
+import { documentSemanticHash } from '../lib/ai/document-processing/chunking';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
   let page = 0;
@@ -114,10 +115,13 @@ describe('Arango migration indexes', () => {
     expect(source.indexOf('await migrateGenericContentContracts(targetDb)')).toBeLessThan(source.indexOf('for (const spec of collections)'));
   });
   test('repairs recoverable document and version representations without borrowing data', async () => {
+    const previousContentArray = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
+    process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = 'true';
+    try {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
     const documentMigration = migrationDatabase('documents', { _key: 'document-1', _rev: 'document-rev', name: 'Current', html: '   ', content: 'Current body', embedding, ...embeddingMetadata(), json: {} });
     await migrateContentDocuments(documentMigration.database);
-    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, html: '<p>Current body</p>', content: 'Current body', embedding }]);
+    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, html: '<p>Current body</p>', content: 'Current body', contentChunks: ['Current body'], embedding, chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Current body') }]);
     expect(documentMigration.update?.query).toContain('UNSET(MERGE(document');
     expect(documentMigration.update?.query).toContain('document._rev == patch._rev');
     expect(documentMigration.update?.query).toContain('UNSET(patch, "_key", "_rev", "source")');
@@ -125,10 +129,14 @@ describe('Arango migration indexes', () => {
 
     const versionMigration = migrationDatabase('documentVersions', { _key: 'version-1', _rev: 'version-rev', html: '\n\t', content: 'Historical body', embedding, ...embeddingMetadata(), json: {}, storageKey: 'legacy', sizeBytes: 12, updatedAt: '2026-01-01T00:00:00.000Z' });
     await migrateContentVersions(versionMigration.database);
-    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, html: '<p>Historical body</p>', content: 'Historical body', embedding }]);
+    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, html: '<p>Historical body</p>', content: ['Historical body'], embedding, chunkEmbeddings: [embedding], semanticChunkCount: 1, semanticContentHash: documentSemanticHash('Historical body') }]);
     expect(versionMigration.update?.query).toContain('snapshot._rev == patch._rev');
     expect(versionMigration.update?.query).toContain('"json", "storageKey", "sizeBytes", "updatedAt"');
     expect(versionMigration.update?.query).toContain('migration must not infer deletion ownership');
+    } finally {
+      if (previousContentArray === undefined) delete process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
+      else process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = previousContentArray;
+    }
   });
   test('regenerates legacy 1536 embeddings without allowing a concurrent replacement', async () => {
     const previous = process.env.CONTENT_E2E;
@@ -145,6 +153,31 @@ describe('Arango migration indexes', () => {
       if (previous === undefined) delete process.env.CONTENT_E2E;
       else process.env.CONTENT_E2E = previous;
     }
+  });
+  test('keeps version content strings during the compatibility rollout phase', async () => {
+    const previous = process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
+    delete process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
+    try {
+      const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
+      const migration = migrationDatabase('documentVersions', { _key: 'version-rollout', _rev: 'version-rev', html: '<p>Historical body</p>', content: 'Historical body', embedding });
+      await migrateContentVersions(migration.database);
+      const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;
+      expect(patch.content).toBe('Historical body');
+      expect(patch.chunkEmbeddings).toEqual([embedding]);
+    } finally {
+      if (previous === undefined) delete process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED;
+      else process.env.CONTENT_VERSION_CONTENT_ARRAY_ENABLED = previous;
+    }
+  });
+  test('marks oversized legacy content for flat-vector fallback without blocking migration', async () => {
+    const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
+    const content = Array.from({ length: 65_000 }, (_, index) => `word${index}`).join(' ');
+    const migration = migrationDatabase('documents', { _key: 'oversized-document', _rev: 'oversized-rev', name: 'Legacy large document', html: `<p>${content}</p>`, content, embedding });
+    await migrateContentDocuments(migration.database);
+    const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;
+    expect(patch).toMatchObject({ _semanticChunkingSkipped: true, semanticChunkCount: 1, embedding });
+    expect(patch).not.toHaveProperty('contentChunks');
+    expect(patch).not.toHaveProperty('chunkEmbeddings');
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
     for (const collection of ['images', 'collections'] as const) {

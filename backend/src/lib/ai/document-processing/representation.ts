@@ -116,17 +116,18 @@ function directText(node: HtmlNode): string {
 }
 
 function extracted(node: HtmlNode): ExtractedBlock[] {
-  if (/^h[1-6]$/.test(node.tag)) return [{ type: 'heading', level: Number(node.tag[1]), text: directText(node) }];
-  if (node.tag === 'p') return [{ type: 'paragraph', text: directText(node) }];
+  const inlineHtml = () => node.children.map(serializeNode).join('');
+  if (/^h[1-6]$/.test(node.tag)) return [{ type: 'heading', level: Number(node.tag[1]), text: directText(node), attrs: { html: inlineHtml() } }];
+  if (node.tag === 'p') return [{ type: 'paragraph', text: directText(node), attrs: { html: inlineHtml() } }];
   if (node.tag === 'blockquote') return [{ type: 'blockquote', text: treeText(node).trim() }];
   if (node.tag === 'pre') return [{ type: 'codeBlock', text: treeText(node, true).trimEnd() }];
   if (node.tag === 'hr') return [{ type: 'horizontalRule' }];
   if (node.tag === 'ul' || node.tag === 'ol') return [{ type: node.tag === 'ul' ? 'bulletList' : 'orderedList', children: node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child)) }];
-  if (node.tag === 'li') return [{ type: 'listItem', text: directText(node), children: node.children.filter((child): child is HtmlNode => typeof child !== 'string' && ['ul', 'ol'].includes(child.tag)).flatMap(extracted) }];
+  if (node.tag === 'li') return [{ type: 'listItem', text: directText(node), attrs: { html: inlineHtml() }, children: node.children.filter((child): child is HtmlNode => typeof child !== 'string' && ['ul', 'ol'].includes(child.tag)).flatMap(extracted) }];
   if (node.tag === 'table') return [{ type: 'table', children: node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child)) }];
   if (node.tag === 'tbody' || node.tag === 'thead') return node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child));
   if (node.tag === 'tr') return [{ type: 'tableRow', children: node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child)) }];
-  if (node.tag === 'td' || node.tag === 'th') return [{ type: 'tableCell', text: treeText(node).trim() }];
+  if (node.tag === 'td' || node.tag === 'th') return [{ type: 'tableCell', text: treeText(node).trim(), attrs: { html: inlineHtml() } }];
   return node.children.flatMap((child) => typeof child === 'string' ? [] : extracted(child));
 }
 

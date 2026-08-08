@@ -115,11 +115,11 @@ suite('Content live E2E', () => {
     const agentKey = newId();
     const skillKey = newId();
     const scopeAgentKey = newId();
-    const testPrefix = `content/${organizationKey}/`;
+    const testPrefix = `content/${scopeKey}/`;
     roots.add(organizationKey);
     roots.add(outsiderOrganizationKey);
     prefixes.add(testPrefix);
-    prefixes.add(`content/${outsiderOrganizationKey}/`);
+    prefixes.add(`content/${secondScopeKey}/`);
 
     const save = (collection: string, value: Record<string, unknown>) => db.collection(collection).save(value);
     await save('organizations', { _key: organizationKey, name: 'Content E2E', is_root: false, slug: `archive-${organizationKey}`, description: null, isActive: true, mfa_enabled: false, metadata: {}, createdAt: now, updatedAt: now, embedding: [] });
@@ -138,11 +138,13 @@ suite('Content live E2E', () => {
 
     let randomSeed = 1;
     const processingOrder: string[] = [];
+    const ingestionBatchSizes: number[] = [];
     const dependencies = {
       embed: async () => embedding,
       ingestion: {
         embeddingDimensions: 4096,
         embed: async () => embedding,
+        embedBatch: async ({ texts }: { texts: string[] }) => { ingestionBatchSizes.push(texts.length); return texts.map(() => embedding); },
         logger: (event: any) => {
           if (event.action === 'document.parse' ? event.status === 'started' : event.status === 'completed') processingOrder.push(event.action);
         },
@@ -222,6 +224,40 @@ suite('Content live E2E', () => {
     expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
     expect((await call('document.find', { documentKeys: [documentKey], include: ['html', 'content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(4096);
     expect((await call('document.list', { scopeKey, folderKey: childFolderKey, extensions: ['md'] })).documents.map((item: any) => item.key)).toContain(documentKey);
+
+    const [{ Hono }, { createContentToolHandler }] = await Promise.all([import('hono'), import('@/api/content-tools')]);
+    const api = new Hono();
+    api.post('/content/tools/:tool', createContentToolHandler({
+      getIdentity: async () => ({ key: userKey, identityType: 'user' }),
+      run: async (request) => runContentTool(request.tool, request.input, context, dependencies),
+    }));
+    const apiText = Array.from({ length: 2_105 }, (_, index) => `word${index}`).join(' ');
+    const apiResponse = await api.request('/content/tools/document.parse', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'idempotency-key': `http-processing-${organizationKey}` },
+      body: JSON.stringify({
+        organizationKey,
+        agentKey,
+        input: {
+          scopeKey,
+          folderKey: childFolderKey,
+          file: { filename: 'http-upload.txt', mimeType: 'text/plain', sizeBytes: Buffer.byteLength(apiText), encoding: 'base64', content: Buffer.from(apiText).toString('base64') },
+        },
+      }),
+    });
+    expect(apiResponse.status).toBe(200);
+    const apiResult = await apiResponse.json() as any;
+    const apiDocument = await db.collection('documents').document(apiResult.data.document.key);
+    expect(apiDocument.content).toBe(apiText);
+    expect(apiDocument.embedding).toHaveLength(4096);
+    expect(apiDocument.contentChunks).toHaveLength(3);
+    expect(apiDocument.contentChunks.every((chunk: string) => chunk.trim().split(/\s+/).length <= 1_000)).toBe(true);
+    expect(apiDocument.chunkEmbeddings).toHaveLength(3);
+    expect(apiDocument.chunkEmbeddings.every((vector: number[]) => vector.length === 4_096)).toBe(true);
+    expect(ingestionBatchSizes).toContain(3);
+    const apiObject = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: apiDocument.storageKey }));
+    expect(Buffer.from(await apiObject.Body.transformToByteArray()).toString()).toBe(apiText);
+
     for (const mode of ['content', 'html'] as const) expect((await call('document.read', { documentKeys: [documentKey], mode })).summary.failed).toBe(0);
     const ephemeralAudio = await call('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 2, includeTitle: true, includeCode: false });
     expect(ephemeralAudio.results[0].data.audio[0].url).toStartWith('data:audio/mpeg;base64,');
@@ -250,6 +286,7 @@ suite('Content live E2E', () => {
     expect(JSON.stringify(listedShares)).not.toContain('tokenHash');
 
     const versionOne = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release one' } })).results[0].data.version;
+    expect(Array.isArray((await db.collection('documentVersions').document(versionOne.key)).content)).toBe(true);
     const versionTwo = (await call('document.create-version', { documentKeys: [documentKey], labels: { [documentKey]: 'Release two' }, atomic: true })).results[0].data.version;
     expect(versionTwo.version).toBeGreaterThan(versionOne.version);
     expect((await call('document.find-version', { versionKeys: [versionOne.key], include: ['html', 'content', 'embedding'] })).results[0].data.version.embedding).toHaveLength(4096);

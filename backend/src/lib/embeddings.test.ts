@@ -1,5 +1,15 @@
-import { expect, test } from 'bun:test';
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, QWEN_RETRIEVAL_INSTRUCTION, embeddingMetadata, prepareEmbeddingText, rolloutEmbeddingSchema } from './embeddings';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, EXTERNAL_EMBEDDING_MODEL_ID, QWEN_RETRIEVAL_INSTRUCTION, embedText, embedTexts, embeddingMetadata, prepareEmbeddingText, rolloutEmbeddingSchema } from './embeddings';
+
+const originalFetch = globalThis.fetch;
+const originalApiKey = process.env.OPENROUTER_API_KEY;
+const vector = (value: number) => Array.from({ length: EMBEDDING_DIMENSIONS }, () => value);
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  if (originalApiKey === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = originalApiKey;
+});
 
 test('applies the Qwen retrieval instruction exactly once only to queries', () => {
   expect(prepareEmbeddingText('hello', 'document')).toBe('hello');
@@ -12,4 +22,54 @@ test('rollout reads accept finite legacy and current vectors only', () => {
   expect(rolloutEmbeddingSchema.safeParse(Array(1_536).fill(0)).success).toBe(true);
   expect(rolloutEmbeddingSchema.safeParse(Array(EMBEDDING_DIMENSIONS).fill(0)).success).toBe(true);
   expect(rolloutEmbeddingSchema.safeParse(Array(2).fill(0)).success).toBe(false);
+});
+
+describe('batch embeddings', () => {
+  test('uses one ordered batch and prepares every query exactly once', async () => {
+    process.env.OPENROUTER_API_KEY = 'test-key';
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ provider: 'DeepInfra', data: [{ index: 1, embedding: vector(2) }, { index: 0, embedding: vector(1) }] });
+    }) as typeof fetch;
+
+    const result = await embedTexts({ texts: ['first', `${QWEN_RETRIEVAL_INSTRUCTION}second`], purpose: 'query', timeoutMs: 5_000 });
+    expect(body.input).toEqual([`${QWEN_RETRIEVAL_INSTRUCTION}first`, `${QWEN_RETRIEVAL_INSTRUCTION}second`]);
+    expect(body.model).toBe(EXTERNAL_EMBEDDING_MODEL_ID);
+    expect(result[0]?.[0]).toBe(1);
+    expect(result[1]?.[0]).toBe(2);
+  });
+
+  test('rejects incorrect response cardinality and every malformed vector', async () => {
+    process.env.OPENROUTER_API_KEY = 'test-key';
+    globalThis.fetch = (async () => Response.json({ provider: 'DeepInfra', data: [{ index: 0, embedding: vector(1) }] })) as unknown as typeof fetch;
+    await expect(embedTexts({ texts: ['one', 'two'] })).rejects.toBeDefined();
+
+    globalThis.fetch = (async () => Response.json({ provider: 'DeepInfra', data: [{ index: 0, embedding: vector(1) }, { index: 1, embedding: [1] }] })) as unknown as typeof fetch;
+    await expect(embedTexts({ texts: ['one', 'two'] })).rejects.toBeDefined();
+  });
+
+  test('keeps embedText as a one-item wrapper', async () => {
+    process.env.OPENROUTER_API_KEY = 'test-key';
+    let input: unknown;
+    globalThis.fetch = (async (_url, init) => {
+      input = JSON.parse(String(init?.body)).input;
+      return Response.json({ provider: 'DeepInfra', data: [{ index: 0, embedding: vector(3) }] });
+    }) as typeof fetch;
+    expect((await embedText({ text: ' document ' }))[0]).toBe(3);
+    expect(input).toEqual(['document']);
+  });
+
+  test('splits large requests into bounded provider batches while preserving order', async () => {
+    process.env.OPENROUTER_API_KEY = 'test-key';
+    const sizes: number[] = [];
+    globalThis.fetch = (async (_url, init) => {
+      const input = JSON.parse(String(init?.body)).input as string[];
+      sizes.push(input.length);
+      return Response.json({ provider: 'DeepInfra', data: input.map((text, index) => ({ index, embedding: vector(Number(text.slice(1))) })) });
+    }) as typeof fetch;
+    const result = await embedTexts({ texts: Array.from({ length: 33 }, (_, index) => `v${index}`) });
+    expect(sizes).toEqual([16, 16, 1]);
+    expect(result.map((embedding) => embedding[0])).toEqual(Array.from({ length: 33 }, (_, index) => index));
+  });
 });

@@ -16,6 +16,7 @@ import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
 import { htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
+import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
@@ -66,13 +67,14 @@ export interface ContentRepository {
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
 }
 
-export interface ContentActionResult { text?: string; audio?: Uint8Array; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[] }
+export interface ContentActionResult { text?: string; audio?: Uint8Array; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
 export interface ContentToolDependencies extends RouterDependencies {
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
   runAction?: (action: Action, input: Record<string, unknown>, context: DomainToolContext) => Promise<ContentActionResult>;
   embed?: (text: string) => Promise<number[]>;
+  embedBatch?: (texts: string[]) => Promise<number[][]>;
   observer?: (event: SafeEvent) => void | Promise<void>;
   clock?: () => Date;
   id?: () => string;
@@ -121,7 +123,7 @@ function folderView(folder: Folder) {
 }
 
 function documentView(document: Document) {
-  const { html: _html, content: _content, embedding: _embedding, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
   return safe;
 }
 
@@ -131,8 +133,8 @@ function shareView(share: DocumentShare) {
 }
 
 function versionView(version: DocumentVersion, include: string[] = []) {
-  const { embedding, html, content, ...safe } = version;
-  return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('content') ? { content } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
+  const { embedding, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, html, content: _content, ...safe } = version;
+  return { ...safe, ...(include.includes('html') ? { html } : {}), ...(include.includes('content') ? { content: htmlToPlainText(html) } : {}), ...(include.includes('embedding') ? { embedding } : {}) };
 }
 
 async function productionRepository(): Promise<ContentRepository> {
@@ -262,6 +264,7 @@ interface RuntimeDefaults {
   clock: () => Date;
   random: (size: number) => Uint8Array;
   embed: (text: string, purpose?: 'document' | 'query') => Promise<number[]>;
+  embedBatch: (texts: string[], purpose?: 'document' | 'query') => Promise<number[][]>;
   runAction: NonNullable<ContentToolDependencies['runAction']>;
   idempotency: ContentIdempotencyStore;
   generateExport: typeof generateDocumentExport;
@@ -278,14 +281,20 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     import('@/lib/ai/document-processing/exports'),
   ]);
   const embedding = deps.embed ? (text: string) => deps.embed!(text) : (text: string, purpose: 'document' | 'query' = 'document') => embeddings.embedText({ text, purpose });
+  const embeddingBatch = deps.embedBatch
+    ? (texts: string[]) => deps.embedBatch!(texts)
+    : deps.embed
+      ? (texts: string[]) => Promise.all(texts.map((text) => deps.embed!(text)))
+      : (texts: string[], purpose: 'document' | 'query' = 'document') => embeddings.embedTexts({ texts, purpose });
   return {
     repository: deps.repository ?? await productionRepository(), storage: deps.storage ?? storage.documentStorage,
     parseDocument: deps.parseDocument ?? processing.parseDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
     embed: embedding,
+    embedBatch: embeddingBatch,
     runAction: deps.runAction ?? (async (action: Action, input: Record<string, unknown>): Promise<ContentActionResult> => {
       if (action === 'document-generate-html') return processing.documentGenerateHtml(input as never) as Promise<ContentActionResult>;
       if (action === 'document-generate-content') return processing.documentGenerateContent(input as never) as Promise<ContentActionResult>;
-      if (action === 'document-embed') return processing.documentEmbed(input as never, { embed: ({ text }) => embedding(text), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
+      if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
       const response = await router.executeAction<Record<string, unknown>, ContentActionResult>({ mode: 'auto', organizationKey: context.organizationKey, actionSlug: action as never }, input, deps);
       return response.output;
     }),
@@ -585,6 +594,22 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     if (!output.text?.trim()) fail('CONTENT_CONFLICT', 'The generation action returned invalid output.', tool, slug, doc.key);
     return output.text.trim();
   };
+  const parsedSemantics = (embedded: ContentActionResult, content: string, resourceKey: string) => {
+    const embedding = z.array(z.number().finite()).length(EMBEDDING_DIMENSIONS).parse(embedded.embedding);
+    const contentChunks = embedded.contentChunks
+      ? z.array(z.string().trim().min(1)).min(1).parse(embedded.contentChunks)
+      : chunkDocumentContent(content);
+    const chunkEmbeddings = embedded.chunkEmbeddings
+      ? z.array(z.array(z.number().finite()).length(EMBEDDING_DIMENSIONS)).length(contentChunks.length).parse(embedded.chunkEmbeddings)
+      : contentChunks.length === 1 ? [embedding] : fail('CONTENT_CONFLICT', 'Document embedding action did not return every semantic chunk.', tool, 'document-embed', resourceKey);
+    return {
+      embedding,
+      contentChunks,
+      chunkEmbeddings,
+      semanticChunkCount: z.number().int().positive().parse(embedded.semanticChunkCount ?? contentChunks.length),
+      semanticContentHash: z.string().regex(/^[a-f0-9]{64}$/).parse(embedded.semanticContentHash ?? createHash('sha256').update(content).digest('hex')),
+    };
+  };
   const representations = async (
     source: { html?: string; content?: string },
     documentName: string,
@@ -597,14 +622,29 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     const content = htmlToPlainText(html);
     if (z.string().parse(generatedContent.content) !== content) fail('CONTENT_CONFLICT', 'Document content must be derived from canonical HTML.', tool, 'document-generate-content', resourceKey);
     const embedded = await action('document-embed', { name: documentName, content }, resourceKey, scopeKey);
-    const embedding = z.array(z.number().finite()).min(1).parse(embedded.embedding);
-    return { html, content, embedding };
+    return { html, content, ...parsedSemantics(embedded, content, resourceKey) };
   };
   const isCurrentEmbedding = (embedding: readonly number[]) => embedding.length === EMBEDDING_DIMENSIONS && embedding.every(Number.isFinite);
-  const currentDocumentEmbedding = (source: Pick<Document, 'embedding' | 'name' | 'content' | 'key' | 'scopeKey'>, name = source.name) =>
-    isCurrentEmbedding(source.embedding) ? Promise.resolve(source.embedding) : embed(`${name.trim()}\n\n${source.content.trim()}`, source.key, source.scopeKey);
-  const currentVersionEmbedding = (source: Pick<DocumentVersion, 'content' | 'key' | 'scopeKey'> | Pick<Document, 'content' | 'key' | 'scopeKey'>, label?: string) =>
-    embed([label, source.content].filter(Boolean).join('\n\n'), source.key, source.scopeKey);
+  const hasCurrentSemantics = (source: Pick<Document, 'embedding' | 'content' | 'contentChunks' | 'chunkEmbeddings'>) => {
+    const expectedChunks = chunkDocumentContent(source.content);
+    return isCurrentEmbedding(source.embedding)
+      && source.contentChunks?.length === expectedChunks.length
+      && source.contentChunks.every((chunk, index) => chunk === expectedChunks[index])
+      && source.chunkEmbeddings?.length === expectedChunks.length
+      && source.chunkEmbeddings.every(isCurrentEmbedding);
+  };
+  const generatedSemantics = async (name: string, content: string, resourceKey: string, scopeKey: string) => {
+    const embedded = await action('document-embed', { name, content }, resourceKey, scopeKey);
+    return parsedSemantics(embedded, content, resourceKey);
+  };
+  const currentDocumentSemantics = (source: Pick<Document, 'embedding' | 'name' | 'content' | 'contentChunks' | 'chunkEmbeddings' | 'key' | 'scopeKey'>, name = source.name) =>
+    name === source.name && hasCurrentSemantics(source)
+      ? Promise.resolve({ embedding: source.embedding, contentChunks: source.contentChunks!, chunkEmbeddings: source.chunkEmbeddings!, semanticChunkCount: source.contentChunks!.length, semanticContentHash: createHash('sha256').update(source.content).digest('hex') })
+      : generatedSemantics(name, source.content, source.key, source.scopeKey);
+  const currentVersionSemantics = async (source: Pick<DocumentVersion, 'html' | 'key' | 'scopeKey'> | Pick<Document, 'html' | 'key' | 'scopeKey'>, label?: string) => {
+    const { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash } = await generatedSemantics(label ?? '', htmlToPlainText(source.html), source.key, source.scopeKey);
+    return { embedding, chunkEmbeddings, semanticChunkCount, semanticContentHash };
+  };
   const persistGenerated = async (source: Document, text: string, mode: 'copy' | 'replace', suffix: string) => {
     const finalName = mode === 'copy' ? `${source.name} (${suffix})` : source.name;
     const transformed = await representations({ content: text }, finalName, source.key, source.scopeKey);
@@ -614,7 +654,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         documentKey: source.key,
         html: source.html,
         content: source.content,
-        embedding: await currentVersionEmbedding(source),
+        ...await currentVersionSemantics(source),
       });
       try {
         await repo.updateDocument(source.key, { ...transformed, updatedAt: now() });
@@ -1047,7 +1087,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               documentKey: current.key,
               html: current.html,
               content: current.content,
-              embedding: await currentVersionEmbedding(current),
+              ...await currentVersionSemantics(current),
             });
           }
           try {
@@ -1073,9 +1113,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await document(item.documentKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await document(item.documentKey, 'moderator', false);
-          const embedded = await action('document-embed', { name: item.name, content: current.content }, current.key, current.scopeKey);
-          const embedding = z.array(z.number().finite()).min(1).parse(embedded.embedding);
-          const renamed = await mutationRepository.updateDocument(current.key, { name: item.name, embedding, updatedAt: now() });
+          const semantics = await generatedSemantics(item.name, current.content, current.key, current.scopeKey);
+          const renamed = await mutationRepository.updateDocument(current.key, { name: item.name, ...semantics, updatedAt: now() });
           return { document: documentView(renamed) };
         },
       })), input.atomic, repo);
@@ -1110,11 +1149,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           let insertedDocument = false;
           if (storageKey && source.storageKey) await storageOperation('copy', key, item.targetScopeKey, () => d.storage.copy({ sourceKey: source.storageKey!, destinationKey: storageKey, mimeType: source.mimeType }));
           try {
-            let embedding = await currentDocumentEmbedding(source, name);
-            if (name !== source.name && isCurrentEmbedding(source.embedding)) {
-              const embedded = await action('document-embed', { name, content: source.content }, source.key, item.targetScopeKey);
-              embedding = z.array(z.number().finite()).min(1).parse(embedded.embedding);
-            }
+            const semantics = await currentDocumentSemantics(source, name);
             const timestamp = now();
             const copy = await repo.insertDocument({
               ...source,
@@ -1122,7 +1157,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                scopeKey: item.targetScopeKey,
                ...(target ? { folderKey: target.key } : { folderKey: undefined }),
               name,
-              embedding,
+              ...semantics,
                ...(storageKey ? { storageKey } : {}),
               deletedAt: null,
               createdAt: timestamp,
@@ -1137,8 +1172,8 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                   documentKey: key,
                   label: version.label,
                   html: version.html,
-                  content: version.content,
-                   embedding: await currentVersionEmbedding(version),
+                  content: htmlToPlainText(version.html),
+                  ...await currentVersionSemantics(version, version.label),
                 });
                 insertedVersionKeys.push(created.key);
               }
@@ -1376,7 +1411,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             label: input.labels?.[key],
             html: current.html,
             content: current.content,
-            embedding: await currentVersionEmbedding(current, input.labels?.[key]),
+            ...await currentVersionSemantics(current, input.labels?.[key]),
           });
           return { version: versionView(version) };
         },
@@ -1428,14 +1463,15 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               documentKey: current.key,
               html: current.html,
               content: current.content,
-              embedding: await currentVersionEmbedding(current),
+              ...await currentVersionSemantics(current),
             });
           }
           try {
+            const content = htmlToPlainText(version.html);
             const restored = await mutationRepository.updateDocument(current.key, {
               html: version.html,
-              content: version.content,
-              embedding: await embed(`${current.name}\n\n${version.content}`, current.key, current.scopeKey),
+              content,
+              ...await generatedSemantics(current.name, content, current.key, current.scopeKey),
               updatedAt: now(),
             });
             return { document: documentView(restored) };
