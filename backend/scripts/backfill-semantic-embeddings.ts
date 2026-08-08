@@ -41,13 +41,17 @@ function staleFilter(spec: SemanticSpec): string {
       || LENGTH(doc.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0`;
 }
 
+function staleBindVars(spec: SemanticSpec, values: Record<string, unknown>): Record<string, unknown> {
+  return spec.includeMetadata ? { ...values, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL } : values;
+}
+
 async function staleCount(spec: SemanticSpec): Promise<number> {
   const cursor = await db.query<number>(`
     RETURN LENGTH(FOR doc IN @@collection
       ${inclusionFilter(spec.name)}
       ${staleFilter(spec)}
       RETURN 1)
-  `, { '@collection': spec.name, embedKeys: spec.embedKeys, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS });
+  `, staleBindVars(spec, { '@collection': spec.name, embedKeys: spec.embedKeys, dimensions: EMBEDDING_DIMENSIONS }));
   return await cursor.next() ?? 0;
 }
 
@@ -68,7 +72,7 @@ for (const spec of semanticCollections) {
           SORT doc._key ASC
           LIMIT @limit
           RETURN { _key: doc._key, _rev: doc._rev, source: KEEP(doc, @embedKeys) }
-      `, { '@collection': spec.name, after, limit: BATCH_SIZE, embedKeys: spec.embedKeys, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS });
+      `, staleBindVars(spec, { '@collection': spec.name, after, limit: BATCH_SIZE, embedKeys: spec.embedKeys, dimensions: EMBEDDING_DIMENSIONS }));
       const rows = await cursor.all();
       if (rows.length === 0) break;
 
