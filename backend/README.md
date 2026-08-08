@@ -20,7 +20,7 @@ You can still run pieces manually with `bun run dev:infra`, `bun run db:migrate:
 Docker Desktop or another ArangoDB/Redis environment must be running for migrations and DB-backed tests.
 Mailpit is included in the dev infra at `localhost:8025` with SMTP on `localhost:1025`.
 
-Run the live Archive release gate with `bun run test:e2e:archive`. It starts the required Compose services without stopping existing containers, waits on their host HTTP/TCP endpoints, recreates only the default isolated `vorinthex_archive_e2e` database, migrates it, and runs the gated test. Environment variables supplied by CI override all isolated defaults; no env file is written.
+Run the live content release gate with `bun run test:e2e:content`. It starts the required Compose services without stopping existing containers, waits on their host HTTP/TCP endpoints, recreates only the default isolated `content_e2e` database, migrates it, and runs the gated test. Environment variables supplied by CI override all isolated defaults; no env file is written.
 
 ## Production
 

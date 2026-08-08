@@ -25,7 +25,7 @@ export async function listSharesByScope(scopeKey: string, sourceType?: z.infer<t
   return (await cursor.all()).map((share) => shareSchema.parse(withArangoKey(share)));
 }
 
-export async function getActiveGalleryShareByTokenHash(tokenHash: string, at = new Date().toISOString()): Promise<Share | null> {
+export async function getActiveMediaLibraryShareByTokenHash(tokenHash: string, at = new Date().toISOString()): Promise<Share | null> {
   const validatedHash = shareSchema.shape.tokenHash.parse(tokenHash);
   const validatedAt = z.string().datetime().parse(at);
   const cursor = await db.query(aql`

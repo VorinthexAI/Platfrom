@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { dedupeMentionCandidates } from './mention-candidates';
 
-describe('Chorus mention candidates', () => {
+describe('Communication mention candidates', () => {
   test('deduplicates normalized labels within each mention lane', () => {
     const candidates = [
       { participantKey: 'everyone', type: 'everyone' as const, key: 'everyone', name: 'everyone', mentionCount: 0 },

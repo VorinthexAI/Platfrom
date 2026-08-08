@@ -4,8 +4,8 @@ import type { RouterDependencies } from '@/lib/ai/router';
 import type { ChatOutput, ProviderExecuteResponse, ProviderStreamChunk, TranscribeInput, TranscriptionOutput } from '@/lib/ai/providers';
 import { sanitizedAgentMessageSchema } from './input-sanitizer';
 import type { DocumentParseDependencies } from '@/lib/ai/document-processing';
-import type { ArchiveToolDependencies } from './archive-runtime';
-import type { ArchiveToolInput, ArchiveToolName, ArchiveToolOutput } from './archive-schemas';
+import type { ContentToolDependencies } from './content-runtime';
+import type { ContentToolInput, ContentToolName, ContentToolOutput } from './content-schemas';
 import type { DomainActionSlug } from './domain-schemas';
 import type { DomainToolContext, DomainToolExecutionOptions } from './domain-execute';
 import { orchestratorChatTool, orchestratorChatToolInputSchema } from './orchestrator-chat';
@@ -15,8 +15,8 @@ import type { PublicToolDependencies } from './tool-definition';
 import type { RetrievalContext, RetrievalDependencies } from './retrieval';
 
 /**
- * A tool name has exactly one registry entry. Archive lifecycle calls retain
- * their legacy `{ items, atomic }` form while Archive clients use key arrays.
+ * A tool name has exactly one registry entry. Content lifecycle calls retain
+ * their legacy `{ items, atomic }` form while Content clients use key arrays.
  */
 export const TOOL_NAMES = PUBLIC_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
 export const toolNameSchema = z.enum(TOOL_NAMES);
@@ -38,8 +38,8 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   retrievalContext?: RetrievalContext;
   embedRetrievalQuery?: (text: string, signal?: AbortSignal) => Promise<number[]>;
   retrievalTimeoutMs?: number;
-  archiveContext?: DomainToolContext;
-  archiveDependencies?: ArchiveToolDependencies;
+  contentContext?: DomainToolContext;
+  contentDependencies?: ContentToolDependencies;
   domainDependencies?: DomainToolExecutionOptions;
   timeoutMs?: number;
 }
@@ -53,23 +53,23 @@ const chatOutputSchema = z.object({
 /** Executes one of the capabilities exposed by the unified tool registry. */
 export function runTool(name: 'chat', skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<string>;
 export function runTool(name: 'transcribe', skill: string, rawInput: TranscribeInput, dependencies?: ToolDependencies): Promise<TranscriptionOutput>;
-export function runTool<Name extends ArchiveToolName>(name: Name, skill: string, rawInput: ArchiveToolInput<Name>, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<ArchiveToolOutput<Name>>;
-export function runTool<Name extends DomainActionSlug>(name: Name, skill: string, rawInput: unknown, dependencies: ToolDependencies & { archiveContext: DomainToolContext }): Promise<unknown>;
+export function runTool<Name extends ContentToolName>(name: Name, skill: string, rawInput: ContentToolInput<Name>, dependencies: ToolDependencies & { contentContext: DomainToolContext }): Promise<ContentToolOutput<Name>>;
+export function runTool<Name extends DomainActionSlug>(name: Name, skill: string, rawInput: unknown, dependencies: ToolDependencies & { contentContext: DomainToolContext }): Promise<unknown>;
 export function runTool(name: string, skill: string, rawInput: unknown, dependencies?: ToolDependencies): Promise<unknown>;
 export async function runTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): Promise<unknown> {
   const toolName = toolNameSchema.parse(name);
   if (toolName === orchestratorChatTool.name) return orchestratorChatTool.execute(skill, rawInput, dependencies);
   if (toolName === transcribeTool.name) return transcribeTool.execute(rawInput, dependencies);
-  if (!dependencies.archiveContext) throw new Error(`Tool ${toolName} requires archiveContext.`);
+  if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
   const definition = publicToolDefinitionsByName.get(toolName) as Exclude<(typeof PUBLIC_TOOL_DEFINITIONS)[number], typeof orchestratorChatTool | typeof transcribeTool>;
   return definition.execute(rawInput, {
-    context: dependencies.archiveContext,
+    context: dependencies.contentContext,
     domain: dependencies.domainDependencies,
-    archive: {
+    content: {
       adapters: dependencies.adapters,
       credentials: dependencies.credentials,
-      ...dependencies.archiveDependencies,
-      ingestion: { ...dependencies, ...dependencies.archiveDependencies?.ingestion },
+      ...dependencies.contentDependencies,
+      ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
     },
   } satisfies PublicToolDependencies);
 }
@@ -84,12 +84,12 @@ export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitiz
 export { retrievalTool, retrievalInputSchema, retrievalFiltersSchema, retrieveNodeDocuments } from './retrieval';
 export { transcribeTool };
 export type { RetrievalContext, RetrievalDependencies, RetrievalDocument, RetrievalFilters, RetrievalNodeResult } from './retrieval';
-export * from './archive-errors';
-export * from './archive-schemas';
-export * from './archive-json-schema';
-export * from './archive-registry';
-export * from './archive-runtime';
-export * from './archive-run';
+export * from './content-errors';
+export * from './content-schemas';
+export * from './content-json-schema';
+export * from './content-registry';
+export * from './content-runtime';
+export * from './content-run';
 export * from './domain-schemas';
 export * from './domain-execute';
 export * from './domain-run';

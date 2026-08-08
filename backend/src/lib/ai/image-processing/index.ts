@@ -86,7 +86,7 @@ function imageRequestHash(scopeKey: string, ownerKey: string, image: ValidatedIm
 }
 
 export async function captionImageWithOpenAI(input: { filename: string; mimeType: string; bytes: Uint8Array; signal?: AbortSignal }, client: ResponsesClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, baseURL: process.env.OPENAI_BASE_URL || undefined })) {
-  const response = await client.responses.create({ model: OPENAI_VISION_MODEL, max_output_tokens: 1_500, input: [{ role: 'user', content: [{ type: 'input_text', text: `Describe this image accurately for a searchable gallery. Include visible subjects, setting, composition, colors, style, and readable text. The filename is ${JSON.stringify(input.filename)}.` }, { type: 'input_image', image_url: `data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`, detail: 'high' }] }] }, input.signal ? { signal: input.signal } : undefined);
+  const response = await client.responses.create({ model: OPENAI_VISION_MODEL, max_output_tokens: 1_500, input: [{ role: 'user', content: [{ type: 'input_text', text: `Describe this image accurately for a searchable media library. Include visible subjects, setting, composition, colors, style, and readable text. The filename is ${JSON.stringify(input.filename)}.` }, { type: 'input_image', image_url: `data:${input.mimeType};base64,${Buffer.from(input.bytes).toString('base64')}`, detail: 'high' }] }] }, input.signal ? { signal: input.signal } : undefined);
   return response.output_text?.trim() ?? '';
 }
 
@@ -95,7 +95,7 @@ async function execute(input: ProcessImageInput, image: ValidatedImage, requestH
   const getImage = dependencies.getImage ?? getImageById; const insertImage = dependencies.insertImage ?? insertPreparedImage;
   const key = input.idempotencyKey ? `c${hash(`${input.scopeKey}\0${input.idempotencyKey}`).slice(0, 24)}` : (dependencies.createKey ?? newId)();
   if (input.idempotencyKey) { const existing = await getImage(key); if (existing) { if (existing.scopeKey !== input.scopeKey || existing.deletedAt !== null) throw new ImageProcessingError('IMAGE_INSERT_FAILED', 'The idempotent image is unavailable.'); if (existing.requestHash !== requestHash) throw new ImageProcessingError('IMAGE_IDEMPOTENCY_CONFLICT', 'The image idempotency key was already used for a different request.'); return existing; } }
-  const storage = dependencies.storage ?? documentStorage; const requestedKey = `gallery/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`; let storageKey: string;
+  const storage = dependencies.storage ?? documentStorage; const requestedKey = `media/${input.scopeKey}/${key}/${hash(image.bytes)}/original.${image.extension}`; let storageKey: string;
   try { storageKey = (await storage.upload({ key: requestedKey, bytes: image.bytes, mimeType: image.mimeType })).storageKey; } catch (error) { throw new ImageProcessingError('IMAGE_UPLOAD_FAILED', 'The original image could not be uploaded.', { cause: error }); }
   try {
     let caption: string; try { caption = (await (dependencies.caption ?? ((value) => captionImageWithOpenAI(value, dependencies.openAI)))({ filename: image.filename, mimeType: image.mimeType, bytes: image.bytes, signal: input.signal })).trim(); } catch (error) { throw new ImageProcessingError('IMAGE_CAPTION_FAILED', 'The image caption could not be generated.', { cause: error }); }

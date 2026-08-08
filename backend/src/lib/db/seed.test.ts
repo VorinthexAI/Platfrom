@@ -182,7 +182,7 @@ describe('orchestrator seeds', () => {
     expect(seedSource).toContain('SEEDED_ORCHESTRATOR_SKILLS');
   });
 
-  test('reconciles every orchestrator into the general Chorus channel', async () => {
+  test('reconciles every orchestrator into the general communication channel', async () => {
     const source = await Bun.file(new URL('./seed.ts', import.meta.url)).text();
     expect(source).toContain('UPSERT { channelKey: @channelKey, orchestratorKey: @orchestratorKey }');
     expect(source).toContain("collection: 'channelParticipants'");

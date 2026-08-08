@@ -5,10 +5,10 @@ import { AiError } from '@/lib/ai/shared/result';
 import { getDefaultArtifactService } from '@/lib/artifacts/service';
 import { domainToolInputSchemas, domainToolResultSchema, type DomainActionSlug, type DomainToolResult } from './domain-schemas';
 import { executeAccessDomainTool, syncOrganizationAgentMembers } from './domain-execute-access-domains';
-import { executeArchiveLifecycleTool, type ArchiveExecutionDependencies } from './domain-execute-archive';
-import { isArchiveAction } from './domain-archive-schemas';
-import { executeMomentumTool, type MomentumExecutionDependencies, type MomentumReasonInput } from '@/lib/ai/momentum';
-import { isMomentumAction } from '@/lib/ai/momentum/tool-schemas';
+import { executeContentLifecycleTool, type ContentExecutionDependencies } from './domain-execute-content';
+import { isContentAction } from './domain-content-schemas';
+import { executeWorkflowExecutionTool, type WorkflowExecutionExecutionDependencies, type WorkflowExecutionReasonInput } from '@/lib/ai/workflow-execution';
+import { isWorkflowExecutionAction } from '@/lib/ai/workflow-execution/tool-schemas';
 import { coreChatInputSchema } from '@/lib/ai/actions';
 import { executeAction } from '@/lib/ai/router';
 import type { ChatOutput } from '@/lib/ai/providers';
@@ -36,8 +36,8 @@ type ArtifactCreator = Pick<ReturnType<typeof getDefaultArtifactService>, 'creat
 
 export interface DomainToolExecutionOptions {
   artifacts?: ArtifactCreator;
-  momentum?: Partial<Omit<MomentumExecutionDependencies, 'authorize'>>;
-  archive?: Partial<Omit<ArchiveExecutionDependencies, 'authorize'>>;
+  workflowExecution?: Partial<Omit<WorkflowExecutionExecutionDependencies, 'authorize'>>;
+  content?: Partial<Omit<ContentExecutionDependencies, 'authorize'>>;
   authorizeScope?: (scopeKey: string, roles: readonly string[]) => Promise<void>;
 }
 
@@ -153,15 +153,15 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
   const input = domainToolInputSchemas[action].parse(rawInput) as any;
   const principal = memberPrincipal(context);
   const authorizeScope = options.authorizeScope ?? (async (scopeKey: string, roles: readonly string[]) => { await assertOperationalScope(context, scopeKey, roles); });
-  if (isArchiveAction(action)) {
-    const data = await executeArchiveLifecycleTool(action, input, { organizationKey: context.organizationKey }, {
-      ...options.archive,
+  if (isContentAction(action)) {
+    const data = await executeContentLifecycleTool(action, input, { organizationKey: context.organizationKey }, {
+      ...options.content,
       authorize: authorizeScope,
     });
     return result(action, data);
   }
-  if (isMomentumAction(action)) {
-    const defaultReason = async (reasonInput: MomentumReasonInput) => {
+  if (isWorkflowExecutionAction(action)) {
+    const defaultReason = async (reasonInput: WorkflowExecutionReasonInput) => {
       const prompt = reasonInput.action === 'summarize'
         ? `Summarize this task concisely.\n\nTitle: ${reasonInput.task.title}\n\n${reasonInput.task.description ?? ''}`
         : reasonInput.action === 'translate'
@@ -173,13 +173,13 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
       );
       return response.output.text;
     };
-    const data = await executeMomentumTool(action, input, {
-      repository: options.momentum?.repository,
-      createKey: options.momentum?.createKey,
-      now: options.momentum?.now,
-      generateEmbedding: options.momentum?.generateEmbedding,
-      reason: options.momentum?.reason ?? defaultReason,
-      organizationScopeKeys: options.momentum?.organizationScopeKeys ?? (async () => {
+    const data = await executeWorkflowExecutionTool(action, input, {
+      repository: options.workflowExecution?.repository,
+      createKey: options.workflowExecution?.createKey,
+      now: options.workflowExecution?.now,
+      generateEmbedding: options.workflowExecution?.generateEmbedding,
+      reason: options.workflowExecution?.reason ?? defaultReason,
+      organizationScopeKeys: options.workflowExecution?.organizationScopeKeys ?? (async () => {
         const cursor = await db.query<{ key: string }>('FOR scope IN scopes FILTER scope.organizationKey == @organizationKey && scope.deletedAt == null RETURN { key: scope._key }', { organizationKey: context.organizationKey });
         return (await cursor.all()).map(({ key }) => key);
       }),

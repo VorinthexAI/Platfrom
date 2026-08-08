@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { createNodeHelpers } from './base';
+import { normalizeLegacyProjectContract } from './legacy-contracts';
 
 export const PROJECTS_COLLECTION = 'projects';
 
-export const projectSchema = z.object({
+const currentProjectSchema = z.object({
   key: z.string().cuid(),
   scopeKey: z.string().cuid(),
-  archiveFolderKey: z.string().cuid(),
+  contentFolderKey: z.string().cuid(),
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
   embedding: z.array(z.number().finite()).default([]),
@@ -14,6 +15,11 @@ export const projectSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
+
+export const projectSchema = Object.assign(
+  z.preprocess(normalizeLegacyProjectContract, currentProjectSchema),
+  { shape: currentProjectSchema.shape },
+) as unknown as typeof currentProjectSchema;
 
 export type Project = z.infer<typeof projectSchema>;
 export const projectsEmbeddingFields = ['name', 'description'] as const;

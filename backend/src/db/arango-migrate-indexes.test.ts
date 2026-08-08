@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
-import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
-import { migrateArchiveDocuments, migrateArchiveFavorites, migrateArchiveVersions, retireRemovedActions } from './arango-migrate';
+import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
+import { migrateContentDocuments, migrateContentFavorites, migrateContentVersions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
@@ -77,7 +77,7 @@ describe('Arango migration indexes', () => {
   });
   test('migration never hashes missing data or borrows current documents for version history', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
-    const helperSource = await Bun.file(new URL('./archive-migration.ts', import.meta.url)).text();
+    const helperSource = await Bun.file(new URL('./content-migration.ts', import.meta.url)).text();
     expect(source).toContain('stageLegacyDocumentShares([share])');
     expect(source).toContain('nonEmptyString(snapshot.html)');
     expect(source).not.toContain('DOCUMENT(documents, snapshot.documentKey)');
@@ -85,10 +85,20 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('beginTransaction');
     expect(source).toContain('migration verification failed');
   });
+  test('migrates legacy branded persistence contracts before generic indexes are created', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain("targetDb.collection('archiveIdempotency')");
+    expect(source).toContain('INSERT record INTO contentIdempotency');
+    expect(source).toContain('if (ledgerAlreadyExisted) await legacyLedger.drop()');
+    expect(source).toContain('migration found conflicting records');
+    expect(source).toContain('contentFolderKey: project.contentFolderKey != null ? project.contentFolderKey : project.archiveFolderKey');
+    expect(source).toContain("_key: 'content-document-shares-cutover'");
+    expect(source.indexOf('await migrateGenericContentContracts(targetDb)')).toBeLessThan(source.indexOf('for (const spec of collections)'));
+  });
   test('repairs recoverable document and version representations without borrowing data', async () => {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
     const documentMigration = migrationDatabase('documents', { _key: 'document-1', _rev: 'document-rev', name: 'Current', html: '   ', content: 'Current body', embedding, ...embeddingMetadata(), json: {} });
-    await migrateArchiveDocuments(documentMigration.database);
+    await migrateContentDocuments(documentMigration.database);
     expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, html: '<p>Current body</p>', content: 'Current body', embedding, ...embeddingMetadata() }]);
     expect(documentMigration.update?.query).toContain('UNSET(MERGE(document');
     expect(documentMigration.update?.query).toContain('document._rev == patch._rev');
@@ -96,25 +106,25 @@ describe('Arango migration indexes', () => {
     expect(documentMigration.update?.query).not.toContain('"storageKey", "sizeBytes"');
 
     const versionMigration = migrationDatabase('documentVersions', { _key: 'version-1', _rev: 'version-rev', html: '\n\t', content: 'Historical body', embedding, ...embeddingMetadata(), json: {}, storageKey: 'legacy', sizeBytes: 12, updatedAt: '2026-01-01T00:00:00.000Z' });
-    await migrateArchiveVersions(versionMigration.database);
+    await migrateContentVersions(versionMigration.database);
     expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, html: '<p>Historical body</p>', content: 'Historical body', embedding, ...embeddingMetadata() }]);
     expect(versionMigration.update?.query).toContain('snapshot._rev == patch._rev');
     expect(versionMigration.update?.query).toContain('"json", "storageKey", "sizeBytes", "updatedAt"');
     expect(versionMigration.update?.query).toContain('migration must not infer deletion ownership');
   });
   test('regenerates legacy 1536 embeddings without allowing a concurrent replacement', async () => {
-    const previous = process.env.ARCHIVE_E2E;
-    process.env.ARCHIVE_E2E = 'true';
+    const previous = process.env.CONTENT_E2E;
+    process.env.CONTENT_E2E = 'true';
     try {
       const migration = migrationDatabase('documents', { _key: 'legacy-document', _rev: 'legacy-rev', name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body', embedding: Array(1_536).fill(0.1) });
-      await migrateArchiveDocuments(migration.database);
+      await migrateContentDocuments(migration.database);
       const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;
       expect(patch.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
       expect(patch).toMatchObject({ _key: 'legacy-document', _rev: 'legacy-rev', source: { name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body' }, ...embeddingMetadata() });
       expect(migration.update?.query).toContain('FILTER document != null && document._rev == patch._rev');
     } finally {
-      if (previous === undefined) delete process.env.ARCHIVE_E2E;
-      else process.env.ARCHIVE_E2E = previous;
+      if (previous === undefined) delete process.env.CONTENT_E2E;
+      else process.env.CONTENT_E2E = previous;
     }
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
@@ -129,8 +139,8 @@ describe('Arango migration indexes', () => {
           return { async step(run: () => Promise<void>) { await run(); }, async commit() {}, async abort() {} };
         },
       };
-      await migrateArchiveFavorites(database as never, collection);
-      await migrateArchiveFavorites(database as never, collection);
+      await migrateContentFavorites(database as never, collection);
+      await migrateContentFavorites(database as never, collection);
       expect(calls.filter(({ query }) => query.includes('UPDATE resource WITH { isFavorite: false }'))).toHaveLength(2);
       expect(calls.every(({ query }) => !query.includes('isFavorite') || query.includes('!IS_BOOL(resource.isFavorite)'))).toBe(true);
       expect(calls.filter(({ query }) => query.includes('RETURN LENGTH'))).toHaveLength(2);

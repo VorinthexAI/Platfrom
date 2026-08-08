@@ -5,8 +5,8 @@ import { executeRoute, selectRoute, type RouterDependencies } from '@/lib/ai/rou
 import type { ChatOutput } from '@/lib/ai/providers';
 import { DOMAIN_ACTION_SLUGS, isDomainActionSlug } from './domain-schemas';
 import { runDomainAgentTool, type RunDomainAgentToolOptions } from './domain-run';
-import { archiveToolJsonSchemas } from './domain-archive-schemas';
-import { momentumToolJsonSchemas } from '@/lib/ai/momentum/tool-schemas';
+import { contentToolJsonSchemas } from './domain-content-schemas';
+import { workflowExecutionToolJsonSchemas } from '@/lib/ai/workflow-execution/tool-schemas';
 
 const property = (type: 'string' | 'boolean' | 'integer' | 'array', description: string, extra: Record<string, unknown> = {}) => ({ type, description, ...extra });
 const objectSchema = (properties: Record<string, unknown>, required: string[] = []) => ({ type: 'object', additionalProperties: false, properties, ...(required.length ? { required } : {}) });
@@ -90,8 +90,8 @@ export const domainToolJsonSchemas: Record<string, Record<string, unknown>> = {
   'access.organization.explain': objectSchema({ organization: { type: 'string' }, member: { type: 'string' }, action: { type: 'string' } }),
   'access.scope.explain': objectSchema({ scope: { type: 'string' }, member: { type: 'string' }, action: { type: 'string' } }, ['scope']),
   'access.agent.explain': objectSchema({ scope: { type: 'string' }, agent: { type: 'string' }, member: { type: 'string' }, action: { type: 'string', enum: ['read', 'run', 'delegate', 'manage'] } }, ['scope', 'agent']),
-  ...archiveToolJsonSchemas,
-  ...momentumToolJsonSchemas,
+  ...contentToolJsonSchemas,
+  ...workflowExecutionToolJsonSchemas,
 };
 
 export const interpretDomainToolInputSchema = z.object({

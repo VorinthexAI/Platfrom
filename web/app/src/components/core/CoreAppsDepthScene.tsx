@@ -117,7 +117,7 @@ export function CoreAppsDepthScene() {
 
       gates.forEach((gate, index) => {
         const strength = reducedMotion.matches
-          ? 0
+          ? index === 0 ? 0.7 : 0
           : strengths[index] ?? 0;
         gate.group.visible = strength > 0.01;
         gate.materials[0]!.opacity = strength * 0.22;
@@ -165,9 +165,9 @@ export function CoreAppsDepthScene() {
       camera.fov = isMobile ? 66 : 48;
       camera.updateProjectionMatrix();
       gates.forEach((gate, index) => {
-        gate.group.position.x = (index % 2 === 0 ? 1 : -1) * (isMobile ? 0.7 : 2.35);
-        gate.group.position.y = isMobile ? 1.5 : 0;
-        gate.group.scale.setScalar(isMobile ? 0.62 : 1);
+        gate.group.position.x = (index % 2 === 0 ? 1 : -1) * (isMobile ? 0.42 : 2.35);
+        gate.group.position.y = isMobile ? 0.9 : 0;
+        gate.group.scale.setScalar(isMobile ? 0.82 : 1);
       });
       scheduleMeasure();
     };
