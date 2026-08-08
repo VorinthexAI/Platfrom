@@ -18,7 +18,7 @@ const messageKey = newId();
 const participantKey = newId();
 const pollKey = newId();
 
-describe('Chorus communication keys', () => {
+describe('Communication communication keys', () => {
   test('accepts persisted opaque channel keys across every related document', () => {
     expect(channelSchema.parse({ key: channelKey, organizationKey: 'organization_root', scopeKey, name: 'general', position: 0, createdAt: now, updatedAt: now }).key).toBe(channelKey);
     expect(channelParticipantSchema.parse({ key: participantKey, scopeKey, channelKey, userOrganizationKey: 'membership_root', joinedAt: now, createdAt: now, updatedAt: now }).channelKey).toBe(channelKey);

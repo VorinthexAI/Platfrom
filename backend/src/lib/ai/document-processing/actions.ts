@@ -74,7 +74,7 @@ function hasPrefix(bytes: Uint8Array, prefix: readonly number[]): boolean {
   return prefix.every((value, index) => bytes[index] === value);
 }
 
-function validateDocxArchive(bytes: Uint8Array): boolean {
+function validateDocxContent(bytes: Uint8Array): boolean {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const names = new Set<string>();
   let entries = 0;
@@ -110,7 +110,7 @@ function validateDocxArchive(bytes: Uint8Array): boolean {
 function validateSignature(extension: DocumentExtension, bytes: Uint8Array): boolean {
   if (extension === 'pdf') return hasPrefix(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d]);
   if (extension === 'doc') return hasPrefix(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
-  if (extension === 'docx') return hasPrefix(bytes, [0x50, 0x4b, 0x03, 0x04]) && validateDocxArchive(bytes);
+  if (extension === 'docx') return hasPrefix(bytes, [0x50, 0x4b, 0x03, 0x04]) && validateDocxContent(bytes);
   return !bytes.includes(0);
 }
 
@@ -122,7 +122,7 @@ export async function documentValidate(input: {
 }, options: { maxBytes?: number; logger?: DocumentActionLogger } = {}): Promise<NormalizedDocument> {
   return observed('document-validate', { scopeKey: input.scopeKey, folderKey: input.folderKey }, options.logger ?? defaultLogger, async () => {
     try {
-      const maxBytes = options.maxBytes ?? Number(process.env.ARCHIVE_MAX_DOCUMENT_BYTES ?? DEFAULT_MAX_DOCUMENT_BYTES);
+      const maxBytes = options.maxBytes ?? Number(process.env.CONTENT_MAX_DOCUMENT_BYTES ?? DEFAULT_MAX_DOCUMENT_BYTES);
       const uploaded = await uploadedFileBytes(input.file, maxBytes);
       const safeFilename = basename(uploaded.filename.trim());
       if (!safeFilename || safeFilename !== uploaded.filename.trim() || safeFilename === '.' || safeFilename === '..') {
@@ -156,7 +156,7 @@ export async function storageUpload(input: NormalizedDocument & { documentKey: s
   return observed('storage-upload', { documentKey: input.documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, extension: input.extension, mimeType: input.mimeType, sizeBytes: input.sizeBytes }, options.logger ?? defaultLogger, async () => {
     try {
       const contentHash = createHash('sha256').update(input.fileInput).digest('hex').slice(0, 16);
-      const storageKey = `archive/${input.scopeKey}/${input.folderKey ?? 'root'}/${input.documentKey}/${contentHash}/original.${input.extension}`;
+      const storageKey = `content/${input.scopeKey}/${input.folderKey ?? 'root'}/${input.documentKey}/${contentHash}/original.${input.extension}`;
       return await (options.storage ?? documentStorage).upload({ key: storageKey, bytes: input.fileInput, mimeType: input.mimeType });
     } catch (error) {
       throw documentActionError(error, 'DOCUMENT_UPLOAD_FAILED', 'The document could not be uploaded.', 'storage-upload', true);
@@ -227,7 +227,7 @@ function parseMarkdown(markdown: string): ExtractedBlock[] {
 }
 
 function extractionFromText(text: string, blocks = paragraphs(text), metadata?: Record<string, unknown>): ExtractionResult {
-  const maxCharacters = Number(process.env.ARCHIVE_MAX_EXTRACTED_CHARACTERS ?? DEFAULT_MAX_EXTRACTED_CHARACTERS);
+  const maxCharacters = Number(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS ?? DEFAULT_MAX_EXTRACTED_CHARACTERS);
   if (text.length > maxCharacters) throw new Error('Extracted document content exceeds the configured limit.');
   return extractionResultSchema.parse({ extractedText: text.trim(), blocks, metadata });
 }
@@ -242,7 +242,7 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
     try {
       if (input.extension === 'pdf') {
         const result = extractionResultSchema.parse(await (options.ocr ?? awsTextractDocumentOcr).extract(input.storageKey));
-        if (result.extractedText.length > Number(process.env.ARCHIVE_MAX_EXTRACTED_CHARACTERS ?? DEFAULT_MAX_EXTRACTED_CHARACTERS)) throw new Error('Extracted document content exceeds the configured limit.');
+        if (result.extractedText.length > Number(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS ?? DEFAULT_MAX_EXTRACTED_CHARACTERS)) throw new Error('Extracted document content exceeds the configured limit.');
         return result;
       }
       if (input.extension === 'txt') return extractionFromText(new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput));
@@ -317,12 +317,12 @@ export async function documentInsert(input: Document, options: DocumentInsertDep
       if (document.embedding.length === 0) throw new Error('A document embedding is required.');
       if (document.folderKey) {
         const folder = await (options.getFolder ?? getFolderById)(document.folderKey);
-        if (!folder || folder.scopeKey !== document.scopeKey) throw new Error('The Archive folder does not exist in the requested scope.');
-        if (folder.deletedAt !== null) throw new Error('The Archive folder is archived.');
+        if (!folder || folder.scopeKey !== document.scopeKey) throw new Error('The Content folder does not exist in the requested scope.');
+        if (folder.deletedAt !== null) throw new Error('The Content folder is archived.');
       }
       const existing = await (options.getDocument ?? getDocumentById)(document.key);
       if (existing) {
-        if (existing.deletedAt !== null) throw new Error('The idempotent Archive document is archived.');
+        if (existing.deletedAt !== null) throw new Error('The idempotent Content document is archived.');
         return { document: existing };
       }
       return { document: await (options.insert ?? insertPreparedDocument)(document) };

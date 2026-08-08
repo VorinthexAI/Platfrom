@@ -56,7 +56,7 @@ async function deleteWithRetry(storage: DocumentStorage, storageKey: string): Pr
   throw lastError;
 }
 
-/** Orchestrates the Archive ingestion actions and compensates S3 on every failure after upload. */
+/** Orchestrates the Content ingestion actions and compensates S3 on every failure after upload. */
 export async function parseDocument(rawInput: DocumentParseInput, dependencies: DocumentParseDependencies = {}): Promise<DocumentParseResult> {
   const started = performance.now();
   const input = documentParseInputSchema.parse(rawInput);
@@ -76,10 +76,10 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
   if (normalized.folderKey) {
     const folder = await (dependencies.getFolder ?? (await import('@/lib/db/folders.node')).getFolderById)(normalized.folderKey);
     if (!folder || folder.scopeKey !== normalized.scopeKey) {
-      throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The Archive folder does not exist in the requested scope.', 'document.parse');
+      throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The Content folder does not exist in the requested scope.', 'document.parse');
     }
     if (folder.deletedAt !== null) {
-      throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The Archive folder is archived.', 'document.parse');
+      throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The Content folder is archived.', 'document.parse');
     }
   }
   const documentKey = documentKeyForRequest(normalized.scopeKey, normalized.folderKey, input.idempotencyKey);
@@ -87,7 +87,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
     const existing = await (dependencies.getDocument ?? (await import('@/lib/db/documents.node')).getDocumentById)(documentKey);
     if (existing) {
       if (existing.deletedAt !== null) {
-        throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The idempotent Archive document is archived.', 'document.parse');
+        throw new DocumentProcessingError('DOCUMENT_INSERT_FAILED', 'The idempotent Content document is archived.', 'document.parse');
       }
       logger({ action: 'document.parse', status: 'completed', documentKey, scopeKey: input.scopeKey, folderKey: input.folderKey, durationMs: Math.round(performance.now() - started), idempotent: true });
       return { document: existing };

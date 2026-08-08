@@ -21,7 +21,7 @@ import { organizationProviderSchema } from '../lib/ai/organization-providers/sch
 import { buildEmbeddingText } from '../lib/db/base';
 import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
-import { legacyContentRepresentations, stageLegacyDocumentShares } from './archive-migration';
+import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
 import { canonicalDocumentRepresentations } from '../lib/ai/document-processing/representation';
 import { z } from 'zod';
 
@@ -37,12 +37,85 @@ export interface CollectionSpec {
   archive?: boolean;
 }
 
+export async function migrateGenericContentContracts(targetDb: Database): Promise<void> {
+  const legacyLedger = targetDb.collection('archiveIdempotency');
+  if (await legacyLedger.exists()) {
+    const ledger = targetDb.collection('contentIdempotency');
+    const ledgerAlreadyExisted = await ledger.exists();
+    if (!ledgerAlreadyExisted) await ledger.create();
+    const conflicts = await targetDb.query<number>(`
+      RETURN LENGTH(
+        FOR source IN archiveIdempotency
+          LET target = DOCUMENT(contentIdempotency, source._key)
+          FILTER target != null
+            && UNSET(source, "_id", "_rev") != UNSET(target, "_id", "_rev")
+          RETURN 1
+      )
+    `);
+    if ((await conflicts.next() ?? 0) > 0) throw new Error('Content idempotency collection migration found conflicting records.');
+    await targetDb.query(`FOR record IN archiveIdempotency INSERT record INTO contentIdempotency OPTIONS { overwriteMode: "ignore" }`);
+    const verification = await targetDb.query<number>(`RETURN LENGTH(FOR record IN archiveIdempotency LET migrated = DOCUMENT(contentIdempotency, record._key) FILTER migrated == null || UNSET(record, "_id", "_rev") != UNSET(migrated, "_id", "_rev") RETURN 1)`);
+    if ((await verification.next() ?? 0) > 0) throw new Error('Content idempotency collection migration verification failed.');
+    // Keep the source through the first cutover so requests already using it can settle.
+    if (ledgerAlreadyExisted) await legacyLedger.drop();
+  }
+
+  const projects = targetDb.collection('projects');
+  if (await projects.exists()) {
+    const conflicts = await targetDb.query<number>(`
+      RETURN LENGTH(
+        FOR project IN projects
+          FILTER HAS(project, "archiveFolderKey") && project.contentFolderKey != null
+            && project.archiveFolderKey != project.contentFolderKey
+          RETURN 1
+      )
+    `);
+    if ((await conflicts.next() ?? 0) > 0) throw new Error('Project folder contract migration found conflicting records.');
+    await targetDb.query(`
+      FOR project IN projects
+        FILTER HAS(project, "archiveFolderKey")
+        UPDATE project WITH {
+          contentFolderKey: project.contentFolderKey != null ? project.contentFolderKey : project.archiveFolderKey,
+          archiveFolderKey: null
+        } IN projects OPTIONS { keepNull: false }
+    `);
+  }
+
+  const shares = targetDb.collection('shares');
+  if (await shares.exists()) {
+    const legacyKey = 'archive-document-shares-cutover';
+    const legacy = await shares.document(legacyKey).catch(() => null) as Record<string, unknown> | null;
+    if (legacy) {
+      const current = await shares.document('content-document-shares-cutover').catch(() => null);
+      if (!current) {
+        const { _key, _id, _rev, ...state } = legacy;
+        const transaction = await targetDb.beginTransaction({ write: ['shares'], exclusive: ['shares'] });
+        try {
+          await transaction.step(() => shares.remove(legacyKey));
+          await transaction.step(() => shares.save({
+            ...state,
+            _key: 'content-document-shares-cutover',
+            kind: 'content-share-cutover',
+            tokenHash: new Bun.CryptoHasher('sha256').update('content-document-shares-cutover').digest('hex'),
+          }));
+          await transaction.commit();
+        } catch (error) {
+          await transaction.abort();
+          throw error;
+        }
+      } else {
+        await shares.remove(legacyKey);
+      }
+    }
+  }
+}
+
 function buildNodeEmbedText(_collectionName: string, _key: string, embedKeys: readonly string[], doc: Record<string, unknown>): string | null {
   return buildEmbeddingText(embedKeys, doc);
 }
 
 function generateEmbedding(text: string) {
-  if (process.env.ARCHIVE_E2E === 'true') {
+  if (process.env.CONTENT_E2E === 'true') {
     const dimensions = EMBEDDING_DIMENSIONS;
     const digest = Buffer.from(new Bun.CryptoHasher('sha256').update(text).digest());
     return Promise.resolve(Array.from({ length: dimensions }, (_, index) => digest[index % digest.length]! / 255));
@@ -83,7 +156,7 @@ export async function retireRemovedActions(targetDb: Database): Promise<void> {
   `, { slugs });
 }
 
-export async function migrateArchiveFavorites(targetDb: Database, collectionName: 'folders' | 'documents' | 'images' | 'collections') {
+export async function migrateContentFavorites(targetDb: Database, collectionName: 'folders' | 'documents' | 'images' | 'collections') {
   await runMigrationTransaction(targetDb, collectionName, `
     FOR resource IN @@collection
       FILTER !IS_BOOL(resource.isFavorite)
@@ -98,7 +171,7 @@ export async function migrateArchiveFavorites(targetDb: Database, collectionName
   if (invalid > 0) throw new Error(`${collectionName} favorite migration verification failed for ${invalid} row(s).`);
 }
 
-export async function migrateArchiveVersions(targetDb: Database) {
+export async function migrateContentVersions(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
   while (true) {
@@ -168,7 +241,7 @@ export async function migrateArchiveVersions(targetDb: Database) {
   if (invalid > 0) throw new Error(`documentVersions migration verification failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
 }
 
-export async function migrateArchiveDocuments(targetDb: Database) {
+export async function migrateContentDocuments(targetDb: Database) {
   const dimensions = EMBEDDING_DIMENSIONS;
   let after = '';
   while (true) {
@@ -237,7 +310,7 @@ export async function migrateArchiveDocuments(targetDb: Database) {
   if (invalid > 0) throw new Error(`documents migration verification failed for ${invalid} stale row(s), including any concurrent edit conflicts; rerun the migration.`);
 }
 
-export async function migrateArchiveShares(targetDb: Database) {
+export async function migrateContentShares(targetDb: Database) {
   const legacy = targetDb.collection('documentShares');
   if (!(await legacy.exists())) return;
   const target = targetDb.collection('shares');
@@ -247,10 +320,10 @@ export async function migrateArchiveShares(targetDb: Database) {
     { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true },
   ]) await target.ensureIndex({ type: 'persistent', unique: false, sparse: false, ...index });
 
-  const markerKey = 'archive-document-shares-cutover';
+  const markerKey = 'content-document-shares-cutover';
   const marker = await target.document(markerKey).catch(() => null) as { state?: string } | null;
   const timestamp = new Date().toISOString();
-  if (!marker) await target.save({ _key: markerKey, kind: 'archive-share-cutover', state: 'dual', createdAt: timestamp, updatedAt: timestamp });
+  if (!marker) await target.save({ _key: markerKey, kind: 'content-share-cutover', state: 'dual', createdAt: timestamp, updatedAt: timestamp });
   const iso = z.string().datetime();
   const canonical = (share: Record<string, unknown>) => {
     const [patch] = stageLegacyDocumentShares([share]);
@@ -527,8 +600,8 @@ export const collections: CollectionSpec[] = [
   { name: 'shares', skipEmbedding: true, archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   // Private replay ledger. Responses may contain one-time share tokens, so this
   // collection is deliberately not registered as a generic application node.
-  { name: 'archiveIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
-  { name: 'projects', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['archiveFolderKey'], unique: true }, { fields: ['scopeKey', 'name'] }] },
+  { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
+  { name: 'projects', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['contentFolderKey'], unique: true }, { fields: ['scopeKey', 'name'] }] },
   { name: 'milestones', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['projectKey', 'order'] }, { fields: ['projectKey', 'status'] }] },
   { name: 'tasks', embedKeys: ['title', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['milestoneKey', 'deletedAt'] }, { fields: ['milestoneKey', 'position'] }, { fields: ['projectKey', 'status'] }, { fields: ['priority'] }] },
   // Pure link nodes (scope tree edges, scope memberships) — ids only, so
@@ -570,6 +643,8 @@ async function main() {
     console.log(`Created database ${databaseName}`);
   }
   const targetDb = systemDb.database(databaseName);
+
+  await migrateGenericContentContracts(targetDb);
 
   for (const name of droppedCollections) {
     const collection = targetDb.collection(name);
@@ -788,7 +863,7 @@ async function main() {
       );
     }
     if (spec.name === 'folders' || spec.name === 'documents' || spec.name === 'images' || spec.name === 'collections') {
-      await migrateArchiveFavorites(targetDb, spec.name);
+      await migrateContentFavorites(targetDb, spec.name);
     }
     if (spec.name === 'actions') {
       await targetDb.query(`
@@ -860,15 +935,15 @@ async function main() {
       `);
       const incompatibleDocuments = await cursor.next() ?? 0;
       if (incompatibleDocuments > 0) {
-        throw new Error(`Cannot migrate documents: ${incompatibleDocuments} existing row(s) lack required Archive ingestion fields.`);
+        throw new Error(`Cannot migrate documents: ${incompatibleDocuments} existing row(s) lack required Content ingestion fields.`);
       }
-      await migrateArchiveDocuments(targetDb);
+      await migrateContentDocuments(targetDb);
     }
     if (spec.name === 'documentVersions') {
-      await migrateArchiveVersions(targetDb);
+      await migrateContentVersions(targetDb);
     }
     if (spec.name === 'shares') {
-      await migrateArchiveShares(targetDb);
+      await migrateContentShares(targetDb);
     }
     const legacyIndexes = LEGACY_INDEX_FIELDS[spec.name] ?? [];
     if (legacyIndexes.length > 0) {

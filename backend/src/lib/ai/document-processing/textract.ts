@@ -23,7 +23,7 @@ export interface DocumentOcr {
 
 export const awsTextractDocumentOcr: DocumentOcr = {
   async extract(storageKey) {
-    const timeoutMs = Number(process.env.ARCHIVE_TEXTRACT_TIMEOUT_MS ?? 300_000);
+    const timeoutMs = Number(process.env.CONTENT_TEXTRACT_TIMEOUT_MS ?? 300_000);
     const deadline = Date.now() + timeoutMs;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);

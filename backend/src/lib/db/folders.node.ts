@@ -30,15 +30,15 @@ export type Folder = z.infer<typeof folderSchema>;
 export const foldersEmbeddingFields = ['name', 'description'] as const;
 const helpers = createNodeHelpers(FOLDERS_COLLECTION, folderSchema, foldersEmbeddingFields);
 export async function insertFolder(folder: Folder): Promise<Folder> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.insertFolder(folder);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.insertFolder(folder);
 }
 export const getFolderById = helpers.getById;
 export const upsertFolderByKey = helpers.upsertByKey;
 export const getAllFoldersChunked = helpers.getAllChunked;
 export const listFoldersPage = helpers.listPage;
 
-export async function updateFolder(folderKey: string, patch: import('./archive-persistence.node').ScopedFolderPatch): Promise<Folder> {
+export async function updateFolder(folderKey: string, patch: import('./content-persistence.node').ScopedFolderPatch): Promise<Folder> {
   const current = await helpers.getById(folderKey);
   if (!current) throw new Error(`Folder ${folderKey} was not found.`);
   const scoped = await updateFolderInScope(current.scopeKey, folderKey, patch);
@@ -46,14 +46,14 @@ export async function updateFolder(folderKey: string, patch: import('./archive-p
   return scoped;
 }
 
-export async function updateFolderInScope(scopeKey: string, folderKey: string, patch: import('./archive-persistence.node').ScopedFolderPatch) {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.updateFolder(scopeKey, folderKey, patch);
+export async function updateFolderInScope(scopeKey: string, folderKey: string, patch: import('./content-persistence.node').ScopedFolderPatch) {
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.updateFolder(scopeKey, folderKey, patch);
 }
 
 export async function deleteFolderInScope(scopeKey: string, folderKey: string): Promise<boolean> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.deleteFolder(scopeKey, folderKey);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.deleteFolder(scopeKey, folderKey);
 }
 
 export async function deleteFolder(folderKey: string): Promise<void> {

@@ -199,7 +199,7 @@ async function executeScopeAgent(action: DomainActionSlug, input: Input, context
     return output(action, { scopeAgentKeys: keys, sync, schedulesResumed: false });
   }
   if (action === 'scope.agent.remove') {
-    if (relations.some(({ relation }) => relation.status !== 'archived')) throw new DomainToolExecutionError('scope_agent_active', 'Archive every relation before removal');
+    if (relations.some(({ relation }) => relation.status !== 'archived')) throw new DomainToolExecutionError('scope_agent_active', 'Content every relation before removal');
     const keys = relations.map(({ relation }) => relation.key);
     const activeRuns = await db.query('FOR run IN agentRuns FILTER run.scopeKey == @scopeKey && run.agentKey IN @agentKeys && run.status == "accepted" LIMIT 1 RETURN run._key', { scopeKey: scope.key, agentKeys: relations.map(({ agent }) => agent.key) });
     if (await activeRuns.next()) throw new DomainToolExecutionError('agent_run_active', 'An active run blocks relation removal');
@@ -418,11 +418,11 @@ async function executeOrganization(action: DomainActionSlug, input: Input, conte
   if (input.confirmation && input.confirmation !== organization.name && input.confirmation !== organization.key) throw new DomainToolExecutionError('confirmation_mismatch', 'Confirmation must match the organization name or key');
   if (action === 'organization.archive') {
     const timestamp = new Date().toISOString();
-    await withTransaction(['organizations', 'userSessions'], async (trx) => { await trx.query('UPDATE @key WITH { isActive: false, metadata: MERGE(@metadata, { archivedAt: @timestamp, archiveReason: @reason }), updatedAt: @timestamp } IN organizations', { key: organization.key, metadata: organization.metadata, timestamp, reason: input.reason ?? null }); await trx.query('FOR session IN userSessions FOR member IN userOrganizations FILTER member.organizationId == @key && member.userId == session.userId && session.disconnectedAt == null UPDATE session WITH { disconnectedAt: @timestamp, updatedAt: @timestamp } IN userSessions', { key: organization.key, timestamp }); });
+    await withTransaction(['organizations', 'userSessions'], async (trx) => { await trx.query('UPDATE @key WITH { isActive: false, metadata: MERGE(@metadata, { archivedAt: @timestamp, contentReason: @reason }), updatedAt: @timestamp } IN organizations', { key: organization.key, metadata: organization.metadata, timestamp, reason: input.reason ?? null }); await trx.query('FOR session IN userSessions FOR member IN userOrganizations FILTER member.organizationId == @key && member.userId == session.userId && session.disconnectedAt == null UPDATE session WITH { disconnectedAt: @timestamp, updatedAt: @timestamp } IN userSessions', { key: organization.key, timestamp }); });
     return output(action, { organizationKey: organization.key, status: 'archived', runtimeBlocked: true, schedulesResumed: false });
   }
   if (organization.isActive) throw new DomainToolExecutionError('organization_active', 'The organization is already active');
-  const timestamp = new Date().toISOString(); await withTransaction(['organizations'], async (trx) => { await trx.query('UPDATE @key WITH { isActive: true, metadata: UNSET(@metadata, "archivedAt", "archiveReason"), updatedAt: @timestamp } IN organizations', { key: organization.key, metadata: organization.metadata, timestamp }); });
+  const timestamp = new Date().toISOString(); await withTransaction(['organizations'], async (trx) => { await trx.query('UPDATE @key WITH { isActive: true, metadata: UNSET(@metadata, "archivedAt", "contentReason"), updatedAt: @timestamp } IN organizations', { key: organization.key, metadata: organization.metadata, timestamp }); });
   return output(action, { organizationKey: organization.key, status: 'active', schedulesResumed: false, providersRequireRetest: true });
 }
 

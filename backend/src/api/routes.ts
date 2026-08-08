@@ -50,8 +50,8 @@ import {
   updateSystemOrchestrator,
   upsertCurrentMind,
 } from './system';
-import { invokeArchiveTool } from './archive-tools';
-import { chorusHandlers } from './chorus';
+import { invokeContentTool } from './content-tools';
+import { communicationHandlers } from './communication';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -328,29 +328,29 @@ export function registerRoutes(app: Hono) {
   app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
 
   app.post('/orchestrators/chat', postOrchestratorChat);
-  app.post('/archive/tools/:tool', invokeArchiveTool);
+  app.post('/content/tools/:tool', invokeContentTool);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);
   app.get('/founders/organizations/:organizationKey/scopes', listFoundersOrganizationScopes);
   app.get('/founders/organizations/:organizationKey/providers', listFoundersOrganizationProviders);
   app.put('/founders/organizations/:organizationKey/providers/:provider', upsertFoundersOrganizationProvider);
-  app.get('/founders/organizations/:organizationKey/chorus/channels', chorusHandlers.listChannels);
-  app.post('/founders/organizations/:organizationKey/chorus/transcriptions', chorusHandlers.transcribe);
-  app.post('/founders/organizations/:organizationKey/chorus/speech', chorusHandlers.speak);
-  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', chorusHandlers.listMessages);
-  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/typing', chorusHandlers.typingStream);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/typing', chorusHandlers.typing);
-  app.delete('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey', chorusHandlers.deleteMessage);
-  app.patch('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey', chorusHandlers.editMessage);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages', chorusHandlers.postMessage);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/reactions', chorusHandlers.react);
-  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/messages/:messageKey/replies', chorusHandlers.readReplies);
-  app.get('/founders/organizations/:organizationKey/chorus/reactions', chorusHandlers.frequentReactions);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls', chorusHandlers.createPoll);
-  app.get('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey', chorusHandlers.readPoll);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey/votes', chorusHandlers.votePoll);
-  app.post('/founders/organizations/:organizationKey/chorus/channels/:channelKey/polls/:pollKey/close', chorusHandlers.closePoll);
+  app.get('/founders/organizations/:organizationKey/communication/channels', communicationHandlers.listChannels);
+  app.post('/founders/organizations/:organizationKey/communication/transcriptions', communicationHandlers.transcribe);
+  app.post('/founders/organizations/:organizationKey/communication/speech', communicationHandlers.speak);
+  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.listMessages);
+  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typingStream);
+  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/typing', communicationHandlers.typing);
+  app.delete('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey', communicationHandlers.deleteMessage);
+  app.patch('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey', communicationHandlers.editMessage);
+  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages', communicationHandlers.postMessage);
+  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey/reactions', communicationHandlers.react);
+  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/messages/:messageKey/replies', communicationHandlers.readReplies);
+  app.get('/founders/organizations/:organizationKey/communication/reactions', communicationHandlers.frequentReactions);
+  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls', communicationHandlers.createPoll);
+  app.get('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey', communicationHandlers.readPoll);
+  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey/votes', communicationHandlers.votePoll);
+  app.post('/founders/organizations/:organizationKey/communication/channels/:channelKey/polls/:pollKey/close', communicationHandlers.closePoll);
   app.get('/founders/artifacts', listFounderArtifacts);
   app.post('/founders/artifacts', createFounderArtifact);
   app.get('/founders/artifacts/:artifactKey', getFounderArtifact);

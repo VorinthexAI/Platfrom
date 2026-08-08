@@ -1,0 +1,74 @@
+import { describe, expect, test } from 'bun:test';
+import { newId } from '@/lib/ids';
+import { organizationSchema } from '@/lib/db/organizations.node';
+import { userSchema } from '@/lib/db/users.node';
+import { userOrganizationSchema } from '@/lib/db/user-organization.node';
+import { scopeMemberSchema, scopeSchema } from '@/lib/ai/scopes';
+import { agentSchema } from '@/lib/db/agents.node';
+import { skillSchema } from '@/lib/db/skills.node';
+import { agentSkillSchema } from '@/lib/db/agent-skills.node';
+import { scopeAgentSchema } from '@/lib/db/scope-agents.node';
+import { agentMemberSchema } from '@/lib/db/agent-members.node';
+import { runContentAgentTool } from './content-run';
+
+const now = '2026-07-22T00:00:00.000Z';
+function fixture() {
+  const organization = organizationSchema.parse({ key: newId(), name: 'Acme', createdAt: now, updatedAt: now });
+  const scope = scopeSchema.parse({ key: newId(), organizationKey: organization.key, slug: 'content', name: 'Content', summary: 'Content', description: 'Content', position: 1 });
+  const user = userSchema.parse({ key: newId(), organizationId: organization.key, email: 'owner@acme.test', emailHash: 'hash', createdAt: now, updatedAt: now });
+  const membership = userOrganizationSchema.parse({ key: newId(), organizationId: organization.key, userId: user.key, orgRole: 'owner', status: 'active', joinedAt: now, createdAt: now, updatedAt: now });
+  const scopeMember = scopeMemberSchema.parse({ key: newId(), scopeKey: scope.key, userOrganizationKey: membership.key, role: 'owner' });
+  const agent = agentSchema.parse({ key: newId(), slug: 'content-agent', name: 'Content Agent', title: 'Records Agent', scopeKey: scope.key });
+  const skill = skillSchema.parse({ key: newId(), slug: 'content', name: 'Content', title: 'Content', definition: 'Use content tools.' });
+  const relation = agentSkillSchema.parse({ key: newId(), agentKey: agent.key, skillKey: skill.key, priority: 100 });
+  const scopeAgent = scopeAgentSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, position: 1, minimumAccessRole: 'owner', createdAt: now, updatedAt: now });
+  const grant = agentMemberSchema.parse({ key: newId(), organizationKey: organization.key, scopeKey: scope.key, agentKey: agent.key, scopeAgentKey: scopeAgent.key, userOrganizationKey: membership.key, source: 'inherited', createdAt: now });
+  const runtimeData = { async getAgent() { return agent; }, async getScope() { return scope; }, async getOrganization() { return organization; }, async listAgentSkills() { return [relation]; }, async getSkill() { return skill; } };
+  const accessData = { async getUserOrganization() { return membership; }, async getUser() { return user; }, async listScopeMembers() { return [scopeMember]; }, async getScopeAgent() { return scopeAgent; }, async listAgentMembers() { return [grant]; } };
+  return { organization, scope, user, membership, agent, runtimeData, accessData };
+}
+
+describe('runContentAgentTool', () => {
+  test('derives the principal from the authenticated user and dispatches', async () => {
+    const f = fixture(); let received: any;
+    const output = await runContentAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: { scopeKey: f.scope.key } }, {
+      authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData,
+      resolveMembership: async (organizationKey, userKey) => organizationKey === f.organization.key && userKey === f.user.key ? f.membership : null,
+      execute: (async (tool: any, input: any, context: any) => { received = { tool, input, context }; return { folders: [] }; }) as any,
+    });
+    expect(output).toEqual({ folders: [] });
+    expect(received).toMatchObject({ tool: 'folder.list', context: { principal: { kind: 'member', user: { key: f.user.key }, userOrganization: { key: f.membership.key } } } });
+  });
+
+  test('rejects organization-agent mismatch before membership resolution', async () => {
+    const f = fixture(); let resolved = false;
+    await expect(runContentAgentTool({ organizationKey: newId(), agentKey: f.agent.key, tool: 'folder.list', input: {} }, {
+      authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData,
+      resolveMembership: async () => { resolved = true; return f.membership; },
+    })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    expect(resolved).toBe(false);
+  });
+
+  test('preserves execution failures', async () => {
+    const f = fixture();
+    await expect(runContentAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: { secret: 'do-not-log' } }, {
+      authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData,
+      resolveMembership: async () => f.membership,
+      execute: (async () => { throw new Error('sensitive provider response'); }) as any,
+    })).rejects.toThrow('sensitive provider response');
+  });
+
+  test('cannot use a membership belonging to another authenticated user', async () => {
+    const f = fixture();
+    await expect(runContentAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: {} }, {
+      authenticatedUserKey: newId(), runtimeData: f.runtimeData, accessData: f.accessData,
+      resolveMembership: async () => f.membership,
+    })).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+  });
+
+  test('strictly rejects unknown tools and top-level fields', async () => {
+    const f = fixture(); const options = { authenticatedUserKey: f.user.key, runtimeData: f.runtimeData, accessData: f.accessData, resolveMembership: async () => f.membership };
+    await expect(runContentAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'unknown', input: {} } as any, options)).rejects.toThrow();
+    await expect(runContentAgentTool({ organizationKey: f.organization.key, agentKey: f.agent.key, tool: 'folder.list', input: {}, principal: { kind: 'system' } } as any, options)).rejects.toThrow();
+  });
+});

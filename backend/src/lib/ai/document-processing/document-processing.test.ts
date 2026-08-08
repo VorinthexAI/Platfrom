@@ -70,7 +70,7 @@ const normalized = (extension: 'txt' | 'md' | 'doc' | 'docx' | 'pdf', fileInput 
 
 const completeDocument = (overrides: Partial<Document> = {}): Document => ({
   key: documentKey, scopeKey, folderKey, name: 'Report', extension: 'txt', mimeType: 'text/plain',
-  storageKey: `archive/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
+  storageKey: `content/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
   html: '<h1>Report</h1><p>Body</p>', content: 'Report\n\nBody', embedding,
   isFavorite: false, deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
 });
@@ -133,13 +133,13 @@ describe('document-extract action', () => {
 });
 
 describe('storage-upload action', () => {
-  test('uploads to a deterministic collision-safe Archive key', async () => {
+  test('uploads to a deterministic collision-safe content key', async () => {
     let key = '';
     const result = await storageUpload({ ...normalized('txt'), documentKey }, { logger: quiet, storage: {
-      upload: async (input) => { key = input.key; return { storageKey: input.key, bucket: 'archive' }; },
+      upload: async (input) => { key = input.key; return { storageKey: input.key, bucket: 'content' }; },
       delete: async () => undefined,
     } });
-    expect(key).toMatch(new RegExp(`^archive/${scopeKey}/${folderKey}/${documentKey}/[a-f0-9]{16}/original\\.txt$`));
+    expect(key).toMatch(new RegExp(`^content/${scopeKey}/${folderKey}/${documentKey}/[a-f0-9]{16}/original\\.txt$`));
     expect(result.storageKey).toBe(key);
   });
 
@@ -234,7 +234,7 @@ describe('document.parse tool', () => {
     const fail = (step: keyof DocumentPipelineActions) => { if (failAt === step) throw new Error(step); };
     const actions: DocumentPipelineActions = {
       validate: async (input) => { calls.push('document-validate'); fail('validate'); return normalized('txt', (input.file as ReturnType<typeof fileFor>).bytes); },
-      upload: async (input, options) => options!.storage!.upload({ key: `archive/${input.documentKey}`, bytes: input.fileInput, mimeType: input.mimeType }),
+      upload: async (input, options) => options!.storage!.upload({ key: `content/${input.documentKey}`, bytes: input.fileInput, mimeType: input.mimeType }),
       extract: async () => { calls.push('document-extract'); fail('extract'); return { extractedText: 'Body', blocks: [{ type: 'paragraph', text: 'Body' }] }; },
       generateHtml: async () => { calls.push('document-generate-html'); fail('generateHtml'); return { html: '<p>Body</p>' }; },
       generateContent: async () => { calls.push('document-generate-content'); fail('generateContent'); return { content: 'Body' }; },
@@ -314,7 +314,7 @@ describe('document.parse tool', () => {
     const context = harness('insert');
     const key = documentKeyForRequest(scopeKey, folderKey, input.idempotencyKey);
     let lookups = 0;
-    const existing = completeDocument({ key, storageKey: `archive/${key}` });
+    const existing = completeDocument({ key, storageKey: `content/${key}` });
     const result = await parseDocument(input, {
       ...context,
       logger: quiet,

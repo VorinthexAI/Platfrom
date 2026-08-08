@@ -23,25 +23,25 @@ export const documentShareSchema = z.object({
 export type DocumentShare = z.infer<typeof documentShareSchema>;
 export const documentSharesEmbeddingFields = [] as const;
 export async function insertDocumentShare(share: Omit<DocumentShare, 'deletedAt'>): Promise<DocumentShare> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.insertShare(share);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.insertShare(share);
 }
 export async function getDocumentShareById(shareKey: string): Promise<DocumentShare | null> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.getShare(shareKey);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.getShare(shareKey);
 }
 export async function updateDocumentShare(shareKey: string, patch: Partial<Pick<DocumentShare, 'revokedAt' | 'deletedAt' | 'updatedAt'>>): Promise<DocumentShare> {
   const current = await getDocumentShareById(shareKey);
   if (!current) throw new Error(`Document share ${shareKey} was not found.`);
-  const { archivePersistence } = await import('./archive-persistence.node');
-  const updated = await archivePersistence.updateShare(current.scopeKey, shareKey, patch);
+  const { contentPersistence } = await import('./content-persistence.node');
+  const updated = await contentPersistence.updateShare(current.scopeKey, shareKey, patch);
   if (!updated) throw new Error(`Document share ${shareKey} is pending deletion.`);
   return updated;
 }
 
 export async function deleteDocumentShareInScope(scopeKey: string, shareKey: string): Promise<boolean> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.deleteShare(scopeKey, shareKey);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.deleteShare(scopeKey, shareKey);
 }
 
 export async function deleteDocumentShare(shareKey: string): Promise<void> {
@@ -70,7 +70,7 @@ export async function getActiveDocumentShareByTokenHash(tokenHash: string, at = 
       const { sourceType: _sourceType, sourceKey: documentKey, ...projected } = (await import('./shares.node')).shareSchema.parse(withArangoKey(share));
       return documentShareSchema.parse({ ...projected, documentKey });
     }
-    const marker = await db.collection('shares').document('archive-document-shares-cutover').catch(() => null) as { state?: string } | null;
+    const marker = await db.collection('shares').document('content-document-shares-cutover').catch(() => null) as { state?: string } | null;
     if (marker?.state === 'global' || !await db.collection(DOCUMENT_SHARES_COLLECTION).exists()) return null;
   }
   const cursor = await db.query(aql`
@@ -148,8 +148,8 @@ export async function listDocumentSharesByDocumentKeys(
 }
 
 export async function revokeDocumentShare(scopeKey: string, shareKey: string, revokedAt = new Date().toISOString()): Promise<DocumentShare | null> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.updateShare(scopeKey, shareKey, { revokedAt, updatedAt: revokedAt });
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.updateShare(scopeKey, shareKey, { revokedAt, updatedAt: revokedAt });
 }
 
 export async function archiveDocumentShare(key: string): Promise<DocumentShare> {

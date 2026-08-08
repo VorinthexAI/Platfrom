@@ -42,8 +42,8 @@ export type DocumentExtension = z.infer<typeof documentExtensionSchema>;
 export const documentsEmbeddingFields = ['name', 'content'] as const;
 const helpers = createNodeHelpers(DOCUMENTS_COLLECTION, documentSchema, documentsEmbeddingFields);
 export async function insertDocument(document: Document): Promise<Document> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.insertDocument(document);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.insertDocument(document);
 }
 export const getDocumentById = helpers.getById;
 export function upsertDocumentByKey(input: Omit<z.input<typeof documentSchema>, 'embedding'>): Promise<Document> {
@@ -52,7 +52,7 @@ export function upsertDocumentByKey(input: Omit<z.input<typeof documentSchema>, 
 export const getAllDocumentsChunked = helpers.getAllChunked;
 export const listDocumentsPage = helpers.listPage;
 
-export async function updateDocument(documentKey: string, patch: import('./archive-persistence.node').ScopedDocumentPatch): Promise<Document> {
+export async function updateDocument(documentKey: string, patch: import('./content-persistence.node').ScopedDocumentPatch): Promise<Document> {
   const current = await helpers.getById(documentKey);
   if (!current) throw new Error(`Document ${documentKey} was not found.`);
   const scoped = await updateDocumentInScope(current.scopeKey, documentKey, patch);
@@ -60,14 +60,14 @@ export async function updateDocument(documentKey: string, patch: import('./archi
   return scoped;
 }
 
-export async function updateDocumentInScope(scopeKey: string, documentKey: string, patch: import('./archive-persistence.node').ScopedDocumentPatch) {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.updateDocument(scopeKey, documentKey, patch);
+export async function updateDocumentInScope(scopeKey: string, documentKey: string, patch: import('./content-persistence.node').ScopedDocumentPatch) {
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.updateDocument(scopeKey, documentKey, patch);
 }
 
 export async function deleteDocumentInScope(scopeKey: string, documentKey: string): Promise<boolean> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.deleteDocument(scopeKey, documentKey);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.deleteDocument(scopeKey, documentKey);
 }
 
 export async function deleteDocument(documentKey: string): Promise<void> {
@@ -95,8 +95,8 @@ export async function restoreDocument(key: string): Promise<Document> {
 export async function insertPreparedDocument(input: Document): Promise<Document> {
   const document = documentSchema.parse({ ...input, ...embeddingMetadata() });
   currentEmbeddingSchema.parse(document.embedding);
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.insertDocument(document);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.insertDocument(document);
 }
 
 export async function getDocumentInScope(scopeKey: string, documentKey: string, includeArchived = false): Promise<Document | null> {
@@ -152,7 +152,7 @@ export async function listDocumentsByKeysInScope(
   return (await cursor.all()).map((document) => documentSchema.parse(withArangoKey(document)));
 }
 
-export interface ArchiveSemanticSearchInput {
+export interface ContentSemanticSearchInput {
   embedding: number[];
   authorizedScopeKeys: string[];
   sources?: Array<'document' | 'version'>;
@@ -171,7 +171,7 @@ export interface ArchiveSemanticSearchInput {
   limit?: number;
 }
 
-export interface ArchiveSemanticMatch {
+export interface ContentSemanticMatch {
   source: 'document' | 'version';
   score: number;
   document: Document;
@@ -179,7 +179,7 @@ export interface ArchiveSemanticMatch {
 }
 
 /** Search boundaries are applied in AQL before scoring; callers cannot retrieve outside authorized scopes. */
-export async function semanticSearchArchive(input: ArchiveSemanticSearchInput): Promise<ArchiveSemanticMatch[]> {
+export async function semanticSearchContent(input: ContentSemanticSearchInput): Promise<ContentSemanticMatch[]> {
   if (input.authorizedScopeKeys.length === 0 || input.embedding.length === 0) return [];
   if (input.embedding.some((value) => !Number.isFinite(value))) throw new Error('Search embedding must contain only finite values.');
   assertConfiguredEmbeddingDimensions(input.embedding);
@@ -255,6 +255,6 @@ export async function semanticSearchArchive(input: ArchiveSemanticSearchInput): 
   });
 }
 
-export function semanticSearchDocuments(input: Omit<ArchiveSemanticSearchInput, 'sources'>): Promise<ArchiveSemanticMatch[]> {
-  return semanticSearchArchive({ ...input, sources: ['document'] });
+export function semanticSearchDocuments(input: Omit<ContentSemanticSearchInput, 'sources'>): Promise<ContentSemanticMatch[]> {
+  return semanticSearchContent({ ...input, sources: ['document'] });
 }

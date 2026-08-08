@@ -134,8 +134,8 @@ export async function deleteDocumentVersion(versionKey: string): Promise<void> {
 }
 
 export async function deleteDocumentVersionInScope(scopeKey: string, versionKey: string): Promise<boolean> {
-  const { archivePersistence } = await import('./archive-persistence.node');
-  return archivePersistence.deleteVersion(scopeKey, versionKey);
+  const { contentPersistence } = await import('./content-persistence.node');
+  return contentPersistence.deleteVersion(scopeKey, versionKey);
 }
 
 type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>;
@@ -143,13 +143,13 @@ type NewDocumentVersion = Omit<DocumentVersion, 'key' | 'version' | 'createdAt' 
 /** Exclusive collection transaction makes MAX(version)+1 monotonic under concurrent writers. */
 export async function createDocumentVersion(input: NewDocumentVersion): Promise<DocumentVersion> {
   currentEmbeddingSchema.parse(input.embedding);
-  const { withArchivePersistenceTransaction } = await import('./archive-persistence.node');
-  return withArchivePersistenceTransaction((persistence) => persistence.createVersion({ ...input, ...embeddingMetadata() }));
+  const { withContentPersistenceTransaction } = await import('./content-persistence.node');
+  return withContentPersistenceTransaction((persistence) => persistence.createVersion({ ...input, ...embeddingMetadata() }));
 }
 
-export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ArchiveSemanticSearchInput, 'sources'>) {
-  const { semanticSearchArchive } = await import('./documents.node');
-  return semanticSearchArchive({ ...input, sources: ['version'] });
+export async function semanticSearchDocumentVersions(input: Omit<import('./documents.node').ContentSemanticSearchInput, 'sources'>) {
+  const { semanticSearchContent } = await import('./documents.node');
+  return semanticSearchContent({ ...input, sources: ['version'] });
 }
 
 export async function updateDocumentVersion(key: string, patch: Pick<DocumentVersion, 'deletedAt'>): Promise<DocumentVersion> {

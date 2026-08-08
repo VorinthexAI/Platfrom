@@ -4,7 +4,7 @@ import { ImageProcessingError, processImage } from './index';
 
 function png(width = 2, height = 3) { const bytes = new Uint8Array(24); bytes.set([137, 80, 78, 71, 13, 10, 26, 10]); bytes.set([73, 72, 68, 82], 12); new DataView(bytes.buffer).setUint32(16, width); new DataView(bytes.buffer).setUint32(20, height); return bytes; }
 function input(bytes = png()) { return { scopeKey: 'c123456789', ownerKey: 'c987654321', file: { filename: 'photo.png', mimeType: 'image/png', sizeBytes: bytes.length, bytes } }; }
-describe('Gallery image processing', () => {
+describe('MediaLibrary image processing', () => {
   test('stores captions with current Qwen vectors and metadata', async () => {
     let stored: Record<string, unknown> | undefined;
     const result = await processImage(input(), {

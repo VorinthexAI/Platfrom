@@ -144,6 +144,19 @@ describe('node registry schema contracts', () => {
     expect(channelParticipantSchema.parse({ ...participant, userOrganizationKey: 'cmrnlzf640003qc7k4p5zem5w' }).userOrganizationKey).toBeDefined();
   });
 
+  test('normalizes the legacy project folder contract while deployments overlap', () => {
+    const project = projectSchema.parse({
+      key: 'cmrnlzf640000qc7k4p5zem5w',
+      scopeKey: 'cmrnlzf640001qc7k4p5zem5w',
+      archiveFolderKey: 'cmrnlzf640002qc7k4p5zem5w',
+      name: 'Launch',
+      createdAt: '2026-07-22T00:00:00.000Z',
+      updatedAt: '2026-07-22T00:00:00.000Z',
+    });
+    expect(project.contentFolderKey).toBe('cmrnlzf640002qc7k4p5zem5w');
+    expect(project).not.toHaveProperty('archiveFolderKey');
+  });
+
   test('registers new nodes for generic consumers', () => {
     const name = 'traverseTestNode';
     registerNode(name, { listPage: async () => ({ items: [], nextCursor: null }), async *getAllChunked() {}, async upsertByKey() { return {}; } });

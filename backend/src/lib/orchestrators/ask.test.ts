@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ChatOutput, ProviderExecuteResponse } from '@/lib/ai/providers';
 import { ask } from './ask';
-import { ARCHIVE_TOOL_NAMES, TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
+import { CONTENT_TOOL_NAMES, TOOL_NAMES, runTool, streamTool } from '@/lib/ai/tools';
 
 const response: ProviderExecuteResponse<ChatOutput> = {
   output: { text: 'A useful answer.', toolCalls: [], stopReason: 'stop' },
@@ -15,7 +15,7 @@ describe('orchestrator chat tool', () => {
   test('exposes the unified registered tools', () => {
     expect(TOOL_NAMES).toContain('chat');
     expect(TOOL_NAMES).toContain('transcribe');
-    expect(TOOL_NAMES).toEqual(expect.arrayContaining(ARCHIVE_TOOL_NAMES));
+    expect(TOOL_NAMES).toEqual(expect.arrayContaining(CONTENT_TOOL_NAMES));
     expect(TOOL_NAMES).toContain('scope.list');
   });
 
@@ -50,9 +50,9 @@ describe('orchestrator chat tool', () => {
     })).rejects.toThrow();
   });
 
-  test('requires archive context for document processing and every Archive tool', async () => {
-    await expect(runTool('document.parse', '', {} as never)).rejects.toThrow('requires archiveContext');
-    await expect(runTool('folder.find', '', { folderKeys: [] } as never)).rejects.toThrow('requires archiveContext');
+  test('requires content context for document processing and every content tool', async () => {
+    await expect(runTool('document.parse', '', {} as never)).rejects.toThrow('requires contentContext');
+    await expect(runTool('folder.find', '', { folderKeys: [] } as never)).rejects.toThrow('requires contentContext');
   });
 
   test('streams chat action chunks through the unified tool', async () => {

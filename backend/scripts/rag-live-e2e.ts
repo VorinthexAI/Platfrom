@@ -17,7 +17,7 @@ process.env.ARANGO_DATABASE = databaseName;
 try {
   const target = system.database(databaseName);
   await Promise.all(['documents', 'documentVersions', 'folders'].map((name) => target.createCollection(name)));
-  const [{ embedText, EMBEDDING_DIMENSIONS }, { newId }, { insertPreparedDocument, semanticSearchArchive }] = await Promise.all([
+  const [{ embedText, EMBEDDING_DIMENSIONS }, { newId }, { insertPreparedDocument, semanticSearchContent }] = await Promise.all([
     import('../src/lib/embeddings'),
     import('../src/lib/ids'),
     import('../src/lib/db/documents.node'),
@@ -42,7 +42,7 @@ try {
   }
   const queryEmbedding = await embedText({ text: 'How can I recover access when I forgot my login password?', purpose: 'query' });
   if (queryEmbedding.length !== EMBEDDING_DIMENSIONS || queryEmbedding.some((value) => !Number.isFinite(value))) throw new Error('Live query embedding is not finite 4096-dimensional data.');
-  const matches = await semanticSearchArchive({ embedding: queryEmbedding, authorizedScopeKeys: [authorizedScope], limit: 10 });
+  const matches = await semanticSearchContent({ embedding: queryEmbedding, authorizedScopeKeys: [authorizedScope], limit: 10 });
   const relevant = matches.findIndex((match) => match.document.key === keys[0]);
   const unrelated = matches.findIndex((match) => match.document.key === keys[1]);
   if (relevant < 0 || unrelated < 0 || relevant >= unrelated) throw new Error('Relevant paraphrase did not rank above unrelated content.');
