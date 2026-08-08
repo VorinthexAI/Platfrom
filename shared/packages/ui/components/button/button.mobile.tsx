@@ -1,15 +1,19 @@
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
-  ActivityIndicator,
+  AccessibilityInfo,
+  Animated,
+  Easing,
   Pressable,
   StyleSheet,
   Text,
+  View,
   type PressableProps,
   type PressableStateCallbackType,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
 } from "react-native";
+import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 
 export type ButtonVariant =
   | "primary"
@@ -33,6 +37,115 @@ export type ButtonProps = PressableProps & {
   variant?: ButtonVariant;
 };
 
+function useReducedMotion() {
+  const [reducedMotion, setReducedMotion] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
+      if (mounted) setReducedMotion(enabled);
+    });
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReducedMotion);
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return reducedMotion;
+}
+
+function ChromeGradient({ muted = false }: { muted?: boolean }) {
+  const gradientId = useId().replaceAll(":", "");
+  const stops = muted
+    ? [
+      <Stop key="start" offset="0" stopColor="#DDE2E5" stopOpacity="0.08" />,
+      <Stop key="middle" offset="0.5" stopColor="#DDE2E5" stopOpacity="0.22" />,
+      <Stop key="end" offset="1" stopColor="#DDE2E5" stopOpacity="0.08" />,
+    ]
+    : [
+      <Stop key="white-start" offset="0" stopColor="#FFFFFF" />,
+      <Stop key="silver" offset="0.18" stopColor="#AEB6BC" />,
+      <Stop key="graphite" offset="0.38" stopColor="#3C434A" />,
+      <Stop key="white-middle" offset="0.55" stopColor="#F5F7F8" />,
+      <Stop key="steel" offset="0.76" stopColor="#7B858C" />,
+      <Stop key="white-end" offset="1" stopColor="#FFFFFF" />,
+    ];
+  return (
+    <Svg height="100%" pointerEvents="none" style={StyleSheet.absoluteFill} width="100%">
+      <Defs>
+        <LinearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
+          {stops}
+        </LinearGradient>
+      </Defs>
+      <Rect fill={`url(#${gradientId})`} height="100%" rx={BUTTON_RADIUS} width="100%" />
+    </Svg>
+  );
+}
+
+function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reducedMotion: boolean }) {
+  const rise = useRef(new Animated.Value(0)).current;
+  const firstBubble = useRef(new Animated.Value(0)).current;
+  const secondBubble = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    rise.stopAnimation();
+    firstBubble.stopAnimation();
+    secondBubble.stopAnimation();
+    if (reducedMotion) {
+      rise.setValue(1);
+      firstBubble.setValue(0);
+      secondBubble.setValue(0);
+      return;
+    }
+
+    rise.setValue(0);
+    firstBubble.setValue(0);
+    secondBubble.setValue(0);
+    const bubbleLoop = (value: Animated.Value, delay: number) => Animated.sequence([
+      Animated.delay(delay),
+      Animated.loop(Animated.timing(value, {
+        duration: 1300,
+        easing: Easing.in(Easing.quad),
+        toValue: 1,
+        useNativeDriver: true,
+      })),
+    ]);
+    const animation = Animated.parallel([
+      Animated.timing(rise, {
+        duration: 1400,
+        easing: Easing.bezier(0.16, 1, 0.3, 1),
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+      bubbleLoop(firstBubble, 250),
+      bubbleLoop(secondBubble, 850),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [firstBubble, reducedMotion, rise, secondBubble]);
+
+  const bubbleStyle = (value: Animated.Value) => ({
+    opacity: value.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.85, 0] }),
+    transform: [
+      { translateY: value.interpolate({ inputRange: [0, 1], outputRange: [0, -34] }) },
+      { scale: value.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] }) },
+    ],
+  });
+
+  return (
+    <Animated.View style={[styles.loadingFill, { transform: [{ scaleY: rise }] }]}>
+      <ChromeGradient muted={!primary} />
+      {!reducedMotion && (
+        <>
+          <Animated.View style={[styles.bubble, styles.firstBubble, bubbleStyle(firstBubble)]} />
+          <Animated.View style={[styles.bubble, styles.secondBubble, bubbleStyle(secondBubble)]} />
+        </>
+      )}
+    </Animated.View>
+  );
+}
+
 export function Button({
   accessibilityState,
   accessibilityLabel,
@@ -49,6 +162,7 @@ export function Button({
   ...props
 }: ButtonProps) {
   const inactive = disabled || loading;
+  const reducedMotion = useReducedMotion();
   const resolveStyle = (state: PressableStateCallbackType) =>
     typeof style === "function" ? style(state) : style;
 
@@ -65,30 +179,51 @@ export function Button({
         disabled: inactive || undefined,
       }}
       disabled={inactive}
-      style={(state) => [
-        styles.root,
-        sizeStyles[size],
-        variantStyles[variant],
-        variant === "icon" && iconSizeStyles[size],
-        contentMode === "raw" && styles.rawContent,
-        disabled && !loading && variant !== "primary" && styles.disabledNonPrimary,
-        inactive && styles.disabled,
-        loading && styles.loading,
-        state.pressed &&
-          !inactive &&
-          pressFeedback === "opacity" &&
-          styles.pressed,
-        resolveStyle(state),
-        styles.radius,
-      ]}
+      style={(state) => {
+        const showPress = state.pressed && !inactive && pressFeedback === "opacity";
+        return [
+          styles.root,
+          sizeStyles[size],
+          variantStyles[variant],
+          variant === "icon" && iconSizeStyles[size],
+          contentMode === "raw" && styles.rawContent,
+          disabled && !loading && variant !== "primary" && styles.disabledNonPrimary,
+          inactive && styles.disabled,
+          loading && styles.loading,
+          showPress && pressedVariantStyles[variant],
+          showPress && !["primary", "secondary", "outline"].includes(variant) && styles.pressed,
+          resolveStyle(state),
+          styles.radius,
+        ];
+      }}
       {...props}
     >
-      {loading ? <ActivityIndicator color={variant === "primary" ? "#030507" : "#F5F7F8"} /> : icon}
-      {contentMode === "raw" ? children : variant !== "icon" && (
-        <Text style={[styles.text, textSizeStyles[size], textVariantStyles[variant], textStyle]}>
-          {children}
-        </Text>
-      )}
+      {({ pressed }) => {
+        const showPress = pressed && !inactive && pressFeedback === "opacity";
+        return (
+          <>
+            {(variant === "primary" || loading) && (
+              <View pointerEvents="none" style={styles.surface}>
+                {variant === "primary" && <ChromeGradient />}
+                {loading && <ButtonLoadingFill primary={variant === "primary"} reducedMotion={reducedMotion} />}
+              </View>
+            )}
+            {!loading && icon}
+            {contentMode === "raw" ? children : variant !== "icon" && (
+              <Text style={[
+                styles.text,
+                textSizeStyles[size],
+                textVariantStyles[variant],
+                showPress && pressedTextVariantStyles[variant],
+                disabled && !loading && variant !== "primary" && styles.disabledText,
+                textStyle,
+              ]}>
+                {children}
+              </Text>
+            )}
+          </>
+        );
+      }}
     </Pressable>
   );
 }
@@ -104,11 +239,11 @@ const sizeStyles: Record<ButtonSize, ViewStyle> = {
 };
 
 const textSizeStyles: Record<ButtonSize, TextStyle> = {
-  xs: { fontSize: 10, lineHeight: 12 },
-  sm: { fontSize: 11, lineHeight: 14 },
-  md: { fontSize: 13, lineHeight: 16 },
-  lg: { fontSize: 14, lineHeight: 18 },
-  xl: { fontSize: 15, lineHeight: 20 },
+  xs: { fontSize: 10, letterSpacing: 0.8, lineHeight: 12 },
+  sm: { fontSize: 11, letterSpacing: 0.88, lineHeight: 14 },
+  md: { fontSize: 13, letterSpacing: 1.04, lineHeight: 16 },
+  lg: { fontSize: 14, letterSpacing: 1.12, lineHeight: 18 },
+  xl: { fontSize: 15, letterSpacing: 1.2, lineHeight: 20 },
 };
 
 const iconSizeStyles: Record<ButtonSize, ViewStyle> = {
@@ -120,12 +255,28 @@ const iconSizeStyles: Record<ButtonSize, ViewStyle> = {
 };
 
 const variantStyles: Record<ButtonVariant, ViewStyle> = {
-  primary: { backgroundColor: "#DDE2E5", borderColor: "#DDE2E5" },
+  primary: {
+    backgroundColor: "transparent",
+    borderColor: "transparent",
+    boxShadow: "0 0 34px rgba(221, 226, 229, 0.18)",
+  },
   secondary: { backgroundColor: "rgba(255, 255, 255, 0.03)", borderColor: "rgba(221, 226, 229, 0.18)" },
   ghost: { backgroundColor: "transparent", borderColor: "transparent" },
-  outline: { backgroundColor: "transparent", borderColor: "#262D36" },
+  outline: { backgroundColor: "rgba(255, 255, 255, 0.03)", borderColor: "rgba(221, 226, 229, 0.18)" },
   danger: { backgroundColor: "#B04A4A", borderColor: "#B04A4A" },
   icon: { backgroundColor: "transparent", borderColor: "#262D36", paddingHorizontal: 0, paddingVertical: 0 },
+};
+
+const pressedVariantStyles: Record<ButtonVariant, ViewStyle> = {
+  primary: {
+    boxShadow: "0 0 44px rgba(221, 226, 229, 0.3)",
+    transform: [{ translateY: -1 }],
+  },
+  secondary: { backgroundColor: "rgba(255, 255, 255, 0.06)", borderColor: "rgba(221, 226, 229, 0.4)" },
+  outline: { backgroundColor: "rgba(255, 255, 255, 0.06)", borderColor: "rgba(221, 226, 229, 0.4)" },
+  ghost: {},
+  danger: {},
+  icon: {},
 };
 
 const textVariantStyles: Record<ButtonVariant, TextStyle> = {
@@ -135,6 +286,15 @@ const textVariantStyles: Record<ButtonVariant, TextStyle> = {
   outline: { color: "#DDE2E5" },
   danger: { color: "#F5F7F8" },
   icon: { color: "#F5F7F8" },
+};
+
+const pressedTextVariantStyles: Record<ButtonVariant, TextStyle> = {
+  primary: {},
+  secondary: { color: "#FFFFFF" },
+  outline: { color: "#FFFFFF" },
+  ghost: {},
+  danger: {},
+  icon: {},
 };
 
 const styles = StyleSheet.create({
@@ -151,8 +311,9 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   disabledNonPrimary: {
-    backgroundColor: "#0D1117",
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
   },
+  disabledText: { color: "#7B858C" },
   pressed: {
     opacity: 0.82,
   },
@@ -164,7 +325,35 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   text: {
-    fontFamily: "Fraunces",
-    fontWeight: "500",
+    fontFamily: "Geist_600SemiBold",
   },
+  surface: {
+    bottom: 0,
+    borderRadius: BUTTON_RADIUS,
+    left: 0,
+    overflow: "hidden",
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
+  loadingFill: {
+    bottom: 0,
+    borderRadius: BUTTON_RADIUS,
+    left: 0,
+    overflow: "hidden",
+    position: "absolute",
+    right: 0,
+    top: 0,
+    transformOrigin: "bottom",
+  },
+  bubble: {
+    backgroundColor: "rgba(255, 255, 255, 0.95)",
+    borderRadius: 999,
+    bottom: -6,
+    height: 10,
+    position: "absolute",
+    width: 10,
+  },
+  firstBubble: { left: "27%" },
+  secondBubble: { height: 7, left: "66%", width: 7 },
 });
