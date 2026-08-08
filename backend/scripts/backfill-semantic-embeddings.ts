@@ -13,14 +13,14 @@ export const SEMANTIC_COLLECTION_ALLOWLIST = [
   'documents', 'documentVersions', 'projects', 'milestones', 'tasks',
 ] as const;
 
-type SemanticSpec = { name: string; embedKeys: string[] };
+type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };
 const authoritative = new Map(collections.map((spec) => [spec.name, spec]));
 const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.map((name) => {
   const spec = authoritative.get(name);
   if (!spec || spec.skipEmbedding || !spec.embedKeys?.length) throw new Error(`Semantic allowlist entry ${name} is not an embedding collection in authoritative specs.`);
-  return { name, embedKeys: [...spec.embedKeys] };
+  return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions'].includes(name) };
 });
-semanticCollections.push({ name: 'agentMemories', embedKeys: ['content'] });
+semanticCollections.push({ name: 'agentMemories', embedKeys: ['content'], includeMetadata: true });
 
 function inclusionFilter(name: string): string {
   const active = 'FILTER !HAS(doc, "_internalDeletion") || doc._internalDeletion == null';
@@ -33,7 +33,8 @@ function sourcePresentFilter(): string {
   return 'LENGTH(@embedKeys[* FILTER doc[CURRENT] != null && LENGTH(TRIM(TO_STRING(doc[CURRENT]))) > 0]) > 0';
 }
 
-function staleFilter(): string {
+function staleFilter(spec: SemanticSpec): string {
+  if (!spec.includeMetadata) return `FILTER !IS_ARRAY(doc.embedding) || LENGTH(doc.embedding) != @dimensions || LENGTH(doc.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0 || HAS(doc, "embeddingProvider") || HAS(doc, "embeddingModel") || HAS(doc, "embeddingDimensions") || HAS(doc, "embeddingState") || HAS(doc, "embeddedAt")`;
   return `FILTER doc.embeddingState != "skipped_empty" || ${sourcePresentFilter()}
     FILTER doc.embeddingProvider != @provider || doc.embeddingModel != @model || doc.embeddingDimensions != @dimensions
       || !IS_ARRAY(doc.embedding) || LENGTH(doc.embedding) != @dimensions
@@ -44,7 +45,7 @@ async function staleCount(spec: SemanticSpec): Promise<number> {
   const cursor = await db.query<number>(`
     RETURN LENGTH(FOR doc IN @@collection
       ${inclusionFilter(spec.name)}
-      ${staleFilter()}
+      ${staleFilter(spec)}
       RETURN 1)
   `, { '@collection': spec.name, embedKeys: spec.embedKeys, provider: EMBEDDING_PROVIDER_ID, model: EMBEDDING_MODEL, dimensions: EMBEDDING_DIMENSIONS });
   return await cursor.next() ?? 0;
@@ -63,7 +64,7 @@ for (const spec of semanticCollections) {
         FOR doc IN @@collection
           FILTER doc._key > @after
           ${inclusionFilter(spec.name)}
-          ${staleFilter()}
+          ${staleFilter(spec)}
           SORT doc._key ASC
           LIMIT @limit
           RETURN { _key: doc._key, _rev: doc._rev, source: KEEP(doc, @embedKeys) }
@@ -88,9 +89,9 @@ for (const spec of semanticCollections) {
             FOR doc IN @@collection
               FILTER doc._key == @key && doc._rev == @revision
               FILTER LENGTH(@embedKeys[* FILTER doc[CURRENT] != @source[CURRENT]]) == 0
-              UPDATE doc WITH MERGE(@metadata, { embedding: @embedding, embeddingState: HAS(doc, "embeddingState") ? "ready" : doc.embeddingState, embeddedAt: HAS(doc, "embeddedAt") ? @now : doc.embeddedAt }) IN @@collection OPTIONS { keepNull: false }
+              UPDATE doc WITH MERGE(@metadata, { embedding: @embedding, embeddingState: @includeMetadata && HAS(doc, "embeddingState") ? "ready" : null, embeddedAt: @includeMetadata && HAS(doc, "embeddedAt") ? @now : null, embeddingProvider: @includeMetadata ? @metadata.embeddingProvider : null, embeddingModel: @includeMetadata ? @metadata.embeddingModel : null, embeddingDimensions: @includeMetadata ? @metadata.embeddingDimensions : null }) IN @@collection OPTIONS { keepNull: false }
               RETURN NEW._key
-          `, { '@collection': spec.name, key: row._key, revision: row._rev, embedKeys: spec.embedKeys, source: row.source, embedding, metadata: embeddingMetadata(), now: new Date().toISOString() });
+          `, { '@collection': spec.name, key: row._key, revision: row._rev, embedKeys: spec.embedKeys, source: row.source, embedding, metadata: embeddingMetadata(), includeMetadata: spec.includeMetadata, now: new Date().toISOString() });
           if (await write.next()) updated += 1;
         }
         after = row._key;

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
-import { migrateContentDocuments, migrateContentFavorites, migrateContentVersions, retireRemovedActions } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 
 function migrationDatabase(collection: 'documents' | 'documentVersions', row: Record<string, unknown>) {
@@ -69,6 +69,18 @@ describe('Arango migration indexes', () => {
     expect(source).toContain("fields[0] === 'scopeKey' && fields[1] === 'name'");
     expect(source).toContain('Dropped obsolete unique channel-name index');
   });
+  test('declares travel and book-generation collection indexes', () => {
+    expect(collections.filter(({ name }) => ['places', 'trips', 'tripPlaces', 'placeVisits'].includes(name)).map(({ name }) => name)).toEqual(['places', 'trips', 'tripPlaces', 'placeVisits']);
+    expect(collections.find(({ name }) => name === 'tripPlaces')?.indexes).toContainEqual({ fields: ['scopeKey', 'tripKey', 'position'], unique: true });
+    const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
+    expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
+    expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
+    expect(collections.find(({ name }) => name === 'bookProgress')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'chapterKey'], unique: true });
+    const emailNames = ['emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles', 'emailRules', 'emailReplyDrafts'];
+    expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
+    expect(collections.find(({ name }) => name === 'emailAccounts')?.skipEmbedding).toBe(true);
+    expect(collections.find(({ name }) => name === 'emailMessages')?.indexes).toContainEqual({ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true });
+  });
   test('derives deterministic historical representations from version content', () => {
     expect(legacyContentRepresentations('First <line>\n\nSecond')).toEqual({
       html: '<p>First &lt;line&gt;</p><p>Second</p>',
@@ -99,7 +111,7 @@ describe('Arango migration indexes', () => {
     const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
     const documentMigration = migrationDatabase('documents', { _key: 'document-1', _rev: 'document-rev', name: 'Current', html: '   ', content: 'Current body', embedding, ...embeddingMetadata(), json: {} });
     await migrateContentDocuments(documentMigration.database);
-    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, html: '<p>Current body</p>', content: 'Current body', embedding, ...embeddingMetadata() }]);
+    expect(documentMigration.update?.bindVars?.updates).toEqual([{ _key: 'document-1', _rev: 'document-rev', source: { name: 'Current', html: '   ', content: 'Current body' }, html: '<p>Current body</p>', content: 'Current body', embedding }]);
     expect(documentMigration.update?.query).toContain('UNSET(MERGE(document');
     expect(documentMigration.update?.query).toContain('document._rev == patch._rev');
     expect(documentMigration.update?.query).toContain('UNSET(patch, "_key", "_rev", "source")');
@@ -107,7 +119,7 @@ describe('Arango migration indexes', () => {
 
     const versionMigration = migrationDatabase('documentVersions', { _key: 'version-1', _rev: 'version-rev', html: '\n\t', content: 'Historical body', embedding, ...embeddingMetadata(), json: {}, storageKey: 'legacy', sizeBytes: 12, updatedAt: '2026-01-01T00:00:00.000Z' });
     await migrateContentVersions(versionMigration.database);
-    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, html: '<p>Historical body</p>', content: 'Historical body', embedding, ...embeddingMetadata() }]);
+    expect(versionMigration.update?.bindVars?.updates).toEqual([{ _key: 'version-1', _rev: 'version-rev', source: { html: '\n\t', content: 'Historical body' }, html: '<p>Historical body</p>', content: 'Historical body', embedding }]);
     expect(versionMigration.update?.query).toContain('snapshot._rev == patch._rev');
     expect(versionMigration.update?.query).toContain('"json", "storageKey", "sizeBytes", "updatedAt"');
     expect(versionMigration.update?.query).toContain('migration must not infer deletion ownership');
@@ -120,7 +132,8 @@ describe('Arango migration indexes', () => {
       await migrateContentDocuments(migration.database);
       const [patch] = migration.update?.bindVars?.updates as Array<Record<string, unknown>>;
       expect(patch.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
-      expect(patch).toMatchObject({ _key: 'legacy-document', _rev: 'legacy-rev', source: { name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body' }, ...embeddingMetadata() });
+      expect(patch).toMatchObject({ _key: 'legacy-document', _rev: 'legacy-rev', source: { name: 'Legacy', html: '<p>Historical body</p>', content: 'Historical body' } });
+      expect(patch).not.toHaveProperty('embeddingProvider');
       expect(migration.update?.query).toContain('FILTER document != null && document._rev == patch._rev');
     } finally {
       if (previous === undefined) delete process.env.CONTENT_E2E;
@@ -128,7 +141,7 @@ describe('Arango migration indexes', () => {
     }
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
-    for (const collection of ['folders', 'documents', 'images', 'collections'] as const) {
+    for (const collection of ['images', 'collections'] as const) {
       const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
       const database = {
         async query(query: string, bindVars?: Record<string, unknown>) {

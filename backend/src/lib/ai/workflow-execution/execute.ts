@@ -338,7 +338,7 @@ export async function executeWorkflowExecutionTool(
     const contentFolderKey = key();
     const timestamp = now();
     const project: Project = { key: projectKey, scopeKey: item.scopeKey, contentFolderKey, name: item.name, ...(item.description ? { description: item.description } : {}), embedding: await embeddingFor(item), deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
-    const folder: Folder = { key: contentFolderKey, scopeKey: item.scopeKey, name: item.name, ...(item.description ? { description: item.description } : {}), isFavorite: false, embedding: await embeddingFor(item), deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
+    const folder: Folder = { key: contentFolderKey, scopeKey: item.scopeKey, name: item.name, ...(item.description ? { description: item.description } : {}), embedding: await embeddingFor(item), deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
     return { keys: { scopeKey: item.scopeKey, projectKey, contentFolderKey }, run: async (source) => { const created = await source.createProject(project); await source.createContentFolder(folder); return created; } };
   });
 

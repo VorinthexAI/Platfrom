@@ -19,7 +19,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async allowedScopeKeys() { return [scopeKey]; },
     async getFolder(key) { return folders.get(key) ?? null; },
     async listFolders(key) { return [...folders.values()].filter((value) => value.scopeKey === key); },
-    async insertFolder(value) { const folder = { ...value, embedding: [1] }; folders.set(folder.key, folder); return folder; },
+    async insertFolder(value) { const folder = { ...value, embedding }; folders.set(folder.key, folder); return folder; },
     async updateFolder(key, patch) { patches.push(patch); const value = { ...folders.get(key), ...patch }; folders.set(key, value); return value; },
     async setFolderDeletion(key, marker, owner) { const current = folders.get(key); if (!current || (owner && current._internalDeletion?.owner !== owner)) return null; const value = { ...current, _internalDeletion: marker }; if (!marker) delete value._internalDeletion; folders.set(key, value); return value; },
     async deleteFolder(key) { folders.delete(key); },
@@ -48,8 +48,8 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async transaction(operation) { return operation(repository); },
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
-  const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', isFavorite: false, embedding: [1], createdAt: now, updatedAt: now });
-  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, isFavorite: false, embedding, createdAt: now, updatedAt: now }); return key; };
+  const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
+  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, embedding, createdAt: now, updatedAt: now }); return key; };
   return { repository, context, folders, documents, shares, versions, patches, scopeKey, folderKey, addDocument };
 }
 
@@ -73,17 +73,17 @@ describe('Content runtime', () => {
 
   test('preserves batch order, continues partial failures, and preflights atomic batches', async () => {
     const f = fixture('moderator'); const missing = newId();
-    const result = await runContentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: missing, name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => [1] });
+    const result = await runContentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: missing, name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(result.results.map((item) => [item.key, item.success])).toEqual([[f.folderKey, true], [missing, false]]);
     expect(result.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
     const before = f.folders.get(f.folderKey).name;
-    await expect(runContentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Atomic' }, { folderKey: missing, name: 'Missing' }], atomic: true }, f.context, { repository: f.repository, embed: async () => [1] })).rejects.toBeInstanceOf(ContentError);
+    await expect(runContentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Atomic' }, { folderKey: missing, name: 'Missing' }], atomic: true }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toBeInstanceOf(ContentError);
     expect(f.folders.get(f.folderKey).name).toBe(before);
   });
 
   test('detects folder cycles and document moves do not re-embed', async () => {
     const f = fixture('admin'); const child = newId();
-    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], createdAt: now, updatedAt: now });
+    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
     const cycle = await runContentTool('folder.move', { moves: [{ folderKey: f.folderKey, targetParentFolderKey: child }] }, f.context, { repository: f.repository });
     expect(cycle.results[0]).toMatchObject({ success: false, error: { code: 'FOLDER_CYCLE_DETECTED' } });
     const documentKey = f.addDocument();
@@ -107,7 +107,7 @@ describe('Content runtime', () => {
 
     const shared = await runContentTool('document.share', { shares: [{ documentKey: rootKey, permission: 'read' }] }, f.context, { repository: f.repository, random: (size) => new Uint8Array(size).fill(3) });
     expect(shared.results[0]?.success).toBe(true);
-    const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository });
+    const versioned = await runContentTool('document.create-version', { documentKeys: [rootKey] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(versioned.results[0]?.success).toBe(true);
   });
 
@@ -115,7 +115,7 @@ describe('Content runtime', () => {
     const f = fixture('admin');
     const foreignScopeKey = newId();
     const targetFolderKey = newId();
-    f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: foreignScopeKey, name: 'Foreign', embedding: [1], createdAt: now, updatedAt: now });
+    f.folders.set(targetFolderKey, { key: targetFolderKey, scopeKey: foreignScopeKey, name: 'Foreign', embedding, createdAt: now, updatedAt: now });
     const originalGetScope = f.repository.getScope;
     f.repository.getScope = async (key) => key === foreignScopeKey ? { key, organizationKey: f.context.organizationKey } : originalGetScope(key);
     const output = await runContentTool('document.move', { moves: [{ documentKey: f.addDocument(), targetScopeKey: foreignScopeKey, targetFolderKey }] }, f.context, { repository: f.repository });
@@ -214,9 +214,9 @@ describe('Content runtime', () => {
   test('filters semantic search to authorized scopes and rejects unresolved projects', async () => {
     const f = fixture('viewer'); f.addDocument('Roadmap launch'); let authorized: string[] = [];
     f.repository.semanticSearch = async (input) => { authorized = input.authorizedScopeKeys; return [...f.documents.values()].map((document) => ({ score: 0.8, document })); };
-    const output = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => [1] });
+    const output = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(authorized).toEqual([f.scopeKey]); expect(output.results[0]?.score).toBe(0.8);
-    await expect(runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => [1] })).rejects.toMatchObject({ code: 'CONTENT_SEARCH_INVALID_SOURCE' });
+    await expect(runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toMatchObject({ code: 'CONTENT_SEARCH_INVALID_SOURCE' });
   });
 
   test('search includes archived folder hierarchies only when explicitly requested', async () => {
@@ -225,9 +225,9 @@ describe('Content runtime', () => {
     f.folders.get(f.folderKey).deletedAt = now;
     f.documents.get(documentKey).deletedAt = now;
     f.repository.semanticSearch = async () => [{ score: 0.9, document: f.documents.get(documentKey) }];
-    const activeOnly = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => [1] });
+    const activeOnly = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(activeOnly.results).toEqual([]);
-    const archived = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', filters: { includeArchived: true } }, f.context, { repository: f.repository, embed: async () => [1] });
+    const archived = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', filters: { includeArchived: true } }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(archived.results.map((item) => item.documentKey)).toEqual([documentKey]);
   });
 
@@ -239,15 +239,15 @@ describe('Content runtime', () => {
       updates: [{ documentKey, content: 'New body' }],
     }, f.context, {
       repository: f.repository,
-      embed: async () => [0.5],
-      ingestion: { embeddingDimensions: 1 },
+      embed: async () => embedding,
+      ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS },
       observer(event) {
         if (event.type === 'action' && event.status === 'started' && event.action?.startsWith('document-')) actions.push(event.action);
       },
     });
     expect(output.results[0]?.success).toBe(true);
     expect(actions).toEqual(['document-generate-html', 'document-generate-content', 'document-embed']);
-    expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding: [0.5] });
+    expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>New body</p>', content: 'New body', embedding });
   });
 
   test('re-embeds legacy vectors for every new document and version rollout path', async () => {
@@ -274,8 +274,8 @@ describe('Content runtime', () => {
     expect(updated.results[0]?.success).toBe(true);
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
 
-    const legacyVersion = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>Historical exact body</p>', content: 'Historical exact body', embedding: legacy });
-    f.documents.get(documentKey).embedding = legacy;
+    const legacyVersion = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>Historical exact body</p>', content: 'Historical exact body', embedding });
+    f.documents.get(documentKey).embedding = embedding;
     const copied = await runContentTool('document.copy', { copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey, includeVersions: true }] }, f.context, dependencies);
     expect(copied.results[0]?.success).toBe(true);
     const copiedKey = copied.results[0]?.data?.document.key;
@@ -304,38 +304,16 @@ describe('Content runtime', () => {
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
   });
 
-  test('updates favorites atomically without embedding, canonicalizing, or versioning', async () => {
+  test('does not add favorite fields to folders or copied documents', async () => {
     const f = fixture('moderator');
-    const documentKey = f.addDocument('Unchanged body');
-    let actions = 0;
-    const documentOutput = await runContentTool('document.update', {
-      updates: [{ documentKey, isFavorite: true }], atomic: true,
-    }, f.context, { repository: f.repository, runAction: async () => { actions += 1; throw new Error('unexpected action'); } });
-    expect(documentOutput.results[0]).toMatchObject({ success: true, data: { document: { isFavorite: true } } });
-    expect(f.documents.get(documentKey)).toMatchObject({ html: '<p>Unchanged body</p>', content: 'Unchanged body', isFavorite: true });
-    expect(f.versions.size).toBe(0);
+    const created = await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Default' }] }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(created.results[0]?.data?.folder).not.toHaveProperty('isFavorite');
 
-    const folderOutput = await runContentTool('folder.update', {
-      updates: [{ folderKey: f.folderKey, isFavorite: true }], atomic: true,
-    }, f.context, { repository: f.repository, embed: async () => { actions += 1; throw new Error('unexpected embed'); } });
-    expect(folderOutput.results[0]).toMatchObject({ success: true, data: { folder: { isFavorite: true } } });
-    expect(actions).toBe(0);
-  });
-
-  test('initializes folder and copied document favorites sensibly', async () => {
-    const f = fixture('moderator');
-    const created = await runContentTool('folder.create', { folders: [
-      { scopeKey: f.scopeKey, name: 'Default' },
-      { scopeKey: f.scopeKey, name: 'Pinned', isFavorite: true },
-    ] }, f.context, { repository: f.repository, embed: async () => [1] });
-    expect(created.results.map((result) => result.data?.folder.isFavorite)).toEqual([false, true]);
-
-    const documentKey = f.addDocument('Favorite source');
-    f.documents.get(documentKey).isFavorite = true;
+    const documentKey = f.addDocument('Source');
     const copied = await runContentTool('document.copy', {
       copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }],
     }, f.context, { repository: f.repository, storage: { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input) { return { storageKey: input.destinationKey }; }, async delete() {} } });
-    expect(copied.results[0]?.data?.document.isFavorite).toBe(false);
+    expect(copied.results[0]?.data?.document).not.toHaveProperty('isFavorite');
   });
 
   test('sanitizes HTML updates and persists canonical agreeing representations', async () => {
@@ -343,7 +321,7 @@ describe('Content runtime', () => {
     const documentKey = f.addDocument('Old body');
     const output = await runContentTool('document.update', {
       updates: [{ documentKey, html: '<p onclick="steal()">Safe <span>text</span></p><script>alert(1)</script><custom>drop</custom>' }],
-    }, f.context, { repository: f.repository, embed: async () => [1], ingestion: { embeddingDimensions: 1 } });
+    }, f.context, { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } });
     expect(output.results[0]?.success).toBe(true);
     const stored = f.documents.get(documentKey);
     expect(stored.html).toBe('<p>Safe text</p>drop');
@@ -356,7 +334,6 @@ describe('Content runtime', () => {
   test('embeds the final derived name for persisted AI copies', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Source body');
-    f.documents.get(documentKey).isFavorite = true;
     const embeddedNames: string[] = [];
     const storage: any = { async upload(input: any) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } };
     const output = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'copy' }, f.context, {
@@ -368,7 +345,7 @@ describe('Content runtime', () => {
         if (action === 'document-generate-content') return documentGenerateContent(input as never);
         if (action === 'document-embed') {
           embeddedNames.push(String(input.name));
-          return documentEmbed(input as never, { embed: async () => [1], dimensions: 1 });
+          return documentEmbed(input as never, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
         }
         throw new Error(`Unexpected action ${action}`);
       },
@@ -376,7 +353,7 @@ describe('Content runtime', () => {
     expect(output.results[0]?.success).toBe(true);
     expect(embeddedNames).toEqual(['Notes (translate)']);
     const persistedDocumentKey = output.results[0]?.data?.persistedDocumentKey;
-    expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)?.isFavorite).toBe(false);
+    expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)).not.toHaveProperty('isFavorite');
   });
 
   test('precomputes atomic exports and throws without returning partial success', async () => {
@@ -398,7 +375,7 @@ describe('Content runtime', () => {
   test('orders subtree document and folder lifecycle updates around active destination guards', async () => {
     const f = fixture('moderator');
     const child = newId();
-    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], createdAt: now, updatedAt: now });
+    f.folders.set(child, { key: child, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
     const documentKey = f.addDocument();
     f.documents.get(documentKey).folderKey = child;
     const updates: string[] = [];
@@ -428,7 +405,7 @@ describe('Content runtime', () => {
     f.documents.get(documentKey).deletedAt = now;
     f.documents.get(documentKey).speechStorageKeys = ['speech/shared', 'speech/second'];
     const version = await f.repository.createVersion({
-      scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding: [1],
+      scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding,
     });
     const calls: string[] = [];
     const originalDelete = f.repository.deleteDocument;
@@ -483,7 +460,7 @@ describe('Content runtime', () => {
     const f = fixture('owner');
     const documentKey = f.addDocument();
     f.documents.get(documentKey).deletedAt = now;
-    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding: [1] });
+    const version = await f.repository.createVersion({ scopeKey: f.scopeKey, documentKey, html: '<p>old</p>', content: 'old', embedding });
     let storageDeletes = 0;
     const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete() { storageDeletes += 1; } };
     const deleted = await runContentTool('document.delete-version', { versionKeys: [version.key] }, f.context, { repository: f.repository, storage, canPermanentlyDelete: () => true });
@@ -496,13 +473,13 @@ describe('Content runtime', () => {
   test('rejects descendant creation, sharing, versioning, move, and copy after a subtree freeze', async () => {
     const f = fixture('owner');
     const childKey = newId();
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, deletedAt: now, createdAt: now, updatedAt: now });
     f.folders.get(f.folderKey).deletedAt = now;
     const doomedKey = f.addDocument('Doomed');
     f.documents.get(doomedKey).folderKey = childKey;
     f.documents.get(doomedKey).deletedAt = now;
     const outsideKey = newId();
-    f.folders.set(outsideKey, { key: outsideKey, scopeKey: f.scopeKey, name: 'Outside', embedding: [1], createdAt: now, updatedAt: now });
+    f.folders.set(outsideKey, { key: outsideKey, scopeKey: f.scopeKey, name: 'Outside', embedding, createdAt: now, updatedAt: now });
     const movableKey = f.addDocument('Movable');
     f.documents.get(movableKey).folderKey = outsideKey;
     const originalListVersions = f.repository.listVersions;
@@ -534,7 +511,7 @@ describe('Content runtime', () => {
   test('resumes the persisted recursive folder deletion intent regardless of retry flags', async () => {
     const f = fixture('owner');
     const childKey = newId();
-    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], deletedAt: now, createdAt: now, updatedAt: now });
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, deletedAt: now, createdAt: now, updatedAt: now });
     f.folders.get(f.folderKey).deletedAt = now;
     const normalTransaction = f.repository.transaction!;
     let transactions = 0;
@@ -571,7 +548,7 @@ describe('Content runtime', () => {
       async release(identity) { records.delete(identity.idempotencyKey); },
     };
     const request = { folders: [{ scopeKey: f.scopeKey, name: 'Idempotent' }], idempotencyKey: 'same-key' };
-    const dependencies = { repository: f.repository, idempotency: store, embed: async () => [1] };
+    const dependencies = { repository: f.repository, idempotency: store, embed: async () => embedding };
     const first = await runContentTool('folder.create', request, f.context, dependencies);
     expect(records.get('same-key')?.response).toEqual(first);
     const replay = await runContentTool('folder.create', request, f.context, dependencies);
@@ -592,7 +569,7 @@ describe('Content runtime', () => {
       async release() { releases += 1; },
     };
     const request = { folders: [{ scopeKey: f.scopeKey, name: 'Committed once' }], idempotencyKey: 'completion-failure' };
-    const dependencies = { repository: f.repository, idempotency: store, embed: async () => [1] };
+    const dependencies = { repository: f.repository, idempotency: store, embed: async () => embedding };
     await expect(runContentTool('folder.create', request, f.context, dependencies)).rejects.toMatchObject({ retryable: true });
     await expect(runContentTool('folder.create', request, f.context, dependencies)).rejects.toMatchObject({ retryable: true });
     expect(releases).toBe(0);
@@ -623,8 +600,8 @@ describe('Content runtime', () => {
   test('validates the full restore ancestor chain and rejects corrupt cycles before mutation', async () => {
     const f = fixture('moderator');
     const middle = newId(), leaf = newId(), documentKey = f.addDocument();
-    f.folders.set(middle, { key: middle, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Middle', deletedAt: now, embedding: [1], createdAt: now, updatedAt: now });
-    f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: middle, name: 'Leaf', embedding: [1], createdAt: now, updatedAt: now });
+    f.folders.set(middle, { key: middle, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Middle', deletedAt: now, embedding, createdAt: now, updatedAt: now });
+    f.folders.set(leaf, { key: leaf, scopeKey: f.scopeKey, parentFolderKey: middle, name: 'Leaf', embedding, createdAt: now, updatedAt: now });
     f.documents.get(documentKey).folderKey = leaf;
     f.documents.get(documentKey).deletedAt = now;
     const blocked = await runContentTool('document.restore', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
@@ -657,8 +634,8 @@ describe('Content runtime', () => {
       const documentKey = f.addDocument('Source body');
       const childKey = newId();
       const siblingKey = newId();
-      f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding: [1], createdAt: now, updatedAt: now });
-      f.folders.set(siblingKey, { key: siblingKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Sibling', embedding: [1], createdAt: now, updatedAt: now });
+      f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
+      f.folders.set(siblingKey, { key: siblingKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Sibling', embedding, createdAt: now, updatedAt: now });
       const storage: any = {
         async upload(input: any) { return { storageKey: input.key }; },
         async delete() {},
@@ -737,7 +714,7 @@ describe('Content runtime', () => {
         label: 'authorization',
         run: async () => {
           const f = fixture('viewer');
-          return runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, f.context, { repository: f.repository, embed: async () => [1] });
+          return runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Denied' }] }, f.context, { repository: f.repository, embed: async () => embedding });
         },
         codes: ['CONTENT_FORBIDDEN'],
       },
@@ -763,7 +740,7 @@ describe('Content runtime', () => {
         label: 'partial ordered batch',
         run: async () => {
           const f = fixture('moderator');
-          return runContentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: newId(), name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => [1] });
+          return runContentTool('folder.rename', { renames: [{ folderKey: f.folderKey, name: 'Renamed' }, { folderKey: newId(), name: 'Missing' }] }, f.context, { repository: f.repository, embed: async () => embedding });
         },
         codes: [undefined, 'CONTENT_NOT_FOUND'],
       },

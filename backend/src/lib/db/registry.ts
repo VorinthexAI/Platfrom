@@ -42,6 +42,25 @@ import { getAllCollectionImagesChunked, listCollectionImagesPage, upsertCollecti
 import { getAllCollectionMembersChunked, listCollectionMembersPage, upsertCollectionMemberByKey } from './collection-members.node';
 import { getAllTagsChunked, listTagsPage, upsertTagByKey } from './tags.node';
 import { getAllTagAssignmentsChunked, listTagAssignmentsPage, upsertTagAssignmentByKey } from './tag-assignments.node';
+import { getAllPlacesChunked, listPlacesPage, upsertPlaceByKey } from './places.node';
+import { getAllTripsChunked, listTripsPage, upsertTripByKey } from './trips.node';
+import { getAllTripPlacesChunked, listTripPlacesPage, upsertTripPlaceByKey } from './trip-places.node';
+import { getAllPlaceVisitsChunked, listPlaceVisitsPage, upsertPlaceVisitByKey } from './place-visits.node';
+import { getAllBooksChunked, listBooksPage, upsertBookByKey } from './books.node';
+import { getAllBookContextsChunked, listBookContextsPage, upsertBookContextByKey } from './book-contexts.node';
+import { getAllBookThemesChunked, listBookThemesPage, upsertBookThemeByKey } from './book-themes.node';
+import { getAllBookSourcesChunked, listBookSourcesPage, upsertBookSourceByKey } from './book-sources.node';
+import { getAllBookPartsChunked, listBookPartsPage, upsertBookPartByKey } from './book-parts.node';
+import { getAllBookChaptersChunked, listBookChaptersPage, upsertBookChapterByKey } from './book-chapters.node';
+import { getAllChapterContextsChunked, listChapterContextsPage, upsertChapterContextByKey } from './chapter-contexts.node';
+import { getAllBookProgressChunked, listBookProgressPage, upsertBookProgressByKey } from './book-progress.node';
+import { getAllEmailAccountsChunked, listEmailAccountsPage, upsertEmailAccountByKey } from './email-accounts.node';
+import { getAllEmailThreadsChunked, listEmailThreadsPage, upsertEmailThreadByKey } from './email-threads.node';
+import { getAllEmailMessagesChunked, listEmailMessagesPage, upsertEmailMessageByKey } from './email-messages.node';
+import { getAllEmailContactsChunked, listEmailContactsPage, upsertEmailContactByKey } from './email-contacts.node';
+import { getAllEmailWritingProfilesChunked, listEmailWritingProfilesPage, upsertEmailWritingProfileByKey } from './email-writing-profiles.node';
+import { getAllEmailRulesChunked, listEmailRulesPage, upsertEmailRuleByKey } from './email-rules.node';
+import { getAllEmailReplyDraftsChunked, listEmailReplyDraftsPage, upsertEmailReplyDraftByKey } from './email-reply-drafts.node';
 import { getAllProjectsChunked, listProjectsPage, upsertProjectByKey } from './projects.node';
 import { getAllMilestonesChunked, listMilestonesPage, upsertMilestoneByKey } from './milestones.node';
 import { getAllTasksChunked, listTasksPage, upsertTaskByKey } from './tasks.node';
@@ -94,6 +113,25 @@ export const NODE_REGISTRY: Record<string, NodeAccessors> = {
   collectionMembers: { listPage: listCollectionMembersPage, getAllChunked: getAllCollectionMembersChunked, upsertByKey: upsertCollectionMemberByKey },
   tags: { listPage: listTagsPage, getAllChunked: getAllTagsChunked, upsertByKey: upsertTagByKey },
   tagAssignments: { listPage: listTagAssignmentsPage, getAllChunked: getAllTagAssignmentsChunked, upsertByKey: upsertTagAssignmentByKey },
+  places: { listPage: listPlacesPage, getAllChunked: getAllPlacesChunked, upsertByKey: upsertPlaceByKey },
+  trips: { listPage: listTripsPage, getAllChunked: getAllTripsChunked, upsertByKey: upsertTripByKey },
+  tripPlaces: { listPage: listTripPlacesPage, getAllChunked: getAllTripPlacesChunked, upsertByKey: upsertTripPlaceByKey },
+  placeVisits: { listPage: listPlaceVisitsPage, getAllChunked: getAllPlaceVisitsChunked, upsertByKey: upsertPlaceVisitByKey },
+  books: { listPage: listBooksPage, getAllChunked: getAllBooksChunked, upsertByKey: upsertBookByKey },
+  bookContexts: { listPage: listBookContextsPage, getAllChunked: getAllBookContextsChunked, upsertByKey: upsertBookContextByKey },
+  bookThemes: { listPage: listBookThemesPage, getAllChunked: getAllBookThemesChunked, upsertByKey: upsertBookThemeByKey },
+  bookSources: { listPage: listBookSourcesPage, getAllChunked: getAllBookSourcesChunked, upsertByKey: upsertBookSourceByKey },
+  bookParts: { listPage: listBookPartsPage, getAllChunked: getAllBookPartsChunked, upsertByKey: upsertBookPartByKey },
+  bookChapters: { listPage: listBookChaptersPage, getAllChunked: getAllBookChaptersChunked, upsertByKey: upsertBookChapterByKey },
+  chapterContexts: { listPage: listChapterContextsPage, getAllChunked: getAllChapterContextsChunked, upsertByKey: upsertChapterContextByKey },
+  bookProgress: { listPage: listBookProgressPage, getAllChunked: getAllBookProgressChunked, upsertByKey: upsertBookProgressByKey },
+  emailAccounts: { listPage: listEmailAccountsPage, getAllChunked: getAllEmailAccountsChunked, upsertByKey: upsertEmailAccountByKey },
+  emailThreads: { listPage: listEmailThreadsPage, getAllChunked: getAllEmailThreadsChunked, upsertByKey: upsertEmailThreadByKey },
+  emailMessages: { listPage: listEmailMessagesPage, getAllChunked: getAllEmailMessagesChunked, upsertByKey: upsertEmailMessageByKey },
+  emailContacts: { listPage: listEmailContactsPage, getAllChunked: getAllEmailContactsChunked, upsertByKey: upsertEmailContactByKey },
+  emailWritingProfiles: { listPage: listEmailWritingProfilesPage, getAllChunked: getAllEmailWritingProfilesChunked, upsertByKey: upsertEmailWritingProfileByKey },
+  emailRules: { listPage: listEmailRulesPage, getAllChunked: getAllEmailRulesChunked, upsertByKey: upsertEmailRuleByKey },
+  emailReplyDrafts: { listPage: listEmailReplyDraftsPage, getAllChunked: getAllEmailReplyDraftsChunked, upsertByKey: upsertEmailReplyDraftByKey },
   projects: { listPage: listProjectsPage, getAllChunked: getAllProjectsChunked, upsertByKey: upsertProjectByKey },
   milestones: { listPage: listMilestonesPage, getAllChunked: getAllMilestonesChunked, upsertByKey: upsertMilestoneByKey },
   tasks: { listPage: listTasksPage, getAllChunked: getAllTasksChunked, upsertByKey: upsertTaskByKey },

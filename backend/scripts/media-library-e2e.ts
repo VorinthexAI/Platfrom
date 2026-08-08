@@ -13,13 +13,13 @@ await system.createDatabase(databaseName);
 const database = system.database(databaseName);
 
 try {
-  const names = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'folders', 'documents', 'scopes', 'scopeMembers', 'userOrganizations', 'users', 'documentShares'];
+  const names = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'folders', 'documents', 'places', 'trips', 'scopes', 'scopeMembers', 'userOrganizations', 'users', 'documentShares'];
   await Promise.all(names.map((name) => database.createCollection(name)));
   for (const spec of collectionSpecs.filter(({ name }) => names.includes(name))) for (const index of spec.indexes ?? []) await database.collection(spec.name).ensureIndex({ type: 'persistent', sparse: false, unique: false, ...index });
   const [{ createMediaLibraryRepository }, { createMediaLibraryService }, { processImage }, { imageSchema }] = await Promise.all([
     import('../src/lib/media-library/repository'), import('../src/lib/media-library/service'), import('../src/lib/ai/image-processing'), import('../src/lib/db/images.node'),
   ]);
-  const transactionCollections = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'documents', 'scopes', 'scopeMembers', 'userOrganizations', 'users'];
+  const transactionCollections = ['images', 'collections', 'collectionImages', 'collectionMembers', 'collectionInvites', 'tags', 'tagAssignments', 'shares', 'documents', 'places', 'trips', 'scopes', 'scopeMembers', 'userOrganizations', 'users'];
   const repository = createMediaLibraryRepository(database, (operation) => withDatabaseTransaction(database, transactionCollections, (transaction) => operation(transaction)));
   let tokenSequence = 0;
   const service = createMediaLibraryService({ repository, token: () => `media-library-e2e-token-${String(++tokenSequence).padStart(32, '0')}` });
@@ -29,26 +29,26 @@ try {
   await database.collection('collections').save({ _key: collectionKey, scopeKey, name: 'Launch', description: 'Launch imagery', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
   const sourceOwnerMembershipKey = newId();
   await database.collection('collectionMembers').save({ _key: sourceOwnerMembershipKey, scopeKey, collectionKey, memberKey: actorKey, role: 'owner', createdAt: now });
-  await database.collection('images').save({ _key: imageKey, scopeKey, ownerKey: actorKey, filename: 'launch.png', caption: 'A launch vehicle', storageKey: 'mediaLibrary/e2e.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, requestHash: 'a'.repeat(64), embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
-  await database.collection('tags').save({ _key: tagKey, scopeKey, name: 'Launch', description: '', embedding: Array(4096).fill(0), deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('images').save({ _key: imageKey, scopeKey, filename: 'launch.png', caption: 'A launch vehicle', storageKey: 'mediaLibrary/e2e.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('tags').save({ _key: tagKey, scopeKey, name: 'Launch', embedding: Array(4096).fill(0), createdAt: now, updatedAt: now });
   const membership = await service.addImageToCollection({ scopeKey, collectionKey, imageKey, actorKey, now });
-  const assignment = await service.assignTag({ scopeKey, tagKey, sourceType: 'image', sourceKey: imageKey, actorKey, now });
+  const assignment = await service.assignTag({ scopeKey, tagKey, sourceType: 'image', sourceKey: imageKey, source: 'user', actorKey, now });
   const cover = await service.setCollectionCoverImage({ scopeKey, collectionKey, imageKey, ownerKey: actorKey, now });
   if (cover.coverImageKey !== imageKey) throw new Error('Collection cover membership verification failed.');
   const unrelatedImageKey = newId();
-  await database.collection('images').save({ _key: unrelatedImageKey, scopeKey, ownerKey: actorKey, filename: 'other.png', caption: 'Other', storageKey: 'mediaLibrary/other.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, requestHash: 'b'.repeat(64), embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('images').save({ _key: unrelatedImageKey, scopeKey, filename: 'other.png', caption: 'Other', storageKey: 'mediaLibrary/other.png', mimeType: 'image/png', sizeBytes: 24, width: 1, height: 1, embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
   let unrelatedCoverRejected = false;
   try { await service.setCollectionCoverImage({ scopeKey, collectionKey, imageKey: unrelatedImageKey, ownerKey: actorKey, now }); } catch { unrelatedCoverRejected = true; }
   if (!unrelatedCoverRejected) throw new Error('Unrelated image was accepted as collection cover.');
   const destinationCollectionKey = newId();
-  await database.collection('collections').save({ _key: destinationCollectionKey, scopeKey, name: 'Destination', description: '', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('collections').save({ _key: destinationCollectionKey, scopeKey, name: 'Destination', description: 'Destination imagery', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
   const destinationOwnerMembershipKey = newId();
   await database.collection('collectionMembers').save({ _key: destinationOwnerMembershipKey, scopeKey, collectionKey: destinationCollectionKey, memberKey: actorKey, role: 'owner', createdAt: now });
   await service.moveImageBetweenCollections({ scopeKey, sourceCollectionKey: collectionKey, collectionKey: destinationCollectionKey, imageKey, actorKey, now });
   const sourceAfterMove = await database.collection('collections').document(collectionKey) as Record<string, unknown>;
   if ('coverImageKey' in sourceAfterMove) throw new Error('Moving a cover image did not clear the source cover atomically.');
   const attackerCollectionKey = newId();
-  await database.collection('collections').save({ _key: attackerCollectionKey, scopeKey, name: 'Attacker destination', description: '', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
+  await database.collection('collections').save({ _key: attackerCollectionKey, scopeKey, name: 'Attacker destination', description: 'Unauthorized destination', embedding: Array(4096).fill(0), isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now });
   await database.collection('collectionMembers').save({ _key: newId(), scopeKey, collectionKey: attackerCollectionKey, memberKey: strangerKey, role: 'owner', createdAt: now });
   let inaccessibleAttachRejected = false;
   try { await service.addImageToCollection({ scopeKey, collectionKey: attackerCollectionKey, imageKey, actorKey: strangerKey, now }); } catch { inaccessibleAttachRejected = true; }
@@ -64,10 +64,7 @@ try {
   const processingDependencies = { storage, caption: async () => 'A deterministic processed image.', embed: async () => Array(4096).fill(0.125), getImage: getProcessedImage, insertImage: insertProcessedImage };
   const processed = await processImage(processingInput, processingDependencies);
   const processedReplay = await processImage(processingInput, processingDependencies);
-  if (processed.key !== processedReplay.key || processed.embedding.length !== 4096 || processed.ownerKey !== actorKey || processed.embeddingDimensions !== 4096 || uploads !== 1) throw new Error('Image processing validation/idempotency/metadata contract failed.');
-  let processingConflict = false;
-  try { await processImage({ ...processingInput, file: { ...processingInput.file, bytes: png(9, 6) } }, processingDependencies); } catch { processingConflict = true; }
-  if (!processingConflict) throw new Error('Image processing idempotency payload conflict was accepted.');
+  if (processed.key !== processedReplay.key || processed.embedding.length !== 4096 || uploads !== 1) throw new Error('Image processing validation/idempotency contract failed.');
   let cleanupFailed = false;
   try { await processImage({ ...processingInput, idempotencyKey: 'cleanup-e2e', file: { ...processingInput.file, filename: 'cleanup.png' } }, { ...processingDependencies, embed: async () => Array(4095).fill(0) }); } catch { cleanupFailed = true; }
   if (!cleanupFailed || deletes !== 1) throw new Error('Image processing failure did not clean uploaded storage.');

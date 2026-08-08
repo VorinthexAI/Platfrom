@@ -6,16 +6,14 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const IMAGES_COLLECTION = 'images';
 export const imageSchema = z.object({
-  key: z.string().cuid(), scopeKey: z.string().cuid(), ownerKey: z.string().cuid().optional(), filename: z.string().trim().min(1), caption: z.string().trim().min(1),
+  key: z.string().cuid(), scopeKey: z.string().cuid(), filename: z.string().trim().min(1), caption: z.string().trim().min(1),
   storageKey: z.string().trim().min(1), mimeType: z.string().trim().min(1), sizeBytes: z.number().int().positive(),
   width: z.number().int().positive(), height: z.number().int().positive(), embedding: currentEmbeddingSchema,
-  requestHash: z.string().regex(/^[a-f0-9]{64}$/),
-  embeddingProvider: z.string().trim().min(1).optional(), embeddingModel: z.string().trim().min(1).optional(), embeddingDimensions: z.number().int().positive().optional(),
   isFavorite: z.boolean().default(false), deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Image = z.infer<typeof imageSchema>;
 export const imagesEmbeddingFields = ['filename', 'caption'] as const;
-const helpers = createNodeHelpers(IMAGES_COLLECTION, imageSchema, imagesEmbeddingFields);
+const helpers = createNodeHelpers(IMAGES_COLLECTION, imageSchema, imagesEmbeddingFields, { includeEmbeddingMetadata: false });
 export const insertImage = helpers.insert;
 export const getImageById = helpers.getById;
 export const updateImage = helpers.updateById;

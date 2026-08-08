@@ -17,7 +17,11 @@ export function CoreAppsJourney() {
                 <p className={styles.capabilityLabel}>Core app</p>
                 <h3>{capability.name}</h3>
                 <p className={styles.capabilityPromise}>{capability.promise}</p>
-                <p>{capability.detail}</p>
+                <div className={styles.capabilityParagraphs}>
+                  {capability.details.map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
+                  ))}
+                </div>
               </div>
             </article>
           </div>

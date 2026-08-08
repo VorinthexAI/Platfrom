@@ -5,6 +5,7 @@ import { EMBEDDING_DIMENSIONS } from '../embeddings';
 const scopeKey = 'cm00000000000000000000001';
 const folderKey = 'cm00000000000000000000002';
 const timestamp = '2026-07-22T10:00:00.000Z';
+const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0);
 
 describe('scoped Content persistence', () => {
   test('updates by key and scope and explicitly unsets optional fields', async () => {
@@ -12,7 +13,7 @@ describe('scoped Content persistence', () => {
     const executor: ContentQueryExecutor = {
       async query(query, bindVars) {
         calls.push({ query, bindVars });
-        return { async next() { return { _key: folderKey, scopeKey, name: 'Root', embedding: [], createdAt: timestamp, updatedAt: timestamp }; } };
+        return { async next() { return { _key: folderKey, scopeKey, name: 'Root', embedding, createdAt: timestamp, updatedAt: timestamp }; } };
       },
     };
     const result = await createContentPersistence(executor).updateFolder(scopeKey, folderKey, {
@@ -64,11 +65,11 @@ describe('scoped Content persistence', () => {
       },
     };
     const persistence = createContentPersistence(executor);
-    await persistence.updateFolder(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
-    await persistence.updateDocument(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
+    await persistence.updateFolder(scopeKey, folderKey, { updatedAt: timestamp });
+    await persistence.updateDocument(scopeKey, folderKey, { updatedAt: timestamp });
     expect(calls.map(({ bindVars }) => bindVars?.patch)).toEqual([
-      { isFavorite: true, updatedAt: timestamp },
-      { isFavorite: true, updatedAt: timestamp },
+      { updatedAt: timestamp },
+      { updatedAt: timestamp },
     ]);
   });
 

@@ -19,7 +19,7 @@ test("renders the download action and immersive Core app journey", () => {
   for (const capability of CORE_CAPABILITIES) {
     expect(html).toContain(`id="${capability.id}"`);
     expect(html).toContain(capability.promise);
-    expect(html).toContain(capability.detail);
+    for (const paragraph of capability.details) expect(html).toContain(paragraph);
   }
 });
 

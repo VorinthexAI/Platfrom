@@ -6,13 +6,13 @@ import { currentEmbeddingSchema } from '@/lib/embeddings';
 
 export const COLLECTIONS_COLLECTION = 'collections';
 export const collectionSchema = z.object({
-  key: z.string().cuid(), scopeKey: z.string().cuid(), name: z.string().trim().min(1), description: z.string().trim().default(''), coverImageKey: z.string().cuid().optional(),
-  embedding: currentEmbeddingSchema, embeddingProvider: z.string().trim().min(1).optional(), embeddingModel: z.string().trim().min(1).optional(), embeddingDimensions: z.number().int().positive().optional(),
+  key: z.string().cuid(), scopeKey: z.string().cuid(), name: z.string().trim().min(1), description: z.string().trim().min(1).optional(), coverImageKey: z.string().cuid().optional(),
+  embedding: currentEmbeddingSchema,
   isFavorite: z.boolean().default(false), deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Collection = z.infer<typeof collectionSchema>;
 export const collectionsEmbeddingFields = ['name', 'description'] as const;
-const helpers = createNodeHelpers(COLLECTIONS_COLLECTION, collectionSchema, collectionsEmbeddingFields);
+const helpers = createNodeHelpers(COLLECTIONS_COLLECTION, collectionSchema, collectionsEmbeddingFields, { includeEmbeddingMetadata: false });
 export const insertCollection = helpers.insert;
 export const getCollectionById = helpers.getById;
 export const updateCollection = helpers.updateById;
