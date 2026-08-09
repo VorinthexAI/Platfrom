@@ -389,7 +389,7 @@ jobs:
           {
             echo "AWS_DEPLOY_ROLE_ARN=$(jq -r '.vars.AWS_DEPLOY_ROLE_ARN' .github/environments.json)"
             echo "CONFIG_ENV<<EOF_CONFIG_ENV"
-            jq -c '.secrets.prod.env' .github/environments.json
+            jq -c '(.secrets.prod.env + {S3_BUCKET: .vars.PROD_S3_BUCKET_NAME})' .github/environments.json
             echo "EOF_CONFIG_ENV"
           } >> "$GITHUB_ENV"
       - name: Configure AWS credentials
