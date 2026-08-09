@@ -19,7 +19,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
+type Action = 'ask' | 'enhance' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -726,6 +726,17 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         .slice(0, input.wordCount)
         .join(' ');
       result = { completion: z.string().min(1).parse(completion) };
+    } else if (tool === 'enhance') {
+      const response = await action('enhance', {
+        systemPrompt: 'Correct spelling, grammar, awkward wording, and unclear phrasing. Preserve the original meaning, facts, tone, paragraph structure, line breaks, and formatting. Do not add new claims or commentary. Return only the revised text.',
+        messages: [{ role: 'user', content: [{ type: 'text', text: input.content }] }],
+        options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(input.content.length / 3))) },
+      });
+      const content = z.string().trim().min(1).parse(response.text)
+        .replace(/^```(?:text)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      result = { content: z.string().min(1).parse(content) };
     } else if (tool === 'folder.create') {
       const creates = input.folders.map((item: any) => ({ ...item, key: item.key ?? d.id() }));
       result = await batch(tool, creates.map((item: any) => ({

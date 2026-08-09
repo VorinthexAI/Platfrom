@@ -126,6 +126,7 @@ const projectedVersionDataSchema = z.object({ version: contentProjectedDocumentV
 const fileDataSchema = z.object({ documentKey: keySchema, format: z.string().trim().min(1), fileName: nameSchema, mimeType: textSchema, encoding: z.literal('base64'), content: z.string() }).strict();
 const generatedTextDataSchema = z.object({ documentKey: keySchema, text: z.string(), language: z.string().trim().min(1).optional(), persistedDocumentKey: keySchema.optional() }).strict();
 const autocompleteDataSchema = z.object({ completion: z.string().trim().min(1) }).strict();
+const enhancedContentDataSchema = z.object({ content: z.string().trim().min(1) }).strict();
 const canonicalRepresentationSchema = z.object({
   html: z.string().min(1).optional(),
   content: z.string().min(1).optional(),
@@ -216,6 +217,7 @@ const documentReadDataSchema = z.union([
 
 export const contentToolContracts = {
   autocomplete: { description: 'Complete the text immediately following a writing context.', input: z.object({ context: z.string().trim().min(1).max(12_000), wordCount: z.number().int().min(1).max(24) }).strict(), output: autocompleteDataSchema },
+  enhance: { description: 'Correct spelling, grammar, wording, and clarity while preserving meaning and formatting.', input: z.object({ content: z.string().trim().min(1).max(40_000) }).strict(), output: enhancedContentDataSchema },
   'folder.create': { description: 'Create one or more Content folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.find': { description: 'Find Content folders by key.', input: z.object({ folderKeys: keysSchema, includeArchived: z.boolean().optional(), includeChildrenCount: z.boolean().optional(), includeDocumentCount: z.boolean().optional() }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.list': { description: 'List folders under a scope or parent folder.', input: z.object({ scopeKey: keySchema, parentFolderKey: keySchema.optional(), includeArchived: z.boolean().optional(), includeDocuments: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: folderSortSchema.optional() }).strict(), output: z.object({ folders: z.array(contentFolderSchema), documents: z.array(contentDocumentSchema).optional(), cursor: cursorSchema.optional() }).strict() },
