@@ -652,6 +652,7 @@ export const collections: CollectionSpec[] = [
     indexes: [
       { fields: ['slug'], unique: true },
       { fields: ['scopeKey'] },
+      { fields: ['personalOwnerUserId'], unique: true, sparse: true },
     ],
   },
   {

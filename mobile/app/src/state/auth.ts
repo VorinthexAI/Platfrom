@@ -17,6 +17,7 @@ type AuthState = {
   user: AuthUser | null;
   organization: Record<string, unknown> | null;
   scope: Record<string, unknown> | null;
+  contentExecution: { agentKey: string } | null;
   bootstrap: () => Promise<void>;
   hydrate: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
@@ -39,6 +40,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   organization: null,
   scope: null,
+  contentExecution: null,
   bootstrap: async () => {
     const operation = ++authOperation;
     const { session, generation } = await tokenVault.snapshot();
@@ -50,7 +52,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           if (operation === authOperation) set({ status: "authenticated", ...context });
         }
       } catch {
-        if (operation === authOperation) set({ status: "unauthenticated", user: null, organization: null, scope: null });
+        if (operation === authOperation) set({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
       }
       return;
     }
@@ -72,14 +74,14 @@ export const useAuthStore = create<AuthState>((set) => ({
             if (recoveryOperation === authOperation) set({ status: "authenticated", ...context });
           }
         } catch {
-          if (recoveryOperation === authOperation) set({ status: "unauthenticated", user: null, organization: null, scope: null });
+          if (recoveryOperation === authOperation) set({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
         }
         return;
       }
       const cached = await readAuthContext();
       if (operation === authOperation) set(cached
         ? { status: "authenticated", ...cached }
-        : { status: "unauthenticated", user: null, organization: null, scope: null });
+        : { status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
     }
   },
   hydrate: async () => {
@@ -103,7 +105,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     useOnboardingStore.getState().reset();
     const session = await tokenVault.read();
     const clearing = Promise.all([tokenVault.clear(), clearAuthContext()]);
-    set({ status: "unauthenticated", user: null, organization: null, scope: null });
+    set({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
     await clearing;
     if (session) await revokeRemoteSession(session).catch(() => undefined);
   },
@@ -113,5 +115,5 @@ onUnauthorized(() => {
   authOperation += 1;
   useOnboardingStore.getState().reset();
   void clearAuthContext();
-  useAuthStore.setState({ status: "unauthenticated", user: null, organization: null, scope: null });
+  useAuthStore.setState({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
 });

@@ -23,7 +23,8 @@ import {
   createContentDocument,
   createContentFolder,
   createContentMutationKey,
-  hasContentContext,
+  getContentContext,
+  isContentContextConfigured,
   listContentLocation,
   listContentSearchHistory,
   readContentDocument,
@@ -37,6 +38,7 @@ import {
   type ContentSearchResponse,
 } from "@/lib/content-client";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
+import { useAuthStore } from "@/state/auth";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" | "folders";
@@ -48,6 +50,11 @@ const MAX_MOBILE_UPLOAD_BYTES = 8 * 1024 * 1024;
 export function KnowledgeWorkspace() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
+  const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
+  const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
+  const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
+  const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
@@ -81,6 +88,7 @@ export function KnowledgeWorkspace() {
   const pendingCreateKey = useRef<string | undefined>(undefined);
   const navigationGeneration = useRef(0);
   const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const loadedContentContextKey = useRef<string | undefined>(undefined);
   const currentFolder = folderStack.at(-1);
   const visibleFolders = rootFolders.filter((folder) => {
     const normalized = libraryQuery.trim().toLowerCase();
@@ -125,7 +133,7 @@ export function KnowledgeWorkspace() {
   };
 
   useEffect(() => {
-    if (hasContentContext || !localDraftFile.exists) return;
+    if (!localDraftFile.exists) return;
     const initialRevision = revision.current;
     void localDraftFile.text().then((value) => {
       if (revision.current !== initialRevision) return;
@@ -137,6 +145,10 @@ export function KnowledgeWorkspace() {
       if (typeof draft.content === "string") {
         contentRef.current = draft.content;
         setContent(draft.content);
+      }
+      if (isContentContextConfigured(getContentContext()) && typeof draft.content === "string" && draft.content.trim()) {
+        dirty.current = true;
+        setSaveState("dirty");
       }
     }).catch(() => setError("The local draft could not be restored."));
   }, []);
@@ -152,10 +164,35 @@ export function KnowledgeWorkspace() {
       setRootFolders(localFolders);
       setFolders(localFolders);
     }).catch(() => setError("Local folders could not be restored."));
-  }, []);
+  }, [hasContentContext]);
 
   useEffect(() => {
     if (!hasContentContext) return;
+    const changedAccount = Boolean(loadedContentContextKey.current && loadedContentContextKey.current !== contentContextKey);
+    loadedContentContextKey.current = contentContextKey;
+    if (changedAccount) {
+      editorSession.current += 1;
+      revision.current = 0;
+      dirty.current = false;
+      documentKeyRef.current = undefined;
+      updatedAtRef.current = undefined;
+      titleRef.current = "Untitled note";
+      contentRef.current = "";
+      savedTitleRef.current = "Untitled note";
+      savedContentRef.current = "";
+      setTitle("Untitled note");
+      setContent("");
+      setFolders([]);
+      setRootFolders([]);
+      setDocuments([]);
+      setRootDocuments([]);
+      setFolderStack([]);
+      setHistory([]);
+      setResults(undefined);
+      setMatchSummary(undefined);
+      setError(undefined);
+      setSaveState("saved");
+    }
     void Promise.all([listContentLocation(), listContentSearchHistory()])
       .then(([location, recent]) => {
         setFolders(location.folders);
@@ -165,7 +202,7 @@ export function KnowledgeWorkspace() {
         setHistory(recent);
       })
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Knowledge could not connect."));
-  }, []);
+  }, [contentContextKey, hasContentContext]);
 
   useEffect(() => {
     if (!hasContentContext || !dirty.current) return;
@@ -185,6 +222,7 @@ export function KnowledgeWorkspace() {
           if (!nextContent.trim()) {
             dirty.current = false;
             setSaveState("saved");
+            if (localDraftFile.exists) localDraftFile.delete();
             return;
           }
           pendingCreateKey.current ??= createContentMutationKey();
@@ -221,6 +259,7 @@ export function KnowledgeWorkspace() {
         if (savingRevision === revision.current) {
           dirty.current = false;
           setSaveState("saved");
+          if (localDraftFile.exists) localDraftFile.delete();
         } else {
           setSaveState("dirty");
         }
@@ -236,7 +275,7 @@ export function KnowledgeWorkspace() {
       });
     }, 500);
     return () => clearTimeout(timeout);
-  }, [content, currentFolder?.key, title]);
+  }, [content, contentContextKey, currentFolder?.key, hasContentContext, title]);
 
   const markDirty = () => {
     revision.current += 1;

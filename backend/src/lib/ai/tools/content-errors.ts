@@ -63,6 +63,7 @@ export class ContentError extends Error {
     this.action = options.action;
     this.retryable = options.retryable ?? false;
     this.resourceKey = options.resourceKey;
+    this.cause = options.cause;
   }
 
   toJSON(): ContentErrorShape {

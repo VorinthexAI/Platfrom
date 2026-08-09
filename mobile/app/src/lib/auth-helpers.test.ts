@@ -35,9 +35,11 @@ describe("mobile auth helpers", () => {
       user: { display_name: "Ada Lovelace" },
       org: { key: "org" },
       main_scope: { key: "scope" },
+      content_execution: { agent_key: "agent" },
     });
     expect(context.organization).toEqual({ key: "org" });
     expect(context.scope).toEqual({ key: "scope" });
+    expect(context.contentExecution).toEqual({ agentKey: "agent" });
     expect(firstNameFor(context.user)).toBe("Ada");
   });
 });

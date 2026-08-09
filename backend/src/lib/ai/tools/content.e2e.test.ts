@@ -99,7 +99,7 @@ suite('Content live E2E', () => {
     for (const organizationKey of roots) await cleanupOrganization(organizationKey);
   });
 
-  test('executes all 35 tools through Arango transactions and LocalStack S3', async () => {
+  test('executes every Content tool through Arango transactions and LocalStack S3', async () => {
     const stale = await (await db.query('FOR organization IN organizations FILTER organization.name IN ["Content E2E", "Content outsider"] RETURN organization._key')).all();
     for (const organizationKey of stale) {
       await removeObjects(`content/${organizationKey}/`);
@@ -222,6 +222,10 @@ suite('Content live E2E', () => {
     });
     const documentKey = processed.document.key;
     expect(processingOrder).toEqual(['document.parse', 'document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
+    const createdDocument = await call('document.create', {
+      scopeKey, folderKey: childFolderKey, name: 'Created note', representation: { content: 'Created directly through Content.' }, idempotencyKey: `created-${organizationKey}`,
+    });
+    expect(createdDocument.document.key).toBeString();
     expect((await call('document.find', { documentKeys: [documentKey], include: ['html', 'content', 'embedding', 'folder', 'shares'] })).results[0].data.document.embedding).toHaveLength(4096);
     expect((await call('document.list', { scopeKey, folderKey: childFolderKey, extensions: ['md'] })).documents.map((item: any) => item.key)).toContain(documentKey);
 
@@ -335,6 +339,12 @@ suite('Content live E2E', () => {
     const organizationSearch = await call('organization.document.search', { organizationKey, query: 'roadmap', sources: [{ type: 'scope', scopeKeys: [scopeKey, secondScopeKey, outsiderScopeKey] }], include: ['snippet', 'scope', 'scoreBreakdown'] });
     expect(organizationSearch.results.map((item: any) => item.documentKey)).toContain(secondDocument.document.key);
     expect(organizationSearch.results.map((item: any) => item.documentKey)).not.toContain(outsiderDocumentKey);
+    const contentSearch = await call('scope.content.search', { scopeKey, query: 'semantic roadmap', minimumScore: 0.1 });
+    expect(contentSearch.documents.some((item: any) => item.documentKey === documentKey)).toBe(true);
+    const contentSearchReplay = await call('scope.content.search', { scopeKey, query: '  SEMANTIC   ROADMAP  ', minimumScore: 0.1 });
+    expect(contentSearchReplay.cached).toBe(true);
+    const contentSearchHistory = await call('scope.content.search-history', { scopeKey, limit: 8 });
+    expect(contentSearchHistory.history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(true);
 
     const unshared = await call('document.unshare', { shareKeys: [shareKey], atomic: true });
     expect(unshared.results[0].data.share.revokedAt).toBe(now);

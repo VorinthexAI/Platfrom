@@ -39,6 +39,9 @@ export function buildAuthAccountResponse(
       role: context.scopeMembership.role,
       membership_key: context.scopeMembership.key,
     },
+    content_execution: {
+      agent_key: context.agent.key,
+    },
   };
 }
 
@@ -79,8 +82,7 @@ export async function patchAuthAccount(c: Context) {
   if (!identity || identity.identityType !== 'user') return c.json({ error: 'user authentication required' }, 401);
   const existing = await getUserById(identity.key);
   if (!existing?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
-  const context = await getPersonalAuthContext(existing.key);
-  if (!context) return c.json({ error: 'personal organization is unavailable' }, 503);
+  const context = await getPersonalAuthContext(existing.key) ?? await provisionPersonalAuthContext(existing);
   const user = existing.isOnboarded ? existing : await updateUser(existing.key, {
     isOnboarded: body.isOnboarded,
     updatedAt: new Date().toISOString(),
@@ -95,8 +97,7 @@ export async function getAuthAccount(c: Context) {
   if (!identity) return c.json({ error: 'authentication required' }, 401);
   const user = await getUserById(identity.key);
   if (!user?.isVerified) return c.json({ error: 'verified authentication required' }, 403);
-  const context = await getPersonalAuthContext(user.key);
-  if (!context) return c.json({ error: 'personal organization is unavailable' }, 503);
+  const context = await getPersonalAuthContext(user.key) ?? await provisionPersonalAuthContext(user);
   return c.json(buildAuthAccountResponse(user, context));
 }
 

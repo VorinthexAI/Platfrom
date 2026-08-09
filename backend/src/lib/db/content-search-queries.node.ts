@@ -37,13 +37,25 @@ export const contentSearchQueries = {
     return value ? contentSearchQuerySchema.parse(withArangoKey(value as Record<string, unknown>)) : null;
   },
   async record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; cacheVersion: number; output: unknown; now: string; expiresAt: string }) {
-    const value = contentSearchQuerySchema.parse({ ...input, count: 1, searchedAt: input.now });
+    const { now, ...stored } = input;
+    const value = contentSearchQuerySchema.parse({ ...stored, count: 1, searchedAt: now });
     await db.query(`
       UPSERT { actorKey: @actorKey, scopeKey: @scopeKey, normalizedQuery: @normalizedQuery }
         INSERT @value
         UPDATE { query: @query, output: @output, cacheVersion: @cacheVersion, expiresAt: @expiresAt, searchedAt: @now, count: OLD.count + 1 }
         IN @@collection
-    `, { '@collection': CONTENT_SEARCH_QUERIES_COLLECTION, ...input, value: toArangoDoc(value) });
+    `, {
+      '@collection': CONTENT_SEARCH_QUERIES_COLLECTION,
+      actorKey: input.actorKey,
+      scopeKey: input.scopeKey,
+      normalizedQuery: input.normalizedQuery,
+      query: input.query,
+      output: input.output,
+      cacheVersion: input.cacheVersion,
+      expiresAt: input.expiresAt,
+      now: input.now,
+      value: toArangoDoc(value),
+    });
     await db.query(`
       LET retained = (FOR query IN @@collection
         FILTER query.actorKey == @actorKey && query.scopeKey == @scopeKey
