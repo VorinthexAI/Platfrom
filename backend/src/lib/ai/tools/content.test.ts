@@ -11,6 +11,7 @@ import {
 } from './index';
 
 const expectedNames = [
+  'autocomplete',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete',
   'document.parse', 'document.create', 'document.find', 'document.list', 'document.read', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
   'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
@@ -19,11 +20,10 @@ const expectedNames = [
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(38);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(39);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
-      expect(name).toContain('.');
-      expect(name).not.toMatch(/^[a-z]+-[a-z-]+$/);
+      if (name !== 'autocomplete') expect(name).toContain('.');
       expect(isContentToolName(name)).toBe(true);
     }
     expect(isContentToolName('document-create-version')).toBe(false);
@@ -60,6 +60,9 @@ describe('Content input contracts', () => {
   });
 
   test('rejects unknown properties and invalid enum, score, and range values', () => {
+    expect(contentToolInputSchemas.autocomplete.parse({ context: 'The next step', wordCount: 8 })).toEqual({ context: 'The next step', wordCount: 8 });
+    expect(() => contentToolInputSchemas.autocomplete.parse({ context: 'Text', wordCount: 25 })).toThrow();
+    expect(() => contentToolInputSchemas.autocomplete.parse({ context: 'Text', wordCount: 8, model: 'other' })).toThrow();
     expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], surprise: true })).toThrow();
     expect(() => contentToolInputSchemas['document.download'].parse({ documentKeys: [key], format: 'pdf' })).toThrow();
     expect(() => contentToolInputSchemas['scope.document.search'].parse({ scopeKey: key, query: 'roadmap', minimumScore: 1.1 })).toThrow();
