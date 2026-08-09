@@ -213,7 +213,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
          FILTER @folderKey == null || (folder != null && folder.scopeKey == @scopeKey)
          FILTER @folderKey == null || ((!HAS(folder, "_internalDeletion") || folder._internalDeletion == null) && folder.deletedAt == null)
          INSERT @document INTO documents RETURN NEW`,
-        { document: toArangoDoc(parsed), folderKey: parsed.folderKey, scopeKey: parsed.scopeKey },
+        { document: toArangoDoc(parsed), folderKey: parsed.folderKey ?? null, scopeKey: parsed.scopeKey },
       );
       const created = await cursor.next();
       if (!created) throw new Error('Document destination is pending deletion.');
