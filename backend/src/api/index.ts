@@ -52,6 +52,7 @@ app.post(`${RESEND_WEBHOOK_V1_PATH}/`, handleResendWebhook);
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 3001);
   const server = serve({
+    hostname: '0.0.0.0',
     port,
     fetch: app.fetch,
     websocket,

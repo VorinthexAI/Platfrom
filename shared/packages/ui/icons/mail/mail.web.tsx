@@ -18,8 +18,8 @@ export function MailIcon({ variant = "inherit", size = "md", strokeWidth = 1.4, 
   const pixelSize = sizes[size];
   return (
     <svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false" {...props}>
-      <path d="M5 12h14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <path d="M12 5v14" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <path d="M4.5 6.75h15v10.5h-15z" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinejoin="round" />
+      <path d="m5 7.25 7 5.5 7-5.5" stroke={colors[variant]} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

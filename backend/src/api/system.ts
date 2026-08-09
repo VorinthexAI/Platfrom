@@ -8,6 +8,7 @@ import {
 } from '@/lib/db/capabilities.node';
 import { getUserById } from '@/lib/db/users.node';
 import { listActiveUserOrganizationsByUser } from '@/lib/db/user-organization.node';
+import { getOrganizationById } from '@/lib/db/organizations.node';
 import {
   deleteMindCapability,
   getMindCapabilityByPair,
@@ -103,7 +104,18 @@ async function requireSuperAdmin(c: Context) {
   }
   const user = await getUserById(auth.key);
   const memberships = user ? await listActiveUserOrganizationsByUser(user.key) : [];
-  if (!memberships.some((membership) => membership.orgRole === 'owner')) {
+  const rootMembership = memberships.find((membership) => membership.key === auth.founderMembershipKey);
+  const rootOrganization = rootMembership ? await getOrganizationById(rootMembership.organizationId) : null;
+  if (
+    auth.identityType !== 'superAdmin'
+    || auth.founderAssured !== true
+    || !rootMembership
+    || !rootOrganization?.is_root
+    || !rootOrganization.isActive
+    || rootMembership.orgRole !== 'owner'
+    || !rootMembership.isMfaEnabled
+    || rootMembership.mfaVersion !== auth.founderMfaVersion
+  ) {
     return { error: c.json({ error: 'super admin required' }, 403) };
   }
   return { key: auth.key, user };

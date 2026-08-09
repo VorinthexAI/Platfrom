@@ -4,12 +4,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
+    "load-local-env": "bun run ../../.github/scripts/write-local-env.ts dev mobile mobile/app/.env.local",
+    "start": "bun run load-local-env && expo start",
+    "android": "bun run load-local-env && expo run:android",
+    "ios": "bun run load-local-env && expo run:ios",
     "prebuild": "expo prebuild",
     "typecheck": "tsc --noEmit",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "bun test src/lib/*.test.ts"
   },
   "dependencies": {
     "@expo-google-fonts/geist": "^0.4.2",
@@ -28,9 +30,11 @@
     "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.3",
     "expo-router": "~57.0.6",
+    "expo-secure-store": "~57.0.1",
     "expo-splash-screen": "~57.0.4",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.1",
+    "expo-web-browser": "~57.0.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.0",

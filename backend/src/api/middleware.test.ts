@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isResendWebhookPath } from './resend';
-import { createAutoRefreshAuthTokens, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, setSessionCookies, setSessionTokenHeaders, validateQueryParams } from './middleware';
+import { createAutoRefreshAuthTokens, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
   return {
@@ -66,25 +66,60 @@ describe('api middleware webhook exemptions', () => {
   });
 });
 
-describe('native founder auth API-key exemptions', () => {
-  test('exempts only challenge-based founder auth endpoints', async () => {
+describe('mobile auth API-key protection', () => {
+  test('classifies rate-limited auth endpoints but still requires their application key', async () => {
     expect(isPublicFounderAuthPath('/api/v1/auth/founders-gate')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/magic/validate/')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/totp/reset/request')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/founders/me')).toBe(false);
-    expect(isPublicFounderAuthPath('/api/v1/auth/login')).toBe(false);
+    expect(isPublicFounderAuthPath('/api/v1/auth/login')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/handoff/claim')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/oauth/callback')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/google')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/apple/callback')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/github')).toBe(false);
 
     const previousApiKey = process.env.API_KEY;
     process.env.API_KEY = 'server-key';
     let nextCalls = 0;
     try {
-      await requireEnvApiKey(middlewareContext('/api/v1/auth/founders-gate'), async () => { nextCalls += 1; });
+      const authResponse = await requireEnvApiKey(middlewareContext('/api/v1/auth/founders-gate'), async () => { nextCalls += 1; });
+      await requireEnvApiKey(middlewareContext('/api/v1/auth/founders-gate', { 'x-vorinthex-api-key': 'server-key' }), async () => { nextCalls += 1; });
+      await requireEnvApiKey(middlewareContext('/api/v1/auth/mobile/oauth/google/callback'), async () => { nextCalls += 1; });
       const protectedResponse = await requireEnvApiKey(
         middlewareContext('/api/v1/founders/me'),
         async () => { nextCalls += 1; },
       );
-      expect(nextCalls).toBe(1);
+      expect(authResponse?.status).toBe(401);
+      expect(nextCalls).toBe(2);
       expect(protectedResponse?.status).toBe(401);
+    } finally {
+      if (previousApiKey === undefined) delete process.env.API_KEY;
+      else process.env.API_KEY = previousApiKey;
+    }
+  });
+
+  test('requires the application key even with a verified user session', async () => {
+    const previousApiKey = process.env.API_KEY;
+    process.env.API_KEY = 'server-key';
+    try {
+      const buildApp = () => {
+        const app = new Hono();
+        app.use('*', requireEnvApiKey);
+        app.use('*', createAutoRefreshAuthTokens({
+          verifyAccessToken: async (token) => token === 'vrtx_access_valid'
+            ? { key: 'user-1', identityType: 'user' as const, sessionId: 'session-1' }
+            : null,
+          refreshAccessToken: async () => null,
+        }));
+        app.get('/api/v1/private', (c) => c.json({ ok: true }));
+        return app;
+      };
+
+      expect((await buildApp().request('/api/v1/private', { headers: { authorization: 'Bearer vrtx_access_valid' } })).status).toBe(401);
+      expect((await buildApp().request('/api/v1/private', { headers: { authorization: 'Bearer vrtx_access_valid', 'x-vorinthex-api-key': 'server-key' } })).status).toBe(200);
+      expect((await buildApp().request('/api/v1/private', { headers: { authorization: 'Bearer vrtx_access_invalid' } })).status).toBe(401);
+      expect((await buildApp().request('/api/v1/private')).status).toBe(401);
     } finally {
       if (previousApiKey === undefined) delete process.env.API_KEY;
       else process.env.API_KEY = previousApiKey;
@@ -220,6 +255,139 @@ describe('backend session cookies', () => {
     expect(response.headers.get('x-access-token')).toBe(rotatedTokens.accessToken);
     expect(response.headers.get('x-refresh-token')).toBe(rotatedTokens.refreshToken);
     expect(response.headers.get('set-cookie')).toBeNull();
+  });
+
+  test('does not refresh when the current mobile access token is valid', async () => {
+    const app = new Hono();
+    const tokens = {
+      accessToken: 'vrtx_access_fresh',
+      refreshToken: 'vrtx_refresh_same',
+      accessTokenMaxAgeSeconds: 900,
+      refreshTokenMaxAgeSeconds: 31_536_000,
+      sessionExpiresAt: new Date(Date.now() + 31_536_000_000).toISOString(),
+    };
+    let refreshCalls = 0;
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async (token) => token === 'vrtx_access_current' || token === tokens.accessToken
+        ? { key: 'user-1', identityType: 'user' as const, sessionId: 'session-1' }
+        : null,
+      refreshAccessToken: async (token) => {
+        refreshCalls += 1;
+        return token === tokens.refreshToken ? tokens : null;
+      },
+    }));
+    app.get('/', (c) => c.json({ ok: true }));
+
+    const response = await app.request('/', { headers: {
+      authorization: 'Bearer vrtx_access_current',
+      'x-refresh-token': tokens.refreshToken,
+    } });
+    expect(response.status).toBe(200);
+    expect(refreshCalls).toBe(0);
+    expect(response.headers.get('x-access-token')).toBeNull();
+    expect(response.headers.get('x-refresh-token')).toBeNull();
+  });
+
+  test('keeps cookie refresh tokens in HttpOnly cookies', async () => {
+    const app = new Hono<{ Variables: { userId: string } }>();
+    const tokens = {
+      accessToken: 'vrtx_access_cookie_rotated',
+      refreshToken: 'vrtx_refresh_cookie_rotated',
+      accessTokenMaxAgeSeconds: 900,
+      refreshTokenMaxAgeSeconds: 43_200,
+      sessionExpiresAt: new Date(Date.now() + 43_200_000).toISOString(),
+    };
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async (token) => token === tokens.accessToken ? { key: 'cookie-user', identityType: 'user' as const } : null,
+      refreshAccessToken: async (token) => token === 'vrtx_refresh_cookie' ? tokens : null,
+    }));
+    app.get('/', (c) => c.json({ userId: c.get('userId') }));
+
+    const response = await app.request('/', { headers: { cookie: 'vorinthex_access=vrtx_access_expired; vorinthex_refresh=vrtx_refresh_cookie' } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('set-cookie')).toContain('vorinthex_refresh=vrtx_refresh_cookie_rotated');
+    expect(response.headers.get('x-refresh-token')).toBeNull();
+  });
+
+  test('rejects ambiguous cookie and header credentials unless header transport is explicit', async () => {
+    const buildApp = () => {
+      const app = new Hono<{ Variables: { userId: string } }>();
+      app.use('*', createAutoRefreshAuthTokens({
+        verifyAccessToken: async (token) => ({ key: token, identityType: 'user' as const }),
+        refreshAccessToken: async () => null,
+      }));
+      app.get('/', (c) => c.json({ userId: c.get('userId') }));
+      return app;
+    };
+    const headers = {
+      authorization: 'Bearer header-user',
+      cookie: 'vorinthex_access=cookie-user',
+    };
+    expect((await buildApp().request('/', { headers })).status).toBe(400);
+    const explicit = await buildApp().request('/', { headers: { ...headers, 'x-vorinthex-session-transport': 'header' } });
+    expect(await explicit.json()).toEqual({ userId: 'header-user' });
+  });
+
+  test('never lets browser origins opt into readable refresh-token transport', async () => {
+    const app = new Hono();
+    const tokens = {
+      accessToken: 'vrtx_access_new',
+      refreshToken: 'vrtx_refresh_new',
+      accessTokenMaxAgeSeconds: 900,
+      refreshTokenMaxAgeSeconds: 43_200,
+      sessionExpiresAt: new Date(Date.now() + 43_200_000).toISOString(),
+    };
+    app.use('*', createAutoRefreshAuthTokens({ verifyAccessToken: async () => null, refreshAccessToken: async () => null }));
+    app.post('/', (c) => {
+      setSessionForRequest(c, tokens);
+      return c.json(sessionTokenPayload(c, tokens));
+    });
+
+    const response = await app.request('/', { method: 'POST', headers: {
+      authorization: 'Bearer deliberately-invalid-browser-token',
+      origin: 'https://vorinthex.com',
+      'x-vorinthex-session-transport': 'header',
+    } });
+    expect(await response.json()).toEqual({});
+    expect(response.headers.get('set-cookie')).toContain('vorinthex_refresh=vrtx_refresh_new');
+    expect(response.headers.get('x-refresh-token')).toBeNull();
+  });
+
+  test('marks rejected stale credentials as a bearer authentication failure', async () => {
+    const app = new Hono();
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => null,
+      refreshAccessToken: async () => null,
+    }));
+    app.get('/', (c) => c.json({ error: 'Authentication required.' }, 401));
+
+    const response = await app.request('/', { headers: { authorization: 'Bearer vrtx_access_revoked' } });
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe('Bearer');
+  });
+
+  test('does not emit replacement tokens while logging out', async () => {
+    const app = new Hono();
+    const tokens = {
+      accessToken: 'vrtx_access_rotated',
+      refreshToken: 'vrtx_refresh_rotated',
+      accessTokenMaxAgeSeconds: 900,
+      refreshTokenMaxAgeSeconds: 43_200,
+      sessionExpiresAt: new Date(Date.now() + 43_200_000).toISOString(),
+    };
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async (token) => token === tokens.accessToken ? { key: 'user', identityType: 'user' as const } : null,
+      refreshAccessToken: async () => tokens,
+    }));
+    app.post('/api/v1/auth/logout', (c) => c.json({ ok: true }));
+
+    const response = await app.request('/api/v1/auth/logout', { method: 'POST', headers: {
+      'x-refresh-token': 'vrtx_refresh_valid',
+      'x-vorinthex-session-transport': 'header',
+    } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-access-token')).toBeNull();
+    expect(response.headers.get('x-refresh-token')).toBeNull();
   });
 
 });

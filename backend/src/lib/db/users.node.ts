@@ -106,6 +106,22 @@ export async function getUserByRefreshTokenHash(refreshTokenHash: string): Promi
   return doc ? userSchema.parse(withArangoKey(doc)) : null;
 }
 
+export async function revokeLegacyRefreshToken(userId: string, refreshTokenHash: string, updatedAt: string): Promise<boolean> {
+  const cursor = await db.query(aql`
+    FOR u IN ${db.collection(USERS_COLLECTION)}
+      FILTER u._key == ${userId} && u.refreshTokenHash == ${refreshTokenHash}
+      UPDATE u WITH {
+        refreshTokenHash: null,
+        refreshTokenExpiresAt: null,
+        refreshFounderMembershipKey: null,
+        refreshFounderMfaVersion: null,
+        updatedAt: ${updatedAt}
+      } IN ${db.collection(USERS_COLLECTION)}
+      RETURN NEW
+  `);
+  return Boolean(await cursor.next());
+}
+
 export async function getUserByUpdatesUnsubscribeTokenHash(tokenHash: string): Promise<User | null> {
   const cursor = await db.query(aql`
     FOR u IN ${db.collection(USERS_COLLECTION)}

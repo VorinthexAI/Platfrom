@@ -1,20 +1,24 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { countryCodeSchema } from '@/lib/db/users.node';
 import {
   completeTotpSetup,
   buildOAuthAuthorizationUrl,
   completeOAuthSignIn,
+  buildMobileOAuthAuthorizationUrl,
+  createMobileOAuthGrant,
   createUserWithAuth,
   requestFoundersGate,
   requestMfaResetEmail,
   requestSignInEmail,
+  exchangeMobileOAuthGrant,
+  mobileOAuthCallbackUri,
   startTotpSetup,
   validateMagicLink,
   verifyTotpAndIssueSession,
 } from './auth';
 import { claimHandoff, getHandoffStatus, streamHandoff } from './auth-handoff';
-import { setSessionCookies, setSessionTokenHeaders } from './middleware';
+import { camelSessionTokenPayload, sessionTokenPayload, setSessionForRequest } from './middleware';
 import { joinNewsletter } from './newsletter';
 import { parseJson, parseQuery, strictObject } from './validation';
 import {
@@ -52,6 +56,7 @@ import {
 } from './system';
 import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
+import { getAuthAccount, logoutAuthAccount } from './auth-account';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -145,17 +150,74 @@ export function registerRoutes(app: Hono) {
       // the client sends the member through the email sign-in path.
       return c.json({ error: 'mfa required', action: 'mfa', mfa_required: true }, 403);
     }
-    setSessionTokenHeaders(c, result);
-    setSessionCookies(c, result);
+    setSessionForRequest(c, result);
     return c.json({
       ok: true,
       status: result.status,
       identity: result.identity,
-      access_token: result.accessToken,
-      refresh_token: result.refreshToken,
-      access_token_max_age_seconds: result.accessTokenMaxAgeSeconds,
-      refresh_token_max_age_seconds: result.refreshTokenMaxAgeSeconds,
-      session_expires_at: result.sessionExpiresAt,
+      ...sessionTokenPayload(c, result),
+      alias: result.alias,
+      alias_slug: result.aliasSlug,
+      welcome_line: result.welcomeLine,
+    });
+  });
+
+  app.get('/auth/mobile/oauth/:provider', async (c) => {
+    const provider = oauthProviderSchema.parse(c.req.param('provider'));
+    const query = parseQuery(c, strictObject({ redirect_uri: z.string().url() }));
+    try {
+      return c.json({ authorization_url: await buildMobileOAuthAuthorizationUrl(provider, query.redirect_uri) });
+    } catch {
+      return c.json({ error: 'mobile oauth is not configured' }, 503);
+    }
+  });
+
+  const mobileOAuthCallback = async (c: Context) => {
+    const provider = oauthProviderSchema.parse(c.req.param('provider'));
+    const callbackSchema = strictObject({
+      code: z.string().min(1),
+      state: z.string().min(1),
+      user: z.string().max(16_384).optional(),
+    });
+    const callback = c.req.method === 'POST'
+      ? callbackSchema.parse(await c.req.parseBody())
+      : parseQuery(c, callbackSchema);
+    const result = await completeOAuthSignIn({
+      provider,
+      code: callback.code,
+      state: callback.state,
+      redirectUri: mobileOAuthCallbackUri(provider),
+    });
+    if (!result) return c.json({ error: 'oauth sign in failed' }, 401);
+    if (!result.mobileRedirectUri) return c.json({ error: 'invalid mobile oauth state' }, 401);
+    const redirect = new URL(result.mobileRedirectUri);
+    if (result.status !== 'authenticated') {
+      redirect.searchParams.set('error', result.status === 'founders_gate_required' ? 'founders_gate_required' : 'mfa_required');
+      return c.redirect(redirect.toString(), 302);
+    }
+    const code = await createMobileOAuthGrant({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      accessTokenMaxAgeSeconds: result.accessTokenMaxAgeSeconds,
+      refreshTokenMaxAgeSeconds: result.refreshTokenMaxAgeSeconds,
+      sessionExpiresAt: result.sessionExpiresAt,
+      alias: result.alias,
+      aliasSlug: result.aliasSlug,
+      welcomeLine: result.welcomeLine,
+    });
+    redirect.searchParams.set('code', code);
+    return c.redirect(redirect.toString(), 302);
+  };
+  app.get('/auth/mobile/oauth/:provider/callback', mobileOAuthCallback);
+  app.post('/auth/mobile/oauth/:provider/callback', mobileOAuthCallback);
+
+  app.post('/auth/mobile/oauth/exchange', async (c) => {
+    const body = await parseJson(c, strictObject({ code: z.string().startsWith('vrtx_mobile_grant_').max(256) }));
+    const result = await exchangeMobileOAuthGrant(body.code);
+    if (!result) return c.json({ error: 'invalid or expired mobile oauth grant' }, 401);
+    setSessionForRequest(c, result);
+    return c.json({
+      ...sessionTokenPayload(c, result),
       alias: result.alias,
       alias_slug: result.aliasSlug,
       welcome_line: result.welcomeLine,
@@ -176,18 +238,13 @@ export function registerRoutes(app: Hono) {
     const result = await claimHandoff(body.handoff_token_hash);
     if (!result) return c.json({ error: 'handoff is not claimable' }, 401);
     if (result.status === 'authenticated') {
-      setSessionTokenHeaders(c, result);
-      setSessionCookies(c, result);
+      setSessionForRequest(c, result);
     }
     return c.json({
       status: result.status,
       ...(result.status === 'authenticated'
         ? {
-          access_token: result.accessToken,
-          refresh_token: result.refreshToken,
-          access_token_max_age_seconds: result.accessTokenMaxAgeSeconds,
-          refresh_token_max_age_seconds: result.refreshTokenMaxAgeSeconds,
-          session_expires_at: result.sessionExpiresAt,
+          ...sessionTokenPayload(c, result),
           alias: result.alias,
           alias_slug: result.aliasSlug,
           welcome_line: result.welcomeLine,
@@ -215,16 +272,11 @@ export function registerRoutes(app: Hono) {
     const result = await validateMagicLink(body.token_hash);
     if (!result) return c.json({ error: 'invalid or expired sign-in link' }, 401);
     if (result.status === 'authenticated') {
-      setSessionTokenHeaders(c, result);
-      setSessionCookies(c, result);
+      setSessionForRequest(c, result);
       return c.json({
         status: result.status,
         identity: result.identity,
-        access_token: result.accessToken,
-        refresh_token: result.refreshToken,
-        access_token_max_age_seconds: result.accessTokenMaxAgeSeconds,
-        refresh_token_max_age_seconds: result.refreshTokenMaxAgeSeconds,
-        session_expires_at: result.sessionExpiresAt,
+        ...sessionTokenPayload(c, result),
         alias: result.alias,
         alias_slug: result.aliasSlug,
         welcome_line: result.welcomeLine,
@@ -266,19 +318,14 @@ export function registerRoutes(app: Hono) {
     }));
     const result = await completeTotpSetup(body.challenge_token_hash, body.codes);
     if (!result.ok) return c.json({ error: result.error }, 400);
-    setSessionTokenHeaders(c, result);
-    setSessionCookies(c, result);
+    setSessionForRequest(c, result);
     return c.json({
       ok: true,
       authenticated: true,
       identity: result.identity,
       name: result.name,
       organization_title: result.organizationTitle,
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-      accessTokenMaxAgeSeconds: result.accessTokenMaxAgeSeconds,
-      refreshTokenMaxAgeSeconds: result.refreshTokenMaxAgeSeconds,
-      sessionExpiresAt: result.sessionExpiresAt,
+      ...camelSessionTokenPayload(c, result),
     });
   });
 
@@ -288,10 +335,17 @@ export function registerRoutes(app: Hono) {
     }));
     const result = await verifyTotpAndIssueSession(body.challenge_token_hash, body.code);
     if (!result) return c.json({ error: 'invalid TOTP challenge or code' }, 401);
-    setSessionTokenHeaders(c, result);
-    setSessionCookies(c, result);
-    return c.json(result);
+    setSessionForRequest(c, result);
+    return c.json({
+      identity: result.identity,
+      name: result.name,
+      organizationTitle: result.organizationTitle,
+      ...camelSessionTokenPayload(c, result),
+    });
   });
+
+  app.get('/auth/me', getAuthAccount);
+  app.post('/auth/logout', logoutAuthAccount);
 
   app.post('/presence/join', joinPresence);
   app.post('/presence/beat', presenceBeat);

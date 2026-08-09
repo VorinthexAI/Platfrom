@@ -7,9 +7,11 @@ import { SettingsIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { Button } from "@vorinthex/shared/ui/button";
 
 import { HomeConstellation } from "@/components/HomeConstellation";
-import { MOCK_USER, greetingForHour } from "@/data/mock";
+import { greetingForHour } from "@/data/mock";
+import { firstNameFor } from "@/lib/auth-helpers";
 import { CAPABILITIES, type CapabilitySlug } from "@/data/registry";
 import { useOnboardingStore } from "@/state/onboarding";
+import { useAuthStore } from "@/state/auth";
 import { durations } from "@/theme/motion";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
@@ -19,6 +21,7 @@ export default function BrainRoute() {
   const insets = useSafeAreaInsets();
   const greeting = greetingForHour(new Date().getHours());
   const decisions = useOnboardingStore((state) => state.decisions);
+  const user = useAuthStore((state) => state.user);
   const enabledSlugs = useMemo(
     () =>
       CAPABILITIES.filter(
@@ -26,7 +29,7 @@ export default function BrainRoute() {
       ).map((capability) => capability.slug),
     [decisions],
   );
-  const fullName = `${MOCK_USER.firstName}.`;
+  const fullName = `${firstNameFor(user)}.`;
   const [typedCharacters, setTypedCharacters] = useState(0);
   const totalCharacters = greeting.length + fullName.length;
 

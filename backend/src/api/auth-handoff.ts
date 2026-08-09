@@ -10,6 +10,7 @@ import { getUserById } from '@/lib/db/users.node';
 import { generateAlias, pickWelcomeLine } from '@/lib/alias';
 import { randomToken, sha256 } from '@/lib/crypto';
 import { redisConnection } from '@/lib/redis';
+import { provisionPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { createTotpChallengeForIdentity, issueUserTokens, type LoginIdentityType, type SessionTokens } from './auth';
 
 /**
@@ -146,6 +147,8 @@ export async function claimHandoff(handoffPublicHash: string): Promise<HandoffCl
     };
   }
 
+  if (!user.isVerified) return null;
+  await provisionPersonalAuthContext(user);
   const tokens = await issueUserTokens(user);
   const alias = user.alias ?? generateAlias(user.key);
   return {

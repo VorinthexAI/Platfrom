@@ -604,6 +604,16 @@ export const collections: CollectionSpec[] = [
     ],
   },
   {
+    name: 'authSessions',
+    skipEmbedding: true,
+    indexes: [
+      { fields: ['userId'] },
+      { fields: ['refreshTokenHash'], unique: true },
+      { fields: ['expiresAt'] },
+      { fields: ['userId', 'revokedAt'] },
+    ],
+  },
+  {
     // Renamed from the legacy 'user_organization' (snake_case, singular —
     // every other collection is camelCase plural) — see the copy-and-drop
     // step near the end of main() that moves live rows across on deploy.
@@ -680,6 +690,7 @@ export const collections: CollectionSpec[] = [
     indexes: [
       { fields: ['is_root'] },
       { fields: ['slug'], unique: true, sparse: true },
+      { fields: ['personalOwnerUserId'], unique: true, sparse: true },
     ],
   },
   {

@@ -6,7 +6,10 @@ export function buildAppleAppSiteAssociation() {
     applinks: {
       details: [{
         appIDs: [`${APPLE_TEAM_ID}.${APP_IDENTIFIER}`],
-        components: [{ "/": "/auth/mfa", comment: "Founder sign-in and MFA recovery" }],
+        components: [
+          { "/": "/auth/mfa", comment: "Founder sign-in and MFA recovery" },
+          { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
+        ],
       }],
     },
   };

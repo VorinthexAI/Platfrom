@@ -30,6 +30,11 @@
               "scheme": "https",
               "host": "vorinthex.com",
               "path": "/auth/mfa"
+            },
+            {
+              "scheme": "https",
+              "host": "vorinthex.com",
+              "path": "/public/auth/token"
             }
           ],
           "category": [
@@ -50,7 +55,9 @@
           "image": "./assets/brand/vorinthex-mark.png",
           "imageWidth": 96
         }
-      ]
+      ],
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

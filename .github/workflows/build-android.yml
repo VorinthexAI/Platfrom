@@ -23,6 +23,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - uses: ./.github/actions/load-environments-json
+        with:
+          git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
+
+      - name: Load mobile build environment
+        run: |
+          set -euo pipefail
+          EXPO_TOKEN="$(jq -re '.secrets.prod.mobile.EXPO_TOKEN' .github/environments.json)"
+          EXPO_PUBLIC_API_BASE_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_API_BASE_URL' .github/environments.json)"
+          EXPO_PUBLIC_BACKEND_API_KEY="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_BACKEND_API_KEY' .github/environments.json)"
+          echo "::add-mask::$EXPO_TOKEN"
+          echo "::add-mask::$EXPO_PUBLIC_BACKEND_API_KEY"
+          {
+            echo "EXPO_TOKEN=$EXPO_TOKEN"
+            echo "EXPO_PUBLIC_API_BASE_URL=$EXPO_PUBLIC_API_BASE_URL"
+            echo "EXPO_PUBLIC_BACKEND_API_KEY=$EXPO_PUBLIC_BACKEND_API_KEY"
+          } >> "$GITHUB_ENV"
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
@@ -45,7 +63,6 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -58,4 +75,7 @@ jobs:
       # Running from the app directory lets EAS include the complete monorepo.
       - name: Build Android store bundle (.aab) on EAS
         working-directory: mobile/app
-        run: eas build --platform android --profile production --non-interactive --no-wait
+        run: |
+          eas env:set --name EXPO_PUBLIC_API_BASE_URL --value "$EXPO_PUBLIC_API_BASE_URL" --environment production --visibility plaintext --non-interactive
+          eas env:set --name EXPO_PUBLIC_BACKEND_API_KEY --value "$EXPO_PUBLIC_BACKEND_API_KEY" --environment production --visibility plaintext --non-interactive
+          eas build --platform android --profile production --non-interactive --no-wait

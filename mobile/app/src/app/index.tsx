@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useRouter, type Href } from "expo-router";
 import { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import Animated, {
@@ -12,6 +12,7 @@ import { ChromeIcon } from "@/components/ChromeIcon";
 import { vorinthexMarkSource } from "@/data/capability-icons";
 import { durations, easings } from "@/theme/motion";
 import { fonts, palette, tracking } from "@/theme/tokens";
+import { useAuthStore } from "@/state/auth";
 
 const LOGO_SIZE = 150;
 
@@ -21,6 +22,7 @@ const LOGO_SIZE = 150;
  */
 export default function SplashRoute() {
   const router = useRouter();
+  const status = useAuthStore((state) => state.status);
 
   const logoOpacity = useSharedValue(0);
   const logoScale = useSharedValue(0.86);
@@ -39,11 +41,11 @@ export default function SplashRoute() {
     );
 
     const timer = setTimeout(
-      () => router.replace("/onboarding"),
+      () => router.replace((status === "authenticated" ? "/onboarding" : "/auth") as Href),
       durations.splashHold + 300,
     );
     return () => clearTimeout(timer);
-  }, [logoOpacity, logoScale, router, sweepX, taglineOpacity, wordmarkOpacity]);
+  }, [logoOpacity, logoScale, router, status, sweepX, taglineOpacity, wordmarkOpacity]);
 
   const logoStyle = useAnimatedStyle(() => ({
     opacity: logoOpacity.value,

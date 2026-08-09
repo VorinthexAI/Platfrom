@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono';
-import { getCookie, setCookie } from 'hono/cookie';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { timingSafeEqual } from '@/lib/crypto';
 import { isResendWebhookPath } from './resend';
@@ -8,10 +8,18 @@ import { refreshAccessToken, verifyAccessToken, type AuthIdentity, type SessionT
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
+export const HEADER_SESSION_TRANSPORT = 'header';
 
-const PUBLIC_FOUNDER_AUTH_PATHS = new Set([
+const PUBLIC_AUTH_PATHS = new Set([
+  '/api/v1/auth/login',
   '/api/v1/auth/founders-gate',
   '/api/v1/auth/magic/validate',
+  '/api/v1/auth/handoff/stream',
+  '/api/v1/auth/handoff/status',
+  '/api/v1/auth/handoff/claim',
+  '/api/v1/auth/oauth/start',
+  '/api/v1/auth/oauth/callback',
+  '/api/v1/auth/mobile/oauth/exchange',
   '/api/v1/auth/totp/reset/request',
   '/api/v1/auth/totp/setup/start',
   '/api/v1/auth/totp/setup/complete',
@@ -19,7 +27,8 @@ const PUBLIC_FOUNDER_AUTH_PATHS = new Set([
 ]);
 
 export function isPublicFounderAuthPath(path: string) {
-  return PUBLIC_FOUNDER_AUTH_PATHS.has(path.replace(/\/$/, ''));
+  return PUBLIC_AUTH_PATHS.has(path.replace(/\/$/, ''))
+    || /^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)(?:\/callback)?$/.test(path.replace(/\/$/, ''));
 }
 
 function getClientIp(c: Parameters<MiddlewareHandler>[0]) {
@@ -29,8 +38,7 @@ function getClientIp(c: Parameters<MiddlewareHandler>[0]) {
 
 function getRequestApiKey(c: Parameters<MiddlewareHandler>[0]) {
   return c.req.header('x-vorinthex-api-key')
-    ?? c.req.header('x-api-key')
-    ?? c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+    ?? c.req.header('x-api-key');
 }
 
 function getBearerToken(c: Parameters<MiddlewareHandler>[0]) {
@@ -69,6 +77,47 @@ export function setSessionTokenHeaders(c: Context, tokens: SessionTokens) {
   c.header('X-Refresh-Token-Max-Age', String(tokens.refreshTokenMaxAgeSeconds));
 }
 
+function usesHeaderSessionTransport(c: Context) {
+  return c.get('authSessionTransport') === HEADER_SESSION_TRANSPORT
+    || (c.req.header('x-vorinthex-session-transport') === HEADER_SESSION_TRANSPORT && !c.req.header('origin'));
+}
+
+export function setSessionForRequest(c: Context, tokens: SessionTokens) {
+  if (usesHeaderSessionTransport(c)) setSessionTokenHeaders(c, tokens);
+  else setSessionCookies(c, tokens);
+}
+
+export function sessionTokenPayload(c: Context, tokens: SessionTokens) {
+  return usesHeaderSessionTransport(c) ? {
+    access_token: tokens.accessToken,
+    refresh_token: tokens.refreshToken,
+    access_token_max_age_seconds: tokens.accessTokenMaxAgeSeconds,
+    refresh_token_max_age_seconds: tokens.refreshTokenMaxAgeSeconds,
+    session_expires_at: tokens.sessionExpiresAt,
+  } : {};
+}
+
+export function camelSessionTokenPayload(c: Context, tokens: SessionTokens) {
+  return usesHeaderSessionTransport(c) ? {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    accessTokenMaxAgeSeconds: tokens.accessTokenMaxAgeSeconds,
+    refreshTokenMaxAgeSeconds: tokens.refreshTokenMaxAgeSeconds,
+    sessionExpiresAt: tokens.sessionExpiresAt,
+  } : {};
+}
+
+export function getSelectedRefreshToken(c: Context) {
+  const selected = c.get('authRefreshToken');
+  return typeof selected === 'string' ? selected : null;
+}
+
+export function clearSessionCookies(c: Context) {
+  const options = cookieOptions(0);
+  deleteCookie(c, ACCESS_COOKIE, options);
+  deleteCookie(c, REFRESH_COOKIE, options);
+}
+
 function querySchemaForPath(path: string) {
   const apiPath = path.replace(/^\/api\/v1(?=\/|$)/, '');
   if (apiPath === '/nodes') {
@@ -89,6 +138,12 @@ function querySchemaForPath(path: string) {
       provider: z.enum(['google', 'apple']),
       redirect_uri: z.string().url(),
     });
+  }
+  if (/^\/auth\/mobile\/oauth\/(google|apple)$/.test(apiPath)) {
+    return strictObject({ redirect_uri: z.string().url() });
+  }
+  if (/^\/auth\/mobile\/oauth\/(google|apple)\/callback$/.test(apiPath)) {
+    return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1).optional() });
   }
   if (apiPath === '/founders/artifacts' || apiPath === '/founders/artifacts/stream' || /^\/founders\/artifacts\/[^/]+$/.test(apiPath)) {
     return strictObject({ organizationKey: z.string().trim().min(1).optional(), scopeKey: z.string().cuid().optional() });
@@ -119,9 +174,8 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   if (isResendWebhookPath(c.req.path)) return next();
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
-  // Native clients cannot safely embed the platform API key. These endpoints
-  // authenticate with short-lived bearer challenges and are rate limited.
-  if (isPublicFounderAuthPath(c.req.path)) return next();
+  // OAuth providers redirect here directly and cannot attach application headers.
+  if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
   const expected = process.env.API_KEY;
   if (!expected) {
     if (process.env.NODE_ENV === 'production') {
@@ -157,34 +211,42 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
 export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, refreshAccessToken }): MiddlewareHandler {
   return async (c, next) => {
     const bearerToken = getBearerToken(c);
-    const accessToken = bearerToken?.startsWith('vrtx_access_')
-      ? bearerToken
-      : getCookie(c, ACCESS_COOKIE);
-
-    if (accessToken) {
-      const identity = await dependencies.verifyAccessToken(accessToken);
-      if (identity) {
-        setAuthIdentity(c, identity);
-        return next();
-      }
-    }
-
-    const cookieRefreshToken = getCookie(c, REFRESH_COOKIE);
     const headerRefreshToken = c.req.header('x-refresh-token');
-    const refreshToken = cookieRefreshToken ?? headerRefreshToken;
-    if (!refreshToken) return next();
+    const cookieAccessToken = getCookie(c, ACCESS_COOKIE);
+    const cookieRefreshToken = getCookie(c, REFRESH_COOKIE);
+    const browserOrigin = Boolean(c.req.header('origin'));
+    const explicitHeaderTransport = c.req.header('x-vorinthex-session-transport') === HEADER_SESSION_TRANSPORT && !browserOrigin;
+    const hasHeaderCredentials = Boolean(bearerToken || headerRefreshToken);
+    const hasCookieCredentials = Boolean(cookieAccessToken || cookieRefreshToken);
+    if (!browserOrigin && !explicitHeaderTransport && hasHeaderCredentials && hasCookieCredentials) {
+      return c.json({ error: 'ambiguous authentication credentials', code: 'AUTH_TRANSPORT_AMBIGUOUS' }, 400);
+    }
+    const headerTransport = !browserOrigin && (explicitHeaderTransport || (hasHeaderCredentials && !hasCookieCredentials));
+    const accessToken = headerTransport ? bearerToken : cookieAccessToken;
+    const refreshToken = headerTransport ? headerRefreshToken : cookieRefreshToken;
+    const hadSessionCredentials = Boolean(accessToken || refreshToken);
+    c.set('authSessionTransport', headerTransport ? HEADER_SESSION_TRANSPORT : 'cookie');
+    if (refreshToken) c.set('authRefreshToken', refreshToken);
+
+    const identity = accessToken ? await dependencies.verifyAccessToken(accessToken) : null;
+    if (identity) setAuthIdentity(c, identity);
+
+    if (identity) return next();
+
+    const continueWithoutIdentity = async () => {
+      await next();
+      if (hadSessionCredentials && c.res.status === 401) c.header('WWW-Authenticate', 'Bearer');
+    };
+    if (!refreshToken) return continueWithoutIdentity();
 
     const tokens = await dependencies.refreshAccessToken(refreshToken);
-    if (!tokens) return next();
+    if (!tokens) return continueWithoutIdentity();
 
     const refreshedIdentity = await dependencies.verifyAccessToken(tokens.accessToken);
-    if (refreshedIdentity) setAuthIdentity(c, refreshedIdentity);
+    if (!refreshedIdentity) return continueWithoutIdentity();
+    setAuthIdentity(c, refreshedIdentity);
 
-    setSessionTokenHeaders(c, tokens);
-
-    if (cookieRefreshToken) {
-      setSessionCookies(c, tokens);
-    }
+    if (!/^\/api\/v1\/auth\/logout\/?$/.test(c.req.path)) setSessionForRequest(c, tokens);
 
     return next();
   };
@@ -197,13 +259,16 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   // would drop or delay deliveries. The endpoint is protected by signatures.
   if (isResendWebhookPath(c.req.path)) return next();
 
-  const founderAuth = isPublicFounderAuthPath(c.req.path);
-  if (!founderAuth && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
+  const authPath = isPublicFounderAuthPath(c.req.path);
+  if (!authPath && process.env.RATE_LIMIT_ENABLED !== 'true') return next();
+  const handoffRead = /^\/api\/v1\/auth\/handoff\/(stream|status)\/?$/.test(c.req.path);
 
-  const limit = founderAuth
-    ? 20
+  const limit = handoffRead
+    ? 120
+    : authPath
+      ? 20
     : Number(process.env.RATE_LIMIT_MAX_REQUESTS ?? process.env.RATE_LIMIT_REQ_PER_MIN ?? 60);
-  const windowSeconds = founderAuth
+  const windowSeconds = authPath
     ? 5 * 60
     : Number(process.env.RATE_LIMIT_WINDOW_SECONDS ?? 60);
   if (!Number.isInteger(limit) || limit < 1) {
@@ -214,7 +279,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   }
 
   const ip = getClientIp(c);
-  const bucket = founderAuth ? 'founder-auth' : 'global';
+  const bucket = handoffRead ? 'auth-handoff-read' : authPath ? 'auth' : 'global';
   const key = `rate-limit:${bucket}:${ip}:${Math.floor(Date.now() / (windowSeconds * 1000))}`;
 
   try {
@@ -231,7 +296,7 @@ export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
     }
   } catch (error) {
     console.warn('rate limit check failed', error);
-    if (founderAuth) return c.json({ error: 'authentication temporarily unavailable' }, 503);
+    if (authPath) return c.json({ error: 'authentication temporarily unavailable' }, 503);
   }
 
   return next();
