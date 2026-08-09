@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
   type PressableProps,
   type PressableStateCallbackType,
   type StyleProp,
@@ -57,6 +58,13 @@ function useReducedMotion() {
 
 function ChromeGradient({ muted = false }: { muted?: boolean }) {
   const gradientId = useId().replaceAll(":", "");
+  const [size, setSize] = useState<{ width: number; height: number }>();
+  const onLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setSize((current) => current?.width === width && current.height === height ? current : { width, height });
+    }
+  };
   const stops = muted
     ? [
       <Stop key="start" offset="0" stopColor="#DDE2E5" stopOpacity="0.08" />,
@@ -72,14 +80,18 @@ function ChromeGradient({ muted = false }: { muted?: boolean }) {
       <Stop key="white-end" offset="1" stopColor="#FFFFFF" />,
     ];
   return (
-    <Svg height="100%" pointerEvents="none" style={StyleSheet.absoluteFill} width="100%">
-      <Defs>
-        <LinearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
-          {stops}
-        </LinearGradient>
-      </Defs>
-      <Rect fill={`url(#${gradientId})`} height="100%" rx={BUTTON_RADIUS} width="100%" />
-    </Svg>
+    <View onLayout={onLayout} pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {size ? (
+        <Svg height={size.height} style={StyleSheet.absoluteFill} width={size.width}>
+          <Defs>
+            <LinearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
+              {stops}
+            </LinearGradient>
+          </Defs>
+          <Rect fill={`url(#${gradientId})`} height={size.height} rx={size.height / 2} width={size.width} />
+        </Svg>
+      ) : null}
+    </View>
   );
 }
 

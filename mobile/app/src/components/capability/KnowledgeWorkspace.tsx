@@ -1,4 +1,4 @@
-import { useNavigation, useRouter } from "expo-router";
+import { useNavigation } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import { useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -38,19 +38,10 @@ import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 
-const saveLabels: Record<SaveState, string> = {
-  local: "LOCAL DRAFT",
-  dirty: "UNSAVED",
-  saving: "SAVING",
-  saved: "SAVED",
-  error: "SAVE FAILED",
-};
-
 const localDraftFile = new File(Paths.document, "knowledge-draft.json");
 const MAX_MOBILE_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 export function KnowledgeWorkspace() {
-  const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -351,42 +342,35 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const leaveWorkspace = () => {
-    if (hasContentContext && (dirty.current || saveInFlight.current)) {
-      setError("Wait for the current note to save before leaving.");
-      return;
-    }
-    router.back();
-  };
-
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Button accessibilityLabel="Back to your personal AI" contentMode="raw" onPress={leaveWorkspace} size="md" variant="ghost">
-          <ChevronLeftIcon size="md" variant="accent" />
-        </Button>
         <View style={styles.identity}>
           <ArchiveIcon size="md" variant="accent" />
-          <View>
-            <Text style={styles.eyebrow}>CORE APPLICATION</Text>
-            <Text style={styles.headerTitle}>ARCHIVE</Text>
-          </View>
+          <Text style={styles.headerTitle}>ARCHIVE</Text>
         </View>
-        <Button accessibilityLabel="Create in Archive" contentMode="raw" onPress={() => setMenuOpen(true)} size="md" variant="icon">
-          <PlusIcon size="md" />
-        </Button>
       </View>
 
-      <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.sm }]}
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        keyboardShouldPersistTaps="handled"
+        style={styles.scrollView}
+      >
         <View style={styles.noteSheet}>
           <View style={styles.metaRow}>
-            {currentFolder ? (
-              <Button onPress={() => void goBackFolder()} size="xs" variant="ghost" icon={<ChevronLeftIcon size="sm" />}>
-                {currentFolder.name}
-              </Button>
-            ) : <Text style={styles.meta}>MY KNOWLEDGE</Text>}
-            <Text style={[styles.meta, saveState === "error" && styles.errorText]}>{saveLabels[saveState]}</Text>
+            <Text style={styles.meta}>CREATE NOTE</Text>
+            <Button accessibilityLabel="Create in Archive" contentMode="raw" onPress={() => setMenuOpen(true)} size="sm" variant="icon">
+              <PlusIcon size="sm" />
+            </Button>
           </View>
+
+          {currentFolder ? (
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => void goBackFolder()} size="xs" variant="ghost">
+              {currentFolder.name}
+            </Button>
+          ) : null}
 
           {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
 
@@ -466,7 +450,7 @@ export function KnowledgeWorkspace() {
               editable={hasContentContext}
               onChangeText={setQuery}
               onSubmitEditing={() => void runSearch()}
-              placeholder={hasContentContext ? "Search by what you remember..." : "Sign in to search your knowledge"}
+              placeholder="Search by what you remember..."
               returnKeyType="search"
               style={styles.searchInput}
               value={query}
@@ -491,15 +475,15 @@ export function KnowledgeWorkspace() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
-  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
+  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.lg, flexDirection: "row", alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
   identity: { flexDirection: "row", alignItems: "center", gap: 10 },
   eyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
   headerTitle: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 15, letterSpacing: tracking.label },
-  scroll: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  noteSheet: { minHeight: 470, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  scrollView: { flex: 1 },
+  scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   metaRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
-  errorText: { color: palette.danger },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   titleInput: { minHeight: 58, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28 },
   editor: { minHeight: 270, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },

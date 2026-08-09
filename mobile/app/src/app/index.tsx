@@ -42,7 +42,7 @@ export default function SplashRoute() {
 
     const timer = setTimeout(
       () => router.replace((status === "authenticated"
-        ? useAuthStore.getState().user?.isOnboarded ? "/brain" : "/onboarding"
+        ? useAuthStore.getState().user?.isOnboarded ? "/capability/archive" : "/onboarding"
         : "/auth") as Href),
       durations.splashHold + 300,
     );

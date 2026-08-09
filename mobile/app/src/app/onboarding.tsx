@@ -22,7 +22,7 @@ export default function OnboardingRoute() {
     setCompletionError(undefined);
     try {
       await completeOnboarding();
-      router.replace("/brain");
+      router.replace("/capability/archive");
     } catch (error) {
       setCompletionError(error instanceof Error ? error.message : "Onboarding could not be completed.");
     } finally {

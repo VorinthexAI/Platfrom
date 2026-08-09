@@ -62,10 +62,17 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
     } catch (error) {
       if (isAxiosError(error) && error.response?.status === 401) {
-        if (operation === authOperation) {
-          await tokenVault.clearIfCurrent(generation);
-          await clearAuthContext();
-          set({ status: "unauthenticated", user: null, organization: null, scope: null });
+        const recoveryOperation = ++authOperation;
+        await tokenVault.clearIfCurrent(generation);
+        await clearAuthContext();
+        try {
+          const context = await bootstrapGuest();
+          if (recoveryOperation === authOperation) {
+            await writeAuthContext(context);
+            if (recoveryOperation === authOperation) set({ status: "authenticated", ...context });
+          }
+        } catch {
+          if (recoveryOperation === authOperation) set({ status: "unauthenticated", user: null, organization: null, scope: null });
         }
         return;
       }
