@@ -376,7 +376,7 @@ describe('Content runtime', () => {
     const generated = await runContentTool('document.translate', { documentKeys: [documentKey], targetLanguage: 'French', mode: 'replace' }, f.context, {
       ...dependencies,
       runAction: async (action: string, input: any) => {
-        if (action === 'reason') return { text: 'Corps traduit' };
+        if (action === 'translate') return { text: 'Corps traduit' };
         if (action === 'document-generate-html') return documentGenerateHtml(input);
         if (action === 'document-generate-content') return documentGenerateContent(input);
         if (action === 'document-embed') return documentEmbed(input, { embed: async ({ text }) => { embeddedTexts.push(text); return embedding; }, dimensions: EMBEDDING_DIMENSIONS });
@@ -423,7 +423,7 @@ describe('Content runtime', () => {
       repository: f.repository,
       storage,
       runAction: async (action, input) => {
-        if (action === 'reason') return { text: 'Texte traduit' };
+        if (action === 'translate') return { text: 'Texte traduit' };
         if (action === 'document-generate-html') return documentGenerateHtml(input as never);
         if (action === 'document-generate-content') return documentGenerateContent(input as never);
         if (action === 'document-embed') {
@@ -767,7 +767,7 @@ describe('Content runtime', () => {
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
         runAction: async (action: string, input: any) => {
-          if (action === 'ask' || action === 'enhance' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
+          if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
           if (action === 'document-generate-html') return documentGenerateHtml(input);
           if (action === 'document-generate-content') return documentGenerateContent(input);

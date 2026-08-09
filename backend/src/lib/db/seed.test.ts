@@ -121,6 +121,8 @@ describe('model and routing relation seeds', () => {
       .toEqual(['openai.gpt-realtime-2']);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'enhance').map(({ modelSlug }) => modelSlug))
       .toEqual(['amazon.nova-lite']);
+    expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'translate').map(({ modelSlug }) => modelSlug))
+      .toEqual(['amazon.nova-lite']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('qwen.qwen3-embedding-8b');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([

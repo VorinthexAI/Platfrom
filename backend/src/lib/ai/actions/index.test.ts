@@ -19,7 +19,7 @@ describe('action registry', () => {
       'generate-image', 'edit-image', 'generate-video', 'edit-video', 'extend-video', 'analyze-video',
       'generate-speech', 'analyze-audio', 'generate-music', 'orchestrator-chat',
       'document-validate', 'storage-upload', 'document-extract', 'document-generate-html',
-      'document-generate-content', 'document-embed', 'document-insert', 'enhance',
+      'document-generate-content', 'document-embed', 'document-insert', 'enhance', 'translate',
     ]);
     expect(ACTION_DEFINITIONS.filter((action) => action.modelPolicy === 'none').map((action) => action.id))
       .toEqual([
@@ -37,6 +37,8 @@ describe('action registry', () => {
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'transcribe')?.models)
       .toEqual([{ provider: 'openai', model: 'openai.gpt-realtime-2', priority: 100 }]);
     expect(ACTION_DEFINITIONS.find((action) => action.id === 'enhance')?.models)
+      .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
+    expect(ACTION_DEFINITIONS.find((action) => action.id === 'translate')?.models)
       .toEqual([{ provider: 'aws-bedrock', model: 'amazon.nova-lite', priority: 100 }]);
   });
 

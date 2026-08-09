@@ -26,6 +26,7 @@ import { reasonAction } from './reason';
 import { speakAction } from './speak';
 import { storageUploadAction } from './storage-upload';
 import { transcribeAction } from './transcribe';
+import { translateAction } from './translate';
 import { traverseAction } from './traverse';
 import { ACTION_SLUGS, actionIdSchema, isValidActionIdFormat, type ActionDefinition, type ActionId } from './types';
 import { updateActionDefinition } from './update';
@@ -61,6 +62,7 @@ export { reasonAction } from './reason';
 export { speakAction } from './speak';
 export { storageUploadAction } from './storage-upload';
 export { transcribeAction } from './transcribe';
+export { translateAction } from './translate';
 export { traverseAction } from './traverse';
 export { updateActionDefinition } from './update';
 export { upsertAction } from './upsert';
@@ -85,7 +87,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentGenerateHtmlAction,
-  documentGenerateContentAction, documentEmbedAction, documentInsertAction, enhanceAction,
+  documentGenerateContentAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction,
 ];
 export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 

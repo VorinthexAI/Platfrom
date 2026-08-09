@@ -19,7 +19,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
+type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -1596,7 +1596,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               : tool === 'document.translate'
                 ? `Translate to ${input.targetLanguage}${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''}. ${input.preserveFormatting ? 'Preserve headings, lists, tables, paragraph boundaries, and inline emphasis.' : 'Return clear translated prose.'}`
                 : `${item.instruction}${item.tone ? ` Tone: ${item.tone}.` : ''}${item.audience ? ` Audience: ${item.audience}.` : ''}${item.length ? ` Length: ${item.length}.` : ''}`;
-            const text = await generated(current, instruction, tool === 'document.rewrite');
+            const text = tool === 'document.translate'
+              ? z.string().trim().min(1).parse((await action('translate', {
+                systemPrompt: `Translate the supplied text${input.sourceLanguage ? ` from ${input.sourceLanguage}` : ''} into ${input.targetLanguage} using fluent, idiomatic target-language grammar. Preserve meaning, facts, and tone. ${input.preserveFormatting ? 'Preserve paragraph structure, line breaks, and formatting.' : 'Use clear, natural prose.'} Return only the translated text without commentary.`,
+                messages: [{ role: 'user', content: [{ type: 'text', text: current.content }] }],
+                options: { temperature: 0.1, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(current.content.length / 3))) },
+              }, current.key, current.scopeKey)).text)
+              : await generated(current, instruction, tool === 'document.rewrite');
             const persistedDocumentKey = item.mode === 'replace'
               ? await persistGenerated(current, text, 'replace', tool.split('.')[1])
               : item.mode === 'copy'

@@ -10,8 +10,10 @@ import {
   ArchiveIcon,
   CheckIcon,
   ChevronLeftIcon,
+  ClockIcon,
   FileIcon,
   FolderIcon,
+  GlobeIcon,
   PlusIcon,
   SearchIcon,
   SendIcon,
@@ -29,14 +31,18 @@ import {
   enhanceContent,
   getContentContext,
   isContentContextConfigured,
+  listContentDocumentVersions,
   listContentLocation,
   listContentSearchHistory,
   readContentDocument,
   renameContentDocument,
+  restoreContentDocumentVersion,
   saveContentDocument,
   searchContent,
+  translateContentDocument,
   uploadContentDocument,
   type ContentDocument,
+  type ContentDocumentVersion,
   type ContentFolder,
   type ContentSearchHistoryItem,
   type ContentSearchResponse,
@@ -46,7 +52,7 @@ import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
-type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" | "folders" | "enhance";
+type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" | "folders" | "enhance" | "translate" | "versions";
 
 const localDraftFile = new File(Paths.document, "knowledge-draft.json");
 const localFoldersFile = new File(Paths.document, "archive-local-folders.json");
@@ -74,6 +80,11 @@ export function KnowledgeWorkspace() {
   const [autocompleteRevision, setAutocompleteRevision] = useState(0);
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceRange, setEnhanceRange] = useState<TextRange>();
+  const [targetLanguage, setTargetLanguage] = useState("");
+  const [translating, setTranslating] = useState(false);
+  const [versions, setVersions] = useState<ContentDocumentVersion[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [restoringVersionKey, setRestoringVersionKey] = useState<string>();
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [rootFolders, setRootFolders] = useState<ContentFolder[]>([]);
@@ -230,6 +241,11 @@ export function KnowledgeWorkspace() {
       enhanceRequest.current?.abort();
       enhanceRequest.current = undefined;
       setEnhancing(false);
+      setTranslating(false);
+      setTargetLanguage("");
+      setVersions([]);
+      setLoadingVersions(false);
+      setRestoringVersionKey(undefined);
       editorSession.current += 1;
       revision.current = 0;
       dirty.current = false;
@@ -402,6 +418,102 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const applyRemoteDocument = (document: ContentDocument & { content: string }) => {
+    clearCompletion();
+    revision.current += 1;
+    dirty.current = false;
+    pendingCreateKey.current = undefined;
+    documentKeyRef.current = document.key;
+    updatedAtRef.current = document.updatedAt;
+    titleRef.current = document.name;
+    contentRef.current = document.content;
+    savedTitleRef.current = document.name;
+    savedContentRef.current = document.content;
+    selectionRef.current = { start: document.content.length, end: document.content.length };
+    setTitle(document.name);
+    setContent(document.content);
+    setSaveState("saved");
+    setError(undefined);
+    if (localDraftFile.exists) localDraftFile.delete();
+  };
+
+  const openTranslationSheet = () => {
+    setTargetLanguage("");
+    setActiveSheet("translate");
+    setSheetError(undefined);
+  };
+
+  const runTranslation = async () => {
+    const documentKey = documentKeyRef.current;
+    const language = targetLanguage.trim();
+    if (!documentKey || !language) return;
+    if (dirty.current || saveInFlight.current || saveState !== "saved") {
+      setSheetError("Wait for the note to finish saving before translating it.");
+      return;
+    }
+    const session = editorSession.current;
+    setTranslating(true);
+    setSheetError(undefined);
+    try {
+      await translateContentDocument(documentKey, language);
+      const document = await readContentDocument(documentKey);
+      if (session !== editorSession.current || documentKeyRef.current !== documentKey) return;
+      applyRemoteDocument(document);
+      setTargetLanguage("");
+      await loadLocation(currentFolder?.key);
+      closeSheet();
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The note could not be translated.");
+    } finally {
+      if (session === editorSession.current) setTranslating(false);
+    }
+  };
+
+  const openVersionHistory = async () => {
+    const documentKey = documentKeyRef.current;
+    if (!documentKey) {
+      setSheetError("Save the note before opening version history.");
+      return;
+    }
+    if (dirty.current || saveInFlight.current || saveState !== "saved") {
+      setSheetError("Wait for the note to finish saving before opening version history.");
+      return;
+    }
+    const session = editorSession.current;
+    setActiveSheet("versions");
+    setSheetError(undefined);
+    setVersions([]);
+    setLoadingVersions(true);
+    try {
+      const history = await listContentDocumentVersions(documentKey);
+      if (session === editorSession.current && documentKeyRef.current === documentKey) setVersions(history);
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "Version history could not be loaded.");
+    } finally {
+      if (session === editorSession.current) setLoadingVersions(false);
+    }
+  };
+
+  const restoreVersion = async (versionKey: string) => {
+    const documentKey = documentKeyRef.current;
+    if (!documentKey || dirty.current || saveInFlight.current || saveState !== "saved") return;
+    const session = editorSession.current;
+    setRestoringVersionKey(versionKey);
+    setSheetError(undefined);
+    try {
+      await restoreContentDocumentVersion(documentKey, versionKey);
+      const document = await readContentDocument(documentKey);
+      if (session !== editorSession.current || documentKeyRef.current !== documentKey) return;
+      applyRemoteDocument(document);
+      await loadLocation(currentFolder?.key);
+      closeSheet();
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The version could not be restored.");
+    } finally {
+      if (session === editorSession.current) setRestoringVersionKey(undefined);
+    }
+  };
+
   const persistLocalDraft = (nextTitle: string, nextContent: string) => {
     if (hasContentContext) return;
     try {
@@ -413,6 +525,7 @@ export function KnowledgeWorkspace() {
 
   const resetEditor = (nextTitle = "Untitled note") => {
     clearCompletion();
+    setVersions([]);
     editorSession.current += 1;
     revision.current = 0;
     dirty.current = false;
@@ -808,11 +921,11 @@ export function KnowledgeWorkspace() {
       </ScrollView>
 
       <BottomSheet
-        description={activeSheet === "create" ? "Add something to your current Archive folder." : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : undefined}
+        description={activeSheet === "create" ? "Add something to your current Archive folder." : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : activeSheet === "translate" ? "Translate the full note into any language." : activeSheet === "versions" ? "Restore an earlier snapshot without losing the current one." : undefined}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "document" ? "Create document" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : "Create in Archive"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "versions"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "translate" ? "Translate note" : activeSheet === "versions" ? "Version history" : activeSheet === "document" ? "Create document" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : "Create in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
@@ -834,6 +947,60 @@ export function KnowledgeWorkspace() {
             <Button disabled={enhancing} icon={<StarIcon size="sm" />} loading={enhancing} onPress={() => void runEnhancement()} size="lg" variant="primary">
               {enhanceRange ? "Enhance selection" : "Enhance note"}
             </Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} icon={<GlobeIcon size="sm" />} onPress={openTranslationSheet} size="lg" variant="secondary">
+              Translate note
+            </Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} icon={<ClockIcon size="sm" />} onPress={() => void openVersionHistory()} size="lg" variant="secondary">
+              Version history
+            </Button>
+            {!documentKeyRef.current || saveState !== "saved" ? <Text style={styles.rowSubtitle}>Translation and version history become available after the note is saved.</Text> : null}
+          </View>
+        ) : null}
+        {activeSheet === "translate" ? (
+          <View style={styles.enhancePanel}>
+            <View style={styles.enhanceIdentity}>
+              <GlobeIcon size="lg" variant="accent" />
+              <View style={styles.enhanceCopy}>
+                <Text style={styles.rowTitle}>Translate entire note</Text>
+                <Text style={styles.rowSubtitle}>The current text will be saved as a version before the translation replaces it.</Text>
+              </View>
+            </View>
+            <TextInput
+              accessibilityLabel="Translation language"
+              autoCapitalize="words"
+              autoFocus
+              maxLength={120}
+              onChangeText={setTargetLanguage}
+              onSubmitEditing={() => void runTranslation()}
+              placeholder="Language, for example Spanish or Japanese"
+              returnKeyType="done"
+              value={targetLanguage}
+            />
+            <Button disabled={!targetLanguage.trim() || translating} icon={<GlobeIcon size="sm" />} loading={translating} onPress={() => void runTranslation()} size="lg" variant="primary">
+              Translate
+            </Button>
+          </View>
+        ) : null}
+        {activeSheet === "versions" ? (
+          <View style={styles.versionPanel}>
+            <View style={styles.currentVersion}>
+              <CheckIcon size="sm" variant="accent" />
+              <View style={styles.enhanceCopy}>
+                <Text style={styles.rowTitle}>Current document</Text>
+                <Text style={styles.rowSubtitle}>Restoring history will save this current text as another version.</Text>
+              </View>
+            </View>
+            {loadingVersions ? <Text style={styles.empty}>Loading version history...</Text> : null}
+            {!loadingVersions && versions.length === 0 ? <Text style={styles.empty}>No previous versions yet. Translating this note will create one.</Text> : null}
+            {versions.map((version) => (
+              <Button contentMode="raw" disabled={Boolean(restoringVersionKey)} key={version.key} loading={restoringVersionKey === version.key} onPress={() => void restoreVersion(version.key)} size="lg" style={styles.resultRow} variant="secondary">
+                <ClockIcon size="md" variant="accent" />
+                <View style={styles.resultText}>
+                  <Text style={styles.rowTitle}>{version.label ?? `Version ${version.version}`}</Text>
+                  <Text style={styles.rowSubtitle}>{new Date(version.createdAt).toLocaleString()}</Text>
+                </View>
+              </Button>
+            ))}
           </View>
         ) : null}
         {activeSheet === "folder" ? (
@@ -914,6 +1081,8 @@ const styles = StyleSheet.create({
   enhancePanel: { gap: 18 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },
+  versionPanel: { gap: 10 },
+  currentVersion: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   locationPreview: { gap: 4, marginTop: 10 },
   match: { gap: 7, marginBottom: 10, padding: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   searchArea: { marginTop: spacing.md, gap: 8 },

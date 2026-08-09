@@ -150,7 +150,7 @@ suite('Content live E2E', () => {
         },
       },
       runAction: async (action: string, input: any) => {
-        if (action === 'ask' || action === 'enhance' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
+        if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
         if (action === 'speak') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
         if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
         if (action === 'document-generate-content') return documentGenerateContent(input, { logger: () => undefined });
