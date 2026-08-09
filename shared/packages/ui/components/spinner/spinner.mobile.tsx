@@ -1,12 +1,15 @@
-﻿import type { ReactNode } from "react";
-import { StyleSheet, View, type ViewProps } from "react-native";
-export type SpinnerProps = ViewProps & { children?: ReactNode };
-export function Spinner({ style, ...props }: SpinnerProps) {
-  return <View style={[styles.root, style]} {...props} />;
+﻿import { ActivityIndicator, type ActivityIndicatorProps } from "react-native";
+
+export type SpinnerProps = ActivityIndicatorProps & {
+  variant?: "default" | "muted" | "inverse";
+};
+
+const colors = {
+  default: "#DDE2E5",
+  muted: "#AEB6BC",
+  inverse: "#030507",
+} as const;
+
+export function Spinner({ color, variant = "default", ...props }: SpinnerProps) {
+  return <ActivityIndicator color={color ?? colors[variant]} {...props} />;
 }
-const styles = StyleSheet.create({
-  root: {
-    borderColor: "#262D36",
-    borderRadius: 12,
-  },
-});

@@ -63,3 +63,5 @@ export * from './icons/ascend';
 export * from './icons/brain';
 export * from './icons/shield';
 export * from './icons/fragment';
+export * from './icons/google';
+export * from './icons/apple';

@@ -67,3 +67,5 @@ export * from "./icons/users/users.mobile";
 export * from "./icons/volume/volume.mobile";
 export * from "./icons/warning/warning.mobile";
 export * from "./icons/x-circle/x-circle.mobile";
+export * from "./icons/google/google.mobile";
+export * from "./icons/apple/apple.mobile";

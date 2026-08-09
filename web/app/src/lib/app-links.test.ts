@@ -2,12 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { buildAndroidAssetLinks, buildAppleAppSiteAssociation } from "./app-links";
 
 describe("mobile app associations", () => {
-  test("limits iOS universal links to founder MFA", () => {
+  test("limits iOS universal links to supported authentication routes", () => {
     expect(buildAppleAppSiteAssociation()).toEqual({
       applinks: {
         details: [{
           appIDs: ["3RMYX67679.app.vorinthex.com"],
-          components: [{ "/": "/auth/mfa", comment: "Founder sign-in and MFA recovery" }],
+          components: [
+            { "/": "/auth/mfa", comment: "Founder sign-in and MFA recovery" },
+            { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
+          ],
         }],
       },
     });

@@ -58,6 +58,7 @@ export async function upsertUserByEmail(
     const patch: Partial<User> = { ...values, organizationId, email: normalized, emailHash, updatedAt: now };
     // Country is captured at account creation, not rewritten by later sign-ins.
     delete patch.countryCode;
+    if (existing.guestBootstrapSecretHash) delete patch.guestBootstrapSecretHash;
     if (patch.name === undefined) delete patch.name;
     if (patch.alias === undefined && existing.alias == null && visitor?.alias) {
       patch.alias = visitor.alias;

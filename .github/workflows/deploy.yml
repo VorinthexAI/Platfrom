@@ -80,7 +80,7 @@ jobs:
               mobile/*) mobile=true ;;
               shared/*) shared=true ;;
               .github/scripts/cloudflare-cache-policy.ts) web=true ;;
-              .github/environments.json) web=true; backend=true ;;
+              .github/environments.json) web=true; backend=true; mobile=true ;;
               # deploy.yml defines the backend jobs (image, db, migrate,
               # api roll) as much as the web ones — a workflow change must
               # re-run both pipelines, not just web.
@@ -236,19 +236,31 @@ jobs:
       - uses: ./.github/actions/load-environments-json
         with:
           git-crypt-key-b64: ${{ secrets.GIT_CRYPT_KEY }}
-      - name: Extract Expo token
+      - name: Extract mobile build environment
         run: |
           set -euo pipefail
           EXPO_TOKEN="$(jq -re '.secrets.prod.mobile.EXPO_TOKEN' .github/environments.json)"
+          EXPO_PUBLIC_API_BASE_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_API_BASE_URL' .github/environments.json)"
+          EXPO_PUBLIC_BACKEND_API_KEY="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_BACKEND_API_KEY' .github/environments.json)"
           test -n "$EXPO_TOKEN" && [ "$EXPO_TOKEN" != "null" ] || { echo "::error::secrets.prod.mobile.EXPO_TOKEN is not configured in .github/environments.json."; exit 1; }
+          test -n "$EXPO_PUBLIC_API_BASE_URL" && test -n "$EXPO_PUBLIC_BACKEND_API_KEY" || { echo "::error::Mobile API environment is not configured in .github/environments.json."; exit 1; }
           echo "::add-mask::$EXPO_TOKEN"
+          echo "::add-mask::$EXPO_PUBLIC_BACKEND_API_KEY"
           echo "EXPO_TOKEN=$EXPO_TOKEN" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_API_BASE_URL=$EXPO_PUBLIC_API_BASE_URL" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_BACKEND_API_KEY=$EXPO_PUBLIC_BACKEND_API_KEY" >> "$GITHUB_ENV"
 
       - uses: oven-sh/setup-bun@v2
       - name: Install dependencies
         run: bun install --frozen-lockfile --linker=hoisted
       - name: Typecheck mobile
         run: bun run mobile:typecheck
+
+      - name: Sync EAS preview environment
+        working-directory: mobile/app
+        run: |
+          bunx eas-cli@latest env:set --name EXPO_PUBLIC_API_BASE_URL --value "$EXPO_PUBLIC_API_BASE_URL" --environment preview --visibility plaintext --non-interactive
+          bunx eas-cli@latest env:set --name EXPO_PUBLIC_BACKEND_API_KEY --value "$EXPO_PUBLIC_BACKEND_API_KEY" --environment preview --visibility plaintext --non-interactive
 
       - name: Queue EAS internal distribution build (Android APK)
         if: ${{ false }} # TEMP: pause deploy-triggered EAS submissions; remove to re-enable.
@@ -456,13 +468,13 @@ jobs:
           cache-to: type=gha,mode=max,scope=backend,ignore-error=true
           provenance: false
 
-  # NOTE (migrate/seed): ArangoDB lives on its own PRIVATE EC2 and is reached
+  # NOTE (seed/backfill): ArangoDB lives on its own PRIVATE EC2 and is reached
   # through an SSH tunnel. It could not be safely moved to `aws ecs run-task`
   # because the runtime image only ships backend/src (not backend/scripts), so seed:secrets is
   # unavailable inside the api image and also needs
   # the git-crypt-encrypted .github/environments.json (secrets.prod.db_seeds) which
-  # is not baked into any image. Schema migration and node seeding therefore keep
-  # running from a full checkout over the tunnel.
+  # is not baked into any image. Data seeding therefore keeps running from a
+  # full checkout over the tunnel after the active API has been swapped.
   backend-db:
     name: Deploy graph database
     runs-on: ubuntu-latest
@@ -636,14 +648,16 @@ jobs:
           test -z "$openai_base_url" || echo "OPENAI_BASE_URL=$openai_base_url" >> "$GITHUB_ENV"
           test -z "$openai_organization" || echo "OPENAI_ORGANIZATION=$openai_organization" >> "$GITHUB_ENV"
           test -z "$openai_project" || echo "OPENAI_PROJECT=$openai_project" >> "$GITHUB_ENV"
-      - name: Apply migrations, cut over Qwen seed routes, and backfill semantic data
+      - name: Seed deterministic/runtime catalog
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
-        run: |
-          bun run --cwd backend db:migrate:ci
-          bun run --cwd backend seed.ts
-          bun run --cwd backend db:backfill-semantic-embeddings:ci
+        run: bun run --cwd backend db:seed:ci
+      - name: Backfill semantic embeddings
+        env:
+          ARANGO_URL: http://127.0.0.1:8529
+          ARANGO_USERNAME: root
+        run: bun run --cwd backend db:backfill-semantic-embeddings:ci
       - name: Close SSH ingress for this runner
         if: always()
         run: |
@@ -657,7 +671,7 @@ jobs:
   backend-migrate:
     name: Migrate graph database
     runs-on: ubuntu-latest
-    needs: [changes, backend-image, backend-db]
+    needs: [changes, backend-image, backend-secrets]
     if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     defaults:
       run:
@@ -701,10 +715,6 @@ jobs:
           role-to-assume: ${{ env.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Open SSH ingress for this runner
-        # Migration now runs in backend-db while that job's verified SSH
-        # connection is still open. Keep this legacy marker job successful for
-        # downstream dependency compatibility without opening a second tunnel.
-        if: ${{ false }}
         run: |
           set -euo pipefail
           test -n "${{ env.GRAPH_DB_SSH_SG_ID }}" || { echo "::error::GRAPH_DB_SSH_SG_ID is not set in .github/environments.json."; exit 1; }
@@ -733,7 +743,6 @@ jobs:
           echo "::error::Port 22 on the graph-db host is still unreachable 90s after authorizing ${RUNNER_IP}/32. Check the SG and instance state."
           exit 1
       - name: Open SSH tunnel to ArangoDB
-        if: ${{ false }}
         run: |
           EC2_HOST="$(python3 -c 'import os; print(os.environ["EC2_HOST"].lstrip("﻿").strip())')"
           EC2_USER="$(python3 -c 'import os; print(os.environ["EC2_USER"].lstrip("﻿").strip())')"
@@ -770,7 +779,6 @@ jobs:
           printf 'Host graphdbbox\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/deploy_key\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$EC2_HOST" "$EC2_USER" >> ~/.ssh/config
           ssh -f -N -L 8529:127.0.0.1:8529 graphdbbox
       - name: Fetch ArangoDB credentials from SSM
-        if: ${{ false }}
         run: |
           creds=$(aws ssm get-parameters-by-path --region "$AWS_REGION" --path "$SSM_PATH" --recursive --with-decryption --query "Parameters[].{n:Name,v:Value}" --output json)
           arango_password=$(echo "$creds" | jq -r '.[] | select(.n | endswith("/ARANGO_ROOT_PASSWORD")) | .v')
@@ -787,15 +795,12 @@ jobs:
           echo "ARANGO_DATABASE=$arango_database" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_ACCESS_KEY_ID=$bedrock_aws_access_key_id" >> "$GITHUB_ENV"
           echo "BEDROCK_AWS_SECRET_ACCESS_KEY=$bedrock_aws_secret_access_key" >> "$GITHUB_ENV"
-      - name: Apply migrations and seed nodes
-        if: ${{ false }}
+      - name: Apply graph migrations
         working-directory: .
         env:
           ARANGO_URL: http://127.0.0.1:8529
           ARANGO_USERNAME: root
-        run: |
-          bun run --cwd backend db:migrate:ci
-          bun run --cwd backend seed.ts
+        run: bun run --cwd backend db:migrate:ci
       - name: Close SSH ingress for this runner
         if: always()
         run: |
@@ -809,7 +814,7 @@ jobs:
   seed-db-secrets:
     name: Upsert db.seeds.secrets.json to production
     runs-on: ubuntu-latest
-    needs: [changes, backend-migrate]
+    needs: [changes, backend-db]
     if: needs.changes.outputs.backend == 'true' && (github.event.pull_request.merged == true || inputs.deploy)
     environment: production
     env:
@@ -1094,13 +1099,13 @@ jobs:
   early-deploy:
     name: Blue-green deploy to early-infra box
     runs-on: ubuntu-latest
-    needs: [changes, deploy-web, backend-image, backend-secrets]
+    needs: [changes, deploy-web, backend-image, backend-secrets, backend-migrate]
     if: >-
       always()
       && (needs.changes.outputs.web == 'true' || needs.changes.outputs.backend == 'true')
       && (github.event.pull_request.merged == true || inputs.deploy)
       && (needs.changes.outputs.web != 'true' || needs.deploy-web.result == 'success')
-      && (needs.changes.outputs.backend != 'true' || (needs.backend-image.result == 'success' && needs.backend-secrets.result == 'success'))
+      && (needs.changes.outputs.backend != 'true' || (needs.backend-image.result == 'success' && needs.backend-secrets.result == 'success' && needs.backend-migrate.result == 'success'))
     environment: production
     env:
       APP_INSTANCE_TAG: vorinthex-early-app

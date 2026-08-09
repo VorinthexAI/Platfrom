@@ -153,8 +153,6 @@ export function fetchCapabilityContent<S extends CapabilitySlug>(
   return Promise.resolve(CONTENT[slug]);
 }
 
-export const MOCK_USER = { firstName: "Oscar" } as const;
-
 export function greetingForHour(hour: number): string {
   if (hour >= 5 && hour < 12) return "Good morning,";
   if (hour >= 12 && hour < 18) return "Good afternoon,";

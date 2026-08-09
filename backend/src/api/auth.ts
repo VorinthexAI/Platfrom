@@ -21,7 +21,9 @@ import QRCode from 'qrcode';
 import { z } from 'zod';
 import { sendBrandedEmail } from './email';
 import { defaultNameFromEmail, hashUserEmail, normalizeEmail, upsertUserByEmail } from './users';
-import { countryCodeSchema, getUserByEmailHash, getUserById, getUserByRefreshTokenHash, updateUser, type User } from '@/lib/db/users.node';
+import { countryCodeSchema, getUserByEmailHash, getUserById, getUserByRefreshTokenHash, revokeLegacyRefreshToken, updateUser, type User } from '@/lib/db/users.node';
+import { getAuthSessionById, getAuthSessionByRefreshTokenHash, insertAuthSession, revokeAuthSession } from '@/lib/db/auth-sessions.node';
+import { provisionPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { getOrganizationById } from '@/lib/db/organizations.node';
 import {
   getUserOrganizationById,
@@ -37,7 +39,7 @@ const TOTP_CHALLENGE_TTL_MS = 10 * 60 * 1000;
 export const FOUNDER_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const TOTP_PERIOD_SECONDS = 30;
 const ISSUER = 'Vorinthex';
-export const STANDARD_ACCESS_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
+export const STANDARD_ACCESS_MAX_AGE_SECONDS = 60 * 15;
 export const STANDARD_REFRESH_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 export const FOUNDER_ACCESS_MAX_AGE_SECONDS = 60 * 15;
 export const FOUNDER_REFRESH_MAX_AGE_SECONDS = 60 * 60 * 24;
@@ -57,6 +59,7 @@ export type OAuthProvider = 'google' | 'apple';
 export interface AuthIdentity {
   key: string;
   identityType: AuthIdentityType;
+  sessionId?: string;
   founderAssured?: boolean;
   founderMembershipKey?: string;
   founderMfaVersion?: number;
@@ -128,25 +131,29 @@ async function signAccessTokenPayload(payload: string) {
   return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
 }
 
-async function createSignedOAuthState(provider: OAuthProvider) {
+async function createSignedOAuthState(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string) {
   const payload = jsonBase64Url({
     provider,
+    redirectUri,
+    mobileRedirectUri,
     nonce: randomToken('oauth_'),
     exp: Date.now() + 10 * 60 * 1000,
   });
   return `${payload}.${await signAccessTokenPayload(payload)}`;
 }
 
-async function verifySignedOAuthState(provider: OAuthProvider, state: string) {
+async function verifySignedOAuthState(provider: OAuthProvider, state: string, redirectUri: string) {
   const [payload, signature] = state.split('.');
   if (!payload || !signature) return false;
   const expected = await signAccessTokenPayload(payload);
   if (!timingSafeEqual(signature, expected)) return false;
   try {
-    const parsed = JSON.parse(base64UrlDecode(payload)) as { provider?: string; exp?: number };
-    return parsed.provider === provider && typeof parsed.exp === 'number' && parsed.exp > Date.now();
+    const parsed = JSON.parse(base64UrlDecode(payload)) as { provider?: string; redirectUri?: string; mobileRedirectUri?: string; exp?: number };
+    return parsed.provider === provider && parsed.redirectUri === redirectUri && typeof parsed.exp === 'number' && parsed.exp > Date.now()
+      ? parsed
+      : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -199,7 +206,17 @@ function strongestMembership(
 }
 
 async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
-  const membership = strongestMembership(await listActiveUserOrganizationsByUser(user.key));
+  const memberships = await listActiveUserOrganizationsByUser(user.key);
+  // MFA-enforcing memberships always win over ordinary personal ownership.
+  for (const membership of memberships) {
+    const identity = await membershipIdentity(user, membership);
+    if (identity?.organizationIsRoot && identity.organizationMfaEnabled) return identity;
+  }
+  for (const membership of memberships) {
+    const identity = await membershipIdentity(user, membership);
+    if (identity?.organizationMfaEnabled) return identity;
+  }
+  const membership = strongestMembership(memberships);
   return membership ? membershipIdentity(user, membership) : null;
 }
 
@@ -273,6 +290,7 @@ export async function createAccessToken(identity: AuthIdentity | string, session
   const sessionExpiry = sessionExpiresAt ? Math.floor(sessionExpiresAt.getTime() / 1000) : now + ttlSeconds;
   const payload = base64UrlEncode(JSON.stringify({
     sub: normalized.key,
+    sid: normalized.sessionId,
     identityType: normalized.identityType,
     founder: normalized.founderAssured === true,
     founderMembershipKey: normalized.founderMembershipKey,
@@ -294,6 +312,7 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
   try {
     const parsed = JSON.parse(base64UrlDecode(payload)) as {
       sub?: string;
+      sid?: string;
       identityType?: AuthIdentityType;
       founder?: boolean;
       founderMembershipKey?: string;
@@ -301,9 +320,14 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
       exp?: number;
     };
     if (!parsed.sub || !parsed.exp || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
+    if (parsed.sid) {
+      const session = await getAuthSessionById(parsed.sid);
+      if (!session || session.userId !== parsed.sub || session.revokedAt || !isRefreshTokenActive(session.expiresAt)) return null;
+    }
     return {
       key: parsed.sub,
       identityType: parsed.identityType ?? 'user',
+      ...(parsed.sid ? { sessionId: parsed.sid } : {}),
       founderAssured: parsed.founder === true,
       ...(parsed.founderMembershipKey ? { founderMembershipKey: parsed.founderMembershipKey } : {}),
       ...(typeof parsed.founderMfaVersion === 'number' ? { founderMfaVersion: parsed.founderMfaVersion } : {}),
@@ -313,14 +337,16 @@ export async function verifyAccessToken(token: string): Promise<AuthIdentity | n
   }
 }
 
-export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Date, founderAssured = false): Promise<SessionTokens> {
+export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Date, founderAssured = false, mfaAssured = founderAssured): Promise<SessionTokens> {
   const policy = getAuthSessionPolicy(identity.type, founderAssured);
   const issuedAt = Date.now();
   sessionExpiresAt ??= new Date(issuedAt + policy.refreshMaxAgeSeconds * 1000);
   const remainingSeconds = Math.max(0, Math.floor((sessionExpiresAt.getTime() - issuedAt) / 1000));
+  const sessionId = newId();
   const accessToken = await createAccessToken({
     key: identity.key,
     identityType: identity.type,
+    sessionId,
     founderAssured,
     ...(founderAssured ? {
       founderMembershipKey: identity.linkKey,
@@ -329,12 +355,17 @@ export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Da
   }, sessionExpiresAt);
   const refreshToken = randomToken(founderAssured ? 'vrtx_refresh_founder_' : 'vrtx_refresh_');
   const refreshTokenHash = await sha256(refreshToken);
-  await updateUser(identity.key, {
+  const now = new Date().toISOString();
+  await insertAuthSession({
+    key: sessionId,
+    userId: identity.key,
     refreshTokenHash,
-    refreshTokenExpiresAt: sessionExpiresAt.toISOString(),
-    refreshFounderMembershipKey: founderAssured ? identity.linkKey : null,
-    refreshFounderMfaVersion: founderAssured ? identity.mfaVersion : null,
-    updatedAt: new Date().toISOString(),
+    expiresAt: sessionExpiresAt.toISOString(),
+    revokedAt: null,
+    founderMembershipKey: mfaAssured ? identity.linkKey : null,
+    founderMfaVersion: mfaAssured ? identity.mfaVersion : null,
+    createdAt: now,
+    updatedAt: now,
   });
   return { accessToken, refreshToken, accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds), refreshTokenMaxAgeSeconds: remainingSeconds, sessionExpiresAt: sessionExpiresAt.toISOString() };
 }
@@ -344,15 +375,21 @@ export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?
   const issuedAt = Date.now();
   sessionExpiresAt ??= new Date(issuedAt + policy.refreshMaxAgeSeconds * 1000);
   const remainingSeconds = Math.max(0, Math.floor((sessionExpiresAt.getTime() - issuedAt) / 1000));
-  const accessToken = await createAccessToken({ key: user.key, identityType: 'user' }, sessionExpiresAt);
+  const sessionId = newId();
+  const accessToken = await createAccessToken({ key: user.key, identityType: 'user', sessionId }, sessionExpiresAt);
   const refreshToken = randomToken('vrtx_refresh_');
   const refreshTokenHash = await sha256(refreshToken);
-  await updateUser(user.key, {
+  const now = new Date().toISOString();
+  await insertAuthSession({
+    key: sessionId,
+    userId: user.key,
     refreshTokenHash,
-    refreshTokenExpiresAt: sessionExpiresAt.toISOString(),
-    refreshFounderMembershipKey: null,
-    refreshFounderMfaVersion: null,
-    updatedAt: new Date().toISOString(),
+    expiresAt: sessionExpiresAt.toISOString(),
+    revokedAt: null,
+    founderMembershipKey: null,
+    founderMfaVersion: null,
+    createdAt: now,
+    updatedAt: now,
   });
   return { accessToken, refreshToken, accessTokenMaxAgeSeconds: Math.min(policy.accessMaxAgeSeconds, remainingSeconds), refreshTokenMaxAgeSeconds: remainingSeconds, sessionExpiresAt: sessionExpiresAt.toISOString() };
 }
@@ -365,22 +402,29 @@ export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?
  */
 export async function refreshAccessToken(refreshToken: string): Promise<SessionTokens | null> {
   const tokenHash = await sha256(refreshToken);
-  const user = await getUserByRefreshTokenHash(tokenHash);
-  if (!user || !isRefreshTokenActive(user.refreshTokenExpiresAt)) return null;
-  const founderAssured = refreshToken.startsWith('vrtx_refresh_founder_') && Boolean(user.refreshFounderMembershipKey);
-  const identity = founderAssured
-    ? await getLoginIdentityByMembership('superAdmin', user.key, user.refreshFounderMembershipKey!)
-      ?? await getLoginIdentityByMembership('member', user.key, user.refreshFounderMembershipKey!)
+  const session = await getAuthSessionByRefreshTokenHash(tokenHash);
+  const legacyUser = session ? null : await getUserByRefreshTokenHash(tokenHash);
+  const user = await getUserById(session?.userId ?? legacyUser?.key ?? '');
+  const expiresAt = session?.expiresAt ?? legacyUser?.refreshTokenExpiresAt;
+  if (!user || session?.revokedAt || !isRefreshTokenActive(expiresAt ?? null)) return null;
+  const mfaMembershipKey = session?.founderMembershipKey ?? legacyUser?.refreshFounderMembershipKey;
+  const mfaVersion = session?.founderMfaVersion ?? legacyUser?.refreshFounderMfaVersion;
+  const mfaAssured = Boolean(mfaMembershipKey) && typeof mfaVersion === 'number';
+  const identity = mfaAssured
+    ? await getLoginIdentityByMembership('superAdmin', user.key, mfaMembershipKey!)
+      ?? await getLoginIdentityByMembership('member', user.key, mfaMembershipKey!)
     : await organizationMembershipIdentity(user);
-  if (founderAssured && (
-    !identity?.organizationIsRoot ||
+  if (identity?.organizationMfaEnabled && (
+    !mfaAssured ||
     !identity.isMfaEnabled ||
-    identity.mfaVersion !== user.refreshFounderMfaVersion
+    identity.linkKey !== mfaMembershipKey ||
+    identity.mfaVersion !== mfaVersion
   )) return null;
+  const founderAssured = refreshToken.startsWith('vrtx_refresh_founder_') && identity?.organizationIsRoot === true && mfaAssured;
   const identityType = identity?.type ?? 'user';
   const policy = getAuthSessionPolicy(identityType, founderAssured);
   const sessionExpiresAt = new Date(Math.min(
-    Date.parse(user.refreshTokenExpiresAt!),
+    Date.parse(expiresAt!),
     Date.now() + policy.refreshMaxAgeSeconds * 1000,
   ));
   const issuedAt = Date.now();
@@ -389,6 +433,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
     {
       key: identity?.key ?? user.key,
       identityType,
+      ...(session ? { sessionId: session.key } : {}),
       founderAssured,
       ...(founderAssured && identity ? {
         founderMembershipKey: identity.linkKey,
@@ -404,6 +449,27 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
     refreshTokenMaxAgeSeconds: remainingSeconds,
     sessionExpiresAt: sessionExpiresAt.toISOString(),
   };
+}
+
+export async function revokeSession(identity: AuthIdentity, refreshToken?: string | null): Promise<boolean> {
+  if (identity.sessionId) return revokeAuthSession(identity.sessionId, identity.key, new Date().toISOString());
+  if (!refreshToken) return false;
+  const session = await getAuthSessionByRefreshTokenHash(await sha256(refreshToken));
+  const revokedAt = new Date().toISOString();
+  if (session) {
+    if (session.userId !== identity.key) return false;
+    return revokeAuthSession(session.key, identity.key, revokedAt);
+  }
+  return revokeLegacyRefreshToken(identity.key, await sha256(refreshToken), revokedAt);
+}
+
+export async function revokeRefreshSession(refreshToken: string): Promise<boolean> {
+  const tokenHash = await sha256(refreshToken);
+  const session = await getAuthSessionByRefreshTokenHash(tokenHash);
+  const revokedAt = new Date().toISOString();
+  if (session) return revokeAuthSession(session.key, session.userId, revokedAt);
+  const legacyUser = await getUserByRefreshTokenHash(tokenHash);
+  return legacyUser ? revokeLegacyRefreshToken(legacyUser.key, tokenHash, revokedAt) : false;
 }
 
 export function isRefreshTokenActive(expiresAt: string | null, now = Date.now()): boolean {
@@ -559,8 +625,8 @@ function requiredEnv(name: string) {
   return value;
 }
 
-export async function buildOAuthAuthorizationUrl(provider: OAuthProvider, redirectUri: string) {
-  const state = await createSignedOAuthState(provider);
+export async function buildOAuthAuthorizationUrl(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string) {
+  const state = await createSignedOAuthState(provider, redirectUri, mobileRedirectUri);
   if (provider === 'google') {
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', requiredEnv('GOOGLE_OAUTH_CLIENT_ID'));
@@ -577,7 +643,7 @@ export async function buildOAuthAuthorizationUrl(provider: OAuthProvider, redire
   url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', 'name email');
-  url.searchParams.set('response_mode', 'query');
+  url.searchParams.set('response_mode', mobileRedirectUri ? 'form_post' : 'query');
   url.searchParams.set('state', state);
   return url.toString();
 }
@@ -586,14 +652,48 @@ function formBody(input: Record<string, string>) {
   return new URLSearchParams(input).toString();
 }
 
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  const [, payload] = token.split('.');
-  if (!payload) return null;
+function decodeJwtPart(value: string | undefined): Record<string, unknown> | null {
+  if (!value) return null;
   try {
-    return JSON.parse(base64UrlDecode(payload)) as Record<string, unknown>;
+    return JSON.parse(base64UrlDecode(value)) as Record<string, unknown>;
   } catch {
     return null;
   }
+}
+
+type AppleJwk = JsonWebKey & { kid?: string; alg?: string };
+
+export async function verifyAppleIdentityToken(
+  token: string,
+  loadKeys: () => Promise<AppleJwk[]> = async () => {
+    const response = await fetch('https://appleid.apple.com/auth/keys');
+    const body = await response.json().catch(() => null) as { keys?: AppleJwk[] } | null;
+    if (!response.ok || !Array.isArray(body?.keys)) throw new Error('Apple signing keys unavailable');
+    return body.keys;
+  },
+) {
+  const [encodedHeader, encodedPayload, encodedSignature, extra] = token.split('.');
+  if (!encodedHeader || !encodedPayload || !encodedSignature || extra) return null;
+  const header = decodeJwtPart(encodedHeader);
+  const payload = decodeJwtPart(encodedPayload);
+  if (header?.alg !== 'RS256' || typeof header.kid !== 'string' || !payload) return null;
+  const key = (await loadKeys()).find((candidate) => candidate.kid === header.kid && (!candidate.alg || candidate.alg === 'RS256'));
+  if (!key) return null;
+  const publicKey = await crypto.subtle.importKey('jwk', key, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  const validSignature = await crypto.subtle.verify(
+    'RSASSA-PKCS1-v1_5',
+    publicKey,
+    Buffer.from(encodedSignature, 'base64url'),
+    new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+  );
+  const audience = payload.aud;
+  const expectedAudience = requiredEnv('APPLE_OAUTH_CLIENT_ID');
+  const audienceMatches = audience === expectedAudience || (Array.isArray(audience) && audience.includes(expectedAudience));
+  const now = Math.floor(Date.now() / 1000);
+  if (!validSignature || payload.iss !== 'https://appleid.apple.com' || !audienceMatches || typeof payload.exp !== 'number' || payload.exp <= now) return null;
+  const email = typeof payload.email === 'string' ? payload.email : null;
+  if (!email || (payload.email_verified !== true && payload.email_verified !== 'true')) return null;
+  return { email, name: null, profileUrl: null };
 }
 
 function pemBodyToArrayBuffer(pem: string) {
@@ -652,7 +752,7 @@ async function exchangeGoogleCode(code: string, redirectUri: string) {
     headers: { Authorization: `Bearer ${tokenData.access_token}` },
   });
   const profile = await profileResponse.json().catch(() => null) as { email?: string; name?: string; picture?: string; email_verified?: boolean } | null;
-  if (!profileResponse.ok || !profile?.email || profile.email_verified === false) return null;
+  if (!profileResponse.ok || !profile?.email || profile.email_verified !== true) return null;
   return { email: profile.email, name: profile.name ?? null, profileUrl: profile.picture ?? null };
 }
 
@@ -670,11 +770,7 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
   });
   const tokenData = await tokenResponse.json().catch(() => null) as { id_token?: string } | null;
   if (!tokenResponse.ok || !tokenData?.id_token) return null;
-  const payload = decodeJwtPayload(tokenData.id_token);
-  if (!payload) return null;
-  const email = typeof payload?.email === 'string' ? payload.email : null;
-  if (!email || payload.email_verified === false || payload.email_verified === 'false') return null;
-  return { email, name: null, profileUrl: null };
+  return verifyAppleIdentityToken(tokenData.id_token);
 }
 
 export async function completeOAuthSignIn(input: {
@@ -683,7 +779,8 @@ export async function completeOAuthSignIn(input: {
   state: string;
   redirectUri: string;
 }) {
-  if (!await verifySignedOAuthState(input.provider, input.state)) return null;
+  const state = await verifySignedOAuthState(input.provider, input.state, input.redirectUri);
+  if (!state) return null;
   const profile = input.provider === 'google'
     ? await exchangeGoogleCode(input.code, input.redirectUri)
     : await exchangeAppleCode(input.code, input.redirectUri);
@@ -697,10 +794,10 @@ export async function completeOAuthSignIn(input: {
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
   const enforced = existingUser ? await mfaEnforcedMembershipIdentity(existingUser) : null;
   if (enforced?.organizationIsRoot) {
-    return { status: 'founders_gate_required' as const };
+    return { status: 'founders_gate_required' as const, mobileRedirectUri: state.mobileRedirectUri };
   }
   if (enforced) {
-    return { status: 'mfa_required' as const };
+    return { status: 'mfa_required' as const, mobileRedirectUri: state.mobileRedirectUri };
   }
 
   const user = await upsertUserByEmail(normalized, {
@@ -709,6 +806,7 @@ export async function completeOAuthSignIn(input: {
     isVerified: true,
     lastLoginAt: new Date().toISOString(),
   });
+  await provisionPersonalAuthContext(user);
   const tokens = await issueUserTokens(user);
   const alias = user.alias ?? generateAlias(user.key);
   return {
@@ -718,7 +816,53 @@ export async function completeOAuthSignIn(input: {
     alias,
     aliasSlug: user.alias_slug,
     welcomeLine: pickWelcomeLine(user.key, alias),
+    mobileRedirectUri: state.mobileRedirectUri,
   };
+}
+
+function allowedMobileOAuthRedirect(uri: string) {
+  const allowed = [
+    'vorinthexcore://auth/oauth-complete',
+    ...(process.env.MOBILE_OAUTH_REDIRECT_URIS ?? '').split(','),
+  ].map((value) => value.trim()).filter(Boolean);
+  return allowed.includes(uri);
+}
+
+export function mobileOAuthCallbackUri(provider: OAuthProvider) {
+  const origin = process.env.BACKEND_PUBLIC_URL ?? (process.env.NODE_ENV === 'production' ? 'https://vorinthex.com' : 'http://localhost:3001');
+  return new URL(`/api/v1/auth/mobile/oauth/${provider}/callback`, origin).toString();
+}
+
+export async function buildMobileOAuthAuthorizationUrl(provider: OAuthProvider, mobileRedirectUri: string) {
+  if (!allowedMobileOAuthRedirect(mobileRedirectUri)) throw new Error('mobile OAuth redirect is not allowed');
+  const callbackUri = mobileOAuthCallbackUri(provider);
+  return buildOAuthAuthorizationUrl(provider, callbackUri, mobileRedirectUri);
+}
+
+const mobileGrantSchema = z.object({
+  accessToken: z.string().startsWith('vrtx_access_'),
+  refreshToken: z.string().startsWith('vrtx_refresh_'),
+  accessTokenMaxAgeSeconds: z.number().int().nonnegative(),
+  refreshTokenMaxAgeSeconds: z.number().int().nonnegative(),
+  sessionExpiresAt: z.string().datetime(),
+  alias: z.string(),
+  aliasSlug: z.string().nullable(),
+  welcomeLine: z.string(),
+}).strict();
+
+export async function createMobileOAuthGrant(result: z.infer<typeof mobileGrantSchema>) {
+  const code = randomToken('vrtx_mobile_grant_');
+  const key = `auth:mobile-grant:${await sha256(code)}`;
+  const stored = await redisConnection.set(key, JSON.stringify(mobileGrantSchema.parse(result)), 'EX', 120, 'NX');
+  if (stored !== 'OK') throw new Error('mobile OAuth grant unavailable');
+  return code;
+}
+
+export async function exchangeMobileOAuthGrant(code: string) {
+  const key = `auth:mobile-grant:${await sha256(code)}`;
+  const value = await redisConnection.getdel(key);
+  if (!value) return null;
+  return mobileGrantSchema.parse(JSON.parse(value));
 }
 
 async function deliverSignInEmail(input: { email: string; magicLink: string; expiresAt: Date }) {
@@ -765,9 +909,10 @@ async function deliverMemberSignInEmail(input: {
   mfaEnabled: boolean;
   expiresAt: Date;
 }) {
+  const linkMinutes = Math.max(1, Math.round((input.expiresAt.getTime() - Date.now()) / 60_000));
   const mfaBody = input.mfaEnabled
-    ? '<p style="margin:0;">Follow the link below to sign in with your MFA code. For your security, the link expires in 5 minutes.</p>'
-    : '<p style="margin:0;">Follow the link below to set up multi-factor authentication and secure your platform access. For your security, the link expires in 5 minutes.</p>';
+    ? `<p style="margin:0;">Follow the link below to sign in with your MFA code. For your security, the link expires in ${linkMinutes} minutes.</p>`
+    : `<p style="margin:0;">Follow the link below to set up multi-factor authentication and secure your platform access. For your security, the link expires in ${linkMinutes} minutes.</p>`;
   await sendBrandedEmail({
     to: input.email,
     subject: input.mfaEnabled
@@ -970,13 +1115,14 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
     // The tap proves inbox ownership: wake the browser that requested the
     // link, wherever this one happens to be running.
     await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
-    const tokens = await issueUserTokens(user);
     // Signing in proves inbox ownership — it verifies the email too.
     await updateUser(user.key, {
       isVerified: true,
       lastLoginAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    await provisionPersonalAuthContext(user);
+    const tokens = await issueUserTokens(user);
     const alias = user.alias ?? generateAlias(user.key);
     return {
       status: 'authenticated',
@@ -1026,6 +1172,7 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
     lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
+  await provisionPersonalAuthContext({ key: auth.key, name: auth.name, email: auth.email });
   return {
     status: 'authenticated',
     identity: { key: auth.key, identityType: auth.type },
@@ -1171,12 +1318,13 @@ export async function completeTotpSetup(challengeToken: string, codes: [string, 
     lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
+  await provisionPersonalAuthContext({ key: auth.key, name: auth.name, email: auth.email });
   return {
     ok: true as const,
     identity: { key: auth.key, identityType: auth.type },
     name: auth.name,
     organizationTitle: auth.organizationTitle,
-    ...(await issueTokens(auth, undefined, challenge.kind === 'founder_setup')),
+    ...(await issueTokens(auth, undefined, challenge.kind === 'founder_setup', true)),
   };
 }
 
@@ -1212,10 +1360,11 @@ export async function verifyTotpAndIssueSession(challengeToken: string, code: st
     lastLoginAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
+  await provisionPersonalAuthContext({ key: auth.key, name: auth.name, email: auth.email });
   return {
     identity: { key: auth.key, identityType: auth.type },
     name: auth.name,
     organizationTitle: auth.organizationTitle,
-    ...(await issueTokens(auth, undefined, challenge.kind === 'founder_totp')),
+    ...(await issueTokens(auth, undefined, challenge.kind === 'founder_totp', true)),
   };
 }

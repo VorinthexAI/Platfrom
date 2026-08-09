@@ -19,8 +19,8 @@ export function MailIcon({ variant = "default", size = "md", strokeWidth = 1.4 }
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path d="M4.5 6.75h15v10.5h-15z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+      <Path d="m5 7.25 7 5.5 7-5.5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }

@@ -18,6 +18,7 @@
     "mobile:start": "bun run --cwd mobile/app start",
     "submit": "bun run mobile/scripts/submit.ts",
     "mobile:typecheck": "bun run --cwd mobile/app typecheck",
+    "mobile:test": "bun run --cwd mobile/app test",
     "backend:check": "bun run --cwd backend check",
     "backend:test": "bun run --cwd backend test",
     "nodes": "bun run --cwd backend nodes",

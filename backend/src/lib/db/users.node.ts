@@ -33,6 +33,8 @@ export const userSchema = z.object({
   alias: z.string().nullable().default(null),
   alias_slug: z.string().regex(/^[a-z]{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable().default(null),
   isVerified: z.boolean().default(false),
+  isOnboarded: z.boolean().default(false),
+  guestBootstrapSecretHash: z.string().nullable().default(null),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),
@@ -104,6 +106,22 @@ export async function getUserByRefreshTokenHash(refreshTokenHash: string): Promi
   `);
   const doc = await cursor.next();
   return doc ? userSchema.parse(withArangoKey(doc)) : null;
+}
+
+export async function revokeLegacyRefreshToken(userId: string, refreshTokenHash: string, updatedAt: string): Promise<boolean> {
+  const cursor = await db.query(aql`
+    FOR u IN ${db.collection(USERS_COLLECTION)}
+      FILTER u._key == ${userId} && u.refreshTokenHash == ${refreshTokenHash}
+      UPDATE u WITH {
+        refreshTokenHash: null,
+        refreshTokenExpiresAt: null,
+        refreshFounderMembershipKey: null,
+        refreshFounderMfaVersion: null,
+        updatedAt: ${updatedAt}
+      } IN ${db.collection(USERS_COLLECTION)}
+      RETURN NEW
+  `);
+  return Boolean(await cursor.next());
 }
 
 export async function getUserByUpdatesUnsubscribeTokenHash(tokenHash: string): Promise<User | null> {
