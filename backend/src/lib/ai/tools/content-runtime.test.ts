@@ -711,6 +711,21 @@ describe('Content runtime', () => {
     expect(events.every((event: any) => typeof event.invocationKey === 'string')).toBe(true);
   });
 
+  test('generates a bounded autocomplete continuation', async () => {
+    const f = fixture('viewer');
+    let call: { action?: string; input?: any } = {};
+    const output = await runContentTool('autocomplete', { context: 'A private opening thought', wordCount: 3 }, f.context, {
+      repository: f.repository,
+      runAction: async (action, input) => {
+        call = { action, input };
+        return { text: 'continues with useful detail beyond limit' };
+      },
+    });
+    expect(output).toEqual({ completion: 'continues with useful' });
+    expect(call.action).toBe('ask');
+    expect(call.input.options).toMatchObject({ temperature: 0.2, maxTokens: 16 });
+  });
+
   test('executes one authorized valid behavior path for every registered tool', async () => {
     for (const name of CONTENT_TOOL_NAMES) {
       const f = fixture('owner');
@@ -736,7 +751,7 @@ describe('Content runtime', () => {
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
         runAction: async (action: string, input: any) => {
-          if (action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
+          if (action === 'ask' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
           if (action === 'document-generate-html') return documentGenerateHtml(input);
           if (action === 'document-generate-content') return documentGenerateContent(input);
@@ -750,7 +765,8 @@ describe('Content runtime', () => {
         },
       };
       let input: any;
-      if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
+      if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
+      else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
       else if (name === 'folder.find') input = { folderKeys: [f.folderKey] };
       else if (name === 'folder.list') input = { scopeKey: f.scopeKey, parentFolderKey: f.folderKey };
       else if (name === 'folder.update') input = { updates: [{ folderKey: childKey, description: 'Updated' }] };

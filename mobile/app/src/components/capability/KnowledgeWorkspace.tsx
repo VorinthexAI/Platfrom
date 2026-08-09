@@ -8,6 +8,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import {
   ArchiveIcon,
+  CheckIcon,
   ChevronLeftIcon,
   FileIcon,
   FolderIcon,
@@ -20,6 +21,7 @@ import {
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { capabilityIconSource } from "@/data/capability-icons";
 import {
+  autocompleteContent,
   createContentDocument,
   createContentFolder,
   createContentMutationKey,
@@ -46,6 +48,11 @@ type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" |
 const localDraftFile = new File(Paths.document, "knowledge-draft.json");
 const localFoldersFile = new File(Paths.document, "archive-local-folders.json");
 const MAX_MOBILE_UPLOAD_BYTES = 8 * 1024 * 1024;
+const AUTOCOMPLETE_WORD_COUNT = 8;
+
+function lastWords(value: string, count: number) {
+  return value.trim().split(/\s+/).filter(Boolean).slice(-count).join(" ");
+}
 
 export function KnowledgeWorkspace() {
   const navigation = useNavigation();
@@ -60,6 +67,8 @@ export function KnowledgeWorkspace() {
   const [sheetError, setSheetError] = useState<string>();
   const [title, setTitle] = useState("Untitled note");
   const [content, setContent] = useState("");
+  const [completion, setCompletion] = useState("");
+  const [autocompleteRevision, setAutocompleteRevision] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [rootFolders, setRootFolders] = useState<ContentFolder[]>([]);
@@ -89,6 +98,9 @@ export function KnowledgeWorkspace() {
   const navigationGeneration = useRef(0);
   const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const loadedContentContextKey = useRef<string | undefined>(undefined);
+  const selectionRef = useRef({ start: 0, end: 0 });
+  const autocompleteRequest = useRef<AbortController | undefined>(undefined);
+  const autocompleteGeneration = useRef(0);
   const currentFolder = folderStack.at(-1);
   const visibleFolders = rootFolders.filter((folder) => {
     const normalized = libraryQuery.trim().toLowerCase();
@@ -114,13 +126,41 @@ export function KnowledgeWorkspace() {
 
   useEffect(() => () => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
+    autocompleteRequest.current?.abort();
   }, []);
+
+  useEffect(() => {
+    if (!hasContentContext || autocompleteRevision === 0) return;
+    const generation = ++autocompleteGeneration.current;
+    const timeout = setTimeout(() => {
+      const current = contentRef.current;
+      const selection = selectionRef.current;
+      if (!current.trim() || selection.start !== current.length || selection.end !== current.length) return;
+      const context = lastWords(current, 100);
+      if (!context) return;
+      autocompleteRequest.current?.abort();
+      const controller = new AbortController();
+      autocompleteRequest.current = controller;
+      void autocompleteContent(context, AUTOCOMPLETE_WORD_COUNT, controller.signal).then(({ completion: next }) => {
+        if (generation !== autocompleteGeneration.current || controller.signal.aborted || contentRef.current !== current) return;
+        setCompletion(next);
+      }).catch(() => undefined).finally(() => {
+        if (autocompleteRequest.current === controller) autocompleteRequest.current = undefined;
+      });
+    }, 500);
+    return () => {
+      clearTimeout(timeout);
+      autocompleteGeneration.current += 1;
+      autocompleteRequest.current?.abort();
+      autocompleteRequest.current = undefined;
+    };
+  }, [autocompleteRevision, hasContentContext]);
 
   useEffect(() => navigation.addListener("beforeRemove", (event) => {
     if (!hasContentContext || saveState === "saved") return;
     event.preventDefault();
     setError("Wait for the current note to save before leaving.");
-  }), [navigation, saveState]);
+  }), [hasContentContext, navigation, saveState]);
 
   const loadLocation = async (folderKey?: string) => {
     const location = await listContentLocation(folderKey);
@@ -171,6 +211,7 @@ export function KnowledgeWorkspace() {
     const changedAccount = Boolean(loadedContentContextKey.current && loadedContentContextKey.current !== contentContextKey);
     loadedContentContextKey.current = contentContextKey;
     if (changedAccount) {
+      setCompletion("");
       editorSession.current += 1;
       revision.current = 0;
       dirty.current = false;
@@ -283,6 +324,25 @@ export function KnowledgeWorkspace() {
     setSaveState(hasContentContext ? "dirty" : "local");
   };
 
+  const clearCompletion = () => {
+    autocompleteGeneration.current += 1;
+    autocompleteRequest.current?.abort();
+    autocompleteRequest.current = undefined;
+    setCompletion("");
+  };
+
+  const acceptCompletion = () => {
+    if (!completion) return;
+    const separator = /\s$/.test(contentRef.current) || /^[,.;:!?)]/.test(completion) ? "" : " ";
+    const next = `${contentRef.current}${separator}${completion}`;
+    clearCompletion();
+    contentRef.current = next;
+    selectionRef.current = { start: next.length, end: next.length };
+    setContent(next);
+    markDirty();
+    persistLocalDraft(titleRef.current, next);
+  };
+
   const persistLocalDraft = (nextTitle: string, nextContent: string) => {
     if (hasContentContext) return;
     try {
@@ -293,6 +353,7 @@ export function KnowledgeWorkspace() {
   };
 
   const resetEditor = (nextTitle = "Untitled note") => {
+    clearCompletion();
     editorSession.current += 1;
     revision.current = 0;
     dirty.current = false;
@@ -327,6 +388,7 @@ export function KnowledgeWorkspace() {
       reportError("Wait for the current note to save before opening another.");
       return false;
     }
+    clearCompletion();
     const generation = ++navigationGeneration.current;
     setSearching(true);
     setError(undefined);
@@ -334,6 +396,7 @@ export function KnowledgeWorkspace() {
       const document = await readContentDocument(key);
       if (generation !== navigationGeneration.current) return;
       editorSession.current += 1;
+      clearCompletion();
       revision.current = 0;
       dirty.current = false;
       documentKeyRef.current = document.key;
@@ -362,6 +425,7 @@ export function KnowledgeWorkspace() {
       setError("Wait for the current note to save before opening a folder.");
       return;
     }
+    clearCompletion();
     const generation = ++navigationGeneration.current;
     setSearching(true);
     try {
@@ -383,6 +447,7 @@ export function KnowledgeWorkspace() {
       setError("Wait for the current note to save before navigating.");
       return;
     }
+    clearCompletion();
     if (!hasContentContext) {
       setFolders(rootFolders);
       setDocuments([]);
@@ -408,6 +473,7 @@ export function KnowledgeWorkspace() {
   const runSearch = async (searchQuery = query) => {
     const normalized = searchQuery.trim();
     if (!normalized || !hasContentContext) return;
+    clearCompletion();
     setSearching(true);
     setError(undefined);
     try {
@@ -623,15 +689,29 @@ export function KnowledgeWorkspace() {
                     return;
                   }
                   contentRef.current = value;
+                  clearCompletion();
                   setContent(value);
+                  setAutocompleteRevision((current) => current + 1);
                   markDirty();
                   persistLocalDraft(titleRef.current, value);
                 }}
                 placeholder="Start writing from here..."
+                onSelectionChange={(event) => {
+                  selectionRef.current = event.nativeEvent.selection;
+                  if (event.nativeEvent.selection.end !== contentRef.current.length) clearCompletion();
+                }}
                 style={styles.editor}
                 textAlignVertical="top"
                 value={content}
               />
+              {completion ? (
+                <View style={styles.completionRow}>
+                  <Text accessibilityLabel="Suggested continuation" style={styles.completionText}>{completion}</Text>
+                  <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" variant="icon">
+                    <CheckIcon size="sm" />
+                  </Button>
+                </View>
+              ) : null}
               {!content && (folders.length > 0 || documents.length > 0) ? (
                 <View style={styles.locationPreview}>
                   <Text style={styles.eyebrow}>IN THIS LOCATION</Text>
@@ -753,6 +833,8 @@ const styles = StyleSheet.create({
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   titleInput: { minHeight: 58, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28 },
   editor: { minHeight: 270, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
+  completionRow: { minHeight: 42, marginTop: -8, paddingLeft: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderLeftColor: palette.silver500, borderLeftWidth: 1 },
+  completionText: { flex: 1, color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 24 },
   locationPreview: { gap: 4, marginTop: 10 },
   match: { gap: 7, marginBottom: 10, padding: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   searchArea: { marginTop: spacing.md, gap: 8 },

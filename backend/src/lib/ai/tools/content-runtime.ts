@@ -19,7 +19,7 @@ import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
+type Action = 'ask' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -305,7 +305,10 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
       if (action === 'document-generate-html') return processing.documentGenerateHtml(input as never) as Promise<ContentActionResult>;
       if (action === 'document-generate-content') return processing.documentGenerateContent(input as never) as Promise<ContentActionResult>;
       if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
-      const response = await router.executeAction<Record<string, unknown>, ContentActionResult>({ mode: 'auto', organizationKey: context.organizationKey, actionSlug: action as never }, input, deps);
+      const request = action === 'ask'
+        ? { mode: 'model' as const, organizationKey: context.organizationKey, actionSlug: action, modelSlug: 'amazon.nova-lite' as const }
+        : { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
+      const response = await router.executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
       return response.output;
     }),
     idempotency: deps.idempotency ?? {
@@ -709,7 +712,21 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   }
   let result: unknown;
   try {
-    if (tool === 'folder.create') {
+    if (tool === 'autocomplete') {
+      const response = await action('ask', {
+        systemPrompt: `Continue the user's writing with exactly ${input.wordCount} words or fewer. Return only the continuation, without quotation marks, labels, commentary, or repeating the supplied context.`,
+        messages: [{ role: 'user', content: [{ type: 'text', text: input.context }] }],
+        options: { temperature: 0.2, maxTokens: Math.max(16, input.wordCount * 3) },
+      });
+      const completion = z.string().trim().min(1).parse(response.text)
+        .replace(/^(?:continuation\s*:\s*)/i, '')
+        .replace(/^["'\u2018\u2019\u201c\u201d]+|["'\u2018\u2019\u201c\u201d]+$/g, '')
+        .trim()
+        .split(/\s+/)
+        .slice(0, input.wordCount)
+        .join(' ');
+      result = { completion: z.string().min(1).parse(completion) };
+    } else if (tool === 'folder.create') {
       const creates = input.folders.map((item: any) => ({ ...item, key: item.key ?? d.id() }));
       result = await batch(tool, creates.map((item: any) => ({
         key: item.key,

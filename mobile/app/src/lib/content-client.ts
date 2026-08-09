@@ -62,7 +62,7 @@ export function createContentMutationKey() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-async function callContentTool<T>(tool: string, input: Record<string, unknown>): Promise<T> {
+async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const contentContext = getContentContext();
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   try {
@@ -70,7 +70,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>):
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    }, { timeout: tool === "document.parse" ? 5 * 60_000 : 60_000 });
+    }, { signal, timeout: tool === "document.parse" ? 5 * 60_000 : tool === "autocomplete" ? 15_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -78,6 +78,10 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>):
     if (failure && !failure.success) throw new Error(failure.error.message);
     throw error;
   }
+}
+
+export function autocompleteContent(context: string, wordCount: number, signal?: AbortSignal) {
+  return callContentTool<{ completion: string }>("autocomplete", { context, wordCount }, signal);
 }
 
 export async function listContentLocation(folderKey?: string) {
