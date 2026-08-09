@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { KnowledgeWorkspace } from "@/components/knowledge/KnowledgeWorkspace";
+import { CorePage } from "@/components/core/CorePage";
 import { PricingPage } from "@/components/pricing/PricingPage";
 import { CORE_CAPABILITIES } from "@/lib/discoverability";
 import {
@@ -11,17 +11,16 @@ import {
   formatUsd,
 } from "@/lib/spark-pricing";
 
-test("renders the knowledge workspace and complete Core app selector", () => {
-  const capabilities = CORE_CAPABILITIES.map(({ id, name, icon, description }) => ({ id, name, icon, description }));
-  const html = renderToStaticMarkup(<KnowledgeWorkspace capabilities={capabilities} />);
+test("renders the download action and immersive Core app journey", () => {
+  const html = renderToStaticMarkup(<CorePage />);
 
-  expect(html).toContain("Start writing from here...");
-  expect(html).toContain("Search by what you remember...");
-  expect(html).toContain("Create or upload");
-  expect(html).toContain(`<h1>${CORE_CAPABILITIES[0].name}</h1>`);
-  for (const capability of CORE_CAPABILITIES) expect(html).toContain(capability.name);
-  expect(html).toContain('aria-label="Previous app"');
-  expect(html).toContain('aria-label="Next app"');
+  expect(html).toContain("Download app");
+  expect(html).not.toMatch(/pre-launch|in development|not purchasable/i);
+  for (const capability of CORE_CAPABILITIES) {
+    expect(html).toContain(`id="${capability.id}"`);
+    expect(html).toContain(capability.promise);
+    for (const paragraph of capability.details) expect(html).toContain(paragraph);
+  }
 });
 
 test("renders every pricing amount with a local-tax disclaimer", () => {
