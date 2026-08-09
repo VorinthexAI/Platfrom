@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { ACTION_SLUGS } from '@/lib/ai/actions';
+import { ACTION_DEFINITIONS, ACTION_SLUGS } from '@/lib/ai/actions';
 import { PROVIDER_SLUGS } from '@/lib/ai/providers';
+import { EMBEDDING_MODEL, EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
 import { actionSchema } from './actions.node';
 import { providerSchema } from './providers.node';
 import { voiceSchema } from './voices.node';
@@ -139,6 +140,33 @@ describe('model and routing relation seeds', () => {
       'aws.transcribe-standard:aws-transcribe:standard:true',
     ]);
     expect(SEEDED_MODEL_PROVIDERS.filter((route) => route.modelSlug.includes('embedding')).map((route) => route.modelSlug)).toEqual(['qwen.qwen3-embedding-8b']);
+  });
+
+  test('joins every action binding to its declared provider route', () => {
+    for (const definition of ACTION_DEFINITIONS) {
+      const seededBindings = SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === definition.id);
+      expect(seededBindings.map(({ modelSlug, priority }) => ({ model: modelSlug, priority })), definition.id)
+        .toEqual(definition.models.map(({ model, priority }) => ({ model, priority })));
+      for (const binding of definition.models) {
+        expect(SEEDED_MODEL_PROVIDERS.find((route) => route.modelSlug === binding.model && route.providerSlug === binding.provider), `${definition.id} -> ${binding.model} -> ${binding.provider}`).toBeDefined();
+      }
+    }
+  });
+
+  test('pins the complete Archive provider chain', () => {
+    const archiveRoutes = [
+      ['ask', 'amazon.nova-lite', 'aws-bedrock', 'us.amazon.nova-lite-v1:0'],
+      ['enhance', 'amazon.nova-lite', 'aws-bedrock', 'us.amazon.nova-lite-v1:0'],
+      ['translate', 'amazon.nova-lite', 'aws-bedrock', 'us.amazon.nova-lite-v1:0'],
+      ['reason', 'amazon.nova-pro', 'aws-bedrock', 'us.amazon.nova-pro-v1:0'],
+      ['deep-reason', 'amazon.nova-pro', 'aws-bedrock', 'us.amazon.nova-pro-v1:0'],
+      ['speak', 'openai.gpt-realtime-2', 'openai', 'gpt-realtime-2'],
+      ['embed', EMBEDDING_MODEL, 'openrouter', EXTERNAL_EMBEDDING_MODEL_ID],
+    ] as const;
+    for (const [actionSlug, modelSlug, providerSlug, providerModelId] of archiveRoutes) {
+      expect(SEEDED_MODEL_ACTIONS.find((binding) => binding.actionSlug === actionSlug && binding.modelSlug === modelSlug), `${actionSlug} action binding`).toBeDefined();
+      expect(SEEDED_MODEL_PROVIDERS.find((route) => route.modelSlug === modelSlug && route.providerSlug === providerSlug && route.providerModelId === providerModelId && route.enabled), `${actionSlug} provider route`).toBeDefined();
+    }
   });
 });
 

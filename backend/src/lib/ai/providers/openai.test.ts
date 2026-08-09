@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createOpenAIProvider } from './openai';
 import { LEGACY_EMBEDDING_DIMENSIONS, LEGACY_EXTERNAL_EMBEDDING_MODEL_ID } from '@/lib/embedding-constants';
+import { speechInputSchema } from './types';
 
 const originalFetch = globalThis.fetch;
 
@@ -62,6 +63,11 @@ describe('OpenAI provider transcription', () => {
 });
 
 describe('OpenAI Realtime provider', () => {
+  test('accepts the complete Archive speech action contract', () => {
+    expect(speechInputSchema.parse({ text: 'Read this', voice: 'marin', format: 'wav', language: 'English', speakingRate: 1.25 }))
+      .toEqual({ text: 'Read this', voice: 'marin', format: 'wav', language: 'English', speakingRate: 1.25 });
+  });
+
   test('uses Realtime 2 for chat, transcription, and speech', async () => {
     const source = await Bun.file(new URL('./openai.ts', import.meta.url)).text();
     expect(source).toContain("OPENAI_REALTIME_MODEL = 'gpt-realtime-2'");

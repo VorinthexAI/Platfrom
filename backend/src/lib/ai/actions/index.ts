@@ -100,4 +100,12 @@ export function assertActionRegistryIntegrity(): void {
       throw new Error(`Action slug does not follow lowercase dot notation: ${slug}`);
     }
   }
+  const definitions = new Map(ACTION_DEFINITIONS.map((definition) => [definition.id, definition]));
+  if (definitions.size !== ACTION_DEFINITIONS.length || ACTION_SLUGS.some((slug) => !definitions.has(slug))) {
+    throw new Error('ACTION_SLUGS and ACTION_DEFINITIONS must define the same unique actions');
+  }
+  for (const definition of ACTION_DEFINITIONS) {
+    if (definition.modelPolicy === 'none' && definition.models.length > 0) throw new Error(`${definition.id} cannot bind models with modelPolicy none`);
+    if (definition.modelPolicy === 'required' && definition.models.length === 0) throw new Error(`${definition.id} requires at least one model binding`);
+  }
 }

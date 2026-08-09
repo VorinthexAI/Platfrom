@@ -74,12 +74,13 @@ export interface ContentSearchQueryStore {
   list(input: { actorKey: string; scopeKey: string; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number }>>;
 }
 
-export interface ContentActionResult { text?: string; audio?: Uint8Array; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
+export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
 export interface ContentToolDependencies extends RouterDependencies {
   repository?: ContentRepository;
   storage?: DocumentObjectStorage;
   parseDocument?: (input: DocumentParseInput, dependencies?: DocumentParseDependencies) => Promise<{ document: Document }>;
   runAction?: (action: Action, input: Record<string, unknown>, context: DomainToolContext) => Promise<ContentActionResult>;
+  executeAction?: typeof import('@/lib/ai/router').executeAction;
   embed?: (text: string) => Promise<number[]>;
   embedBatch?: (texts: string[]) => Promise<number[][]>;
   observer?: (event: SafeEvent) => void | Promise<void>;
@@ -97,6 +98,7 @@ export interface ContentToolDependencies extends RouterDependencies {
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
+const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
   'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
@@ -290,12 +292,26 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     import('@/lib/db/content-idempotency.node'),
     import('@/lib/ai/document-processing/exports'),
   ]);
-  const embedding = deps.embed ? (text: string) => deps.embed!(text) : (text: string, purpose: 'document' | 'query' = 'document') => embeddings.embedText({ text, purpose });
+  const executeAction = deps.executeAction ?? router.executeAction;
+  const embedding = deps.embed ? (text: string) => deps.embed!(text) : async (text: string, purpose: 'document' | 'query' = 'document') => {
+    const response = await executeAction<Record<string, unknown>, ContentActionResult>(
+      { mode: 'auto', organizationKey: context.organizationKey, actionSlug: 'embed' },
+      { text: embeddings.prepareEmbeddingText(text, purpose) },
+      deps,
+    );
+    return z.array(z.number().finite()).length(EMBEDDING_DIMENSIONS).parse(response.output.embedding);
+  };
   const embeddingBatch = deps.embedBatch
     ? (texts: string[]) => deps.embedBatch!(texts)
     : deps.embed
       ? (texts: string[]) => Promise.all(texts.map((text) => deps.embed!(text)))
-      : (texts: string[], purpose: 'document' | 'query' = 'document') => embeddings.embedTexts({ texts, purpose });
+      : async (texts: string[], purpose: 'document' | 'query' = 'document') => {
+        const values: number[][] = [];
+        for (let start = 0; start < texts.length; start += ROUTED_EMBEDDING_CONCURRENCY) {
+          values.push(...await Promise.all(texts.slice(start, start + ROUTED_EMBEDDING_CONCURRENCY).map((text) => embedding(text, purpose))));
+        }
+        return values;
+      };
   return {
     repository: deps.repository ?? await productionRepository(), storage: deps.storage ?? storage.documentStorage,
     parseDocument: deps.parseDocument ?? processing.parseDocument, id: deps.id ?? newId, clock: deps.clock ?? (() => new Date()), random: deps.random ?? randomBytes,
@@ -305,10 +321,8 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
       if (action === 'document-generate-html') return processing.documentGenerateHtml(input as never) as Promise<ContentActionResult>;
       if (action === 'document-generate-content') return processing.documentGenerateContent(input as never) as Promise<ContentActionResult>;
       if (action === 'document-embed') return processing.documentEmbed(input as never, { embedBatch: ({ texts }) => embeddingBatch(texts), dimensions: deps.ingestion?.embeddingDimensions }) as Promise<ContentActionResult>;
-      const request = action === 'ask'
-        ? { mode: 'model' as const, organizationKey: context.organizationKey, actionSlug: action, modelSlug: 'amazon.nova-lite' as const }
-        : { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
-      const response = await router.executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
+      const request = { mode: 'auto' as const, organizationKey: context.organizationKey, actionSlug: action };
+      const response = await executeAction<Record<string, unknown>, ContentActionResult>(request, input, deps);
       return response.output;
     }),
     idempotency: deps.idempotency ?? {
@@ -604,7 +618,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   };
   const generated = async (doc: Document, instruction: string, deep = false) => {
     const slug = deep ? 'deep-reason' : 'reason';
-    const output = await action(slug, { instruction, content: doc.content, title: doc.name }, doc.key, doc.scopeKey);
+    const output = await action(slug, {
+      systemPrompt: `${instruction} Use only the supplied document. Preserve its facts and return only the requested text without commentary.`,
+      messages: [{ role: 'user', content: [{ type: 'text', text: `Title: ${doc.name}\n\n${doc.content}` }] }],
+      options: { temperature: 0.2, maxTokens: Math.min(5_000, Math.max(256, Math.ceil(doc.content.length / 3))) },
+    }, doc.key, doc.scopeKey);
     if (!output.text?.trim()) fail('CONTENT_CONFLICT', 'The generation action returned invalid output.', tool, slug, doc.key);
     return output.text.trim();
   };
@@ -1006,6 +1024,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       } : input;
       const processed = await d.parseDocument(processingInput, {
         ...dependencies.ingestion,
+        ...(!dependencies.ingestion?.embed && !dependencies.ingestion?.embedBatch ? {
+          embedBatch: ({ texts, purpose = 'document' }) => d.embedBatch(texts, purpose),
+        } : {}),
         storage: d.storage,
         logger(processingEvent) {
           processingLogger?.(processingEvent);
@@ -1086,8 +1107,16 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             for (let index = 0; index < chunks.length; index += 1) {
               const chunk = chunks[index]!;
-              const spoken = await action('speak', { text: chunk.text, language: input.language, voice: input.voice, speakingRate: input.speakingRate }, key, current.scopeKey);
-              const bytes = z.instanceof(Uint8Array).parse(spoken.audio);
+              const spoken = await action('speak', {
+                text: chunk.text,
+                ...(input.language ? { language: input.language } : {}),
+                ...(input.voice ? { voice: input.voice } : {}),
+                ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
+                format: 'wav',
+              }, key, current.scopeKey);
+              const bytes = spoken.audio
+                ? z.instanceof(Uint8Array).parse(spoken.audio)
+                : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
               const mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
               const item = {
                 index,
@@ -1573,8 +1602,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         const sourceDocuments = [];
         for (const key of input.documentKeys) sourceDocuments.push(await document(key, input.persist ? 'moderator' : 'viewer', false));
         const synthesis = await action('deep-reason', {
-          instruction: `Synthesize one ${input.style ?? 'brief'} summary${input.language ? ` in ${input.language}` : ''} across all supplied documents.`,
-          documents: sourceDocuments.map((item) => ({ title: item.name, content: item.content })),
+          systemPrompt: `Synthesize one ${input.style ?? 'brief'} summary${input.language ? ` in ${input.language}` : ''} across all supplied documents. Use only their content, preserve their facts, and return only the summary without commentary.`,
+          messages: [{ role: 'user', content: [{ type: 'text', text: sourceDocuments.map((item) => `Title: ${item.name}\n\n${item.content}`).join('\n\n---\n\n') }] }],
+          options: { temperature: 0.2, maxTokens: 5_000 },
         }, sourceDocuments[0]!.key, sourceDocuments[0]!.scopeKey);
         const text = z.string().trim().min(1).parse(synthesis.text);
         const persistedDocumentKey = input.persist ? await persistGenerated(sourceDocuments[0]!, text, 'copy', 'combined summary') : undefined;
@@ -1670,9 +1700,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           let summary: string;
           try {
             const generatedSummary = await action('reason', {
-              instruction: `Summarize only how this document relates to the search query: ${input.query}`,
-              title: current.name,
-              content: (matchedContent ?? current.content).slice(0, 16_000),
+              systemPrompt: 'Summarize only how the supplied document relates to the search query. Use only the supplied text and return only the concise summary without commentary.',
+              messages: [{ role: 'user', content: [{ type: 'text', text: `Search query: ${input.query}\n\nTitle: ${current.name}\n\n${(matchedContent ?? current.content).slice(0, 16_000)}` }] }],
+              options: { temperature: 0.1, maxTokens: 300 },
             }, current.key, current.scopeKey);
             summary = z.string().trim().min(1).parse(generatedSummary.text);
           } catch {

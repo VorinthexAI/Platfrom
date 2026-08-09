@@ -193,6 +193,8 @@ export const speechInputSchema = z
     text: z.string().min(1),
     voice: z.string().default('alloy'),
     format: z.enum(['mp3', 'wav']).default('mp3'),
+    language: z.string().trim().min(1).max(120).optional(),
+    speakingRate: z.number().min(0.25).max(4).optional(),
   })
   .strict();
 

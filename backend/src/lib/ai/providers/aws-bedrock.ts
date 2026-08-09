@@ -86,7 +86,13 @@ async function embed(config: AwsBedrockProviderConfig, request: ProviderEmbedReq
 }
 
 export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConfig>, env?: AwsCredentialEnvironment, createStreamClient?: BedrockStreamClientFactory): ProviderAdapter {
-  const parsed = resolveAwsCredentials(config, env);
+  const source = env ?? process.env;
+  const parsed = resolveAwsCredentials(config, {
+    ...source,
+    AWS_REGION: source.BEDROCK_REGION ?? source.AWS_REGION,
+    AWS_ACCESS_KEY_ID: source.BEDROCK_AWS_ACCESS_KEY_ID ?? source.AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: source.BEDROCK_AWS_SECRET_ACCESS_KEY ?? source.AWS_SECRET_ACCESS_KEY,
+  });
   const streamClientFactory = createStreamClient ?? ((requestTimeout) => new BedrockRuntimeClient({
     region: parsed.region,
     credentials: { accessKeyId: parsed.accessKeyId, secretAccessKey: parsed.secretAccessKey },
