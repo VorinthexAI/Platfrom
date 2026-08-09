@@ -1,16 +1,15 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
 import type { ComponentType } from "react";
 
-import { ArchiveContent } from "@/components/capability/ArchiveContent";
 import { AscendContent } from "@/components/capability/AscendContent";
 import { CapabilityShell } from "@/components/capability/CapabilityShell";
 import { CompassContent } from "@/components/capability/CompassContent";
 import { GalleryContent } from "@/components/capability/GalleryContent";
+import { KnowledgeWorkspace } from "@/components/capability/KnowledgeWorkspace";
 import { SignalContent } from "@/components/capability/SignalContent";
 import { capabilitySlugSchema, getCapability, type CapabilitySlug } from "@/data/registry";
 
-const CONTENT_BY_SLUG: Record<CapabilitySlug, ComponentType> = {
-  archive: ArchiveContent,
+const CONTENT_BY_SLUG: Record<Exclude<CapabilitySlug, "archive">, ComponentType> = {
   gallery: GalleryContent,
   signal: SignalContent,
   compass: CompassContent,
@@ -26,6 +25,7 @@ export default function CapabilityRoute() {
   }
 
   const capability = getCapability(parsed.data);
+  if (parsed.data === "archive") return <KnowledgeWorkspace />;
   const Content = CONTENT_BY_SLUG[parsed.data];
 
   return (

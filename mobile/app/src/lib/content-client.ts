@@ -1,4 +1,4 @@
-import { apiClient } from "@vorinthex/shared/lib/api-client";
+import { apiClient } from "./api-client";
 
 export type ContentContext = {
   organizationKey: string;
@@ -8,59 +8,57 @@ export type ContentContext = {
 
 export type ContentFolder = {
   key: string;
-  scopeKey: string;
-  parentFolderKey?: string;
   name: string;
   description?: string;
-  childrenCount?: number;
-  documentCount?: number;
 };
 
 export type ContentDocument = {
   key: string;
-  scopeKey: string;
-  folderKey?: string;
   name: string;
-  extension?: string;
   updatedAt: string;
 };
 
-export type SearchResponse = {
+export type ContentSearchResponse = {
   query: string;
   cached: boolean;
-  folders: Array<ContentFolder & { score: number }>;
-  documents: Array<{
+  folders: (ContentFolder & { score: number })[];
+  documents: {
     documentKey: string;
-    scopeKey: string;
-    folderKey?: string;
     name: string;
     score: number;
     summary: string;
-  }>;
+  }[];
 };
 
-export type SearchHistoryItem = {
+export type ContentSearchHistoryItem = {
   query: string;
   normalizedQuery: string;
   searchedAt: string;
-  count: number;
 };
 
 type ToolResponse<T> =
   | { success: true; data: T }
-  | { success: false; error: { code: string; message: string } };
+  | { success: false; error: { message: string } };
 
 export const contentContext: ContentContext = {
-  organizationKey: process.env.NEXT_PUBLIC_CONTENT_ORGANIZATION_KEY ?? "",
-  agentKey: process.env.NEXT_PUBLIC_CONTENT_AGENT_KEY ?? "",
-  scopeKey: process.env.NEXT_PUBLIC_CONTENT_SCOPE_KEY ?? "",
+  organizationKey: process.env.EXPO_PUBLIC_CONTENT_ORGANIZATION_KEY ?? "",
+  agentKey: process.env.EXPO_PUBLIC_CONTENT_AGENT_KEY ?? "",
+  scopeKey: process.env.EXPO_PUBLIC_CONTENT_SCOPE_KEY ?? "",
 };
 
-export const hasContentContext = Object.values(contentContext).every(Boolean);
+export function isContentContextConfigured(context: ContentContext) {
+  return Object.values(context).every((value) => value.trim().length > 0);
+}
+
+export const hasContentContext = isContentContextConfigured(contentContext);
+
+export function createContentMutationKey() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 async function callContentTool<T>(tool: string, input: Record<string, unknown>): Promise<T> {
   try {
-    const response = await apiClient.post<ToolResponse<T>>(`/content/tools/${tool}`, {
+    const response = await apiClient.post<ToolResponse<T>>(`/api/v1/content/tools/${tool}`, {
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
@@ -74,7 +72,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>):
   }
 }
 
-export async function listLocation(folderKey?: string) {
+export async function listContentLocation(folderKey?: string) {
   const location = folderKey ? { folderKey } : {};
   const [folderData, documentData] = await Promise.all([
     callContentTool<{ folders: ContentFolder[] }>("folder.list", {
@@ -93,74 +91,65 @@ export async function listLocation(folderKey?: string) {
   return { folders: folderData.folders, documents: documentData.documents };
 }
 
-export async function readDocument(documentKey: string) {
+export async function readContentDocument(documentKey: string) {
   const data = await callContentTool<{
-    results: Array<{ success: boolean; data?: { document: ContentDocument & { content?: string } } }>;
+    results: { success: boolean; data?: { document: ContentDocument & { content?: string } } }[];
   }>("document.find", { documentKeys: [documentKey], include: ["content"] });
-  const result = data.results[0];
-  if (!result?.success || !result.data?.document.content) throw new Error("Documentet kunde inte lasas.");
-  return { ...result.data.document, content: result.data.document.content };
+  const document = data.results[0]?.data?.document;
+  if (!document || document.content === undefined) throw new Error("The note could not be opened.");
+  return { ...document, content: document.content };
 }
 
-export async function createDocument(name: string, content: string, folderKey?: string) {
+export async function createContentDocument(name: string, content: string, folderKey?: string, mutationKey = createContentMutationKey()) {
   const data = await callContentTool<{ document: ContentDocument }>("document.create", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     name,
     representation: { content },
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: mutationKey,
   });
   return data.document;
 }
 
-export async function saveDocument(documentKey: string, content: string, expectedUpdatedAt: string) {
+export async function saveContentDocument(documentKey: string, content: string, expectedUpdatedAt: string) {
   const data = await callContentTool<{
-    results: Array<{ success: boolean; data?: { document: ContentDocument }; error?: { message: string } }>;
+    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
   }>("document.update", {
     updates: [{ documentKey, content, createVersion: false, expectedUpdatedAt }],
     atomic: false,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: createContentMutationKey(),
   });
   const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Dokumentet kunde inte sparas.");
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The note could not be saved.");
   return result.data.document;
 }
 
-export async function renameDocument(documentKey: string, name: string) {
+export async function renameContentDocument(documentKey: string, name: string) {
   const data = await callContentTool<{
-    results: Array<{ success: boolean; data?: { document: ContentDocument }; error?: { message: string } }>;
+    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
   }>("document.rename", {
     renames: [{ documentKey, name }],
     atomic: false,
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: createContentMutationKey(),
   });
   const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Dokumentet kunde inte byta namn.");
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The note could not be renamed.");
   return result.data.document;
 }
 
-export async function createFolder(name: string, parentFolderKey?: string) {
+export async function createContentFolder(name: string, parentFolderKey?: string) {
   const data = await callContentTool<{
-    results: Array<{ success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }>;
+    results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
   }>("folder.create", {
     folders: [{ scopeKey: contentContext.scopeKey, parentFolderKey, name }],
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: createContentMutationKey(),
   });
   const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Mappen kunde inte skapas.");
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder could not be created.");
   return result.data.folder;
 }
 
-function bytesToBase64(bytes: Uint8Array) {
-  let binary = "";
-  const blockSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += blockSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
-  }
-  return btoa(binary);
-}
-
-export async function uploadDocument(file: File, folderKey?: string) {
+export function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string) {
   return callContentTool<{ document: ContentDocument }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
@@ -169,24 +158,24 @@ export async function uploadDocument(file: File, folderKey?: string) {
       mimeType: file.type || "application/octet-stream",
       sizeBytes: file.size,
       encoding: "base64",
-      content: bytesToBase64(new Uint8Array(await file.arrayBuffer())),
+      content: file.base64,
     },
-    idempotencyKey: crypto.randomUUID(),
+    idempotencyKey: createContentMutationKey(),
   });
 }
 
 export function searchContent(query: string) {
-  return callContentTool<SearchResponse>("scope.content.search", {
+  return callContentTool<ContentSearchResponse>("scope.content.search", {
     scopeKey: contentContext.scopeKey,
     query,
     minimumScore: 0.55,
   });
 }
 
-export async function listSearchHistory() {
-  const data = await callContentTool<{ history: SearchHistoryItem[] }>("scope.content.search-history", {
+export async function listContentSearchHistory() {
+  const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
     scopeKey: contentContext.scopeKey,
-    limit: 12,
+    limit: 8,
   });
   return data.history;
 }

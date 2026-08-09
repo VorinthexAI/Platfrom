@@ -23,6 +23,10 @@
       "react-native": "./packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx",
       "default": "./packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"
     },
+    "./ui/text-input": {
+      "react-native": "./packages/ui/components/text-input/text-input.mobile.tsx",
+      "default": "./packages/ui/components/text-input/text-input.web.tsx"
+    },
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
     "./ui/icons-mobile": "./packages/ui/icons-mobile.ts",

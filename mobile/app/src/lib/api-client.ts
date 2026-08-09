@@ -11,6 +11,7 @@ const requestSessions = new WeakMap<object, { generation: number; authenticated:
 export const apiClient: AxiosInstance = create({
   baseURL: `${API_BASE_URL.replace(/\/$/, "")}/api/v1`,
   timeout: 15_000,
+  withCredentials: true,
   headers: {
     "Content-Type": "application/json",
     "X-Vorinthex-Session-Transport": "header",
