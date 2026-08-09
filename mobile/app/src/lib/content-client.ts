@@ -74,21 +74,40 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>):
 
 export async function listContentLocation(folderKey?: string) {
   const location = folderKey ? { folderKey } : {};
-  const [folderData, documentData] = await Promise.all([
-    callContentTool<{ folders: ContentFolder[] }>("folder.list", {
-      scopeKey: contentContext.scopeKey,
-      parentFolderKey: folderKey,
-      limit: 100,
-      sort: { field: "name", direction: "asc" },
-    }),
-    callContentTool<{ documents: ContentDocument[] }>("document.list", {
-      scopeKey: contentContext.scopeKey,
-      ...location,
-      limit: 100,
-      sort: { field: "updatedAt", direction: "desc" },
-    }),
-  ]);
-  return { folders: folderData.folders, documents: documentData.documents };
+  const listFolders = async () => {
+    const folders: ContentFolder[] = [];
+    let cursor: string | undefined;
+    do {
+      const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
+        scopeKey: contentContext.scopeKey,
+        parentFolderKey: folderKey,
+        cursor,
+        limit: 100,
+        sort: { field: "name", direction: "asc" },
+      });
+      folders.push(...data.folders);
+      cursor = data.cursor;
+    } while (cursor);
+    return folders;
+  };
+  const listDocuments = async () => {
+    const documents: ContentDocument[] = [];
+    let cursor: string | undefined;
+    do {
+      const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
+        scopeKey: contentContext.scopeKey,
+        ...location,
+        cursor,
+        limit: 100,
+        sort: { field: "updatedAt", direction: "desc" },
+      });
+      documents.push(...data.documents);
+      cursor = data.cursor;
+    } while (cursor);
+    return documents;
+  };
+  const [folders, documents] = await Promise.all([listFolders(), listDocuments()]);
+  return { folders, documents };
 }
 
 export async function readContentDocument(documentKey: string) {

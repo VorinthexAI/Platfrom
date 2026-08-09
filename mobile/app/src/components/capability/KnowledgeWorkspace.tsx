@@ -14,7 +14,6 @@ import {
   PlusIcon,
   SearchIcon,
   SendIcon,
-  SwapIcon,
   UploadIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
@@ -40,7 +39,7 @@ import {
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
-type ArchiveSheet = "create" | "document" | "folder" | "folders";
+type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" | "folders";
 
 const localDraftFile = new File(Paths.document, "knowledge-draft.json");
 const localFoldersFile = new File(Paths.document, "archive-local-folders.json");
@@ -58,6 +57,7 @@ export function KnowledgeWorkspace() {
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [rootFolders, setRootFolders] = useState<ContentFolder[]>([]);
   const [documents, setDocuments] = useState<ContentDocument[]>([]);
+  const [rootDocuments, setRootDocuments] = useState<ContentDocument[]>([]);
   const [folderStack, setFolderStack] = useState<ContentFolder[]>([]);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -66,7 +66,7 @@ export function KnowledgeWorkspace() {
   const [matchSummary, setMatchSummary] = useState<string>();
   const [folderName, setFolderName] = useState("");
   const [documentName, setDocumentName] = useState("");
-  const [folderQuery, setFolderQuery] = useState("");
+  const [libraryQuery, setLibraryQuery] = useState("");
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
   const revision = useRef(0);
@@ -83,9 +83,13 @@ export function KnowledgeWorkspace() {
   const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const currentFolder = folderStack.at(-1);
   const visibleFolders = rootFolders.filter((folder) => {
-    const normalized = folderQuery.trim().toLowerCase();
+    const normalized = libraryQuery.trim().toLowerCase();
     return !normalized || folder.name.toLowerCase().includes(normalized) || folder.description?.toLowerCase().includes(normalized);
   });
+  const visibleDocuments = rootDocuments.filter((document) => (
+    !libraryQuery.trim() || document.name.toLowerCase().includes(libraryQuery.trim().toLowerCase())
+  ));
+  const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
 
   const openSheet = (sheet: ArchiveSheet) => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
@@ -113,7 +117,10 @@ export function KnowledgeWorkspace() {
   const loadLocation = async (folderKey?: string) => {
     const location = await listContentLocation(folderKey);
     setFolders(location.folders);
-    if (!folderKey) setRootFolders(location.folders);
+    if (!folderKey) {
+      setRootFolders(location.folders);
+      setRootDocuments(location.documents);
+    }
     setDocuments(location.documents);
   };
 
@@ -154,6 +161,7 @@ export function KnowledgeWorkspace() {
         setFolders(location.folders);
         setRootFolders(location.folders);
         setDocuments(location.documents);
+        setRootDocuments(location.documents);
         setHistory(recent);
       })
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Knowledge could not connect."));
@@ -274,11 +282,11 @@ export function KnowledgeWorkspace() {
     return true;
   };
 
-  const openDocument = async (key: string, summary?: string) => {
-    if (!hasContentContext) return;
+  const openDocument = async (key: string, summary?: string, reportError = setError) => {
+    if (!hasContentContext) return false;
     if (hasContentContext && (dirty.current || saveInFlight.current)) {
-      setError("Wait for the current note to save before opening another.");
-      return;
+      reportError("Wait for the current note to save before opening another.");
+      return false;
     }
     const generation = ++navigationGeneration.current;
     setSearching(true);
@@ -300,8 +308,10 @@ export function KnowledgeWorkspace() {
       setMatchSummary(summary);
       setResults(undefined);
       setSaveState("saved");
+      return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The note could not be opened.");
+      reportError(cause instanceof Error ? cause.message : "The note could not be opened.");
+      return false;
     } finally {
       if (generation === navigationGeneration.current) setSearching(false);
     }
@@ -381,7 +391,7 @@ export function KnowledgeWorkspace() {
         setSheetError("Nested local folders require a connected Archive.");
         return;
       }
-      const folder = { key: `local-folder-${Date.now()}`, name };
+      const folder = { key: `local-folder-${createContentMutationKey()}`, name };
       const nextFolders = [...rootFolders, folder];
       try {
         localFoldersFile.write(JSON.stringify({ folders: nextFolders }));
@@ -425,6 +435,7 @@ export function KnowledgeWorkspace() {
         setFolders(location.folders);
         setRootFolders(location.folders);
         setDocuments(location.documents);
+        setRootDocuments(location.documents);
       } else {
         setFolders(rootFolders);
         setDocuments([]);
@@ -466,6 +477,15 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const selectDocument = async (document: ContentDocument) => {
+    if (await openDocument(document.key, undefined, setSheetError)) {
+      setFolderStack([]);
+      setFolders(rootFolders);
+      setDocuments(rootDocuments);
+      closeSheet();
+    }
+  };
+
   const uploadDocument = async () => {
     try {
       const picked = await File.pickFileAsync({ mimeTypes: ["text/plain", "text/markdown", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] });
@@ -504,8 +524,8 @@ export function KnowledgeWorkspace() {
           <View style={styles.metaRow}>
             <Text style={styles.meta}>CREATE NOTE</Text>
             <View style={styles.noteActions}>
-              <Button accessibilityLabel="Change Archive folder" contentMode="raw" onPress={() => openSheet("folders")} size="sm" variant="icon">
-                <SwapIcon size="sm" />
+              <Button accessibilityLabel="Browse Archive" contentMode="raw" onPress={() => openSheet("library")} size="sm" variant="icon">
+                <FileIcon size="sm" />
               </Button>
               <Button accessibilityLabel="Create in Archive" contentMode="raw" onPress={() => openSheet("create")} size="sm" variant="icon">
                 <PlusIcon size="sm" />
@@ -610,8 +630,8 @@ export function KnowledgeWorkspace() {
         description={activeSheet === "create" ? "Add something to your current Archive folder." : undefined}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "document" || activeSheet === "folder" || activeSheet === "folders"}
-        title={activeSheet === "document" ? "Create document" : activeSheet === "folder" ? "Create folder" : activeSheet === "folders" ? "Change folder" : "Create in Archive"}
+        tall={activeSheet !== "create"}
+        title={activeSheet === "document" ? "Create document" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : "Create in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
@@ -633,21 +653,45 @@ export function KnowledgeWorkspace() {
             <Button disabled={!documentName.trim()} onPress={submitDocument} size="md" variant="primary">Create document</Button>
           </View>
         ) : null}
+        {activeSheet === "library" ? (
+          <View style={styles.libraryChoices}>
+            <Button icon={<FileIcon size="lg" />} onPress={() => { setLibraryQuery(""); setActiveSheet("documents"); }} size="lg" style={styles.libraryChoice} variant="secondary">Documents</Button>
+            <Button icon={<FolderIcon size="lg" />} onPress={() => { setLibraryQuery(""); setActiveSheet("folders"); }} size="lg" style={styles.libraryChoice} variant="secondary">Folders</Button>
+          </View>
+        ) : null}
         {activeSheet === "folders" ? (
           <>
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <View style={styles.folderSearch}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel="Search Archive folders" onChangeText={setFolderQuery} placeholder="Search folders" style={styles.folderSearchInput} value={folderQuery} />
+              <TextInput accessibilityLabel="Search Archive folders" onChangeText={setLibraryQuery} placeholder="Search folders" style={styles.folderSearchInput} value={libraryQuery} />
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
-              <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button>
+              {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
               {visibleFolders.map((folder) => (
                 <Button icon={<FolderIcon size="md" />} key={folder.key} onPress={() => void selectFolder(folder)} size="lg" style={styles.folderTile} variant="secondary">
                   {folder.name}
                 </Button>
               ))}
             </ScrollView>
-            {visibleFolders.length === 0 ? <Text style={styles.empty}>No folders match this search.</Text> : null}
+            {visibleFolders.length === 0 && !showArchiveRoot ? <Text style={styles.empty}>No folders match this search.</Text> : null}
+          </>
+        ) : null}
+        {activeSheet === "documents" ? (
+          <>
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
+            <View style={styles.folderSearch}>
+              <SearchIcon size="sm" variant="muted" />
+              <TextInput accessibilityLabel="Search Archive documents" onChangeText={setLibraryQuery} placeholder="Search documents" style={styles.folderSearchInput} value={libraryQuery} />
+            </View>
+            <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
+              {visibleDocuments.map((document) => (
+                <Button icon={<FileIcon size="md" />} key={document.key} onPress={() => void selectDocument(document)} size="lg" style={styles.folderTile} variant="secondary">
+                  {document.name}
+                </Button>
+              ))}
+            </ScrollView>
+            {visibleDocuments.length === 0 ? <Text style={styles.empty}>No documents match this search.</Text> : null}
           </>
         ) : null}
       </BottomSheet>
@@ -685,6 +729,8 @@ const styles = StyleSheet.create({
   rowSubtitle: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   empty: { paddingVertical: 24, color: palette.silver500, fontFamily: fonts.regular, textAlign: "center" },
   namingForm: { flex: 1, gap: 12 },
+  libraryChoices: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  libraryChoice: { minHeight: 112, flexBasis: "48%", flexDirection: "column", gap: 10 },
   folderSearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   folderSearchInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
   folderGrid: { paddingTop: 14, flexDirection: "row", flexWrap: "wrap", gap: 10 },
