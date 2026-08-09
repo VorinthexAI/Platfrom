@@ -12,6 +12,7 @@ export const HEADER_SESSION_TRANSPORT = 'header';
 
 const PUBLIC_AUTH_PATHS = new Set([
   '/api/v1/auth/login',
+  '/api/v1/auth/guest',
   '/api/v1/auth/founders-gate',
   '/api/v1/auth/magic/validate',
   '/api/v1/auth/handoff/stream',
@@ -174,6 +175,9 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   if (isResendWebhookPath(c.req.path)) return next();
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
+  // Guest bootstrap creates a revocable per-install session and is protected by
+  // the public-auth Redis rate limit rather than an extractable mobile secret.
+  if (c.req.path.replace(/\/$/, '') === '/api/v1/auth/guest') return next();
   // OAuth providers redirect here directly and cannot attach application headers.
   if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
   const expected = process.env.API_KEY;

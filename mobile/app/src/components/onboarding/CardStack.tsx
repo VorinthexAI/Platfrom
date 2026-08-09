@@ -21,6 +21,8 @@ import {
   type CapabilitySlug,
 } from "@/data/registry";
 import { completionHaptic, decisionHaptic } from "@/lib/haptics";
+import { trackOnboardingDecision } from "@/lib/analytics";
+import type { CoreAppName } from "@/lib/analytics-events";
 import { createRandom } from "@/lib/random";
 import { durations, springs, swipe } from "@/theme/motion";
 import { palette, radii } from "@/theme/tokens";
@@ -182,6 +184,8 @@ function SwipeCard({
   const exitCard = useCallback(
     (decision: CapabilityDecision) => {
       if (exiting.value === 1) return;
+      // Reanimated shared values are intentionally mutated from this event callback.
+      // eslint-disable-next-line react-hooks/immutability
       exiting.value = 1;
       decisionHaptic();
       setBurstDecision(decision);
@@ -315,23 +319,32 @@ export function CardStack({ onComplete }: CardStackProps) {
   const exitRef = useRef<ExitFn | null>(null);
   const completedRef = useRef(false);
 
+  useEffect(() => {
+    if (activeIndex < CAPABILITIES.length || completedRef.current) return;
+    completedRef.current = true;
+    completionHaptic();
+    const timer = setTimeout(() => { void onComplete(); }, 420);
+    return () => clearTimeout(timer);
+  }, [activeIndex, onComplete]);
+
   const registerExit = useCallback((fn: ExitFn) => {
     exitRef.current = fn;
   }, []);
 
   const handleCommit = useCallback(
     (slug: CapabilitySlug, decision: CapabilityDecision) => {
-      decide(slug, decision);
-      if (
-        useOnboardingStore.getState().activeIndex >= CAPABILITIES.length &&
-        !completedRef.current
-      ) {
-        completedRef.current = true;
-        completionHaptic();
-        setTimeout(onComplete, 420);
+      const stepIndex = CAPABILITIES.findIndex((capability) => capability.slug === slug);
+      const capability = CAPABILITIES[stepIndex];
+      if (capability && stepIndex >= 0 && stepIndex < 5) {
+        void trackOnboardingDecision(
+          (stepIndex + 1) as 1 | 2 | 3 | 4 | 5,
+          capability.name as CoreAppName,
+          decision,
+        ).catch(() => undefined);
       }
+      decide(slug, decision);
     },
-    [decide, onComplete],
+    [decide],
   );
 
   const activeCapability = CAPABILITIES[activeIndex];

@@ -4,6 +4,7 @@ export type AuthUser = {
   name?: string;
   firstName?: string;
   alias?: string;
+  isOnboarded: boolean;
 };
 
 export type AuthContext = {
@@ -39,6 +40,13 @@ function numberValue(source: UnknownRecord | null, ...keys: string[]) {
     if (Number.isFinite(value) && value > 0) return value;
   }
   return undefined;
+}
+
+function booleanValue(source: UnknownRecord | null, ...keys: string[]) {
+  for (const key of keys) {
+    if (typeof source?.[key] === "boolean") return source[key] as boolean;
+  }
+  return false;
 }
 
 export function normalizeApiPath(path: string) {
@@ -77,6 +85,7 @@ export function normalizeAuthContext(value: unknown): AuthContext {
     name: stringValue(rawUser, "name", "display_name"),
     firstName: stringValue(rawUser, "firstName", "first_name"),
     alias: stringValue(rawUser, "alias"),
+    isOnboarded: booleanValue(rawUser, "isOnboarded", "is_onboarded"),
   } : null;
   return {
     user,

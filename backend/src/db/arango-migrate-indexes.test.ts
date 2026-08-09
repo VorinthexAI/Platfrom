@@ -255,10 +255,9 @@ describe('Arango migration indexes', () => {
     expect(reconciliation).toBeGreaterThan(sourceMigration);
   });
 
-  test('purges retired Hunt, waitlist, Polar, and event data idempotently', async () => {
+  test('purges retired Hunt, waitlist, Polar, and legacy user-event data idempotently', async () => {
     const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
     const retiredCollections = [
-      'events',
       'userEvents',
       'intelligenceFragments',
       'userWaitlistLeaderboardChanges',
@@ -280,5 +279,7 @@ describe('Arango migration indexes', () => {
     expect(source).toContain('isOnWaitlist: null');
     expect(source).toContain('isWaitlistApproved: null');
     expect(source).toContain('IN users OPTIONS { keepNull: false }');
+    expect(source).toContain("name: 'events'");
+    expect(source).toContain("{ fields: ['distinctId', 'createdAt'] }");
   });
 });

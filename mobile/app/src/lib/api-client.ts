@@ -64,6 +64,10 @@ export async function postJson<TBody, TResponse>(path: string, body: TBody): Pro
   return (await apiClient.post<TResponse>(path, body)).data;
 }
 
+export async function patchJson<TBody, TResponse>(path: string, body: TBody): Promise<TResponse> {
+  return (await apiClient.patch<TResponse>(path, body)).data;
+}
+
 export async function revokeRemoteSession(session: { accessToken: string; refreshToken: string }) {
   await apiClient.post("/auth/logout", {}, { headers: {
     Authorization: `Bearer ${session.accessToken}`,

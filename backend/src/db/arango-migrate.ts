@@ -614,6 +614,15 @@ export const collections: CollectionSpec[] = [
     ],
   },
   {
+    name: 'events',
+    skipEmbedding: true,
+    indexes: [
+      { fields: ['slug', 'createdAt'] },
+      { fields: ['distinctId', 'createdAt'] },
+      { fields: ['userId', 'createdAt'], sparse: true },
+    ],
+  },
+  {
     // Renamed from the legacy 'user_organization' (snake_case, singular —
     // every other collection is camelCase plural) — see the copy-and-drop
     // step near the end of main() that moves live rows across on deploy.
@@ -1956,6 +1965,8 @@ async function main() {
         || !HAS(u, "refreshTokenHash")
         || !HAS(u, "refreshTokenExpiresAt")
         || !HAS(u, "lastLoginAt")
+        || !HAS(u, "isOnboarded")
+        || !HAS(u, "guestBootstrapSecretHash")
         || HAS(u, "waitlistNumber")
         || HAS(u, "isOnWaitlist")
         || HAS(u, "isWaitlistApproved")
@@ -1970,7 +1981,9 @@ async function main() {
         is_subscribed_to_updates_unsubscribe_requested_at: HAS(u, "is_subscribed_to_updates_unsubscribe_requested_at") ? u.is_subscribed_to_updates_unsubscribe_requested_at : null,
         refreshTokenHash: HAS(u, "refreshTokenHash") ? u.refreshTokenHash : null,
         refreshTokenExpiresAt: HAS(u, "refreshTokenExpiresAt") ? u.refreshTokenExpiresAt : null,
-        lastLoginAt: HAS(u, "lastLoginAt") ? u.lastLoginAt : null
+        lastLoginAt: HAS(u, "lastLoginAt") ? u.lastLoginAt : null,
+        isOnboarded: HAS(u, "isOnboarded") ? u.isOnboarded : false,
+        guestBootstrapSecretHash: HAS(u, "guestBootstrapSecretHash") ? u.guestBootstrapSecretHash : null
       } IN users OPTIONS { keepNull: false }
   `);
 
@@ -2309,7 +2322,6 @@ async function main() {
   // Retire collections whose data is no longer part of the platform. The
   // organization-era collections below have already been copied above.
   for (const retiredCollectionName of [
-    'events',
     'userEvents',
     'intelligenceFragments',
     'userWaitlistLeaderboardChanges',

@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Spinner } from "@vorinthex/shared/ui/spinner";
 
 import { postJson } from "@/lib/api-client";
 import { useAuthStore } from "@/state/auth";
@@ -10,17 +11,12 @@ export default function OAuthCompleteRoute() {
   const { code, error } = useLocalSearchParams<{ code?: string; error?: string }>();
   const hydrate = useAuthStore((state) => state.hydrate);
   const router = useRouter();
-  const [message, setMessage] = useState("Completing secure sign in...");
+  const [message, setMessage] = useState(() => error
+    ? "Additional verification is required before this account can sign in."
+    : code ? "Completing secure sign in..." : "The identity provider returned an incomplete sign-in response.");
 
   useEffect(() => {
-    if (error) {
-      setMessage("Additional verification is required before this account can sign in.");
-      return;
-    }
-    if (!code) {
-      setMessage("The identity provider returned an incomplete sign-in response.");
-      return;
-    }
+    if (error || !code) return;
     void postJson<{ code: string }, unknown>("/auth/mobile/oauth/exchange", { code })
       .then(async () => {
         await hydrate();
@@ -29,7 +25,7 @@ export default function OAuthCompleteRoute() {
       .catch(() => setMessage("This sign-in response is invalid or expired."));
   }, [code, error, hydrate, router]);
 
-  return <View style={styles.root}><ActivityIndicator color={palette.silver100} /><Text style={styles.message}>{message}</Text></View>;
+  return <View style={styles.root}><Spinner size="small" /><Text style={styles.message}>{message}</Text></View>;
 }
 
 const styles = StyleSheet.create({

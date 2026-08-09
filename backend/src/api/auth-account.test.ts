@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { buildAuthAccountResponse } from './auth-account';
+import { buildAuthAccountResponse, guestBootstrapSchema, patchAuthAccountSchema } from './auth-account';
 
 describe('GET /auth/me response contract', () => {
   test('returns safe user and personal Main context without auth secrets', () => {
     const response = buildAuthAccountResponse({
       key: 'user-1', organizationId: 'root', email: 'person@example.com', emailHash: 'secret-hash', countryCode: 'SE',
-      name: 'Person', profileUrl: null, alias: 'Nova', alias_slug: null, isVerified: true,
+      name: 'Person', profileUrl: null, alias: 'Nova', alias_slug: null, isVerified: true, isOnboarded: false, guestBootstrapSecretHash: null,
       is_subscribed_to_updates: true, is_subscribed_to_updates_unsubscribe_token_hash: 'unsubscribe-secret',
       is_subscribed_to_updates_unsubscribe_requested_at: null, refreshTokenHash: 'refresh-secret', refreshTokenExpiresAt: null,
       refreshFounderMembershipKey: null, refreshFounderMfaVersion: null, lastLoginAt: null,
@@ -19,8 +19,27 @@ describe('GET /auth/me response contract', () => {
 
     expect(response.organization.role).toBe('owner');
     expect(response.main_scope).toMatchObject({ name: 'Main', slug: 'main', role: 'owner' });
+    expect(response.user.is_onboarded).toBe(false);
     expect(JSON.stringify(response)).not.toContain('refresh-secret');
     expect(JSON.stringify(response)).not.toContain('emailHash');
     expect(JSON.stringify(response)).not.toContain('unsubscribe-secret');
+  });
+});
+
+describe('mobile guest and onboarding account contracts', () => {
+  test('requires separate installation identity and bootstrap proof', () => {
+    const input = {
+      distinctId: 'app_12345678-1234-4234-9234-123456789012',
+      bootstrapSecret: `guest_${'a'.repeat(64)}`,
+    };
+    expect(guestBootstrapSchema.parse(input)).toEqual(input);
+    expect(() => guestBootstrapSchema.parse({ distinctId: input.distinctId })).toThrow();
+    expect(() => guestBootstrapSchema.parse({ ...input, extra: true })).toThrow();
+  });
+
+  test('allows only the one-way onboarding completion transition', () => {
+    expect(patchAuthAccountSchema.parse({ isOnboarded: true })).toEqual({ isOnboarded: true });
+    expect(() => patchAuthAccountSchema.parse({ isOnboarded: false })).toThrow();
+    expect(() => patchAuthAccountSchema.parse({ isOnboarded: true, role: 'admin' })).toThrow();
   });
 });

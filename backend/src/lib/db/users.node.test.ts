@@ -23,6 +23,7 @@ describe('user node schema', () => {
     expect(user.refreshTokenExpiresAt).toBeNull();
     expect(user.refreshFounderMembershipKey).toBeNull();
     expect(user.refreshFounderMfaVersion).toBeNull();
+    expect(user.isOnboarded).toBe(false);
 
     expect('organization_role' in user).toBe(false);
     expect('organization_title' in user).toBe(false);

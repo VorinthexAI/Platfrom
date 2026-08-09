@@ -73,6 +73,7 @@ describe('mobile auth API-key protection', () => {
     expect(isPublicFounderAuthPath('/api/v1/auth/totp/reset/request')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/founders/me')).toBe(false);
     expect(isPublicFounderAuthPath('/api/v1/auth/login')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/guest')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/handoff/claim')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/oauth/callback')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/google')).toBe(true);
@@ -86,12 +87,13 @@ describe('mobile auth API-key protection', () => {
       const authResponse = await requireEnvApiKey(middlewareContext('/api/v1/auth/founders-gate'), async () => { nextCalls += 1; });
       await requireEnvApiKey(middlewareContext('/api/v1/auth/founders-gate', { 'x-vorinthex-api-key': 'server-key' }), async () => { nextCalls += 1; });
       await requireEnvApiKey(middlewareContext('/api/v1/auth/mobile/oauth/google/callback'), async () => { nextCalls += 1; });
+      await requireEnvApiKey(middlewareContext('/api/v1/auth/guest'), async () => { nextCalls += 1; });
       const protectedResponse = await requireEnvApiKey(
         middlewareContext('/api/v1/founders/me'),
         async () => { nextCalls += 1; },
       );
       expect(authResponse?.status).toBe(401);
-      expect(nextCalls).toBe(2);
+      expect(nextCalls).toBe(3);
       expect(protectedResponse?.status).toBe(401);
     } finally {
       if (previousApiKey === undefined) delete process.env.API_KEY;

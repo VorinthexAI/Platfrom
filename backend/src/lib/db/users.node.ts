@@ -33,6 +33,8 @@ export const userSchema = z.object({
   alias: z.string().nullable().default(null),
   alias_slug: z.string().regex(/^[a-z]{4}-[a-z0-9]+(?:-[a-z0-9]+)*$/).nullable().default(null),
   isVerified: z.boolean().default(false),
+  isOnboarded: z.boolean().default(false),
+  guestBootstrapSecretHash: z.string().nullable().default(null),
   is_subscribed_to_updates: z.boolean().default(true),
   is_subscribed_to_updates_unsubscribe_token_hash: z.string().nullable().default(null),
   is_subscribed_to_updates_unsubscribe_requested_at: z.string().nullable().default(null),

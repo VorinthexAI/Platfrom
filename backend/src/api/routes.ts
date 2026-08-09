@@ -56,7 +56,8 @@ import {
 } from './system';
 import { invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
-import { getAuthAccount, logoutAuthAccount } from './auth-account';
+import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
+import { recordPlatformEvent } from './platform-events';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -344,8 +345,12 @@ export function registerRoutes(app: Hono) {
     });
   });
 
+  app.post('/auth/guest', bootstrapGuestAuth);
   app.get('/auth/me', getAuthAccount);
+  app.patch('/auth/me', patchAuthAccount);
   app.post('/auth/logout', logoutAuthAccount);
+
+  app.post('/platform/events', recordPlatformEvent);
 
   app.post('/presence/join', joinPresence);
   app.post('/presence/beat', presenceBeat);
