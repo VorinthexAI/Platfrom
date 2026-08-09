@@ -350,7 +350,7 @@ export function registerRoutes(app: Hono) {
   app.patch('/auth/me', patchAuthAccount);
   app.post('/auth/logout', logoutAuthAccount);
 
-  app.post('/platform/events', recordPlatformEvent);
+  app.post('/app/events', recordPlatformEvent);
 
   app.post('/presence/join', joinPresence);
   app.post('/presence/beat', presenceBeat);

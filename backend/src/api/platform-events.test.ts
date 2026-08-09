@@ -5,7 +5,7 @@ import { appEventBodySchema, createPlatformEventHandler } from './platform-event
 const distinctId = 'app_12345678-1234-4234-9234-123456789012';
 const eventId = 'evt_12345678-1234-4234-9234-123456789012';
 
-describe('POST /platform/events', () => {
+describe('POST /app/events', () => {
   test('accepts only the two app-prefixed event contracts', () => {
     expect(appEventBodySchema.parse({ slug: 'app.opened', eventId, distinctId })).toEqual({ slug: 'app.opened', eventId, distinctId });
     expect(appEventBodySchema.parse({ slug: 'app.onboarding', eventId, distinctId, step: 1, coreAppName: 'Archive', enabled: true, skipped: false }).slug).toBe('app.onboarding');
@@ -18,14 +18,14 @@ describe('POST /platform/events', () => {
 
   test('persists the installation and authenticated user identity', async () => {
     const inserted: Record<string, unknown>[] = [];
-    const app = new Hono().post('/platform/events', createPlatformEventHandler({
+    const app = new Hono().post('/app/events', createPlatformEventHandler({
       getIdentity: async () => ({ key: 'user-1', identityType: 'user' }),
       insert: async (event) => {
         inserted.push(event);
         return { ...event, data: event.data ?? null, userId: event.userId ?? null, embedding: [] };
       },
     }));
-    const response = await app.request('/platform/events', {
+    const response = await app.request('/app/events', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ slug: 'app.onboarding', eventId, distinctId, step: 5, coreAppName: 'Ascend', enabled: false, skipped: true }),
     });
@@ -36,12 +36,31 @@ describe('POST /platform/events', () => {
     });
   });
 
+  test('persists an app-open event without onboarding data', async () => {
+    const inserted: Record<string, unknown>[] = [];
+    const app = new Hono().post('/app/events', createPlatformEventHandler({
+      getIdentity: async () => null,
+      insert: async (event) => {
+        inserted.push(event);
+        return { ...event, data: event.data ?? null, userId: event.userId ?? null, embedding: [] };
+      },
+    }));
+    const response = await app.request('/app/events', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: 'app.opened', eventId, distinctId }),
+    });
+    expect(response.status).toBe(202);
+    expect(inserted[0]).toMatchObject({
+      key: eventId, slug: 'app.opened', distinctId, userId: null, data: null,
+    });
+  });
+
   test('acknowledges a retried event without overwriting the first record', async () => {
-    const app = new Hono().post('/platform/events', createPlatformEventHandler({
+    const app = new Hono().post('/app/events', createPlatformEventHandler({
       getIdentity: async () => null,
       insert: async () => { throw { errorNum: 1210 }; },
     }));
-    const response = await app.request('/platform/events', {
+    const response = await app.request('/app/events', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ slug: 'app.opened', eventId, distinctId }),
     });
