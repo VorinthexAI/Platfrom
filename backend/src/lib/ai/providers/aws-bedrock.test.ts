@@ -39,6 +39,30 @@ const streamRequest = {
 afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe('AWS Bedrock provider', () => {
+  test('sends raw model IDs while signing their canonical encoded path', async () => {
+    let url = '';
+    globalThis.fetch = (async (input) => {
+      url = String(input);
+      return Response.json({
+        output: { message: { content: [{ text: 'continued thought' }] } },
+        usage: { inputTokens: 4, outputTokens: 2, totalTokens: 6 },
+        stopReason: 'end_turn',
+      });
+    }) as typeof fetch;
+
+    const response = await provider().execute({
+      actionId: 'ask',
+      modelId: 'amazon.nova-lite',
+      externalModelId: 'us.amazon.nova-lite-v1:0',
+      input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Continue' }] }] },
+      organizationKey: 'organization',
+    });
+
+    expect(url).toEndWith('/model/us.amazon.nova-lite-v1:0/converse');
+    expect(url).not.toContain('%253A');
+    expect(response.output).toEqual({ text: 'continued thought', toolCalls: [], stopReason: 'end_turn' });
+  });
+
   test('streams typed Converse text, usage, and exactly one done event', async () => {
     let command: ConverseStreamCommand | undefined;
     let abortSignal: AbortSignal | undefined;
