@@ -19,6 +19,14 @@ export type ContentDocument = {
   updatedAt: string;
 };
 
+export type ContentDocumentVersion = {
+  key: string;
+  documentKey: string;
+  version: number;
+  label?: string;
+  createdAt: string;
+};
+
 export type ContentSearchResponse = {
   query: string;
   cached: boolean;
@@ -86,6 +94,48 @@ export function autocompleteContent(context: string, wordCount: number, signal?:
 
 export function enhanceContent(content: string, signal?: AbortSignal) {
   return callContentTool<{ content: string }>("enhance", { content }, signal);
+}
+
+export async function translateContentDocument(documentKey: string, targetLanguage: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
+  }>("document.translate", {
+    documentKeys: [documentKey],
+    targetLanguage,
+    preserveFormatting: true,
+    mode: "replace",
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || result.data?.persistedDocumentKey !== documentKey) throw new Error(result?.error?.message ?? "The note could not be translated.");
+  return result.data;
+}
+
+export async function listContentDocumentVersions(documentKey: string) {
+  const versions: ContentDocumentVersion[] = [];
+  let cursor: string | undefined;
+  do {
+    const data = await callContentTool<{
+      results: { success: boolean; data?: { versions: ContentDocumentVersion[]; cursor?: string }; error?: { message: string } }[];
+    }>("document.list-versions", { documentKeys: [documentKey], cursor, limit: 100 });
+    const result = data.results[0];
+    if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "Version history could not be loaded.");
+    versions.push(...result.data.versions);
+    cursor = result.data.cursor;
+  } while (cursor);
+  return versions;
+}
+
+export async function restoreContentDocumentVersion(documentKey: string, versionKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
+  }>("document.restore-version", {
+    restores: [{ documentKey, versionKey, createBackupVersion: true }],
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The version could not be restored.");
+  return result.data.document;
 }
 
 export async function listContentLocation(folderKey?: string) {
