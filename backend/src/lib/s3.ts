@@ -1,16 +1,24 @@
-import { S3Client } from '@aws-sdk/client-s3';
+import { S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
 
-export const s3 = new S3Client({
-  region: process.env.AWS_REGION ?? 'eu-north-1',
-  endpoint: process.env.AWS_ENDPOINT_URL,
-  forcePathStyle: Boolean(process.env.AWS_ENDPOINT_URL),
-  credentials: process.env.AWS_ACCESS_KEY_ID
-    ? {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-      }
-    : undefined,
-});
+export function resolveS3ClientConfig(env: NodeJS.ProcessEnv = process.env): S3ClientConfig {
+  const endpoint = env.S3_ENDPOINT_URL ?? env.AWS_ENDPOINT_URL;
+  const accessKeyId = env.S3_AWS_ACCESS_KEY_ID ?? env.AWS_ACCESS_KEY_ID ?? env.BEDROCK_AWS_ACCESS_KEY_ID;
+  const secretAccessKey = env.S3_AWS_SECRET_ACCESS_KEY ?? env.AWS_SECRET_ACCESS_KEY ?? env.BEDROCK_AWS_SECRET_ACCESS_KEY;
+  const sessionToken = env.S3_AWS_SESSION_TOKEN ?? env.AWS_SESSION_TOKEN;
+  return {
+    region: env.S3_REGION ?? env.AWS_REGION ?? env.BEDROCK_REGION ?? 'eu-north-1',
+    endpoint,
+    forcePathStyle: Boolean(endpoint),
+    credentials: accessKeyId && secretAccessKey
+      ? {
+          accessKeyId,
+          secretAccessKey,
+          sessionToken,
+        }
+      : undefined,
+  };
+}
+
+export const s3 = new S3Client(resolveS3ClientConfig());
 
 export const S3_BUCKET = process.env.S3_BUCKET ?? 'vorinthex-dev';
-
