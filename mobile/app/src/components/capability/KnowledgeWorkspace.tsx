@@ -17,6 +17,8 @@ import {
   UploadIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
+import { ChromeIcon } from "@/components/ChromeIcon";
+import { capabilityIconSource } from "@/data/capability-icons";
 import {
   createContentDocument,
   createContentFolder,
@@ -346,7 +348,7 @@ export function KnowledgeWorkspace() {
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.identity}>
-          <ArchiveIcon size="md" variant="accent" />
+          <ChromeIcon glow={0.7} size={34} source={capabilityIconSource.archive} />
           <Text style={styles.headerTitle}>ARCHIVE</Text>
         </View>
       </View>
@@ -447,7 +449,6 @@ export function KnowledgeWorkspace() {
             <SearchIcon size="sm" variant="muted" />
             <TextInput
               accessibilityLabel="Search Archive by meaning"
-              editable={hasContentContext}
               onChangeText={setQuery}
               onSubmitEditing={() => void runSearch()}
               placeholder="Search by what you remember..."

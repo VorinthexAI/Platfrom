@@ -88,7 +88,7 @@ function ChromeGradient({ muted = false }: { muted?: boolean }) {
               {stops}
             </LinearGradient>
           </Defs>
-          <Rect fill={`url(#${gradientId})`} height={size.height} rx={size.height / 2} width={size.width} />
+          <Rect fill={`url(#${gradientId})`} height={size.height} width={size.width} />
         </Svg>
       ) : null}
     </View>
@@ -199,6 +199,7 @@ export function Button({
           variantStyles[variant],
           variant === "icon" && iconSizeStyles[size],
           contentMode === "raw" && styles.rawContent,
+          contentMode === "raw" && variant === "primary" && iconSizeStyles[size],
           disabled && !loading && variant !== "primary" && styles.disabledNonPrimary,
           inactive && styles.disabled,
           loading && styles.loading,
