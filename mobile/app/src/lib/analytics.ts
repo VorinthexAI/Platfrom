@@ -1,19 +1,20 @@
 import { postJson } from "./api-client";
 import { randomUUID } from "expo-crypto";
-import { buildAppOpenedEvent, buildOnboardingEvent, type CoreAppName } from "./analytics-events";
+import {
+  buildAppOpenedEvent,
+  buildOnboardingEvent,
+  postAppEvent,
+  type AppEvent,
+  type CoreAppName,
+} from "./analytics-events";
 import { getDistinctId } from "./installation";
 
-async function send(event: ReturnType<typeof buildAppOpenedEvent> | ReturnType<typeof buildOnboardingEvent>) {
-  try {
-    await postJson<typeof event, { ok: true }>("/platform/events", event);
-  } catch {
-    await new Promise((resolve) => setTimeout(resolve, 750));
-    await postJson<typeof event, { ok: true }>("/platform/events", event);
-  }
+async function sendAppEvent(event: AppEvent) {
+  await postAppEvent(event, (path, body) => postJson<AppEvent, { ok: true }>(path, body));
 }
 
 export async function trackAppOpened() {
-  await send(buildAppOpenedEvent(`evt_${randomUUID()}`, await getDistinctId()));
+  await sendAppEvent(buildAppOpenedEvent(`evt_${randomUUID()}`, await getDistinctId()));
 }
 
 export async function trackOnboardingDecision(
@@ -22,5 +23,5 @@ export async function trackOnboardingDecision(
   decision: "enabled" | "skipped",
 ) {
   const distinctId = await getDistinctId();
-  await send(buildOnboardingEvent(distinctId, `evt_onboarding_${distinctId.slice(4)}_${step}`, step, coreAppName, decision));
+  await sendAppEvent(buildOnboardingEvent(distinctId, `evt_onboarding_${distinctId.slice(4)}_${step}`, step, coreAppName, decision));
 }
