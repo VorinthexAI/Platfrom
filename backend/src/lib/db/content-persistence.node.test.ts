@@ -36,6 +36,30 @@ describe('scoped Content persistence', () => {
     expect(await createContentPersistence(executor).deleteDocument(scopeKey, folderKey)).toBe(false);
   });
 
+  test('binds a null folder for root document inserts', async () => {
+    let bindVars: Record<string, unknown> | undefined;
+    const executor: ContentQueryExecutor = {
+      async query(_query, values) {
+        bindVars = values;
+        return { async next() { return values?.document; } };
+      },
+    };
+    const documentKey = 'cm00000000000000000000003';
+    const document = await createContentPersistence(executor).insertDocument({
+      key: documentKey,
+      scopeKey,
+      name: 'Root note',
+      html: '<p>Body</p>',
+      content: 'Body',
+      embedding,
+      deletedAt: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    expect(document.key).toBe(documentKey);
+    expect(bindVars).toMatchObject({ folderKey: null, scopeKey });
+  });
+
   test('canonicalizes HTML and derives content at the document write boundary', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = {
