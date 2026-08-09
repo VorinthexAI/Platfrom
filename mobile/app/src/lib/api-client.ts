@@ -1,16 +1,14 @@
-import axios, { type AxiosInstance } from "axios";
+import { create, type AxiosInstance } from "axios";
 
-/**
- * Typed HTTP client abstraction for the future Core API.
- *
- * INTENTIONALLY UNUSED in this mockup — no screen makes a network request.
- * When the backend exists, TanStack Query queryFns swap their local mock
- * resolvers for these helpers without any screen-level changes.
- */
-export const apiClient: AxiosInstance = axios.create({
-  baseURL: "https://vorinthex.com",
+/** Typed HTTP client shared by authenticated mobile capabilities. */
+export const apiClient: AxiosInstance = create({
+  baseURL: process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://vorinthex.com",
   timeout: 15_000,
-  headers: { "Content-Type": "application/json" },
+  withCredentials: true,
+  headers: {
+    "Content-Type": "application/json",
+    ...(process.env.EXPO_PUBLIC_BACKEND_API_KEY ? { "X-Vorinthex-API-Key": process.env.EXPO_PUBLIC_BACKEND_API_KEY } : {}),
+  },
 });
 
 export async function getJson<T>(path: string): Promise<T> {
