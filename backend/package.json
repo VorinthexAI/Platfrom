@@ -18,6 +18,7 @@
     "check": "tsc --noEmit",
     "test": "bun test --pass-with-no-tests",
     "test:e2e:content": "bun run scripts/content-e2e.ts",
+    "test:e2e:archive-api": "bun run load-local-env && bun --env-file=.env.local run scripts/archive-api-e2e.ts",
     "test:e2e:media-library": "bun run scripts/media-library-e2e.ts",
     "test:e2e:rag-live": "bun run scripts/rag-live-e2e.ts",
     "db:migrate": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",

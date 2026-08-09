@@ -1,4 +1,4 @@
-import { useNavigation, useRouter } from "expo-router";
+import { useNavigation } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import { useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -17,11 +17,14 @@ import {
   UploadIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
+import { ChromeIcon } from "@/components/ChromeIcon";
+import { capabilityIconSource } from "@/data/capability-icons";
 import {
   createContentDocument,
   createContentFolder,
   createContentMutationKey,
-  hasContentContext,
+  getContentContext,
+  isContentContextConfigured,
   listContentLocation,
   listContentSearchHistory,
   readContentDocument,
@@ -35,30 +38,33 @@ import {
   type ContentSearchResponse,
 } from "@/lib/content-client";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
+import { useAuthStore } from "@/state/auth";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
-
-const saveLabels: Record<SaveState, string> = {
-  local: "LOCAL DRAFT",
-  dirty: "UNSAVED",
-  saving: "SAVING",
-  saved: "SAVED",
-  error: "SAVE FAILED",
-};
+type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" | "folders";
 
 const localDraftFile = new File(Paths.document, "knowledge-draft.json");
+const localFoldersFile = new File(Paths.document, "archive-local-folders.json");
 const MAX_MOBILE_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 export function KnowledgeWorkspace() {
-  const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
+  const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
+  const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
+  const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
+  const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
+  const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetError, setSheetError] = useState<string>();
   const [title, setTitle] = useState("Untitled note");
   const [content, setContent] = useState("");
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
+  const [rootFolders, setRootFolders] = useState<ContentFolder[]>([]);
   const [documents, setDocuments] = useState<ContentDocument[]>([]);
+  const [rootDocuments, setRootDocuments] = useState<ContentDocument[]>([]);
   const [folderStack, setFolderStack] = useState<ContentFolder[]>([]);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -66,6 +72,8 @@ export function KnowledgeWorkspace() {
   const [history, setHistory] = useState<ContentSearchHistoryItem[]>([]);
   const [matchSummary, setMatchSummary] = useState<string>();
   const [folderName, setFolderName] = useState("");
+  const [documentName, setDocumentName] = useState("");
+  const [libraryQuery, setLibraryQuery] = useState("");
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
   const revision = useRef(0);
@@ -79,7 +87,34 @@ export function KnowledgeWorkspace() {
   const saveInFlight = useRef<Promise<void> | null>(null);
   const pendingCreateKey = useRef<string | undefined>(undefined);
   const navigationGeneration = useRef(0);
+  const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const loadedContentContextKey = useRef<string | undefined>(undefined);
   const currentFolder = folderStack.at(-1);
+  const visibleFolders = rootFolders.filter((folder) => {
+    const normalized = libraryQuery.trim().toLowerCase();
+    return !normalized || folder.name.toLowerCase().includes(normalized) || folder.description?.toLowerCase().includes(normalized);
+  });
+  const visibleDocuments = rootDocuments.filter((document) => (
+    !libraryQuery.trim() || document.name.toLowerCase().includes(libraryQuery.trim().toLowerCase())
+  ));
+  const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
+
+  const openSheet = (sheet: ArchiveSheet) => {
+    if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
+    setSheetError(undefined);
+    setActiveSheet(sheet);
+    setSheetOpen(true);
+  };
+
+  const closeSheet = () => {
+    setSheetOpen(false);
+    if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
+    sheetCloseTimer.current = setTimeout(() => setActiveSheet(undefined), 240);
+  };
+
+  useEffect(() => () => {
+    if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
+  }, []);
 
   useEffect(() => navigation.addListener("beforeRemove", (event) => {
     if (!hasContentContext || saveState === "saved") return;
@@ -90,11 +125,15 @@ export function KnowledgeWorkspace() {
   const loadLocation = async (folderKey?: string) => {
     const location = await listContentLocation(folderKey);
     setFolders(location.folders);
+    if (!folderKey) {
+      setRootFolders(location.folders);
+      setRootDocuments(location.documents);
+    }
     setDocuments(location.documents);
   };
 
   useEffect(() => {
-    if (hasContentContext || !localDraftFile.exists) return;
+    if (!localDraftFile.exists) return;
     const initialRevision = revision.current;
     void localDraftFile.text().then((value) => {
       if (revision.current !== initialRevision) return;
@@ -107,19 +146,63 @@ export function KnowledgeWorkspace() {
         contentRef.current = draft.content;
         setContent(draft.content);
       }
+      if (isContentContextConfigured(getContentContext()) && typeof draft.content === "string" && draft.content.trim()) {
+        dirty.current = true;
+        setSaveState("dirty");
+      }
     }).catch(() => setError("The local draft could not be restored."));
   }, []);
 
   useEffect(() => {
+    if (hasContentContext || !localFoldersFile.exists) return;
+    void localFoldersFile.text().then((value) => {
+      const parsed = JSON.parse(value) as { folders?: unknown };
+      if (!Array.isArray(parsed.folders)) return;
+      const localFolders = parsed.folders.filter((folder): folder is ContentFolder => (
+        typeof folder === "object" && folder !== null && typeof (folder as ContentFolder).key === "string" && typeof (folder as ContentFolder).name === "string"
+      ));
+      setRootFolders(localFolders);
+      setFolders(localFolders);
+    }).catch(() => setError("Local folders could not be restored."));
+  }, [hasContentContext]);
+
+  useEffect(() => {
     if (!hasContentContext) return;
+    const changedAccount = Boolean(loadedContentContextKey.current && loadedContentContextKey.current !== contentContextKey);
+    loadedContentContextKey.current = contentContextKey;
+    if (changedAccount) {
+      editorSession.current += 1;
+      revision.current = 0;
+      dirty.current = false;
+      documentKeyRef.current = undefined;
+      updatedAtRef.current = undefined;
+      titleRef.current = "Untitled note";
+      contentRef.current = "";
+      savedTitleRef.current = "Untitled note";
+      savedContentRef.current = "";
+      setTitle("Untitled note");
+      setContent("");
+      setFolders([]);
+      setRootFolders([]);
+      setDocuments([]);
+      setRootDocuments([]);
+      setFolderStack([]);
+      setHistory([]);
+      setResults(undefined);
+      setMatchSummary(undefined);
+      setError(undefined);
+      setSaveState("saved");
+    }
     void Promise.all([listContentLocation(), listContentSearchHistory()])
       .then(([location, recent]) => {
         setFolders(location.folders);
+        setRootFolders(location.folders);
         setDocuments(location.documents);
+        setRootDocuments(location.documents);
         setHistory(recent);
       })
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Knowledge could not connect."));
-  }, []);
+  }, [contentContextKey, hasContentContext]);
 
   useEffect(() => {
     if (!hasContentContext || !dirty.current) return;
@@ -139,6 +222,7 @@ export function KnowledgeWorkspace() {
           if (!nextContent.trim()) {
             dirty.current = false;
             setSaveState("saved");
+            if (localDraftFile.exists) localDraftFile.delete();
             return;
           }
           pendingCreateKey.current ??= createContentMutationKey();
@@ -175,6 +259,7 @@ export function KnowledgeWorkspace() {
         if (savingRevision === revision.current) {
           dirty.current = false;
           setSaveState("saved");
+          if (localDraftFile.exists) localDraftFile.delete();
         } else {
           setSaveState("dirty");
         }
@@ -190,7 +275,7 @@ export function KnowledgeWorkspace() {
       });
     }, 500);
     return () => clearTimeout(timeout);
-  }, [content, currentFolder?.key, title]);
+  }, [content, contentContextKey, currentFolder?.key, hasContentContext, title]);
 
   const markDirty = () => {
     revision.current += 1;
@@ -207,35 +292,40 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const startNewNote = () => {
-    if (hasContentContext && (dirty.current || saveInFlight.current)) {
-      setError("Wait for the current note to save before creating another.");
-      return;
-    }
+  const resetEditor = (nextTitle = "Untitled note") => {
     editorSession.current += 1;
     revision.current = 0;
     dirty.current = false;
     documentKeyRef.current = undefined;
     updatedAtRef.current = undefined;
     pendingCreateKey.current = undefined;
-    titleRef.current = "Untitled note";
+    titleRef.current = nextTitle;
     contentRef.current = "";
-    savedTitleRef.current = "Untitled note";
+    savedTitleRef.current = nextTitle;
     savedContentRef.current = "";
-    setTitle("Untitled note");
+    setTitle(nextTitle);
     setContent("");
     setMatchSummary(undefined);
     setResults(undefined);
     setSaveState(hasContentContext ? "saved" : "local");
-    persistLocalDraft("Untitled note", "");
-    setMenuOpen(false);
+    persistLocalDraft(nextTitle, "");
   };
 
-  const openDocument = async (key: string, summary?: string) => {
-    if (!hasContentContext) return;
-    if (dirty.current || saveInFlight.current) {
-      setError("Wait for the current note to save before opening another.");
-      return;
+  const startNewNote = (nextTitle = "Untitled note") => {
+    if (hasContentContext && (dirty.current || saveInFlight.current)) {
+      setSheetError("Wait for the current note to save before creating another.");
+      return false;
+    }
+    resetEditor(nextTitle);
+    closeSheet();
+    return true;
+  };
+
+  const openDocument = async (key: string, summary?: string, reportError = setError) => {
+    if (!hasContentContext) return false;
+    if (hasContentContext && (dirty.current || saveInFlight.current)) {
+      reportError("Wait for the current note to save before opening another.");
+      return false;
     }
     const generation = ++navigationGeneration.current;
     setSearching(true);
@@ -257,8 +347,10 @@ export function KnowledgeWorkspace() {
       setMatchSummary(summary);
       setResults(undefined);
       setSaveState("saved");
+      return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The note could not be opened.");
+      reportError(cause instanceof Error ? cause.message : "The note could not be opened.");
+      return false;
     } finally {
       if (generation === navigationGeneration.current) setSearching(false);
     }
@@ -266,7 +358,7 @@ export function KnowledgeWorkspace() {
 
   const openFolder = async (folder: ContentFolder) => {
     if (!hasContentContext) return;
-    if (dirty.current || saveInFlight.current) {
+    if (hasContentContext && (dirty.current || saveInFlight.current)) {
       setError("Wait for the current note to save before opening a folder.");
       return;
     }
@@ -287,8 +379,14 @@ export function KnowledgeWorkspace() {
   };
 
   const goBackFolder = async () => {
-    if (dirty.current || saveInFlight.current) {
+    if (hasContentContext && (dirty.current || saveInFlight.current)) {
       setError("Wait for the current note to save before navigating.");
+      return;
+    }
+    if (!hasContentContext) {
+      setFolders(rootFolders);
+      setDocuments([]);
+      setFolderStack([]);
       return;
     }
     const generation = ++navigationGeneration.current;
@@ -325,68 +423,160 @@ export function KnowledgeWorkspace() {
   };
 
   const submitFolder = async () => {
-    if (!folderName.trim() || !hasContentContext) return;
+    const name = folderName.trim();
+    if (!name) return;
+    if (!hasContentContext) {
+      if (currentFolder) {
+        setSheetError("Nested local folders require a connected Archive.");
+        return;
+      }
+      const folder = { key: `local-folder-${createContentMutationKey()}`, name };
+      const nextFolders = [...rootFolders, folder];
+      try {
+        localFoldersFile.write(JSON.stringify({ folders: nextFolders }));
+      } catch {
+        setSheetError("The local folder could not be saved.");
+        return;
+      }
+      setRootFolders(nextFolders);
+      setFolders((current) => [...current, folder]);
+      setFolderName("");
+      closeSheet();
+      return;
+    }
     try {
-      await createContentFolder(folderName.trim(), currentFolder?.key);
+      await createContentFolder(name, currentFolder?.key);
       await loadLocation(currentFolder?.key);
       setFolderName("");
-      setMenuOpen(false);
+      closeSheet();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The folder could not be created.");
+      setSheetError(cause instanceof Error ? cause.message : "The folder could not be created.");
+    }
+  };
+
+  const submitDocument = () => {
+    const name = documentName.trim();
+    if (!name) return;
+    if (startNewNote(name)) setDocumentName("");
+  };
+
+  const selectRootFolder = async () => {
+    if (hasContentContext && (dirty.current || saveInFlight.current)) {
+      setSheetError("Wait for the current note to save before changing folders.");
+      return;
+    }
+    const generation = ++navigationGeneration.current;
+    setSearching(true);
+    try {
+      if (hasContentContext) {
+        const location = await listContentLocation();
+        if (generation !== navigationGeneration.current) return;
+        setFolders(location.folders);
+        setRootFolders(location.folders);
+        setDocuments(location.documents);
+        setRootDocuments(location.documents);
+      } else {
+        setFolders(rootFolders);
+        setDocuments([]);
+      }
+      setFolderStack([]);
+      if (hasContentContext) resetEditor();
+      closeSheet();
+    } catch (cause) {
+      if (generation === navigationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Archive could not change folders.");
+    } finally {
+      if (generation === navigationGeneration.current) setSearching(false);
+    }
+  };
+
+  const selectFolder = async (folder: ContentFolder) => {
+    if (hasContentContext && (dirty.current || saveInFlight.current)) {
+      setSheetError("Wait for the current note to save before changing folders.");
+      return;
+    }
+    const generation = ++navigationGeneration.current;
+    setSearching(true);
+    try {
+      if (hasContentContext) {
+        const location = await listContentLocation(folder.key);
+        if (generation !== navigationGeneration.current) return;
+        setFolders(location.folders);
+        setDocuments(location.documents);
+      } else {
+        setFolders([]);
+        setDocuments([]);
+      }
+      setFolderStack([folder]);
+      if (hasContentContext) resetEditor();
+      closeSheet();
+    } catch (cause) {
+      if (generation === navigationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Archive could not change folders.");
+    } finally {
+      if (generation === navigationGeneration.current) setSearching(false);
+    }
+  };
+
+  const selectDocument = async (document: ContentDocument) => {
+    if (await openDocument(document.key, undefined, setSheetError)) {
+      setFolderStack([]);
+      setFolders(rootFolders);
+      setDocuments(rootDocuments);
+      closeSheet();
     }
   };
 
   const uploadDocument = async () => {
-    if (!hasContentContext) return;
     try {
       const picked = await File.pickFileAsync({ mimeTypes: ["text/plain", "text/markdown", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] });
       if (picked.canceled) return;
       const file = picked.result;
       if (file.size > MAX_MOBILE_UPLOAD_BYTES) throw new Error("Mobile uploads must be 8 MB or smaller.");
+      if (!hasContentContext) {
+        setSheetError("Uploads require a connected Archive.");
+        return;
+      }
       await uploadContentDocument({ name: file.name, type: file.type, size: file.size, base64: await file.base64() }, currentFolder?.key);
       await loadLocation(currentFolder?.key);
-      setMenuOpen(false);
+      closeSheet();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "The document could not be uploaded.");
+      setSheetError(cause instanceof Error ? cause.message : "The document could not be uploaded.");
     }
-  };
-
-  const leaveWorkspace = () => {
-    if (hasContentContext && (dirty.current || saveInFlight.current)) {
-      setError("Wait for the current note to save before leaving.");
-      return;
-    }
-    router.back();
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Button accessibilityLabel="Back to your personal AI" contentMode="raw" onPress={leaveWorkspace} size="md" variant="ghost">
-          <ChevronLeftIcon size="md" variant="accent" />
-        </Button>
         <View style={styles.identity}>
-          <ArchiveIcon size="md" variant="accent" />
-          <View>
-            <Text style={styles.eyebrow}>CORE APPLICATION</Text>
-            <Text style={styles.headerTitle}>ARCHIVE</Text>
-          </View>
+          <ChromeIcon glow={0.7} size={34} source={capabilityIconSource.archive} />
+          <Text style={styles.headerTitle}>ARCHIVE</Text>
         </View>
-        <Button accessibilityLabel="Create in Archive" contentMode="raw" onPress={() => setMenuOpen(true)} size="md" variant="icon">
-          <PlusIcon size="md" />
-        </Button>
       </View>
 
-      <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 24 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.sm }]}
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        keyboardShouldPersistTaps="handled"
+        style={styles.scrollView}
+      >
         <View style={styles.noteSheet}>
           <View style={styles.metaRow}>
-            {currentFolder ? (
-              <Button onPress={() => void goBackFolder()} size="xs" variant="ghost" icon={<ChevronLeftIcon size="sm" />}>
-                {currentFolder.name}
+            <Text style={styles.meta}>CREATE NOTE</Text>
+            <View style={styles.noteActions}>
+              <Button accessibilityLabel="Browse Archive" contentMode="raw" onPress={() => openSheet("library")} size="sm" variant="icon">
+                <FileIcon size="sm" />
               </Button>
-            ) : <Text style={styles.meta}>MY KNOWLEDGE</Text>}
-            <Text style={[styles.meta, saveState === "error" && styles.errorText]}>{saveLabels[saveState]}</Text>
+              <Button accessibilityLabel="Create in Archive" contentMode="raw" onPress={() => openSheet("create")} size="sm" variant="icon">
+                <PlusIcon size="sm" />
+              </Button>
+            </View>
           </View>
+
+          {currentFolder ? (
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => void goBackFolder()} size="xs" variant="ghost">
+              {currentFolder.name}
+            </Button>
+          ) : null}
 
           {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
 
@@ -445,7 +635,7 @@ export function KnowledgeWorkspace() {
               {!content && (folders.length > 0 || documents.length > 0) ? (
                 <View style={styles.locationPreview}>
                   <Text style={styles.eyebrow}>IN THIS LOCATION</Text>
-                  {folders.slice(0, 3).map((folder) => <Button key={folder.key} onPress={() => void openFolder(folder)} size="sm" variant="ghost" icon={<FolderIcon size="sm" />}>{folder.name}</Button>)}
+                  {folders.slice(0, 3).map((folder) => <Button key={folder.key} onPress={() => void (hasContentContext ? openFolder(folder) : selectFolder(folder))} size="sm" variant="ghost" icon={<FolderIcon size="sm" />}>{folder.name}</Button>)}
                   {documents.slice(0, 3).map((document) => <Button key={document.key} onPress={() => void openDocument(document.key)} size="sm" variant="ghost" icon={<FileIcon size="sm" />}>{document.name}</Button>)}
                 </View>
               ) : null}
@@ -463,10 +653,9 @@ export function KnowledgeWorkspace() {
             <SearchIcon size="sm" variant="muted" />
             <TextInput
               accessibilityLabel="Search Archive by meaning"
-              editable={hasContentContext}
               onChangeText={setQuery}
               onSubmitEditing={() => void runSearch()}
-              placeholder={hasContentContext ? "Search by what you remember..." : "Sign in to search your knowledge"}
+              placeholder="Search by what you remember..."
               returnKeyType="search"
               style={styles.searchInput}
               value={query}
@@ -476,14 +665,74 @@ export function KnowledgeWorkspace() {
         </View>
       </ScrollView>
 
-      <BottomSheet description="Add something to your current knowledge location." onOpenChange={setMenuOpen} open={menuOpen} title="Create in Archive">
-        <BottomSheetItem icon={<ArchiveIcon />} onPress={startNewNote}>New note</BottomSheetItem>
-        <BottomSheetItem disabled={!hasContentContext} icon={<UploadIcon />} onPress={() => void uploadDocument()}>Upload document</BottomSheetItem>
-        <View style={styles.folderForm}>
-          <TextInput accessibilityLabel="New folder name" editable={hasContentContext} onChangeText={setFolderName} placeholder="Folder name" value={folderName} />
-          <Button disabled={!folderName.trim() || !hasContentContext} onPress={() => void submitFolder()} size="md" variant="secondary" icon={<FolderIcon />}>Create folder</Button>
-        </View>
-        {!hasContentContext ? <Text style={styles.sheetHint}>Sign in and select a knowledge scope to sync notes, folders, and search.</Text> : null}
+      <BottomSheet
+        description={activeSheet === "create" ? "Add something to your current Archive folder." : undefined}
+        onOpenChange={(open) => { if (!open) closeSheet(); }}
+        open={sheetOpen}
+        tall={activeSheet !== "create"}
+        title={activeSheet === "document" ? "Create document" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : "Create in Archive"}
+      >
+        {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
+        {activeSheet === "create" ? (
+          <>
+            <BottomSheetItem icon={<FolderIcon />} onPress={() => { setSheetError(undefined); setActiveSheet("folder"); }}>Create folder</BottomSheetItem>
+            <BottomSheetItem icon={<FileIcon />} onPress={() => { setSheetError(undefined); setActiveSheet("document"); }}>Create document</BottomSheetItem>
+            <BottomSheetItem icon={<UploadIcon />} onPress={() => void uploadDocument()}>Upload documents</BottomSheetItem>
+          </>
+        ) : null}
+        {activeSheet === "folder" ? (
+          <View style={styles.namingForm}>
+            <TextInput accessibilityLabel="New folder name" autoFocus maxLength={255} onChangeText={setFolderName} onSubmitEditing={() => void submitFolder()} placeholder="Folder name" returnKeyType="done" value={folderName} />
+            <Button disabled={!folderName.trim()} onPress={() => void submitFolder()} size="md" variant="primary">Create folder</Button>
+          </View>
+        ) : null}
+        {activeSheet === "document" ? (
+          <View style={styles.namingForm}>
+            <TextInput accessibilityLabel="New document name" autoFocus maxLength={255} onChangeText={setDocumentName} onSubmitEditing={submitDocument} placeholder="Document name" returnKeyType="done" value={documentName} />
+            <Button disabled={!documentName.trim()} onPress={submitDocument} size="md" variant="primary">Create document</Button>
+          </View>
+        ) : null}
+        {activeSheet === "library" ? (
+          <View style={styles.libraryChoices}>
+            <Button icon={<FileIcon size="lg" />} onPress={() => { setLibraryQuery(""); setActiveSheet("documents"); }} size="lg" style={styles.libraryChoice} variant="secondary">Documents</Button>
+            <Button icon={<FolderIcon size="lg" />} onPress={() => { setLibraryQuery(""); setActiveSheet("folders"); }} size="lg" style={styles.libraryChoice} variant="secondary">Folders</Button>
+          </View>
+        ) : null}
+        {activeSheet === "folders" ? (
+          <>
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
+            <View style={styles.folderSearch}>
+              <SearchIcon size="sm" variant="muted" />
+              <TextInput accessibilityLabel="Search Archive folders" onChangeText={setLibraryQuery} placeholder="Search folders" style={styles.folderSearchInput} value={libraryQuery} />
+            </View>
+            <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
+              {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
+              {visibleFolders.map((folder) => (
+                <Button icon={<FolderIcon size="md" />} key={folder.key} onPress={() => void selectFolder(folder)} size="lg" style={styles.folderTile} variant="secondary">
+                  {folder.name}
+                </Button>
+              ))}
+            </ScrollView>
+            {visibleFolders.length === 0 && !showArchiveRoot ? <Text style={styles.empty}>No folders match this search.</Text> : null}
+          </>
+        ) : null}
+        {activeSheet === "documents" ? (
+          <>
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
+            <View style={styles.folderSearch}>
+              <SearchIcon size="sm" variant="muted" />
+              <TextInput accessibilityLabel="Search Archive documents" onChangeText={setLibraryQuery} placeholder="Search documents" style={styles.folderSearchInput} value={libraryQuery} />
+            </View>
+            <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
+              {visibleDocuments.map((document) => (
+                <Button icon={<FileIcon size="md" />} key={document.key} onPress={() => void selectDocument(document)} size="lg" style={styles.folderTile} variant="secondary">
+                  {document.name}
+                </Button>
+              ))}
+            </ScrollView>
+            {visibleDocuments.length === 0 ? <Text style={styles.empty}>No documents match this search.</Text> : null}
+          </>
+        ) : null}
       </BottomSheet>
     </KeyboardAvoidingView>
   );
@@ -491,15 +740,16 @@ export function KnowledgeWorkspace() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
-  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
+  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.lg, flexDirection: "row", alignItems: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
   identity: { flexDirection: "row", alignItems: "center", gap: 10 },
   eyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
   headerTitle: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 15, letterSpacing: tracking.label },
-  scroll: { paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  noteSheet: { minHeight: 470, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  scrollView: { flex: 1 },
+  scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   metaRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  noteActions: { flexDirection: "row", gap: 8 },
   meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
-  errorText: { color: palette.danger },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   titleInput: { minHeight: 58, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28 },
   editor: { minHeight: 270, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
@@ -517,6 +767,12 @@ const styles = StyleSheet.create({
   rowTitle: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 14 },
   rowSubtitle: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   empty: { paddingVertical: 24, color: palette.silver500, fontFamily: fonts.regular, textAlign: "center" },
-  folderForm: { gap: 8, marginTop: 6 },
-  sheetHint: { padding: 8, color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
+  namingForm: { flex: 1, gap: 12 },
+  libraryChoices: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  libraryChoice: { minHeight: 112, flexBasis: "48%", flexDirection: "column", gap: 10 },
+  folderSearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  folderSearchInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
+  folderGrid: { paddingTop: 14, flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  folderList: { flex: 1 },
+  folderTile: { minHeight: 86, flexBasis: "48%", flexDirection: "column", gap: 8, paddingHorizontal: 10 },
 });

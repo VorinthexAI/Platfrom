@@ -4,12 +4,14 @@ import { withTransaction } from './client';
 import { organizationSchema, type Organization } from './organizations.node';
 import { userOrganizationSchema, type UserOrganization } from './user-organization.node';
 import { scopeMemberSchema, scopeSchema, type Scope, type ScopeMember } from '@/lib/ai/scopes/schema';
+import { agentSchema, type Agent } from './agents.node';
 
 export interface PersonalAuthContext {
   organization: Organization;
   membership: UserOrganization;
   scope: Scope;
   scopeMembership: ScopeMember;
+  agent: Agent;
 }
 
 function personalOrganizationName(name: string | null, email: string) {
@@ -25,8 +27,13 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
   const membershipKey = newId();
   const scopeKey = newId();
   const scopeMembershipKey = newId();
+  const agentKey = newId();
+  const skillKey = newId();
+  const agentSkillKey = newId();
+  const scopeAgentKey = newId();
+  const agentMemberKey = newId();
   const result = await withTransaction(
-    ['organizations', 'userOrganizations', 'scopes', 'scopeMembers'],
+    ['organizations', 'userOrganizations', 'scopes', 'scopeMembers', 'agents', 'skills', 'agentSkills', 'scopeAgents', 'agentMembers'],
     async (transaction) => {
       const cursor = await transaction.query(aql`
         UPSERT { personalOwnerUserId: ${user.key} }
@@ -61,7 +68,41 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
             role: "owner", status: "active", source: "explicit"
           }
           UPDATE { role: "owner", status: "active" } IN scopeMembers
-        RETURN { organization, membership, scope, scopeMembership: NEW }
+        LET scopeMembership = NEW
+        UPSERT { slug: "personal-content-execution" }
+          INSERT {
+            _key: ${skillKey}, slug: "personal-content-execution", name: "Personal Content Execution",
+            title: "Personal Content Execution", definition: "Manage and retrieve personal folders and documents.", embedding: []
+          }
+          UPDATE {} IN skills
+        LET skill = NEW
+        UPSERT { personalOwnerUserId: ${user.key} }
+          INSERT {
+            _key: ${agentKey}, personalOwnerUserId: ${user.key}, slug: ${`personal-content-${user.key}`},
+            name: "Personal Content Agent", title: "Personal Content Agent", scopeKey: scope._key,
+            explorationRate: 0, embedding: []
+          }
+          UPDATE { scopeKey: scope._key } IN agents
+        LET agent = NEW
+        UPSERT { agentKey: agent._key, skillKey: skill._key }
+          INSERT { _key: ${agentSkillKey}, agentKey: agent._key, skillKey: skill._key, priority: 100 }
+          UPDATE { priority: 100 } IN agentSkills
+        UPSERT { scopeKey: scope._key, agentKey: agent._key }
+          INSERT {
+            _key: ${scopeAgentKey}, organizationKey: organization._key, scopeKey: scope._key, agentKey: agent._key,
+            position: 1, status: "active", minimumAccessRole: "owner",
+            createdByUserOrganizationKey: membership._key, createdAt: ${now}, updatedAt: ${now}, embedding: []
+          }
+          UPDATE { status: "active", minimumAccessRole: "owner", updatedAt: ${now} } IN scopeAgents
+        LET scopeAgent = NEW
+        UPSERT { scopeAgentKey: scopeAgent._key, userOrganizationKey: membership._key }
+          INSERT {
+            _key: ${agentMemberKey}, organizationKey: organization._key, scopeKey: scope._key,
+            agentKey: agent._key, scopeAgentKey: scopeAgent._key, userOrganizationKey: membership._key,
+            source: "explicit", createdByUserOrganizationKey: membership._key, createdAt: ${now}, embedding: []
+          }
+          UPDATE { source: "explicit", createdByUserOrganizationKey: membership._key } IN agentMembers
+        RETURN { organization, membership, scope, scopeMembership, agent }
       `);
       return cursor.next();
     },
@@ -72,6 +113,7 @@ export async function provisionPersonalAuthContext(user: { key: string; name: st
     membership: userOrganizationSchema.parse({ ...result.membership, key: result.membership._key }),
     scope: scopeSchema.parse({ ...result.scope, key: result.scope._key }),
     scopeMembership: scopeMemberSchema.parse({ ...result.scopeMembership, key: result.scopeMembership._key }),
+    agent: agentSchema.parse({ ...result.agent, key: result.agent._key }),
   };
 }
 
@@ -83,9 +125,14 @@ export async function getPersonalAuthContext(userId: string): Promise<PersonalAu
       LET membership = FIRST(FOR item IN userOrganizations FILTER item.organizationId == organization._key && item.userId == ${userId} && item.status == "active" RETURN item)
       LET scope = FIRST(FOR item IN scopes FILTER item.organizationKey == organization._key && item.slug == "main" && item.deletedAt == null RETURN item)
       LET scopeMembership = FIRST(FOR item IN scopeMembers FILTER item.scopeKey == scope._key && item.userOrganizationKey == membership._key && item.status == "active" RETURN item)
-      FILTER membership != null && scope != null && scopeMembership != null
+      LET agent = FIRST(FOR item IN agents FILTER item.personalOwnerUserId == ${userId} && item.scopeKey == scope._key RETURN item)
+      LET skill = FIRST(FOR item IN skills FILTER item.slug == "personal-content-execution" RETURN item)
+      LET agentSkill = FIRST(FOR item IN agentSkills FILTER item.agentKey == agent._key && item.skillKey == skill._key RETURN item)
+      LET scopeAgent = FIRST(FOR item IN scopeAgents FILTER item.scopeKey == scope._key && item.agentKey == agent._key && item.status == "active" RETURN item)
+      LET agentMember = FIRST(FOR item IN agentMembers FILTER item.scopeAgentKey == scopeAgent._key && item.userOrganizationKey == membership._key RETURN item)
+      FILTER membership != null && scope != null && scopeMembership != null && agent != null && skill != null && agentSkill != null && scopeAgent != null && agentMember != null
       LIMIT 1
-      RETURN { organization, membership, scope, scopeMembership }
+      RETURN { organization, membership, scope, scopeMembership, agent }
   `);
   const result = await cursor.next();
   if (!result) return null;
@@ -94,5 +141,6 @@ export async function getPersonalAuthContext(userId: string): Promise<PersonalAu
     membership: userOrganizationSchema.parse({ ...result.membership, key: result.membership._key }),
     scope: scopeSchema.parse({ ...result.scope, key: result.scope._key }),
     scopeMembership: scopeMemberSchema.parse({ ...result.scopeMembership, key: result.scopeMembership._key }),
+    agent: agentSchema.parse({ ...result.agent, key: result.agent._key }),
   };
 }

@@ -1,4 +1,5 @@
 import { apiClient } from "./api-client";
+import { useAuthStore } from "@/state/auth";
 
 export type ContentContext = {
   organizationKey: string;
@@ -40,29 +41,36 @@ type ToolResponse<T> =
   | { success: true; data: T }
   | { success: false; error: { message: string } };
 
-export const contentContext: ContentContext = {
-  organizationKey: process.env.EXPO_PUBLIC_CONTENT_ORGANIZATION_KEY ?? "",
-  agentKey: process.env.EXPO_PUBLIC_CONTENT_AGENT_KEY ?? "",
-  scopeKey: process.env.EXPO_PUBLIC_CONTENT_SCOPE_KEY ?? "",
-};
+function recordKey(value: Record<string, unknown> | null) {
+  return typeof value?.key === "string" ? value.key : "";
+}
+
+export function getContentContext(): ContentContext {
+  const state = useAuthStore.getState();
+  return {
+    organizationKey: recordKey(state.organization),
+    agentKey: state.contentExecution?.agentKey ?? "",
+    scopeKey: recordKey(state.scope),
+  };
+}
 
 export function isContentContextConfigured(context: ContentContext) {
   return Object.values(context).every((value) => value.trim().length > 0);
 }
-
-export const hasContentContext = isContentContextConfigured(contentContext);
 
 export function createContentMutationKey() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 async function callContentTool<T>(tool: string, input: Record<string, unknown>): Promise<T> {
+  const contentContext = getContentContext();
+  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   try {
     const response = await apiClient.post<ToolResponse<T>>(`/api/v1/content/tools/${tool}`, {
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    });
+    }, { timeout: tool === "document.parse" ? 5 * 60_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -73,22 +81,42 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>):
 }
 
 export async function listContentLocation(folderKey?: string) {
+  const contentContext = getContentContext();
   const location = folderKey ? { folderKey } : {};
-  const [folderData, documentData] = await Promise.all([
-    callContentTool<{ folders: ContentFolder[] }>("folder.list", {
-      scopeKey: contentContext.scopeKey,
-      parentFolderKey: folderKey,
-      limit: 100,
-      sort: { field: "name", direction: "asc" },
-    }),
-    callContentTool<{ documents: ContentDocument[] }>("document.list", {
-      scopeKey: contentContext.scopeKey,
-      ...location,
-      limit: 100,
-      sort: { field: "updatedAt", direction: "desc" },
-    }),
-  ]);
-  return { folders: folderData.folders, documents: documentData.documents };
+  const listFolders = async () => {
+    const folders: ContentFolder[] = [];
+    let cursor: string | undefined;
+    do {
+      const data: { folders: ContentFolder[]; cursor?: string } = await callContentTool("folder.list", {
+        scopeKey: contentContext.scopeKey,
+        parentFolderKey: folderKey,
+        cursor,
+        limit: 100,
+        sort: { field: "name", direction: "asc" },
+      });
+      folders.push(...data.folders);
+      cursor = data.cursor;
+    } while (cursor);
+    return folders;
+  };
+  const listDocuments = async () => {
+    const documents: ContentDocument[] = [];
+    let cursor: string | undefined;
+    do {
+      const data: { documents: ContentDocument[]; cursor?: string } = await callContentTool("document.list", {
+        scopeKey: contentContext.scopeKey,
+        ...location,
+        cursor,
+        limit: 100,
+        sort: { field: "updatedAt", direction: "desc" },
+      });
+      documents.push(...data.documents);
+      cursor = data.cursor;
+    } while (cursor);
+    return documents;
+  };
+  const [folders, documents] = await Promise.all([listFolders(), listDocuments()]);
+  return { folders, documents };
 }
 
 export async function readContentDocument(documentKey: string) {
@@ -101,6 +129,7 @@ export async function readContentDocument(documentKey: string) {
 }
 
 export async function createContentDocument(name: string, content: string, folderKey?: string, mutationKey = createContentMutationKey()) {
+  const contentContext = getContentContext();
   const data = await callContentTool<{ document: ContentDocument }>("document.create", {
     scopeKey: contentContext.scopeKey,
     folderKey,
@@ -138,6 +167,7 @@ export async function renameContentDocument(documentKey: string, name: string) {
 }
 
 export async function createContentFolder(name: string, parentFolderKey?: string) {
+  const contentContext = getContentContext();
   const data = await callContentTool<{
     results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
   }>("folder.create", {
@@ -150,6 +180,7 @@ export async function createContentFolder(name: string, parentFolderKey?: string
 }
 
 export function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string) {
+  const contentContext = getContentContext();
   return callContentTool<{ document: ContentDocument }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
@@ -165,6 +196,7 @@ export function uploadContentDocument(file: { name: string; type: string; size: 
 }
 
 export function searchContent(query: string) {
+  const contentContext = getContentContext();
   return callContentTool<ContentSearchResponse>("scope.content.search", {
     scopeKey: contentContext.scopeKey,
     query,
@@ -173,6 +205,7 @@ export function searchContent(query: string) {
 }
 
 export async function listContentSearchHistory() {
+  const contentContext = getContentContext();
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
     scopeKey: contentContext.scopeKey,
     limit: 8,

@@ -21,7 +21,7 @@ export default function CapabilityRoute() {
   const parsed = capabilitySlugSchema.safeParse(params.slug);
 
   if (!parsed.success) {
-    return <Redirect href="/brain" />;
+    return <Redirect href="/capability/archive" />;
   }
 
   const capability = getCapability(parsed.data);

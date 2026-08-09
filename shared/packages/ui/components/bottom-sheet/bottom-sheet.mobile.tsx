@@ -3,8 +3,10 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
+  KeyboardAvoidingView,
   Modal,
   PanResponder,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -18,6 +20,7 @@ export type BottomSheetProps = {
   description?: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  tall?: boolean;
   title: string;
 };
 
@@ -26,6 +29,7 @@ export function BottomSheet({
   description,
   onOpenChange,
   open,
+  tall = false,
   title,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
@@ -118,7 +122,7 @@ export function BottomSheet({
       transparent
       visible
     >
-      <View style={styles.root}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.root}>
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Button
             accessibilityLabel="Close bottom sheet"
@@ -133,6 +137,7 @@ export function BottomSheet({
           accessibilityRole="summary"
           style={[
             styles.sheet,
+            tall && styles.tallSheet,
             {
               paddingBottom: Math.max(insets.bottom, 16),
               transform: [{ translateY }],
@@ -150,9 +155,9 @@ export function BottomSheet({
               <Text style={styles.description}>{description}</Text>
             ) : null}
           </View>
-          <View style={styles.content}>{children}</View>
+          <View style={[styles.content, tall && styles.tallContent]}>{children}</View>
         </Animated.View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -197,6 +202,7 @@ const styles = StyleSheet.create({
     maxHeight: "90%",
     paddingHorizontal: 20,
   },
+  tallSheet: { height: "72%" },
   dragTarget: { alignItems: "center", paddingBottom: 14, paddingTop: 12 },
   dragHandle: {
     backgroundColor: "#7B858C",
@@ -219,5 +225,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   content: { gap: 6 },
+  tallContent: { flex: 1 },
   item: { justifyContent: "flex-start", width: "100%" },
 });
