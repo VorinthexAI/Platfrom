@@ -13,6 +13,9 @@ export interface AwsCredentialEnvironment extends Record<string, string | undefi
   AWS_DEFAULT_REGION?: string;
   AWS_ACCESS_KEY_ID?: string;
   AWS_SECRET_ACCESS_KEY?: string;
+  BEDROCK_REGION?: string;
+  BEDROCK_AWS_ACCESS_KEY_ID?: string;
+  BEDROCK_AWS_SECRET_ACCESS_KEY?: string;
 }
 
 export function resolveAwsCredentials(

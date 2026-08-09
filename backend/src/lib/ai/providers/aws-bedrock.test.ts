@@ -39,6 +39,28 @@ const streamRequest = {
 afterEach(() => { globalThis.fetch = originalFetch; });
 
 describe('AWS Bedrock provider', () => {
+  test('prefers dedicated Bedrock credentials over generic AWS credentials', async () => {
+    let authorization = '';
+    globalThis.fetch = (async (_input, init) => {
+      authorization = new Headers(init?.headers).get('authorization') ?? '';
+      return Response.json({ output: { message: { content: [{ text: 'ok' }] } } });
+    }) as typeof fetch;
+    const adapter = createAwsBedrockProvider(undefined, {
+      AWS_REGION: 'wrong-region',
+      AWS_ACCESS_KEY_ID: 'generic-key',
+      AWS_SECRET_ACCESS_KEY: 'generic-secret',
+      BEDROCK_REGION: 'us-east-1',
+      BEDROCK_AWS_ACCESS_KEY_ID: 'bedrock-key',
+      BEDROCK_AWS_SECRET_ACCESS_KEY: 'bedrock-secret',
+    });
+    await adapter.execute({
+      actionId: 'reason', modelId: 'amazon.nova-pro', externalModelId: 'us.amazon.nova-pro-v1:0', organizationKey: 'organization',
+      input: { messages: [{ role: 'user', content: [{ type: 'text', text: 'Summarize' }] }] },
+    });
+    expect(authorization).toContain('Credential=bedrock-key/');
+    expect(authorization).not.toContain('generic-key');
+  });
+
   test('sends raw model IDs while signing their canonical encoded path', async () => {
     let url = '';
     globalThis.fetch = (async (input) => {

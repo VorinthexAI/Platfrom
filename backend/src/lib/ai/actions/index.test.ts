@@ -10,6 +10,9 @@ describe('action registry', () => {
 
   test('has no duplicate action ids', () => {
     expect(new Set(ACTION_SLUGS).size).toBe(ACTION_SLUGS.length);
+    expect(ACTION_DEFINITIONS.map(({ id }) => id)).toEqual([...ACTION_SLUGS]);
+    expect(ACTION_DEFINITIONS.filter(({ modelPolicy, models }) => modelPolicy === 'none' && models.length > 0)).toEqual([]);
+    expect(ACTION_DEFINITIONS.filter(({ modelPolicy, models }) => modelPolicy === 'required' && models.length === 0)).toEqual([]);
   });
 
   test('contains only generic runtime primitives with explicit model policies', () => {

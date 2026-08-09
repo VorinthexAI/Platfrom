@@ -5,6 +5,7 @@ import { CONTENT_TOOL_NAMES, ContentError, runContentTool, type ContentIdempoten
 import { DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
+import { chatInputSchema, speechInputSchema } from '@/lib/ai/providers/types';
 
 const now = '2026-07-22T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
@@ -171,8 +172,8 @@ describe('Content runtime', () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument(`0123456789Visible sentence. ${'More words. '.repeat(30)} \`secret code\``);
     const spoken: string[] = [], uploaded: string[] = [];
-    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { expect(action).toBe('speak'); spoken.push(input.text); return { audio: new Uint8Array([spoken.length]), mimeType: 'audio/ogg', durationMs: 10 }; }, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
-    const ephemeral = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true }, f.context, dependencies);
+    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { expect(action).toBe('speak'); const parsed = speechInputSchema.parse(input); expect(parsed).toMatchObject({ language: 'English', speakingRate: 1.25, format: 'wav' }); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: 'audio/ogg', durationMs: 10 }; }, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
+    const ephemeral = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
     const audio = (ephemeral.results[0]?.data as { audio: Array<{ index: number; url: string; startCharacter: number; endCharacter: number }> }).audio;
     expect(audio.map((item) => item.index)).toEqual([...spoken.keys()]);
     expect(audio.every((item) => item.url.startsWith('data:audio/ogg;base64,'))).toBe(true);
@@ -180,7 +181,7 @@ describe('Content runtime', () => {
     expect(spoken[0]).toStartWith('Notes. Visible sentence.');
     expect(spoken.join(' ')).not.toContain('secret code');
     expect(uploaded).toHaveLength(0);
-    await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeCode: false, persistAudio: true }, f.context, dependencies);
+    await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeCode: false, persistAudio: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
     expect(uploaded.length).toBeGreaterThan(0);
     expect(uploaded.every((key) => key.endsWith('.ogg'))).toBe(true);
     expect(f.documents.get(documentKey).speechStorageKeys).toEqual(uploaded);
@@ -266,6 +267,51 @@ describe('Content runtime', () => {
     expect(conflict.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_VERSION_CONFLICT' } });
   });
 
+  test('routes Archive generation and embeddings through registered actions', async () => {
+    const f = fixture('moderator');
+    const calls: Array<{ actionSlug: string; input: unknown }> = [];
+    let activeEmbeddings = 0;
+    let maximumActiveEmbeddings = 0;
+    let nextEmbedding = 0;
+    const executeAction: any = async (request: { actionSlug: string; mode: string }, input: unknown) => {
+      expect(request.mode).toBe('auto');
+      calls.push({ actionSlug: request.actionSlug, input });
+      let output: { embedding: number[] } | { text: string } = { text: 'continued words' };
+      if (request.actionSlug === 'embed') {
+        const index = nextEmbedding++;
+        activeEmbeddings += 1;
+        maximumActiveEmbeddings = Math.max(maximumActiveEmbeddings, activeEmbeddings);
+        await Bun.sleep(2);
+        activeEmbeddings -= 1;
+        output = { embedding: [index, ...embedding.slice(1)] };
+      }
+      return {
+        output,
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        providerId: request.actionSlug === 'embed' ? 'openrouter' : 'aws-bedrock',
+        modelId: request.actionSlug === 'embed' ? 'qwen.qwen3-embedding-8b' : 'amazon.nova-lite',
+        externalModelId: request.actionSlug === 'embed' ? 'qwen/qwen3-embedding-8b' : 'us.amazon.nova-lite-v1:0',
+      };
+    };
+    const dependencies = { repository: f.repository, executeAction };
+    expect((await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Routed folder' }] }, f.context, dependencies)).summary.failed).toBe(0);
+    expect((await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Routed note', representation: { content: 'Routed body' } }, f.context, dependencies)).document.name).toBe('Routed note');
+    expect((await runContentTool('autocomplete', { context: 'Continue this', wordCount: 3 }, f.context, dependencies)).completion).toBe('continued words');
+    expect(calls.map(({ actionSlug }) => actionSlug)).toEqual(['embed', 'embed', 'ask']);
+    expect(calls.filter(({ actionSlug }) => actionSlug === 'embed').every(({ input }) => typeof (input as { text?: unknown }).text === 'string')).toBe(true);
+    expect(() => chatInputSchema.parse(calls.at(-1)?.input)).not.toThrow();
+
+    calls.length = 0;
+    nextEmbedding = 0;
+    maximumActiveEmbeddings = 0;
+    const longContent = Array.from({ length: 10_500 }, () => 'word').join(' ');
+    const created = await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Chunked note', representation: { content: longContent } }, f.context, dependencies);
+    const chunkEmbeddings = f.documents.get(created.document.key).chunkEmbeddings as number[][];
+    expect(chunkEmbeddings.length).toBeGreaterThan(8);
+    expect(maximumActiveEmbeddings).toBe(8);
+    expect(chunkEmbeddings.map((value) => value[0])).toEqual([...chunkEmbeddings.keys()]);
+  });
+
   test('searches folders and chunk-aware documents with caps, summaries, cache, auth, and isolated history', async () => {
     const f = fixture('viewer');
     for (let index = 0; index < 6; index += 1) {
@@ -289,7 +335,7 @@ describe('Content runtime', () => {
       repository: f.repository,
       searchQueries,
       embed: async () => { embeddingCalls += 1; return embedding; },
-      runAction: async (_action: string, input: any) => { summaryCalls += 1; expect(input.instruction).toContain('Launch Roadmap'); return { text: `Relevant to Launch Roadmap: ${input.title}` }; },
+      runAction: async (action: string, input: any) => { summaryCalls += 1; expect(action).toBe('reason'); const parsed = chatInputSchema.parse(input); const text = parsed.messages[0]?.content[0]?.type === 'text' ? parsed.messages[0].content[0].text : ''; expect(text).toContain('Launch Roadmap'); return { text: 'Relevant to Launch Roadmap' }; },
     };
     const first = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Launch Roadmap' }, f.context, dependencies);
     expect(first.folders).toHaveLength(4);
@@ -437,6 +483,25 @@ describe('Content runtime', () => {
     expect(embeddedNames).toEqual(['Notes (translate)']);
     const persistedDocumentKey = output.results[0]?.data?.persistedDocumentKey;
     expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)).not.toHaveProperty('isFavorite');
+  });
+
+  test('sends summaries and rewrites through provider-valid chat action inputs', async () => {
+    const f = fixture('viewer');
+    const first = f.addDocument('First source body');
+    const second = f.addDocument('Second source body');
+    const actions: string[] = [];
+    const runAction = async (action: string, input: Record<string, unknown>) => {
+      actions.push(action);
+      const parsed = chatInputSchema.parse(input);
+      expect(parsed.systemPrompt).toBeString();
+      expect(parsed.messages[0]?.content[0]).toMatchObject({ type: 'text' });
+      return { text: 'Generated text' };
+    };
+    const dependencies = { repository: f.repository, runAction };
+    expect((await runContentTool('document.summarize', { documentKeys: [first] }, f.context, dependencies)).results[0]?.success).toBe(true);
+    expect((await runContentTool('document.summarize', { documentKeys: [first, second], combine: true }, f.context, dependencies)).summary.failed).toBe(0);
+    expect((await runContentTool('document.rewrite', { rewrites: [{ documentKey: first, instruction: 'Improve clarity' }] }, f.context, dependencies)).results[0]?.success).toBe(true);
+    expect(actions).toEqual(['reason', 'deep-reason', 'deep-reason']);
   });
 
   test('precomputes atomic exports and throws without returning partial success', async () => {

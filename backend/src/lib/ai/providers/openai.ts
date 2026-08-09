@@ -277,7 +277,12 @@ async function executeSpeech<TInput, TOutput>(
   realtime.on('response.output_audio.delta', (event) => chunks.push(Buffer.from(event.delta, 'base64')));
   try {
     await raceAbort(realtime.emitted('session.created'), realtimeRequest.signal);
-    realtime.send({ type: 'session.update', session: { type: 'realtime', model: OPENAI_REALTIME_MODEL, output_modalities: ['audio'], audio: { output: { format: { type: 'audio/pcm', rate: 24_000 }, voice: input.voice } }, instructions: 'Read the supplied text verbatim in a clear, calm, natural voice. Do not add, omit, repeat, or summarize words.' } });
+    const delivery = [
+      'Read the supplied text verbatim in a clear, calm, natural voice. Do not add, omit, repeat, or summarize words.',
+      input.language ? `Use ${input.language} pronunciation.` : '',
+      input.speakingRate ? `Speak at ${input.speakingRate} times the normal rate.` : '',
+    ].filter(Boolean).join(' ');
+    realtime.send({ type: 'session.update', session: { type: 'realtime', model: OPENAI_REALTIME_MODEL, output_modalities: ['audio'], audio: { output: { format: { type: 'audio/pcm', rate: 24_000 }, voice: input.voice } }, instructions: delivery } });
     await raceAbort(realtime.emitted('session.updated'), realtimeRequest.signal);
     realtime.send({ type: 'conversation.item.create', item: { type: 'message', role: 'user', content: [{ type: 'input_text', text: input.text }] } });
     realtime.send({ type: 'response.create', response: { output_modalities: ['audio'] } });
