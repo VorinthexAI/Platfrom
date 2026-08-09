@@ -12,6 +12,7 @@ import { documentInsertAction } from './document-insert';
 import { documentValidateAction } from './document-validate';
 import { editImageAction } from './edit-image';
 import { editVideoAction } from './edit-video';
+import { enhanceAction } from './enhance';
 import { embedAction } from './embed';
 import { extendVideoAction } from './extend-video';
 import { generateImageAction } from './generate-image';
@@ -46,6 +47,7 @@ export { documentInsertAction } from './document-insert';
 export { documentValidateAction } from './document-validate';
 export { editImageAction } from './edit-image';
 export { editVideoAction } from './edit-video';
+export { enhanceAction } from './enhance';
 export { embedAction } from './embed';
 export { extendVideoAction } from './extend-video';
 export { generateImageAction } from './generate-image';
@@ -83,7 +85,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentGenerateHtmlAction,
-  documentGenerateContentAction, documentEmbedAction, documentInsertAction,
+  documentGenerateContentAction, documentEmbedAction, documentInsertAction, enhanceAction,
 ];
 export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 

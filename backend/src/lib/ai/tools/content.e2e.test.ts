@@ -150,7 +150,7 @@ suite('Content live E2E', () => {
         },
       },
       runAction: async (action: string, input: any) => {
-        if (action === 'ask' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
+        if (action === 'ask' || action === 'enhance' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
         if (action === 'speak') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
         if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
         if (action === 'document-generate-content') return documentGenerateContent(input, { logger: () => undefined });
@@ -193,6 +193,7 @@ suite('Content live E2E', () => {
     covered.add('folder.list');
 
     expect((await call('autocomplete', { context: 'Continue this note', wordCount: 4 })).completion).toBe('Generated ask: deterministic archive');
+    expect((await call('enhance', { content: 'Improve teh note.' })).content).toContain('enhance');
 
     const created = await call('folder.create', { folders: [{ scopeKey, name: 'Root' }, { scopeKey, name: 'Destination' }], idempotencyKey: `folders-${organizationKey}` });
     expect(created.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });

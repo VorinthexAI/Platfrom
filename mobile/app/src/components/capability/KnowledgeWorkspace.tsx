@@ -15,6 +15,7 @@ import {
   PlusIcon,
   SearchIcon,
   SendIcon,
+  StarIcon,
   UploadIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
@@ -25,6 +26,7 @@ import {
   createContentDocument,
   createContentFolder,
   createContentMutationKey,
+  enhanceContent,
   getContentContext,
   isContentContextConfigured,
   listContentLocation,
@@ -39,11 +41,12 @@ import {
   type ContentSearchHistoryItem,
   type ContentSearchResponse,
 } from "@/lib/content-client";
+import { applyEnhancement, resolveEnhancementTarget, type TextRange } from "@/lib/note-enhancement";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
-type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" | "folders";
+type ArchiveSheet = "create" | "document" | "folder" | "library" | "documents" | "folders" | "enhance";
 
 const localDraftFile = new File(Paths.document, "knowledge-draft.json");
 const localFoldersFile = new File(Paths.document, "archive-local-folders.json");
@@ -69,6 +72,8 @@ export function KnowledgeWorkspace() {
   const [content, setContent] = useState("");
   const [completion, setCompletion] = useState("");
   const [autocompleteRevision, setAutocompleteRevision] = useState(0);
+  const [enhancing, setEnhancing] = useState(false);
+  const [enhanceRange, setEnhanceRange] = useState<TextRange>();
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [rootFolders, setRootFolders] = useState<ContentFolder[]>([]);
@@ -101,6 +106,8 @@ export function KnowledgeWorkspace() {
   const selectionRef = useRef({ start: 0, end: 0 });
   const autocompleteRequest = useRef<AbortController | undefined>(undefined);
   const autocompleteGeneration = useRef(0);
+  const enhanceRequest = useRef<AbortController | undefined>(undefined);
+  const enhanceGeneration = useRef(0);
   const currentFolder = folderStack.at(-1);
   const visibleFolders = rootFolders.filter((folder) => {
     const normalized = libraryQuery.trim().toLowerCase();
@@ -119,6 +126,12 @@ export function KnowledgeWorkspace() {
   };
 
   const closeSheet = () => {
+    if (activeSheet === "enhance") {
+      enhanceGeneration.current += 1;
+      enhanceRequest.current?.abort();
+      enhanceRequest.current = undefined;
+      setEnhancing(false);
+    }
     setSheetOpen(false);
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     sheetCloseTimer.current = setTimeout(() => setActiveSheet(undefined), 240);
@@ -127,6 +140,7 @@ export function KnowledgeWorkspace() {
   useEffect(() => () => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     autocompleteRequest.current?.abort();
+    enhanceRequest.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -212,6 +226,10 @@ export function KnowledgeWorkspace() {
     loadedContentContextKey.current = contentContextKey;
     if (changedAccount) {
       setCompletion("");
+      enhanceGeneration.current += 1;
+      enhanceRequest.current?.abort();
+      enhanceRequest.current = undefined;
+      setEnhancing(false);
       editorSession.current += 1;
       revision.current = 0;
       dirty.current = false;
@@ -341,6 +359,47 @@ export function KnowledgeWorkspace() {
     setContent(next);
     markDirty();
     persistLocalDraft(titleRef.current, next);
+  };
+
+  const openEnhanceSheet = () => {
+    const target = resolveEnhancementTarget(contentRef.current, selectionRef.current);
+    setEnhanceRange(target.range);
+    clearCompletion();
+    openSheet("enhance");
+  };
+
+  const runEnhancement = async () => {
+    if (!hasContentContext || !contentRef.current.trim()) return;
+    const original = contentRef.current;
+    const target = resolveEnhancementTarget(original, enhanceRange ?? { start: 0, end: 0 });
+    const generation = ++enhanceGeneration.current;
+    const controller = new AbortController();
+    enhanceRequest.current?.abort();
+    enhanceRequest.current = controller;
+    setEnhancing(true);
+    setSheetError(undefined);
+    try {
+      const result = await enhanceContent(target.content, controller.signal);
+      if (controller.signal.aborted || generation !== enhanceGeneration.current) return;
+      if (contentRef.current !== original) {
+        setSheetError("The note changed while it was being enhanced. Try again.");
+        return;
+      }
+      const next = applyEnhancement(original, result.content, target.range);
+      clearCompletion();
+      contentRef.current = next;
+      const caret = target.range ? target.range.start + result.content.length : next.length;
+      selectionRef.current = { start: caret, end: caret };
+      setContent(next);
+      markDirty();
+      persistLocalDraft(titleRef.current, next);
+      closeSheet();
+    } catch (cause) {
+      if (!controller.signal.aborted) setSheetError(cause instanceof Error ? cause.message : "The note could not be enhanced.");
+    } finally {
+      if (enhanceRequest.current === controller) enhanceRequest.current = undefined;
+      if (generation === enhanceGeneration.current) setEnhancing(false);
+    }
   };
 
   const persistLocalDraft = (nextTitle: string, nextContent: string) => {
@@ -629,6 +688,9 @@ export function KnowledgeWorkspace() {
           <View style={styles.metaRow}>
             <Text style={styles.meta}>CREATE NOTE</Text>
             <View style={styles.noteActions}>
+              <Button accessibilityLabel="Open AI actions" contentMode="raw" disabled={!hasContentContext || !content.trim() || Boolean(results)} onPress={openEnhanceSheet} size="sm" variant="icon">
+                <StarIcon size="sm" />
+              </Button>
               <Button accessibilityLabel="Browse Archive" contentMode="raw" onPress={() => openSheet("library")} size="sm" variant="icon">
                 <FileIcon size="sm" />
               </Button>
@@ -746,11 +808,11 @@ export function KnowledgeWorkspace() {
       </ScrollView>
 
       <BottomSheet
-        description={activeSheet === "create" ? "Add something to your current Archive folder." : undefined}
+        description={activeSheet === "create" ? "Add something to your current Archive folder." : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : undefined}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet !== "create"}
-        title={activeSheet === "document" ? "Create document" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : "Create in Archive"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "document" ? "Create document" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : "Create in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
@@ -759,6 +821,20 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem icon={<FileIcon />} onPress={() => { setSheetError(undefined); setActiveSheet("document"); }}>Create document</BottomSheetItem>
             <BottomSheetItem icon={<UploadIcon />} onPress={() => void uploadDocument()}>Upload documents</BottomSheetItem>
           </>
+        ) : null}
+        {activeSheet === "enhance" ? (
+          <View style={styles.enhancePanel}>
+            <View style={styles.enhanceIdentity}>
+              <StarIcon size="lg" variant="accent" />
+              <View style={styles.enhanceCopy}>
+                <Text style={styles.rowTitle}>{enhanceRange ? "Selected text" : "Entire note"}</Text>
+                <Text style={styles.rowSubtitle}>{enhanceRange ? "Only the highlighted passage will be replaced." : "No text is selected, so the full note will be replaced."}</Text>
+              </View>
+            </View>
+            <Button disabled={enhancing} icon={<StarIcon size="sm" />} loading={enhancing} onPress={() => void runEnhancement()} size="lg" variant="primary">
+              {enhanceRange ? "Enhance selection" : "Enhance note"}
+            </Button>
+          </View>
         ) : null}
         {activeSheet === "folder" ? (
           <View style={styles.namingForm}>
@@ -835,6 +911,9 @@ const styles = StyleSheet.create({
   editor: { minHeight: 270, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
   completionRow: { minHeight: 42, marginTop: -8, paddingLeft: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderLeftColor: palette.silver500, borderLeftWidth: 1 },
   completionText: { flex: 1, color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 24 },
+  enhancePanel: { gap: 18 },
+  enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
+  enhanceCopy: { flex: 1, gap: 4 },
   locationPreview: { gap: 4, marginTop: 10 },
   match: { gap: 7, marginBottom: 10, padding: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   searchArea: { marginTop: spacing.md, gap: 8 },

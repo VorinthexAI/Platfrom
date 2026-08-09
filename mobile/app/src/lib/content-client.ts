@@ -84,6 +84,10 @@ export function autocompleteContent(context: string, wordCount: number, signal?:
   return callContentTool<{ completion: string }>("autocomplete", { context, wordCount }, signal);
 }
 
+export function enhanceContent(content: string, signal?: AbortSignal) {
+  return callContentTool<{ content: string }>("enhance", { content }, signal);
+}
+
 export async function listContentLocation(folderKey?: string) {
   const contentContext = getContentContext();
   const location = folderKey ? { folderKey } : {};

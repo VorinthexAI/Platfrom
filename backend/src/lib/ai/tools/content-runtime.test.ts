@@ -726,6 +726,22 @@ describe('Content runtime', () => {
     expect(call.input.options).toMatchObject({ temperature: 0.2, maxTokens: 16 });
   });
 
+  test('enhances supplied text without persistence', async () => {
+    const f = fixture('viewer');
+    let call: { action?: string; input?: any } = {};
+    const output = await runContentTool('enhance', { content: 'This are teh text.' }, f.context, {
+      repository: f.repository,
+      runAction: async (action, input) => {
+        call = { action, input };
+        return { text: '```text\nThis is the text.\n```' };
+      },
+    });
+    expect(output).toEqual({ content: 'This is the text.' });
+    expect(call.action).toBe('enhance');
+    expect(call.input.options).toMatchObject({ temperature: 0.1, maxTokens: 256 });
+    expect(f.patches).toHaveLength(0);
+  });
+
   test('executes one authorized valid behavior path for every registered tool', async () => {
     for (const name of CONTENT_TOOL_NAMES) {
       const f = fixture('owner');
@@ -751,7 +767,7 @@ describe('Content runtime', () => {
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
         runAction: async (action: string, input: any) => {
-          if (action === 'ask' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
+          if (action === 'ask' || action === 'enhance' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
           if (action === 'document-generate-html') return documentGenerateHtml(input);
           if (action === 'document-generate-content') return documentGenerateContent(input);
@@ -766,6 +782,7 @@ describe('Content runtime', () => {
       };
       let input: any;
       if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
+      else if (name === 'enhance') input = { content: 'Improve teh wording.' };
       else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
       else if (name === 'folder.find') input = { folderKeys: [f.folderKey] };
       else if (name === 'folder.list') input = { scopeKey: f.scopeKey, parentFolderKey: f.folderKey };
