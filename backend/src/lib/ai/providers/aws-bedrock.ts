@@ -68,9 +68,10 @@ function streamException(event: ConverseStreamOutput): ProviderError | undefined
 
 async function invoke(config: AwsBedrockProviderConfig, externalModelId: string, body: string, signal?: AbortSignal): Promise<unknown> {
   const host = `bedrock-runtime.${config.region}.amazonaws.com`;
-  const path = `/model/${encodeURIComponent(externalModelId)}/invoke`;
-  const signed = signAwsRequest(config, 'bedrock', host, path, body, { 'content-type': 'application/json', accept: 'application/json' });
-  const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body, signal });
+  const requestPath = `/model/${externalModelId}/invoke`;
+  const canonicalPath = `/model/${encodeURIComponent(externalModelId)}/invoke`;
+  const signed = signAwsRequest(config, 'bedrock', host, canonicalPath, body, { 'content-type': 'application/json', accept: 'application/json' });
+  const response = await fetch(`https://${host}${requestPath}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body, signal });
   if (!response.ok) throw new ProviderError(PROVIDER_ID, providerErrorCodeForStatus(response.status), `aws-bedrock request failed with status ${response.status}`, { status: response.status });
   return response.json();
 }
@@ -106,10 +107,11 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
         if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
         const input = chatInputSchema.parse(request.input);
         const host = `bedrock-runtime.${parsed.region}.amazonaws.com`;
-        const path = `/model/${encodeURIComponent(request.externalModelId)}/converse`;
+        const requestPath = `/model/${request.externalModelId}/converse`;
+        const canonicalPath = `/model/${encodeURIComponent(request.externalModelId)}/converse`;
         const body = JSON.stringify(buildConverseInput(input));
-        const signed = signAwsRequest(parsed, 'bedrock', host, path, body, { 'content-type': 'application/json' });
-        const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body, signal: resolveRequestSignal(request) });
+        const signed = signAwsRequest(parsed, 'bedrock', host, canonicalPath, body, { 'content-type': 'application/json' });
+        const response = await fetch(`https://${host}${requestPath}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body, signal: resolveRequestSignal(request) });
         if (!response.ok) throw new ProviderError(PROVIDER_ID, providerErrorCodeForStatus(response.status), `aws-bedrock request failed with status ${response.status}`, { status: response.status });
         const raw = await response.json();
         const result = converseResponseSchema.parse(raw);
