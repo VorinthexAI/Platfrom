@@ -32,6 +32,7 @@ export * from './icons/inbox';
 export * from './icons/clock';
 export * from './icons/filter';
 export * from './icons/sort';
+export * from './icons/swap';
 export * from './icons/more-horizontal';
 export * from './icons/more-vertical';
 export * from './icons/check';

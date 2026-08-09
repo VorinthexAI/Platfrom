@@ -58,6 +58,7 @@ export * from "./icons/soundwave/soundwave.mobile";
 export * from "./icons/microphone/microphone.mobile";
 export * from "./icons/send/send.mobile";
 export * from "./icons/sort/sort.mobile";
+export * from "./icons/swap/swap.mobile";
 export * from "./icons/star/star.mobile";
 export * from "./icons/trash/trash.mobile";
 export * from "./icons/unlock/unlock.mobile";

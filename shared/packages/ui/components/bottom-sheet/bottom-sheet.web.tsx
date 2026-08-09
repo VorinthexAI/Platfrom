@@ -16,6 +16,7 @@ export type BottomSheetProps = {
   description?: string;
   onOpenChange: (open: boolean) => void;
   open: boolean;
+  tall?: boolean;
   title: string;
 };
 
@@ -24,6 +25,7 @@ export function BottomSheet({
   description,
   onOpenChange,
   open,
+  tall = false,
   title,
 }: BottomSheetProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -71,7 +73,7 @@ export function BottomSheet({
         <Dialog.Content
           aria-describedby={description ? descriptionId : undefined}
           aria-labelledby={titleId}
-          className="vui-bottom-sheet"
+          className={`vui-bottom-sheet${tall ? " vui-bottom-sheet-tall" : ""}`}
           ref={contentRef}
         >
           <div

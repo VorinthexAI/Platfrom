@@ -375,6 +375,10 @@
   outline: none;
 }
 
+.vui-bottom-sheet-tall {
+  height: min(72dvh, 680px);
+}
+
 .vui-bottom-sheet-drag-handle {
   align-items: center;
   cursor: grab;
