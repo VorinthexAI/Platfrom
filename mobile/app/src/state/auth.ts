@@ -36,6 +36,16 @@ async function bootstrapGuest() {
   ));
 }
 
+async function recoverGuestSession() {
+  await tokenVault.clear();
+  try {
+    return await bootstrapGuest();
+  } catch {
+    await rotateGuestBootstrapCredentials();
+    return bootstrapGuest();
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   status: "bootstrapping",
   user: null,
@@ -106,18 +116,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   reconnectContentContext: async () => {
-    const operation = ++authOperation;
+    let operation = ++authOperation;
+    const isGuest = get().user?.email?.endsWith("@guest.vorinthex.com") ?? false;
     let context;
     try {
       context = await loadContext();
       if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is incomplete.");
     } catch {
+      operation = ++authOperation;
       try {
         context = await bootstrapGuest();
       } catch (error) {
-        if (!get().user?.email?.endsWith("@guest.vorinthex.com")) throw error;
-        await Promise.all([tokenVault.clear(), rotateGuestBootstrapCredentials()]);
-        context = await bootstrapGuest();
+        if (!isGuest) throw error;
+        context = await recoverGuestSession();
       }
     }
     if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is unavailable.");
@@ -127,8 +138,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   completeOnboarding: async () => {
-    const operation = ++authOperation;
-    const context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
+    let operation = ++authOperation;
+    const isGuest = get().user?.email?.endsWith("@guest.vorinthex.com") ?? false;
+    let context;
+    try {
+      context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
+    } catch (error) {
+      if (!isAxiosError(error) || error.response?.status !== 401 || !isGuest) throw error;
+      operation = ++authOperation;
+      await recoverGuestSession();
+      context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
+    }
     if (operation === authOperation) {
       await writeAuthContext(context);
       if (operation === authOperation) set({ status: "authenticated", ...context });
