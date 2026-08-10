@@ -299,6 +299,7 @@ const styles = StyleSheet.create({
   tallSheet: { height: "72%" },
   mutationSheet: {
     flex: 1,
+    height: "100%",
     maxHeight: "100%",
   },
   headerDragTarget: { marginHorizontal: -20, paddingHorizontal: 20 },

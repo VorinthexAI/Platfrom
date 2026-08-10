@@ -1027,11 +1027,11 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "folders" ? (
           <>
-            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <View style={styles.folderSearch}>
               <SearchIcon size="sm" variant="muted" />
               <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search folders" style={styles.folderSearchInput} value={libraryQuery} />
             </View>
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
               {visibleFolders.map((folder) => (
@@ -1045,11 +1045,11 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "documents" ? (
           <>
-            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <View style={styles.folderSearch}>
               <SearchIcon size="sm" variant="muted" />
               <TextInput accessibilityLabel="Search Archive documents" autoFocus onChangeText={setLibraryQuery} placeholder="Search documents" style={styles.folderSearchInput} value={libraryQuery} />
             </View>
+            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (
                 <Button icon={<FileIcon size="md" />} key={document.key} onPress={() => void selectDocument(document)} size="lg" style={styles.folderTile} variant="secondary">
