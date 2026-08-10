@@ -79,7 +79,6 @@ export function KnowledgeWorkspace() {
   const [title, setTitle] = useState("Untitled note");
   const [content, setContent] = useState("");
   const [completion, setCompletion] = useState("");
-  const [autocompletePending, setAutocompletePending] = useState(false);
   const [autocompleteRevision, setAutocompleteRevision] = useState(0);
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceRange, setEnhanceRange] = useState<TextRange>();
@@ -175,14 +174,12 @@ export function KnowledgeWorkspace() {
       autocompleteRequest.current?.abort();
       const controller = new AbortController();
       autocompleteRequest.current = controller;
-      setAutocompletePending(true);
       void autocompleteContent(context, AUTOCOMPLETE_WORD_COUNT, controller.signal).then(({ completion: next }) => {
         if (generation !== autocompleteGeneration.current || controller.signal.aborted || contentRef.current !== current) return;
         setCompletion(next);
       }).catch(() => undefined).finally(() => {
         if (autocompleteRequest.current === controller) {
           autocompleteRequest.current = undefined;
-          setAutocompletePending(false);
         }
       });
     }, 500);
@@ -191,7 +188,6 @@ export function KnowledgeWorkspace() {
       autocompleteGeneration.current += 1;
       autocompleteRequest.current?.abort();
       autocompleteRequest.current = undefined;
-      setAutocompletePending(false);
     };
   }, [autocompleteRevision, hasContentContext]);
 
@@ -376,7 +372,6 @@ export function KnowledgeWorkspace() {
     autocompleteGeneration.current += 1;
     autocompleteRequest.current?.abort();
     autocompleteRequest.current = undefined;
-    setAutocompletePending(false);
     setCompletion("");
   };
 
@@ -797,7 +792,7 @@ export function KnowledgeWorkspace() {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
+    <KeyboardAvoidingView behavior="padding" style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.identity}>
           <ChromeIcon glow={0.7} size={34} source={capabilityIconSource.archive} />
@@ -871,50 +866,53 @@ export function KnowledgeWorkspace() {
                 style={styles.titleInput}
                 value={title}
               />
-              <TextInput
-                accessibilityLabel="Note content"
-                multiline
-                onBlur={() => setEditorFocused(false)}
-                onChangeText={(value) => {
-                  if (documentKeyRef.current && value.length === 0) {
-                    setError("Saved notes must contain at least one character.");
-                    return;
-                  }
-                  const previousContent = contentRef.current;
-                  const previousLength = previousContent.length;
-                  const changedAtEnd = value.startsWith(previousContent) || previousContent.startsWith(value);
-                  const cursorWasAtEnd = selectionRef.current.start === previousLength && selectionRef.current.end === previousLength;
-                  const shouldAutocomplete = changedAtEnd || cursorWasAtEnd;
-                  if (shouldAutocomplete) {
-                    selectionRef.current = { start: value.length, end: value.length };
-                  }
-                  contentRef.current = value;
-                  clearCompletion();
-                  setContent(value);
-                  if (shouldAutocomplete) setAutocompleteRevision((current) => current + 1);
-                  markDirty();
-                  persistLocalDraft(titleRef.current, value);
-                }}
-                placeholder="Start writing from here..."
-                onFocus={() => setEditorFocused(true)}
-                onSelectionChange={(event) => {
-                  selectionRef.current = event.nativeEvent.selection;
-                  if (event.nativeEvent.selection.end !== contentRef.current.length) clearCompletion();
-                }}
-                style={[styles.editor, editorFocused && styles.editorFocused]}
-                textAlignVertical="top"
-                value={content}
-              />
-              {autocompletePending || completion ? (
-                <View style={styles.completionRow}>
-                  <Text accessibilityLabel={completion ? "Suggested continuation" : undefined} style={styles.completionText}>{completion || "Thinking ahead..."}</Text>
-                  {completion ? (
-                    <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" variant="icon">
-                      <CheckIcon size="sm" />
-                    </Button>
-                  ) : null}
-                </View>
-              ) : null}
+              <View style={[styles.editorFrame, editorFocused && styles.editorFrameFocused]}>
+                {completion ? (
+                  <Text accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.editorGhost}>
+                    <Text style={styles.editorGhostSpacer}>{content}</Text>
+                    <Text style={styles.completionText}>{/\s$/.test(content) || /^[,.;:!?)]/.test(completion) ? "" : " "}{completion}</Text>
+                  </Text>
+                ) : null}
+                <TextInput
+                  accessibilityLabel="Note content"
+                  multiline
+                  onBlur={() => setEditorFocused(false)}
+                  onChangeText={(value) => {
+                    if (documentKeyRef.current && value.length === 0) {
+                      setError("Saved notes must contain at least one character.");
+                      return;
+                    }
+                    const previousContent = contentRef.current;
+                    const previousLength = previousContent.length;
+                    const changedAtEnd = value.startsWith(previousContent) || previousContent.startsWith(value);
+                    const cursorWasAtEnd = selectionRef.current.start === previousLength && selectionRef.current.end === previousLength;
+                    const shouldAutocomplete = changedAtEnd || cursorWasAtEnd;
+                    if (shouldAutocomplete) {
+                      selectionRef.current = { start: value.length, end: value.length };
+                    }
+                    contentRef.current = value;
+                    clearCompletion();
+                    setContent(value);
+                    if (shouldAutocomplete) setAutocompleteRevision((current) => current + 1);
+                    markDirty();
+                    persistLocalDraft(titleRef.current, value);
+                  }}
+                  placeholder="Start writing from here..."
+                  onFocus={() => setEditorFocused(true)}
+                  onSelectionChange={(event) => {
+                    selectionRef.current = event.nativeEvent.selection;
+                    if (event.nativeEvent.selection.end !== contentRef.current.length) clearCompletion();
+                  }}
+                  style={[styles.editor, editorFocused && styles.editorFocused]}
+                  textAlignVertical="top"
+                  value={content}
+                />
+                {completion ? (
+                  <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" style={styles.completionAccept} variant="icon">
+                    <CheckIcon size="sm" />
+                  </Button>
+                ) : null}
+              </View>
               {!content && (folders.length > 0 || documents.length > 0) ? (
                 <View style={styles.locationPreview}>
                   <Text style={styles.eyebrow}>IN THIS LOCATION</Text>
@@ -1103,10 +1101,14 @@ const styles = StyleSheet.create({
   meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   titleInput: { minHeight: 58, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28 },
+  editorFrame: { minHeight: 270, position: "relative" },
+  editorFrameFocused: { flex: 1, minHeight: 80 },
   editor: { minHeight: 270, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
   editorFocused: { flex: 1, minHeight: 80 },
-  completionRow: { minHeight: 42, marginTop: -8, paddingLeft: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderLeftColor: palette.silver500, borderLeftWidth: 1 },
-  completionText: { flex: 1, color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 24 },
+  editorGhost: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 1, paddingVertical: 10, color: "transparent", fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
+  editorGhostSpacer: { color: "transparent" },
+  completionText: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 26 },
+  completionAccept: { bottom: 8, position: "absolute", right: 0, zIndex: 2 },
   enhancePanel: { gap: 18 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },
