@@ -788,7 +788,8 @@ describe('Content runtime', () => {
     });
     expect(output).toEqual({ completion: 'continues with useful' });
     expect(call.action).toBe('ask');
-    expect(call.input.options).toMatchObject({ temperature: 0.2, maxTokens: 16 });
+    expect(call.input.systemPrompt).toContain('vivid, specific, or subtly unexpected');
+    expect(call.input.options).toMatchObject({ temperature: 0.7, maxTokens: 16 });
   });
 
   test('enhances supplied text without persistence', async () => {
