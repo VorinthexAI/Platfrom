@@ -100,6 +100,15 @@ export function normalizeAuthContext(value: unknown): AuthContext {
   };
 }
 
+export function hasCompleteAuthContext(context: AuthContext | null) {
+  return Boolean(
+    context?.user &&
+    stringValue(record(context.organization), "key") &&
+    stringValue(record(context.scope), "key") &&
+    context.contentExecution?.agentKey,
+  );
+}
+
 export function firstNameFor(user: AuthUser | null) {
   const candidate = user?.firstName ?? user?.name ?? user?.alias ?? user?.email?.split("@")[0];
   return candidate?.trim().split(/\s+/)[0] || "there";

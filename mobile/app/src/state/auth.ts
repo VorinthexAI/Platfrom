@@ -3,7 +3,7 @@ import { create } from "zustand";
 
 import { getJson, onUnauthorized, patchJson, postJson, revokeRemoteSession } from "@/lib/api-client";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
-import { normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
+import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
 import { getGuestBootstrapCredentials } from "@/lib/installation";
 import { tokenVault } from "@/lib/token-vault";
 import { useOnboardingStore } from "@/state/onboarding";
@@ -79,6 +79,18 @@ export const useAuthStore = create<AuthState>((set) => ({
         return;
       }
       const cached = await readAuthContext();
+      if (cached && !hasCompleteAuthContext(cached)) {
+        try {
+          const context = await bootstrapGuest();
+          if (operation === authOperation) {
+            await writeAuthContext(context);
+            if (operation === authOperation) set({ status: "authenticated", ...context });
+          }
+          return;
+        } catch {
+          // Preserve offline access to local drafts when session recovery is unavailable.
+        }
+      }
       if (operation === authOperation) set(cached
         ? { status: "authenticated", ...cached }
         : { status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
