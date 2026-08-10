@@ -4,12 +4,13 @@ import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isAxiosError } from "axios";
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AccessibilityInfo, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { vorinthexMarkSource } from "@/data/capability-icons";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { ChromePanel } from "@/components/ChromePanel";
+import { NeuralBackdrop } from "@/components/NeuralBackdrop";
 import { getJson, postJson } from "@/lib/api-client";
 import { launchOAuthProvider, type OAuthProvider } from "@/lib/oauth";
 import { useAuthStore } from "@/state/auth";
@@ -30,6 +31,7 @@ function messageFor(error: unknown) {
 
 export default function AuthRoute() {
   const insets = useSafeAreaInsets();
+  const { height, width } = useWindowDimensions();
   const hydrate = useAuthStore((state) => state.hydrate);
   const [emailVisible, setEmailVisible] = useState(false);
   const [email, setEmail] = useState("");
@@ -138,6 +140,9 @@ export default function AuthRoute() {
 
   return (
     <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.neuralBackdrop}>
+        <NeuralBackdrop height={height} width={width} />
+      </View>
       <View style={styles.atmosphere} pointerEvents="none" />
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + spacing.lg, paddingTop: insets.top + spacing.lg }]}
@@ -206,6 +211,7 @@ export default function AuthRoute() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
+  neuralBackdrop: { position: "absolute", inset: 0, opacity: 0.72 },
   scrollContent: { flexGrow: 1, justifyContent: "center", paddingHorizontal: spacing.lg },
   content: { alignSelf: "center", width: "100%", maxWidth: 420, gap: spacing.xl },
   atmosphere: { position: "absolute", top: "8%", left: "16%", width: "68%", aspectRatio: 1, borderRadius: 999, backgroundColor: "rgba(174,182,188,0.055)", boxShadow: "0 0 100px rgba(221,226,229,0.12)" },
