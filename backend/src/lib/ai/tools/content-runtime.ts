@@ -732,9 +732,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   try {
     if (tool === 'autocomplete') {
       const response = await action('ask', {
-        systemPrompt: `Continue the user's writing with exactly ${input.wordCount} words or fewer. Return only the continuation, without quotation marks, labels, commentary, or repeating the supplied context.`,
+        systemPrompt: `Continue the user's writing with exactly ${input.wordCount} words or fewer. Match the writer's voice and direction while favoring a vivid, specific, or subtly unexpected continuation over generic filler. Keep it coherent with the supplied context. Return only the continuation, without quotation marks, labels, commentary, or repeating the supplied context.`,
         messages: [{ role: 'user', content: [{ type: 'text', text: input.context }] }],
-        options: { temperature: 0.2, maxTokens: Math.max(16, input.wordCount * 3) },
+        options: { temperature: 0.7, maxTokens: Math.max(16, input.wordCount * 3) },
       });
       const completion = z.string().trim().min(1).parse(response.text)
         .replace(/^(?:continuation\s*:\s*)/i, '')

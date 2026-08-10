@@ -1,6 +1,7 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Spinner } from "@vorinthex/shared/ui/spinner";
 
 import { postJson } from "@/lib/api-client";
 import { useAuthStore } from "@/state/auth";
@@ -8,7 +9,6 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 
 export default function MagicTokenRoute() {
   const params = useLocalSearchParams<{ token_hash?: string; token?: string }>();
-  const router = useRouter();
   const hydrate = useAuthStore((state) => state.hydrate);
   const tokenHash = params.token_hash ?? params.token;
   const [message, setMessage] = useState(tokenHash ? "Securing your session..." : "This sign-in link is incomplete.");
@@ -19,12 +19,11 @@ export default function MagicTokenRoute() {
       .then(async (result) => {
         if (result.status !== "authenticated") throw new Error("Additional verification is required on the web.");
         await hydrate();
-        router.replace("/onboarding");
       })
       .catch((error: unknown) => setMessage(error instanceof Error ? error.message : "This sign-in link is invalid or expired."));
-  }, [hydrate, router, tokenHash]);
+  }, [hydrate, tokenHash]);
 
-  return <View style={styles.root}><ActivityIndicator color={palette.silver100} /><Text style={styles.message}>{message}</Text></View>;
+  return <View style={styles.root}><Spinner size="small" /><Text style={styles.message}>{message}</Text></View>;
 }
 
 const styles = StyleSheet.create({

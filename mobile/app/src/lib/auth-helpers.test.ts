@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { extractSessionTokens, firstNameFor, normalizeApiPath, normalizeAuthContext } from "./auth-helpers";
+import { extractSessionTokens, firstNameFor, hasCompleteAuthContext, normalizeApiPath, normalizeAuthContext } from "./auth-helpers";
 
 describe("mobile auth helpers", () => {
   test("normalizes every request beneath the API version", () => {
@@ -40,6 +40,8 @@ describe("mobile auth helpers", () => {
     expect(context.organization).toEqual({ key: "org" });
     expect(context.scope).toEqual({ key: "scope" });
     expect(context.contentExecution).toEqual({ agentKey: "agent" });
+    expect(hasCompleteAuthContext(context)).toBe(true);
+    expect(hasCompleteAuthContext({ ...context, contentExecution: null })).toBe(false);
     expect(firstNameFor(context.user)).toBe("Ada");
   });
 });
