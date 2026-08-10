@@ -2,8 +2,8 @@ export {};
 
 const apiBase = (process.env.ARCHIVE_E2E_API_URL ?? 'http://127.0.0.1:3001').replace(/\/$/, '');
 const hostname = new URL(apiBase).hostname;
-if (!['localhost', '127.0.0.1', '::1'].includes(hostname)) {
-  throw new Error(`Refusing Archive API E2E against non-local host ${hostname}.`);
+if (!['localhost', '127.0.0.1', '::1'].includes(hostname) && process.env.ARCHIVE_E2E_DANGEROUS_REMOTE !== 'true') {
+  throw new Error(`Refusing Archive API E2E against non-local host ${hostname}; set ARCHIVE_E2E_DANGEROUS_REMOTE=true to override.`);
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -29,8 +29,8 @@ const guestResponse = await fetch(`${apiBase}/api/v1/auth/guest`, {
   method: 'POST',
   headers: { 'content-type': 'application/json', 'x-vorinthex-session-transport': 'header' },
   body: JSON.stringify({
-    distinctId: 'app_archive_api_e2e_local_fixture',
-    bootstrapSecret: `guest_${'archive_api_e2e_local_fixture_'.repeat(2)}`,
+    distinctId: `app_archive_api_e2e_${suffix}`,
+    bootstrapSecret: `guest_${crypto.randomUUID().replaceAll('-', '')}${crypto.randomUUID().replaceAll('-', '')}`,
   }),
 });
 if (!guestResponse.ok) throw new Error(`Guest bootstrap failed with ${guestResponse.status}: ${await guestResponse.text()}`);
