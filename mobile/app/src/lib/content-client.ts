@@ -316,12 +316,12 @@ export async function downloadContentDocument(documentKey: string, format: "orig
   return result.data;
 }
 
-export async function createContentFolder(name: string, parentFolderKey?: string) {
+export async function createContentFolder(name: string, parentFolderKey?: string, description?: string) {
   const contentContext = getContentContext();
   const data = await callContentTool<{
     results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
   }>("folder.create", {
-    folders: [{ scopeKey: contentContext.scopeKey, parentFolderKey, name }],
+    folders: [{ scopeKey: contentContext.scopeKey, parentFolderKey, name, ...(description ? { description } : {}) }],
     idempotencyKey: createContentMutationKey(),
   });
   const result = data.results[0];

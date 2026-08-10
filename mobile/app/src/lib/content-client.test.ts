@@ -81,7 +81,7 @@ beforeEach(() => {
 test("sends document and folder mutations with the authenticated Archive context", async () => {
   await createContentDocument("Plan", "Initial plan", "parent", "create-key");
   await saveContentDocument("document", "Updated plan", "2026-08-10T00:00:00.000Z");
-  await createContentFolder("Work", "parent");
+  await createContentFolder("Work", "parent", "Active projects");
 
   expect(calls.map(({ url }) => url)).toEqual([
     "/api/v1/content/tools/document.create",
@@ -97,7 +97,7 @@ test("sends document and folder mutations with the authenticated Archive context
     idempotencyKey: "create-key",
   });
   expect(calls[1]?.body.input.updates[0]).toMatchObject({ documentKey: "document", content: "Updated plan", expectedUpdatedAt: "2026-08-10T00:00:00.000Z" });
-  expect(calls[2]?.body.input.folders[0]).toEqual({ scopeKey: "scope-authenticated", parentFolderKey: "parent", name: "Work" });
+  expect(calls[2]?.body.input.folders[0]).toEqual({ scopeKey: "scope-authenticated", parentFolderKey: "parent", name: "Work", description: "Active projects" });
 });
 
 test("uploads documents through the authenticated Archive context", async () => {
