@@ -796,6 +796,7 @@ export function KnowledgeWorkspace() {
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.sm }]}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={!editorFocused}
         style={styles.scrollView}
       >
         <View style={[styles.noteSheet, editorFocused && styles.noteSheetFocused]}>
@@ -865,6 +866,12 @@ export function KnowledgeWorkspace() {
                     setError("Saved notes must contain at least one character.");
                     return;
                   }
+                  const previousContent = contentRef.current;
+                  const previousLength = previousContent.length;
+                  const changedAtEnd = value.startsWith(previousContent) || previousContent.startsWith(value);
+                  if (changedAtEnd || (selectionRef.current.start === previousLength && selectionRef.current.end === previousLength)) {
+                    selectionRef.current = { start: value.length, end: value.length };
+                  }
                   contentRef.current = value;
                   clearCompletion();
                   setContent(value);
@@ -901,26 +908,28 @@ export function KnowledgeWorkspace() {
           )}
         </View>
 
-        <View style={styles.searchArea}>
-          {history.length > 0 && !results ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.history}>
-              {history.slice(0, 4).map((item) => <Button key={`${item.normalizedQuery}-${item.searchedAt}`} onPress={() => void runSearch(item.query)} size="xs" variant="ghost" icon={<SearchIcon size="sm" />}>{item.query}</Button>)}
-            </ScrollView>
-          ) : null}
-          <View style={styles.searchBar}>
-            <SearchIcon size="sm" variant="muted" />
-            <TextInput
-              accessibilityLabel="Search Archive by meaning"
-              onChangeText={setQuery}
-              onSubmitEditing={() => void runSearch()}
-              placeholder="Search by what you remember..."
-              returnKeyType="search"
-              style={styles.searchInput}
-              value={query}
-            />
-            <Button accessibilityLabel="Search" contentMode="raw" disabled={!query.trim() || !hasContentContext} loading={searching} onPress={() => void runSearch()} size="sm" variant="primary"><SendIcon size="sm" /></Button>
+        {!editorFocused ? (
+          <View style={styles.searchArea}>
+            {history.length > 0 && !results ? (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.history}>
+                {history.slice(0, 4).map((item) => <Button key={`${item.normalizedQuery}-${item.searchedAt}`} onPress={() => void runSearch(item.query)} size="xs" variant="ghost" icon={<SearchIcon size="sm" />}>{item.query}</Button>)}
+              </ScrollView>
+            ) : null}
+            <View style={styles.searchBar}>
+              <SearchIcon size="sm" variant="muted" />
+              <TextInput
+                accessibilityLabel="Search Archive by meaning"
+                onChangeText={setQuery}
+                onSubmitEditing={() => void runSearch()}
+                placeholder="Search by what you remember..."
+                returnKeyType="search"
+                style={styles.searchInput}
+                value={query}
+              />
+              <Button accessibilityLabel="Search" contentMode="raw" disabled={!query.trim() || !hasContentContext} loading={searching} onPress={() => void runSearch()} size="sm" variant="primary"><SendIcon size="sm" /></Button>
+            </View>
           </View>
-        </View>
+        ) : null}
       </ScrollView>
 
       <BottomSheet
@@ -1070,14 +1079,14 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
-  noteSheetFocused: { flexGrow: 0, minHeight: 0 },
+  noteSheetFocused: { flex: 1, minHeight: 0 },
   metaRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   noteActions: { flexDirection: "row", gap: 8 },
   meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   titleInput: { minHeight: 58, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28 },
   editor: { minHeight: 270, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
-  editorFocused: { minHeight: 120, maxHeight: 220 },
+  editorFocused: { flex: 1, minHeight: 80 },
   completionRow: { minHeight: 42, marginTop: -8, paddingLeft: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderLeftColor: palette.silver500, borderLeftWidth: 1 },
   completionText: { flex: 1, color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 24 },
   enhancePanel: { gap: 18 },
