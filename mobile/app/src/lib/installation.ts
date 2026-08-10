@@ -39,3 +39,18 @@ export async function getGuestBootstrapCredentials() {
   }
   return { distinctId, bootstrapSecret };
 }
+
+export async function rotateGuestBootstrapCredentials() {
+  const distinctId = createDistinctId();
+  const bootstrapSecret = `guest_${randomUUID()}_${randomUUID()}`;
+  await Promise.all([
+    SecureStore.setItemAsync(DISTINCT_ID_KEY, distinctId, {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    }),
+    SecureStore.setItemAsync(BOOTSTRAP_SECRET_KEY, bootstrapSecret, {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    }),
+  ]);
+  pendingDistinctId = Promise.resolve(distinctId);
+  return { distinctId, bootstrapSecret };
+}

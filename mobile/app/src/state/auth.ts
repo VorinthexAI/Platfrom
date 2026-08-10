@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { getJson, onUnauthorized, patchJson, postJson, revokeRemoteSession } from "@/lib/api-client";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
 import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
-import { getGuestBootstrapCredentials } from "@/lib/installation";
+import { getGuestBootstrapCredentials, rotateGuestBootstrapCredentials } from "@/lib/installation";
 import { tokenVault } from "@/lib/token-vault";
 import { useOnboardingStore } from "@/state/onboarding";
 
@@ -20,6 +20,7 @@ type AuthState = {
   contentExecution: { agentKey: string } | null;
   bootstrap: () => Promise<void>;
   hydrate: () => Promise<void>;
+  reconnectContentContext: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -35,7 +36,7 @@ async function bootstrapGuest() {
   ));
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   status: "bootstrapping",
   user: null,
   organization: null,
@@ -99,6 +100,27 @@ export const useAuthStore = create<AuthState>((set) => ({
   hydrate: async () => {
     const operation = ++authOperation;
     const context = await loadContext();
+    if (operation === authOperation) {
+      await writeAuthContext(context);
+      if (operation === authOperation) set({ status: "authenticated", ...context });
+    }
+  },
+  reconnectContentContext: async () => {
+    const operation = ++authOperation;
+    let context;
+    try {
+      context = await loadContext();
+      if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is incomplete.");
+    } catch {
+      try {
+        context = await bootstrapGuest();
+      } catch (error) {
+        if (!get().user?.email?.endsWith("@guest.vorinthex.com")) throw error;
+        await Promise.all([tokenVault.clear(), rotateGuestBootstrapCredentials()]);
+        context = await bootstrapGuest();
+      }
+    }
+    if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is unavailable.");
     if (operation === authOperation) {
       await writeAuthContext(context);
       if (operation === authOperation) set({ status: "authenticated", ...context });

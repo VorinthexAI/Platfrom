@@ -69,6 +69,7 @@ export function KnowledgeWorkspace() {
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
   const agentKey = useAuthStore((state) => state.contentExecution?.agentKey ?? "");
+  const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
   const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
   const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
@@ -130,6 +131,13 @@ export function KnowledgeWorkspace() {
     !libraryQuery.trim() || document.name.toLowerCase().includes(libraryQuery.trim().toLowerCase())
   ));
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
+
+  useEffect(() => {
+    if (hasContentContext) return;
+    void reconnectContentContext().catch((cause: unknown) => {
+      setError(cause instanceof Error ? cause.message : "Archive AI could not connect.");
+    });
+  }, [hasContentContext, reconnectContentContext]);
 
   const openSheet = (sheet: ArchiveSheet) => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
