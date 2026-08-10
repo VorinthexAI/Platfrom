@@ -37,6 +37,7 @@ import {
   copyContentDocument,
   downloadContentDocument,
   enhanceContent,
+  instructContent,
   isContentContextConfigured,
   listContentDocumentVersions,
   listContentLocation,
@@ -115,11 +116,15 @@ export function KnowledgeWorkspace() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
+  const [aiInputFocused, setAiInputFocused] = useState(false);
   const [title, setTitle] = useState("Untitled note");
   const [content, setContent] = useState("");
   const [completion, setCompletion] = useState("");
   const [autocompleteRevision, setAutocompleteRevision] = useState(0);
   const [enhancing, setEnhancing] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState("");
+  const [aiInstructionError, setAiInstructionError] = useState<string>();
+  const [instructing, setInstructing] = useState(false);
   const [enhanceRange, setEnhanceRange] = useState<TextRange>();
   const [targetLanguage, setTargetLanguage] = useState("");
   const [translating, setTranslating] = useState(false);
@@ -173,6 +178,7 @@ export function KnowledgeWorkspace() {
   const saveInFlight = useRef<Promise<void> | null>(null);
   const documentMetadataMutation = useRef<Promise<void> | null>(null);
   const pendingCreate = useRef<PendingCreate | undefined>(undefined);
+  const createVersionOnNextSave = useRef(false);
   const navigationGeneration = useRef(0);
   const destinationGeneration = useRef(0);
   const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -185,6 +191,8 @@ export function KnowledgeWorkspace() {
   const autocompleteGeneration = useRef(0);
   const enhanceRequest = useRef<AbortController | undefined>(undefined);
   const enhanceGeneration = useRef(0);
+  const instructionRequest = useRef<AbortController | undefined>(undefined);
+  const instructionGeneration = useRef(0);
   const translationGeneration = useRef(0);
   const restoreGeneration = useRef(0);
   const documentActionGeneration = useRef(0);
@@ -287,6 +295,7 @@ export function KnowledgeWorkspace() {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     autocompleteRequest.current?.abort();
     enhanceRequest.current?.abort();
+    instructionRequest.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -396,7 +405,13 @@ export function KnowledgeWorkspace() {
       enhanceGeneration.current += 1;
       enhanceRequest.current?.abort();
       enhanceRequest.current = undefined;
+      instructionGeneration.current += 1;
+      instructionRequest.current?.abort();
+      instructionRequest.current = undefined;
       setEnhancing(false);
+      setInstructing(false);
+      setAiInstruction("");
+      setAiInstructionError(undefined);
       setTranslating(false);
       setTargetLanguage("");
       setVersions([]);
@@ -408,6 +423,7 @@ export function KnowledgeWorkspace() {
       documentKeyRef.current = undefined;
       updatedAtRef.current = undefined;
       pendingCreate.current = undefined;
+      createVersionOnNextSave.current = false;
       titleRef.current = "Untitled note";
       contentRef.current = "";
       savedTitleRef.current = "Untitled note";
@@ -486,8 +502,10 @@ export function KnowledgeWorkspace() {
           persistLocalDraft(titleRef.current, contentRef.current);
         }
         if (activeKey && nextContent !== savedContentRef.current) {
-          const saved = await saveContentDocument(activeKey, nextContent, activeUpdatedAt!);
+          const shouldCreateVersion = createVersionOnNextSave.current;
+          const saved = await saveContentDocument(activeKey, nextContent, activeUpdatedAt!, shouldCreateVersion);
           if (session !== editorSession.current) return;
+          if (shouldCreateVersion && savingRevision === revision.current) createVersionOnNextSave.current = false;
           activeUpdatedAt = saved.updatedAt;
           updatedAtRef.current = saved.updatedAt;
           savedContentRef.current = nextContent;
@@ -594,11 +612,51 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const runNoteInstruction = async () => {
+    const instruction = aiInstruction.trim();
+    if (!hasContentContext || !instruction || instructing || saveState === "saving") return;
+    const original = contentRef.current;
+    if (original.length > 15_000) {
+      setAiInstructionError("AI changes currently support notes up to 15,000 characters.");
+      return;
+    }
+    const documentKey = documentKeyRef.current;
+    const session = editorSession.current;
+    const generation = ++instructionGeneration.current;
+    const controller = new AbortController();
+    instructionRequest.current?.abort();
+    instructionRequest.current = controller;
+    clearCompletion();
+    setInstructing(true);
+    setAiInstructionError(undefined);
+    try {
+      const result = await instructContent(instruction, original || undefined, controller.signal);
+      if (controller.signal.aborted || generation !== instructionGeneration.current) return;
+      if (session !== editorSession.current || documentKeyRef.current !== documentKey || contentRef.current !== original) {
+        setAiInstructionError("The note changed while AI was writing. Try again.");
+        return;
+      }
+      contentRef.current = result.content;
+      if (documentKey) createVersionOnNextSave.current = true;
+      selectionRef.current = { start: result.content.length, end: result.content.length };
+      setContent(result.content);
+      setAiInstruction("");
+      markDirty();
+      persistLocalDraft(titleRef.current, result.content);
+    } catch (cause) {
+      if (!controller.signal.aborted) setAiInstructionError(cause instanceof Error ? cause.message : "AI could not update the note.");
+    } finally {
+      if (instructionRequest.current === controller) instructionRequest.current = undefined;
+      if (generation === instructionGeneration.current) setInstructing(false);
+    }
+  };
+
   const applyRemoteDocument = (document: ContentDocument & { content: string }) => {
     clearCompletion();
     revision.current += 1;
     dirty.current = false;
     pendingCreate.current = undefined;
+    createVersionOnNextSave.current = false;
     documentKeyRef.current = document.key;
     updatedAtRef.current = document.updatedAt;
     titleRef.current = document.name;
@@ -729,9 +787,15 @@ export function KnowledgeWorkspace() {
 
   const resetEditor = (nextTitle = "Untitled note") => {
     clearCompletion();
+    instructionGeneration.current += 1;
+    instructionRequest.current?.abort();
+    instructionRequest.current = undefined;
     translationGeneration.current += 1;
     restoreGeneration.current += 1;
     setTranslating(false);
+    setInstructing(false);
+    setAiInstruction("");
+    setAiInstructionError(undefined);
     setRestoringVersionKey(undefined);
     setVersions([]);
     editorSession.current += 1;
@@ -740,6 +804,7 @@ export function KnowledgeWorkspace() {
     documentKeyRef.current = undefined;
     updatedAtRef.current = undefined;
     pendingCreate.current = undefined;
+    createVersionOnNextSave.current = false;
     titleRef.current = nextTitle;
     contentRef.current = "";
     savedTitleRef.current = nextTitle;
@@ -781,9 +846,14 @@ export function KnowledgeWorkspace() {
       return false;
     }
     const generation = ++navigationGeneration.current;
+    instructionGeneration.current += 1;
+    instructionRequest.current?.abort();
+    instructionRequest.current = undefined;
     translationGeneration.current += 1;
     restoreGeneration.current += 1;
     setTranslating(false);
+    setInstructing(false);
+    setAiInstructionError(undefined);
     setRestoringVersionKey(undefined);
     setOpeningDocumentKey(document.key);
     setError(undefined);
@@ -1481,13 +1551,35 @@ export function KnowledgeWorkspace() {
             </>
           )}
           {!results ? (
-            <Button accessibilityLabel="Enhance note with AI" contentMode="raw" disabled={!hasContentContext || !content.trim()} onPress={openEnhanceSheet} size="lg" style={styles.enhanceFab} variant="primary">
-              <BrainIcon size="md" variant="inverse" />
-            </Button>
+            <View style={styles.aiComposer}>
+              {aiInstructionError ? <Text accessibilityRole="alert" style={styles.aiComposerError}>{aiInstructionError}</Text> : null}
+              <View style={styles.aiInputBar}>
+                <Button accessibilityLabel="Open AI note actions" contentMode="raw" disabled={!hasContentContext || !content.trim() || instructing} onPress={openEnhanceSheet} size="sm" variant="icon">
+                  <BrainIcon size="sm" variant="accent" />
+                </Button>
+                <TextInput
+                  accessibilityLabel="AI input"
+                  accessibilityHint={content ? "Describe how AI should change the open note" : "Describe the note AI should write"}
+                  editable={!instructing}
+                  maxLength={8_000}
+                  onBlur={() => setAiInputFocused(false)}
+                  onChangeText={(value) => { setAiInstruction(value); if (aiInstructionError) setAiInstructionError(undefined); }}
+                  onFocus={() => setAiInputFocused(true)}
+                  onSubmitEditing={() => void runNoteInstruction()}
+                  placeholder={content ? "Ask AI to change this note..." : "Ask AI to write this note..."}
+                  returnKeyType="send"
+                  style={styles.aiInput}
+                  value={aiInstruction}
+                />
+                <Button accessibilityLabel={content ? "Change note with AI" : "Write note with AI"} contentMode="raw" disabled={!hasContentContext || !aiInstruction.trim() || instructing || saveState === "saving"} loading={instructing} onPress={() => void runNoteInstruction()} size="sm" variant="primary">
+                  <SendIcon size="sm" />
+                </Button>
+              </View>
+            </View>
           ) : null}
         </View>
 
-        {!editorFocused ? (
+        {!editorFocused && !aiInputFocused ? (
           <View style={styles.searchArea}>
             <Text style={styles.meta}>SEARCHING {currentFolder ? `${currentFolder.name.toUpperCase()} + NESTED FOLDERS` : "ALL ARCHIVE DOCUMENTS"}</Text>
             {history.length > 0 && !results ? (
@@ -1748,7 +1840,7 @@ const styles = StyleSheet.create({
   headerTitle: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 15, letterSpacing: tracking.label },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, paddingBottom: 76, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, paddingBottom: 112, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   noteSheetFocused: { flex: 1, minHeight: 0 },
   metaRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   noteActions: { flexDirection: "row", gap: 8 },
@@ -1768,7 +1860,10 @@ const styles = StyleSheet.create({
   editorGhostSpacer: { color: "transparent" },
   completionText: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 26 },
   completionAccept: { bottom: 8, position: "absolute", right: 0, zIndex: 2 },
-  enhanceFab: { bottom: spacing.md, position: "absolute", right: spacing.md, zIndex: 3 },
+  aiComposer: { bottom: spacing.md, left: spacing.md, position: "absolute", right: spacing.md, zIndex: 3, gap: 6 },
+  aiComposerError: { paddingHorizontal: 8, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
+  aiInputBar: { minHeight: 58, padding: 7, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
+  aiInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 14 },
   enhancePanel: { gap: 18 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },

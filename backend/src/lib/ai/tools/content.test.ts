@@ -11,7 +11,7 @@ import {
 } from './index';
 
 const expectedNames = [
-  'autocomplete', 'enhance',
+  'autocomplete', 'content.instruct', 'enhance',
   'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete',
   'document.parse', 'document.create', 'document.find', 'document.list', 'document.read', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
   'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
@@ -20,7 +20,7 @@ const expectedNames = [
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(40);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(41);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       if (name !== 'autocomplete' && name !== 'enhance') expect(name).toContain('.');
@@ -63,6 +63,10 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas.autocomplete.parse({ context: 'The next step', wordCount: 8 })).toEqual({ context: 'The next step', wordCount: 8 });
     expect(() => contentToolInputSchemas.autocomplete.parse({ context: 'Text', wordCount: 25 })).toThrow();
     expect(() => contentToolInputSchemas.autocomplete.parse({ context: 'Text', wordCount: 8, model: 'other' })).toThrow();
+    expect(contentToolInputSchemas['content.instruct'].parse({ instruction: 'Write a launch plan' })).toEqual({ instruction: 'Write a launch plan' });
+    expect(contentToolInputSchemas['content.instruct'].parse({ instruction: 'Make it concise', currentContent: '' })).toEqual({ instruction: 'Make it concise', currentContent: '' });
+    expect(() => contentToolInputSchemas['content.instruct'].parse({ instruction: 'Write a note', model: 'other' })).toThrow();
+    expect(() => contentToolInputSchemas['content.instruct'].parse({ instruction: 'Change this', currentContent: 'x'.repeat(15_001) })).toThrow();
     expect(contentToolInputSchemas.enhance.parse({ content: 'Fix teh wording.' })).toEqual({ content: 'Fix teh wording.' });
     expect(() => contentToolInputSchemas.enhance.parse({ content: 'Text', instruction: 'Change meaning' })).toThrow();
     expect(() => contentToolInputSchemas['folder.find'].parse({ folderKeys: [key], surprise: true })).toThrow();

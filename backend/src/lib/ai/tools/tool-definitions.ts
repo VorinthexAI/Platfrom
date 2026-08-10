@@ -11,6 +11,7 @@ import { agentMemberRevokeTool } from './agent-member-revoke';
 import { agentMemberSyncTool } from './agent-member-sync';
 import { artifactCreateTool } from './artifact-create';
 import { autocompleteToolDefinition } from './autocomplete';
+import { contentInstructToolDefinition } from './content-instruct';
 import { documentContentToolDefinition } from './document-content';
 import { documentCreateToolDefinition } from './document-create';
 import { documentCopyToolDefinition } from './document-copy';
@@ -140,6 +141,7 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   orchestratorChatTool,
   transcribeTool,
   autocompleteToolDefinition,
+  contentInstructToolDefinition,
   enhanceToolDefinition,
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
   agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,

@@ -54,6 +54,7 @@ const {
   copyContentDocument,
   downloadContentDocument,
   enhanceContent,
+  instructContent,
   listContentSearchHistory,
   moveContentFolder,
   moveContentDocument,
@@ -97,6 +98,7 @@ test("sends document and folder mutations with the authenticated Archive context
     idempotencyKey: "create-key",
   });
   expect(calls[1]?.body.input.updates[0]).toMatchObject({ documentKey: "document", content: "Updated plan", expectedUpdatedAt: "2026-08-10T00:00:00.000Z" });
+  expect(calls[1]?.body.input.updates[0].createVersion).toBe(false);
   expect(calls[2]?.body.input.folders[0]).toEqual({ scopeKey: "scope-authenticated", parentFolderKey: "parent", name: "Work", description: "Active projects" });
 });
 
@@ -188,6 +190,29 @@ test("runs note autocomplete, enhancement, translation, and rename through docum
   expect(calls[1]?.body.input).toEqual({ content: "Rough note" });
   expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
   expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
+});
+
+test("writes and revises note content from strict AI instructions", async () => {
+  responseForTool = (tool) => tool === "content.instruct" ? { data: { success: true, data: { content: "Generated note" } } } : undefined;
+
+  expect(await instructContent("Write a launch plan")).toEqual({ content: "Generated note" });
+  expect(await instructContent("Make this concise", "Existing note")).toEqual({ content: "Generated note" });
+  expect(calls.map(({ url }) => url)).toEqual([
+    "/api/v1/content/tools/content.instruct",
+    "/api/v1/content/tools/content.instruct",
+  ]);
+  expect(calls[0]?.body.input).toEqual({ instruction: "Write a launch plan" });
+  expect(calls[1]?.body.input).toEqual({ instruction: "Make this concise", currentContent: "Existing note" });
+});
+
+test("can preserve the previous note as a version during an AI autosave", async () => {
+  await saveContentDocument("document", "AI-revised note", "2026-08-10T00:00:00.000Z", true);
+  expect(calls[0]?.body.input.updates[0]).toEqual({
+    documentKey: "document",
+    content: "AI-revised note",
+    createVersion: true,
+    expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  });
 });
 
 test("scopes search and replayable history to a folder", async () => {

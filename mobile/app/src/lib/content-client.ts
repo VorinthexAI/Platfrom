@@ -131,6 +131,13 @@ export function enhanceContent(content: string, signal?: AbortSignal) {
   return callContentTool<{ content: string }>("enhance", { content }, signal);
 }
 
+export function instructContent(instruction: string, currentContent?: string, signal?: AbortSignal) {
+  return callContentTool<{ content: string }>("content.instruct", {
+    instruction,
+    ...(currentContent ? { currentContent } : {}),
+  }, signal);
+}
+
 export async function translateContentDocument(documentKey: string, targetLanguage: string) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { text: string; persistedDocumentKey?: string }; error?: { message: string } }[];
@@ -234,11 +241,11 @@ export async function createContentDocument(name: string, content: string, folde
   return data.document;
 }
 
-export async function saveContentDocument(documentKey: string, content: string, expectedUpdatedAt: string) {
+export async function saveContentDocument(documentKey: string, content: string, expectedUpdatedAt: string, createVersion = false) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
   }>("document.update", {
-    updates: [{ documentKey, content, createVersion: false, expectedUpdatedAt }],
+    updates: [{ documentKey, content, createVersion, expectedUpdatedAt }],
     atomic: false,
     idempotencyKey: createContentMutationKey(),
   });
