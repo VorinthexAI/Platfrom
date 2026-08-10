@@ -58,6 +58,7 @@ import { getContentDocumentJob, invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
+import { postPersonalAssistantResponse } from './personal-assistant';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -387,6 +388,7 @@ export function registerRoutes(app: Hono) {
   app.delete('/mind/capabilities/:capabilityId', detachCurrentMindCapability);
 
   app.post('/orchestrators/chat', postOrchestratorChat);
+  app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/content/tools/:tool', invokeContentTool);
   app.post('/content/document-jobs/:jobId', getContentDocumentJob);
 

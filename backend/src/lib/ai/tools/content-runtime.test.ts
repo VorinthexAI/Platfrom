@@ -225,9 +225,9 @@ describe('Content runtime', () => {
 
   test('filters semantic search to authorized scopes and rejects unresolved projects', async () => {
     const f = fixture('viewer'); f.addDocument('Roadmap launch'); let authorized: string[] = [];
-    f.repository.semanticSearch = async (input) => { authorized = input.authorizedScopeKeys; return [...f.documents.values()].map((document) => ({ score: 0.8, document })); };
-    const output = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => embedding });
-    expect(authorized).toEqual([f.scopeKey]); expect(output.results[0]?.score).toBe(0.8);
+    f.repository.semanticSearch = async (input) => { authorized = input.authorizedScopeKeys; return [...f.documents.values()].map((document) => ({ score: 0.8, document, matchedContent: 'Matched passage later in the document.' })); };
+    const output = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', include: ['snippet'] }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(authorized).toEqual([f.scopeKey]); expect(output.results[0]).toMatchObject({ score: 0.8, snippet: 'Matched passage later in the document.' });
     await expect(runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toMatchObject({ code: 'CONTENT_SEARCH_INVALID_SOURCE' });
   });
 
@@ -875,47 +875,6 @@ describe('Content runtime', () => {
     expect(f.patches).toHaveLength(0);
   });
 
-  test('writes and revises notes through the lightweight instruction action without persistence', async () => {
-    const f = fixture('viewer');
-    const calls: Array<{ action: string; input: any }> = [];
-    const runAction = async (action: string, input: any) => {
-      calls.push({ action, input });
-      return { text: calls.length === 1 ? '```markdown\n# Launch plan\n\nShip carefully.\n```' : 'A concise launch plan.' };
-    };
-    const written = await runContentTool('content.instruct', { instruction: 'Write a launch plan' }, f.context, { repository: f.repository, runAction });
-    const revised = await runContentTool('content.instruct', { instruction: 'Make it concise', currentContent: written.content }, f.context, { repository: f.repository, runAction });
-    expect(written).toEqual({ content: '# Launch plan\n\nShip carefully.' });
-    expect(revised).toEqual({ content: 'A concise launch plan.' });
-    expect(calls.map(({ action }) => action)).toEqual(['enhance', 'enhance']);
-    expect(calls[0]?.input.options).toMatchObject({ temperature: 0.5, maxTokens: 2_000 });
-    expect(calls[1]?.input.options).toMatchObject({ temperature: 0.2, maxTokens: 512 });
-    expect(JSON.parse(calls[0]?.input.messages[0].content[0].text)).toEqual({ instruction: 'Write a launch plan' });
-    expect(JSON.parse(calls[1]?.input.messages[0].content[0].text)).toEqual({ instruction: 'Make it concise', currentContent: written.content });
-    expect(() => chatInputSchema.parse(calls[0]?.input)).not.toThrow();
-    expect(f.patches).toHaveLength(0);
-  });
-
-  test('pins note instructions to the lightweight model and rejects truncated replacements', async () => {
-    const f = fixture('viewer');
-    let route: any;
-    const executeAction: any = async (request: any) => {
-      route = request;
-      return {
-        output: { text: 'Complete note', stopReason: 'end_turn' },
-        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
-        providerId: 'aws-bedrock',
-        modelId: 'amazon.nova-lite',
-        externalModelId: 'us.amazon.nova-lite-v1:0',
-      };
-    };
-    expect(await runContentTool('content.instruct', { instruction: 'Write a note' }, f.context, { repository: f.repository, executeAction })).toEqual({ content: 'Complete note' });
-    expect(route).toMatchObject({ mode: 'model', actionSlug: 'enhance', modelSlug: 'amazon.nova-lite' });
-    await expect(runContentTool('content.instruct', { instruction: 'Rewrite', currentContent: 'Existing note' }, f.context, {
-      repository: f.repository,
-      runAction: async () => ({ text: 'Partial note', stopReason: 'max_tokens' }),
-    })).rejects.toMatchObject({ code: 'CONTENT_CONFLICT' });
-  });
-
   test('executes one authorized valid behavior path for every registered tool', async () => {
     for (const name of CONTENT_TOOL_NAMES) {
       const f = fixture('owner');
@@ -956,7 +915,6 @@ describe('Content runtime', () => {
       };
       let input: any;
       if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
-      else if (name === 'content.instruct') input = { instruction: 'Write a useful note' };
       else if (name === 'enhance') input = { content: 'Improve teh wording.' };
       else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
       else if (name === 'folder.find') input = { folderKeys: [f.folderKey] };

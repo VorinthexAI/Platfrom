@@ -67,6 +67,10 @@ export type ContentDocumentDownload = {
   content: string;
 };
 
+export type PersonalAssistantResponse =
+  | { type: "answer"; message: string; sources: { documentKey: string; name: string }[] }
+  | { type: "note"; content: string; message: string; sources: { documentKey: string; name: string }[] };
+
 type ToolResponse<T> =
   | { success: true; data: T }
   | { success: false; error: { message: string } };
@@ -131,11 +135,22 @@ export function enhanceContent(content: string, signal?: AbortSignal) {
   return callContentTool<{ content: string }>("enhance", { content }, signal);
 }
 
-export function instructContent(instruction: string, currentContent?: string, signal?: AbortSignal) {
-  return callContentTool<{ content: string }>("content.instruct", {
-    instruction,
-    ...(currentContent ? { currentContent } : {}),
-  }, signal);
+export async function askPersonalAssistant(message: string, currentNote: { title: string; content: string }, folderKey?: string, signal?: AbortSignal) {
+  const contentContext = getContentContext();
+  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
+  try {
+    const response = await apiClient.post<ToolResponse<PersonalAssistantResponse>>("/api/v1/assistant/respond", {
+      organizationKey: contentContext.organizationKey,
+      agentKey: contentContext.agentKey,
+      input: { surface: "knowledge-workspace", message, currentNote, ...(folderKey ? { folderKey } : {}) },
+    }, { signal, timeout: 4 * 60_000 });
+    if (!response.data.success) throw new Error(response.data.error.message);
+    return response.data.data;
+  } catch (error) {
+    const failure = (error as { response?: { data?: ToolResponse<PersonalAssistantResponse> } }).response?.data;
+    if (failure && !failure.success) throw new Error(failure.error.message);
+    throw error;
+  }
 }
 
 export async function translateContentDocument(documentKey: string, targetLanguage: string) {

@@ -31,13 +31,13 @@ import { ChromeIcon } from "@/components/ChromeIcon";
 import { capabilityIconSource } from "@/data/capability-icons";
 import {
   autocompleteContent,
+  askPersonalAssistant,
   createContentDocument,
   createContentFolder,
   createContentMutationKey,
   copyContentDocument,
   downloadContentDocument,
   enhanceContent,
-  instructContent,
   isContentContextConfigured,
   listContentDocumentVersions,
   listContentLocation,
@@ -59,6 +59,7 @@ import {
   type ContentSearchHistoryItem,
   type ContentSearchDocument,
   type ContentSearchResponse,
+  type PersonalAssistantResponse,
 } from "@/lib/content-client";
 import { applyEnhancement, resolveEnhancementTarget, type TextRange } from "@/lib/note-enhancement";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
@@ -124,6 +125,7 @@ export function KnowledgeWorkspace() {
   const [enhancing, setEnhancing] = useState(false);
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiInstructionError, setAiInstructionError] = useState<string>();
+  const [aiResponse, setAiResponse] = useState<PersonalAssistantResponse>();
   const [instructing, setInstructing] = useState(false);
   const [enhanceRange, setEnhanceRange] = useState<TextRange>();
   const [targetLanguage, setTargetLanguage] = useState("");
@@ -412,6 +414,7 @@ export function KnowledgeWorkspace() {
       setInstructing(false);
       setAiInstruction("");
       setAiInstructionError(undefined);
+      setAiResponse(undefined);
       setTranslating(false);
       setTargetLanguage("");
       setVersions([]);
@@ -629,22 +632,26 @@ export function KnowledgeWorkspace() {
     clearCompletion();
     setInstructing(true);
     setAiInstructionError(undefined);
+    setAiResponse(undefined);
     try {
-      const result = await instructContent(instruction, original || undefined, controller.signal);
+      const result = await askPersonalAssistant(instruction, { title: titleRef.current, content: original }, currentFolderKeyRef.current, controller.signal);
       if (controller.signal.aborted || generation !== instructionGeneration.current) return;
       if (session !== editorSession.current || documentKeyRef.current !== documentKey || contentRef.current !== original) {
-        setAiInstructionError("The note changed while AI was writing. Try again.");
+        setAiInstructionError("The note changed while Core was responding. Try again.");
         return;
       }
-      contentRef.current = result.content;
-      if (documentKey) createVersionOnNextSave.current = true;
-      selectionRef.current = { start: result.content.length, end: result.content.length };
-      setContent(result.content);
+      setAiResponse(result);
       setAiInstruction("");
-      markDirty();
-      persistLocalDraft(titleRef.current, result.content);
+      if (result.type === "note") {
+        contentRef.current = result.content;
+        if (documentKey) createVersionOnNextSave.current = true;
+        selectionRef.current = { start: result.content.length, end: result.content.length };
+        setContent(result.content);
+        markDirty();
+        persistLocalDraft(titleRef.current, result.content);
+      }
     } catch (cause) {
-      if (!controller.signal.aborted) setAiInstructionError(cause instanceof Error ? cause.message : "AI could not update the note.");
+      if (!controller.signal.aborted) setAiInstructionError(cause instanceof Error ? cause.message : "Core could not respond.");
     } finally {
       if (instructionRequest.current === controller) instructionRequest.current = undefined;
       if (generation === instructionGeneration.current) setInstructing(false);
@@ -795,6 +802,7 @@ export function KnowledgeWorkspace() {
     setTranslating(false);
     setInstructing(false);
     setAiInstruction("");
+    setAiResponse(undefined);
     setAiInstructionError(undefined);
     setRestoringVersionKey(undefined);
     setVersions([]);
@@ -854,6 +862,7 @@ export function KnowledgeWorkspace() {
     setTranslating(false);
     setInstructing(false);
     setAiInstructionError(undefined);
+    setAiResponse(undefined);
     setRestoringVersionKey(undefined);
     setOpeningDocumentKey(document.key);
     setError(undefined);
@@ -1553,25 +1562,31 @@ export function KnowledgeWorkspace() {
           {!results ? (
             <View style={styles.aiComposer}>
               {aiInstructionError ? <Text accessibilityRole="alert" style={styles.aiComposerError}>{aiInstructionError}</Text> : null}
+              {aiResponse ? (
+                <View style={styles.aiResponse}>
+                  <Text style={styles.aiResponseText}>{aiResponse.message}</Text>
+                  {aiResponse.sources.length > 0 ? <Text style={styles.aiResponseSources}>Sources: {aiResponse.sources.map(({ name }) => name).join(", ")}</Text> : null}
+                </View>
+              ) : null}
               <View style={styles.aiInputBar}>
                 <Button accessibilityLabel="Open AI note actions" contentMode="raw" disabled={!hasContentContext || !content.trim() || instructing} onPress={openEnhanceSheet} size="sm" variant="icon">
                   <BrainIcon size="sm" variant="accent" />
                 </Button>
                 <TextInput
-                  accessibilityLabel="AI input"
-                  accessibilityHint={content ? "Describe how AI should change the open note" : "Describe the note AI should write"}
+                  accessibilityLabel="Ask Core"
+                  accessibilityHint="Ask a question, search your knowledge, or describe how to change the open note"
                   editable={!instructing}
                   maxLength={8_000}
                   onBlur={() => setAiInputFocused(false)}
                   onChangeText={(value) => { setAiInstruction(value); if (aiInstructionError) setAiInstructionError(undefined); }}
                   onFocus={() => setAiInputFocused(true)}
                   onSubmitEditing={() => void runNoteInstruction()}
-                  placeholder={content ? "Ask AI to change this note..." : "Ask AI to write this note..."}
+                  placeholder="Ask Core..."
                   returnKeyType="send"
                   style={styles.aiInput}
                   value={aiInstruction}
                 />
-                <Button accessibilityLabel={content ? "Change note with AI" : "Write note with AI"} contentMode="raw" disabled={!hasContentContext || !aiInstruction.trim() || instructing || saveState === "saving"} loading={instructing} onPress={() => void runNoteInstruction()} size="sm" variant="primary">
+                <Button accessibilityLabel="Send to Core" contentMode="raw" disabled={!hasContentContext || !aiInstruction.trim() || instructing || saveState === "saving"} loading={instructing} onPress={() => void runNoteInstruction()} size="sm" variant="primary">
                   <SendIcon size="sm" />
                 </Button>
               </View>
@@ -1863,6 +1878,9 @@ const styles = StyleSheet.create({
   aiComposer: { bottom: spacing.md, left: spacing.md, position: "absolute", right: spacing.md, zIndex: 3, gap: 6 },
   aiComposerError: { paddingHorizontal: 8, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   aiInputBar: { minHeight: 58, padding: 7, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
+  aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: 3 },
+  aiResponseText: { color: palette.text, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
+  aiResponseSources: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   aiInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 14 },
   enhancePanel: { gap: 18 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },

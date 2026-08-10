@@ -49,12 +49,12 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
 
 const {
   autocompleteContent,
+  askPersonalAssistant,
   createContentDocument,
   createContentFolder,
   copyContentDocument,
   downloadContentDocument,
   enhanceContent,
-  instructContent,
   listContentSearchHistory,
   moveContentFolder,
   moveContentDocument,
@@ -192,17 +192,16 @@ test("runs note autocomplete, enhancement, translation, and rename through docum
   expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
 });
 
-test("writes and revises note content from strict AI instructions", async () => {
-  responseForTool = (tool) => tool === "content.instruct" ? { data: { success: true, data: { content: "Generated note" } } } : undefined;
+test("sends Archive requests to the personal assistant surface", async () => {
+  responseForTool = (tool) => tool === "respond" ? { data: { success: true, data: { type: "note", content: "Generated note", message: "Wrote the note.", sources: [] } } } : undefined;
 
-  expect(await instructContent("Write a launch plan")).toEqual({ content: "Generated note" });
-  expect(await instructContent("Make this concise", "Existing note")).toEqual({ content: "Generated note" });
-  expect(calls.map(({ url }) => url)).toEqual([
-    "/api/v1/content/tools/content.instruct",
-    "/api/v1/content/tools/content.instruct",
-  ]);
-  expect(calls[0]?.body.input).toEqual({ instruction: "Write a launch plan" });
-  expect(calls[1]?.body.input).toEqual({ instruction: "Make this concise", currentContent: "Existing note" });
+  expect(await askPersonalAssistant("Write a launch plan", { title: "Untitled note", content: "" }, "folder")).toEqual({ type: "note", content: "Generated note", message: "Wrote the note.", sources: [] });
+  expect(calls[0]?.url).toBe("/api/v1/assistant/respond");
+  expect(calls[0]?.body).toEqual({
+    organizationKey: "org-authenticated",
+    agentKey: "agent-authenticated",
+    input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { title: "Untitled note", content: "" }, folderKey: "folder" },
+  });
 });
 
 test("can preserve the previous note as a version during an AI autosave", async () => {

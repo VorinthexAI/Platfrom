@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const coreChatContentSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string().min(1) }).strict(),
   z.object({ type: z.literal('audio'), artifactKey: z.string().min(1), format: z.enum(['pcm', 'wav', 'opus', 'mp3']), sampleRate: z.number().int().positive().optional() }).strict(),
+  z.object({ type: z.literal('tool-call'), toolCallId: z.string().min(1), name: z.string().min(1), arguments: z.unknown() }).strict(),
   z.object({ type: z.literal('tool-result'), toolCallId: z.string().min(1), result: z.unknown() }).strict(),
 ]);
 export type CoreChatContent = z.infer<typeof coreChatContentSchema>;

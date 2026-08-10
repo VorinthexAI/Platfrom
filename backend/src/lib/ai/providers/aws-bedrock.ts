@@ -1,5 +1,6 @@
-import { BedrockRuntimeClient, ConverseStreamCommand, type ConverseStreamCommandInput, type ConverseStreamCommandOutput, type ConverseStreamOutput } from '@aws-sdk/client-bedrock-runtime';
+import { BedrockRuntimeClient, ConverseStreamCommand, type ContentBlock, type ConverseStreamCommandInput, type ConverseStreamCommandOutput, type ConverseStreamOutput, type Tool } from '@aws-sdk/client-bedrock-runtime';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
+import type { DocumentType } from '@smithy/types';
 import { z } from 'zod';
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { awsCredentialsSchema, resolveAwsCredentials, signAwsRequest, type AwsCredentialEnvironment } from './aws-sigv4';
@@ -27,19 +28,27 @@ export const awsBedrockCredentialsSchema = awsBedrockProviderConfigSchema;
 export type AwsBedrockCredentials = AwsBedrockProviderConfig;
 
 const PROVIDER_ID = 'aws-bedrock' as const;
-const converseResponseSchema = z.object({ output: z.object({ message: z.object({ content: z.array(z.object({ text: z.string().optional() }).passthrough()).optional() }).passthrough().optional() }), usage: z.object({ inputTokens: z.number().optional(), outputTokens: z.number().optional(), totalTokens: z.number().optional() }).passthrough().optional(), stopReason: z.string().optional() });
+const converseResponseSchema = z.object({ output: z.object({ message: z.object({ content: z.array(z.object({ text: z.string().optional(), toolUse: z.object({ toolUseId: z.string().min(1), name: z.string().min(1), input: z.unknown() }).optional() }).passthrough()).optional() }).passthrough().optional() }), usage: z.object({ inputTokens: z.number().optional(), outputTokens: z.number().optional(), totalTokens: z.number().optional() }).passthrough().optional(), stopReason: z.string().optional() });
 const embeddingResponseSchema = z.object({ embedding: z.array(z.number().finite()).min(1), inputTextTokenCount: z.number().optional() }).passthrough();
+const documentValue = (value: unknown) => value as DocumentType;
 
 function buildConverseInput(input: ChatInput): Omit<ConverseStreamCommandInput, 'modelId'> {
   const messages: NonNullable<ConverseStreamCommandInput['messages']> = [];
   const systemParts: string[] = input.systemPrompt ? [input.systemPrompt] : [];
-  if (input.tools?.length) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support core.chat tools');
   for (const message of input.messages) {
-    const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
-    if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support non-text core.chat content');
-    if (message.role === 'system') { systemParts.push(text); continue; }
-    if (message.role === 'tool') throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter does not support core.chat tool-result messages');
-    messages.push({ role: message.role, content: [{ text }] });
+    if (message.role === 'system') {
+      const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('\n');
+      if (!text || message.content.some((part) => part.type !== 'text')) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter supports text-only system messages');
+      systemParts.push(text);
+      continue;
+    }
+    const content = message.content.map((part): ContentBlock => {
+      if (part.type === 'text') return { text: part.text };
+      if (part.type === 'tool-call' && message.role === 'assistant') return { toolUse: { toolUseId: part.toolCallId, name: part.name, input: documentValue(part.arguments) } };
+      if (part.type === 'tool-result' && message.role === 'tool') return { toolResult: { toolUseId: part.toolCallId, content: [{ json: documentValue(part.result) }], status: 'success' } };
+      throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock adapter received unsupported core.chat content');
+    });
+    messages.push({ role: message.role === 'tool' ? 'user' : message.role, content });
   }
   const request: Omit<ConverseStreamCommandInput, 'modelId'> = { messages };
   if (systemParts.length > 0) request.system = systemParts.map((text) => ({ text }));
@@ -47,6 +56,7 @@ function buildConverseInput(input: ChatInput): Omit<ConverseStreamCommandInput, 
   if (input.options?.maxTokens !== undefined) inferenceConfig.maxTokens = input.options.maxTokens;
   if (input.options?.temperature !== undefined) inferenceConfig.temperature = Math.min(input.options.temperature, 1);
   if (Object.keys(inferenceConfig).length > 0) request.inferenceConfig = inferenceConfig;
+  if (input.tools?.length) request.toolConfig = { tools: input.tools.map((tool): Tool => ({ toolSpec: { name: tool.name, ...(tool.description ? { description: tool.description } : {}), inputSchema: { json: documentValue(tool.inputSchema) } } })) };
   return request;
 }
 
@@ -121,7 +131,12 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
         if (!response.ok) throw new ProviderError(PROVIDER_ID, providerErrorCodeForStatus(response.status), `aws-bedrock request failed with status ${response.status}`, { status: response.status });
         const raw = await response.json();
         const result = converseResponseSchema.parse(raw);
-        const output: ChatOutput = { text: (result.output.message?.content ?? []).map((block) => block.text ?? '').join(''), toolCalls: [], stopReason: result.stopReason ?? null };
+        const blocks = result.output.message?.content ?? [];
+        const output: ChatOutput = {
+          text: blocks.map((block) => block.text ?? '').join(''),
+          toolCalls: blocks.flatMap((block) => block.toolUse ? [{ id: block.toolUse.toolUseId, name: block.toolUse.name, arguments: block.toolUse.input }] : []),
+          stopReason: result.stopReason ?? null,
+        };
         return { output: output as TOutput, usage: tokenUsage(result.usage?.inputTokens, result.usage?.outputTokens, result.usage?.totalTokens), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: raw };
       } catch (error) { throw normalizeProviderError(PROVIDER_ID, error); }
     },
@@ -130,6 +145,7 @@ export function createAwsBedrockProvider(config?: Partial<AwsBedrockProviderConf
       try {
         if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, 'stream');
         const input = chatInputSchema.parse(request.input);
+        if (input.tools?.length || input.messages.some((message) => message.content.some((part) => part.type === 'tool-call' || part.type === 'tool-result'))) throw new ProviderError(PROVIDER_ID, 'unsupported_action', 'AWS Bedrock streaming does not support tools');
         client = streamClientFactory(request.timeoutMs ?? 300_000);
         const response = await client.send(new ConverseStreamCommand({ modelId: request.externalModelId, ...buildConverseInput(input) }), { abortSignal: resolveRequestSignal(request) });
         if (!response.stream) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'aws-bedrock returned no event stream');

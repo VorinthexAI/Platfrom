@@ -85,6 +85,61 @@ describe('AWS Bedrock provider', () => {
     expect(response.output).toEqual({ text: 'continued thought', toolCalls: [], stopReason: 'end_turn' });
   });
 
+  test('serializes Converse tools and normalizes native tool calls', async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({
+        output: { message: { content: [{ text: 'Searching.' }, { toolUse: { toolUseId: 'call-1', name: 'search_knowledge', input: { query: 'roadmap' } } }] } },
+        stopReason: 'tool_use',
+      });
+    }) as typeof fetch;
+
+    const response = await provider().execute({
+      actionId: 'orchestrator-chat',
+      modelId: 'amazon.nova-lite',
+      externalModelId: 'us.amazon.nova-lite-v1:0',
+      organizationKey: 'organization',
+      input: {
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'Find the roadmap' }] }],
+        tools: [
+          { name: 'search_knowledge', description: 'Search accessible knowledge.', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false } },
+          { name: 'write_note', inputSchema: { type: 'object' } },
+        ],
+      },
+    });
+
+    expect(body).toEqual({
+      messages: [{ role: 'user', content: [{ text: 'Find the roadmap' }] }],
+      toolConfig: { tools: [
+        { toolSpec: { name: 'search_knowledge', description: 'Search accessible knowledge.', inputSchema: { json: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false } } } },
+        { toolSpec: { name: 'write_note', inputSchema: { json: { type: 'object' } } } },
+      ] },
+    });
+    expect(response.output).toEqual({ text: 'Searching.', toolCalls: [{ id: 'call-1', name: 'search_knowledge', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' });
+  });
+
+  test('serializes prior tool calls and results for Converse', async () => {
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json({ output: { message: { content: [{ text: 'Found it.' }] } }, stopReason: 'end_turn' });
+    }) as typeof fetch;
+
+    await provider().execute({
+      actionId: 'orchestrator-chat', modelId: 'amazon.nova-lite', externalModelId: 'us.amazon.nova-lite-v1:0', organizationKey: 'organization',
+      input: { messages: [
+        { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'call-1', name: 'search_knowledge', arguments: { query: 'roadmap' } }] },
+        { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'call-1', result: { documents: [] } }] },
+      ] },
+    });
+
+    expect(body.messages).toEqual([
+      { role: 'assistant', content: [{ toolUse: { toolUseId: 'call-1', name: 'search_knowledge', input: { query: 'roadmap' } } }] },
+      { role: 'user', content: [{ toolResult: { toolUseId: 'call-1', content: [{ json: { documents: [] } }], status: 'success' } }] },
+    ]);
+  });
+
   test('streams typed Converse text, usage, and exactly one done event', async () => {
     let command: ConverseStreamCommand | undefined;
     let abortSignal: AbortSignal | undefined;
