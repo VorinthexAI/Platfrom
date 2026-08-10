@@ -8,6 +8,7 @@ import {
 import { Stack, useRouter, useSegments, type Href } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
+import { BottomSheetScene } from "@vorinthex/shared/ui/bottom-sheet";
 import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -73,14 +74,16 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.page }}>
       <SafeAreaProvider>
         <AppQueryProvider>
-          <StatusBar style="light" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: palette.page },
-              animation: "fade",
-            }}
-          />
+          <BottomSheetScene>
+            <StatusBar style="light" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: palette.page },
+                animation: "fade",
+              }}
+            />
+          </BottomSheetScene>
         </AppQueryProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

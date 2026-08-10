@@ -379,6 +379,12 @@
   height: min(72dvh, 680px);
 }
 
+.vui-bottom-sheet-mutation {
+  border-radius: var(--vui-radius-lg) var(--vui-radius-lg) 0 0;
+  height: calc(100dvh - env(safe-area-inset-top));
+  max-height: calc(100dvh - env(safe-area-inset-top));
+}
+
 .vui-bottom-sheet-drag-handle {
   align-items: center;
   cursor: grab;
@@ -401,7 +407,14 @@
 }
 
 .vui-bottom-sheet-header {
-  padding: 0 4px 18px;
+  padding: 0 52px 18px 4px;
+}
+
+.vui-bottom-sheet-close {
+  position: absolute;
+  right: 24px;
+  top: 10px;
+  z-index: 1;
 }
 
 .vui-bottom-sheet-title {

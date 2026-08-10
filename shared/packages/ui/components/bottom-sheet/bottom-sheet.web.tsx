@@ -10,19 +10,26 @@ import {
 } from "react";
 
 import { Button, type ButtonProps } from "../button/button.web";
+import { CloseIcon } from "../../icons/close/close.web";
 
 export type BottomSheetProps = {
   children?: ReactNode;
   description?: string;
+  mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   tall?: boolean;
   title: string;
 };
 
+export function BottomSheetScene({ children }: { children: ReactNode }) {
+  return <>{children}</>;
+}
+
 export function BottomSheet({
   children,
   description,
+  mutation = false,
   onOpenChange,
   open,
   tall = false,
@@ -73,7 +80,7 @@ export function BottomSheet({
         <Dialog.Content
           aria-describedby={description ? descriptionId : undefined}
           aria-labelledby={titleId}
-          className={`vui-bottom-sheet${tall ? " vui-bottom-sheet-tall" : ""}`}
+          className={`vui-bottom-sheet${tall ? " vui-bottom-sheet-tall" : ""}${mutation ? " vui-bottom-sheet-mutation" : ""}`}
           ref={contentRef}
         >
           <div
@@ -100,6 +107,16 @@ export function BottomSheet({
               </Dialog.Description>
             ) : null}
           </header>
+          <Dialog.Close asChild>
+            <Button
+              aria-label="Close bottom sheet"
+              className="vui-bottom-sheet-close"
+              size="sm"
+              variant="icon"
+            >
+              <CloseIcon size="sm" />
+            </Button>
+          </Dialog.Close>
           <div className="vui-bottom-sheet-content">{children}</div>
         </Dialog.Content>
       </Dialog.Portal>

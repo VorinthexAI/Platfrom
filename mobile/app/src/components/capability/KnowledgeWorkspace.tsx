@@ -74,6 +74,7 @@ export function KnowledgeWorkspace() {
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
+  const [editorFocused, setEditorFocused] = useState(false);
   const [title, setTitle] = useState("Untitled note");
   const [content, setContent] = useState("");
   const [completion, setCompletion] = useState("");
@@ -782,7 +783,7 @@ export function KnowledgeWorkspace() {
   };
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.root}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.identity}>
           <ChromeIcon glow={0.7} size={34} source={capabilityIconSource.archive} />
@@ -791,13 +792,13 @@ export function KnowledgeWorkspace() {
       </View>
 
       <ScrollView
-        automaticallyAdjustKeyboardInsets
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
         contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.sm }]}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
         style={styles.scrollView}
       >
-        <View style={styles.noteSheet}>
+        <View style={[styles.noteSheet, editorFocused && styles.noteSheetFocused]}>
           <View style={styles.metaRow}>
             <Text style={styles.meta}>CREATE NOTE</Text>
             <View style={styles.noteActions}>
@@ -858,6 +859,7 @@ export function KnowledgeWorkspace() {
               <TextInput
                 accessibilityLabel="Note content"
                 multiline
+                onBlur={() => setEditorFocused(false)}
                 onChangeText={(value) => {
                   if (documentKeyRef.current && value.length === 0) {
                     setError("Saved notes must contain at least one character.");
@@ -871,11 +873,12 @@ export function KnowledgeWorkspace() {
                   persistLocalDraft(titleRef.current, value);
                 }}
                 placeholder="Start writing from here..."
+                onFocus={() => setEditorFocused(true)}
                 onSelectionChange={(event) => {
                   selectionRef.current = event.nativeEvent.selection;
                   if (event.nativeEvent.selection.end !== contentRef.current.length) clearCompletion();
                 }}
-                style={styles.editor}
+                style={[styles.editor, editorFocused && styles.editorFocused]}
                 textAlignVertical="top"
                 value={content}
               />
@@ -922,6 +925,7 @@ export function KnowledgeWorkspace() {
 
       <BottomSheet
         description={activeSheet === "create" ? "Add something to your current Archive folder." : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : activeSheet === "translate" ? "Translate the full note into any language." : activeSheet === "versions" ? "Restore an earlier snapshot without losing the current one." : undefined}
+        mutation={activeSheet === "document" || activeSheet === "folder" || activeSheet === "translate"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "versions"}
@@ -1070,12 +1074,14 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  noteSheetFocused: { flexGrow: 0, minHeight: 0 },
   metaRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   noteActions: { flexDirection: "row", gap: 8 },
   meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
   titleInput: { minHeight: 58, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28 },
   editor: { minHeight: 270, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
+  editorFocused: { minHeight: 120, maxHeight: 220 },
   completionRow: { minHeight: 42, marginTop: -8, paddingLeft: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, borderLeftColor: palette.silver500, borderLeftWidth: 1 },
   completionText: { flex: 1, color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 24 },
   enhancePanel: { gap: 18 },
