@@ -925,7 +925,7 @@ export function KnowledgeWorkspace() {
 
       <BottomSheet
         description={activeSheet === "create" ? "Add something to your current Archive folder." : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : activeSheet === "translate" ? "Translate the full note into any language." : activeSheet === "versions" ? "Restore an earlier snapshot without losing the current one." : undefined}
-        mutation={activeSheet === "document" || activeSheet === "folder" || activeSheet === "translate"}
+        mutation={activeSheet === "document" || activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "translate"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "versions"}
@@ -1030,7 +1030,7 @@ export function KnowledgeWorkspace() {
             <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <View style={styles.folderSearch}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel="Search Archive folders" onChangeText={setLibraryQuery} placeholder="Search folders" style={styles.folderSearchInput} value={libraryQuery} />
+              <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search folders" style={styles.folderSearchInput} value={libraryQuery} />
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
@@ -1048,7 +1048,7 @@ export function KnowledgeWorkspace() {
             <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <View style={styles.folderSearch}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel="Search Archive documents" onChangeText={setLibraryQuery} placeholder="Search documents" style={styles.folderSearchInput} value={libraryQuery} />
+              <TextInput accessibilityLabel="Search Archive documents" autoFocus onChangeText={setLibraryQuery} placeholder="Search documents" style={styles.folderSearchInput} value={libraryQuery} />
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (
