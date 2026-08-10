@@ -109,7 +109,7 @@ export function KnowledgeWorkspace() {
   const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
   const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
   const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
-  const draftIdentity = userKey && contentContextKey ? `${userKey}:${organizationKey}:${scopeKey}` : "";
+  const draftIdentity = userKey && organizationKey && scopeKey ? `${userKey}:${organizationKey}:${scopeKey}` : "";
   const localDraftFile = draftFileFor(draftIdentity || "unavailable");
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -342,7 +342,7 @@ export function KnowledgeWorkspace() {
       if (revision.current !== initialRevision || draftIdentityRef.current !== expectedDraftIdentity) return;
       const draft = JSON.parse(value) as LocalDraft;
       const draftDocumentKey = typeof draft.documentKey === "string" ? draft.documentKey : undefined;
-      if (draftDocumentKey && !pendingCreateFrom(draft.pendingCreate)) {
+      if (hasContentContext && draftDocumentKey && !pendingCreateFrom(draft.pendingCreate)) {
         const remote = await readContentDocument(draftDocumentKey);
         if (revision.current !== initialRevision || draftIdentityRef.current !== expectedDraftIdentity) return;
         if (remote.extension) {
@@ -371,11 +371,13 @@ export function KnowledgeWorkspace() {
       )) {
         dirty.current = true;
         setSaveState("dirty");
+      } else if (!draftDocumentKey && typeof draft.title === "string" && draft.title !== savedTitleRef.current) {
+        setSaveState("local");
       }
     })().catch(() => {
       if (draftIdentityRef.current === expectedDraftIdentity) setError("The local draft could not be restored.");
     });
-  }, [draftIdentity]);
+  }, [draftIdentity, hasContentContext]);
 
   useEffect(() => {
     if (!hasContentContext) return;
@@ -460,8 +462,13 @@ export function KnowledgeWorkspace() {
         if (!activeKey) {
           if (!nextContent.trim()) {
             dirty.current = false;
-            setSaveState("saved");
-            if (localDraftFile.exists) localDraftFile.delete();
+            if (nextTitle === savedTitleRef.current) {
+              setSaveState("saved");
+              if (localDraftFile.exists) localDraftFile.delete();
+            } else {
+              setSaveState("local");
+              persistLocalDraft(titleRef.current, contentRef.current);
+            }
             return;
           }
           pendingCreate.current ??= { name: nextTitle, content: nextContent, folderKey: currentFolder?.key, mutationKey: createContentMutationKey() };
