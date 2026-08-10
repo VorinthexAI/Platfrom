@@ -1031,7 +1031,6 @@ export function KnowledgeWorkspace() {
               <SearchIcon size="sm" variant="muted" />
               <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search folders" style={styles.folderSearchInput} value={libraryQuery} />
             </View>
-            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
               {visibleFolders.map((folder) => (
@@ -1040,7 +1039,6 @@ export function KnowledgeWorkspace() {
                 </Button>
               ))}
             </ScrollView>
-            {visibleFolders.length === 0 && !showArchiveRoot ? <Text style={styles.empty}>No folders match this search.</Text> : null}
           </>
         ) : null}
         {activeSheet === "documents" ? (
@@ -1049,7 +1047,6 @@ export function KnowledgeWorkspace() {
               <SearchIcon size="sm" variant="muted" />
               <TextInput accessibilityLabel="Search Archive documents" autoFocus onChangeText={setLibraryQuery} placeholder="Search documents" style={styles.folderSearchInput} value={libraryQuery} />
             </View>
-            <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { setLibraryQuery(""); setActiveSheet("library"); }} size="xs" variant="ghost">Back</Button>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (
                 <Button icon={<FileIcon size="md" />} key={document.key} onPress={() => void selectDocument(document)} size="lg" style={styles.folderTile} variant="secondary">
@@ -1057,7 +1054,6 @@ export function KnowledgeWorkspace() {
                 </Button>
               ))}
             </ScrollView>
-            {visibleDocuments.length === 0 ? <Text style={styles.empty}>No documents match this search.</Text> : null}
           </>
         ) : null}
       </BottomSheet>
@@ -1104,8 +1100,8 @@ const styles = StyleSheet.create({
   rowSubtitle: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   empty: { paddingVertical: 24, color: palette.silver500, fontFamily: fonts.regular, textAlign: "center" },
   namingForm: { flex: 1, gap: 12 },
-  libraryChoices: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  libraryChoice: { minHeight: 112, flexBasis: "48%", flexDirection: "column", gap: 10 },
+  libraryChoices: { gap: 10 },
+  libraryChoice: { minHeight: 72, width: "100%", gap: 10 },
   folderSearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   folderSearchInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
   folderGrid: { paddingTop: 14, flexDirection: "row", flexWrap: "wrap", gap: 10 },
