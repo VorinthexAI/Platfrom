@@ -108,6 +108,7 @@ export function KnowledgeWorkspace() {
   const [enhanceRange, setEnhanceRange] = useState<TextRange>();
   const [targetLanguage, setTargetLanguage] = useState("");
   const [translating, setTranslating] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [versions, setVersions] = useState<ContentDocumentVersion[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [restoringVersionKey, setRestoringVersionKey] = useState<string>();
@@ -793,8 +794,10 @@ export function KnowledgeWorkspace() {
   };
 
   const uploadDocument = async () => {
+    if (uploading) return;
+    setUploading(true);
     try {
-      const picked = await File.pickFileAsync({ mimeTypes: ["text/plain", "text/markdown", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] });
+      const picked = await File.pickFileAsync({ mimeTypes: ["text/plain", "text/markdown", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"] });
       if (picked.canceled) return;
       const file = picked.result;
       if (file.size > MAX_MOBILE_UPLOAD_BYTES) throw new Error("Mobile uploads must be 8 MB or smaller.");
@@ -802,11 +805,13 @@ export function KnowledgeWorkspace() {
         setSheetError("Uploads require a connected Archive.");
         return;
       }
-      await uploadContentDocument({ name: file.name, type: file.type, size: file.size, base64: await file.base64() }, currentFolder?.key);
+      const uploaded = await uploadContentDocument({ name: file.name, type: file.type, size: file.size, base64: await file.base64() }, currentFolder?.key);
       await loadLocation(currentFolder?.key);
-      closeSheet();
+      if (await openDocument(uploaded.document.key, undefined, setSheetError)) closeSheet();
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "The document could not be uploaded.");
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -980,7 +985,7 @@ export function KnowledgeWorkspace() {
           <>
             <BottomSheetItem icon={<FolderIcon />} onPress={() => { setSheetError(undefined); setActiveSheet("folder"); }}>Create folder</BottomSheetItem>
             <BottomSheetItem icon={<FileIcon />} onPress={() => { setSheetError(undefined); setActiveSheet("document"); }}>Create document</BottomSheetItem>
-            <BottomSheetItem icon={<UploadIcon />} onPress={() => void uploadDocument()}>Upload documents</BottomSheetItem>
+            <BottomSheetItem disabled={uploading} icon={<UploadIcon />} loading={uploading} onPress={() => void uploadDocument()}>Upload documents</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "enhance" ? (

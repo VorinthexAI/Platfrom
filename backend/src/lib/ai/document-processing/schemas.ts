@@ -63,6 +63,7 @@ export const extractedBlockSchema: z.ZodType<ExtractedBlock> = z.lazy(() => z.ob
 
 export const extractionResultSchema = z.object({
   extractedText: z.string(),
+  extractedHtml: z.string().optional(),
   blocks: z.array(extractedBlockSchema),
   metadata: z.record(z.unknown()).optional(),
 }).strict();

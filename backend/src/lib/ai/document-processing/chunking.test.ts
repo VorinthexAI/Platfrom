@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DOCUMENT_CHUNK_MAX_CHARACTERS, DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, chunkDocumentContent, chunkDocumentText, documentTextChunksSchema } from './chunking';
+import { DOCUMENT_CHUNK_MAX_CHARACTERS, DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentTextChunksSchema } from './chunking';
 
 const words = (count: number, prefix = 'word') => Array.from({ length: count }, (_, index) => `${prefix}${index}`).join(' ');
 
@@ -45,5 +45,17 @@ describe('document text chunking', () => {
   test('rejects content that would create an unbounded semantic index', () => {
     const oversized = 'x'.repeat(DOCUMENT_MAX_CHUNKS * DOCUMENT_CHUNK_MAX_CHARACTERS + 1);
     expect(() => chunkDocumentContent(oversized)).toThrow(`maximum of ${DOCUMENT_MAX_CHUNKS} semantic chunks`);
+  });
+
+  test('adds bounded semantic overlap to embedding passages without changing stored chunks', () => {
+    const chunks = chunkDocumentContent(`${words(1_000, 'first')} ${words(10, 'second')}`);
+    const passages = documentEmbeddingTexts('Report', chunks);
+    expect(chunks.map((chunk) => chunk).join('')).toBe(`${words(1_000, 'first')} ${words(10, 'second')}`);
+    expect(passages[0]).toBe(`Report\n\n${chunks[0]!.trim()}`);
+    expect(passages[1]).toContain('Previous context:\n');
+    expect(passages[1]).toContain('first999');
+    expect(passages[1]).toEndWith(chunks[1]!.trim());
+    expect(passages[1]!.length).toBeLessThanOrEqual(chunks[1]!.trim().length + 1_700);
+    expect(documentEmbeddingTexts('Report', chunks)).toEqual(passages);
   });
 });

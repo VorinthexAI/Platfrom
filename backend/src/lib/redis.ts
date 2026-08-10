@@ -9,7 +9,8 @@ import IORedis from 'ioredis';
 // connection to the first actual command fixes that for scripts while
 // staying transparent for the long-running server (it just connects on
 // its first real use, e.g. the first rate-limited request).
-export const redisConnection = new IORedis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6380', {
-  maxRetriesPerRequest: null,
-  lazyConnect: true,
-});
+export function createRedisConnection(url = process.env.REDIS_URL ?? 'redis://127.0.0.1:6380') {
+  return new IORedis(url, { maxRetriesPerRequest: null, lazyConnect: true });
+}
+
+export const redisConnection = createRedisConnection();

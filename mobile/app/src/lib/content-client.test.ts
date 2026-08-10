@@ -7,6 +7,7 @@ let authState = {
   scope: { key: "scope-authenticated" },
   contentExecution: { agentKey: "agent-authenticated" },
 };
+let queuedUpload = false;
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => authState },
@@ -16,10 +17,20 @@ mock.module("./api-client", () => ({
     post: (...args: any[]) => testRuntime.__archiveApiPost?.(...args),
   },
 }));
+mock.module("expo-crypto", () => ({
+  CryptoDigestAlgorithm: { SHA256: "SHA-256" },
+  digestStringAsync: async () => "upload-digest",
+}));
 
 testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, config: Record<string, any>) => {
   calls.push({ url, body, config });
   const tool = url.split("/").at(-1);
+  if (tool === "document.parse" && queuedUpload) {
+    return { data: { success: true, data: { job: { key: "a".repeat(64), state: "waiting" } } } };
+  }
+  if (url.includes("/content/document-jobs/")) {
+    return { data: { success: true, data: { document: { key: "document", name: "Note", updatedAt: "2026-08-10T00:00:00.000Z" } } } };
+  }
   if (tool === "document.create" || tool === "document.parse") {
     return { data: { success: true, data: { document: { key: "document", name: "Note", updatedAt: "2026-08-10T00:00:00.000Z" } } } };
   }
@@ -41,6 +52,7 @@ const {
 
 beforeEach(() => {
   calls.length = 0;
+  queuedUpload = false;
   authState = {
     organization: { key: "org-authenticated" },
     scope: { key: "scope-authenticated" },
@@ -83,6 +95,19 @@ test("uploads documents through the authenticated Archive context", async () => 
     },
   });
   expect(calls[0]?.config.timeout).toBe(5 * 60_000);
+  expect(calls[0]?.body.input.idempotencyKey).toBe("upload-upload-digest-folder");
+});
+
+test("polls an offloaded upload using the same authenticated Archive context", async () => {
+  queuedUpload = true;
+  const result = await uploadContentDocument({ name: "notes.txt", type: "", size: 3, base64: "YWJj" }, "folder");
+  expect(result.document.key).toBe("document");
+  expect(calls.map(({ url }) => url)).toEqual([
+    "/api/v1/content/tools/document.parse",
+    `/api/v1/content/document-jobs/${"a".repeat(64)}`,
+  ]);
+  expect(calls[0]?.body.input.file.mimeType).toBe("text/plain");
+  expect(calls[1]?.body).toEqual({ organizationKey: "org-authenticated", agentKey: "agent-authenticated" });
 });
 
 test("rejects Archive calls when authenticated context is incomplete", async () => {

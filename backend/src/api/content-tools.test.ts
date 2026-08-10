@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { newId } from '@/lib/ids';
 import { ContentError } from '@/lib/ai/tools';
-import { createContentToolHandler } from './content-tools';
+import { createContentToolHandler, createDocumentJobStatusHandler } from './content-tools';
 import { registerRoutes } from './routes';
 import { validateQueryParams } from './middleware';
 
@@ -66,6 +66,44 @@ describe('Content tool API', () => {
     const tooLarge = await request({ getIdentity: async () => user, maxDocumentBytes: 2, run: async () => ({}) }, 'document.parse', { organizationKey, agentKey, input: { scopeKey, folderKey, file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
     expect(tooLarge.status).toBe(400);
     expect(await tooLarge.json()).toMatchObject({ error: { code: 'DOCUMENT_TOO_LARGE' } });
+  });
+
+  test('authorizes before returning an asynchronous Fargate document job', async () => {
+    const user = { key: newId(), identityType: 'user' as const };
+    const order: string[] = [];
+    const response = await request({
+      getIdentity: async () => user,
+      fargateConfigured: () => true,
+      authorize: async () => { order.push('authorize'); return { context: {} } as never; },
+      authorizeLocation: async () => { order.push('location'); },
+      enqueueDocument: async (input) => { order.push('enqueue'); expect(input.authenticatedUserKey).toBe(user.key); return { key: 'a'.repeat(64), state: 'waiting' }; },
+    }, 'document.parse', { organizationKey, agentKey, input: { scopeKey, folderKey, idempotencyKey: 'upload-1', file: { filename: 'a.txt', mimeType: 'text/plain', sizeBytes: 3, encoding: 'base64', content: 'YWJj' } } });
+    expect(response.status).toBe(202);
+    expect(order).toEqual(['authorize', 'location', 'enqueue']);
+    expect(await response.json()).toEqual({ success: true, data: { job: { key: 'a'.repeat(64), state: 'waiting' } } });
+  });
+
+  test('returns authenticated document job progress and final output', async () => {
+    const user = { key: newId(), identityType: 'user' as const };
+    const jobKey = 'b'.repeat(64);
+    const app = new Hono();
+    let completed = false;
+    app.post('/content/document-jobs/:jobId', createDocumentJobStatusHandler({
+      getIdentity: async () => user,
+      authorize: async () => ({} as never),
+      getStatus: async (key, identity) => {
+        expect(key).toBe(jobKey);
+        expect(identity).toEqual({ organizationKey, agentKey, authenticatedUserKey: user.key });
+        return completed ? { success: true, data: { document: { key: folderKey } } } : { key: jobKey, state: 'active' };
+      },
+    }));
+    const body = JSON.stringify({ organizationKey, agentKey });
+    const pending = await app.request(`/content/document-jobs/${jobKey}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    expect(pending.status).toBe(202);
+    completed = true;
+    const final = await app.request(`/content/document-jobs/${jobKey}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+    expect(final.status).toBe(200);
+    expect(await final.json()).toEqual({ success: true, data: { document: { key: folderKey } } });
   });
 
   test('rejects oversized request bodies before JSON and base64 normalization', async () => {

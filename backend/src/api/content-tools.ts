@@ -3,7 +3,8 @@ import { z, ZodError } from 'zod';
 import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
 import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { DEFAULT_MAX_DOCUMENT_BYTES, positiveDocumentLimit } from '@/lib/ai/document-processing/actions';
-import { ContentError, contentToolInputSchemas, contentToolNameSchema, isContentMutation, runContentAgentTool, type ContentErrorCode, type RunContentAgentToolOptions } from '@/lib/ai/tools';
+import { documentFargateConfigured, enqueueDocumentProcessing, getDocumentProcessingStatus } from '@/lib/ai/document-processing/fargate-queue';
+import { authorizeContentAgentTool, authorizeDocumentParseLocation, ContentError, contentToolInputSchemas, contentToolNameSchema, isContentMutation, runContentAgentTool, type ContentErrorCode, type RunContentAgentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
@@ -14,6 +15,10 @@ export interface ContentToolHandlerDependencies {
   run?: ContentToolRunner;
   serviceOptions?: Omit<RunContentAgentToolOptions, 'authenticatedUserKey'>;
   maxDocumentBytes?: number;
+  fargateConfigured?: typeof documentFargateConfigured;
+  enqueueDocument?: typeof enqueueDocumentProcessing;
+  authorize?: typeof authorizeContentAgentTool;
+  authorizeLocation?: typeof authorizeDocumentParseLocation;
 }
 
 function responseError(error: ContentError) { return { success: false as const, error: error.toJSON() }; }
@@ -89,6 +94,17 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
         if (idempotencyKey) input = { ...(input as Record<string, unknown>), idempotencyKey };
       }
       input = contentToolInputSchemas[tool].parse(input);
+      if (tool === 'document.parse' && !dependencies.run && (dependencies.fargateConfigured ?? documentFargateConfigured)()) {
+        const authorized = await (dependencies.authorize ?? authorizeContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key });
+        const location = z.object({ scopeKey: z.string().cuid(), folderKey: z.string().cuid().optional() }).parse(input);
+        await (dependencies.authorizeLocation ?? authorizeDocumentParseLocation)(location, authorized.context);
+        const queued = await (dependencies.enqueueDocument ?? enqueueDocumentProcessing)({ organizationKey: body.organizationKey, agentKey: body.agentKey, authenticatedUserKey: identity.key, document: input, maxBytes: maximum });
+        if ('success' in queued) {
+          if (!queued.success) return c.json({ success: false as const, error: queued.error }, contentStatus(queued.error.code));
+          return c.json({ success: true as const, data: queued.data });
+        }
+        return c.json({ success: true as const, data: { job: queued } }, 202);
+      }
       const output = await (dependencies.run ?? runContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key });
       return c.json({ success: true, data: output });
     } catch (error) {
@@ -103,3 +119,37 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
 }
 
 export const invokeContentTool = createContentToolHandler();
+
+const documentJobBodySchema = strictObject({ organizationKey: z.string().trim().min(1), agentKey: z.string().cuid() });
+
+export function createDocumentJobStatusHandler(dependencies: {
+  getIdentity?: typeof getAuthIdentity;
+  getStatus?: typeof getDocumentProcessingStatus;
+  authorize?: typeof authorizeContentAgentTool;
+  serviceOptions?: Omit<RunContentAgentToolOptions, 'authenticatedUserKey'>;
+} = {}) {
+  return async (c: Context) => {
+    const identity = await (dependencies.getIdentity ?? getAuthIdentity)(c);
+    if (!identity) return c.json(responseError(new ContentError('CONTENT_UNAUTHORIZED', 'Authentication required.', 'document.parse', { action: 'authorization' })), 401);
+    if (identity.identityType !== 'user') return c.json(responseError(new ContentError('CONTENT_FORBIDDEN', 'A user session is required.', 'document.parse', { action: 'authorization' })), 403);
+    try {
+      const body = documentJobBodySchema.parse(await c.req.json());
+      await (dependencies.authorize ?? authorizeContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool: 'document.parse', input: {} }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key });
+      const status = await (dependencies.getStatus ?? getDocumentProcessingStatus)(z.string().parse(c.req.param('jobId')), { ...body, authenticatedUserKey: identity.key });
+      if (!status) return c.json(responseError(new ContentError('CONTENT_NOT_FOUND', 'Document processing job was not found.', 'document.parse', { action: 'status' })), 404);
+      if ('success' in status) {
+        if (!status.success) return c.json({ success: false as const, error: status.error }, contentStatus(status.error.code));
+        return c.json({ success: true as const, data: status.data });
+      }
+      return c.json({ success: true as const, data: { job: status } }, 202);
+    } catch (error) {
+      if (error instanceof ContentError) return c.json(responseError(error), contentStatus(error.code));
+      if (error instanceof AgentExecutionAccessError) return c.json(responseError(new ContentError('CONTENT_FORBIDDEN', 'Agent execution access denied.', 'document.parse', { action: 'authorization' })), 403);
+      if (error instanceof AgentRuntimeNotFoundError) return c.json(responseError(new ContentError('CONTENT_NOT_FOUND', 'Agent runtime was not found.', 'document.parse', { action: 'authorization' })), 404);
+      if (error instanceof ZodError || error instanceof SyntaxError) return c.json(responseError(new ContentError('CONTENT_INVALID_INPUT', 'Document job request was invalid.', 'document.parse', { action: 'status' })), 400);
+      return c.json(responseError(new ContentError('DOCUMENT_PROCESSING_FAILED', 'Document processing status could not be read.', 'document.parse', { action: 'status', retryable: true })), 500);
+    }
+  };
+}
+
+export const getContentDocumentJob = createDocumentJobStatusHandler();

@@ -73,6 +73,35 @@ resource "aws_vpc_security_group_ingress_rule" "arango_from_early_app" {
   referenced_security_group_id = aws_security_group.early_app.id
 }
 
+resource "aws_security_group" "document_worker" {
+  name        = "${var.name_prefix}-document-worker-sg"
+  description = "Transient Fargate document processing tasks"
+  vpc_id      = module.network.vpc_id
+  tags        = merge(local.tags, { Name = "${var.name_prefix}-document-worker-sg" })
+}
+
+resource "aws_vpc_security_group_egress_rule" "document_worker_all" {
+  security_group_id = aws_security_group.document_worker.id
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "arango_from_document_worker" {
+  security_group_id            = module.network.graph_db_security_group_id
+  ip_protocol                  = "tcp"
+  from_port                    = 8529
+  to_port                      = 8529
+  referenced_security_group_id = aws_security_group.document_worker.id
+}
+
+resource "aws_vpc_security_group_ingress_rule" "job_redis_from_document_worker" {
+  security_group_id            = aws_security_group.early_app.id
+  ip_protocol                  = "tcp"
+  from_port                    = 6379
+  to_port                      = 6379
+  referenced_security_group_id = aws_security_group.document_worker.id
+}
+
 resource "aws_instance" "early_app" {
   ami                         = "ami-0d08de17b554b801f"
   instance_type               = "t4g.medium"
@@ -107,17 +136,170 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-        Resource = ["${module.storage.s3_bucket_arn}/archive/*"]
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = [
+          "${module.storage.s3_bucket_arn}/archive/*",
+          "${module.storage.s3_bucket_arn}/content/*",
+          "${module.storage.s3_bucket_arn}/pending/document-processing/*"
+        ]
       },
       {
         Effect   = "Allow"
-        Action   = ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection"]
+        Action   = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis"]
         Resource = ["*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["ecs:RunTask"]
+        Resource = [aws_ecs_task_definition.document_worker.arn]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = [aws_iam_role.document_worker_execution.arn, aws_iam_role.document_worker_task.arn]
       }
     ]
   })
+}
+
+resource "aws_ecs_cluster" "document_processing" {
+  name = "${var.name_prefix}-document-processing"
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+  tags = local.tags
+}
+
+resource "aws_cloudwatch_log_group" "document_worker" {
+  name              = "/ecs/${var.name_prefix}-document-worker"
+  retention_in_days = 30
+  tags              = local.tags
+}
+
+resource "aws_iam_role" "document_worker_execution" {
+  name = "${var.name_prefix}-document-worker-execution"
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "document_worker_execution" {
+  role       = aws_iam_role.document_worker_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_role_policy" "document_worker_secrets" {
+  name = "${var.name_prefix}-document-worker-secrets"
+  role = aws_iam_role.document_worker_execution.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = ["ssm:GetParameter", "ssm:GetParameters"], Resource = [local.ssm_prefix_arn] },
+      { Effect = "Allow", Action = ["kms:Decrypt"], Resource = var.kms_key_arns }
+    ]
+  })
+}
+
+resource "aws_iam_role" "document_worker_task" {
+  name = "${var.name_prefix}-document-worker-task"
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+  tags = local.tags
+}
+
+resource "aws_iam_role_policy" "document_worker_runtime" {
+  name = "${var.name_prefix}-document-worker-runtime"
+  role = aws_iam_role.document_worker_task.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+        Resource = ["${module.storage.s3_bucket_arn}/content/*", "${module.storage.s3_bucket_arn}/pending/document-processing/*"]
+      },
+      { Effect = "Allow", Action = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis"], Resource = ["*"] }
+    ]
+  })
+}
+
+resource "aws_ecs_task_definition" "document_worker" {
+  family                   = "${var.name_prefix}-document-worker"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = tostring(var.document_worker_cpu)
+  memory                   = tostring(var.document_worker_memory)
+  execution_role_arn       = aws_iam_role.document_worker_execution.arn
+  task_role_arn            = aws_iam_role.document_worker_task.arn
+
+  runtime_platform {
+    cpu_architecture        = "ARM64"
+    operating_system_family = "LINUX"
+  }
+
+  container_definitions = jsonencode([{
+    name      = "document-worker"
+    image     = "${module.storage.ecr_repository_url}:latest"
+    essential = true
+    command   = ["src/document-worker/index.ts"]
+    environment = [
+      { name = "NODE_ENV", value = "production" },
+      { name = "AWS_REGION", value = var.aws_region },
+      { name = "ROLE", value = "document-worker" }
+    ]
+    healthCheck = {
+      command     = ["CMD-SHELL", "exit 0"]
+      interval    = 30
+      timeout     = 5
+      retries     = 3
+      startPeriod = 10
+    }
+    secrets = concat([
+      for key in [
+        "ARANGO_DATABASE",
+        "ARANGO_ROOT_PASSWORD",
+        "ARANGO_URL",
+        "ARANGO_USERNAME",
+        "OPENROUTER_API_KEY",
+        "ORCHESTRATION_CREDENTIALS_MASTER_KEY",
+        "S3_BUCKET"
+      ] : { name = key, valueFrom = "${local.ssm_path}/${key}" }
+      ], [
+      { name = "REDIS_URL", valueFrom = "${local.ssm_path}/JOB_REDIS_URL" },
+      { name = "JOB_REDIS_URL", valueFrom = "${local.ssm_path}/JOB_REDIS_URL" }
+    ])
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.document_worker.name
+        awslogs-region        = var.aws_region
+        awslogs-stream-prefix = "document"
+      }
+    }
+  }])
+
+  tags = local.tags
+}
+
+resource "aws_ssm_parameter" "document_processing_config" {
+  for_each = {
+    COMPUTE_ECS_CLUSTER         = aws_ecs_cluster.document_processing.name
+    COMPUTE_ECS_TASK_DEFINITION = aws_ecs_task_definition.document_worker.arn
+    COMPUTE_ECS_SUBNETS         = join(",", module.network.public_subnet_ids)
+    COMPUTE_ECS_SECURITY_GROUPS = aws_security_group.document_worker.id
+    JOB_REDIS_URL               = "redis://${aws_instance.early_app.private_ip}:6379"
+  }
+  name        = "${local.ssm_path}/${each.key}"
+  description = "Vorinthex production ${each.key}"
+  type        = "String"
+  value       = each.value
+  tags        = local.tags
 }
 
 resource "aws_eip" "early_app" {

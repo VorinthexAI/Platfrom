@@ -541,7 +541,7 @@ resource "aws_iam_role_policy" "api_runtime" {
       },
       {
         Effect   = "Allow"
-        Action   = ["textract:StartDocumentTextDetection", "textract:GetDocumentTextDetection"]
+        Action   = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis"]
         Resource = ["*"]
       }
     ]

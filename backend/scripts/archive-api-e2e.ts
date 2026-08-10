@@ -57,7 +57,32 @@ async function tool(name: string, input: Record<string, unknown>) {
   accessToken = response.headers.get('x-access-token') ?? accessToken;
   refreshToken = response.headers.get('x-refresh-token') ?? refreshToken;
   if (!response.ok || body.success !== true) throw new Error(`${name} failed with ${response.status}: ${JSON.stringify(body)}`);
-  return object(body.data);
+  let data = object(body.data);
+  if (name === 'document.parse' && data.job) {
+    const jobKey = string(object(data.job).key, 'document job key');
+    const deadline = Date.now() + 30 * 60_000;
+    while (data.job) {
+      if (Date.now() >= deadline) throw new Error(`document.parse job ${jobKey} timed out.`);
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      const status = await fetch(`${apiBase}/api/v1/content/document-jobs/${jobKey}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${accessToken}`,
+          'content-type': 'application/json',
+          'x-refresh-token': refreshToken,
+          'x-vorinthex-api-key': process.env.API_KEY ?? '',
+          'x-vorinthex-session-transport': 'header',
+        },
+        body: JSON.stringify({ organizationKey, agentKey }),
+      });
+      const statusBody = object(await status.json());
+      accessToken = status.headers.get('x-access-token') ?? accessToken;
+      refreshToken = status.headers.get('x-refresh-token') ?? refreshToken;
+      if (statusBody.success !== true) throw new Error(`document.parse status failed with ${status.status}: ${JSON.stringify(statusBody)}`);
+      data = object(statusBody.data);
+    }
+  }
+  return data;
 }
 
 const folderResult = await tool('folder.create', {

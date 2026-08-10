@@ -5,7 +5,7 @@ import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingBatchSchema, currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
-import { chunkDocumentContent, documentContentChunksSchema, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
+import { chunkDocumentContent, documentContentChunksSchema, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 
 export const DOCUMENTS_COLLECTION = 'documents';
 export { documentExtensionSchema } from '@/lib/ai/document-processing/schemas';
@@ -51,7 +51,7 @@ export const getDocumentById = helpers.getById;
 export async function upsertDocumentByKey(input: Omit<z.input<typeof documentSchema>, 'embedding' | 'contentChunks' | 'chunkEmbeddings'>): Promise<Document> {
   const representations = canonicalDocumentRepresentations(input.html);
   const contentChunks = chunkDocumentContent(representations.content);
-  const chunkEmbeddings = await embedTexts({ texts: contentChunks.map((chunk) => `${input.name.trim()}\n\n${chunk}`) });
+  const chunkEmbeddings = await embedTexts({ texts: documentEmbeddingTexts(input.name, contentChunks) });
   const document = documentSchema.parse({ ...input, ...representations, contentChunks, embedding: chunkEmbeddings[0], chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(representations.content) });
   const result = await db.collection(DOCUMENTS_COLLECTION).save(toArangoDoc(document), { returnNew: true, overwriteMode: 'replace' });
   return documentSchema.parse(withArangoKey(result.new as Record<string, unknown>));

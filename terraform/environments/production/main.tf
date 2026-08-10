@@ -88,8 +88,6 @@ module "graph_db_backup" {
   tags                  = local.tags
 }
 
-# (Removed module "cache" — retired in the early-infra cost teardown.)
-
 resource "random_password" "api_key" {
   length  = 48
   special = false

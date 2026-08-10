@@ -32,12 +32,12 @@ export function plainContentToHtml(input: string): string {
 }
 
 type HtmlNode = { tag: string; attrs: Record<string, string>; children: Array<HtmlNode | string> };
-const VOID_TAGS = new Set(['br', 'hr', 'img']);
+const VOID_TAGS = new Set(['br', 'hr', 'img', 'col']);
 const HTML_VOID_TAGS = new Set([...VOID_TAGS, 'area', 'base', 'col', 'embed', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
-const ALLOWED_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'strong', 'b', 'em', 'i', 'u', 's', 'a', 'blockquote', 'pre', 'code', 'ul', 'ol', 'li', 'table', 'tbody', 'thead', 'tr', 'td', 'th', 'br', 'hr', 'img']);
-const TRANSPARENT_TAGS = new Set(['section', 'article', 'main', 'header', 'footer', 'div', 'span']);
+const ALLOWED_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'strong', 'b', 'em', 'i', 'u', 's', 'a', 'blockquote', 'pre', 'code', 'ul', 'ol', 'li', 'table', 'caption', 'colgroup', 'col', 'tbody', 'thead', 'tr', 'td', 'th', 'br', 'hr', 'img', 'section', 'figure', 'figcaption']);
+const TRANSPARENT_TAGS = new Set(['article', 'main', 'header', 'footer', 'div', 'span']);
 const DANGEROUS_TAGS = new Set(['script', 'style', 'iframe', 'object', 'svg']);
-const BLOCK_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'blockquote', 'pre', 'table']);
+const BLOCK_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'blockquote', 'pre', 'table', 'section', 'figure', 'figcaption']);
 const decodeHtml = (value: string) => value.replace(/&(amp|lt|gt|quot|#39);/g, (_, entity: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[entity]!);
 
 function parseDocumentHtml(input: string): HtmlNode {
@@ -75,11 +75,18 @@ function serializeNode(node: HtmlNode | string): string {
   if (DANGEROUS_TAGS.has(node.tag)) return '';
   if (TRANSPARENT_TAGS.has(node.tag)) return node.children.filter((child) => typeof child !== 'string' || child.trim()).map(serializeNode).join('');
   if (!ALLOWED_TAGS.has(node.tag)) return node.children.filter((child) => typeof child !== 'string' || child.trim()).map(serializeNode).join('');
+  const positiveSpan = (value: string | undefined) => /^\d{1,2}$/.test(value ?? '') && Number(value) > 0 ? value : undefined;
   const attrs = node.tag === 'a' && /^https?:\/\//i.test(node.attrs.href ?? '')
     ? ` href="${escapeHtml(node.attrs.href!)}"${['_blank', '_self'].includes(node.attrs.target ?? '') ? ` target="${node.attrs.target}"` : ''}`
     : node.tag === 'img' && /^\/(?!\/)/.test(node.attrs.src ?? '')
       ? ` src="${escapeHtml(node.attrs.src!)}"${node.attrs.alt ? ` alt="${escapeHtml(node.attrs.alt)}"` : ''}${node.attrs.title ? ` title="${escapeHtml(node.attrs.title)}"` : ''}`
-    : '';
+      : node.tag === 'section' && node.attrs.class === 'doc-page' && /^\d{1,5}$/.test(node.attrs['data-page'] ?? '')
+        ? ` class="doc-page" data-page="${node.attrs['data-page']}"`
+        : node.tag === 'td' || node.tag === 'th'
+          ? `${positiveSpan(node.attrs.colspan) ? ` colspan="${node.attrs.colspan}"` : ''}${positiveSpan(node.attrs.rowspan) ? ` rowspan="${node.attrs.rowspan}"` : ''}`
+          : node.tag === 'ol' && positiveSpan(node.attrs.start)
+            ? ` start="${node.attrs.start}"`
+            : '';
   const tag = node.tag === 'b' ? 'strong' : node.tag === 'i' ? 'em' : node.tag;
   if (VOID_TAGS.has(node.tag)) return `<${tag}${attrs}>`;
   return `<${tag}${attrs}>${node.children.map(serializeNode).join('')}</${tag}>`;
@@ -184,5 +191,5 @@ const documentHtmlInputSchema = z.union([
 export function documentInputToHtml(input: DocumentHtmlInput): string {
   const parsed = documentHtmlInputSchema.parse(input);
   if ('html' in parsed) return parsed.html;
-  return 'content' in parsed ? plainContentToHtml(parsed.content) : extractionResultToHtml(parsed);
+  return 'content' in parsed ? plainContentToHtml(parsed.content) : parsed.extractedHtml ?? extractionResultToHtml(parsed);
 }

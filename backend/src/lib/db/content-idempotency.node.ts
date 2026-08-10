@@ -56,7 +56,9 @@ export async function claimContentIdempotency(
   const leaseExpiresAt = future(now, Number(process.env.CONTENT_IDEMPOTENCY_LEASE_MS ?? DEFAULT_LEASE_MS));
   const cursor = await db.query<Record<string, unknown>>(`
     LET existing = DOCUMENT(@@collection, @key)
-    FILTER existing == null || (existing.status == "completed" && existing.expiresAt <= @now)
+    FILTER existing == null
+      || (existing.status == "completed" && existing.expiresAt <= @now)
+      || (existing.status == "pending" && existing.requestHash == @requestHash && existing.leaseExpiresAt <= @now)
     UPSERT { _key: @key }
       INSERT MERGE(@identity, { _key: @key, requestHash: @requestHash, status: "pending", leaseOwner: @leaseOwner, leaseExpiresAt: @leaseExpiresAt, createdAt: @now, updatedAt: @now })
       UPDATE MERGE(@identity, { requestHash: @requestHash, status: "pending", leaseOwner: @leaseOwner, leaseExpiresAt: @leaseExpiresAt, responseCiphertext: null, expiresAt: null, updatedAt: @now })

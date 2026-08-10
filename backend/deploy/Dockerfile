@@ -31,10 +31,14 @@ RUN apt-get update \
 # fb-dotslash") — a known emulation flake, not a real dependency problem. A
 # clean retry succeeds every time this has been seen.
 FROM base AS deps
-COPY backend/package.json backend/bun.lock ./
+COPY package.json bun.lock ./
+COPY backend/package.json ./backend/package.json
+COPY mobile/app/package.json ./mobile/app/package.json
+COPY shared/package.json ./shared/package.json
+COPY web/app/package.json ./web/app/package.json
 RUN --mount=type=cache,target=/root/.bun/install/cache \
 	for i in 1 2 3; do \
-		if bun install --frozen-lockfile --production; then break; fi; \
+		if bun install --frozen-lockfile --production --linker=hoisted --filter vorinthex-backend; then break; fi; \
 		echo "bun install failed (attempt $i/3), retrying..."; \
 		if [ "$i" = 3 ]; then exit 1; fi; \
 		sleep 5; \
@@ -43,10 +47,14 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 FROM base AS dev
 WORKDIR /app
 ENV NODE_ENV=development
-COPY backend/package.json backend/bun.lock ./
+COPY package.json bun.lock ./
+COPY backend/package.json ./backend/package.json
+COPY mobile/app/package.json ./mobile/app/package.json
+COPY shared/package.json ./shared/package.json
+COPY web/app/package.json ./web/app/package.json
 RUN --mount=type=cache,target=/root/.bun/install/cache \
 	for i in 1 2 3; do \
-		if bun install --frozen-lockfile; then break; fi; \
+		if bun install --frozen-lockfile --linker=hoisted --filter vorinthex-backend; then break; fi; \
 		echo "bun install failed (attempt $i/3), retrying..."; \
 		if [ "$i" = 3 ]; then exit 1; fi; \
 		sleep 5; \
@@ -69,4 +77,3 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
   CMD bun -e "fetch('http://127.0.0.1:' + (process.env.PORT || 3001) + '/api/v1/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 ENTRYPOINT ["bun", "run"]
 CMD ["src/api/index.ts"]
-

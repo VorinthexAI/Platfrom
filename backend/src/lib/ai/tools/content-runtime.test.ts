@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ContentRepository } from './content-runtime';
-import { CONTENT_TOOL_NAMES, ContentError, runContentTool, type ContentIdempotencyStore } from '.';
+import { authorizeDocumentParseLocation, CONTENT_TOOL_NAMES, ContentError, runContentTool, type ContentIdempotencyStore } from '.';
 import { DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
@@ -56,6 +56,16 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
 }
 
 describe('Content runtime', () => {
+  test('preflights document ingestion scope role and active folder hierarchy', async () => {
+    const allowed = fixture('moderator');
+    await expect(authorizeDocumentParseLocation({ scopeKey: allowed.scopeKey, folderKey: allowed.folderKey }, allowed.context, allowed.repository)).resolves.toBeUndefined();
+    const denied = fixture('viewer');
+    await expect(authorizeDocumentParseLocation({ scopeKey: denied.scopeKey, folderKey: denied.folderKey }, denied.context, denied.repository)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+    const archived = fixture('moderator');
+    archived.folders.get(archived.folderKey).deletedAt = now;
+    await expect(authorizeDocumentParseLocation({ scopeKey: archived.scopeKey, folderKey: archived.folderKey }, archived.context, archived.repository)).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
+  });
+
   test('requires a resolved human principal for every registered tool', async () => {
     const f = fixture();
     for (const name of CONTENT_TOOL_NAMES) {

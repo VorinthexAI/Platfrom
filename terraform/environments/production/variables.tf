@@ -90,22 +90,16 @@ variable "graph_db_name" {
   default     = "vorinthex"
 }
 
-variable "redis_node_type" {
-  type        = string
-  description = "ElastiCache Redis node type."
-  default     = "cache.t4g.micro"
-}
-
-variable "redis_num_cache_clusters" {
+variable "document_worker_cpu" {
   type        = number
-  description = "Number of Redis cache clusters."
-  default     = 1
+  description = "Fargate CPU units allocated to each document processing job."
+  default     = 2048
 }
 
-variable "redis_automatic_failover_enabled" {
-  type        = bool
-  description = "Enable Redis automatic failover."
-  default     = false
+variable "document_worker_memory" {
+  type        = number
+  description = "Fargate memory in MiB allocated to each document processing job."
+  default     = 4096
 }
 
 variable "task_cpu" {

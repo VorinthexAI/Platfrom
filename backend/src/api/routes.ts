@@ -54,7 +54,7 @@ import {
   updateSystemOrchestrator,
   upsertCurrentMind,
 } from './system';
-import { invokeContentTool } from './content-tools';
+import { getContentDocumentJob, invokeContentTool } from './content-tools';
 import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
@@ -388,6 +388,7 @@ export function registerRoutes(app: Hono) {
 
   app.post('/orchestrators/chat', postOrchestratorChat);
   app.post('/content/tools/:tool', invokeContentTool);
+  app.post('/content/document-jobs/:jobId', getContentDocumentJob);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);

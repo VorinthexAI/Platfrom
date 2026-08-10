@@ -18,7 +18,7 @@ curl -fsSL "https://github.com/docker/compose/releases/download/v2.32.4/docker-c
 	-o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-mkdir -p /opt/vorinthex/redis-data /opt/vorinthex/caddy-data
+mkdir -p /opt/vorinthex/redis-data /opt/vorinthex/job-redis-data /opt/vorinthex/caddy-data
 cat > /opt/vorinthex/overrides.env <<EOF
 DB_PRIVATE_IP=__DB_PRIVATE_IP__
 EOF

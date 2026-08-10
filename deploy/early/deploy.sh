@@ -67,9 +67,9 @@ acquire_deploy_lock() {
 
 acquire_deploy_lock
 
-# --- overrides: DB_PRIVATE_IP (ArangoDB box) + local redis URL --------------
+# --- overrides: DB_PRIVATE_IP (ArangoDB box) --------------------------------
 # shellcheck disable=SC1091
-source "${ROOT}/overrides.env"   # sets DB_PRIVATE_IP; REDIS_URL is forced below
+source "${ROOT}/overrides.env"
 
 cleanup_docker_disk
 
@@ -78,12 +78,24 @@ aws ecr get-login-password --region "$REGION" | docker login --username AWS --pa
 
 docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET"
 
-# --- shared, non-colored services (started once, left running) --------------
+# App Redis stays private to Docker. BullMQ uses a separate persistent Redis
+# exposed on the host's private VPC address for transient Fargate workers.
+mkdir -p "${ROOT}/redis-data" "${ROOT}/job-redis-data"
 if ! docker ps --format '{{.Names}}' | grep -qx redis; then
-	log "starting shared redis"
-	docker run -d --name redis --network "$NET" --restart unless-stopped \
-		-v "${ROOT}/redis-data:/data" redis:7-alpine \
-		redis-server --appendonly yes
+	if docker ps -a --format '{{.Names}}' | grep -qx redis; then
+		docker start redis
+	else
+		docker run -d --name redis --network "$NET" --restart unless-stopped \
+			-v "${ROOT}/redis-data:/data" redis:7-alpine redis-server --appendonly yes
+	fi
+fi
+if ! docker ps --format '{{.Names}}' | grep -qx job-redis; then
+	if docker ps -a --format '{{.Names}}' | grep -qx job-redis; then
+		docker start job-redis
+	else
+		docker run -d --name job-redis --network "$NET" --restart unless-stopped \
+			-p 6379:6379 -v "${ROOT}/job-redis-data:/data" redis:7-alpine redis-server --appendonly yes
+	fi
 fi
 
 # --- build the runtime env file from SSM (backend needs the full set) -------
@@ -107,7 +119,7 @@ aws ssm get-parameters-by-path --path "$SSM_PREFIX" --recursive --with-decryptio
 		case "$key" in NEXT_PUBLIC_*|NODE_ENV|PORT|AWS_REGION) continue;; esac
 		printf '%s=%s\n' "$key" "$value" >> "$API_ENV"
 	done
-# Co-located overrides: redis on the box, ArangoDB on the DB box.
+# Runtime overrides: app Redis is private to the backend Docker network.
 {
 	echo "NODE_ENV=production"
 	echo "PORT=3001"

@@ -23,7 +23,7 @@ import { NEXUS_SCOPE_KEY, SEEDED_SCOPES } from '../lib/db/seed';
 import { isLegacyIndex, LEGACY_INDEX_FIELDS } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
 import { canonicalDocumentRepresentations } from '../lib/ai/document-processing/representation';
-import { chunkDocumentContent, chunkDocumentText, documentSemanticHash } from '../lib/ai/document-processing/chunking';
+import { chunkDocumentContent, chunkDocumentText, documentEmbeddingTexts, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 import { z } from 'zod';
 
 const url = process.env.ARANGO_URL ?? 'http://127.0.0.1:8529';
@@ -298,7 +298,7 @@ export async function migrateContentVersions(targetDb: Database) {
       const reusable = metadataCurrent && historicalContent === representations.content && (storedChunksCurrent || typeof snapshot.content === 'string')
         ? currentChunkEmbeddings(snapshot.chunkEmbeddings, contentChunks.length) ?? (contentChunks.length === 1 && isCurrentVector(snapshot.embedding) ? [snapshot.embedding] : null)
         : null;
-      const chunkEmbeddings = reusable ?? await generateEmbeddings(contentChunks.map((chunk) => [nonEmptyString(snapshot.label), chunk].filter(Boolean).join('\n\n')));
+      const chunkEmbeddings = reusable ?? await generateEmbeddings(documentEmbeddingTexts(nonEmptyString(snapshot.label) ?? '', contentChunks));
       const embedding = chunkEmbeddings[0]!;
       updates.push({
         _key: snapshot._key,
@@ -401,7 +401,7 @@ export async function migrateContentDocuments(targetDb: Database) {
       const reusable = metadataCurrent && historicalContent === representations.content && (storedChunksCurrent || document.contentChunks === undefined)
         ? currentChunkEmbeddings(document.chunkEmbeddings, contentChunks.length) ?? (contentChunks.length === 1 && isCurrentVector(document.embedding) ? [document.embedding] : null)
         : null;
-      const chunkEmbeddings = reusable ?? await generateEmbeddings(contentChunks.map((chunk) => `${String(document.name ?? '').trim()}\n\n${chunk}`.trim()));
+      const chunkEmbeddings = reusable ?? await generateEmbeddings(documentEmbeddingTexts(String(document.name ?? ''), contentChunks));
       const embedding = chunkEmbeddings[0]!;
       updates.push({
         _key: document._key,

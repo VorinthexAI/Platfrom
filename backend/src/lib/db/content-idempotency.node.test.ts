@@ -24,7 +24,7 @@ describe('Content idempotency encryption', () => {
     expect(source).toContain('responseCiphertext: @responseCiphertext');
     expect(source).not.toContain('response: @response');
     expect(source).toContain('claim.leaseOwner == @leaseOwner');
-    expect(source).not.toContain('existing.leaseExpiresAt <= @now');
+    expect(source).toContain('existing.status == "pending" && existing.requestHash == @requestHash && existing.leaseExpiresAt <= @now');
     expect(source).toContain('existing.status == "completed" && existing.expiresAt <= @now');
     expect(source).toContain('existing.expiresAt <= @now');
   });

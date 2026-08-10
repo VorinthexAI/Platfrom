@@ -268,6 +268,30 @@ async function productionRepository(): Promise<ContentRepository> {
   return makeRepository(content.contentPersistence);
 }
 
+/** Performs the complete cheap authorization/location preflight before queued ingestion spends compute. */
+export async function authorizeDocumentParseLocation(input: { scopeKey: string; folderKey?: string }, context: DomainToolContext, repository?: ContentRepository): Promise<void> {
+  if (context.principal.kind !== 'member') throw new ContentError('CONTENT_FORBIDDEN', 'A member principal is required.', 'document.parse', { action: 'authorization' });
+  const repo = repository ?? await productionRepository();
+  const scope = await repo.getScope(input.scopeKey);
+  if (!scope || scope.organizationKey !== context.organizationKey) throw new ContentError('CONTENT_NOT_FOUND', 'Scope was not found in this organization.', 'document.parse', { action: 'resolution' });
+  if (scope.deletedAt) throw new ContentError('CONTENT_FORBIDDEN', 'Archived scopes cannot be mutated.', 'document.parse', { action: 'authorization' });
+  const organizationRole = context.principal.userOrganization.orgRole;
+  const role: Role | null = organizationRole === 'owner' || organizationRole === 'admin' ? organizationRole : await repo.role(input.scopeKey, context.principal.userOrganization.key);
+  if (!role || rank[role] < rank.moderator) throw new ContentError('CONTENT_FORBIDDEN', 'The principal lacks the required scope role.', 'document.parse', { action: 'authorization' });
+  let folderKey = input.folderKey;
+  const visited = new Set<string>();
+  while (folderKey) {
+    if (visited.has(folderKey)) throw new ContentError('FOLDER_CYCLE_DETECTED', 'The folder hierarchy contains a cycle.', 'document.parse', { action: 'resolution', resourceKey: folderKey });
+    visited.add(folderKey);
+    const folder = await repo.getFolder(folderKey);
+    if (!folder) throw new ContentError('CONTENT_NOT_FOUND', 'Folder was not found.', 'document.parse', { action: 'read', resourceKey: folderKey });
+    if (folder.scopeKey !== input.scopeKey) throw new ContentError('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', 'document.parse', { action: 'authorization', resourceKey: folderKey });
+    if (folder.deletedAt) throw new ContentError('FOLDER_ARCHIVED', 'Folder is archived.', 'document.parse', { action: 'read', resourceKey: folderKey });
+    if (folder._internalDeletion) throw new ContentError('CONTENT_NOT_FOUND', 'Folder was not found.', 'document.parse', { action: 'read', resourceKey: folderKey });
+    folderKey = folder.parentFolderKey;
+  }
+}
+
 interface RuntimeDefaults {
   repository: ContentRepository;
   storage: DocumentObjectStorage;
@@ -1696,20 +1720,25 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         }
         const documents = [];
         let summariesComplete = true;
-        for (const { document: current, matchedContent, score } of selectedDocuments) {
-          let summary: string;
-          try {
-            const generatedSummary = await action('reason', {
-              systemPrompt: 'Summarize only how the supplied document relates to the search query. Use only the supplied text and return only the concise summary without commentary.',
-              messages: [{ role: 'user', content: [{ type: 'text', text: `Search query: ${input.query}\n\nTitle: ${current.name}\n\n${(matchedContent ?? current.content).slice(0, 16_000)}` }] }],
-              options: { temperature: 0.1, maxTokens: 300 },
-            }, current.key, current.scopeKey);
-            summary = z.string().trim().min(1).parse(generatedSummary.text);
-          } catch {
-            summariesComplete = false;
-            summary = `This document contains semantically relevant information for "${input.query}".`;
-          }
-          documents.push({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, score: Math.max(0, Math.min(1, score)), summary });
+        for (let start = 0; start < selectedDocuments.length; start += 3) {
+          const batch = await Promise.all(selectedDocuments.slice(start, start + 3).map(async ({ document: current, matchedContent, score }) => {
+            let summary: string;
+            let complete = true;
+            try {
+              const generatedSummary = await action('reason', {
+                systemPrompt: 'Summarize only how the supplied document relates to the search query. Use only the supplied text and return only the concise summary without commentary.',
+                messages: [{ role: 'user', content: [{ type: 'text', text: `Search query: ${input.query}\n\nTitle: ${current.name}\n\n${(matchedContent ?? current.content).slice(0, 16_000)}` }] }],
+                options: { temperature: 0.1, maxTokens: 300 },
+              }, current.key, current.scopeKey);
+              summary = z.string().trim().min(1).parse(generatedSummary.text);
+            } catch {
+              complete = false;
+              summary = `This document contains semantically relevant information for "${input.query}".`;
+            }
+            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, score: Math.max(0, Math.min(1, score)), summary } };
+          }));
+          summariesComplete &&= batch.every(({ complete }) => complete);
+          documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
         const revisions = [

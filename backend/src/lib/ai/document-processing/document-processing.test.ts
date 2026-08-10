@@ -15,6 +15,7 @@ import {
   documentSemanticHash,
   documentValidate,
   storageUpload,
+  textractBlocksToExtractionResult,
   type DocumentPipelineActions,
   type DocumentParseResult,
   type DocumentStorage,
@@ -116,6 +117,15 @@ describe('document-extract action', () => {
     expect(md.blocks.map(({ type }) => type)).toEqual(['heading', 'bulletList']);
   });
 
+  test('preserves literal TXT whitespace in canonical HTML', async () => {
+    const source = 'Name\tScore\nAda \t  10\n\nIndented:\n    value';
+    const extracted = await documentExtract({ ...normalized('txt', bytes(source)), storageKey: 'txt' }, { logger: quiet });
+    const { html } = await documentGenerateHtml(extracted, { logger: quiet });
+    const { content } = await documentGenerateContent({ html }, { logger: quiet });
+    expect(html).toBe('<pre><code>Name\tScore\nAda \t  10\n\nIndented:\n    value</code></pre>');
+    expect(content).toBe(source);
+  });
+
   test('preserves common Markdown inline semantics and joins paragraph lines', async () => {
     const source = '# **Core**\nFirst line with [Archive](https://vorinthex.com/archive)\ncontinues with `**literal**` and *emphasis*.';
     const extracted = await documentExtract({ ...normalized('md', bytes(source)), storageKey: 'md' }, { logger: quiet });
@@ -127,6 +137,17 @@ describe('document-extract action', () => {
     const blocks = htmlToExtractedBlocks('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
     const { html } = await documentGenerateHtml({ extractedText: 'Bold and italic with link.', blocks }, { logger: quiet });
     expect(html).toBe('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
+  });
+
+  test('uses extracted DOCX HTML without flattening table layout', async () => {
+    const extracted = {
+      extractedText: 'Quarter\tRevenue',
+      extractedHtml: '<table><tr><th colspan="2">Quarter</th></tr><tr><td>Q1</td><td>Revenue</td></tr></table>',
+      blocks: [],
+      metadata: { format: 'docx' },
+    };
+    const { html } = await documentGenerateHtml(extracted, { logger: quiet });
+    expect(html).toBe('<table><tr><th colspan="2">Quarter</th></tr><tr><td>Q1</td><td>Revenue</td></tr></table>');
   });
 
   test('uses format adapters for DOC and DOCX', async () => {
@@ -153,6 +174,32 @@ describe('document-extract action', () => {
       const result = await documentExtract({ ...normalized('pdf'), storageKey: 'pdf' }, { logger: quiet, ocr: { extract: async () => ({ extractedText: text, blocks: [{ type: 'paragraph', text }], metadata: { provider: 'aws-textract' } }) } });
       expect(result.extractedText).toBe(text);
     }
+  });
+
+  test('reconstructs PDF pages, headings, and merged table cells from Textract layout blocks', () => {
+    const result = textractBlocksToExtractionResult([
+      { Id: 'title', BlockType: 'LAYOUT_TITLE', Page: 1, Text: 'Annual report', Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
+      { Id: 'layout-table', BlockType: 'LAYOUT_TABLE', Page: 1, Relationships: [{ Type: 'CHILD', Ids: ['table'] }], Geometry: { BoundingBox: { Top: 0.2, Left: 0.1 } } },
+      { Id: 'table', BlockType: 'TABLE', Page: 1, Relationships: [{ Type: 'CHILD', Ids: ['header', 'value'] }] },
+      { Id: 'header', BlockType: 'CELL', Page: 1, RowIndex: 1, ColumnIndex: 1, ColumnSpan: 2, EntityTypes: ['COLUMN_HEADER'], Relationships: [{ Type: 'CHILD', Ids: ['header-word'] }] },
+      { Id: 'header-word', BlockType: 'WORD', Page: 1, Text: 'Revenue' },
+      { Id: 'value', BlockType: 'CELL', Page: 1, RowIndex: 2, ColumnIndex: 1, Relationships: [{ Type: 'CHILD', Ids: ['value-word'] }] },
+      { Id: 'value-word', BlockType: 'WORD', Page: 1, Text: '$10M' },
+      { Id: 'second-page', BlockType: 'LAYOUT_SECTION_HEADER', Page: 2, Text: 'Appendix', Geometry: { BoundingBox: { Top: 0.05, Left: 0.1 } } },
+    ]);
+    expect(result.extractedHtml).toBe('<section class="doc-page" data-page="1"><h1>Annual report</h1><table><tbody><tr><th colspan="2">Revenue</th></tr><tr><td>$10M</td></tr></tbody></table></section><section class="doc-page" data-page="2"><h2>Appendix</h2></section>');
+    expect(result.extractedText).toBe('Annual report\n\nRevenue\n$10M\n\nAppendix');
+    expect(result.metadata).toMatchObject({ provider: 'aws-textract', layout: 'semantic', pages: 2 });
+  });
+
+  test('deduplicates Textract blocks and safely stops cyclic relationships', () => {
+    const title = { Id: 'title', BlockType: 'LAYOUT_TITLE' as const, Page: 1, Text: 'Unique title' };
+    const result = textractBlocksToExtractionResult([
+      title,
+      { ...title },
+      { Id: 'cycle', BlockType: 'LAYOUT_TEXT', Page: 1, Relationships: [{ Type: 'CHILD', Ids: ['cycle'] }] },
+    ]);
+    expect(result.extractedHtml).toBe('<section class="doc-page" data-page="1"><h1>Unique title</h1></section>');
   });
 
   test('returns a structured extraction failure', async () => {
@@ -207,6 +254,12 @@ describe('document generation actions', () => {
     expect(result.content).toBe('Vorinthex Core\n\nCore has five apps.\n\nArchive\nGallery\n\nApp\tStatus\nCore\tReady\n\nCore map');
   });
 
+  test('preserves only canonical page and table layout attributes', () => {
+    const result = canonicalDocumentRepresentations('<section class="doc-page" data-page="12" style="position:fixed"><table><tr><td colspan="3" rowspan="2" style="color:red">Cell</td></tr></table></section>');
+    expect(result.html).toBe('<section class="doc-page" data-page="12"><table><tr><td colspan="3" rowspan="2">Cell</td></tr></table></section>');
+    expect(canonicalDocumentRepresentations(result.html)).toEqual(result);
+  });
+
   test('removes unsafe links and rejects malformed allowed HTML', async () => {
     const { html } = await documentGenerateHtml({ html: '<p><a href="javascript:alert(1)" style="color:red">Unsafe</a> <u>underline</u> <s>old</s></p>' }, { logger: quiet });
     expect(html).toBe('<p><a>Unsafe</a> <u>underline</u> <s>old</s></p>');
@@ -240,7 +293,8 @@ describe('document-embed action', () => {
     expect(result.contentChunks.every((chunk) => chunk.trim().split(/\s+/).length <= 1_000)).toBe(true);
     expect(result.chunkEmbeddings).toEqual([[0, 1], [1, 2], [2, 3]]);
     expect(result.embedding).toEqual([0, 1]);
-    expect(received.every((text, index) => text === `Large report\n\n${result.contentChunks[index]!.trim()}`)).toBe(true);
+    expect(received[0]).toBe(`Large report\n\n${result.contentChunks[0]!.trim()}`);
+    expect(received.slice(1).every((text, index) => text.includes(`Previous context:\n`) && text.endsWith(result.contentChunks[index + 1]!.trim()))).toBe(true);
   });
 });
 

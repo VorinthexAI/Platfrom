@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 export const DOCUMENT_CHUNK_MAX_WORDS = 1_000;
 export const DOCUMENT_CHUNK_MAX_CHARACTERS = 16_000;
 export const DOCUMENT_MAX_CHUNKS = 640;
+export const DOCUMENT_CHUNK_OVERLAP_WORDS = 100;
+export const DOCUMENT_CHUNK_OVERLAP_CHARACTERS = 1_600;
 
 function countWords(value: string): number {
   return value.match(/\S+/g)?.length ?? 0;
@@ -31,8 +33,8 @@ export const documentContentChunksSchema = z.array(chunkTextSchema.refine(
   `Document chunks cannot exceed ${DOCUMENT_CHUNK_MAX_WORDS} words.`,
 )).min(1).max(DOCUMENT_MAX_CHUNKS);
 
-function preferredBoundary(value: string, maximum: number): number {
-  const candidate = value.slice(0, maximum);
+function preferredBoundary(value: string, start: number, maximum: number): number {
+  const candidate = value.slice(start, start + maximum);
   const minimum = Math.min(256, Math.floor(maximum / 2));
   for (const pattern of [/\n\s*\n/g, /[.!?]["')\]]?\s+/g, /\s+/g]) {
     let boundary = 0;
@@ -53,18 +55,19 @@ export function chunkDocumentText(text: string): DocumentTextChunk[] {
   let offset = 0;
 
   while (offset < source.length) {
-    const remaining = source.slice(offset);
-    let wordBoundary = remaining.length;
+    const remainingLength = source.length - offset;
+    let wordBoundary = remainingLength;
     let scannedWordCount = 0;
-    for (const word of remaining.slice(0, DOCUMENT_CHUNK_MAX_CHARACTERS + 1).matchAll(/\S+/g)) {
+    const scan = source.slice(offset, offset + DOCUMENT_CHUNK_MAX_CHARACTERS + 1);
+    for (const word of scan.matchAll(/\S+/g)) {
       if (scannedWordCount++ === DOCUMENT_CHUNK_MAX_WORDS) {
         wordBoundary = word.index;
         break;
       }
     }
-    const hardMaximum = Math.min(remaining.length, DOCUMENT_CHUNK_MAX_CHARACTERS, wordBoundary);
-    const length = hardMaximum === remaining.length ? hardMaximum : preferredBoundary(remaining, hardMaximum);
-    const chunk = remaining.slice(0, Math.max(length, 1));
+    const hardMaximum = Math.min(remainingLength, DOCUMENT_CHUNK_MAX_CHARACTERS, wordBoundary);
+    const length = hardMaximum === remainingLength ? hardMaximum : preferredBoundary(source, offset, hardMaximum);
+    const chunk = source.slice(offset, offset + Math.max(length, 1));
     const wordCount = countWords(chunk);
     if (!wordCount) throw new Error('Document chunking could not make progress through whitespace.');
     chunks.push({ index: chunks.length, text: chunk, wordCount });
@@ -78,6 +81,26 @@ export function chunkDocumentText(text: string): DocumentTextChunk[] {
 export function chunkDocumentContent(text: string): string[] {
   const chunks = documentTextChunksSchema.parse(chunkDocumentText(text)).map((chunk) => chunk.text);
   return documentContentChunksSchema.parse(chunks);
+}
+
+function trailingSemanticContext(text: string): string {
+  const bounded = text.slice(-DOCUMENT_CHUNK_OVERLAP_CHARACTERS);
+  const words = [...bounded.matchAll(/\S+/g)];
+  const wordStart = words.at(-DOCUMENT_CHUNK_OVERLAP_WORDS)?.index ?? 0;
+  const candidate = bounded.slice(wordStart);
+  const paragraph = candidate.lastIndexOf('\n\n');
+  const sentence = [...candidate.matchAll(/[.!?]["')\]]?\s+/g)].at(-1);
+  const boundary = Math.max(paragraph >= 0 ? paragraph + 2 : 0, sentence ? sentence.index + sentence[0].length : 0);
+  return candidate.slice(boundary).trim() || candidate.trim();
+}
+
+/** Builds bounded, deterministic retrieval passages while keeping stored chunks exact and non-overlapping. */
+export function documentEmbeddingTexts(name: string, chunks: string[]): string[] {
+  return chunks.map((chunk, index) => [
+    name.trim(),
+    index > 0 ? `Previous context:\n${trailingSemanticContext(chunks[index - 1]!)}` : '',
+    chunk.trim(),
+  ].filter(Boolean).join('\n\n'));
 }
 
 export function documentSemanticHash(content: string): string {

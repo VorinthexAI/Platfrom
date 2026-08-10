@@ -23,7 +23,7 @@ export interface RunContentAgentToolOptions {
 }
 
 /** Authenticated human boundary for invoking a registered Content tool. */
-export async function runContentAgentTool(rawInput: z.input<typeof runContentAgentToolInputSchema>, options: RunContentAgentToolOptions) {
+export async function authorizeContentAgentTool(rawInput: z.input<typeof runContentAgentToolInputSchema>, options: Omit<RunContentAgentToolOptions, 'execute'>) {
   const input = runContentAgentToolInputSchema.parse(rawInput);
   const authenticatedUserKey = z.string().trim().min(1).parse(options.authenticatedUserKey);
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
@@ -40,5 +40,11 @@ export async function runContentAgentTool(rawInput: z.input<typeof runContentAge
   }
 
   const context: DomainToolContext = { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal };
+  return { input, context };
+}
+
+/** Authenticated human boundary for invoking a registered Content tool. */
+export async function runContentAgentTool(rawInput: z.input<typeof runContentAgentToolInputSchema>, options: RunContentAgentToolOptions) {
+  const { input, context } = await authorizeContentAgentTool(rawInput, options);
   return (options.execute ?? runContentTool)(input.tool, input.input, context);
 }

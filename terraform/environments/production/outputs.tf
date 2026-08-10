@@ -47,12 +47,22 @@ output "arango_url" {
   value = "http://${module.graph_db_host.private_ip}:8529"
 }
 
+output "document_processing_cluster" {
+  value = aws_ecs_cluster.document_processing.name
+}
+
+output "document_processing_task_definition" {
+  value = aws_ecs_task_definition.document_worker.arn
+}
+
+output "job_redis_url" {
+  value = "redis://${aws_instance.early_app.private_ip}:6379"
+}
+
 
 output "ssm_parameter_prefix" {
   value = local.normalized_ssm_prefix
 }
-
-
 
 
 

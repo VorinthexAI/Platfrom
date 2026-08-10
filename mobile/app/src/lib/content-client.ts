@@ -1,4 +1,5 @@
 import { apiClient } from "./api-client";
+import * as Crypto from "expo-crypto";
 import { useAuthStore } from "@/state/auth";
 
 export type ContentContext = {
@@ -69,6 +70,19 @@ export function isContentContextConfigured(context: ContentContext) {
 export function createContentMutationKey() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
+
+function documentMimeType(name: string, reported: string) {
+  if (reported && reported !== "application/octet-stream") return reported;
+  const extension = name.toLowerCase().split(".").pop();
+  return extension === "txt" ? "text/plain"
+    : extension === "md" ? "text/markdown"
+      : extension === "pdf" ? "application/pdf"
+        : extension === "doc" ? "application/msword"
+          : extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            : reported || "application/octet-stream";
+}
+
+const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const contentContext = getContentContext();
@@ -179,10 +193,11 @@ export async function listContentLocation(folderKey?: string) {
 
 export async function readContentDocument(documentKey: string) {
   const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument & { content?: string } } }[];
+    results: { success: boolean; data?: { document: ContentDocument & { content?: string } }; error?: { message: string } }[];
   }>("document.find", { documentKeys: [documentKey], include: ["content"] });
-  const document = data.results[0]?.data?.document;
-  if (!document || document.content === undefined) throw new Error("The note could not be opened.");
+  const result = data.results[0];
+  const document = result?.data?.document;
+  if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The note could not be opened.");
   return { ...document, content: document.content };
 }
 
@@ -237,20 +252,37 @@ export async function createContentFolder(name: string, parentFolderKey?: string
   return result.data.folder;
 }
 
-export function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string) {
+export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string) {
   const contentContext = getContentContext();
-  return callContentTool<{ document: ContentDocument }>("document.parse", {
+  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
+  const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, file.base64);
+  const idempotencyKey = `upload-${digest}-${folderKey ?? "root"}`;
+  let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     file: {
       filename: file.name,
-      mimeType: file.type || "application/octet-stream",
+      mimeType: documentMimeType(file.name, file.type),
       sizeBytes: file.size,
       encoding: "base64",
       content: file.base64,
     },
-    idempotencyKey: createContentMutationKey(),
+    idempotencyKey,
   });
+  const deadline = Date.now() + 30 * 60_000;
+  let firstPoll = true;
+  while (!("document" in data)) {
+    if (Date.now() >= deadline) throw new Error("The upload is still processing. Retry the same file to reconnect.");
+    if (!firstPoll) await wait(2_000);
+    firstPoll = false;
+    const response = await apiClient.post<ToolResponse<{ document: ContentDocument } | { job: { key: string; state: string } }>>(`/api/v1/content/document-jobs/${data.job.key}`, {
+      organizationKey: contentContext.organizationKey,
+      agentKey: contentContext.agentKey,
+    }, { timeout: 30_000 });
+    if (!response.data.success) throw new Error(response.data.error.message);
+    data = response.data.data;
+  }
+  return data;
 }
 
 export function searchContent(query: string) {

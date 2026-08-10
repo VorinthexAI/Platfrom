@@ -28,10 +28,6 @@ on:
         description: 'Optional render task memory override'
         required: false
         type: string
-      redis_node_type:
-        description: 'Optional Redis node type override'
-        required: false
-        type: string
       ssh_ingress_cidr_blocks:
         description: 'Optional SSH ingress CIDRs as a JSON list, e.g. ["1.2.3.4/32"]. Empty = no SSH (SSM only).'
         required: false
@@ -92,7 +88,6 @@ jobs:
           IN_GRAPH_DB_VOLUME_SIZE: ${{ inputs.graph_db_volume_size }}
           IN_TASK_CPU: ${{ inputs.task_cpu }}
           IN_TASK_MEMORY: ${{ inputs.task_memory }}
-          IN_REDIS_NODE_TYPE: ${{ inputs.redis_node_type }}
           IN_SSH_INGRESS_CIDR_BLOCKS: ${{ inputs.ssh_ingress_cidr_blocks }}
           IN_APP_AMI_ID: ${{ inputs.app_ami_id }}
           IN_GRAPH_DB_AMI_ID: ${{ inputs.graph_db_ami_id }}
@@ -119,7 +114,6 @@ jobs:
             echo "TF_VAR_graph_db_volume_size=$(pick "$IN_GRAPH_DB_VOLUME_SIZE" PROD_GRAPH_DB_VOLUME_SIZE 30)"
             echo "TF_VAR_task_cpu=$(pick "$IN_TASK_CPU" PROD_TASK_CPU 1024)"
             echo "TF_VAR_task_memory=$(pick "$IN_TASK_MEMORY" PROD_TASK_MEMORY 2048)"
-            echo "TF_VAR_redis_node_type=$(pick "$IN_REDIS_NODE_TYPE" PROD_REDIS_NODE_TYPE cache.t4g.micro)"
             echo "TF_VAR_s3_bucket_name=$(v PROD_S3_BUCKET_NAME)"
             echo "TF_VAR_ssm_parameter_prefix=$(pick '' SSM_PARAMETER_PREFIX vorinthex/prod)"
             echo "TF_VAR_ssh_ingress_cidr_blocks=$(pick "$IN_SSH_INGRESS_CIDR_BLOCKS" PROD_SSH_INGRESS_CIDR_BLOCKS '[]')"

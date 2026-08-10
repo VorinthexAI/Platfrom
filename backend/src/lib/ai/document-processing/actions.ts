@@ -18,7 +18,7 @@ import {
 } from './schemas';
 import { documentStorage, type DocumentStorage } from './storage';
 import { awsTextractDocumentOcr, type DocumentOcr } from './textract';
-import { chunkDocumentContent, documentSemanticHash } from './chunking';
+import { chunkDocumentContent, documentEmbeddingTexts, documentSemanticHash } from './chunking';
 import {
   documentInputToHtml,
   htmlToExtractedBlocks,
@@ -260,7 +260,12 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
       if (input.extension === 'txt') {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
         if (text.length > maxExtractedCharacters()) throw new Error('Extracted document content exceeds the configured limit.');
-        return extractionFromText(text);
+        const extracted = extractionFromText(text);
+        return extractionResultSchema.parse({
+          ...extracted,
+          extractedHtml: `<pre><code>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></pre>`,
+          metadata: { format: 'plain-text', layout: 'preformatted' },
+        });
       }
       if (input.extension === 'md') {
         const text = new TextDecoder('utf-8', { fatal: true }).decode(input.fileInput);
@@ -270,9 +275,13 @@ export async function documentExtract(input: NormalizedDocument & { storageKey: 
       if (input.extension === 'docx') {
         if (options.extractDocx) return extractionFromText(await options.extractDocx(input.fileInput));
         const result = await mammoth.convertToHtml({ buffer: Buffer.from(input.fileInput) });
-        const blocks = htmlToExtractedBlocks(result.value);
-        const text = blocks.map((block) => block.text ?? (block.children ?? []).map((child) => child.text ?? '').join('\n')).filter(Boolean).join('\n\n');
-        return extractionFromText(text, blocks, { warnings: result.messages.length });
+        const extractedHtml = sanitizeDocumentHtml(result.value);
+        const text = htmlToPlainText(extractedHtml);
+        return extractionResultSchema.parse({
+          ...extractionFromText(text, htmlToExtractedBlocks(extractedHtml)),
+          extractedHtml,
+          metadata: { format: 'docx', layout: 'semantic', warnings: result.messages.length },
+        });
       }
       if (options.extractDoc) return extractionFromText(await options.extractDoc(input.fileInput));
       const extractor = new WordExtractor();
@@ -308,7 +317,7 @@ export async function documentEmbed(input: { name: string; content: string }, op
   return observed('document-embed', {}, options.logger ?? defaultLogger, async () => {
     try {
       const contentChunks = chunkDocumentContent(input.content);
-      const texts = contentChunks.map((chunk) => [input.name.trim(), chunk.trim()].filter(Boolean).join('\n\n'));
+      const texts = documentEmbeddingTexts(input.name, contentChunks);
       const chunkEmbeddings = options.embedBatch
         ? await options.embedBatch({ texts })
         : options.embed

@@ -4,7 +4,7 @@ import { createNodeHelpers, toArangoDoc, withArangoKey } from './base';
 import { db } from './client';
 import { EMBEDDING_DIMENSIONS, currentEmbeddingBatchSchema, currentEmbeddingSchema, embedTexts } from '@/lib/embeddings';
 import { canonicalDocumentRepresentations } from '@/lib/ai/document-processing/representation';
-import { chunkDocumentContent, documentContentChunksSchema, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
+import { chunkDocumentContent, documentContentChunksSchema, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 
 export const DOCUMENT_VERSIONS_COLLECTION = 'documentVersions';
 
@@ -45,7 +45,7 @@ function storedSnapshot(snapshot: DocumentVersion) {
 
 export async function prepareDocumentVersionSemantics(content: string, label?: string) {
   const contentChunks = chunkDocumentContent(content);
-  const chunkEmbeddings = await embedTexts({ texts: contentChunks.map((chunk) => [label, chunk].filter(Boolean).join('\n\n')) });
+  const chunkEmbeddings = await embedTexts({ texts: documentEmbeddingTexts(label ?? '', contentChunks) });
   return { content, embedding: chunkEmbeddings[0]!, chunkEmbeddings, semanticChunkCount: contentChunks.length, semanticContentHash: documentSemanticHash(content) };
 }
 
