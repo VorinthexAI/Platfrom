@@ -76,7 +76,7 @@ const completeDocument = (overrides: Partial<Document> = {}): Document => ({
   key: documentKey, scopeKey, folderKey, name: 'Report', extension: 'txt', mimeType: 'text/plain',
   storageKey: `content/${scopeKey}/${folderKey}/${documentKey}/original.txt`, sizeBytes: 10,
   html: '<h1>Report</h1><p>Body</p>', content: 'Report\n\nBody', embedding,
-  deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
+  isFavorite: false, deletedAt: null, createdAt: timestamp, updatedAt: timestamp, ...overrides,
 });
 
 describe('document-validate action', () => {
@@ -347,7 +347,7 @@ describe('document.parse tool', () => {
     const context = harness();
     const result = await parseDocument(input, { ...context, logger: quiet }) as DocumentParseResult;
     expect(result.document.content).toBe('Body');
-    expect(result.document).not.toHaveProperty('isFavorite');
+    expect(result.document.isFavorite).toBe(false);
     expect(context.calls).toEqual(['document-validate', 'storage-upload', 'document-extract', 'document-generate-html', 'document-generate-content', 'document-embed', 'document-insert']);
     expect(context.calls.indexOf('document-embed')).toBeLessThan(context.calls.indexOf('document-insert'));
   });

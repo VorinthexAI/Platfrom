@@ -20,6 +20,7 @@ export const LEGACY_INDEX_FIELDS: Readonly<Record<string, readonly (readonly str
   documentVersions: [['scopeKey'], ['documentKey'], ['storageKey']],
   documentShares: [['scopeKey'], ['token']],
   projects: [['archiveFolderKey']],
+  contentSearchQueries: [['actorKey', 'scopeKey', 'normalizedQuery'], ['expiresAt']],
 };
 
 export const DOCUMENT_SHARE_COMMENT_LEGACY_PERMISSIONS = ['comment', 'edit'] as const;

@@ -756,7 +756,7 @@ export const collections: CollectionSpec[] = [
   { name: 'collectionInvites', skipEmbedding: true, indexes: [{ fields: ['tokenHash'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['expiresAt'] }, { fields: ['acceptedAt'], sparse: true }, { fields: ['revokedAt'], sparse: true }] },
   { name: 'tags', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'name'] }] },
   { name: 'tagAssignments', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tagKey', 'sourceType', 'sourceKey'], unique: true }, { fields: ['scopeKey', 'sourceType', 'sourceKey'] }, { fields: ['scopeKey', 'tagKey'] }] },
-  { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
+  { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
   { name: 'documentVersions', embedKeys: ['label', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
   { name: 'shares', skipEmbedding: true, archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
   { name: 'places', embedKeys: ['name', 'description', 'country', 'region', 'city'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'isWishlist', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'countryCode'] }] },
@@ -782,7 +782,7 @@ export const collections: CollectionSpec[] = [
   // collection is deliberately not registered as a generic application node.
   { name: 'contentIdempotency', skipEmbedding: true, indexes: [{ fields: ['organizationKey', 'actorKey', 'tool', 'idempotencyKey'], unique: true }, { fields: ['leaseExpiresAt'], sparse: true }, { fields: ['expiresAt'], sparse: true }] },
   // Private per-user search history and replay cache. Never expose through the generic node registry.
-  { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }, { fields: ['expiresAt'] }] },
+  { name: 'contentSearchQueries', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'], unique: true }, { fields: ['actorKey', 'scopeKey', 'searchedAt'] }] },
   { name: 'projects', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['contentFolderKey'], unique: true }, { fields: ['scopeKey', 'name'] }] },
   { name: 'milestones', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['projectKey', 'order'] }, { fields: ['projectKey', 'status'] }] },
   { name: 'tasks', embedKeys: ['title', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['projectKey', 'deletedAt'] }, { fields: ['milestoneKey', 'deletedAt'] }, { fields: ['milestoneKey', 'position'] }, { fields: ['projectKey', 'status'] }, { fields: ['priority'] }] },
@@ -1044,11 +1044,16 @@ async function main() {
         { '@collection': spec.name },
       );
     }
-    if (spec.name === 'images' || spec.name === 'collections') {
+    if (spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents') {
       await migrateContentFavorites(targetDb, spec.name);
     }
-    if (spec.name === 'folders' || spec.name === 'documents') {
+    if (spec.name === 'folders') {
       await targetDb.query(`FOR resource IN @@collection FILTER HAS(resource, "isFavorite") UPDATE resource WITH { isFavorite: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
+    }
+    if (spec.name === 'contentSearchQueries') {
+      await targetDb.query('FOR query IN contentSearchQueries FILTER IS_STRING(query.expiresAt) && query.expiresAt <= DATE_ISO8601(DATE_NOW()) && query.output != null UPDATE query WITH { output: null } IN contentSearchQueries');
+      await targetDb.query('FOR query IN contentSearchQueries FILTER !HAS(query, "folderKey") || !HAS(query, "includeDescendants") UPDATE query WITH { folderKey: null, includeDescendants: false } IN contentSearchQueries');
+      await targetDb.query('FOR query IN contentSearchQueries FILTER HAS(query, "expiresAt") UPDATE query WITH { expiresAt: null } IN contentSearchQueries OPTIONS { keepNull: false }');
     }
     if (spec.name === 'folders') await migrateExactSemanticRecords(targetDb, 'folders', ['name', 'description']);
     if (spec.name === 'images') await migrateExactSemanticRecords(targetDb, 'images', ['filename', 'caption']);

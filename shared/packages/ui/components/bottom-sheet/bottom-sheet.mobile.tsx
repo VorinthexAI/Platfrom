@@ -83,6 +83,7 @@ export function BottomSheetScene({ children }: { children: ReactNode }) {
 export type BottomSheetProps = {
   children?: ReactNode;
   description?: string;
+  dismissible?: boolean;
   mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -93,6 +94,7 @@ export type BottomSheetProps = {
 export function BottomSheet({
   children,
   description,
+  dismissible = true,
   mutation = false,
   onOpenChange,
   open,
@@ -107,9 +109,11 @@ export function BottomSheet({
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const openRef = useRef(open);
   const onOpenChangeRef = useRef(onOpenChange);
+  const dismissibleRef = useRef(dismissible);
   const reducedMotionRef = useRef(reducedMotion);
   openRef.current = open;
   onOpenChangeRef.current = onOpenChange;
+  dismissibleRef.current = dismissible;
   reducedMotionRef.current = reducedMotion;
 
   const animate = (show: boolean) => {
@@ -174,7 +178,7 @@ export function BottomSheet({
       onPanResponderMove: (_, gesture) =>
         translateY.setValue(Math.max(0, gesture.dy)),
       onPanResponderRelease: (_, gesture) => {
-        if (gesture.dy >= 96 || gesture.vy >= 0.65) {
+        if (dismissibleRef.current && (gesture.dy >= 96 || gesture.vy >= 0.65)) {
           onOpenChangeRef.current(false);
         } else {
           animate(true);
@@ -190,7 +194,7 @@ export function BottomSheet({
     <Modal
       accessibilityViewIsModal
       animationType="none"
-      onRequestClose={() => onOpenChange(false)}
+      onRequestClose={() => { if (dismissible) onOpenChange(false); }}
       statusBarTranslucent
       transparent
       visible
@@ -200,6 +204,7 @@ export function BottomSheet({
           <Button
             accessibilityLabel="Close bottom sheet"
             contentMode="raw"
+            disabled={!dismissible}
             onPress={() => onOpenChange(false)}
             style={StyleSheet.absoluteFill}
             variant="ghost"
@@ -236,6 +241,7 @@ export function BottomSheet({
             <Button
               accessibilityLabel="Close bottom sheet"
               contentMode="raw"
+              disabled={!dismissible}
               onPress={() => onOpenChange(false)}
               size="sm"
               style={styles.closeButton}

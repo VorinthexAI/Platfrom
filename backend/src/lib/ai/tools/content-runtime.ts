@@ -69,9 +69,9 @@ export interface ContentRepository {
 }
 
 export interface ContentSearchQueryStore {
-  get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; cacheVersion: number; now: string }): Promise<{ output: unknown } | null>;
-  record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; cacheVersion: number; output: unknown; now: string; expiresAt: string }): Promise<void>;
-  list(input: { actorKey: string; scopeKey: string; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number }>>;
+  get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
+  record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
+  list(input: { actorKey: string; scopeKey: string; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; score: number; summary: string }> }>>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
@@ -135,6 +135,11 @@ function folderView(folder: Folder) {
 function documentView(document: Document) {
   const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
   return safe;
+}
+
+function downloadFileName(name: string, extension: string) {
+  const suffix = `.${extension}`;
+  return `${name.slice(0, 255 - suffix.length)}${suffix}`;
 }
 
 function shareView(share: DocumentShare) {
@@ -728,6 +733,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       scopeKey: source.scopeKey,
       ...(source.folderKey ? { folderKey: source.folderKey } : {}),
       name: finalName,
+      isFavorite: false,
       ...transformed,
       deletedAt: null,
       createdAt: timestamp,
@@ -1069,6 +1075,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         scopeKey: input.scopeKey,
         ...(input.folderKey ? { folderKey: input.folderKey } : {}),
         name: input.name,
+        isFavorite: false,
         ...transformed,
         deletedAt: null,
         createdAt: timestamp,
@@ -1202,6 +1209,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           try {
             const updated = await mutationRepository.updateDocument(current.key, {
               ...(transformed ?? {}),
+              ...(item.isFavorite !== undefined ? { isFavorite: item.isFavorite } : {}),
               updatedAt: nextUpdatedAt(current.updatedAt),
             }, { expectedUpdatedAt: item.expectedUpdatedAt });
             return { document: documentView(updated) };
@@ -1267,6 +1275,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
                scopeKey: item.targetScopeKey,
                ...(target ? { folderKey: target.key } : { folderKey: undefined }),
               name,
+              isFavorite: false,
               ...semantics,
                ...(storageKey ? { storageKey } : {}),
               deletedAt: null,
@@ -1416,7 +1425,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             return {
               documentKey: current.key,
               format: 'original',
-              fileName: `${current.name}.${current.extension!}`,
+              fileName: downloadFileName(current.name, current.extension!),
               mimeType: object.mimeType ?? current.mimeType!,
               encoding: 'base64' as const,
               content: Buffer.from(object.bytes).toString('base64'),
@@ -1428,7 +1437,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {
             documentKey: current.key,
             format: exported.extension,
-            fileName: `${current.name}.${exported.extension}`,
+            fileName: downloadFileName(current.name, exported.extension),
             mimeType: exported.mimeType,
             encoding: 'base64' as const,
             content: Buffer.from(exported.bytes).toString('base64'),
@@ -1673,49 +1682,65 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       }
     } else if (tool === 'scope.content.search-history') {
       await roleFor(input.scopeKey, 'viewer');
+      let historyFolderKeys: Set<string> | undefined;
+      if (input.folderKey) {
+        const current = await folder(input.folderKey, 'viewer', false);
+        if (current.scopeKey !== input.scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', input.folderKey);
+        historyFolderKeys = new Set([input.folderKey, ...((input.includeDescendants ?? true) ? descendants(await foldersIn(input.scopeKey), input.folderKey).map((item) => item.key) : [])]);
+      }
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      result = { history: await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, limit: input.limit }) };
+      const history = await store.list({ actorKey: member.user.key, scopeKey: input.scopeKey, folderKey: input.folderKey ?? null, includeDescendants: input.folderKey ? input.includeDescendants ?? true : false, limit: input.limit });
+      result = { history: await Promise.all(history.map(async (item) => ({
+        ...item,
+        documents: (await Promise.all(item.documents.map(async (stored) => {
+          const current = await repo.getDocument(stored.documentKey);
+          if (!current || current.scopeKey !== input.scopeKey || current.deletedAt || current._internalDeletion) return null;
+          if (historyFolderKeys && (!current.folderKey || !historyFolderKeys.has(current.folderKey))) return null;
+          if (!await activeFolderHierarchy(current.folderKey, current.scopeKey)) return null;
+          return stored;
+        }))).filter((item): item is NonNullable<typeof item> => item !== null),
+      }))) };
     } else if (tool === 'scope.content.search') {
       await roleFor(input.scopeKey, 'viewer');
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
       if (!allowed.includes(input.scopeKey)) fail('CONTENT_FORBIDDEN', 'The principal lacks access to the requested scope.', tool, 'authorization', input.scopeKey);
       const normalizedQuery = input.query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const cacheVersion = 1;
+      const cacheVersion = 2;
+      const folderKey = input.folderKey ?? null;
+      const includeDescendants = folderKey !== null && (input.includeDescendants ?? true);
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
-      const scopeContent = await Promise.all([repo.listFolders(input.scopeKey, true), repo.listDocuments(input.scopeKey, true)]);
-      const scopeRevision = createHash('sha256').update(scopeContent.flat().map((item) => `${item.key}:${item.updatedAt}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`).sort().join('\n')).digest('hex');
-      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, cacheVersion, now: now() });
-      const cachedValue = cached?.output as { result?: unknown; scopeRevision?: string; minimumScore?: number; revisions?: Array<{ type: 'folder' | 'document'; key: string; updatedAt: string }> } | undefined;
-      let reusable = Boolean(cachedValue?.result && cachedValue.revisions && cachedValue.scopeRevision === scopeRevision && cachedValue.minimumScore === input.minimumScore);
-      if (reusable) {
-        for (const revision of cachedValue!.revisions!) {
-          const current = revision.type === 'folder' ? await repo.getFolder(revision.key) : await repo.getDocument(revision.key);
-          if (!current || current.scopeKey !== input.scopeKey || current.updatedAt !== revision.updatedAt || current.deletedAt || current._internalDeletion) { reusable = false; break; }
-        }
+      const [allFolders, allDocuments] = await Promise.all([repo.listFolders(input.scopeKey, true), repo.listDocuments(input.scopeKey, true)]);
+      let folderKeys: string[] | undefined;
+      let revisionFolders = allFolders;
+      if (folderKey) {
+        const current = await folder(folderKey, 'viewer', false);
+        if (current.scopeKey !== input.scopeKey) fail('CONTENT_FORBIDDEN', 'Folder does not belong to the requested scope.', tool, 'authorization', folderKey);
+        folderKeys = [folderKey, ...(includeDescendants ? descendants(allFolders, folderKey).map((item) => item.key) : [])];
+        const relevant = new Set(folderKeys);
+        let ancestorKey = current.parentFolderKey;
+        while (ancestorKey && !relevant.has(ancestorKey)) { relevant.add(ancestorKey); ancestorKey = allFolders.find((item) => item.key === ancestorKey)?.parentFolderKey; }
+        revisionFolders = allFolders.filter((item) => relevant.has(item.key));
       }
+      const revisionDocuments = folderKeys ? allDocuments.filter((item) => item.folderKey && folderKeys!.includes(item.folderKey)) : allDocuments;
+      const folderRevision = revisionFolders.map((item) => `${item.key}:${item.parentFolderKey ?? ''}:${item.updatedAt}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
+      const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
+      const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
+      const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
+      const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; replayable?: boolean } | undefined;
+      const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore);
       if (reusable) {
         const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, cacheVersion, output: cachedValue, now: now(), expiresAt: new Date(d.clock().getTime() + 60 * 60 * 1000).toISOString() });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: cachedValue, now: now() });
         result = parsed;
       } else {
         let queryEmbedding: number[];
         try { queryEmbedding = await embed(input.query, undefined, input.scopeKey, 'query'); }
         catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
-        const [folderMatches, documentMatches] = await Promise.all([
-          repo.semanticSearchFolders!({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], minScore: input.minimumScore, limit: 40 }),
-          repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], minScore: input.minimumScore, limit: 100 }),
-        ]);
-        const selectedFolders = [];
-        for (const match of folderMatches) {
-          if (match.score >= input.minimumScore && await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) selectedFolders.push(match);
-          if (selectedFolders.length === 4) break;
-        }
-        const folders = selectedFolders.map(({ folder: current, score }) => ({
-          key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), score: Math.max(0, Math.min(1, score)),
-        }));
+        const documentMatches = await repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 100 });
+        const folders: never[] = [];
         const selectedDocuments = [];
         for (const match of documentMatches) {
-          if (match.score >= input.minimumScore && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
+          if (match.score >= input.minimumScore && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
           if (selectedDocuments.length === 10) break;
         }
         const documents = [];
@@ -1741,11 +1766,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
-        const revisions = [
-          ...selectedFolders.map(({ folder: current }) => ({ type: 'folder' as const, key: current.key, updatedAt: current.updatedAt })),
-          ...selectedDocuments.map(({ document: current }) => ({ type: 'document' as const, key: current.key, updatedAt: current.updatedAt })),
-        ];
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, cacheVersion, output: { result: freshResult, revisions, scopeRevision, minimumScore: input.minimumScore }, now: now(), expiresAt: summariesComplete ? new Date(d.clock().getTime() + 60 * 60 * 1000).toISOString() : now() });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, replayable: summariesComplete }, now: now() });
         result = freshResult;
       }
     } else {

@@ -33,6 +33,7 @@ function providerInputSchema(name: ContentToolName) {
     properties.updates.items.oneOf = [
       { required: ['html'], not: { required: ['content'] } },
       { required: ['content'], not: { required: ['html'] } },
+      { required: ['isFavorite'], not: { anyOf: [{ required: ['html'] }, { required: ['content'] }] } },
     ];
   }
   if (name === 'document.create') {

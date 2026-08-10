@@ -93,7 +93,8 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.unshare'].parse({ shareKeys: [key], documentKeys: [newId()] })).toThrow();
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, html: '<p>x</p>', content: 'x' }] })).toThrow();
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, createVersion: true }] })).toThrow();
-    expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true }] })).toThrow();
+    expect(contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true }] }).updates[0]).toMatchObject({ isFavorite: true });
+    expect(contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, content: 'x', isFavorite: true }] }).updates[0]).toMatchObject({ content: 'x', isFavorite: true });
     expect(() => contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, isFavorite: true }] })).toThrow();
     expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: { html: '<p>x</p>', content: 'x' } })).toThrow();
     expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: {} })).toThrow();
@@ -135,7 +136,7 @@ describe('Content input contracts', () => {
     const definitions = Object.fromEntries(CONTENT_TOOL_DEFINITIONS.map((definition) => [definition.name, definition.inputSchema])) as Record<string, any>;
     expect(definitions['document.parse'].properties.file).toMatchObject({ type: 'object' });
     expect(definitions['document.unshare'].oneOf).toHaveLength(2);
-    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(2);
+    expect(definitions['document.update'].properties.updates.items.oneOf).toHaveLength(3);
     expect(definitions['document.read'].description).toContain('endOffset');
   });
 });

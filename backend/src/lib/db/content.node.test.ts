@@ -31,7 +31,7 @@ describe('Content node contracts', () => {
       expect(() => schema.shape.deletedAt.parse('yesterday')).toThrow();
     }
     expect(folderSchema.shape).not.toHaveProperty('isFavorite');
-    expect(documentSchema.shape).not.toHaveProperty('isFavorite');
+    expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);
   });
 
   test('versions contain complete immutable HTML snapshots', () => {

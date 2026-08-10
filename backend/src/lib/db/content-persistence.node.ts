@@ -41,7 +41,7 @@ function toGlobalDocumentShare(share: DocumentShare): Share {
 }
 
 type MutableFolderField = 'parentFolderKey' | 'name' | 'description' | 'deletedAt' | 'updatedAt' | 'embedding' | '_internalDeletion';
-type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
+type MutableDocumentField = 'folderKey' | 'name' | 'html' | 'content' | 'embedding' | 'contentChunks' | 'chunkEmbeddings' | 'semanticChunkCount' | 'semanticContentHash' | '_semanticChunkingSkipped' | 'speechStorageKeys' | 'isFavorite' | 'deletedAt' | 'updatedAt' | '_internalDeletion';
 export type ScopedFolderPatch = Partial<Pick<Folder, MutableFolderField>>;
 export type ScopedDocumentPatch = Partial<Pick<Document, MutableDocumentField>>;
 

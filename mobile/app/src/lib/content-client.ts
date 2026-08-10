@@ -10,6 +10,7 @@ export type ContentContext = {
 
 export type ContentFolder = {
   key: string;
+  parentFolderKey?: string;
   name: string;
   description?: string;
 };
@@ -17,6 +18,11 @@ export type ContentFolder = {
 export type ContentDocument = {
   key: string;
   name: string;
+  folderKey?: string;
+  extension?: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  isFavorite: boolean;
   updatedAt: string;
 };
 
@@ -28,22 +34,37 @@ export type ContentDocumentVersion = {
   createdAt: string;
 };
 
+export type ContentSearchDocument = {
+  documentKey: string;
+  name: string;
+  score: number;
+  summary: string;
+  scopeKey?: string;
+  folderKey?: string;
+};
+
 export type ContentSearchResponse = {
   query: string;
   cached: boolean;
   folders: (ContentFolder & { score: number })[];
-  documents: {
-    documentKey: string;
-    name: string;
-    score: number;
-    summary: string;
-  }[];
+  documents: ContentSearchDocument[];
 };
 
 export type ContentSearchHistoryItem = {
   query: string;
   normalizedQuery: string;
   searchedAt: string;
+  count: number;
+  documents: ContentSearchDocument[];
+};
+
+export type ContentDocumentDownload = {
+  documentKey: string;
+  format: "original" | "txt";
+  fileName: string;
+  mimeType: string;
+  encoding: "base64";
+  content: string;
 };
 
 type ToolResponse<T> =
@@ -239,6 +260,62 @@ export async function renameContentDocument(documentKey: string, name: string) {
   return result.data.document;
 }
 
+export async function setContentDocumentFavorite(documentKey: string, isFavorite: boolean) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
+  }>("document.update", {
+    updates: [{ documentKey, isFavorite }],
+    atomic: false,
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The favorite could not be updated.");
+  return result.data.document;
+}
+
+export async function moveContentDocument(documentKey: string, targetFolderKey?: string) {
+  const contentContext = getContentContext();
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
+  }>("document.move", {
+    moves: [{ documentKey, targetScopeKey: contentContext.scopeKey, ...(targetFolderKey ? { targetFolderKey } : {}) }],
+    atomic: false,
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be moved.");
+  return result.data.document;
+}
+
+export async function copyContentDocument(documentKey: string, targetFolderKey?: string) {
+  const contentContext = getContentContext();
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
+  }>("document.copy", {
+    copies: [{
+      documentKey,
+      targetScopeKey: contentContext.scopeKey,
+      ...(targetFolderKey ? { targetFolderKey } : {}),
+      includeVersions: false,
+      includeShares: false,
+    }],
+    atomic: false,
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be copied.");
+  return result.data.document;
+}
+
+export async function downloadContentDocument(documentKey: string, format: "original" | "txt" = "original") {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: ContentDocumentDownload; error?: { message: string } }[];
+  }>("document.download", { documentKeys: [documentKey], format });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The original file could not be downloaded.");
+  return result.data;
+}
+
 export async function createContentFolder(name: string, parentFolderKey?: string) {
   const contentContext = getContentContext();
   const data = await callContentTool<{
@@ -252,17 +329,47 @@ export async function createContentFolder(name: string, parentFolderKey?: string
   return result.data.folder;
 }
 
+export async function updateContentFolder(folderKey: string, name: string, description: string | null) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
+  }>("folder.update", {
+    updates: [{ folderKey, name, description }],
+    atomic: false,
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder could not be updated.");
+  return result.data.folder;
+}
+
+export async function moveContentFolder(folderKey: string, targetParentFolderKey?: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
+  }>("folder.move", {
+    moves: [{ folderKey, ...(targetParentFolderKey ? { targetParentFolderKey } : {}) }],
+    atomic: false,
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder could not be moved.");
+  return result.data.folder;
+}
+
 export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string) {
   const contentContext = getContentContext();
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
-  const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, file.base64);
-  const idempotencyKey = `upload-${digest}-${folderKey ?? "root"}`;
+  const mimeType = documentMimeType(file.name, file.type);
+  const [contentDigest, identityDigest] = await Promise.all([
+    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, file.base64),
+    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${file.name}\0${mimeType}`),
+  ]);
+  const idempotencyKey = `upload-${contentDigest}-${identityDigest}-${folderKey ?? "root"}`;
   let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     file: {
       filename: file.name,
-      mimeType: documentMimeType(file.name, file.type),
+      mimeType,
       sizeBytes: file.size,
       encoding: "base64",
       content: file.base64,
@@ -285,19 +392,21 @@ export async function uploadContentDocument(file: { name: string; type: string; 
   return data;
 }
 
-export function searchContent(query: string) {
+export function searchContent(query: string, folderKey?: string, includeDescendants = false) {
   const contentContext = getContentContext();
   return callContentTool<ContentSearchResponse>("scope.content.search", {
     scopeKey: contentContext.scopeKey,
     query,
     minimumScore: 0.55,
+    ...(folderKey ? { folderKey, includeDescendants } : {}),
   });
 }
 
-export async function listContentSearchHistory() {
+export async function listContentSearchHistory(folderKey?: string, includeDescendants = false) {
   const contentContext = getContentContext();
   const data = await callContentTool<{ history: ContentSearchHistoryItem[] }>("scope.content.search-history", {
     scopeKey: contentContext.scopeKey,
+    ...(folderKey ? { folderKey, includeDescendants } : {}),
     limit: 8,
   });
   return data.history;

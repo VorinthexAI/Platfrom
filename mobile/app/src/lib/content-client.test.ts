@@ -8,6 +8,8 @@ let authState = {
   contentExecution: { agentKey: "agent-authenticated" },
 };
 let queuedUpload = false;
+let responseForTool: ((tool: string) => unknown) | undefined;
+const digestInputs: string[] = [];
 
 mock.module("@/state/auth", () => ({
   useAuthStore: { getState: () => authState },
@@ -19,7 +21,7 @@ mock.module("./api-client", () => ({
 }));
 mock.module("expo-crypto", () => ({
   CryptoDigestAlgorithm: { SHA256: "SHA-256" },
-  digestStringAsync: async () => "upload-digest",
+  digestStringAsync: async (_algorithm: string, value: string) => { digestInputs.push(value); return "upload-digest"; },
 }));
 
 testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, config: Record<string, any>) => {
@@ -29,30 +31,46 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
     return { data: { success: true, data: { job: { key: "a".repeat(64), state: "waiting" } } } };
   }
   if (url.includes("/content/document-jobs/")) {
-    return { data: { success: true, data: { document: { key: "document", name: "Note", updatedAt: "2026-08-10T00:00:00.000Z" } } } };
+    return { data: { success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" } } } };
   }
+  const response = responseForTool?.(tool ?? "");
+  if (response) return response;
   if (tool === "document.create" || tool === "document.parse") {
-    return { data: { success: true, data: { document: { key: "document", name: "Note", updatedAt: "2026-08-10T00:00:00.000Z" } } } };
+    return { data: { success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" } } } };
   }
   if (tool === "folder.create") {
     return { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Work" } } }] } } };
   }
   if (tool === "document.update") {
-    return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Note", updatedAt: "2026-08-10T00:01:00.000Z" } } }] } } };
+    return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:01:00.000Z" } } }] } } };
   }
   throw new Error(`Unexpected tool: ${tool}`);
 };
 
 const {
+  autocompleteContent,
   createContentDocument,
   createContentFolder,
+  copyContentDocument,
+  downloadContentDocument,
+  enhanceContent,
+  listContentSearchHistory,
+  moveContentFolder,
+  moveContentDocument,
+  renameContentDocument,
   saveContentDocument,
+  searchContent,
+  setContentDocumentFavorite,
+  translateContentDocument,
+  updateContentFolder,
   uploadContentDocument,
 } = await import("./content-client");
 
 beforeEach(() => {
   calls.length = 0;
+  digestInputs.length = 0;
   queuedUpload = false;
+  responseForTool = undefined;
   authState = {
     organization: { key: "org-authenticated" },
     scope: { key: "scope-authenticated" },
@@ -95,7 +113,8 @@ test("uploads documents through the authenticated Archive context", async () => 
     },
   });
   expect(calls[0]?.config.timeout).toBe(5 * 60_000);
-  expect(calls[0]?.body.input.idempotencyKey).toBe("upload-upload-digest-folder");
+  expect(calls[0]?.body.input.idempotencyKey).toBe("upload-upload-digest-upload-digest-folder");
+  expect(digestInputs).toEqual(["YWJj", "notes.txt\0text/plain"]);
 });
 
 test("polls an offloaded upload using the same authenticated Archive context", async () => {
@@ -108,6 +127,88 @@ test("polls an offloaded upload using the same authenticated Archive context", a
   ]);
   expect(calls[0]?.body.input.file.mimeType).toBe("text/plain");
   expect(calls[1]?.body).toEqual({ organizationKey: "org-authenticated", agentKey: "agent-authenticated" });
+});
+
+test("sends exact document action payloads and returns their results", async () => {
+  responseForTool = (tool) => {
+    if (tool === "document.download") return { data: { success: true, data: { results: [{ success: true, data: { documentKey: "document", format: "original", fileName: "Note.pdf", mimeType: "application/pdf", encoding: "base64", content: "cGRm" } }] } } };
+    if (["document.rename", "document.move", "document.copy", "document.update"].includes(tool)) {
+      return { data: { success: true, data: { results: [{ success: true, data: { document: { key: tool, name: "Note", isFavorite: true, updatedAt: "2026-08-10T00:01:00.000Z" } } }] } } };
+    }
+  };
+
+  expect((await setContentDocumentFavorite("document", true)).isFavorite).toBe(true);
+  expect((await renameContentDocument("document", "Renamed")).key).toBe("document.rename");
+  expect((await moveContentDocument("document", "destination")).key).toBe("document.move");
+  expect((await copyContentDocument("document")).key).toBe("document.copy");
+  expect((await downloadContentDocument("document")).fileName).toBe("Note.pdf");
+
+  expect(calls.map(({ url }) => url)).toEqual([
+    "/api/v1/content/tools/document.update",
+    "/api/v1/content/tools/document.rename",
+    "/api/v1/content/tools/document.move",
+    "/api/v1/content/tools/document.copy",
+    "/api/v1/content/tools/document.download",
+  ]);
+  expect(calls[0]?.body.input).toEqual({ updates: [{ documentKey: "document", isFavorite: true }], atomic: false, idempotencyKey: expect.any(String) });
+  expect(calls[1]?.body.input).toEqual({ renames: [{ documentKey: "document", name: "Renamed" }], atomic: false, idempotencyKey: expect.any(String) });
+  expect(calls[2]?.body.input).toEqual({ moves: [{ documentKey: "document", targetScopeKey: "scope-authenticated", targetFolderKey: "destination" }], atomic: false, idempotencyKey: expect.any(String) });
+  expect(calls[3]?.body.input).toEqual({
+    copies: [{ documentKey: "document", targetScopeKey: "scope-authenticated", includeVersions: false, includeShares: false }],
+    atomic: false,
+    idempotencyKey: expect.any(String),
+  });
+  expect(calls[4]?.body.input).toEqual({ documentKeys: ["document"], format: "original" });
+});
+
+test("updates folder details and moves folders with exact payloads", async () => {
+  responseForTool = (tool) => ["folder.update", "folder.move"].includes(tool)
+    ? { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Plans", description: "Current plans" } } }] } } }
+    : undefined;
+
+  expect((await updateContentFolder("folder", "Plans", "Current plans")).description).toBe("Current plans");
+  expect((await moveContentFolder("folder", "parent")).key).toBe("folder");
+  expect(calls[0]?.body.input).toEqual({ updates: [{ folderKey: "folder", name: "Plans", description: "Current plans" }], atomic: false, idempotencyKey: expect.any(String) });
+  expect(calls[1]?.body.input).toEqual({ moves: [{ folderKey: "folder", targetParentFolderKey: "parent" }], atomic: false, idempotencyKey: expect.any(String) });
+});
+
+test("runs note autocomplete, enhancement, translation, and rename through document tools", async () => {
+  responseForTool = (tool) => {
+    if (tool === "autocomplete") return { data: { success: true, data: { completion: "next words" } } };
+    if (tool === "enhance") return { data: { success: true, data: { content: "Improved note" } } };
+    if (tool === "document.translate") return { data: { success: true, data: { results: [{ success: true, data: { text: "Nota", persistedDocumentKey: "document" } }] } } };
+    if (tool === "document.rename") return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Renamed note", isFavorite: false, updatedAt: "2026-08-10T00:02:00.000Z" } } }] } } };
+  };
+
+  expect(await autocompleteContent("Draft context", 8)).toEqual({ completion: "next words" });
+  expect(await enhanceContent("Rough note")).toEqual({ content: "Improved note" });
+  expect((await translateContentDocument("document", "Spanish")).persistedDocumentKey).toBe("document");
+  expect((await renameContentDocument("document", "Renamed note")).name).toBe("Renamed note");
+  expect(calls[0]?.body.input).toEqual({ context: "Draft context", wordCount: 8 });
+  expect(calls[1]?.body.input).toEqual({ content: "Rough note" });
+  expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
+  expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
+});
+
+test("scopes search and replayable history to a folder", async () => {
+  const documents = [{ documentKey: "document", name: "Note", score: 0.9, summary: "Relevant note", folderKey: "folder" }];
+  responseForTool = (tool) => tool === "scope.content.search"
+    ? { data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents } } }
+    : { data: { success: true, data: { history: [{ query: "roadmap", normalizedQuery: "roadmap", searchedAt: "2026-08-10T00:00:00.000Z", count: 2, documents }] } } };
+
+  expect((await searchContent("roadmap", "folder", true)).documents).toEqual(documents);
+  expect((await listContentSearchHistory("folder", true))[0]?.documents).toEqual(documents);
+  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", minimumScore: 0.55, folderKey: "folder", includeDescendants: true });
+  expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 8 });
+});
+
+test("surfaces tool and item errors for document actions", async () => {
+  responseForTool = (tool) => tool === "document.download"
+    ? { data: { success: false, error: { message: "Download denied" } } }
+    : { data: { success: true, data: { results: [{ success: false, error: { message: "Move denied" } }] } } };
+
+  await expect(moveContentDocument("document", "folder")).rejects.toThrow("Move denied");
+  await expect(downloadContentDocument("document")).rejects.toThrow("Download denied");
 });
 
 test("rejects Archive calls when authenticated context is incomplete", async () => {

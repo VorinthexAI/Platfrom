@@ -118,6 +118,7 @@ export async function parseDocument(rawInput: DocumentParseInput, dependencies: 
       sizeBytes: normalized.sizeBytes,
       html,
       content,
+      isFavorite: false,
       ...semantics,
       deletedAt: null,
       createdAt: timestamp,

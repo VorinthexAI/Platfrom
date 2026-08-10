@@ -64,6 +64,7 @@ export const contentDocumentSchema = z.object({
   extension: documentExtensionSchema.optional(),
   mimeType: textSchema.optional(),
   sizeBytes: z.number().int().positive().optional(),
+  isFavorite: z.boolean().default(false),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
@@ -140,11 +141,12 @@ const documentUpdateSchema = z.object({
   documentKey: keySchema,
   html: z.string().min(1).optional(),
   content: z.string().min(1).optional(),
+  isFavorite: z.boolean().optional(),
   createVersion: z.boolean().optional(),
   expectedUpdatedAt: dateTimeSchema.optional(),
 }).strict().superRefine((value, context) => {
   const representations = [value.html, value.content].filter((item) => item !== undefined).length;
-  if (representations === 0) context.addIssue({ code: z.ZodIssueCode.custom, message: 'one document representation is required' });
+  if (representations === 0 && value.isFavorite === undefined) context.addIssue({ code: z.ZodIssueCode.custom, message: 'a document representation or isFavorite is required' });
   if (representations > 1) context.addIssue({ code: z.ZodIssueCode.custom, message: 'html and content are mutually exclusive' });
   if (value.createVersion && representations === 0) context.addIssue({ code: z.ZodIssueCode.custom, path: ['createVersion'], message: 'createVersion requires a document representation' });
 });
@@ -202,7 +204,7 @@ export const contentSearchOutputSchema = z.object({ query: textSchema, results: 
 const workspaceFolderMatchSchema = z.object({ key: keySchema, scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: z.string().optional(), score: normalizedScoreSchema }).strict();
 const workspaceDocumentMatchSchema = z.object({ documentKey: keySchema, scopeKey: keySchema, folderKey: keySchema.optional(), name: nameSchema, score: normalizedScoreSchema, summary: z.string().trim().min(1) }).strict();
 export const scopeContentSearchOutputSchema = z.object({ query: textSchema, folders: z.array(workspaceFolderMatchSchema).max(4), documents: z.array(workspaceDocumentMatchSchema).max(10), cached: z.boolean() }).strict();
-export const contentSearchHistoryItemSchema = z.object({ query: textSchema, normalizedQuery: textSchema, searchedAt: dateTimeSchema, count: z.number().int().positive() }).strict();
+export const contentSearchHistoryItemSchema = z.object({ query: textSchema, normalizedQuery: textSchema, searchedAt: dateTimeSchema, count: z.number().int().positive(), folderKey: keySchema.optional(), includeDescendants: z.boolean().optional(), documents: z.array(workspaceDocumentMatchSchema).max(10) }).strict();
 
 const documentReadDataSchema = z.union([
   z.object({ documentKey: keySchema, title: nameSchema, content: z.string() }).strict(),
@@ -262,8 +264,8 @@ export const contentToolContracts = {
   'document.translate': { description: 'Translate documents.', input: z.object({ documentKeys: keysSchema, targetLanguage: textSchema, sourceLanguage: textSchema.optional(), preserveFormatting: z.boolean().optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview'), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
   'document.rewrite': { description: 'Rewrite documents from an instruction.', input: z.object({ rewrites: z.array(z.object({ documentKey: keySchema, instruction: textSchema.max(8_000), tone: textSchema.optional(), audience: textSchema.optional(), length: z.enum(['shorter', 'same', 'longer']).optional(), mode: z.enum(['preview', 'replace', 'copy']).default('preview') }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(generatedTextDataSchema) },
   'scope.document.search': { description: 'Search documents available from a scope.', input: z.object({ scopeKey: keySchema, ...searchInputShape }).strict(), output: contentSearchOutputSchema },
-  'scope.content.search': { description: 'Search authorized folders and documents in a scope with query-relative document summaries.', input: z.object({ scopeKey: keySchema, query: textSchema.max(8_000), minimumScore: z.number().min(0).max(1).default(0.55) }).strict(), output: scopeContentSearchOutputSchema },
-  'scope.content.search-history': { description: 'List the current user\'s search history in a scope.', input: z.object({ scopeKey: keySchema, limit: z.number().int().min(1).max(100).default(20) }).strict(), output: z.object({ history: z.array(contentSearchHistoryItemSchema) }).strict() },
+  'scope.content.search': { description: 'Search authorized documents in a scope or folder hierarchy with query-relative summaries.', input: z.object({ scopeKey: keySchema, query: textSchema.max(8_000), folderKey: keySchema.optional(), includeDescendants: z.boolean().optional(), minimumScore: z.number().min(0).max(1).default(0.55) }).strict().superRefine((value, context) => { if (!value.folderKey && value.includeDescendants !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['includeDescendants'], message: 'includeDescendants requires folderKey' }); }), output: scopeContentSearchOutputSchema },
+  'scope.content.search-history': { description: 'List the current user\'s search history in a scope.', input: z.object({ scopeKey: keySchema, folderKey: keySchema.optional(), includeDescendants: z.boolean().optional(), limit: z.number().int().min(1).max(100).default(20) }).strict().superRefine((value, context) => { if (!value.folderKey && value.includeDescendants !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['includeDescendants'], message: 'includeDescendants requires folderKey' }); }), output: z.object({ history: z.array(contentSearchHistoryItemSchema) }).strict() },
   'organization.document.search': { description: 'Search documents across an organization.', input: z.object({ organizationKey: keySchema, ...searchInputShape, filters: organizationContentSearchFiltersSchema.optional(), include: organizationSearchIncludeSchema.optional() }).strict(), output: contentSearchOutputSchema },
 } as const satisfies Record<string, { description: string; input: z.ZodTypeAny; output: z.ZodTypeAny }>;
 

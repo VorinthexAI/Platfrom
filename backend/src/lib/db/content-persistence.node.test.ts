@@ -52,6 +52,7 @@ describe('scoped Content persistence', () => {
       html: '<p>Body</p>',
       content: 'Body',
       embedding,
+      isFavorite: false,
       deletedAt: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -81,7 +82,7 @@ describe('scoped Content persistence', () => {
     expect(() => createContentPersistence(executor).updateDocument(scopeKey, folderKey, { html: '<p onclick="bad()">Detached</p>', content: 'Detached', embedding: Array(EMBEDDING_DIMENSIONS).fill(1) })).toThrow('Document representations must be canonical and agreeing.');
   });
 
-  test('persists favorite-only folder and document patches without representation fields', async () => {
+  test('persists favorite-only document patches without representation fields', async () => {
     const calls: Array<{ bindVars?: Record<string, unknown> }> = [];
     const executor: ContentQueryExecutor = {
       async query(_query, bindVars) {
@@ -90,12 +91,8 @@ describe('scoped Content persistence', () => {
       },
     };
     const persistence = createContentPersistence(executor);
-    await persistence.updateFolder(scopeKey, folderKey, { updatedAt: timestamp });
-    await persistence.updateDocument(scopeKey, folderKey, { updatedAt: timestamp });
-    expect(calls.map(({ bindVars }) => bindVars?.patch)).toEqual([
-      { updatedAt: timestamp },
-      { updatedAt: timestamp },
-    ]);
+    await persistence.updateDocument(scopeKey, folderKey, { isFavorite: true, updatedAt: timestamp });
+    expect(calls.map(({ bindVars }) => bindVars?.patch)).toEqual([{ isFavorite: true, updatedAt: timestamp }]);
   });
 
   test('only the marker owner can unfreeze a pending deletion', async () => {

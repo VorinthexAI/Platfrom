@@ -15,6 +15,7 @@ import { CloseIcon } from "../../icons/close/close.web";
 export type BottomSheetProps = {
   children?: ReactNode;
   description?: string;
+  dismissible?: boolean;
   mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -29,6 +30,7 @@ export function BottomSheetScene({ children }: { children: ReactNode }) {
 export function BottomSheet({
   children,
   description,
+  dismissible = true,
   mutation = false,
   onOpenChange,
   open,
@@ -70,17 +72,19 @@ export function BottomSheet({
     const velocity =
       distance / Math.max(performance.now() - dragStart.current.time, 1);
     resetDrag();
-    if (distance >= 96 || velocity >= 0.65) onOpenChange(false);
+    if (dismissible && (distance >= 96 || velocity >= 0.65)) onOpenChange(false);
   };
 
   return (
-    <Dialog.Root onOpenChange={onOpenChange} open={open}>
+    <Dialog.Root onOpenChange={(next) => { if (next || dismissible) onOpenChange(next); }} open={open}>
       <Dialog.Portal>
         <Dialog.Overlay className="vui-bottom-sheet-overlay" />
         <Dialog.Content
           aria-describedby={description ? descriptionId : undefined}
           aria-labelledby={titleId}
           className={`vui-bottom-sheet${tall ? " vui-bottom-sheet-tall" : ""}${mutation ? " vui-bottom-sheet-mutation" : ""}`}
+          onEscapeKeyDown={(event) => { if (!dismissible) event.preventDefault(); }}
+          onInteractOutside={(event) => { if (!dismissible) event.preventDefault(); }}
           ref={contentRef}
         >
           <div
@@ -111,6 +115,7 @@ export function BottomSheet({
             <Button
               aria-label="Close bottom sheet"
               className="vui-bottom-sheet-close"
+              disabled={!dismissible}
               size="sm"
               variant="icon"
             >

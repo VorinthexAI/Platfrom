@@ -59,6 +59,11 @@ describe('Arango migration indexes', () => {
     expect(isLegacyIndex('scopeAgents', ['scopeKey', 'agentKey'])).toBe(false);
     expect(isLegacyIndex('scopeAgents', ['agentKey', 'status'])).toBe(false);
   });
+  test('drops obsolete search uniqueness and expiry indexes', () => {
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery'])).toBe(true);
+    expect(isLegacyIndex('contentSearchQueries', ['expiresAt'])).toBe(true);
+    expect(isLegacyIndex('contentSearchQueries', ['actorKey', 'scopeKey', 'normalizedQuery', 'folderKey', 'includeDescendants'])).toBe(false);
+  });
   test('never classifies a currently desired index as legacy', () => {
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['storageKey']])).toBe(false);
     expect(isLegacyIndex('documentVersions', ['storageKey'], [['documentKey', 'version']])).toBe(true);
@@ -180,7 +185,7 @@ describe('Arango migration indexes', () => {
     expect(patch).not.toHaveProperty('chunkEmbeddings');
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
-    for (const collection of ['images', 'collections'] as const) {
+    for (const collection of ['images', 'collections', 'documents'] as const) {
       const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
       const database = {
         async query(query: string, bindVars?: Record<string, unknown>) {

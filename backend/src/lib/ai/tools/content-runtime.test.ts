@@ -51,7 +51,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
   };
   const context = { organizationKey, runtimeScopeKey: scopeKey, principal: { kind: 'member', user: { key: userKey }, userOrganization: { key: membershipKey, organizationId: organizationKey, status: 'active', orgRole: role } } } as any;
   const folderKey = newId(); folders.set(folderKey, { key: folderKey, scopeKey, name: 'Root', embedding, createdAt: now, updatedAt: now });
-  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, embedding, createdAt: now, updatedAt: now }); return key; };
+  const addDocument = (content = 'First sentence. Second sentence.') => { const key = newId(); documents.set(key, { key, scopeKey, folderKey, name: 'Notes', extension: 'txt', mimeType: 'text/plain', sizeBytes: content.length, storageKey: `docs/${key}`, html: `<p>${content}</p>`, content, embedding, isFavorite: false, createdAt: now, updatedAt: now }); return key; };
   return { repository, context, folders, documents, shares, versions, patches, scopeKey, folderKey, addDocument };
 }
 
@@ -332,34 +332,67 @@ describe('Content runtime', () => {
     let embeddingCalls = 0;
     let summaryCalls = 0;
     let allowed = true;
+    let clock = new Date(now);
     const rows = new Map<string, any>();
     f.repository.allowedScopeKeys = async () => allowed ? [f.scopeKey] : [];
     f.repository.semanticSearchFolders = async () => [...f.folders.values()].map((folder, index) => ({ score: index === 0 ? 0.54 : 0.9, folder }));
-    f.repository.semanticSearch = async () => [...f.documents.values()].map((document, index) => ({ score: index === 0 ? 0.54 : 0.9, document }));
+    f.repository.semanticSearch = async (input) => [...f.documents.values()].filter((document) => !input.folderKeys || input.folderKeys.includes(document.folderKey)).map((document, index) => ({ score: index === 0 ? 0.54 : 0.9, document }));
     const searchQueries = {
-      async get({ actorKey, scopeKey, normalizedQuery }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}`) ?? null; },
-      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
-      async list({ actorKey, scopeKey, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count })).slice(0, limit); },
+      async get({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`) ?? null; },
+      async record(value: any) { const identity = `${value.actorKey}:${value.scopeKey}:${value.normalizedQuery}:${value.folderKey ?? 'root'}:${value.includeDescendants}`; const old = rows.get(identity); rows.set(identity, { output: value.output, query: value.query, normalizedQuery: value.normalizedQuery, folderKey: value.folderKey, includeDescendants: value.includeDescendants, searchedAt: value.now, count: (old?.count ?? 0) + 1 }); },
+      async list({ actorKey, scopeKey, folderKey, includeDescendants, limit }: any) { return [...rows.entries()].filter(([key]) => key.startsWith(`${actorKey}:${scopeKey}:`)).map(([, value]) => value).filter((value) => value.folderKey === folderKey && value.includeDescendants === includeDescendants).map((value) => ({ query: value.query, normalizedQuery: value.normalizedQuery, searchedAt: value.searchedAt, count: value.count, ...(value.folderKey ? { folderKey: value.folderKey, includeDescendants: value.includeDescendants } : {}), documents: value.output.result.documents })).slice(0, limit); },
     };
     const dependencies: any = {
       repository: f.repository,
       searchQueries,
+      clock: () => clock,
       embed: async () => { embeddingCalls += 1; return embedding; },
       runAction: async (action: string, input: any) => { summaryCalls += 1; expect(action).toBe('reason'); const parsed = chatInputSchema.parse(input); const text = parsed.messages[0]?.content[0]?.type === 'text' ? parsed.messages[0].content[0].text : ''; expect(text).toContain('Launch Roadmap'); return { text: 'Relevant to Launch Roadmap' }; },
     };
     const first = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Launch Roadmap' }, f.context, dependencies);
-    expect(first.folders).toHaveLength(4);
+    expect(first.folders).toEqual([]);
     expect(first.documents).toHaveLength(10);
-    expect(first.folders.every((item) => item.score >= 0.55)).toBe(true);
     expect(first.documents.every((item) => item.score >= 0.55 && item.summary.includes('Launch Roadmap'))).toBe(true);
     expect(embeddingCalls).toBe(1);
     expect(summaryCalls).toBe(10);
+    clock = new Date(Date.parse(now) + 2 * 60 * 60 * 1000);
     const replay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: '  launch   roadmap  ' }, f.context, dependencies);
     expect(replay.cached).toBe(true);
     expect(embeddingCalls).toBe(1);
     expect(summaryCalls).toBe(10);
+    const favoriteOnlyDocument = f.documents.get(first.documents[0]!.documentKey);
+    favoriteOnlyDocument.isFavorite = true;
+    favoriteOnlyDocument.updatedAt = '2026-07-23T11:00:00.000Z';
+    const metadataReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
+    expect(metadataReplay.cached).toBe(true);
+    expect(embeddingCalls).toBe(1);
+    expect(summaryCalls).toBe(10);
     const history = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
-    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', count: 2 }]);
+    expect(history.history).toMatchObject([{ normalizedQuery: 'launch roadmap', count: 3 }]);
+    expect(history.history[0]?.documents).toEqual(first.documents);
+    const archivedDocument = f.documents.get(first.documents[0]!.documentKey);
+    archivedDocument.deletedAt = now;
+    const prunedHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, f.context, dependencies);
+    expect(prunedHistory.history[0]?.documents.some((item) => item.documentKey === archivedDocument.key)).toBe(false);
+    archivedDocument.deletedAt = null;
+    const childKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, createdAt: now, updatedAt: now });
+    const nestedDocumentKey = [...f.documents.keys()][1]!;
+    f.documents.get(nestedDocumentKey).folderKey = childKey;
+    const folderReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'launch roadmap' }, f.context, dependencies);
+    expect(folderReplay.folders).toEqual([]);
+    expect(folderReplay.cached).toBe(false);
+    expect(rows).toHaveLength(2);
+    expect(folderReplay.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(true);
+    const directFolderSearch = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, includeDescendants: false, query: 'launch roadmap' }, f.context, dependencies);
+    expect(directFolderSearch.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(false);
+    expect(rows).toHaveLength(3);
+    const folderHistory = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey, folderKey: f.folderKey }, f.context, dependencies);
+    expect(folderHistory.history[0]).toMatchObject({ folderKey: f.folderKey, includeDescendants: true, documents: folderReplay.documents });
+    f.documents.get(first.documents[0]!.documentKey).semanticContentHash = 'a'.repeat(64);
+    const invalidated = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies);
+    expect(invalidated.cached).toBe(false);
+    expect(embeddingCalls).toBe(4);
     const otherContext = { ...f.context, principal: { ...f.context.principal, user: { key: newId() } } };
     const isolated = await runContentTool('scope.content.search-history', { scopeKey: f.scopeKey }, otherContext, dependencies);
     expect(isolated.history).toEqual([]);
@@ -443,31 +476,55 @@ describe('Content runtime', () => {
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
   });
 
-  test('does not add favorite fields to folders or copied documents', async () => {
+  test('keeps folders without favorites and resets copied documents to not favorite', async () => {
     const f = fixture('moderator');
     const created = await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Default' }] }, f.context, { repository: f.repository, embed: async () => embedding });
     expect(created.results[0]?.data?.folder).not.toHaveProperty('isFavorite');
 
     const documentKey = f.addDocument('Source');
+    f.documents.get(documentKey).isFavorite = true;
     const copied = await runContentTool('document.copy', {
       copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }],
-    }, f.context, { repository: f.repository, storage: { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input) { return { storageKey: input.destinationKey }; }, async delete() {} } });
-    expect(copied.results[0]?.data?.document).not.toHaveProperty('isFavorite');
+    }, f.context, { repository: f.repository, embed: async () => embedding, storage: { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input) { return { storageKey: input.destinationKey }; }, async delete() {} } });
+    expect(copied.results[0]?.data?.document.isFavorite).toBe(false);
+  });
+
+  test('preserves the extension while bounding download filenames', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Download body');
+    f.documents.get(documentKey).name = 'n'.repeat(255);
+    const downloaded = await runContentTool('document.download', { documentKeys: [documentKey], format: 'original' }, f.context, {
+      repository: f.repository,
+      storage: {
+        async download() { return { bytes: new TextEncoder().encode('Download body'), mimeType: 'text/plain' }; },
+        async copy(input) { return { storageKey: input.destinationKey }; },
+        async upload(input) { return { storageKey: input.key }; },
+        async delete() {},
+      },
+    });
+    const fileName = downloaded.results[0]?.data?.fileName;
+    expect(fileName).toHaveLength(255);
+    expect(fileName?.endsWith('.txt')).toBe(true);
   });
 
   test('sanitizes HTML updates and persists canonical agreeing representations', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('Old body');
     const output = await runContentTool('document.update', {
-      updates: [{ documentKey, html: '<p onclick="steal()">Safe <span>text</span></p><script>alert(1)</script><custom>drop</custom>' }],
+      updates: [{ documentKey, html: '<p onclick="steal()">Safe <span>text</span></p><script>alert(1)</script><custom>drop</custom>', isFavorite: true }],
     }, f.context, { repository: f.repository, embed: async () => embedding, ingestion: { embeddingDimensions: EMBEDDING_DIMENSIONS } });
     expect(output.results[0]?.success).toBe(true);
     const stored = f.documents.get(documentKey);
     expect(stored.html).toBe('<p>Safe text</p>drop');
     expect(stored.content).toBe('Safe text\n\ndrop');
+    expect(stored.isFavorite).toBe(true);
     expect(stored).not.toHaveProperty('json');
     expect(stored.html).not.toContain('onclick');
     expect(stored.html).not.toContain('custom');
+
+    const favoriteOnly = await runContentTool('document.update', { updates: [{ documentKey, isFavorite: false }] }, f.context, { repository: f.repository });
+    expect(favoriteOnly.results[0]?.data?.document.isFavorite).toBe(false);
+    expect(f.documents.get(documentKey).content).toBe('Safe text\n\ndrop');
   });
 
   test('embeds the final derived name for persisted AI copies', async () => {
@@ -492,7 +549,7 @@ describe('Content runtime', () => {
     expect(output.results[0]?.success).toBe(true);
     expect(embeddedNames).toEqual(['Notes (translate)']);
     const persistedDocumentKey = output.results[0]?.data?.persistedDocumentKey;
-    expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)).not.toHaveProperty('isFavorite');
+    expect(persistedDocumentKey && f.documents.get(persistedDocumentKey)?.isFavorite).toBe(false);
   });
 
   test('sends summaries and rewrites through provider-valid chat action inputs', async () => {
