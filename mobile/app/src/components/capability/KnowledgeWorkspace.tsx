@@ -113,7 +113,6 @@ export function KnowledgeWorkspace() {
   const localDraftFile = draftFileFor(draftIdentity || "unavailable");
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [canGoBackSheet, setCanGoBackSheet] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
   const [title, setTitle] = useState("Untitled note");
@@ -235,7 +234,6 @@ export function KnowledgeWorkspace() {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     setSheetError(undefined);
     sheetBackStack.current = [];
-    setCanGoBackSheet(false);
     setActiveSheet(sheet);
     setSheetOpen(true);
   };
@@ -243,7 +241,6 @@ export function KnowledgeWorkspace() {
   const pushSheet = (sheet: ArchiveSheet) => {
     const current = activeSheetRef.current;
     if (current) sheetBackStack.current.push(current);
-    setCanGoBackSheet(sheetBackStack.current.length > 0);
     setSheetError(undefined);
     setActiveSheet(sheet);
   };
@@ -253,7 +250,6 @@ export function KnowledgeWorkspace() {
     if (!previous) return;
     setSheetError(undefined);
     setActiveSheet(previous);
-    setCanGoBackSheet(sheetBackStack.current.length > 0);
   };
 
   const closeSheet = () => {
@@ -268,9 +264,23 @@ export function KnowledgeWorkspace() {
     if (activeSheetRef.current === "folderActions" || activeSheetRef.current === "folderDetails") folderActionGeneration.current += 1;
     setSheetOpen(false);
     sheetBackStack.current = [];
-    setCanGoBackSheet(false);
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     sheetCloseTimer.current = setTimeout(() => setActiveSheet(undefined), 240);
+  };
+
+  const dismissSheetLayer = () => {
+    const previous = sheetBackStack.current.pop();
+    if (!previous) {
+      closeSheet();
+      return;
+    }
+    setSheetOpen(false);
+    if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
+    sheetCloseTimer.current = setTimeout(() => {
+      setSheetError(undefined);
+      setActiveSheet(previous);
+      setSheetOpen(true);
+    }, 240);
   };
 
   useEffect(() => () => {
@@ -414,7 +424,6 @@ export function KnowledgeWorkspace() {
       setSelectedFolder(undefined);
       setSheetOpen(false);
       sheetBackStack.current = [];
-      setCanGoBackSheet(false);
       setActiveSheet(undefined);
       setError(undefined);
       setSaveState("saved");
@@ -1132,7 +1141,6 @@ export function KnowledgeWorkspace() {
       const batch = picked.result.map((file, index): UploadBatchItem => ({ id: `${file.uri}-${index}`, file, name: file.name, status: "pending" }));
       setUploadBatch(batch);
       sheetBackStack.current = [];
-      setCanGoBackSheet(false);
       setActiveSheet("uploads");
       setUploading(true);
       let cursor = 0;
@@ -1499,14 +1507,13 @@ export function KnowledgeWorkspace() {
 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "folder" ? `Create a folder inside ${currentFolder?.name ?? "Archive"}.` : activeSheet === "destinationFolder" ? `Create a folder inside ${destinationFolder?.name ?? "Archive"}.` : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : activeSheet === "translate" ? "Translate the full note into any language." : activeSheet === "versions" ? "Choose an earlier snapshot to review before restoring it." : activeSheet === "restoreVersion" ? "The current text will be backed up before this version is restored." : activeSheet === "destination" ? `Choose where to ${destinationAction === "moveFolder" ? "move this folder" : destinationAction === "upload" ? "upload documents" : `${destinationAction ?? "continue"} this document`}.` : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "folderDetails" ? "Rename this folder or add context that describes what belongs inside." : undefined}
-        dismissible={!uploading && !translating && !restoringVersionKey && !folderCreating && !folderActionLoading && !destinationLoading && !documentActionLoading}
+        dismissible={!enhancing && !uploading && !translating && !restoringVersionKey && !folderCreating && !folderActionLoading && !destinationLoading && !documentActionLoading}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "destinationFolder" || activeSheet === "folders" || activeSheet === "translate" || activeSheet === "rename" || activeSheet === "destination" || activeSheet === "folderDetails"}
-        onOpenChange={(open) => { if (!open) closeSheet(); }}
+        onOpenChange={(open) => { if (!open) dismissSheetLayer(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "destination" || activeSheet === "uploads"}
         title={activeSheet === "enhance" ? "AI actions" : activeSheet === "translate" ? "Translate note" : activeSheet === "versions" ? "Version history" : activeSheet === "restoreVersion" ? "Restore this version?" : activeSheet === "folder" || activeSheet === "destinationFolder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename document" : "Rename note" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "uploads" ? "Upload progress" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
       >
-        {canGoBackSheet && !uploading ? <Button icon={<ChevronLeftIcon size="sm" />} onPress={goBackSheet} size="sm" style={styles.sheetBack} variant="ghost">Back</Button> : null}
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
           <>
@@ -1762,7 +1769,6 @@ const styles = StyleSheet.create({
   summaryPanel: { gap: 16 },
   summaryText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 24 },
   destinationPanel: { flex: 1, gap: 12 },
-  sheetBack: { alignSelf: "flex-start", marginBottom: 6 },
   destinationFolders: { gap: 8, paddingVertical: 4 },
   uploadPanel: { gap: 10 },
   uploadRow: { minHeight: 54, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
