@@ -3,7 +3,6 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isAxiosError } from "axios";
-import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,6 +18,7 @@ import { fonts, palette, spacing, tracking } from "@/theme/tokens";
 type LoginResponse = {
   handoff_token_hash?: string;
   handoff_expires_at?: string;
+  organization_mfa_required?: boolean;
 };
 
 function messageFor(error: unknown) {
@@ -30,7 +30,6 @@ function messageFor(error: unknown) {
 
 export default function AuthRoute() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const hydrate = useAuthStore((state) => state.hydrate);
   const [emailVisible, setEmailVisible] = useState(false);
   const [email, setEmail] = useState("");
@@ -72,7 +71,6 @@ export default function AuthRoute() {
           if (!active) return;
           claiming = false;
           setClaimingHandoff(false);
-          router.replace("/onboarding");
         } else {
           claiming = false;
           setClaimingHandoff(false);
@@ -91,7 +89,7 @@ export default function AuthRoute() {
       active = false;
       clearInterval(interval);
     };
-  }, [handoff, hydrate, router]);
+  }, [handoff, hydrate]);
 
   useEffect(() => {
     if (error && Platform.OS === "ios") AccessibilityInfo.announceForAccessibility(error);
@@ -103,7 +101,6 @@ export default function AuthRoute() {
     try {
       if (await launchOAuthProvider(provider)) {
         await hydrate();
-        router.replace("/onboarding");
       }
     } catch (oauthError) {
       setError(messageFor(oauthError));
@@ -122,6 +119,10 @@ export default function AuthRoute() {
     setLoading("email");
     try {
       const response = await postJson<{ email: string }, LoginResponse>("/auth/login", { email: normalized });
+      if (response.organization_mfa_required) {
+        setError("This organization requires an additional verification step on the web.");
+        return;
+      }
       const parsedExpiry = response.handoff_expires_at ? Date.parse(response.handoff_expires_at) : Number.NaN;
       setCheckInbox(true);
       setHandoff(response.handoff_token_hash ? {

@@ -1,10 +1,9 @@
 import { isAxiosError } from "axios";
 import { create } from "zustand";
 
-import { getJson, onUnauthorized, patchJson, postJson, revokeRemoteSession } from "@/lib/api-client";
+import { getJson, onUnauthorized, patchJson, revokeRemoteSession } from "@/lib/api-client";
 import { clearAuthContext, readAuthContext, writeAuthContext } from "@/lib/auth-context-vault";
 import { hasCompleteAuthContext, normalizeAuthContext, type AuthUser } from "@/lib/auth-helpers";
-import { getGuestBootstrapCredentials, rotateGuestBootstrapCredentials } from "@/lib/installation";
 import { tokenVault } from "@/lib/token-vault";
 import { useOnboardingStore } from "@/state/onboarding";
 
@@ -29,24 +28,19 @@ async function loadContext() {
   return normalizeAuthContext(await getJson<unknown>("/auth/me"));
 }
 
-async function bootstrapGuest() {
-  return normalizeAuthContext(await postJson<{ distinctId: string; bootstrapSecret: string }, unknown>(
-    "/auth/guest",
-    await getGuestBootstrapCredentials(),
-  ));
+const signedOutState = {
+  status: "unauthenticated" as const,
+  user: null,
+  organization: null,
+  scope: null,
+  contentExecution: null,
+};
+
+function isGuest(user: AuthUser | null) {
+  return user?.email?.endsWith("@guest.vorinthex.com") ?? false;
 }
 
-async function recoverGuestSession() {
-  await tokenVault.clear();
-  try {
-    return await bootstrapGuest();
-  } catch {
-    await rotateGuestBootstrapCredentials();
-    return bootstrapGuest();
-  }
-}
-
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   status: "bootstrapping",
   user: null,
   organization: null,
@@ -56,19 +50,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const operation = ++authOperation;
     const { session, generation } = await tokenVault.snapshot();
     if (!session) {
-      try {
-        const context = await bootstrapGuest();
-        if (operation === authOperation) {
-          await writeAuthContext(context);
-          if (operation === authOperation) set({ status: "authenticated", ...context });
-        }
-      } catch {
-        if (operation === authOperation) set({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
-      }
+      await clearAuthContext();
+      if (operation === authOperation) set(signedOutState);
       return;
     }
     try {
       const context = await loadContext();
+      if (isGuest(context.user)) {
+        const guestSession = await tokenVault.read();
+        await Promise.all([tokenVault.clear(), clearAuthContext()]);
+        if (operation === authOperation) set(signedOutState);
+        if (guestSession) await revokeRemoteSession(guestSession).catch(() => undefined);
+        return;
+      }
       if (operation === authOperation) {
         await writeAuthContext(context);
         if (operation === authOperation) set({ status: "authenticated", ...context });
@@ -78,33 +72,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const recoveryOperation = ++authOperation;
         await tokenVault.clearIfCurrent(generation);
         await clearAuthContext();
-        try {
-          const context = await bootstrapGuest();
-          if (recoveryOperation === authOperation) {
-            await writeAuthContext(context);
-            if (recoveryOperation === authOperation) set({ status: "authenticated", ...context });
-          }
-        } catch {
-          if (recoveryOperation === authOperation) set({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
-        }
+        if (recoveryOperation === authOperation) set(signedOutState);
         return;
       }
       const cached = await readAuthContext();
-      if (cached && !hasCompleteAuthContext(cached)) {
-        try {
-          const context = await bootstrapGuest();
-          if (operation === authOperation) {
-            await writeAuthContext(context);
-            if (operation === authOperation) set({ status: "authenticated", ...context });
-          }
-          return;
-        } catch {
-          // Preserve offline access to local drafts when session recovery is unavailable.
-        }
+      if (cached && isGuest(cached.user)) {
+        await Promise.all([tokenVault.clear(), clearAuthContext()]);
+        if (operation === authOperation) set(signedOutState);
+        return;
       }
-      if (operation === authOperation) set(cached
+      if (operation === authOperation) set(cached && hasCompleteAuthContext(cached)
         ? { status: "authenticated", ...cached }
-        : { status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
+        : signedOutState);
     }
   },
   hydrate: async () => {
@@ -116,21 +95,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   reconnectContentContext: async () => {
-    let operation = ++authOperation;
-    const isGuest = get().user?.email?.endsWith("@guest.vorinthex.com") ?? false;
-    let context;
-    try {
-      context = await loadContext();
-      if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is incomplete.");
-    } catch {
-      operation = ++authOperation;
-      try {
-        context = await bootstrapGuest();
-      } catch (error) {
-        if (!isGuest) throw error;
-        context = await recoverGuestSession();
-      }
-    }
+    const operation = ++authOperation;
+    const context = await loadContext();
     if (!hasCompleteAuthContext(context)) throw new Error("Archive execution context is unavailable.");
     if (operation === authOperation) {
       await writeAuthContext(context);
@@ -138,17 +104,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
   completeOnboarding: async () => {
-    let operation = ++authOperation;
-    const isGuest = get().user?.email?.endsWith("@guest.vorinthex.com") ?? false;
-    let context;
-    try {
-      context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
-    } catch (error) {
-      if (!isAxiosError(error) || error.response?.status !== 401 || !isGuest) throw error;
-      operation = ++authOperation;
-      await recoverGuestSession();
-      context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
-    }
+    const operation = ++authOperation;
+    const context = normalizeAuthContext(await patchJson<{ isOnboarded: true }, unknown>("/auth/me", { isOnboarded: true }));
     if (operation === authOperation) {
       await writeAuthContext(context);
       if (operation === authOperation) set({ status: "authenticated", ...context });
@@ -159,7 +116,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     useOnboardingStore.getState().reset();
     const session = await tokenVault.read();
     const clearing = Promise.all([tokenVault.clear(), clearAuthContext()]);
-    set({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
+    set(signedOutState);
     await clearing;
     if (session) await revokeRemoteSession(session).catch(() => undefined);
   },
@@ -169,5 +126,5 @@ onUnauthorized(() => {
   authOperation += 1;
   useOnboardingStore.getState().reset();
   void clearAuthContext();
-  useAuthStore.setState({ status: "unauthenticated", user: null, organization: null, scope: null, contentExecution: null });
+  useAuthStore.setState(signedOutState);
 });

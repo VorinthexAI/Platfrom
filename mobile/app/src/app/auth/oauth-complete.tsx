@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams } from "expo-router";
 import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
@@ -10,7 +10,6 @@ import { fonts, palette, spacing } from "@/theme/tokens";
 export default function OAuthCompleteRoute() {
   const { code, error } = useLocalSearchParams<{ code?: string; error?: string }>();
   const hydrate = useAuthStore((state) => state.hydrate);
-  const router = useRouter();
   const [message, setMessage] = useState(() => error
     ? "Additional verification is required before this account can sign in."
     : code ? "Completing secure sign in..." : "The identity provider returned an incomplete sign-in response.");
@@ -20,10 +19,9 @@ export default function OAuthCompleteRoute() {
     void postJson<{ code: string }, unknown>("/auth/mobile/oauth/exchange", { code })
       .then(async () => {
         await hydrate();
-        router.replace("/onboarding");
       })
       .catch(() => setMessage("This sign-in response is invalid or expired."));
-  }, [code, error, hydrate, router]);
+  }, [code, error, hydrate]);
 
   return <View style={styles.root}><Spinner size="small" /><Text style={styles.message}>{message}</Text></View>;
 }

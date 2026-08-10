@@ -61,6 +61,7 @@ export default function RootLayout() {
     const isPublic = root === "auth" || root === "public" || root === undefined;
     const isOnboarded = useAuthStore.getState().user?.isOnboarded === true;
     if (status === "unauthenticated" && !isPublic) router.replace("/auth" as Href);
+    if (status === "authenticated" && root === "auth") router.replace(isOnboarded ? "/capability/archive" : "/onboarding");
     if (status === "authenticated" && root === "public") router.replace(isOnboarded ? "/capability/archive" : "/onboarding");
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
     if (status === "authenticated" && isOnboarded && root === "onboarding") router.replace("/capability/archive");

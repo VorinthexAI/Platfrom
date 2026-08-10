@@ -1,47 +1,57 @@
-import { expect, mock, test } from "bun:test";
+import { beforeEach, expect, mock, test } from "bun:test";
 
-const guestContext = {
-  user: { email: "guest.example@guest.vorinthex.com", is_onboarded: false },
+const realContext = {
+  user: { key: "user", email: "user@example.com", is_onboarded: true },
   organization: { key: "org" },
   main_scope: { key: "scope" },
   content_execution: { agent_key: "agent" },
 };
+const guestContext = {
+  ...realContext,
+  user: { key: "guest", email: "guest.example@guest.vorinthex.com", is_onboarded: false },
+};
+const storedSession = {
+  accessToken: "access",
+  refreshToken: "refresh",
+  accessExpiresAt: Date.now() + 60_000,
+  refreshExpiresAt: Date.now() + 120_000,
+};
+
+let contextResponse: unknown = realContext;
+let session: typeof storedSession | null = null;
+let getCalls = 0;
+let clearContextCalls = 0;
+let clearTokenCalls = 0;
+let revokeCalls = 0;
 let unauthorizedListener: (() => void) | undefined;
-let patchCalls = 0;
-let tokenClears = 0;
 
 mock.module("@/lib/api-client", () => ({
-  getJson: async () => guestContext,
+  getJson: async () => {
+    getCalls += 1;
+    if (contextResponse instanceof Error || (contextResponse as { isAxiosError?: boolean })?.isAxiosError) {
+      if ((contextResponse as { response?: { status?: number } }).response?.status === 401) unauthorizedListener?.();
+      throw contextResponse;
+    }
+    return contextResponse;
+  },
   onUnauthorized: (listener: () => void) => {
     unauthorizedListener = listener;
     return () => undefined;
   },
-  patchJson: async () => {
-    patchCalls += 1;
-    if (patchCalls === 1) {
-      unauthorizedListener?.();
-      throw { isAxiosError: true, response: { status: 401 } };
-    }
-    return { ...guestContext, user: { ...guestContext.user, is_onboarded: true } };
-  },
-  postJson: async () => guestContext,
-  revokeRemoteSession: async () => undefined,
+  patchJson: async () => realContext,
+  revokeRemoteSession: async () => { revokeCalls += 1; },
 }));
 mock.module("@/lib/auth-context-vault", () => ({
-  clearAuthContext: async () => undefined,
+  clearAuthContext: async () => { clearContextCalls += 1; },
   readAuthContext: async () => null,
   writeAuthContext: async () => undefined,
 }));
-mock.module("@/lib/installation", () => ({
-  getGuestBootstrapCredentials: async () => ({ distinctId: "app_test", bootstrapSecret: "guest_test" }),
-  rotateGuestBootstrapCredentials: async () => undefined,
-}));
 mock.module("@/lib/token-vault", () => ({
   tokenVault: {
-    clear: async () => { tokenClears += 1; },
-    clearIfCurrent: async () => true,
-    read: async () => null,
-    snapshot: async () => ({ session: null, generation: 0 }),
+    clear: async () => { clearTokenCalls += 1; session = null; },
+    clearIfCurrent: async () => { clearTokenCalls += 1; session = null; return true; },
+    read: async () => session,
+    snapshot: async () => ({ session, generation: 0 }),
   },
 }));
 mock.module("@/state/onboarding", () => ({
@@ -50,18 +60,53 @@ mock.module("@/state/onboarding", () => ({
 
 const { useAuthStore } = await import("../state/auth");
 
-test("reconnects a guest session and retries onboarding after a 401", async () => {
-  useAuthStore.setState({
-    status: "authenticated",
-    user: { email: "guest.example@guest.vorinthex.com", isOnboarded: false },
-    organization: { key: "org" },
-    scope: { key: "scope" },
-    contentExecution: { agentKey: "agent" },
-  });
+beforeEach(() => {
+  contextResponse = realContext;
+  session = null;
+  getCalls = 0;
+  clearContextCalls = 0;
+  clearTokenCalls = 0;
+  revokeCalls = 0;
+  useAuthStore.setState({ status: "bootstrapping", user: null, organization: null, scope: null, contentExecution: null });
+});
 
-  await useAuthStore.getState().completeOnboarding();
+test("shows signed-out state without creating a guest when no session exists", async () => {
+  await useAuthStore.getState().bootstrap();
 
-  expect(patchCalls).toBe(2);
-  expect(tokenClears).toBe(1);
-  expect(useAuthStore.getState().user?.isOnboarded).toBe(true);
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(getCalls).toBe(0);
+  expect(clearContextCalls).toBe(1);
+});
+
+test("hydrates a persisted real account session", async () => {
+  session = storedSession;
+
+  await useAuthStore.getState().bootstrap();
+
+  expect(useAuthStore.getState().status).toBe("authenticated");
+  expect(useAuthStore.getState().user?.email).toBe("user@example.com");
+  expect(clearTokenCalls).toBe(0);
+});
+
+test("retires a persisted legacy guest session", async () => {
+  session = storedSession;
+  contextResponse = guestContext;
+
+  await useAuthStore.getState().bootstrap();
+
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(clearTokenCalls).toBe(1);
+  expect(clearContextCalls).toBe(1);
+  expect(revokeCalls).toBe(1);
+});
+
+test("clears an expired server session without guest recovery", async () => {
+  session = storedSession;
+  contextResponse = { isAxiosError: true, response: { status: 401 } };
+
+  await useAuthStore.getState().bootstrap();
+
+  expect(useAuthStore.getState().status).toBe("unauthenticated");
+  expect(clearTokenCalls).toBe(1);
+  expect(revokeCalls).toBe(0);
 });
