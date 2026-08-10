@@ -26,6 +26,13 @@ let revokeCalls = 0;
 let unauthorizedListener: (() => void) | undefined;
 
 mock.module("@/lib/api-client", () => ({
+  apiClient: {
+    post: (...args: unknown[]) => {
+      const handler = (globalThis as { __archiveApiPost?: (...input: unknown[]) => unknown }).__archiveApiPost;
+      if (!handler) throw new Error("Archive API test handler is unavailable.");
+      return handler(...args);
+    },
+  },
   getJson: async () => {
     getCalls += 1;
     if (contextResponse instanceof Error || (contextResponse as { isAxiosError?: boolean })?.isAxiosError) {
