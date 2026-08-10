@@ -78,6 +78,7 @@ export function KnowledgeWorkspace() {
   const [title, setTitle] = useState("Untitled note");
   const [content, setContent] = useState("");
   const [completion, setCompletion] = useState("");
+  const [autocompletePending, setAutocompletePending] = useState(false);
   const [autocompleteRevision, setAutocompleteRevision] = useState(0);
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceRange, setEnhanceRange] = useState<TextRange>();
@@ -160,18 +161,21 @@ export function KnowledgeWorkspace() {
     const generation = ++autocompleteGeneration.current;
     const timeout = setTimeout(() => {
       const current = contentRef.current;
-      const selection = selectionRef.current;
-      if (!current.trim() || selection.start !== current.length || selection.end !== current.length) return;
+      if (!current.trim()) return;
       const context = lastWords(current, 100);
       if (!context) return;
       autocompleteRequest.current?.abort();
       const controller = new AbortController();
       autocompleteRequest.current = controller;
+      setAutocompletePending(true);
       void autocompleteContent(context, AUTOCOMPLETE_WORD_COUNT, controller.signal).then(({ completion: next }) => {
         if (generation !== autocompleteGeneration.current || controller.signal.aborted || contentRef.current !== current) return;
         setCompletion(next);
       }).catch(() => undefined).finally(() => {
-        if (autocompleteRequest.current === controller) autocompleteRequest.current = undefined;
+        if (autocompleteRequest.current === controller) {
+          autocompleteRequest.current = undefined;
+          setAutocompletePending(false);
+        }
       });
     }, 500);
     return () => {
@@ -179,6 +183,7 @@ export function KnowledgeWorkspace() {
       autocompleteGeneration.current += 1;
       autocompleteRequest.current?.abort();
       autocompleteRequest.current = undefined;
+      setAutocompletePending(false);
     };
   }, [autocompleteRevision, hasContentContext]);
 
@@ -363,6 +368,7 @@ export function KnowledgeWorkspace() {
     autocompleteGeneration.current += 1;
     autocompleteRequest.current?.abort();
     autocompleteRequest.current = undefined;
+    setAutocompletePending(false);
     setCompletion("");
   };
 
@@ -869,13 +875,15 @@ export function KnowledgeWorkspace() {
                   const previousContent = contentRef.current;
                   const previousLength = previousContent.length;
                   const changedAtEnd = value.startsWith(previousContent) || previousContent.startsWith(value);
-                  if (changedAtEnd || (selectionRef.current.start === previousLength && selectionRef.current.end === previousLength)) {
+                  const cursorWasAtEnd = selectionRef.current.start === previousLength && selectionRef.current.end === previousLength;
+                  const shouldAutocomplete = changedAtEnd || cursorWasAtEnd;
+                  if (shouldAutocomplete) {
                     selectionRef.current = { start: value.length, end: value.length };
                   }
                   contentRef.current = value;
                   clearCompletion();
                   setContent(value);
-                  setAutocompleteRevision((current) => current + 1);
+                  if (shouldAutocomplete) setAutocompleteRevision((current) => current + 1);
                   markDirty();
                   persistLocalDraft(titleRef.current, value);
                 }}
@@ -889,12 +897,14 @@ export function KnowledgeWorkspace() {
                 textAlignVertical="top"
                 value={content}
               />
-              {completion ? (
+              {autocompletePending || completion ? (
                 <View style={styles.completionRow}>
-                  <Text accessibilityLabel="Suggested continuation" style={styles.completionText}>{completion}</Text>
-                  <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" variant="icon">
-                    <CheckIcon size="sm" />
-                  </Button>
+                  <Text accessibilityLabel={completion ? "Suggested continuation" : undefined} style={styles.completionText}>{completion || "Thinking ahead..."}</Text>
+                  {completion ? (
+                    <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" variant="icon">
+                      <CheckIcon size="sm" />
+                    </Button>
+                  ) : null}
                 </View>
               ) : null}
               {!content && (folders.length > 0 || documents.length > 0) ? (
