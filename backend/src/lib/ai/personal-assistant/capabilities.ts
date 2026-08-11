@@ -2,8 +2,9 @@ import { z } from 'zod';
 import type { CoreChatToolDefinition } from '@/lib/ai/actions/core-chat';
 import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
+import { imageSearchTool } from '@/lib/ai/tools/image-search';
 
-export const assistantSurfaceSchema = z.enum(['knowledge-workspace']);
+export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace']);
 export type AssistantSurface = z.infer<typeof assistantSurfaceSchema>;
 
 export const assistantSourceSchema = z.object({
@@ -103,7 +104,26 @@ const writeNoteCapability: AssistantCapability = {
   },
 };
 
+const searchImagesCapability: AssistantCapability = {
+  definition: {
+    name: 'search_images',
+    description: 'Search the user\'s Gallery images by visible subjects, objects, actions, setting, style, colors, lighting, or readable text.',
+    inputSchema: {
+      type: 'object',
+      properties: { query: { type: 'string', minLength: 1, maxLength: 8_000 } },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  async execute(rawInput, context) {
+    const input = searchInputSchema.parse(rawInput);
+    return { kind: 'continue', result: await imageSearchTool.execute({ query: input.query, limit: 50 }, { context: context.domain }) };
+  },
+};
+
 export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistry()
   .register(searchKnowledgeCapability)
   .register(writeNoteCapability)
-  .registerSurface('knowledge-workspace', ['search_knowledge', 'write_note']);
+  .register(searchImagesCapability)
+  .registerSurface('knowledge-workspace', ['search_knowledge', 'write_note'])
+  .registerSurface('media-workspace', ['search_images']);

@@ -27,8 +27,7 @@ import {
   UploadIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
-import { ChromeIcon } from "@/components/ChromeIcon";
-import { capabilityIconSource } from "@/data/capability-icons";
+import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import {
   autocompleteContent,
   askPersonalAssistant,
@@ -1422,10 +1421,7 @@ export function KnowledgeWorkspace() {
         <Button accessibilityLabel="Back to your personal AI" contentMode="raw" onPress={() => navigation.goBack()} size="md" style={styles.headerBack} variant="ghost">
           <ChevronLeftIcon size="md" variant="accent" />
         </Button>
-        <View style={styles.identity}>
-          <ChromeIcon glow={0.7} size={34} source={capabilityIconSource.archive} />
-          <Text style={styles.headerTitle}>ARCHIVE</Text>
-        </View>
+        <WorkspaceAppSwitcher active="archive" />
       </View>
 
       <ScrollView
@@ -1850,9 +1846,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", gap: 6, borderBottomColor: palette.hairline, borderBottomWidth: 1 },
   headerBack: { width: 42 },
-  identity: { flexDirection: "row", alignItems: "center", gap: 10 },
   eyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
-  headerTitle: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 15, letterSpacing: tracking.label },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, paddingBottom: 112, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },

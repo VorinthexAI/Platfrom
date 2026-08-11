@@ -60,6 +60,7 @@ import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
 import { postPersonalAssistantResponse } from './personal-assistant';
+import { completeGalleryUploads, createGalleryCollection, galleryOverview, galleryUploadStatus, presignGalleryUploads, searchGalleryImages } from './gallery';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -414,6 +415,12 @@ export function registerRoutes(app: Hono) {
   app.post('/assistant/respond', postPersonalAssistantResponse);
   app.post('/content/tools/:tool', invokeContentTool);
   app.post('/content/document-jobs/:jobId', getContentDocumentJob);
+  app.post('/gallery/overview', galleryOverview);
+  app.post('/gallery/collections', createGalleryCollection);
+  app.post('/gallery/uploads/presign', presignGalleryUploads);
+  app.post('/gallery/uploads/complete', completeGalleryUploads);
+  app.post('/gallery/uploads/status', galleryUploadStatus);
+  app.post('/gallery/images/search', searchGalleryImages);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);

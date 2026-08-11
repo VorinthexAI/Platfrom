@@ -52,7 +52,14 @@
         }
       ],
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Vorinthex to add the photos you choose to Gallery.",
+          "cameraPermission": "Allow Vorinthex to take photos for Gallery."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

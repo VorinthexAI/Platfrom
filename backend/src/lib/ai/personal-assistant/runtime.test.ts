@@ -34,6 +34,19 @@ describe('personal assistant runtime', () => {
     expect(result).toEqual({ type: 'answer', message: 'Here is the answer.', sources: [] });
   });
 
+  test('exposes only image search on the media workspace', async () => {
+    let chatInput: any;
+    const result = await runPersonalAssistant({ ...input, surface: 'media-workspace' }, domain, {
+      execute: async (_request, nextInput) => {
+        chatInput = nextInput;
+        return response({ text: 'I can search your Gallery.', toolCalls: [], stopReason: 'end_turn' });
+      },
+    });
+
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['search_images']);
+    expect(result).toEqual({ type: 'answer', message: 'I can search your Gallery.', sources: [] });
+  });
+
   test('searches authorized knowledge before answering and returns sources', async () => {
     let modelCalls = 0;
     let searchInput: unknown;

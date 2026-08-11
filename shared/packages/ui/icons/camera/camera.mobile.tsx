@@ -1,4 +1,4 @@
-﻿import Svg, { Path } from "react-native-svg";
+﻿import Svg, { Circle, Path } from "react-native-svg";
 export type CameraIconVariant = "default" | "muted" | "accent" | "danger" | "inverse";
 export type CameraIconSize = "sm" | "md" | "lg";
 export type CameraIconProps = {
@@ -19,8 +19,8 @@ export function CameraIcon({ variant = "default", size = "md", strokeWidth = 1.4
   const color = colors[variant];
   return (
     <Svg width={pixelSize} height={pixelSize} viewBox="0 0 24 24" fill="none">
-      <Path d="M5 12h14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
-      <Path d="M12 5v14" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+      <Path d="M14.5 5 16 7h2.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-7A2.5 2.5 0 0 1 5.5 7H8l1.5-2h5Z" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" />
+      <Circle cx="12" cy="13" r="3.25" stroke={color} strokeWidth={strokeWidth} />
     </Svg>
   );
 }
