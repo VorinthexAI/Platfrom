@@ -6,6 +6,7 @@ import {
   buildOAuthAuthorizationUrl,
   completeOAuthSignIn,
   buildMobileOAuthAuthorizationUrl,
+  completeNativeGoogleSignIn,
   createMobileOAuthGrant,
   createUserWithAuth,
   requestFoundersGate,
@@ -172,6 +173,28 @@ export function registerRoutes(app: Hono) {
     } catch {
       return c.json({ error: 'mobile oauth is not configured' }, 503);
     }
+  });
+
+  app.post('/auth/mobile/google', async (c) => {
+    const body = await parseJson(c, strictObject({ id_token: z.string().min(100).max(16_384) }));
+    const result = await completeNativeGoogleSignIn(body.id_token);
+    if (!result) return c.json({ error: 'google sign in failed' }, 401);
+    if (result.status === 'founders_gate_required') {
+      return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
+    }
+    if (result.status === 'mfa_required') {
+      return c.json({ error: 'mfa required', action: 'mfa', mfa_required: true }, 403);
+    }
+    setSessionForRequest(c, result);
+    return c.json({
+      ok: true,
+      status: result.status,
+      identity: result.identity,
+      ...sessionTokenPayload(c, result),
+      alias: result.alias,
+      alias_slug: result.aliasSlug,
+      welcome_line: result.welcomeLine,
+    });
   });
 
   const mobileOAuthCallback = async (c: Context) => {

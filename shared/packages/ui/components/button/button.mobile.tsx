@@ -148,7 +148,7 @@ function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reduc
   return (
     <Animated.View style={[styles.loadingFill, { transform: [{ scaleY: rise }] }]}>
       <ChromeGradient muted={!primary} />
-      {!reducedMotion && (
+      {primary && !reducedMotion && (
         <>
           <Animated.View style={[styles.bubble, styles.firstBubble, bubbleStyle(firstBubble)]} />
           <Animated.View style={[styles.bubble, styles.secondBubble, bubbleStyle(secondBubble)]} />
@@ -221,7 +221,7 @@ export function Button({
                 {loading && <ButtonLoadingFill primary={variant === "primary"} reducedMotion={reducedMotion} />}
               </View>
             )}
-            {!loading && icon}
+            {(!loading || variant !== "primary") && icon}
             {contentMode === "raw" ? children : variant !== "icon" && (
               <Text style={[
                 styles.text,

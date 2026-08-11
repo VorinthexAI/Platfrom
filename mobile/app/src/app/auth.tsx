@@ -3,6 +3,7 @@ import { Button } from "@vorinthex/shared/ui/button";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { isAxiosError } from "axios";
+import * as Linking from "expo-linking";
 import { useEffect, useState } from "react";
 import { AccessibilityInfo, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -21,6 +22,8 @@ type LoginResponse = {
   handoff_expires_at?: string;
   organization_mfa_required?: boolean;
 };
+
+const FRONTEND_URL = (process.env.EXPO_PUBLIC_FRONTEND_URL ?? "https://vorinthex.com").replace(/\/$/, "");
 
 function messageFor(error: unknown) {
   if (isAxiosError<{ error?: string }>(error)) {
@@ -154,9 +157,9 @@ export default function AuthRoute() {
           <View style={styles.brand}>
             <ChromeIcon glow={0.55} size={86} source={vorinthexMarkSource} />
             <Text style={styles.eyebrow}>VORINTHEX AI</Text>
-            <Text accessibilityRole="header" style={styles.title}>{checkInbox ? "Check your inbox" : "Enter your universe"}</Text>
+            <Text accessibilityRole="header" style={styles.title}>{checkInbox ? "Check your inbox" : "Access your personal AI"}</Text>
             <Text style={styles.subtitle}>
-              {checkInbox ? `We sent a secure 15-minute sign-in link to ${email.trim()}. ${handoff ? "This screen will continue automatically." : "Open it on this device to continue."}` : "One identity for your intelligence, memory, and tools."}
+              {checkInbox ? `We sent a secure 15-minute sign-in link to ${email.trim()}. ${handoff ? "This screen will continue automatically." : "Open it on this device to continue."}` : "Your intelligence, memory, and tools, all in one place."}
             </Text>
           </View>
 
@@ -174,7 +177,7 @@ export default function AuthRoute() {
                 <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" variant="secondary">Continue with Google</Button>
                 <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" variant="secondary">Continue with Apple</Button>
                 {!emailVisible ? (
-                  <Button disabled={busy} icon={<MailIcon />} onPress={() => setEmailVisible(true)} size="lg" variant="outline">Continue with email</Button>
+                  <Button disabled={busy} icon={<MailIcon />} onPress={() => setEmailVisible(true)} size="lg" variant="secondary">Continue with email</Button>
                 ) : (
                   <View style={styles.emailForm}>
                     <Text style={styles.inputLabel}>Email address</Text>
@@ -202,7 +205,14 @@ export default function AuthRoute() {
             )}
             {error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
           </ChromePanel>
-          <Text style={styles.securityNote}>Session credentials are encrypted and stored securely on this device.</Text>
+          {!checkInbox && (
+            <Text style={styles.legalNote}>
+              By continuing, you agree to our{" "}
+              <Text accessibilityRole="link" onPress={() => void Linking.openURL(`${FRONTEND_URL}/terms`)} style={styles.legalLink}>Terms of Service</Text>
+              {" "}and{" "}
+              <Text accessibilityRole="link" onPress={() => void Linking.openURL(`${FRONTEND_URL}/privacy`)} style={styles.legalLink}>Privacy Policy</Text>.
+            </Text>
+          )}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -227,5 +237,6 @@ const styles = StyleSheet.create({
   waiting: { minHeight: 76, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 12, borderRadius: 22, borderWidth: 1, borderColor: palette.hairline },
   waitingText: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 13, letterSpacing: 0.6 },
   error: { paddingHorizontal: spacing.sm, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 13, lineHeight: 18, textAlign: "center" },
-  securityNote: { alignSelf: "center", maxWidth: 330, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "center" },
+  legalNote: { alignSelf: "center", maxWidth: 330, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "center" },
+  legalLink: { color: palette.silver300, textDecorationLine: "underline" },
 });

@@ -18,6 +18,7 @@ import {
   loginIdentityTypeForMembership,
   verifyAccessToken,
   verifyAppleIdentityToken,
+  verifyGoogleIdentityToken,
   verifySuccessiveTotpCodes,
 } from './auth';
 import { decryptSecret, encryptSecret, timingSafeEqual } from '@/lib/crypto';
@@ -121,6 +122,46 @@ describe('auth helpers', () => {
     expect(await verifyAppleIdentityToken(`${token.slice(0, token.lastIndexOf('.'))}.invalid`, loadKeys)).toBeNull();
     process.env.APPLE_OAUTH_CLIENT_ID = 'another-client';
     expect(await verifyAppleIdentityToken(token, loadKeys)).toBeNull();
+  });
+
+  test('accepts only cryptographically verified Google identity tokens', async () => {
+    process.env.GOOGLE_OAUTH_CLIENT_ID = 'google-web-client';
+    const keys = await crypto.subtle.generateKey(
+      { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      true,
+      ['sign', 'verify'],
+    );
+    const publicJwk = await crypto.subtle.exportKey('jwk', keys.publicKey);
+    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const header = encode({ alg: 'RS256', kid: 'google-test' });
+    const tokenFor = async (claims: Record<string, unknown>) => {
+      const payload = encode({
+        iss: 'https://accounts.google.com',
+        aud: 'google-web-client',
+        sub: 'google-user-123',
+        exp: Math.floor(Date.now() / 1000) + 300,
+        email: 'verified@example.com',
+        email_verified: true,
+        name: 'Verified User',
+        picture: 'https://example.com/avatar.png',
+        ...claims,
+      });
+      const signingInput = `${header}.${payload}`;
+      const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', keys.privateKey, new TextEncoder().encode(signingInput));
+      return `${signingInput}.${Buffer.from(signature).toString('base64url')}`;
+    };
+    const loadKeys = async () => [{ ...publicJwk, kid: 'google-test', alg: 'RS256', use: 'sig' }];
+
+    expect(await verifyGoogleIdentityToken(await tokenFor({}), loadKeys)).toEqual({
+      email: 'verified@example.com',
+      name: 'Verified User',
+      profileUrl: 'https://example.com/avatar.png',
+    });
+    expect(await verifyGoogleIdentityToken(await tokenFor({ aud: 'another-client' }), loadKeys)).toBeNull();
+    expect(await verifyGoogleIdentityToken(await tokenFor({ email_verified: false }), loadKeys)).toBeNull();
+    expect(await verifyGoogleIdentityToken(await tokenFor({ exp: Math.floor(Date.now() / 1000) - 1 }), loadKeys)).toBeNull();
+    expect(await verifyGoogleIdentityToken(await tokenFor({ sub: null }), loadKeys)).toBeNull();
+    expect(await verifyGoogleIdentityToken(await tokenFor({}), async () => { throw new Error('offline'); })).toBeNull();
   });
 
   test('encrypts and decrypts TOTP secrets', async () => {

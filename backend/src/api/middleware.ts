@@ -21,6 +21,7 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/api/v1/auth/oauth/start',
   '/api/v1/auth/oauth/callback',
   '/api/v1/auth/mobile/oauth/exchange',
+  '/api/v1/auth/mobile/google',
   '/api/v1/auth/totp/reset/request',
   '/api/v1/auth/totp/setup/start',
   '/api/v1/auth/totp/setup/complete',

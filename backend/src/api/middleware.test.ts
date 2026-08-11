@@ -77,6 +77,7 @@ describe('mobile auth API-key protection', () => {
     expect(isPublicFounderAuthPath('/api/v1/auth/handoff/claim')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/oauth/callback')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/google')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/mobile/google')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/apple/callback')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/github')).toBe(false);
 

@@ -241,6 +241,8 @@ jobs:
           set -euo pipefail
           EXPO_TOKEN="$(jq -re '.secrets.prod.mobile.EXPO_TOKEN' .github/environments.json)"
           EXPO_PUBLIC_API_BASE_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_API_BASE_URL' .github/environments.json)"
+          EXPO_PUBLIC_FRONTEND_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_FRONTEND_URL' .github/environments.json)"
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID' .github/environments.json)"
           EXPO_PUBLIC_BACKEND_API_KEY="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_BACKEND_API_KEY' .github/environments.json)"
           test -n "$EXPO_TOKEN" && [ "$EXPO_TOKEN" != "null" ] || { echo "::error::secrets.prod.mobile.EXPO_TOKEN is not configured in .github/environments.json."; exit 1; }
           test -n "$EXPO_PUBLIC_API_BASE_URL" && test -n "$EXPO_PUBLIC_BACKEND_API_KEY" || { echo "::error::Mobile API environment is not configured in .github/environments.json."; exit 1; }
@@ -248,6 +250,8 @@ jobs:
           echo "::add-mask::$EXPO_PUBLIC_BACKEND_API_KEY"
           echo "EXPO_TOKEN=$EXPO_TOKEN" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_API_BASE_URL=$EXPO_PUBLIC_API_BASE_URL" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FRONTEND_URL=$EXPO_PUBLIC_FRONTEND_URL" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" >> "$GITHUB_ENV"
           echo "EXPO_PUBLIC_BACKEND_API_KEY=$EXPO_PUBLIC_BACKEND_API_KEY" >> "$GITHUB_ENV"
 
       - uses: oven-sh/setup-bun@v2
@@ -260,6 +264,8 @@ jobs:
         working-directory: mobile/app
         run: |
           bunx eas-cli@latest env:set --name EXPO_PUBLIC_API_BASE_URL --value "$EXPO_PUBLIC_API_BASE_URL" --environment preview --visibility plaintext --non-interactive
+          bunx eas-cli@latest env:set --name EXPO_PUBLIC_FRONTEND_URL --value "$EXPO_PUBLIC_FRONTEND_URL" --environment preview --visibility plaintext --non-interactive
+          bunx eas-cli@latest env:set --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --value "$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" --environment preview --visibility plaintext --non-interactive
           bunx eas-cli@latest env:set --name EXPO_PUBLIC_BACKEND_API_KEY --value "$EXPO_PUBLIC_BACKEND_API_KEY" --environment preview --visibility plaintext --non-interactive
 
       - name: Queue EAS internal distribution build (Android APK)

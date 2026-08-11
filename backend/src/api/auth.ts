@@ -663,6 +663,8 @@ function decodeJwtPart(value: string | undefined): Record<string, unknown> | nul
 
 type AppleJwk = JsonWebKey & { kid?: string; alg?: string };
 
+type GoogleJwk = JsonWebKey & { kid?: string; alg?: string; use?: string };
+
 export async function verifyAppleIdentityToken(
   token: string,
   loadKeys: () => Promise<AppleJwk[]> = async () => {
@@ -694,6 +696,51 @@ export async function verifyAppleIdentityToken(
   const email = typeof payload.email === 'string' ? payload.email : null;
   if (!email || (payload.email_verified !== true && payload.email_verified !== 'true')) return null;
   return { email, name: null, profileUrl: null };
+}
+
+export async function verifyGoogleIdentityToken(
+  token: string,
+  loadKeys: () => Promise<GoogleJwk[]> = async () => {
+    const response = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+    const body = await response.json().catch(() => null) as { keys?: GoogleJwk[] } | null;
+    if (!response.ok || !Array.isArray(body?.keys)) throw new Error('Google signing keys unavailable');
+    return body.keys;
+  },
+) {
+  const [encodedHeader, encodedPayload, encodedSignature, extra] = token.split('.');
+  if (!encodedHeader || !encodedPayload || !encodedSignature || extra) return null;
+  const header = decodeJwtPart(encodedHeader);
+  const payload = decodeJwtPart(encodedPayload);
+  if (header?.alg !== 'RS256' || typeof header.kid !== 'string' || !payload) return null;
+  try {
+    const key = (await loadKeys()).find((candidate) => candidate.kid === header.kid
+      && (!candidate.alg || candidate.alg === 'RS256')
+      && (!candidate.use || candidate.use === 'sig'));
+    if (!key) return null;
+    const publicKey = await crypto.subtle.importKey('jwk', key, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const validSignature = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      publicKey,
+      Buffer.from(encodedSignature, 'base64url'),
+      new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+    );
+    const audience = payload.aud;
+    const expectedAudience = requiredEnv('GOOGLE_OAUTH_CLIENT_ID');
+    const audienceMatches = audience === expectedAudience || (Array.isArray(audience) && audience.includes(expectedAudience));
+    const now = Math.floor(Date.now() / 1000);
+    const issuerMatches = payload.iss === 'https://accounts.google.com' || payload.iss === 'accounts.google.com';
+    const email = typeof payload.email === 'string' ? payload.email : null;
+    if (!validSignature || !issuerMatches || !audienceMatches || typeof payload.exp !== 'number' || payload.exp <= now
+      || typeof payload.sub !== 'string' || !payload.sub || !email
+      || (payload.email_verified !== true && payload.email_verified !== 'true')) return null;
+    return {
+      email,
+      name: typeof payload.name === 'string' ? payload.name : null,
+      profileUrl: typeof payload.picture === 'string' ? payload.picture : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function pemBodyToArrayBuffer(pem: string) {
@@ -773,18 +820,10 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
   return verifyAppleIdentityToken(tokenData.id_token);
 }
 
-export async function completeOAuthSignIn(input: {
-  provider: OAuthProvider;
-  code: string;
-  state: string;
-  redirectUri: string;
-}) {
-  const state = await verifySignedOAuthState(input.provider, input.state, input.redirectUri);
-  if (!state) return null;
-  const profile = input.provider === 'google'
-    ? await exchangeGoogleCode(input.code, input.redirectUri)
-    : await exchangeAppleCode(input.code, input.redirectUri);
-  if (!profile) return null;
+async function completeOAuthProfile(
+  profile: { email: string; name: string | null; profileUrl: string | null },
+  mobileRedirectUri?: string,
+) {
   const normalized = normalizeEmail(profile.email);
 
   // Members of MFA-enforcing organizations never get a session through
@@ -794,10 +833,10 @@ export async function completeOAuthSignIn(input: {
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
   const enforced = existingUser ? await mfaEnforcedMembershipIdentity(existingUser) : null;
   if (enforced?.organizationIsRoot) {
-    return { status: 'founders_gate_required' as const, mobileRedirectUri: state.mobileRedirectUri };
+    return { status: 'founders_gate_required' as const, mobileRedirectUri };
   }
   if (enforced) {
-    return { status: 'mfa_required' as const, mobileRedirectUri: state.mobileRedirectUri };
+    return { status: 'mfa_required' as const, mobileRedirectUri };
   }
 
   const user = await upsertUserByEmail(normalized, {
@@ -816,8 +855,27 @@ export async function completeOAuthSignIn(input: {
     alias,
     aliasSlug: user.alias_slug,
     welcomeLine: pickWelcomeLine(user.key, alias),
-    mobileRedirectUri: state.mobileRedirectUri,
+    mobileRedirectUri,
   };
+}
+
+export async function completeOAuthSignIn(input: {
+  provider: OAuthProvider;
+  code: string;
+  state: string;
+  redirectUri: string;
+}) {
+  const state = await verifySignedOAuthState(input.provider, input.state, input.redirectUri);
+  if (!state) return null;
+  const profile = input.provider === 'google'
+    ? await exchangeGoogleCode(input.code, input.redirectUri)
+    : await exchangeAppleCode(input.code, input.redirectUri);
+  return profile ? completeOAuthProfile(profile, state.mobileRedirectUri) : null;
+}
+
+export async function completeNativeGoogleSignIn(idToken: string) {
+  const profile = await verifyGoogleIdentityToken(idToken);
+  return profile ? completeOAuthProfile(profile) : null;
 }
 
 function allowedMobileOAuthRedirect(uri: string) {
