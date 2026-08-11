@@ -37,7 +37,8 @@ describe('image caption pHash lookup', () => {
     expect(bindVars).toMatchObject({ scopeKey, actorKey, segment0: '0000', segment1: '0000', segment2: '0000', segment3: '0000' });
     expect(query).toContain('actorMembership.organizationId == actorScope.organizationKey');
     expect(query).toContain('FILTER elevated || scoped || collectionAccess');
-    expect(query).toContain('sourceImage.scopeKey == @scopeKey');
+    expect(query).toContain('image.imageCaptionKey == caption._key');
+    expect(query).toContain('FILTER accessibleImage != null');
   });
 
   test('rejects candidates below 95 percent similarity', async () => {

@@ -23,10 +23,10 @@ function context(): DomainToolContext {
 
 function result(scopeKey: string) {
   return {
-    image: {
+      image: {
       key: newId(), scopeKey, filename: 'mountain.jpg', caption: 'Snow-covered mountains beneath a blue sky.',
       storageKey: 'private/mountain.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 1_200, height: 800,
-      embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
+      embedding, imageCaptionKey: null, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
     },
     score: 0.92,
   };
@@ -63,6 +63,7 @@ describe('image.search tool', () => {
     expect(output.images).toEqual([expect.objectContaining({ filename: 'mountain.jpg', score: 0.92 })]);
     expect(output.images[0]).not.toHaveProperty('embedding');
     expect(output.images[0]).not.toHaveProperty('storageKey');
+    expect(output.images[0]).toEqual(expect.objectContaining({ imageCaptionKey: null }));
   });
 
   test('passes explicit threshold and limit and rejects malformed input', async () => {
@@ -74,8 +75,27 @@ describe('image.search tool', () => {
       async searchImages(input) { searched = input; return []; },
     });
     expect(searched).toMatchObject({ threshold: 0.7, limit: 12 });
+    await imageSearchTool.execute({ query: `  ${QWEN_RETRIEVAL_INSTRUCTION}city  `, threshold: 0 }, {
+      context: toolContext,
+      executeEmbedding: async (_organizationKey, input) => { expect(input.text).toBe(`${QWEN_RETRIEVAL_INSTRUCTION}city`); return { output: { embedding } } as never; },
+      async searchImages(input) { expect(input.threshold).toBe(0); return []; },
+    });
     await expect(imageSearchTool.execute({ query: '', extra: true }, { context: toolContext })).rejects.toThrow();
     await expect(imageSearchTool.execute({ query: 'city', limit: 51 }, { context: toolContext })).rejects.toThrow();
+  });
+
+  test('rejects malformed embedding responses and invalid result scores', async () => {
+    const toolContext = context();
+    await expect(imageSearchTool.execute({ query: 'city' }, {
+      context: toolContext,
+      executeEmbedding: async () => ({ output: { embedding: embedding.slice(1) } }) as never,
+      searchImages: async () => [],
+    })).rejects.toThrow();
+    await expect(imageSearchTool.execute({ query: 'city' }, {
+      context: toolContext,
+      executeEmbedding: async () => ({ output: { embedding } }) as never,
+      searchImages: async () => [{ ...result(toolContext.runtimeScopeKey), score: 1.1 }],
+    })).rejects.toThrow();
   });
 
   test('requires an active member in the current organization', async () => {

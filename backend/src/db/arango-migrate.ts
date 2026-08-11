@@ -90,7 +90,10 @@ export async function migrateImageCaptions(targetDb: Database): Promise<void> {
     RETURN LENGTH(
       FOR image IN images
         LET caption = DOCUMENT(imageCaptions, image.imageCaptionKey)
-        FILTER caption == null || caption.scopeKey != image.scopeKey
+        FILTER caption == null
+          || caption.scopeKey != image.scopeKey
+          || caption.caption != image.caption
+          || caption.embedding != image.embedding
         RETURN 1
     )
   `);
@@ -809,7 +812,7 @@ export const collections: CollectionSpec[] = [
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
   { name: 'images', embedKeys: ['filename', 'caption'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
-  { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], unique: true, sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
+  { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'collections', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
@@ -1223,6 +1226,15 @@ async function main() {
         if (fields.length === 2 && fields[0] === 'scopeKey' && fields[1] === 'name' && 'unique' in index && index.unique === true) {
           await collection.dropIndex(index.id);
           console.log(`Dropped obsolete unique channel-name index ${index.id}`);
+        }
+      }
+    }
+    if (spec.name === 'imageCaptions') {
+      for (const index of await collection.indexes()) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+        if (fields.join('\0') === ['scopeKey', 'hashAlgorithm', 'perceptualHash'].join('\0') && 'unique' in index && index.unique === true) {
+          await collection.dropIndex(index.id);
+          console.log(`Dropped obsolete unique image-caption pHash index ${index.id}`);
         }
       }
     }

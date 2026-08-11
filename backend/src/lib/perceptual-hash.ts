@@ -14,7 +14,8 @@ function dct(samples: Uint8Array): number[] {
       let sum = 0;
       for (let y = 0; y < SAMPLE_SIDE; y += 1) {
         for (let x = 0; x < SAMPLE_SIDE; x += 1) {
-          sum += samples[y * SAMPLE_SIDE + x]!
+          const sample = Math.round(samples[y * SAMPLE_SIDE + x]! / 4) * 4;
+          sum += sample
             * Math.cos(((2 * x + 1) * horizontal * Math.PI) / (2 * SAMPLE_SIDE))
             * Math.cos(((2 * y + 1) * vertical * Math.PI) / (2 * SAMPLE_SIDE));
         }
@@ -33,11 +34,14 @@ export async function computePerceptualHash(bytes: Uint8Array): Promise<string> 
     .resize(SAMPLE_SIDE, SAMPLE_SIDE, { fit: 'fill' })
     .raw()
     .toBuffer();
-  const coefficients = dct(samples);
+  const rawCoefficients = dct(samples);
+  const tolerance = Math.max(1, Math.abs(rawCoefficients[0] ?? 0)) * 1e-12;
+  const coefficients = rawCoefficients.map((coefficient) => Math.abs(coefficient) < tolerance ? 0 : coefficient);
   const sorted = coefficients.slice(1).sort((left, right) => left - right);
   const median = sorted[Math.floor(sorted.length / 2)]!;
+  const deadband = ((sorted.at(-1) ?? median) - (sorted[0] ?? median)) * 2e-3;
   let hash = 0n;
-  for (const coefficient of coefficients) hash = (hash << 1n) | (coefficient >= median ? 1n : 0n);
+  for (const coefficient of coefficients) hash = (hash << 1n) | (coefficient > median + deadband ? 1n : 0n);
   return perceptualHashSchema.parse(hash.toString(16).padStart(16, '0'));
 }
 

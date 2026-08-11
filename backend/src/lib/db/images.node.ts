@@ -45,20 +45,23 @@ export async function insertPreparedImageWithCaption(input: {
   image: Image;
   caption?: ImageCaptionRecord;
   actorKey: string;
-}): Promise<Image> {
+}, options: {
+  runTransaction?: typeof withTransaction;
+  findCaption?: typeof findReusableImageCaption;
+} = {}): Promise<Image> {
   let image = imageSchema.parse(input.image);
   let caption = input.caption ? imageCaptionRecordSchema.parse(input.caption) : undefined;
   if (!image.imageCaptionKey) throw new Error('Prepared images require an image caption reference.');
   if (caption && (caption.key !== image.imageCaptionKey || caption.scopeKey !== image.scopeKey || caption.caption !== image.caption)) {
     throw new Error('Image caption relation does not match the prepared image.');
   }
-  return withTransaction({
+  return (options.runTransaction ?? withTransaction)({
     read: ['userOrganizations', 'scopes', 'scopeMembers', 'collectionImages', 'collections', 'collectionMembers'],
     write: ['images', 'imageCaptions'],
   }, async (transaction) => {
     if (caption) {
       const reusable = caption.perceptualHash
-        ? await findReusableImageCaption(image.scopeKey, caption.perceptualHash, input.actorKey, transaction)
+        ? await (options.findCaption ?? findReusableImageCaption)(image.scopeKey, caption.perceptualHash, input.actorKey, transaction)
         : null;
       if (reusable) {
         image = imageSchema.parse({ ...image, caption: reusable.caption, embedding: reusable.embedding, imageCaptionKey: reusable.key });
@@ -71,6 +74,11 @@ export async function insertPreparedImageWithCaption(input: {
       const record = await existing.next();
       const parsed = record ? imageCaptionRecordSchema.parse(withArangoKey(record as Record<string, unknown>)) : null;
       if (!parsed || parsed.scopeKey !== image.scopeKey || parsed.caption !== image.caption) throw new Error('Reusable image caption is unavailable.');
+      const accessible = parsed.perceptualHash
+        ? await (options.findCaption ?? findReusableImageCaption)(image.scopeKey, parsed.perceptualHash, input.actorKey, transaction)
+        : null;
+      if (!accessible) throw new Error('Reusable image caption is not accessible.');
+      image = imageSchema.parse({ ...image, caption: accessible.caption, embedding: accessible.embedding, imageCaptionKey: accessible.key });
     }
     const cursor = await transaction.query('INSERT @image INTO images RETURN NEW', { image: toArangoDoc(image) });
     const inserted = await cursor.next();

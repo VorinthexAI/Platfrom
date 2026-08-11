@@ -85,4 +85,42 @@ describe('MediaLibrary image processing', () => {
     await expect(processImage({ ...input(png(4, 3)), idempotencyKey: 'same-key' }, { ...dependencies, caption: async () => 'Caption' })).rejects.toMatchObject({ code: 'IMAGE_IDEMPOTENCY_CONFLICT' });
     expect(stored).not.toHaveProperty('requestHash');
   });
+  test('hashes and uploads only pending items in a mixed replay batch', async () => {
+    let stored: any;
+    const baseDependencies = {
+      storage: { async upload({ key }: { key: string }) { return { storageKey: key }; }, async delete() {} },
+      hashBatch: async () => ['0123456789abcdef'], findCaption: async () => null,
+      caption: async () => 'Caption', embed: async () => Array(EMBEDDING_DIMENSIONS).fill(0.1),
+      getImage: async () => stored ?? null, persistImage: async ({ image }: any) => stored = image,
+      createCaptionKey: () => 'cmrnlzf650002qc7k4p5zem5x',
+    } as Parameters<typeof processImage>[1];
+    await processImage({ ...input(), idempotencyKey: 'persisted' }, baseDependencies);
+    let hashed = 0;
+    let uploads = 0;
+    const results = await processImages([
+      { ...input(), idempotencyKey: 'persisted' },
+      { ...input(), file: { ...input().file, filename: 'new.png' } },
+    ], {
+      ...baseDependencies,
+      storage: { async upload({ key }) { uploads += 1; return { storageKey: key }; }, async delete() {} },
+      hashBatch: async (images) => { hashed += images.length; return ['0123456789abcdee']; },
+      getImage: async (key) => key === stored.key ? stored : null,
+      persistImage: async ({ image }) => image,
+      createKey: () => 'cmrnlzf650002qc7k4p5zem5z',
+    });
+    expect(hashed).toBe(1);
+    expect(uploads).toBe(1);
+    expect(results[0]).toBe(stored);
+    expect(results[1]?.filename).toBe('new.png');
+  });
+  test('rejects invalid batch bounds and hash cardinality before uploading', async () => {
+    await expect(processImages([], {})).rejects.toMatchObject({ code: 'IMAGE_INVALID_INPUT' });
+    let uploads = 0;
+    await expect(processImages([input(), { ...input(), file: { ...input().file, filename: 'two.png' } }], {
+      hashBatch: async () => ['0123456789abcdef'],
+      getImage: async () => null,
+      storage: { async upload({ key }) { uploads += 1; return { storageKey: key }; }, async delete() {} },
+    })).rejects.toMatchObject({ code: 'IMAGE_INVALID_INPUT' });
+    expect(uploads).toBe(0);
+  });
 });

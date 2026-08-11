@@ -43,8 +43,12 @@ describe('Arango migration indexes', () => {
     expect(calls.some((query) => query.includes('UPDATE image WITH { imageCaptionKey: image._key } IN images'))).toBe(true);
     expect(calls.some((query) => query.includes('caption.perceptualHash'))).toBe(false);
     expect(collections.find(({ name }) => name === 'imageCaptions')?.indexes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], unique: true, sparse: true }),
+      expect.objectContaining({ fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }),
     ]));
+    expect(collections.find(({ name }) => name === 'imageCaptions')?.indexes?.find(({ fields }) => fields.join('.') === 'scopeKey.hashAlgorithm.perceptualHash')?.unique).not.toBe(true);
+    expect(calls.at(-1)).toContain('caption.embedding != image.embedding');
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('Dropped obsolete unique image-caption pHash index');
   });
   test('retires removed action relations before their fixed seed keys are reused', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];

@@ -44,6 +44,22 @@ export async function findReusableImageCaption(
   const hash = perceptualHashSchema.parse(perceptualHash);
   const segments = perceptualHashSegments(hash);
   const cursor = await database.query(`
+    LET actorMembership = DOCUMENT(userOrganizations, @actorKey)
+    LET actorScope = DOCUMENT(scopes, @scopeKey)
+    LET active = actorMembership != null
+      && actorScope != null
+      && actorScope.deletedAt == null
+      && actorMembership.status == "active"
+      && actorMembership.organizationId == actorScope.organizationKey
+    LET elevated = active && actorMembership.orgRole IN ["owner", "admin"]
+    LET scoped = active && LENGTH(
+      FOR scopeMember IN scopeMembers
+        FILTER scopeMember.scopeKey == @scopeKey
+        FILTER scopeMember.userOrganizationKey == @actorKey
+        FILTER scopeMember.status == "active"
+        LIMIT 1
+        RETURN 1
+    ) > 0
     FOR caption IN imageCaptions
       FILTER caption.scopeKey == @scopeKey
       FILTER caption.hashAlgorithm == @hashAlgorithm
@@ -52,38 +68,28 @@ export async function findReusableImageCaption(
         || caption.hashSegment1 == @segment1
         || caption.hashSegment2 == @segment2
         || caption.hashSegment3 == @segment3
-      LET sourceImage = DOCUMENT(images, caption.sourceImageKey)
-      LET actorMembership = DOCUMENT(userOrganizations, @actorKey)
-      LET actorScope = DOCUMENT(scopes, @scopeKey)
-      LET active = actorMembership != null
-        && actorScope != null
-        && actorScope.deletedAt == null
-        && actorMembership.status == "active"
-        && actorMembership.organizationId == actorScope.organizationKey
-      LET elevated = active && actorMembership.orgRole IN ["owner", "admin"]
-      LET scoped = active && LENGTH(
-        FOR scopeMember IN scopeMembers
-          FILTER scopeMember.scopeKey == @scopeKey
-          FILTER scopeMember.userOrganizationKey == @actorKey
-          FILTER scopeMember.status == "active"
+      LET accessibleImage = FIRST(
+        FOR image IN images
+          FILTER image.imageCaptionKey == caption._key
+          FILTER image.scopeKey == @scopeKey && image.deletedAt == null
+          LET collectionAccess = active && LENGTH(
+            FOR relation IN collectionImages
+              FILTER relation.scopeKey == @scopeKey
+              FILTER relation.imageKey == image._key
+              LET collection = DOCUMENT(collections, relation.collectionKey)
+              FILTER collection != null && collection.scopeKey == @scopeKey && collection.deletedAt == null
+              FOR member IN collectionMembers
+                FILTER member.scopeKey == @scopeKey
+                FILTER member.collectionKey == relation.collectionKey
+                FILTER member.memberKey == @actorKey
+                LIMIT 1
+                RETURN 1
+          ) > 0
+          FILTER elevated || scoped || collectionAccess
           LIMIT 1
-          RETURN 1
-      ) > 0
-      LET collectionAccess = active && LENGTH(
-        FOR relation IN collectionImages
-          FILTER relation.scopeKey == @scopeKey
-          FILTER relation.imageKey == caption.sourceImageKey
-          LET collection = DOCUMENT(collections, relation.collectionKey)
-          FILTER collection != null && collection.scopeKey == @scopeKey && collection.deletedAt == null
-          FOR member IN collectionMembers
-            FILTER member.scopeKey == @scopeKey
-            FILTER member.collectionKey == relation.collectionKey
-            FILTER member.memberKey == @actorKey
-            LIMIT 1
-            RETURN 1
-      ) > 0
-      FILTER sourceImage != null && sourceImage.scopeKey == @scopeKey && sourceImage.deletedAt == null
-      FILTER elevated || scoped || collectionAccess
+          RETURN image._key
+      )
+      FILTER accessibleImage != null
       RETURN caption
   `, {
     scopeKey,
