@@ -29,11 +29,6 @@
             {
               "scheme": "https",
               "host": "vorinthex.com",
-              "path": "/auth/mfa"
-            },
-            {
-              "scheme": "https",
-              "host": "vorinthex.com",
               "path": "/public/auth/token"
             }
           ],

@@ -77,6 +77,7 @@ interface LoginIdentity {
   organizationTitle: string | null;
   orchestratorKey: string | null;
   organizationIsRoot: boolean;
+  organizationIsPersonal: boolean;
   organizationMfaEnabled: boolean;
   isMfaEnabled: boolean;
   totpSecret: string | null;
@@ -175,6 +176,7 @@ async function membershipIdentity(
     organizationTitle: membership.orgTitle,
     orchestratorKey: membership.orchestratorKey,
     organizationIsRoot: organization.is_root,
+    organizationIsPersonal: organization.slug === `personal-${user.key}`,
     organizationMfaEnabled: organization.mfa_enabled,
     isMfaEnabled: membership.isMfaEnabled,
     totpSecret: membership.totpSecret,
@@ -196,28 +198,26 @@ const membershipRoleRank: Record<UserOrganization['orgRole'], number> = {
   viewer: 1,
 };
 
-function strongestMembership(
-  memberships: UserOrganization[],
-): UserOrganization | null {
-  return memberships.reduce<UserOrganization | null>((best, membership) => {
-    if (!best || membershipRoleRank[membership.orgRole] > membershipRoleRank[best.orgRole]) return membership;
+function strongestIdentity(identities: LoginIdentity[]): LoginIdentity | null {
+  return identities.reduce<LoginIdentity | null>((best, identity) => {
+    if (!best || membershipRoleRank[identity.orgRole] > membershipRoleRank[best.orgRole]) return identity;
     return best;
   }, null);
 }
 
 async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
   const memberships = await listActiveUserOrganizationsByUser(user.key);
+  const identities = (await Promise.all(memberships.map((membership) => membershipIdentity(user, membership))))
+    .filter((identity): identity is LoginIdentity => identity !== null);
   // MFA-enforcing memberships always win over ordinary personal ownership.
-  for (const membership of memberships) {
-    const identity = await membershipIdentity(user, membership);
-    if (identity?.organizationIsRoot && identity.organizationMfaEnabled) return identity;
-  }
-  for (const membership of memberships) {
-    const identity = await membershipIdentity(user, membership);
-    if (identity?.organizationMfaEnabled) return identity;
-  }
-  const membership = strongestMembership(memberships);
-  return membership ? membershipIdentity(user, membership) : null;
+  const root = identities.find((identity) => identity.organizationIsRoot && identity.organizationMfaEnabled);
+  if (root) return root;
+  const enforced = identities.find((identity) => identity.organizationMfaEnabled);
+  if (enforced) return enforced;
+  // A real organization membership takes precedence over the automatically
+  // provisioned personal workspace, even when personal ownership ranks higher.
+  return strongestIdentity(identities.filter((identity) => !identity.organizationIsPersonal))
+    ?? strongestIdentity(identities);
 }
 
 async function rootOrganizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
@@ -840,8 +840,8 @@ async function completeOAuthProfile(
   }
 
   const user = await upsertUserByEmail(normalized, {
-    name: profile.name ?? defaultNameFromEmail(normalized),
-    profileUrl: profile.profileUrl,
+    ...(profile.name ? { name: profile.name } : {}),
+    ...(profile.profileUrl ? { profileUrl: profile.profileUrl } : {}),
     isVerified: true,
     lastLoginAt: new Date().toISOString(),
   });
@@ -1041,24 +1041,26 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
       };
     }
 
-    const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type, {
-      withHandoff: true,
-      membershipKey: identity.linkKey,
-    });
-    const magicLink = buildMagicLink(challenge.tokenHash, 'member');
-    await deliverMemberSignInEmail({
-      email: normalized,
-      name: memberGreetingName(identity),
-      magicLink,
-      mfaEnabled: false,
-      expiresAt: challenge.expiresAt,
-    });
-    return {
-      allowed: true as const,
-      expiresAt: challenge.expiresAt,
-      handoffTokenHash: challenge.handoffTokenHash,
-      handoffExpiresAt: new Date(challenge.expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
-    };
+    if (!identity.organizationIsPersonal) {
+      const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type, {
+        withHandoff: true,
+        membershipKey: identity.linkKey,
+      });
+      const magicLink = buildMagicLink(challenge.tokenHash, 'member');
+      await deliverMemberSignInEmail({
+        email: normalized,
+        name: memberGreetingName(identity),
+        magicLink,
+        mfaEnabled: false,
+        expiresAt: challenge.expiresAt,
+      });
+      return {
+        allowed: true as const,
+        expiresAt: challenge.expiresAt,
+        handoffTokenHash: challenge.handoffTokenHash,
+        handoffExpiresAt: new Date(challenge.expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
+      };
+    }
   }
 
   // Users without an organization membership sign in directly without TOTP.
@@ -1170,25 +1172,31 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
   if (emailChallenge.identityType === 'user') {
     const user = await getUserById(emailChallenge.identityKey);
     if (!user) return null;
-    // The tap proves inbox ownership: wake the browser that requested the
-    // link, wherever this one happens to be running.
-    await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
     // Signing in proves inbox ownership — it verifies the email too.
-    await updateUser(user.key, {
+    const verifiedUser = await updateUser(user.key, {
       isVerified: true,
       lastLoginAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await provisionPersonalAuthContext(user);
-    const tokens = await issueUserTokens(user);
-    const alias = user.alias ?? generateAlias(user.key);
+    await provisionPersonalAuthContext(verifiedUser);
+    const tokens = await issueUserTokens(verifiedUser);
+    // Publish only after verification and session prerequisites are durable,
+    // otherwise the waiting client can race ahead and burn its one-shot claim.
+    try {
+      await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
+    } catch (error) {
+      // The tapping client already has a valid session. Handoff failure must
+      // not turn that successful one-time link into an unrecoverable error.
+      console.warn('magic-link handoff approval failed', error instanceof Error ? error.message : String(error));
+    }
+    const alias = verifiedUser.alias ?? generateAlias(verifiedUser.key);
     return {
       status: 'authenticated',
-      identity: { key: user.key, identityType: 'user' },
+      identity: { key: verifiedUser.key, identityType: 'user' },
       ...tokens,
       alias,
-      aliasSlug: user.alias_slug,
-      welcomeLine: pickWelcomeLine(user.key, alias),
+      aliasSlug: verifiedUser.alias_slug,
+      welcomeLine: pickWelcomeLine(verifiedUser.key, alias),
     };
   }
 

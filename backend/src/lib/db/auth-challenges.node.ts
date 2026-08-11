@@ -35,6 +35,7 @@ export const authChallengeSchema = z.object({
   handoffTokenHash: z.string().nullable().default(null),
   approvedAt: z.string().nullable().default(null),
   handoffClaimedAt: z.string().nullable().default(null),
+  handoffClaimLeaseAt: z.string().nullable().default(null),
 });
 
 export type AuthChallenge = z.infer<typeof authChallengeSchema>;
@@ -104,6 +105,58 @@ export async function getAuthChallengeByTokenHash(tokenHash: string): Promise<Au
   `);
   const doc = await cursor.next();
   return doc ? parseAuthChallenge(withArangoKey(doc)) : null;
+}
+
+/** Leases a fresh approval so only one requester performs session work at a time. */
+export async function leaseAuthChallengeByHandoffTokenHash(
+  tokenHash: string,
+  leaseAt: string,
+  approvalCutoff: string,
+  leaseCutoff: string,
+): Promise<AuthChallenge | null> {
+  const cursor = await db.query(aql`
+    FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      FILTER challenge.handoffTokenHash == ${tokenHash}
+        && (!HAS(challenge, "handoffClaimedAt") || challenge.handoffClaimedAt == null)
+        && HAS(challenge, "approvedAt")
+        && challenge.approvedAt != null
+        && DATE_TIMESTAMP(challenge.approvedAt) > DATE_TIMESTAMP(${approvalCutoff})
+        && (
+          !HAS(challenge, "handoffClaimLeaseAt")
+          || challenge.handoffClaimLeaseAt == null
+          || DATE_TIMESTAMP(challenge.handoffClaimLeaseAt) <= DATE_TIMESTAMP(${leaseCutoff})
+        )
+      LIMIT 1
+      UPDATE challenge WITH { handoffClaimLeaseAt: ${leaseAt} }
+        IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      RETURN NEW
+  `);
+  const doc = await cursor.next();
+  return doc ? parseAuthChallenge(withArangoKey(doc)) : null;
+}
+
+/** Finalizes only the caller's active lease after its session is durable. */
+export async function completeAuthChallengeHandoffClaim(id: string, leaseAt: string, claimedAt: string): Promise<boolean> {
+  const cursor = await db.query(aql`
+    FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      FILTER challenge._key == ${id}
+        && challenge.handoffClaimedAt == null
+        && challenge.handoffClaimLeaseAt == ${leaseAt}
+      UPDATE challenge WITH { handoffClaimedAt: ${claimedAt}, handoffClaimLeaseAt: null }
+        IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      RETURN true
+  `);
+  return Boolean(await cursor.next());
+}
+
+/** Releases only the matching in-progress lease after a transient failure. */
+export async function releaseAuthChallengeHandoffLease(id: string, leaseAt: string): Promise<void> {
+  await db.query(aql`
+    FOR challenge IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+      FILTER challenge._key == ${id} && challenge.handoffClaimLeaseAt == ${leaseAt}
+      UPDATE challenge WITH { handoffClaimLeaseAt: null }
+        IN ${db.collection(AUTH_CHALLENGES_COLLECTION)}
+  `);
 }
 
 /** Atomically claims an unexpired challenge so concurrent requests cannot replay it. */
@@ -178,7 +231,7 @@ export async function exchangeFounderTotpForRecovery(input: {
   identityType: z.infer<typeof authIdentityTypeSchema>;
   membershipKey: string;
   exchangedAt: string;
-  recoveryChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt'>;
+  recoveryChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt' | 'handoffClaimLeaseAt'>;
 }): Promise<boolean> {
   return withTransaction([AUTH_CHALLENGES_COLLECTION], async (transaction) => {
     const sourceCursor = await transaction.query(aql`
@@ -222,7 +275,7 @@ export async function consumeFounderRecoveryAndStartSetup(input: {
   expectedMfaVersion: number;
   encryptedSecret: string;
   startedAt: string;
-  setupChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt'>;
+  setupChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt' | 'handoffClaimLeaseAt'>;
 }): Promise<boolean> {
   return withTransaction(
     [AUTH_CHALLENGES_COLLECTION, USER_ORGANIZATION_COLLECTION, USERS_COLLECTION],
@@ -293,7 +346,7 @@ export async function consumeSetupAuthorizationAndStartSetup(input: {
   membershipKey: string;
   encryptedSecret: string;
   startedAt: string;
-  setupChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt'>;
+  setupChallenge: Omit<AuthChallenge, 'embedding' | 'consumedAt' | 'handoffTokenHash' | 'approvedAt' | 'handoffClaimedAt' | 'handoffClaimLeaseAt'>;
 }): Promise<boolean> {
   return withTransaction([AUTH_CHALLENGES_COLLECTION, USER_ORGANIZATION_COLLECTION], async (transaction) => {
     const sourceCursor = await transaction.query(aql`

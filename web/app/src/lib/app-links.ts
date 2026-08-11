@@ -7,7 +7,6 @@ export function buildAppleAppSiteAssociation() {
       details: [{
         appIDs: [`${APPLE_TEAM_ID}.${APP_IDENTIFIER}`],
         components: [
-          { "/": "/auth/mfa", comment: "Founder sign-in and MFA recovery" },
           { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
         ],
       }],
@@ -16,10 +15,10 @@ export function buildAppleAppSiteAssociation() {
 }
 
 export function buildAndroidAssetLinks(certificateFingerprints: string | undefined) {
-  const fingerprints = (certificateFingerprints ?? "")
-    .split(",")
+  const fingerprints = (certificateFingerprints ?? "").split(",")
     .map((fingerprint) => fingerprint.trim().toUpperCase())
-    .filter((fingerprint) => /^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(fingerprint));
+    .filter((fingerprint) => /^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(fingerprint))
+    .filter((fingerprint, index, all) => all.indexOf(fingerprint) === index);
 
   return fingerprints.length === 0 ? [] : [{
     relation: ["delegate_permission/common.handle_all_urls"],

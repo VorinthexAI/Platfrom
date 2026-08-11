@@ -18,6 +18,7 @@ describe('auth challenge node schema', () => {
     expect(challenge.identityKey).toBe('usr_test');
     expect(challenge.identityType).toBe('user');
     expect(challenge.membershipKey).toBeNull();
+    expect(challenge.handoffClaimLeaseAt).toBeNull();
   });
 
   test('parses purpose-bound founder challenges', () => {
