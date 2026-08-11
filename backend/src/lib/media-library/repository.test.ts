@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
-import { createMediaLibraryRepository, type MediaLibraryDatabase } from './repository';
+import { currentEmbeddingSchema } from '@/lib/embeddings';
+import { createMediaLibraryRepository, searchAccessibleImages, type MediaLibraryDatabase } from './repository';
 
 describe('MediaLibrary repository transactions', () => {
   test('requires existing source-image access in the add query', async () => {
@@ -43,5 +44,44 @@ describe('MediaLibrary repository transactions', () => {
     const coverQuery = queries.find((query) => query.includes('collection.coverImageKey == @imageKey'));
     expect(coverQuery).toContain('UPDATE collection WITH { coverImageKey: null');
     expect(coverQuery).toContain('OPTIONS { keepNull: false }');
+  });
+});
+
+describe('MediaLibrary image similarity search', () => {
+  test('enforces Gallery access and returns descending cosine matches', async () => {
+    const organizationKey = newId(), scopeKey = newId(), actorKey = newId(), imageKey = newId();
+    const embedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.25));
+    const now = '2026-08-11T12:00:00.000Z';
+    let query = '';
+    let bindVars: Record<string, unknown> = {};
+    const database: MediaLibraryDatabase = {
+      async query(value, variables) {
+        query = value;
+        bindVars = variables ?? {};
+        return { async all() { return [{ image: { _key: imageKey, scopeKey, filename: 'image.jpg', caption: 'Caption', storageKey: 'private/image.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 10, height: 10, embedding, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now }, score: 0.9 }]; } };
+      },
+    };
+
+    const results = await searchAccessibleImages({ organizationKey, scopeKey, actorKey, embedding, limit: 50 }, database);
+    expect(query).toContain('actorMembership.status == "active"');
+    expect(query).toContain('actorMembership.organizationId == @organizationKey');
+    expect(query).toContain('actorScope.organizationKey == @organizationKey');
+    expect(query).toContain('FILTER elevated || scoped || collectionAccess');
+    expect(query).toContain('collection.deletedAt == null');
+    expect(query).toContain('LENGTH(image.embedding) == @dimensions');
+    expect(query).toContain('COSINE_SIMILARITY(image.embedding, @embedding)');
+    expect(query).toContain('FILTER @threshold == null || score >= @threshold');
+    expect(query).toContain('SORT score DESC, image._key ASC');
+    expect(query).toContain('LIMIT @limit');
+    expect(bindVars).toMatchObject({ organizationKey, scopeKey, actorKey, dimensions: 4_096, threshold: null, limit: 50 });
+    expect(results).toEqual([{ image: expect.objectContaining({ key: imageKey, filename: 'image.jpg' }), score: 0.9 }]);
+    expect(results[0]?.image).not.toHaveProperty('_key');
+  });
+
+  test('binds an explicit threshold without interpolating it into AQL', async () => {
+    let bindVars: Record<string, unknown> = {};
+    const database: MediaLibraryDatabase = { async query(_query, variables) { bindVars = variables ?? {}; return { async all() { return []; } }; } };
+    await searchAccessibleImages({ organizationKey: newId(), scopeKey: newId(), actorKey: newId(), embedding: Array.from({ length: 4_096 }, () => 0), threshold: 0.97, limit: 10 }, database);
+    expect(bindVars).toMatchObject({ threshold: 0.97, limit: 10 });
   });
 });

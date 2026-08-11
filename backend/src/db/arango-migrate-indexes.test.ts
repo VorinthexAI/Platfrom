@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, retireRemovedActions } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateImageCaptions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 
@@ -29,6 +29,23 @@ function migrationDatabase(collection: 'documents' | 'documentVersions', row: Re
 }
 
 describe('Arango migration indexes', () => {
+  test('additively backfills canonical image captions and image references', async () => {
+    const calls: string[] = [];
+    const database = {
+      async query(query: string) {
+        calls.push(query);
+        return { async all() { return []; }, async next() { return 0; } };
+      },
+    };
+    await migrateImageCaptions(database as never);
+    expect(calls.some((query) => query.includes('INTO imageCaptions OPTIONS { overwriteMode: "ignore" }'))).toBe(true);
+    expect(calls.filter((query) => query.includes('INTO imageCaptions')).every((query) => query.includes('FILTER image.imageCaptionKey == null'))).toBe(true);
+    expect(calls.some((query) => query.includes('UPDATE image WITH { imageCaptionKey: image._key } IN images'))).toBe(true);
+    expect(calls.some((query) => query.includes('caption.perceptualHash'))).toBe(false);
+    expect(collections.find(({ name }) => name === 'imageCaptions')?.indexes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], unique: true, sparse: true }),
+    ]));
+  });
   test('retires removed action relations before their fixed seed keys are reused', async () => {
     const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
     const database = {

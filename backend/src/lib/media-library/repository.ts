@@ -46,6 +46,86 @@ export interface MediaLibraryRepository {
   getTag(scopeKey: string, tagKey: string): Promise<Tag | null>;
 }
 
+export interface AccessibleImageSearchInput {
+  organizationKey: string;
+  scopeKey: string;
+  actorKey: string;
+  embedding: number[];
+  threshold?: number;
+  limit: number;
+}
+
+export interface AccessibleImageSearchResult {
+  image: Image;
+  score: number;
+}
+
+export async function searchAccessibleImages(
+  input: AccessibleImageSearchInput,
+  database: MediaLibraryDatabase = db,
+): Promise<AccessibleImageSearchResult[]> {
+  const cursor = await database.query(`
+    LET actorMembership = DOCUMENT(userOrganizations, @actorKey)
+    LET actorScope = DOCUMENT(scopes, @scopeKey)
+    FILTER actorMembership != null
+    FILTER actorMembership.status == "active"
+    FILTER actorMembership.organizationId == @organizationKey
+    FILTER actorScope != null
+    FILTER actorScope.deletedAt == null
+    FILTER actorScope.organizationKey == @organizationKey
+    LET elevated = actorMembership.orgRole IN ["owner", "admin"]
+    LET scoped = LENGTH(
+      FOR scopeMember IN scopeMembers
+        FILTER scopeMember.scopeKey == @scopeKey
+        FILTER scopeMember.userOrganizationKey == @actorKey
+        FILTER scopeMember.status == "active"
+        LIMIT 1
+        RETURN 1
+    ) > 0
+    FOR image IN images
+      FILTER image.scopeKey == @scopeKey
+      FILTER image.deletedAt == null
+      LET collectionAccess = LENGTH(
+        FOR relation IN collectionImages
+          FILTER relation.scopeKey == @scopeKey
+          FILTER relation.imageKey == image._key
+          LET collection = DOCUMENT(collections, relation.collectionKey)
+          FILTER collection != null
+          FILTER collection.scopeKey == @scopeKey
+          FILTER collection.deletedAt == null
+          FOR member IN collectionMembers
+            FILTER member.scopeKey == @scopeKey
+            FILTER member.collectionKey == relation.collectionKey
+            FILTER member.memberKey == @actorKey
+            LIMIT 1
+            RETURN 1
+      ) > 0
+      FILTER elevated || scoped || collectionAccess
+      FILTER IS_ARRAY(image.embedding)
+      FILTER LENGTH(image.embedding) == @dimensions
+      FILTER LENGTH(image.embedding[* FILTER !IS_NUMBER(CURRENT)]) == 0
+      LET score = COSINE_SIMILARITY(image.embedding, @embedding)
+      FILTER IS_NUMBER(score)
+      FILTER @threshold == null || score >= @threshold
+      SORT score DESC, image._key ASC
+      LIMIT @limit
+      RETURN { image, score }
+  `, {
+    organizationKey: input.organizationKey,
+    scopeKey: input.scopeKey,
+    actorKey: input.actorKey,
+    embedding: input.embedding,
+    dimensions: input.embedding.length,
+    threshold: input.threshold ?? null,
+    limit: input.limit,
+  });
+  return (await cursor.all()).map((value) => {
+    const row = value as { image?: unknown; score?: unknown };
+    if (typeof row.score !== 'number' || !Number.isFinite(row.score)) throw new Error('Image similarity query returned an invalid score.');
+    return { image: parse(imageSchema, row.image), score: row.score };
+  });
+}
+
 export function createMediaLibraryRepository(database: MediaLibraryDatabase = db, runTransaction: MediaLibraryTransactionRunner = defaultTransactionRunner): MediaLibraryRepository {
   const add = async (relation: CollectionImage) => {
     const valid = collectionImageSchema.parse(relation);

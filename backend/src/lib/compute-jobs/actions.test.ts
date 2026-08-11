@@ -37,6 +37,10 @@ describe('compute-dispatch action', () => {
       networkConfiguration: { awsvpcConfiguration: { subnets: ['subnet-a', 'subnet-b'], securityGroups: ['sg-worker'], assignPublicIp: 'ENABLED' } },
       overrides: { containerOverrides: [{ name: 'document-worker', command: ['src/document-worker/index.ts'], environment: [{ name: 'DOCUMENT_PROCESSING_JOB_ID', value: 'a'.repeat(64) }] }] },
     });
+    await computeDispatch({ jobType: 'image-hashing', jobKey: 'b'.repeat(64) }, {
+      ecs: { async send(value) { command = value; return { tasks: [{ taskArn: 'image-task-arn' }], $metadata: {} }; } },
+    });
+    expect(command?.input.overrides).toEqual({ containerOverrides: [{ name: 'document-worker', command: ['src/image-worker/index.ts'], environment: [{ name: 'IMAGE_HASHING_JOB_ID', value: 'b'.repeat(64) }] }] });
   });
 
   test('rejects unregistered job types and arbitrary keys', async () => {

@@ -51,6 +51,7 @@ import { folderRenameToolDefinition } from './folder-rename';
 import { folderRestoreToolDefinition } from './folder-restore';
 import { folderUpdateToolDefinition } from './folder-update';
 import { imageCaptionTool } from './image-caption';
+import { imageSearchTool } from './image-search';
 import { milestoneContentTool } from './milestone-content';
 import { milestoneChangeStatusTool } from './milestone-change-status';
 import { milestoneCompleteTool } from './milestone-complete';
@@ -141,6 +142,7 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   orchestratorChatTool,
   transcribeTool,
   imageCaptionTool,
+  imageSearchTool,
   autocompleteToolDefinition,
   enhanceToolDefinition,
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,

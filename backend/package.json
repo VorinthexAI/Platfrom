@@ -57,6 +57,7 @@
     "otplib": "^13.4.1",
     "puppeteer-core": "^25.2.1",
     "qrcode": "^1.5.4",
+    "sharp": "^0.34.5",
     "svix": "^1.96.1",
     "word-extractor": "^1.0.4",
     "zod": "^3.24.0"

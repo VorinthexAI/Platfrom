@@ -38,6 +38,65 @@ export interface CollectionSpec {
   archive?: boolean;
 }
 
+export async function migrateImageCaptions(targetDb: Database): Promise<void> {
+  const invalid = await targetDb.query<number>(`
+    RETURN LENGTH(
+      FOR image IN images
+        FILTER !IS_STRING(image.caption) || LENGTH(TRIM(image.caption)) == 0
+        RETURN 1
+    )
+  `);
+  if ((await invalid.next() ?? 0) > 0) throw new Error('Image caption migration found images with invalid legacy captions.');
+
+  const conflicts = await targetDb.query<number>(`
+    RETURN LENGTH(
+      FOR image IN images
+        FILTER image.imageCaptionKey == null
+        LET caption = DOCUMENT(imageCaptions, image._key)
+        FILTER caption != null
+        FILTER caption.scopeKey != image.scopeKey
+          || caption.sourceImageKey != image._key
+          || caption.caption != image.caption
+        RETURN 1
+    )
+  `);
+  if ((await conflicts.next() ?? 0) > 0) throw new Error('Image caption migration found conflicting canonical records.');
+
+  await targetDb.query(`
+    FOR image IN images
+      FILTER image.imageCaptionKey == null
+      INSERT {
+        _key: image._key,
+        scopeKey: image.scopeKey,
+        sourceImageKey: image._key,
+        caption: image.caption,
+        embedding: image.embedding,
+        perceptualHash: null,
+        hashAlgorithm: null,
+        hashSegment0: null,
+        hashSegment1: null,
+        hashSegment2: null,
+        hashSegment3: null,
+        createdAt: image.createdAt,
+        updatedAt: image.updatedAt
+      } INTO imageCaptions OPTIONS { overwriteMode: "ignore" }
+  `);
+  await targetDb.query(`
+    FOR image IN images
+      FILTER image.imageCaptionKey == null
+      UPDATE image WITH { imageCaptionKey: image._key } IN images
+  `);
+  const missing = await targetDb.query<number>(`
+    RETURN LENGTH(
+      FOR image IN images
+        LET caption = DOCUMENT(imageCaptions, image.imageCaptionKey)
+        FILTER caption == null || caption.scopeKey != image.scopeKey
+        RETURN 1
+    )
+  `);
+  if ((await missing.next() ?? 0) > 0) throw new Error('Image caption migration verification failed.');
+}
+
 export async function migrateGenericContentContracts(targetDb: Database): Promise<void> {
   const legacyLedger = targetDb.collection('archiveIdempotency');
   if (await legacyLedger.exists()) {
@@ -749,7 +808,8 @@ export const collections: CollectionSpec[] = [
   { name: 'pollOptions', embedKeys: ['text'], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['pollKey', 'position'], unique: true }] },
   { name: 'pollVotes', embedKeys: [], indexes: [{ fields: ['scopeKey'] }, { fields: ['channelKey'] }, { fields: ['pollKey'] }, { fields: ['optionKey'] }, { fields: ['participantKey'] }, { fields: ['pollKey', 'optionKey', 'participantKey'], unique: true }] },
   { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
-  { name: 'images', embedKeys: ['filename', 'caption'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['storageKey'], unique: true }] },
+  { name: 'images', embedKeys: ['filename', 'caption'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
+  { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], unique: true, sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
   { name: 'collections', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
   { name: 'collectionMembers', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'memberKey'], unique: true }, { fields: ['scopeKey', 'collectionKey', 'role'] }, { fields: ['scopeKey', 'memberKey'] }] },
@@ -1047,6 +1107,7 @@ async function main() {
     if (spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents') {
       await migrateContentFavorites(targetDb, spec.name);
     }
+    if (spec.name === 'imageCaptions') await migrateImageCaptions(targetDb);
     if (spec.name === 'folders') {
       await targetDb.query(`FOR resource IN @@collection FILTER HAS(resource, "isFavorite") UPDATE resource WITH { isFavorite: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
     }
