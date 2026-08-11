@@ -115,6 +115,7 @@ describe('model and routing relation seeds', () => {
       'amazon.polly-generative',
       'qwen.qwen3-embedding-8b',
       'aws.transcribe-standard',
+      'qwen.qwen3-vl-32b-instruct',
     ]);
     expect(SEEDED_MODEL_ACTIONS.filter(({ actionSlug }) => actionSlug === 'orchestrator-chat').map(({ modelSlug }) => modelSlug))
       .toEqual(['amazon.nova-lite', 'amazon.nova-pro']);
@@ -126,6 +127,7 @@ describe('model and routing relation seeds', () => {
       .toEqual(['amazon.nova-lite']);
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('qwen.qwen3-embedding-8b');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('qwen.qwen3-vl-32b-instruct');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:false',
       'openai.gpt-5.6-terra:aws-bedrock-mantle:openai.gpt-5.6-terra:false',
@@ -138,6 +140,7 @@ describe('model and routing relation seeds', () => {
       'qwen.qwen3-embedding-8b:openrouter:qwen/qwen3-embedding-8b:true',
       'amazon.polly-generative:aws-polly:generative:true',
       'aws.transcribe-standard:aws-transcribe:standard:true',
+      'qwen.qwen3-vl-32b-instruct:openrouter:qwen/qwen3-vl-32b-instruct:true',
     ]);
     expect(SEEDED_MODEL_PROVIDERS.filter((route) => route.modelSlug.includes('embedding')).map((route) => route.modelSlug)).toEqual(['qwen.qwen3-embedding-8b']);
   });

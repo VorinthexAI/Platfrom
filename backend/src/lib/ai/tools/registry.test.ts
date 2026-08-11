@@ -6,14 +6,15 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(137);
-    expect(TOOL_DEFINITIONS).toHaveLength(137);
-    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 97);
+    expect(TOOL_NAMES).toHaveLength(138);
+    expect(TOOL_DEFINITIONS).toHaveLength(138);
+    expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 98);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES.filter((name) => name === 'chat')).toHaveLength(1);
     expect(TOOL_NAMES).not.toContain('orchestrator.chat');
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'chat')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'transcribe')).toHaveLength(1);
+    expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'image.caption')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.some(({ name }) => name === 'orchestrator.chat')).toBe(false);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'folder.archive')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'document.restore')).toHaveLength(1);

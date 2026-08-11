@@ -3,6 +3,7 @@ import { actionIdSchema, type ActionId } from '@/lib/ai/actions/types';
 import { coreChatInputSchema, coreChatMessageSchema, coreChatToolDefinitionSchema, type CoreChatInput, type CoreChatMessage, type CoreChatToolDefinition } from '@/lib/ai/actions/core-chat';
 import { organizationKeySchema } from '@/lib/ai/shared/ids';
 import type { TokenUsage } from '@/lib/ai/shared/usage';
+import { MAX_IMAGE_CAPTION_URLS } from '@/lib/image-caption-constants';
 
 /**
  * Every provider the execution layer can route through. There are no
@@ -172,6 +173,21 @@ export type ImageGenerateInput = z.infer<typeof imageGenerateInputSchema>;
 export interface ImageOutput {
   images: Array<{ base64: string; mimeType: string }>;
 }
+
+const httpImageUrlSchema = z.string().url().refine((value) => {
+  const protocol = new URL(value).protocol;
+  return protocol === 'http:' || protocol === 'https:';
+}, 'Image URL must use HTTP or HTTPS');
+
+export const imageCaptionInputSchema = z.object({
+  imageUrls: z.array(httpImageUrlSchema).min(1).max(MAX_IMAGE_CAPTION_URLS),
+}).strict();
+export type ImageCaptionInput = z.infer<typeof imageCaptionInputSchema>;
+
+export const imageCaptionOutputSchema = z.object({
+  captions: z.array(z.string().trim().min(1).max(4_000)).min(1).max(MAX_IMAGE_CAPTION_URLS),
+}).strict();
+export type ImageCaptionOutput = z.infer<typeof imageCaptionOutputSchema>;
 
 export const transcribeInputSchema = z
   .object({

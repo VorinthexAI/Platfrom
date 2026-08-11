@@ -669,6 +669,14 @@ export const SEEDED_MODELS = [
     supportedUseCases: 'Audio file transcription, meeting transcripts, captions, and speech-to-text.',
     enabled: true,
   },
+  {
+    key: 'cmqwen3vl32bmodel0000001',
+    slug: 'qwen.qwen3-vl-32b-instruct',
+    name: 'Qwen3-VL 32B Instruct',
+    description: 'Qwen multimodal instruction model for detailed, factual image captioning through OpenRouter.',
+    supportedUseCases: 'Rich image captions, visual scene understanding, object recognition, and optical character recognition.',
+    enabled: true,
+  },
 ] as const;
 
 const LEGACY_SEEDED_MODEL_ACTIONS = [
@@ -769,6 +777,13 @@ export const SEEDED_MODEL_PROVIDERS = [
     modelSlug: 'aws.transcribe-standard',
     providerSlug: 'aws-transcribe',
     providerModelId: 'standard',
+    enabled: true,
+  },
+  {
+    key: 'cmqwen3vl32broute0000001',
+    modelSlug: 'qwen.qwen3-vl-32b-instruct',
+    providerSlug: 'openrouter',
+    providerModelId: 'qwen/qwen3-vl-32b-instruct',
     enabled: true,
   },
 ] as const;

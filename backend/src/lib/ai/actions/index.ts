@@ -1,6 +1,7 @@
 import { analyzeAudioAction } from './analyze-audio';
 import { analyzeVideoAction } from './analyze-video';
 import { askAction } from './ask';
+import { captionImageAction } from './caption-image';
 import { chatAction } from './chat';
 import { deepReasonAction } from './deep-reason';
 import { deleteActionDefinition } from './delete';
@@ -37,6 +38,7 @@ export type { ActionDefinition, ActionId, ActionModelBinding, ActionModelPolicy 
 export { analyzeAudioAction } from './analyze-audio';
 export { analyzeVideoAction } from './analyze-video';
 export { askAction } from './ask';
+export { captionImageAction } from './caption-image';
 export { chatAction } from './chat';
 export { deepReasonAction } from './deep-reason';
 export { deleteActionDefinition } from './delete';
@@ -87,7 +89,7 @@ export const ACTION_DEFINITIONS: readonly ActionDefinition[] = [
   generateImageAction, editImageAction, generateVideoAction, editVideoAction, extendVideoAction, analyzeVideoAction,
   generateSpeechAction, analyzeAudioAction, generateMusicAction, orchestratorChatAction,
   documentValidateAction, storageUploadAction, documentExtractAction, documentGenerateHtmlAction,
-  documentGenerateContentAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction,
+  documentGenerateContentAction, documentEmbedAction, documentInsertAction, enhanceAction, translateAction, captionImageAction,
 ];
 export const getActionDefinition = (id: ActionId) => ACTION_DEFINITIONS.find((definition) => definition.id === id);
 
