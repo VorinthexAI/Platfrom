@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { timingSafeEqual } from '@/lib/crypto';
 import { isResendWebhookPath } from './resend';
 import { strictObject } from './validation';
-import { refreshAccessToken, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
+import { refreshAccessToken, refreshTokenMatchesIdentity, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
@@ -56,12 +56,11 @@ function cookieOptions(maxAge: number) {
   // Root-scope sessions keep authentication available across the apex site.
   // The web bridge uses the same production fallback when it persists a rotation.
   const domain = process.env.COOKIE_DOMAIN ?? (process.env.NODE_ENV === 'production' ? 'vorinthex.com' : undefined);
-  const crossSite = Boolean(domain);
   return {
     httpOnly: true,
     path: '/',
-    sameSite: crossSite ? 'None' : 'Lax',
-    secure: process.env.NODE_ENV === 'production' || crossSite,
+    sameSite: 'Lax',
+    secure: process.env.NODE_ENV === 'production' || Boolean(domain),
     domain,
     maxAge,
   } as const;
@@ -213,7 +212,17 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
   }
 };
 
-export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, refreshAccessToken }): MiddlewareHandler {
+interface AutoRefreshDependencies {
+  verifyAccessToken: typeof verifyAccessToken;
+  refreshAccessToken: typeof refreshAccessToken;
+  refreshTokenMatchesIdentity?: typeof refreshTokenMatchesIdentity;
+}
+
+export function createAutoRefreshAuthTokens(dependencies: AutoRefreshDependencies = {
+  verifyAccessToken,
+  refreshAccessToken,
+  refreshTokenMatchesIdentity,
+}): MiddlewareHandler {
   return async (c, next) => {
     const bearerToken = getBearerToken(c);
     const headerRefreshToken = c.req.header('x-refresh-token');
@@ -233,14 +242,30 @@ export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, 
     c.set('authSessionTransport', headerTransport ? HEADER_SESSION_TRANSPORT : 'cookie');
     if (refreshToken) c.set('authRefreshToken', refreshToken);
 
-    const identity = accessToken ? await dependencies.verifyAccessToken(accessToken) : null;
-    if (identity) setAuthIdentity(c, identity);
+    // Public authentication handlers issue their own session and only need the
+    // selected response transport; stale credentials must not block sign-in.
+    if (isPublicFounderAuthPath(c.req.path) || c.req.path === '/api/v1/health' || isResendWebhookPath(c.req.path)) {
+      return next();
+    }
 
-    if (identity) return next();
+    const identity = accessToken ? await dependencies.verifyAccessToken(accessToken) : null;
+    if (identity) {
+      if (refreshToken && dependencies.refreshTokenMatchesIdentity
+        && !await dependencies.refreshTokenMatchesIdentity(refreshToken, identity)) {
+        if (!headerTransport) clearSessionCookies(c);
+        c.header('WWW-Authenticate', 'Bearer');
+        return c.json({ error: 'session credentials do not match', code: 'AUTH_SESSION_MISMATCH' }, 401);
+      }
+      setAuthIdentity(c, identity);
+      return next();
+    }
 
     const continueWithoutIdentity = async () => {
       await next();
-      if (hadSessionCredentials && c.res.status === 401) c.header('WWW-Authenticate', 'Bearer');
+      if (hadSessionCredentials && c.res.status === 401) {
+        if (!headerTransport) clearSessionCookies(c);
+        c.header('WWW-Authenticate', 'Bearer');
+      }
     };
     if (!refreshToken) return continueWithoutIdentity();
 

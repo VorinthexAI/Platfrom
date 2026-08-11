@@ -369,6 +369,67 @@ describe('backend session cookies', () => {
     expect(response.headers.get('www-authenticate')).toBe('Bearer');
   });
 
+  test('clears rejected HttpOnly session cookies', async () => {
+    const app = new Hono();
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => null,
+      refreshAccessToken: async () => null,
+    }));
+    app.get('/', (c) => c.json({ error: 'Authentication required.' }, 401));
+
+    const response = await app.request('/', { headers: {
+      cookie: 'vorinthex_access=vrtx_access_expired; vorinthex_refresh=vrtx_refresh_revoked',
+    } });
+    const cookies = response.headers.get('set-cookie') ?? '';
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe('Bearer');
+    expect(cookies).toContain('vorinthex_access=;');
+    expect(cookies).toContain('vorinthex_refresh=;');
+    expect(cookies).toContain('Max-Age=0');
+  });
+
+  test('rejects access and refresh tokens from different sessions', async () => {
+    const app = new Hono();
+    let nextCalls = 0;
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => ({ key: 'user-1', identityType: 'user', sessionId: 'session-1' }),
+      refreshAccessToken: async () => null,
+      refreshTokenMatchesIdentity: async () => false,
+    }));
+    app.get('/', (c) => {
+      nextCalls += 1;
+      return c.json({ ok: true });
+    });
+
+    const response = await app.request('/', { headers: {
+      authorization: 'Bearer access-for-session-1',
+      'x-refresh-token': 'refresh-for-session-2',
+    } });
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await response.json()).toEqual({ error: 'session credentials do not match', code: 'AUTH_SESSION_MISMATCH' });
+    expect(nextCalls).toBe(0);
+  });
+
+  test('ignores stale credentials on public sign-in routes while preserving transport selection', async () => {
+    const app = new Hono<{ Variables: { authSessionTransport: string } }>();
+    let verifyCalls = 0;
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => { verifyCalls += 1; return null; },
+      refreshAccessToken: async () => null,
+    }));
+    app.post('/api/v1/auth/login', (c) => c.json({ transport: c.get('authSessionTransport') }));
+
+    const response = await app.request('/api/v1/auth/login', { method: 'POST', headers: {
+      authorization: 'Bearer stale-access',
+      'x-refresh-token': 'stale-refresh',
+      'x-vorinthex-session-transport': 'header',
+    } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ transport: 'header' });
+    expect(verifyCalls).toBe(0);
+  });
+
   test('does not emit replacement tokens while logging out', async () => {
     const app = new Hono();
     const tokens = {

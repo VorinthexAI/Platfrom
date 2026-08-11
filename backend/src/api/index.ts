@@ -31,12 +31,13 @@ app.use('*', cors({
     'Idempotency-Key',
     'X-API-Key',
     'X-Vorinthex-API-Key',
+    'X-Vorinthex-Session-Transport',
     'X-Refresh-Token',
     'svix-id',
     'svix-timestamp',
     'svix-signature',
   ],
-  exposeHeaders: ['X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
+  exposeHeaders: ['WWW-Authenticate', 'X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
 }));
 app.use('*', requestLogger);
 app.use('*', rateLimitByIp);

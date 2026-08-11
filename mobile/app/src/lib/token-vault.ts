@@ -48,16 +48,14 @@ export const tokenVault = {
     generation += 1;
     return true;
   }),
-  clear: () => {
+  clear: () => serialize(async () => {
     generation += 1;
-    return serialize(() => SecureStore.deleteItemAsync(SESSION_KEY));
-  },
-  clearIfCurrent: (expectedGeneration: number) => {
-    if (generation !== expectedGeneration) return Promise.resolve(false);
+    await SecureStore.deleteItemAsync(SESSION_KEY);
+  }),
+  clearIfCurrent: (expectedGeneration: number) => serialize(async () => {
+    if (generation !== expectedGeneration) return false;
     generation += 1;
-    return serialize(async () => {
-      await SecureStore.deleteItemAsync(SESSION_KEY);
-      return true;
-    });
-  },
+    await SecureStore.deleteItemAsync(SESSION_KEY);
+    return true;
+  }),
 };

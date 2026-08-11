@@ -129,7 +129,7 @@ function jsonBase64Url(value: unknown) {
 }
 
 async function signAccessTokenPayload(payload: string) {
-  return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
+  return sha256(`${payload}.${requiredEnv('ACCESS_TOKEN_SECRET')}`);
 }
 
 async function createSignedOAuthState(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string) {
@@ -449,6 +449,20 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
     refreshTokenMaxAgeSeconds: remainingSeconds,
     sessionExpiresAt: sessionExpiresAt.toISOString(),
   };
+}
+
+export async function refreshTokenMatchesIdentity(refreshToken: string, identity: AuthIdentity): Promise<boolean> {
+  const tokenHash = await sha256(refreshToken);
+  const session = await getAuthSessionByRefreshTokenHash(tokenHash);
+  if (session) {
+    return session.key === identity.sessionId
+      && session.userId === identity.key
+      && !session.revokedAt
+      && isRefreshTokenActive(session.expiresAt);
+  }
+  if (identity.sessionId) return false;
+  const legacyUser = await getUserByRefreshTokenHash(tokenHash);
+  return legacyUser?.key === identity.key && isRefreshTokenActive(legacyUser.refreshTokenExpiresAt);
 }
 
 export async function revokeSession(identity: AuthIdentity, refreshToken?: string | null): Promise<boolean> {

@@ -39,9 +39,13 @@ apiClient.interceptors.response.use(async (response) => {
   if (tokens && requestSession) await tokenVault.writeIfCurrent(tokens, requestSession.generation);
   return response;
 }, async (error: unknown) => {
-  if (isAxiosError(error) && error.response?.status === 401 && String(error.response.headers["www-authenticate"] ?? "").includes("Bearer")) {
+  if (isAxiosError(error) && error.response) {
     const requestSession = error.config ? requestSessions.get(error.config) : undefined;
-    if (requestSession?.authenticated) {
+    const tokens = extractSessionTokens(error.response.data, (name) => error.response?.headers[name]);
+    if (tokens && requestSession) await tokenVault.writeIfCurrent(tokens, requestSession.generation);
+    if (error.response.status === 401
+      && String(error.response.headers["www-authenticate"] ?? "").includes("Bearer")
+      && requestSession?.authenticated) {
       const cleared = await tokenVault.clearIfCurrent(requestSession.generation);
       if (cleared) unauthorizedListener?.();
     }
