@@ -53,6 +53,7 @@ export const chapterProgressRequestSchema = contextSchema.extend({
 const overviewResponseSchema = z.strictObject({ books: z.array(bookSchema) });
 const detailResponseSchema = z.strictObject({ book: bookSchema, chapters: z.array(bookChapterSchema) });
 const progressResponseSchema = z.strictObject({ chapter: bookChapterSchema, book: bookSchema });
+const assistantResponseSchema = z.strictObject({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.strictObject({ documentKey: keySchema, name: z.string().min(1) })) });
 const failureSchema = z.strictObject({ success: z.literal(false), error: z.strictObject({ message: z.string().min(1) }) });
 
 export type Book = z.infer<typeof bookSchema>;
@@ -97,4 +98,17 @@ export function createBook(input: CreateBookInput, generationRequestKey: string)
 export function fetchBookDetail(bookKey: string) { return request("post", `/books/${keySchema.parse(bookKey)}/detail`, {}, detailRequestSchema, detailResponseSchema); }
 export function updateBookChapterProgress(bookKey: string, chapterKey: string, input: { progressSeconds: number; isCompleted: boolean }) {
   return request("patch", `/books/${keySchema.parse(bookKey)}/chapters/${keySchema.parse(chapterKey)}/progress`, input, chapterProgressRequestSchema, progressResponseSchema);
+}
+
+export async function askBookAssistant(message: string, requestKey: string) {
+  const state = useAuthStore.getState();
+  const { organizationKey } = getBooksContext();
+  const agentKey = typeof state.contentExecution?.agentKey === "string" ? state.contentExecution.agentKey : "";
+  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  try {
+    const response = await apiClient.post("/assistant/respond", { organizationKey, agentKey, input: { surface: "book-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } } }, { timeout: 15 * 60_000 });
+    return unwrap(response.data, assistantResponseSchema);
+  } catch (error) {
+    throw responseError(error);
+  }
 }

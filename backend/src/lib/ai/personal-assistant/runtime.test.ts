@@ -99,6 +99,58 @@ describe('personal assistant runtime', () => {
     expect(result).toEqual({ type: 'note', content: 'Rewritten text', message: 'Rewrote the note.', sources: [] });
   });
 
+  test('creates and writes a book through sequential scoped capabilities', async () => {
+    const bookKey = newId();
+    const brief = { topic: 'Decision making', goal: 'Make clearer decisions', audience: 'Curious leaders', tone: 'Warm and rigorous', length: 'short', language: 'English' } as const;
+    const contentCalls: Array<{ name: string; input: any }> = [];
+    let modelCalls = 0;
+    const result = await runPersonalAssistant({ ...input, surface: 'book-workspace', requestKey: 'book-request-1', message: 'Create a short book about decision making for leaders.' }, domain, {
+      execute: async (_request, nextInput) => {
+        modelCalls += 1;
+        if (modelCalls === 1) {
+          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['book_create_context', 'book_write']);
+          expect(nextInput.systemPrompt).toContain('Call book_create_context first');
+          return response({ text: '', toolCalls: [{ id: 'book-context-1', name: 'book_create_context', arguments: brief }], stopReason: 'tool_use' });
+        }
+        if (modelCalls === 2) {
+          expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', result: { bookKey, status: 'planning' } }] });
+          return response({ text: '', toolCalls: [{ id: 'book-write-1', name: 'book_write', arguments: { bookKey, ...brief } }], stopReason: 'tool_use' });
+        }
+        expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', result: { bookKey, status: 'ready' } }] });
+        return response({ text: 'Your book is ready in Ascend.', toolCalls: [], stopReason: 'end_turn' });
+      },
+      executeContent: (async (name: string, nextInput: any) => {
+        contentCalls.push({ name, input: nextInput });
+        return name === 'book.create-context' ? { bookKey, status: 'planning' } : { bookKey, status: 'ready' };
+      }) as any,
+    });
+
+    expect(contentCalls).toEqual([
+      { name: 'book.create-context', input: { scopeKey, ...brief, idempotencyKey: 'book-request-1:context' } },
+      { name: 'book.write', input: { scopeKey, bookKey, ...brief, idempotencyKey: 'book-request-1:write' } },
+    ]);
+    expect(modelCalls).toBe(3);
+    expect(result).toEqual({ type: 'answer', message: 'Your book is ready in Ascend.', sources: [] });
+  });
+
+  test('enforces the server-owned book creation sequence and matching brief', async () => {
+    await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
+      execute: async () => response({ text: '', toolCalls: [{ id: 'write-first', name: 'book_write', arguments: { bookKey: newId(), topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' }),
+    })).rejects.toThrow('before creating');
+
+    const bookKey = newId();
+    let call = 0;
+    await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
+      execute: async () => {
+        call += 1;
+        return call === 1
+          ? response({ text: '', toolCalls: [{ id: 'create', name: 'book_create_context', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' })
+          : response({ text: '', toolCalls: [{ id: 'write', name: 'book_write', arguments: { bookKey, topic: 'Changed', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' });
+      },
+      executeContent: (async () => ({ bookKey, status: 'planning' })) as any,
+    })).rejects.toThrow('did not match');
+  });
+
   test('rejects capabilities outside the server-selected surface allowlist', async () => {
     await expect(runPersonalAssistant(input, domain, {
       execute: async () => response({ text: '', toolCalls: [{ id: 'bad-1', name: 'delete_everything', arguments: {} }], stopReason: 'tool_use' }),

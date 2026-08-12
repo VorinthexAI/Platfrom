@@ -4,7 +4,7 @@ import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
 import { imageSearchTool } from '@/lib/ai/tools/image-search';
 
-export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace']);
+export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace']);
 export type AssistantSurface = z.infer<typeof assistantSurfaceSchema>;
 
 export const assistantSourceSchema = z.object({
@@ -20,6 +20,7 @@ export type AssistantCapabilityResult =
 export interface AssistantCapabilityContext {
   domain: DomainToolContext;
   folderKey?: string;
+  requestKey?: string;
   contentDependencies?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   executeImageSearch?: typeof imageSearchTool.execute;
@@ -56,6 +57,25 @@ const writeNoteInputSchema = z.object({
   content: z.string().max(40_000),
   message: z.string().trim().min(1).max(500),
 }).strict();
+const bookBriefSchema = z.object({
+  topic: z.string().trim().min(3).max(500),
+  goal: z.string().trim().min(3).max(1_000),
+  audience: z.string().trim().min(2).max(500),
+  tone: z.string().trim().min(2).max(200),
+  length: z.enum(['short', 'standard', 'deep']),
+  language: z.string().trim().min(2).max(100),
+  sourceNotes: z.string().trim().min(1).max(12_000).optional(),
+}).strict();
+const bookWriteInputSchema = bookBriefSchema.extend({ bookKey: z.string().cuid() }).strict();
+const bookBriefJsonSchema = {
+  topic: { type: 'string', minLength: 3, maxLength: 500 },
+  goal: { type: 'string', minLength: 3, maxLength: 1_000 },
+  audience: { type: 'string', minLength: 2, maxLength: 500 },
+  tone: { type: 'string', minLength: 2, maxLength: 200 },
+  length: { type: 'string', enum: ['short', 'standard', 'deep'] },
+  language: { type: 'string', minLength: 2, maxLength: 100 },
+  sourceNotes: { type: 'string', minLength: 1, maxLength: 12_000 },
+} as const;
 
 const searchKnowledgeCapability: AssistantCapability = {
   definition: {
@@ -122,9 +142,36 @@ const searchImagesCapability: AssistantCapability = {
   },
 };
 
+const createBookContextCapability: AssistantCapability = {
+  definition: {
+    name: 'book_create_context',
+    description: 'Create the planning context for a new personalized book after the user explicitly asks to create one. Call this before book_write.',
+    inputSchema: { type: 'object', properties: bookBriefJsonSchema, required: ['topic', 'goal', 'audience', 'tone', 'length', 'language'], additionalProperties: false },
+  },
+  async execute(rawInput, context) {
+    const input = bookBriefSchema.parse(rawInput);
+    return { kind: 'continue', result: await (context.executeContent ?? runContentTool)('book.create-context', { scopeKey: context.domain.runtimeScopeKey, ...input, ...(context.requestKey ? { idempotencyKey: `${context.requestKey}:context` } : {}) }, context.domain, context.contentDependencies) };
+  },
+};
+
+const writeBookCapability: AssistantCapability = {
+  definition: {
+    name: 'book_write',
+    description: 'Write, narrate, and finish a book created by book_create_context. Use the returned bookKey and the exact same brief.',
+    inputSchema: { type: 'object', properties: { bookKey: { type: 'string', minLength: 20, maxLength: 30 }, ...bookBriefJsonSchema }, required: ['bookKey', 'topic', 'goal', 'audience', 'tone', 'length', 'language'], additionalProperties: false },
+  },
+  async execute(rawInput, context) {
+    const input = bookWriteInputSchema.parse(rawInput);
+    return { kind: 'continue', result: await (context.executeContent ?? runContentTool)('book.write', { scopeKey: context.domain.runtimeScopeKey, ...input, ...(context.requestKey ? { idempotencyKey: `${context.requestKey}:write` } : {}) }, context.domain, context.contentDependencies) };
+  },
+};
+
 export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistry()
   .register(searchKnowledgeCapability)
   .register(writeNoteCapability)
   .register(searchImagesCapability)
+  .register(createBookContextCapability)
+  .register(writeBookCapability)
   .registerSurface('knowledge-workspace', ['search_knowledge', 'write_note'])
-  .registerSurface('media-workspace', ['search_images']);
+  .registerSurface('media-workspace', ['search_images'])
+  .registerSurface('book-workspace', ['book_create_context', 'book_write']);
