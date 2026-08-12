@@ -1,7 +1,7 @@
 import { Image } from "expo-image";
 import { randomUUID } from "expo-crypto";
 import { LinearGradient } from "expo-linear-gradient";
-import { useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,6 +11,7 @@ import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { AscendIcon, CheckIcon, ChevronLeftIcon, PauseIcon, PlayIcon, PlusIcon, SoundwaveIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
+import { BOOK_AUDIO_MODE, bookAudioMetadata } from "@/lib/book-audio";
 import { createBook, fetchBookDetail, fetchBooksOverview, updateBookChapterProgress, type Book, type BookChapter, type BookDetail, type CreateBookInput } from "@/lib/books-client";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
@@ -46,6 +47,19 @@ function Reader({ detail, initialChapter, onChange, onMessage }: { detail: BookD
   const audio = useAudioPlayerStatus(player);
   const latest = useRef({ detail, chapter, seconds: chapter?.progressSeconds ?? 0, playing: false });
   const lastSaved = useRef(-1);
+
+  useEffect(() => {
+    void setAudioModeAsync(BOOK_AUDIO_MODE).catch((error: unknown) => onMessage(errorMessage(error)));
+  }, [onMessage]);
+
+  useEffect(() => {
+    if (!chapter?.audioUrl) {
+      player.clearLockScreenControls();
+      return;
+    }
+    player.setActiveForLockScreen(true, bookAudioMetadata(detail.book, chapter), { showSeekBackward: true, showSeekForward: true });
+    return () => player.clearLockScreenControls();
+  }, [chapter, detail.book, player]);
 
   useEffect(() => {
     latest.current = { detail, chapter, seconds: audio.currentTime || chapter?.progressSeconds || 0, playing: audio.playing };

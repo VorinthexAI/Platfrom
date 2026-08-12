@@ -18,6 +18,9 @@
     },
     "android": {
       "package": "app.vorinthex.com",
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#030507",
         "foregroundImage": "./assets/brand/adaptive-icon-foreground.png"
@@ -62,7 +65,15 @@
           "cameraPermission": "Allow Vorinthex to take photos for Gallery."
         }
       ],
-      "expo-audio"
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true,
+          "enableBackgroundRecording": false,
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
