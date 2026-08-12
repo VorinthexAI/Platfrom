@@ -281,6 +281,17 @@ export function getAuthSessionPolicy(identityType: AuthIdentityType, founderAssu
     : { accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS };
 }
 
+export function resolveRefreshedIdentityType(
+  storedIdentityType: AuthIdentityType | undefined,
+  membershipIdentityType: LoginIdentityType | undefined,
+  durableSession: boolean,
+  mfaAssured: boolean,
+): AuthIdentityType {
+  if (storedIdentityType) return storedIdentityType;
+  if (durableSession && !mfaAssured) return 'user';
+  return membershipIdentityType ?? 'user';
+}
+
 export async function createAccessToken(identity: AuthIdentity | string, sessionExpiresAt?: Date) {
   const normalized = typeof identity === 'string'
     ? { key: identity, identityType: 'user' as const, founderAssured: false }
@@ -359,6 +370,7 @@ export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Da
   await insertAuthSession({
     key: sessionId,
     userId: identity.key,
+    identityType: identity.type,
     refreshTokenHash,
     expiresAt: sessionExpiresAt.toISOString(),
     revokedAt: null,
@@ -383,6 +395,7 @@ export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?
   await insertAuthSession({
     key: sessionId,
     userId: user.key,
+    identityType: 'user',
     refreshTokenHash,
     expiresAt: sessionExpiresAt.toISOString(),
     revokedAt: null,
@@ -410,10 +423,16 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
   const mfaMembershipKey = session?.founderMembershipKey ?? legacyUser?.refreshFounderMembershipKey;
   const mfaVersion = session?.founderMfaVersion ?? legacyUser?.refreshFounderMfaVersion;
   const mfaAssured = Boolean(mfaMembershipKey) && typeof mfaVersion === 'number';
+  const storedIdentityType = session?.identityType;
+  const needsMembership = storedIdentityType === 'member' || storedIdentityType === 'superAdmin';
   const identity = mfaAssured
     ? await getLoginIdentityByMembership('superAdmin', user.key, mfaMembershipKey!)
       ?? await getLoginIdentityByMembership('member', user.key, mfaMembershipKey!)
-    : await organizationMembershipIdentity(user);
+    : needsMembership || !session
+      ? await organizationMembershipIdentity(user)
+      : null;
+  if (needsMembership && !identity) return null;
+  if (storedIdentityType === 'superAdmin' && identity?.type !== 'superAdmin') return null;
   if (identity?.organizationMfaEnabled && (
     !mfaAssured ||
     !identity.isMfaEnabled ||
@@ -421,7 +440,9 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
     identity.mfaVersion !== mfaVersion
   )) return null;
   const founderAssured = refreshToken.startsWith('vrtx_refresh_founder_') && identity?.organizationIsRoot === true && mfaAssured;
-  const identityType = identity?.type ?? 'user';
+  // Legacy durable sessions without MFA were user sessions. Never infer a
+  // stronger identity from organization membership during token refresh.
+  const identityType = resolveRefreshedIdentityType(storedIdentityType, identity?.type, Boolean(session), mfaAssured);
   const policy = getAuthSessionPolicy(identityType, founderAssured);
   const sessionExpiresAt = new Date(Math.min(
     Date.parse(expiresAt!),
@@ -687,6 +708,7 @@ export async function verifyAppleIdentityToken(
     if (!response.ok || !Array.isArray(body?.keys)) throw new Error('Apple signing keys unavailable');
     return body.keys;
   },
+  options: { clientId?: string; nonce?: string } = {},
 ) {
   const [encodedHeader, encodedPayload, encodedSignature, extra] = token.split('.');
   if (!encodedHeader || !encodedPayload || !encodedSignature || extra) return null;
@@ -703,10 +725,12 @@ export async function verifyAppleIdentityToken(
     new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
   );
   const audience = payload.aud;
-  const expectedAudience = requiredEnv('APPLE_OAUTH_CLIENT_ID');
+  const expectedAudience = options.clientId ?? requiredEnv('APPLE_OAUTH_CLIENT_ID');
   const audienceMatches = audience === expectedAudience || (Array.isArray(audience) && audience.includes(expectedAudience));
   const now = Math.floor(Date.now() / 1000);
-  if (!validSignature || payload.iss !== 'https://appleid.apple.com' || !audienceMatches || typeof payload.exp !== 'number' || payload.exp <= now) return null;
+  const nonceMatches = !options.nonce || payload.nonce === await sha256(options.nonce);
+  if (!validSignature || payload.iss !== 'https://appleid.apple.com' || !audienceMatches || !nonceMatches
+    || typeof payload.sub !== 'string' || !payload.sub || typeof payload.exp !== 'number' || payload.exp <= now) return null;
   const email = typeof payload.email === 'string' ? payload.email : null;
   if (!email || (payload.email_verified !== true && payload.email_verified !== 'true')) return null;
   return { email, name: null, profileUrl: null };
@@ -837,6 +861,7 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
 async function completeOAuthProfile(
   profile: { email: string; name: string | null; profileUrl: string | null },
   mobileRedirectUri?: string,
+  initializeNameOnly = false,
 ) {
   const normalized = normalizeEmail(profile.email);
 
@@ -854,7 +879,7 @@ async function completeOAuthProfile(
   }
 
   const user = await upsertUserByEmail(normalized, {
-    ...(profile.name ? { name: profile.name } : {}),
+    ...(profile.name && (!initializeNameOnly || !existingUser?.name) ? { name: profile.name } : {}),
     ...(profile.profileUrl ? { profileUrl: profile.profileUrl } : {}),
     isVerified: true,
     lastLoginAt: new Date().toISOString(),
@@ -890,6 +915,14 @@ export async function completeOAuthSignIn(input: {
 export async function completeNativeGoogleSignIn(idToken: string) {
   const profile = await verifyGoogleIdentityToken(idToken);
   return profile ? completeOAuthProfile(profile) : null;
+}
+
+export async function completeNativeAppleSignIn(idToken: string, nonce: string, name?: string) {
+  const profile = await verifyAppleIdentityToken(idToken, undefined, {
+    clientId: requiredEnv('APPLE_NATIVE_CLIENT_ID'),
+    nonce,
+  });
+  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }, undefined, true) : null;
 }
 
 function allowedMobileOAuthRedirect(uri: string) {

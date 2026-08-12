@@ -189,6 +189,16 @@ export const imageCaptionOutputSchema = z.object({
 }).strict();
 export type ImageCaptionOutput = z.infer<typeof imageCaptionOutputSchema>;
 
+export const visualIdentityDescriptionInputSchema = z.object({
+  imageUrls: z.array(httpImageUrlSchema).min(1).max(8),
+}).strict();
+export type VisualIdentityDescriptionInput = z.infer<typeof visualIdentityDescriptionInputSchema>;
+
+export const visualIdentityDescriptionOutputSchema = z.object({
+  description: z.string().trim().min(1).max(12_000),
+}).strict();
+export type VisualIdentityDescriptionOutput = z.infer<typeof visualIdentityDescriptionOutputSchema>;
+
 export const transcribeInputSchema = z
   .object({
     audioBase64: z.string().min(1),

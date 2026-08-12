@@ -5,7 +5,7 @@ import { IMAGE_CAPTION_EXTERNAL_MODEL_ID, MAX_IMAGE_CAPTION_URLS } from '@/lib/i
 import { tokenUsage } from '@/lib/ai/shared/usage';
 import { normalizeProviderError, ProviderError, providerErrorCodeForStatus } from './errors';
 import { CHAT_ACTION_IDS, executeOpenAICompatibleChat, streamOpenAICompatibleChat, unsupportedAction } from './openai-compatible';
-import { embeddingInputSchema, imageCaptionInputSchema, imageCaptionOutputSchema, resolveRequestSignal, type EmbeddingOutput, type ImageCaptionOutput, type ProviderAdapter, type ProviderEmbedRequest, type ProviderEmbedResponse, type ProviderExecuteRequest, type ProviderExecuteResponse, type ProviderFactory } from './types';
+import { embeddingInputSchema, imageCaptionInputSchema, imageCaptionOutputSchema, resolveRequestSignal, visualIdentityDescriptionInputSchema, visualIdentityDescriptionOutputSchema, type EmbeddingOutput, type ImageCaptionOutput, type ProviderAdapter, type ProviderEmbedRequest, type ProviderEmbedResponse, type ProviderExecuteRequest, type ProviderExecuteResponse, type ProviderFactory, type VisualIdentityDescriptionOutput } from './types';
 
 /** OpenRouter is an OpenAI-compatible gateway; model ids are `vendor/model` slugs. */
 export const openRouterProviderConfigSchema = z
@@ -199,6 +199,45 @@ async function captionImages<TInput, TOutput>(
   }
 }
 
+async function describeVisualIdentity<TInput, TOutput>(
+  client: OpenAI,
+  request: ProviderExecuteRequest<TInput>,
+): Promise<ProviderExecuteResponse<TOutput>> {
+  if (request.externalModelId !== IMAGE_CAPTION_EXTERNAL_MODEL_ID) throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenRouter visual identity descriptions require ${IMAGE_CAPTION_EXTERNAL_MODEL_ID}`);
+  const input = visualIdentityDescriptionInputSchema.parse(request.input);
+  const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [{
+    type: 'text',
+    text: `The reference images show the same specific visual subject. Write one exhaustive, factual recognition profile that can distinguish this exact subject from similar subjects in future images. Cover every stable visible identifier shared across references: body and face shape, proportions, coloring, markings, texture, eyes, ears, hair or fur patterns, scars, accessories, and other persistent features. Separate stable identifiers from pose, lighting, background, clothing, or other temporary context. Do not guess a real-world identity, breed, age, personality, ownership, or facts that are not visible.`,
+  }];
+  input.imageUrls.forEach((url, index) => {
+    content.push({ type: 'text', text: `Reference image ${index + 1}:` });
+    content.push({ type: 'image_url', image_url: { url, detail: 'high' } });
+  });
+  try {
+    const completion = await client.chat.completions.create({
+      model: request.externalModelId,
+      messages: [{ role: 'user', content }],
+      temperature: 0.1,
+      max_tokens: 2_000,
+      provider: { data_collection: 'deny', zdr: true },
+      response_format: { type: 'json_schema', json_schema: { name: 'visual_identity_description', strict: true, schema: {
+        type: 'object', additionalProperties: false, required: ['description'], properties: { description: { type: 'string', minLength: 1, maxLength: 12_000 } },
+      } } },
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & { provider: { data_collection: 'deny'; zdr: true } }, { signal: resolveRequestSignal(request) });
+    const rawContent = completion.choices[0]?.message.content;
+    if (!rawContent) throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter visual identity description returned no content');
+    let output: VisualIdentityDescriptionOutput;
+    try {
+      output = visualIdentityDescriptionOutputSchema.parse(JSON.parse(rawContent));
+    } catch (error) {
+      throw new ProviderError(PROVIDER_ID, 'response_invalid', 'OpenRouter visual identity description returned invalid JSON', { cause: error });
+    }
+    return { output: output as TOutput & VisualIdentityDescriptionOutput, usage: tokenUsage(completion.usage?.prompt_tokens, completion.usage?.completion_tokens, completion.usage?.total_tokens), providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: completion };
+  } catch (error) {
+    throw normalizeProviderError(PROVIDER_ID, error);
+  }
+}
+
 export function createOpenRouterProvider(config: OpenRouterProviderConfigInput): ProviderAdapter {
   const parsed = openRouterProviderConfigSchema.parse(config);
   const headers: Record<string, string> = {};
@@ -217,6 +256,7 @@ export function createOpenRouterProvider(config: OpenRouterProviderConfigInput):
         return { output: { embedding: result.embeddings[0]! } as TOutput & EmbeddingOutput, usage: result.usage, providerId: PROVIDER_ID, modelId: request.modelId, externalModelId: request.externalModelId, rawResponse: result.rawResponse };
       }
       if (request.actionId === 'caption-image') return captionImages(client, request);
+      if (request.actionId === 'describe-visual-identity') return describeVisualIdentity(client, request);
       if (!CHAT_ACTION_IDS.has(request.actionId)) throw unsupportedAction(PROVIDER_ID, request.actionId);
       return executeOpenAICompatibleChat(PROVIDER_ID, client, request, { maxTokensParam: 'max_tokens' });
     },

@@ -55,6 +55,7 @@ const {
   copyContentDocument,
   downloadContentDocument,
   enhanceContent,
+  loadInitialContentLocation,
   listContentSearchHistory,
   moveContentFolder,
   moveContentDocument,
@@ -129,6 +130,12 @@ test("polls an offloaded upload using the same authenticated Archive context", a
   ]);
   expect(calls[0]?.body.input.file.mimeType).toBe("text/plain");
   expect(calls[1]?.body).toEqual({ organizationKey: "org-authenticated", agentKey: "agent-authenticated" });
+});
+
+test("normalizes platform PDF MIME aliases and missing filename extensions", async () => {
+  await uploadContentDocument({ name: "Quarterly report", type: "application/x-pdf; charset=binary", size: 8, base64: "JVBERi0=" }, "folder");
+  expect(calls[0]?.body.input.file).toMatchObject({ filename: "Quarterly report.pdf", mimeType: "application/pdf" });
+  expect(digestInputs).toEqual(["JVBERi0=", "Quarterly report.pdf\0application/pdf"]);
 });
 
 test("sends exact document action payloads and returns their results", async () => {
@@ -224,6 +231,36 @@ test("scopes search and replayable history to a folder", async () => {
   expect((await listContentSearchHistory("folder", true))[0]?.documents).toEqual(documents);
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", minimumScore: 0.55, folderKey: "folder", includeDescendants: true });
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 8 });
+});
+
+test("loads an existing My Documents folder as the initial Archive location", async () => {
+  responseForTool = (tool) => {
+    if (tool === "folder.list") {
+      const parentFolderKey = calls.at(-1)?.body.input.parentFolderKey;
+      return { data: { success: true, data: { folders: parentFolderKey ? [{ key: "nested", parentFolderKey, name: "Projects" }] : [{ key: "my-documents", name: "My Documents" }] } } };
+    }
+    if (tool === "document.list") return { data: { success: true, data: { documents: [] } } };
+  };
+
+  const initial = await loadInitialContentLocation();
+
+  expect(initial.initialFolder).toEqual({ key: "my-documents", name: "My Documents" });
+  expect(initial.root.folders).toEqual([{ key: "my-documents", name: "My Documents" }]);
+  expect(initial.location.folders).toEqual([{ key: "nested", parentFolderKey: "my-documents", name: "Projects" }]);
+  expect(calls.filter(({ url }) => url.endsWith("folder.list")).map(({ body }) => body.input.parentFolderKey)).toEqual([undefined, "my-documents"]);
+});
+
+test("keeps legacy accounts at the root when My Documents is absent", async () => {
+  responseForTool = (tool) => tool === "folder.list"
+    ? { data: { success: true, data: { folders: [{ key: "legacy", name: "Legacy" }] } } }
+    : { data: { success: true, data: { documents: [{ key: "root-note", name: "Root note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" }] } } };
+
+  const initial = await loadInitialContentLocation();
+
+  expect(initial.initialFolder).toBeUndefined();
+  expect(initial.location).toBe(initial.root);
+  expect(calls.filter(({ url }) => url.endsWith("folder.list"))).toHaveLength(1);
+  expect(calls.filter(({ url }) => url.endsWith("document.list"))).toHaveLength(1);
 });
 
 test("surfaces tool and item errors for document actions", async () => {

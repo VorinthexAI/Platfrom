@@ -2,7 +2,7 @@ import { useNavigation } from "expo-router";
 import { Directory, File, Paths } from "expo-file-system";
 import { EncodingType, writeAsStringAsync } from "expo-file-system/legacy";
 import { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
@@ -28,6 +28,8 @@ import {
 } from "@vorinthex/shared/ui/icons-mobile";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
+import { ChromeIcon } from "@/components/ChromeIcon";
+import { assistantIconSource } from "@/data/capability-icons";
 import {
   autocompleteContent,
   askPersonalAssistant,
@@ -38,6 +40,7 @@ import {
   downloadContentDocument,
   enhanceContent,
   isContentContextConfigured,
+  loadInitialContentLocation,
   listContentDocumentVersions,
   listContentLocation,
   listContentSearchHistory,
@@ -65,6 +68,7 @@ import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
+type WorkspaceMode = "auto" | "folders" | "folder" | "editor";
 type ArchiveSheet = "create" | "folder" | "destinationFolder" | "library" | "documents" | "folders" | "enhance" | "translate" | "versions" | "restoreVersion" | "documentActions" | "destination" | "rename" | "summary" | "uploads" | "folderActions" | "folderDetails";
 type DestinationAction = "upload" | "move" | "copy" | "moveFolder";
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
@@ -117,6 +121,7 @@ export function KnowledgeWorkspace() {
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
   const [aiInputFocused, setAiInputFocused] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [title, setTitle] = useState("Untitled note");
   const [content, setContent] = useState("");
   const [completion, setCompletion] = useState("");
@@ -141,6 +146,7 @@ export function KnowledgeWorkspace() {
   const [documents, setDocuments] = useState<ContentDocument[]>([]);
   const [rootDocuments, setRootDocuments] = useState<ContentDocument[]>([]);
   const [folderStack, setFolderStack] = useState<ContentFolder[]>([]);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("auto");
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -201,9 +207,11 @@ export function KnowledgeWorkspace() {
   const contentContextKeyRef = useRef(contentContextKey);
   const draftIdentityRef = useRef(draftIdentity);
   const folderStackRef = useRef(folderStack);
+  const workspaceModeRef = useRef(workspaceMode);
   contentContextKeyRef.current = contentContextKey;
   draftIdentityRef.current = draftIdentity;
   folderStackRef.current = folderStack;
+  workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
   const destinationFolder = destinationStack.at(-1);
   const activeDocument = documentKeyRef.current
@@ -223,6 +231,17 @@ export function KnowledgeWorkspace() {
     !libraryQuery.trim() || document.name.toLowerCase().includes(libraryQuery.trim().toLowerCase())
   ));
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSubscription = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (hasContentContext) return;
@@ -368,6 +387,10 @@ export function KnowledgeWorkspace() {
         contentRef.current = draft.content;
         setContent(draft.content);
       }
+      if (draftDocumentKey || (typeof draft.content === "string" && draft.content.trim()) || (typeof draft.title === "string" && draft.title !== "Untitled note")) {
+        workspaceModeRef.current = "editor";
+        setWorkspaceMode("editor");
+      }
       documentKeyRef.current = draftDocumentKey;
       updatedAtRef.current = typeof draft.updatedAt === "string" ? draft.updatedAt : undefined;
       savedTitleRef.current = typeof draft.savedTitle === "string" ? draft.savedTitle : "Untitled note";
@@ -437,6 +460,8 @@ export function KnowledgeWorkspace() {
       setDocuments([]);
       setRootDocuments([]);
       setFolderStack([]);
+      workspaceModeRef.current = "auto";
+      setWorkspaceMode("auto");
       setHistory([]);
       setResults(undefined);
       setSelectedSummary(undefined);
@@ -448,13 +473,25 @@ export function KnowledgeWorkspace() {
       setError(undefined);
       setSaveState("saved");
     }
-    void Promise.all([listContentLocation(), listContentSearchHistory(undefined, true)])
-      .then(([location, recent]) => {
+    void (async () => {
+      const initial = await loadInitialContentLocation();
+      const useInitialFolder = workspaceModeRef.current !== "folders" && Boolean(initial.initialFolder);
+      const recent = await listContentSearchHistory(useInitialFolder ? initial.initialFolder?.key : undefined, true);
+      return { initial, recent, useInitialFolder };
+    })()
+      .then(({ initial, recent, useInitialFolder }) => {
         if (contentContextKeyRef.current !== requestContextKey) return;
+        const location = useInitialFolder ? initial.location : initial.root;
         setFolders(location.folders);
-        setRootFolders(location.folders);
+        setRootFolders(initial.root.folders);
         setDocuments(location.documents);
-        setRootDocuments(location.documents);
+        setRootDocuments(initial.root.documents);
+        setFolderStack(useInitialFolder && initial.initialFolder ? [initial.initialFolder] : []);
+        if (workspaceModeRef.current === "auto") {
+          const nextMode = initial.initialFolder ? "folder" : "folders";
+          workspaceModeRef.current = nextMode;
+          setWorkspaceMode(nextMode);
+        }
         setHistory(recent);
       })
       .catch((cause: unknown) => {
@@ -830,6 +867,8 @@ export function KnowledgeWorkspace() {
       return false;
     }
     resetEditor(nextTitle);
+    workspaceModeRef.current = "editor";
+    setWorkspaceMode("editor");
     closeSheet();
     return true;
   };
@@ -876,6 +915,8 @@ export function KnowledgeWorkspace() {
       }
       editorSession.current += 1;
       applyRemoteDocument(opened);
+      workspaceModeRef.current = "editor";
+      setWorkspaceMode("editor");
       setSelectedSummary(undefined);
       setResults(undefined);
       return true;
@@ -977,6 +1018,8 @@ export function KnowledgeWorkspace() {
       setFolders(location.folders);
       setDocuments(location.documents);
       setFolderStack((current) => [...current, folder]);
+      workspaceModeRef.current = "folder";
+      setWorkspaceMode("folder");
       setResults(undefined);
       setHistory(recent);
     } catch (cause) {
@@ -996,6 +1039,8 @@ export function KnowledgeWorkspace() {
       setFolders(rootFolders);
       setDocuments([]);
       setFolderStack([]);
+      workspaceModeRef.current = "folders";
+      setWorkspaceMode("folders");
       return;
     }
     const generation = ++navigationGeneration.current;
@@ -1009,6 +1054,9 @@ export function KnowledgeWorkspace() {
       setFolders(location.folders);
       setDocuments(location.documents);
       setFolderStack(nextStack);
+      const nextMode = nextStack.length > 0 ? "folder" : "folders";
+      workspaceModeRef.current = nextMode;
+      setWorkspaceMode(nextMode);
       setHistory(recent);
       setResults(undefined);
     } catch (cause) {
@@ -1085,6 +1133,8 @@ export function KnowledgeWorkspace() {
         setDocuments([]);
       }
       setFolderStack([]);
+      workspaceModeRef.current = "folder";
+      setWorkspaceMode("folder");
       if (hasContentContext) resetEditor();
       closeSheet();
     } catch (cause) {
@@ -1114,6 +1164,8 @@ export function KnowledgeWorkspace() {
         setDocuments([]);
       }
       setFolderStack([folder]);
+      workspaceModeRef.current = "folder";
+      setWorkspaceMode("folder");
       if (hasContentContext) resetEditor();
       closeSheet();
     } catch (cause) {
@@ -1291,6 +1343,8 @@ export function KnowledgeWorkspace() {
         setRootDocuments(location.documents);
         if (folderStackRef.current.some((folder) => folder.key === sourceFolderKey) || currentFolderKeyRef.current === undefined) {
           setFolderStack([]);
+          workspaceModeRef.current = "folders";
+          setWorkspaceMode("folders");
           setFolders(location.folders);
           setDocuments(location.documents);
           setHistory(recent);
@@ -1416,23 +1470,91 @@ export function KnowledgeWorkspace() {
   };
 
   return (
-    <KeyboardAvoidingView behavior="padding" style={styles.root}>
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "height" : undefined} style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <Button accessibilityLabel="Back to your personal AI" contentMode="raw" onPress={() => navigation.goBack()} size="md" style={styles.headerBack} variant="ghost">
-          <ChevronLeftIcon size="md" variant="accent" />
-        </Button>
         <WorkspaceAppSwitcher active="archive" />
       </View>
 
       <ScrollView
         automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + spacing.sm }]}
+        contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 112 }]}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!editorFocused}
         style={styles.scrollView}
       >
-        <View style={[styles.noteSheet, editorFocused && styles.noteSheetFocused]}>
+        {workspaceMode === "auto" || workspaceMode === "folders" ? (
+          <View style={styles.workspacePanel}>
+            <View style={styles.workspaceTitleRow}>
+              <Button accessibilityLabel="Create in Archive" contentMode="raw" onPress={() => openSheet("create")} size="sm" variant="icon"><PlusIcon size="sm" /></Button>
+            </View>
+            {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
+            <View style={styles.folderSearch}>
+              <SearchIcon size="sm" variant="muted" />
+              <TextInput accessibilityLabel="Search all Archive documents" onChangeText={setQuery} onSubmitEditing={() => void runSearch()} placeholder="Search Archive" returnKeyType="search" style={styles.folderSearchInput} value={query} />
+              <Button accessibilityLabel="Search Archive" contentMode="raw" disabled={!query.trim() || !hasContentContext} loading={searching} onPress={() => void runSearch()} size="xs" variant="icon"><SendIcon size="sm" /></Button>
+            </View>
+            {results ? (
+              <View style={styles.results}>
+                <View style={styles.resultsHeader}><Text style={styles.resultsTitle}>{results.query}</Text><Button onPress={() => setResults(undefined)} size="xs" variant="ghost">Back</Button></View>
+                {results.documents.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => { setSelectedSummary(document); openSheet("summary"); }} size="lg" style={styles.resultRow} variant="secondary"><FileIcon size="md" variant="accent" /><View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{document.name}</Text><Text numberOfLines={2} style={styles.rowSubtitle}>{document.summary}</Text></View></Button>)}
+                {results.documents.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
+              </View>
+            ) : (
+              <>
+                <View style={styles.folderGrid}>
+                  {rootFolders.map((folder) => (
+                    <View key={folder.key} style={styles.managedTile}>
+                      <Button disabled={locationLoading} icon={<FolderIcon size="md" />} loading={locationLoading} onPress={() => void (hasContentContext ? openFolder(folder) : selectFolder(folder))} size="lg" style={styles.managedTileMain} variant="secondary">{folder.name}</Button>
+                      <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" disabled={locationLoading} onPress={() => showFolderActions(folder)} size="xs" style={styles.managedTileAction} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+                    </View>
+                  ))}
+                </View>
+                {rootDocuments.length > 0 ? <Text style={styles.sectionLabel}>DOCUMENTS</Text> : null}
+                {rootDocuments.map((document) => <Button icon={document.isFavorite ? <StarIcon size="sm" /> : <FileIcon size="sm" />} key={document.key} loading={openingDocumentKey === document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentRow} variant="ghost">{document.name}</Button>)}
+                {!locationLoading && rootFolders.length === 0 && rootDocuments.length === 0 ? <Text style={styles.empty}>Archive is empty.</Text> : null}
+              </>
+            )}
+          </View>
+        ) : workspaceMode === "folder" ? (
+          <View style={styles.workspacePanel}>
+            <View style={styles.folderTitleRow}>
+              <Button accessibilityLabel={`Back to ${folderStack.at(-2)?.name ?? "folders"}`} contentMode="raw" disabled={locationLoading} loading={locationLoading} onPress={() => void goBackFolder()} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+              <Text numberOfLines={1} style={styles.folderTitle}>{currentFolder?.name ?? "Archive"}</Text>
+              <View style={styles.folderTitleActions}>
+                {currentFolder ? <Button accessibilityLabel={`Manage ${currentFolder.name}`} contentMode="raw" onPress={() => showFolderActions(currentFolder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
+                <Button accessibilityLabel={`Create in ${currentFolder?.name ?? "Archive"}`} contentMode="raw" onPress={() => openSheet("create")} size="xs" variant="icon"><PlusIcon size="sm" /></Button>
+              </View>
+            </View>
+            {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
+            <View style={styles.folderSearch}>
+              <SearchIcon size="sm" variant="muted" />
+              <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "Archive"}`} onChangeText={setQuery} onSubmitEditing={() => void runSearch()} placeholder="Search this folder" returnKeyType="search" style={styles.folderSearchInput} value={query} />
+              <Button accessibilityLabel="Search folder" contentMode="raw" disabled={!query.trim() || !hasContentContext} loading={searching} onPress={() => void runSearch()} size="xs" variant="icon"><SendIcon size="sm" /></Button>
+            </View>
+            {results ? (
+              <View style={styles.results}>
+                <View style={styles.resultsHeader}><Text style={styles.resultsTitle}>{results.query}</Text><Button onPress={() => setResults(undefined)} size="xs" variant="ghost">Back</Button></View>
+                {results.documents.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => { setSelectedSummary(document); openSheet("summary"); }} size="lg" style={styles.resultRow} variant="secondary"><FileIcon size="md" variant="accent" /><View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{document.name}</Text><Text numberOfLines={2} style={styles.rowSubtitle}>{document.summary}</Text></View></Button>)}
+                {results.documents.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
+              </View>
+            ) : (
+              <>
+                <View style={styles.folderGrid}>
+                  {folders.map((folder) => (
+                    <View key={folder.key} style={styles.managedTile}>
+                      <Button disabled={locationLoading} icon={<FolderIcon size="md" />} loading={locationLoading} onPress={() => void openFolder(folder)} size="lg" style={styles.managedTileMain} variant="secondary">{folder.name}</Button>
+                      <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" onPress={() => showFolderActions(folder)} size="xs" style={styles.managedTileAction} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+                    </View>
+                  ))}
+                </View>
+                {documents.map((document) => <View key={document.key} style={styles.locationRow}><Button icon={document.isFavorite ? <StarIcon size="sm" /> : <FileIcon size="sm" />} loading={openingDocumentKey === document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.locationItem} variant="ghost">{document.name}</Button><Button accessibilityLabel={`Manage ${document.name}`} contentMode="raw" onPress={() => showDocumentActions(document)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button></View>)}
+                {!locationLoading && folders.length === 0 && documents.length === 0 ? <View style={styles.folderEmpty}><Text style={styles.empty}>Nothing here yet.</Text><Button onPress={() => openSheet("create")} size="sm" style={styles.emptyAction} textStyle={styles.emptyActionText} variant="ghost">Create a document, folder, or upload</Button></View> : null}
+              </>
+            )}
+          </View>
+        ) : (
+        <View style={[styles.noteSheet, (editorFocused || aiInputFocused) && styles.noteSheetFocused]}>
           <View style={styles.metaRow}>
             <Text style={styles.meta}>{documentKeyRef.current ? "EDIT NOTE" : "CREATE NOTE"}</Text>
             <View style={styles.noteActions}>
@@ -1452,7 +1574,7 @@ export function KnowledgeWorkspace() {
 
           {currentFolder ? (
             <View style={styles.folderContext}>
-              <Button disabled={locationLoading} icon={<ChevronLeftIcon size="sm" />} loading={locationLoading} onPress={() => void goBackFolder()} size="xs" style={styles.folderContextBack} variant="ghost">Back to {folderStack.at(-2)?.name ?? "Archive"}</Button>
+              <Button icon={<ChevronLeftIcon size="sm" />} onPress={() => { workspaceModeRef.current = "folder"; setWorkspaceMode("folder"); }} size="xs" style={styles.folderContextBack} variant="ghost">Back to {currentFolder.name}</Button>
               <Button accessibilityLabel={`Manage ${currentFolder.name}`} contentMode="raw" onPress={() => showFolderActions(currentFolder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
             </View>
           ) : null}
@@ -1494,7 +1616,7 @@ export function KnowledgeWorkspace() {
                 style={styles.titleInput}
                 value={title}
               />
-              <View style={[styles.editorFrame, editorFocused && styles.editorFrameFocused]}>
+              <View style={[styles.editorFrame, (editorFocused || aiInputFocused) && styles.editorFrameFocused]}>
                 {completion ? (
                   <Text accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.editorGhost}>
                     <Text style={styles.editorGhostSpacer}>{content}</Text>
@@ -1531,7 +1653,7 @@ export function KnowledgeWorkspace() {
                     selectionRef.current = event.nativeEvent.selection;
                     if (event.nativeEvent.selection.end !== contentRef.current.length) clearCompletion();
                   }}
-                  style={[styles.editor, editorFocused && styles.editorFocused]}
+                  style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused]}
                   textAlignVertical="top"
                   value={content}
                 />
@@ -1555,65 +1677,41 @@ export function KnowledgeWorkspace() {
               ) : null}
             </>
           )}
-          {!results ? (
-            <View style={styles.aiComposer}>
-              {aiInstructionError ? <Text accessibilityRole="alert" style={styles.aiComposerError}>{aiInstructionError}</Text> : null}
-              {aiResponse ? (
-                <View style={styles.aiResponse}>
-                  <Text style={styles.aiResponseText}>{aiResponse.message}</Text>
-                  {aiResponse.sources.length > 0 ? <Text style={styles.aiResponseSources}>Sources: {aiResponse.sources.map(({ name }) => name).join(", ")}</Text> : null}
-                </View>
-              ) : null}
-              <View style={styles.aiInputBar}>
-                <Button accessibilityLabel="Open AI note actions" contentMode="raw" disabled={!hasContentContext || !content.trim() || instructing} onPress={openEnhanceSheet} size="sm" variant="icon">
-                  <BrainIcon size="sm" variant="accent" />
-                </Button>
-                <TextInput
-                  accessibilityLabel="Ask Core"
-                  accessibilityHint="Ask a question, search your knowledge, or describe how to change the open note"
-                  editable={!instructing}
-                  maxLength={8_000}
-                  onBlur={() => setAiInputFocused(false)}
-                  onChangeText={(value) => { setAiInstruction(value); if (aiInstructionError) setAiInstructionError(undefined); }}
-                  onFocus={() => setAiInputFocused(true)}
-                  onSubmitEditing={() => void runNoteInstruction()}
-                  placeholder="Ask Core..."
-                  returnKeyType="send"
-                  style={styles.aiInput}
-                  value={aiInstruction}
-                />
-                <Button accessibilityLabel="Send to Core" contentMode="raw" disabled={!hasContentContext || !aiInstruction.trim() || instructing || saveState === "saving"} loading={instructing} onPress={() => void runNoteInstruction()} size="sm" variant="primary">
-                  <SendIcon size="sm" />
-                </Button>
-              </View>
-            </View>
-          ) : null}
         </View>
+        )}
+      </ScrollView>
 
-        {!editorFocused && !aiInputFocused ? (
-          <View style={styles.searchArea}>
-            <Text style={styles.meta}>SEARCHING {currentFolder ? `${currentFolder.name.toUpperCase()} + NESTED FOLDERS` : "ALL ARCHIVE DOCUMENTS"}</Text>
-            {history.length > 0 && !results ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.history}>
-                {history.slice(0, 4).map((item) => <Button key={`${item.normalizedQuery}-${item.searchedAt}`} onPress={() => restoreHistory(item)} size="xs" variant="ghost" icon={<ClockIcon size="sm" />}>{item.query}</Button>)}
-              </ScrollView>
-            ) : null}
-            <View style={styles.searchBar}>
-              <SearchIcon size="sm" variant="muted" />
-              <TextInput
-                accessibilityLabel="Search Archive documents"
-                onChangeText={setQuery}
-                onSubmitEditing={() => void runSearch()}
-                placeholder="Search documents..."
-                returnKeyType="search"
-                style={styles.searchInput}
-                value={query}
-              />
-              <Button accessibilityLabel="Search" contentMode="raw" disabled={!query.trim() || !hasContentContext} loading={searching} onPress={() => void runSearch()} size="sm" variant="primary"><SendIcon size="sm" /></Button>
-            </View>
+      <View style={[styles.aiComposer, { bottom: keyboardVisible ? 6 : insets.bottom + 12 }]}>
+        {aiInstructionError ? <Text accessibilityRole="alert" style={styles.aiComposerError}>{aiInstructionError}</Text> : null}
+        {aiResponse ? (
+          <View style={styles.aiResponse}>
+            <Text numberOfLines={4} style={styles.aiResponseText}>{aiResponse.message}</Text>
+            {aiResponse.sources.length > 0 ? <Text numberOfLines={1} style={styles.aiResponseSources}>Sources: {aiResponse.sources.map(({ name }) => name).join(", ")}</Text> : null}
           </View>
         ) : null}
-      </ScrollView>
+        <View style={styles.aiInputBar}>
+          <Button accessibilityLabel="Open note actions" contentMode="raw" disabled={!hasContentContext || !content.trim() || instructing} onPress={openEnhanceSheet} size="sm" variant="icon">
+            <ChromeIcon glow={0.35} size={24} source={assistantIconSource} />
+          </Button>
+          <TextInput
+            accessibilityLabel="Ask Core anything"
+            accessibilityHint="Ask a question, search your Archive, or describe how to change the open note"
+            editable={!instructing}
+            maxLength={8_000}
+            onBlur={() => setAiInputFocused(false)}
+            onChangeText={(value) => { setAiInstruction(value); if (aiInstructionError) setAiInstructionError(undefined); }}
+            onFocus={() => setAiInputFocused(true)}
+            onSubmitEditing={() => void runNoteInstruction()}
+            placeholder="Ask Core anything..."
+            returnKeyType="send"
+            style={styles.aiInput}
+            value={aiInstruction}
+          />
+          <Button accessibilityLabel="Send to Core" contentMode="raw" disabled={!hasContentContext || !aiInstruction.trim() || instructing || saveState === "saving"} loading={instructing} onPress={() => void runNoteInstruction()} size="sm" variant="primary">
+            <SendIcon size="sm" />
+          </Button>
+        </View>
+      </View>
 
       <BottomSheet
         description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "folder" ? `Create a folder inside ${currentFolder?.name ?? "Archive"}.` : activeSheet === "destinationFolder" ? `Create a folder inside ${destinationFolder?.name ?? "Archive"}.` : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : activeSheet === "translate" ? "Translate the full note into any language." : activeSheet === "versions" ? "Choose an earlier snapshot to review before restoring it." : activeSheet === "restoreVersion" ? "The current text will be backed up before this version is restored." : activeSheet === "destination" ? `Choose where to ${destinationAction === "moveFolder" ? "move this folder" : destinationAction === "upload" ? "upload documents" : `${destinationAction ?? "continue"} this document`}.` : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "folderDetails" ? "Rename this folder or add context that describes what belongs inside." : undefined}
@@ -1844,12 +1942,21 @@ export function KnowledgeWorkspace() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
-  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", gap: 6, borderBottomColor: palette.hairline, borderBottomWidth: 1 },
-  headerBack: { width: 42 },
+  header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, justifyContent: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1 },
   eyebrow: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, paddingBottom: 112, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  workspacePanel: { flexGrow: 1, gap: spacing.md, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  workspaceTitleRow: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
+  folderTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
+  folderTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
+  folderTitleActions: { flexDirection: "row", alignItems: "center", gap: 4 },
+  sectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
+  documentRow: { justifyContent: "flex-start" },
+  folderEmpty: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center" },
+  emptyAction: { minHeight: 34, paddingHorizontal: spacing.sm },
+  emptyActionText: { color: palette.muted, letterSpacing: 0.4, textTransform: "none" },
+  noteSheet: { flexGrow: 1, minHeight: 360, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   noteSheetFocused: { flex: 1, minHeight: 0 },
   metaRow: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   noteActions: { flexDirection: "row", gap: 8 },
@@ -1869,10 +1976,10 @@ const styles = StyleSheet.create({
   editorGhostSpacer: { color: "transparent" },
   completionText: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 26 },
   completionAccept: { bottom: 8, position: "absolute", right: 0, zIndex: 2 },
-  aiComposer: { bottom: spacing.md, left: spacing.md, position: "absolute", right: spacing.md, zIndex: 3, gap: 6 },
+  aiComposer: { left: spacing.md, position: "absolute", right: spacing.md, zIndex: 10, gap: 6 },
   aiComposerError: { paddingHorizontal: 8, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
-  aiInputBar: { minHeight: 58, padding: 7, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
-  aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: 3 },
+  aiInputBar: { minHeight: 58, padding: 7, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairlineBright, borderWidth: 1, backgroundColor: palette.obsidian850, shadowColor: palette.voidBlack, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: 3, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   aiResponseText: { color: palette.text, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
   aiResponseSources: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   aiInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 14 },
@@ -1891,10 +1998,6 @@ const styles = StyleSheet.create({
   locationRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   locationItem: { flex: 1, justifyContent: "flex-start" },
   match: { gap: 7, marginBottom: 10, padding: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
-  searchArea: { marginTop: spacing.md, gap: 8 },
-  history: { gap: 5, paddingHorizontal: 4 },
-  searchBar: { minHeight: 58, padding: 7, paddingLeft: 16, flexDirection: "row", alignItems: "center", gap: 9, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
-  searchInput: { flex: 1, minHeight: 40, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 14 },
   results: { gap: 8 },
   resultsHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
   resultsTitle: { marginTop: 6, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
@@ -1913,7 +2016,7 @@ const styles = StyleSheet.create({
   folderGrid: { paddingTop: 14, flexDirection: "row", flexWrap: "wrap", gap: 10 },
   folderList: { flex: 1 },
   folderTile: { minHeight: 86, flexBasis: "48%", flexDirection: "column", gap: 8, paddingHorizontal: 10 },
-  managedTile: { minHeight: 86, flexBasis: "48%", position: "relative" },
+  managedTile: { minHeight: 86, flexBasis: "31%", position: "relative" },
   managedTileMain: { minHeight: 86, width: "100%", flexDirection: "column", gap: 8, paddingHorizontal: 10 },
   managedTileAction: { position: "absolute", right: 4, top: 4 },
 });

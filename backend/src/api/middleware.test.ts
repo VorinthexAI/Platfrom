@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isResendWebhookPath } from './resend';
+import { isGmailWebhookPath } from './email-webhook';
 import { createAutoRefreshAuthTokens, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
@@ -29,18 +30,24 @@ describe('api middleware webhook exemptions', () => {
     expect(isResendWebhookPath('/api/webhooks/resend')).toBe(false);
   });
 
+  test('recognizes only the v1 Gmail Pub/Sub path', () => {
+    expect(isGmailWebhookPath('/api/v1/webhooks/gmail/pubsub')).toBe(true);
+    expect(isGmailWebhookPath('/api/v1/webhooks/gmail/pubsub/')).toBe(true);
+    expect(isGmailWebhookPath('/api/webhooks/gmail/pubsub')).toBe(false);
+  });
+
   test('does not require the global API key for provider webhooks', async () => {
     const previousApiKey = process.env.API_KEY;
     process.env.API_KEY = 'server-key';
     let nextCalls = 0;
 
     try {
-      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/resend/']) {
+      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/resend/', '/api/v1/webhooks/gmail/pubsub', '/api/v1/webhooks/gmail/pubsub/']) {
         await requireEnvApiKey(middlewareContext(path), async () => {
           nextCalls += 1;
         });
       }
-      expect(nextCalls).toBe(2);
+      expect(nextCalls).toBe(4);
     } finally {
       if (previousApiKey === undefined) delete process.env.API_KEY;
       else process.env.API_KEY = previousApiKey;
@@ -54,11 +61,9 @@ describe('api middleware webhook exemptions', () => {
     let nextCalls = 0;
 
     try {
-      await rateLimitByIp(middlewareContext('/api/v1/webhooks/resend'), async () => {
-        nextCalls += 1;
-      });
+      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/gmail/pubsub']) await rateLimitByIp(middlewareContext(path), async () => { nextCalls += 1; });
 
-      expect(nextCalls).toBe(1);
+      expect(nextCalls).toBe(2);
     } finally {
       if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
       else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
@@ -78,6 +83,7 @@ describe('mobile auth API-key protection', () => {
     expect(isPublicFounderAuthPath('/api/v1/auth/oauth/callback')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/google')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/google')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/mobile/apple')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/apple/callback')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/github')).toBe(false);
 

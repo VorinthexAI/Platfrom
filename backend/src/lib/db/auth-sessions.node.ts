@@ -8,6 +8,7 @@ export const AUTH_SESSIONS_COLLECTION = 'authSessions';
 export const authSessionSchema = z.object({
   key: z.string(),
   userId: z.string(),
+  identityType: z.enum(['user', 'member', 'superAdmin']).optional(),
   refreshTokenHash: z.string(),
   expiresAt: z.string().datetime(),
   revokedAt: z.string().datetime().nullable().default(null),

@@ -1,20 +1,26 @@
 import { aql } from 'arangojs';
 import { z } from 'zod';
-import { currentEmbeddingSchema } from '@/lib/embeddings';
+import { rolloutEmbeddingSchema } from '@/lib/embeddings';
+import { countryCodeSchema } from './users.node';
 import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
 export const PLACES_COLLECTION = 'places';
+export const placeKindSchema = z.enum(['country', 'place']);
+export const placeCountryCodeSchema = z.preprocess(
+  (value) => typeof value === 'string' ? value.trim().toUpperCase() : value,
+  countryCodeSchema,
+);
 export const placeSchema = z.object({
-  key: z.string().cuid(), scopeKey: z.string().cuid(), name: z.string().trim().min(1), description: z.string().trim().min(1).optional(),
+  key: z.string().cuid(), scopeKey: z.string().cuid(), kind: placeKindSchema.default('place'), name: z.string().trim().min(1), description: z.string().trim().min(1).optional(),
   latitude: z.number().finite().min(-90).max(90), longitude: z.number().finite().min(-180).max(180),
-  countryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/).optional(), country: z.string().trim().min(1).optional(),
+  countryCode: placeCountryCodeSchema.optional(), country: z.string().trim().min(1).optional(), continent: z.string().trim().min(1).optional(),
   region: z.string().trim().min(1).optional(), city: z.string().trim().min(1).optional(), isWishlist: z.boolean().default(false),
-  isFavorite: z.boolean().default(false), embedding: currentEmbeddingSchema, deletedAt: z.string().datetime().nullable().default(null),
+  isFavorite: z.boolean().default(false), embedding: rolloutEmbeddingSchema, deletedAt: z.string().datetime().nullable().default(null),
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Place = z.infer<typeof placeSchema>;
-export const placesEmbeddingFields = ['name', 'description', 'country', 'region', 'city'] as const;
+export const placesEmbeddingFields = ['name', 'description', 'country', 'continent', 'region', 'city'] as const;
 const helpers = createNodeHelpers(PLACES_COLLECTION, placeSchema, placesEmbeddingFields, { includeEmbeddingMetadata: false });
 export const insertPlace = helpers.insert;
 export const getPlaceById = helpers.getById;

@@ -6,6 +6,7 @@ import {
   buildOAuthAuthorizationUrl,
   completeOAuthSignIn,
   buildMobileOAuthAuthorizationUrl,
+  completeNativeAppleSignIn,
   completeNativeGoogleSignIn,
   createMobileOAuthGrant,
   createUserWithAuth,
@@ -60,7 +61,10 @@ import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
 import { postPersonalAssistantResponse } from './personal-assistant';
-import { completeGalleryUploads, createGalleryCollection, galleryOverview, galleryUploadStatus, presignGalleryUploads, searchGalleryImages } from './gallery';
+import { completeGalleryUploads, createGalleryCollection, createGallerySubject, deleteGalleryCollectionDuplicates, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, restoreGallerySubject, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages } from './gallery';
+import { travelHandlers } from './travel';
+import { emailHandlers } from './email-inbox';
+import { bookHandlers } from './books';
 
 const challengeHash = z.string().regex(/^[a-f0-9]{64}$/);
 const tokenHashBodyBase = strictObject({ token_hash: challengeHash });
@@ -198,8 +202,36 @@ export function registerRoutes(app: Hono) {
     });
   });
 
+  app.post('/auth/mobile/apple', async (c) => {
+    const body = await parseJson(c, strictObject({
+      id_token: z.string().min(100).max(16_384),
+      nonce: z.string().uuid(),
+      name: z.string().trim().min(1).max(200).optional(),
+    }));
+    const result = await completeNativeAppleSignIn(body.id_token, body.nonce, body.name);
+    if (!result) return c.json({ error: 'apple sign in failed' }, 401);
+    if (result.status === 'founders_gate_required') {
+      return c.json({ error: 'founders gate required', action: 'founders_gate', founders_gate_required: true }, 403);
+    }
+    if (result.status === 'mfa_required') {
+      return c.json({ error: 'mfa required', action: 'mfa', mfa_required: true }, 403);
+    }
+    setSessionForRequest(c, result);
+    return c.json({
+      ok: true,
+      status: result.status,
+      identity: result.identity,
+      ...sessionTokenPayload(c, result),
+      alias: result.alias,
+      alias_slug: result.aliasSlug,
+      welcome_line: result.welcomeLine,
+    });
+  });
+
   const mobileOAuthCallback = async (c: Context) => {
     const provider = oauthProviderSchema.parse(c.req.param('provider'));
+    const rawState = new URL(c.req.url).searchParams.get('state');
+    if (provider === 'google' && rawState?.startsWith('vrtx_email_state_')) return emailHandlers.callback(c);
     const callbackSchema = strictObject({
       code: z.string().min(1),
       state: z.string().min(1),
@@ -421,6 +453,36 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/uploads/complete', completeGalleryUploads);
   app.post('/gallery/uploads/status', galleryUploadStatus);
   app.post('/gallery/images/search', searchGalleryImages);
+  app.post('/gallery/images/favorite', setGalleryImageFavorite);
+  app.post('/gallery/collections/duplicates', findGalleryCollectionDuplicates);
+  app.post('/gallery/collections/duplicates/delete', deleteGalleryCollectionDuplicates);
+  app.post('/gallery/collections/images/transfer', transferGalleryCollectionImages);
+  app.post('/gallery/subjects/list', listGallerySubjects);
+  app.post('/gallery/subjects', createGallerySubject);
+  app.post('/gallery/subjects/images', listGallerySubjectImages);
+  app.post('/gallery/subjects/delete', deleteGallerySubject);
+  app.post('/gallery/subjects/restore', restoreGallerySubject);
+  app.post('/travel/overview', travelHandlers.overview);
+  app.post('/travel/places', travelHandlers.createPlace);
+  app.post('/travel/places/:placeKey/visits', travelHandlers.createVisit);
+  app.post('/travel/trips', travelHandlers.createTrip);
+  app.post('/travel/trips/:tripKey/places', travelHandlers.appendPlace);
+  app.delete('/travel/trips/:tripKey/places/:placeKey', travelHandlers.removePlace);
+  app.post('/email/overview', emailHandlers.overview);
+  app.post('/email/connect', emailHandlers.startConnect);
+  app.get('/email/connectors/gmail/callback', emailHandlers.callback);
+  app.post('/email/connect/exchange', emailHandlers.exchangeConnect);
+  app.post('/email/sync', emailHandlers.sync);
+  app.post('/email/threads/:threadKey', emailHandlers.thread);
+  app.post('/email/threads/:threadKey/favorite', emailHandlers.favorite);
+  app.post('/email/drafts', emailHandlers.draft);
+  app.patch('/email/drafts/:draftKey', emailHandlers.updateDraft);
+  app.post('/email/drafts/:draftKey/send', emailHandlers.sendDraft);
+  app.post('/email/disconnect', emailHandlers.disconnect);
+  app.post('/books/overview', bookHandlers.overview);
+  app.post('/books', bookHandlers.create);
+  app.post('/books/:bookKey/detail', bookHandlers.detail);
+  app.patch('/books/:bookKey/chapters/:chapterKey/progress', bookHandlers.progress);
 
   app.get('/founders/me', getFoundersAccount);
   app.get('/founders/organizations', listFoundersOrganizations);

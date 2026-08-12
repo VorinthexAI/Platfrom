@@ -34,6 +34,8 @@ export * from './icons/filter';
 export * from './icons/sort';
 export * from './icons/more-horizontal';
 export * from './icons/more-vertical';
+export * from './icons/pause';
+export * from './icons/play';
 export * from './icons/check';
 export * from './icons/checkbox';
 export * from './icons/x-circle';

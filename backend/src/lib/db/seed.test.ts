@@ -128,6 +128,7 @@ describe('model and routing relation seeds', () => {
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'embed')?.modelSlug).toBe('qwen.qwen3-embedding-8b');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'generate-speech')?.modelSlug).toBe('amazon.polly-generative');
     expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'caption-image')?.modelSlug).toBe('qwen.qwen3-vl-32b-instruct');
+    expect(SEEDED_MODEL_ACTIONS.find(({ actionSlug }) => actionSlug === 'describe-visual-identity')?.modelSlug).toBe('qwen.qwen3-vl-32b-instruct');
     expect(SEEDED_MODEL_PROVIDERS.map(({ modelSlug, providerSlug, providerModelId, enabled }) => `${modelSlug}:${providerSlug}:${providerModelId}:${enabled}`)).toEqual([
       'openai.gpt-5.6-sol:aws-bedrock-mantle:openai.gpt-5.6-sol:false',
       'openai.gpt-5.6-terra:aws-bedrock-mantle:openai.gpt-5.6-terra:false',

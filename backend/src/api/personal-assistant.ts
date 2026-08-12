@@ -3,7 +3,7 @@ import { z, ZodError } from 'zod';
 import { AgentExecutionAccessError } from '@/lib/ai/agents/access';
 import { AgentRuntimeNotFoundError } from '@/lib/ai/agents/runtime';
 import { personalAssistantInputSchema, runPersonalAssistant, type PersonalAssistantDependencies } from '@/lib/ai/personal-assistant';
-import { authorizeContentAgentTool, ContentError, type RunContentAgentToolOptions } from '@/lib/ai/tools';
+import { authorizeContentAgentExecution, ContentError, type RunContentAgentToolOptions } from '@/lib/ai/tools';
 import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
@@ -38,7 +38,7 @@ async function parseRequest(c: Context) {
 
 export interface PersonalAssistantHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
-  authorize?: typeof authorizeContentAgentTool;
+  authorize?: typeof authorizeContentAgentExecution;
   authorizationOptions?: Omit<RunContentAgentToolOptions, 'authenticatedUserKey' | 'execute'>;
   run?: typeof runPersonalAssistant;
   runtime?: PersonalAssistantDependencies;
@@ -57,11 +57,9 @@ export function createPersonalAssistantHandler(dependencies: PersonalAssistantHa
       throw error;
     }
     try {
-      const { context } = await (dependencies.authorize ?? authorizeContentAgentTool)({
+      const { context } = await (dependencies.authorize ?? authorizeContentAgentExecution)({
         organizationKey: body.organizationKey,
         agentKey: body.agentKey,
-        tool: 'scope.document.search',
-        input: {},
       }, { ...dependencies.authorizationOptions, authenticatedUserKey: identity.key });
       const output = await (dependencies.run ?? runPersonalAssistant)(body.input, context, {
         ...dependencies.runtime,

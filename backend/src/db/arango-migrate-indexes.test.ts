@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isLegacyIndex, normalizeLegacyDocumentSharePermission } from './arango-migrate-indexes';
 import { legacyContentRepresentations, stageLegacyDocumentShares } from './content-migration';
-import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateImageCaptions, retireRemovedActions } from './arango-migrate';
+import { collections, migrateContentDocuments, migrateContentFavorites, migrateContentVersions, migrateEmailReplyMetadata, migrateImageCaptions, retireRemovedActions } from './arango-migrate';
 import { EMBEDDING_DIMENSIONS, embeddingMetadata } from '../lib/embeddings';
 import { DOCUMENT_CHUNK_MAX_WORDS, DOCUMENT_MAX_CHUNKS, documentSemanticHash } from '../lib/ai/document-processing/chunking';
 
@@ -108,11 +108,17 @@ describe('Arango migration indexes', () => {
     const bookNames = ['books', 'bookContexts', 'bookThemes', 'bookSources', 'bookParts', 'bookChapters', 'chapterContexts', 'bookProgress'];
     expect(collections.filter(({ name }) => bookNames.includes(name)).map(({ name }) => name)).toEqual(bookNames);
     expect(collections.find(({ name }) => name === 'bookChapters')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'position'], unique: true });
-    expect(collections.find(({ name }) => name === 'bookProgress')?.indexes).toContainEqual({ fields: ['scopeKey', 'bookKey', 'chapterKey'], unique: true });
+    expect(collections.find(({ name }) => name === 'bookProgress')?.indexes).toContainEqual({ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true });
+    expect(collections.find(({ name }) => name === 'books')?.indexes).toContainEqual({ fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true });
     const emailNames = ['emailAccounts', 'emailThreads', 'emailMessages', 'emailContacts', 'emailWritingProfiles', 'emailRules', 'emailReplyDrafts'];
     expect(collections.filter(({ name }) => emailNames.includes(name)).map(({ name }) => name)).toEqual(emailNames);
     expect(collections.find(({ name }) => name === 'emailAccounts')?.skipEmbedding).toBe(true);
     expect(collections.find(({ name }) => name === 'emailMessages')?.indexes).toContainEqual({ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true });
+  });
+  test('removes legacy scope-shared book progress before per-user indexes', async () => {
+    const source = await Bun.file(new URL('./arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('FILTER !HAS(progress, "userKey") REMOVE progress IN bookProgress');
+    expect(source).toContain('Dropped obsolete scope-shared book progress index');
   });
   test('derives deterministic historical representations from version content', () => {
     expect(legacyContentRepresentations('First <line>\n\nSecond')).toEqual({
@@ -206,7 +212,7 @@ describe('Arango migration indexes', () => {
     expect(patch).not.toHaveProperty('chunkEmbeddings');
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
-    for (const collection of ['images', 'collections', 'documents'] as const) {
+    for (const collection of ['images', 'collections', 'documents', 'emailThreads'] as const) {
       const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
       const database = {
         async query(query: string, bindVars?: Record<string, unknown>) {
@@ -224,6 +230,17 @@ describe('Arango migration indexes', () => {
       expect(calls.filter(({ query }) => query.includes('RETURN LENGTH'))).toHaveLength(2);
       expect(calls.every(({ bindVars }) => bindVars?.['@collection'] === collection)).toBe(true);
     }
+  });
+  test('backfills stable email reply depths from RFC message links', async () => {
+    const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
+    const database = { async query(query: string, bindVars?: Record<string, unknown>) {
+      calls.push({ query, bindVars });
+      if (calls.length === 1) return { async all() { return [{ scopeKey: 'scope', threadKey: 'thread' }]; } };
+      if (calls.length === 2) return { async all() { return [{ key: 'one', messageIdHeader: '<one@example.com>' }, { key: 'two', messageIdHeader: '<two@example.com>', inReplyTo: '<one@example.com>' }]; } };
+      return { async all() { return []; } };
+    } };
+    await migrateEmailReplyMetadata(database as never);
+    expect(calls[2]?.bindVars?.updates).toEqual([{ key: 'one', parentMessageId: null, replyDepth: 0 }, { key: 'two', parentMessageId: '<one@example.com>', replyDepth: 1 }]);
   });
   test('uses a durable two-phase cutover and verifies before dropping legacy shares', async () => {
     const staged = stageLegacyDocumentShares([

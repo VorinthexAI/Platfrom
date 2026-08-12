@@ -16,10 +16,11 @@ const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
 describe('travel node contracts', () => {
   test('validates places and builds the exact semantic text', () => {
     const place = placeSchema.parse({ key, scopeKey: otherKey, name: ' Tokyo ', latitude: 35.6762, longitude: 139.6503, countryCode: 'jp', country: 'Japan', region: 'Tokyo', city: 'Tokyo', embedding, createdAt: timestamp, updatedAt: timestamp });
-    expect(place).toMatchObject({ name: 'Tokyo', countryCode: 'JP', isWishlist: false, isFavorite: false, deletedAt: null });
+    expect(place).toMatchObject({ kind: 'place', name: 'Tokyo', countryCode: 'JP', isWishlist: false, isFavorite: false, deletedAt: null });
     expect(buildEmbeddingText(placesEmbeddingFields, place)).toBe('Tokyo\n\nJapan\n\nTokyo\n\nTokyo');
     expect(placeSchema.safeParse({ ...place, latitude: 91 }).success).toBe(false);
     expect(placeSchema.safeParse({ ...place, longitude: -181 }).success).toBe(false);
+    expect(placeSchema.safeParse({ ...place, countryCode: 'ZZ' }).success).toBe(false);
   });
 
   test('validates trips without a persisted status', () => {
@@ -44,5 +45,10 @@ describe('travel node contracts', () => {
       expect(sourceTypeSchema.parse(sourceType)).toBe(sourceType);
       expect(shareSourceTypeSchema.parse(sourceType)).toBe(sourceType);
     }
+  });
+
+  test('migrates legacy places to the default kind', async () => {
+    const source = await Bun.file(new URL('../../db/arango-migrate.ts', import.meta.url)).text();
+    expect(source).toContain('FILTER !HAS(place, "kind") UPDATE place WITH { kind: "place" } IN places');
   });
 });

@@ -10,6 +10,8 @@ import { agentMemberReadTool } from './agent-member-read';
 import { agentMemberRevokeTool } from './agent-member-revoke';
 import { agentMemberSyncTool } from './agent-member-sync';
 import { artifactCreateTool } from './artifact-create';
+import { bookCreateContextToolDefinition } from './book-create-context';
+import { bookWriteToolDefinition } from './book-write';
 import { autocompleteToolDefinition } from './autocomplete';
 import { documentContentToolDefinition } from './document-content';
 import { documentCreateToolDefinition } from './document-create';
@@ -41,6 +43,10 @@ import { documentUpdateToolDefinition } from './document-update';
 import { documentVersionContentTool } from './document-version-content';
 import { documentVersionRestoreTool } from './document-version-restore';
 import { enhanceToolDefinition } from './enhance';
+import { emailReplyDraftTool } from './email-reply-draft';
+import { emailReadTool } from './email-read';
+import { emailThreadListTool } from './email-thread-list';
+import { emailThreadReadTool } from './email-thread-read';
 import { folderContentToolDefinition } from './folder-content';
 import { folderCreateToolDefinition } from './folder-create';
 import { folderDeleteToolDefinition } from './folder-delete';
@@ -51,6 +57,7 @@ import { folderRenameToolDefinition } from './folder-rename';
 import { folderRestoreToolDefinition } from './folder-restore';
 import { folderUpdateToolDefinition } from './folder-update';
 import { imageCaptionTool } from './image-caption';
+import { imageCreateVisualIdentityTool } from './image-create-visual-identity';
 import { imageSearchTool } from './image-search';
 import { milestoneContentTool } from './milestone-content';
 import { milestoneChangeStatusTool } from './milestone-change-status';
@@ -142,9 +149,13 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   orchestratorChatTool,
   transcribeTool,
   imageCaptionTool,
+  imageCreateVisualIdentityTool,
   imageSearchTool,
   autocompleteToolDefinition,
   enhanceToolDefinition,
+  bookCreateContextToolDefinition,
+  bookWriteToolDefinition,
+  emailThreadListTool, emailThreadReadTool, emailReadTool, emailReplyDraftTool,
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
   agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,
   documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,

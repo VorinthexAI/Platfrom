@@ -18,6 +18,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -102,10 +103,13 @@ export function BottomSheet({
   title,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const setSceneSheetOpen = useContext(BottomSheetSceneContext);
   const [visible, setVisible] = useState(open);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const translateY = useRef(new Animated.Value(480)).current;
+  const closedOffsetRef = useRef(windowHeight + 64);
+  closedOffsetRef.current = windowHeight + 64;
+  const translateY = useRef(new Animated.Value(closedOffsetRef.current)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const openRef = useRef(open);
   const onOpenChangeRef = useRef(onOpenChange);
@@ -124,7 +128,7 @@ export function BottomSheet({
       Animated.timing(translateY, {
         duration,
         easing: show ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
-        toValue: show ? 0 : 480,
+        toValue: show ? 0 : closedOffsetRef.current,
         useNativeDriver: true,
       }),
       Animated.timing(overlayOpacity, {
@@ -161,7 +165,7 @@ export function BottomSheet({
   useEffect(() => {
     if (open) {
       setVisible(true);
-      translateY.setValue(reducedMotionRef.current ? 0 : 480);
+      translateY.setValue(reducedMotionRef.current ? 0 : closedOffsetRef.current);
       overlayOpacity.setValue(reducedMotionRef.current ? 1 : 0);
       animate(true);
     } else if (visible) {
@@ -174,16 +178,27 @@ export function BottomSheet({
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
-        gesture.dy > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-      onPanResponderMove: (_, gesture) =>
-        translateY.setValue(Math.max(0, gesture.dy)),
+        dismissibleRef.current && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
+      onMoveShouldSetPanResponderCapture: (_, gesture) =>
+        dismissibleRef.current && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
+      onPanResponderGrant: () => {
+        translateY.stopAnimation();
+        overlayOpacity.stopAnimation();
+      },
+      onPanResponderMove: (_, gesture) => {
+        const distance = Math.max(0, gesture.dy);
+        translateY.setValue(distance);
+        overlayOpacity.setValue(Math.max(0, 1 - distance / 420));
+      },
       onPanResponderRelease: (_, gesture) => {
-        if (dismissibleRef.current && (gesture.dy >= 96 || gesture.vy >= 0.65)) {
+        const projectedDistance = gesture.dy + Math.max(0, gesture.vy) * 140;
+        if (dismissibleRef.current && projectedDistance >= 88) {
           onOpenChangeRef.current(false);
         } else {
           animate(true);
         }
       },
+      onPanResponderTerminationRequest: () => false,
       onPanResponderTerminate: () => animate(true),
     }),
   ).current;
@@ -199,7 +214,7 @@ export function BottomSheet({
       transparent
       visible
     >
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "height" : undefined} style={styles.root}>
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Button
             accessibilityLabel="Close bottom sheet"
@@ -225,8 +240,9 @@ export function BottomSheet({
               transform: [{ translateY }],
             },
           ]}
+          {...panResponder.panHandlers}
         >
-          <View style={styles.headerDragTarget} {...panResponder.panHandlers}>
+          <View style={styles.headerDragTarget}>
             <View style={styles.dragTarget}>
               <View style={styles.dragHandle} />
             </View>
@@ -290,7 +306,7 @@ const styles = StyleSheet.create({
     top: 0,
   },
   sheet: {
-    backgroundColor: "#0D1117",
+    backgroundColor: "#030507",
     borderColor: "rgba(221, 226, 229, 0.14)",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -309,7 +325,7 @@ const styles = StyleSheet.create({
     maxHeight: "100%",
   },
   headerDragTarget: { marginHorizontal: -20, paddingHorizontal: 20 },
-  dragTarget: { alignItems: "center", paddingBottom: 14, paddingTop: 12 },
+  dragTarget: { alignItems: "center", minHeight: 36, paddingBottom: 14, paddingTop: 12 },
   dragHandle: {
     backgroundColor: "#7B858C",
     borderRadius: 999,
@@ -318,7 +334,7 @@ const styles = StyleSheet.create({
     width: 42,
   },
   header: { gap: 6, paddingBottom: 18, paddingHorizontal: 4, paddingRight: 48 },
-  closeButton: { position: "absolute", right: 20, top: 8, zIndex: 1 },
+  closeButton: { position: "absolute", right: 20, top: 20, zIndex: 1 },
   title: {
     color: "#F5F7F8",
     fontFamily: "Geist_600SemiBold",

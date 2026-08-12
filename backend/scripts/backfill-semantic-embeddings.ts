@@ -10,7 +10,7 @@ const MAX_CATCHUP_PASSES = 5;
 export const SEMANTIC_COLLECTION_ALLOWLIST = [
   'actions', 'providers', 'models', 'users', 'minds', 'orchestrators', 'voices', 'agents', 'skills', 'capabilities',
   'organizations', 'scopes', 'channels', 'threads', 'messages', 'messageReactions', 'polls', 'pollOptions', 'folders',
-  'documents', 'documentVersions', 'projects', 'milestones', 'tasks',
+  'documents', 'documentVersions', 'projects', 'milestones', 'tasks', 'places', 'trips', 'emailThreads', 'emailMessages',
 ] as const;
 
 type SemanticSpec = { name: string; embedKeys: string[]; includeMetadata: boolean };
@@ -18,7 +18,7 @@ const authoritative = new Map(collections.map((spec) => [spec.name, spec]));
 const semanticCollections: SemanticSpec[] = SEMANTIC_COLLECTION_ALLOWLIST.filter((name) => name !== 'documents' && name !== 'documentVersions').map((name) => {
   const spec = authoritative.get(name);
   if (!spec || spec.skipEmbedding || !spec.embedKeys?.length) throw new Error(`Semantic allowlist entry ${name} is not an embedding collection in authoritative specs.`);
-  return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions'].includes(name) };
+  return { name, embedKeys: [...spec.embedKeys], includeMetadata: !['folders', 'documents', 'documentVersions', 'places', 'trips', 'emailThreads', 'emailMessages'].includes(name) };
 });
 semanticCollections.push({ name: 'agentMemories', embedKeys: ['content'], includeMetadata: true });
 
@@ -37,6 +37,7 @@ function sourcePresentFilter(): string {
 }
 
 function staleFilter(spec: SemanticSpec): string {
+  if (spec.name === 'emailThreads' || spec.name === 'emailMessages') return `FILTER doc.embeddingContentVersion != 2 || !IS_ARRAY(doc.embedding) || LENGTH(doc.embedding) != @dimensions || LENGTH(doc.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0`;
   if (!spec.includeMetadata) return `FILTER !IS_ARRAY(doc.embedding) || LENGTH(doc.embedding) != @dimensions || LENGTH(doc.embedding[* FILTER !IS_NUMBER(CURRENT)]) > 0 || HAS(doc, "embeddingProvider") || HAS(doc, "embeddingModel") || HAS(doc, "embeddingDimensions") || HAS(doc, "embeddingState") || HAS(doc, "embeddedAt")`;
   return `FILTER doc.embeddingState != "skipped_empty" || ${sourcePresentFilter()}
     FILTER doc.embeddingProvider != @provider || doc.embeddingModel != @model || doc.embeddingDimensions != @dimensions
@@ -80,15 +81,16 @@ for (const spec of semanticCollections) {
       if (rows.length === 0) break;
 
       for (const row of rows) {
-        const text = buildEmbeddingText(spec.embedKeys, row.source);
+        const rawText = buildEmbeddingText(spec.embedKeys, row.source);
+        const text = rawText && (spec.name === 'emailThreads' || spec.name === 'emailMessages') ? rawText.slice(0, 24_000) : rawText;
         if (!text) {
           const write = await db.query<string>(`
             FOR doc IN @@collection
               FILTER doc._key == @key && doc._rev == @revision
               FILTER LENGTH(@embedKeys[* FILTER doc[CURRENT] != @source[CURRENT]]) == 0
-              UPDATE doc WITH { embedding: [], embeddingState: "skipped_empty", embeddingProvider: null, embeddingModel: null, embeddingDimensions: null } IN @@collection OPTIONS { keepNull: false }
+              UPDATE doc WITH { embedding: [], embeddingContentVersion: @embeddingContentVersion, embeddingState: "skipped_empty", embeddingProvider: null, embeddingModel: null, embeddingDimensions: null } IN @@collection OPTIONS { keepNull: false }
               RETURN NEW._key
-          `, { '@collection': spec.name, key: row._key, revision: row._rev, embedKeys: spec.embedKeys, source: row.source });
+          `, { '@collection': spec.name, key: row._key, revision: row._rev, embedKeys: spec.embedKeys, source: row.source, embeddingContentVersion: spec.name === 'emailThreads' || spec.name === 'emailMessages' ? 2 : null });
           if (await write.next()) skippedEmpty += 1;
         } else {
           const embedding = await embedText({ text, purpose: 'document' });
@@ -96,9 +98,9 @@ for (const spec of semanticCollections) {
             FOR doc IN @@collection
               FILTER doc._key == @key && doc._rev == @revision
               FILTER LENGTH(@embedKeys[* FILTER doc[CURRENT] != @source[CURRENT]]) == 0
-              UPDATE doc WITH MERGE(@metadata, { embedding: @embedding, embeddingState: @includeMetadata && HAS(doc, "embeddingState") ? "ready" : null, embeddedAt: @includeMetadata && HAS(doc, "embeddedAt") ? @now : null, embeddingProvider: @includeMetadata ? @metadata.embeddingProvider : null, embeddingModel: @includeMetadata ? @metadata.embeddingModel : null, embeddingDimensions: @includeMetadata ? @metadata.embeddingDimensions : null }) IN @@collection OPTIONS { keepNull: false }
+              UPDATE doc WITH MERGE(@metadata, { embedding: @embedding, embeddingContentVersion: @embeddingContentVersion, embeddingState: @includeMetadata && HAS(doc, "embeddingState") ? "ready" : null, embeddedAt: @includeMetadata && HAS(doc, "embeddedAt") ? @now : null, embeddingProvider: @includeMetadata ? @metadata.embeddingProvider : null, embeddingModel: @includeMetadata ? @metadata.embeddingModel : null, embeddingDimensions: @includeMetadata ? @metadata.embeddingDimensions : null }) IN @@collection OPTIONS { keepNull: false }
               RETURN NEW._key
-          `, { '@collection': spec.name, key: row._key, revision: row._rev, embedKeys: spec.embedKeys, source: row.source, embedding, metadata: embeddingMetadata(), includeMetadata: spec.includeMetadata, now: new Date().toISOString() });
+          `, { '@collection': spec.name, key: row._key, revision: row._rev, embedKeys: spec.embedKeys, source: row.source, embedding, embeddingContentVersion: spec.name === 'emailThreads' || spec.name === 'emailMessages' ? 2 : null, metadata: embeddingMetadata(), includeMetadata: spec.includeMetadata, now: new Date().toISOString() });
           if (await write.next()) updated += 1;
         }
         after = row._key;

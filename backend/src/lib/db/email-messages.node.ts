@@ -8,7 +8,8 @@ const text = z.string().trim().min(1);
 export const emailMessageSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), accountKey: z.string().cuid(), threadKey: z.string().cuid(), providerMessageId: text,
   from: address, to: z.array(address), cc: z.array(address).optional(), bcc: z.array(address).optional(), subject: text, body: text, summary: text,
-  direction: z.enum(['inbound', 'outbound']), sentAt: z.string().datetime(), hasAttachments: z.boolean(), embedding: currentEmbeddingSchema, createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  bodyHtml: z.string().optional(), replyTo: address.optional(), messageIdHeader: z.string().optional(), inReplyTo: z.string().optional(), references: z.array(z.string()).optional(), parentMessageId: z.string().optional(), replyDepth: z.number().int().nonnegative().default(0), labels: z.array(z.string()).optional(), unread: z.boolean().optional(),
+  direction: z.enum(['inbound', 'outbound']), sentAt: z.string().datetime(), hasAttachments: z.boolean(), embedding: currentEmbeddingSchema, embeddingContentVersion: z.literal(2).optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type EmailMessage = z.infer<typeof emailMessageSchema>;
 export const emailMessagesEmbeddingFields = ['subject', 'body', 'summary'] as const;

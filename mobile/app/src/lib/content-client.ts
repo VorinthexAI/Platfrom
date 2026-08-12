@@ -97,14 +97,29 @@ export function createContentMutationKey() {
 }
 
 function documentMimeType(name: string, reported: string) {
-  if (reported && reported !== "application/octet-stream") return reported;
   const extension = name.toLowerCase().split(".").pop();
-  return extension === "txt" ? "text/plain"
+  const extensionMimeType = extension === "txt" ? "text/plain"
     : extension === "md" ? "text/markdown"
       : extension === "pdf" ? "application/pdf"
         : extension === "doc" ? "application/msword"
           : extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            : reported || "application/octet-stream";
+            : undefined;
+  if (extensionMimeType) return extensionMimeType;
+  const normalized = reported.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (["application/x-pdf", "application/acrobat", "applications/vnd.pdf", "com.adobe.pdf"].includes(normalized)) return "application/pdf";
+  return normalized || "application/octet-stream";
+}
+
+function documentFilename(name: string, mimeType: string) {
+  const normalized = name.trim() || "Document";
+  if (/\.(?:txt|md|pdf|doc|docx)$/i.test(normalized)) return normalized;
+  const extension = mimeType === "application/pdf" ? "pdf"
+    : mimeType === "text/plain" ? "txt"
+      : mimeType === "text/markdown" ? "md"
+        : mimeType === "application/msword" ? "doc"
+          : mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx"
+            : undefined;
+  return extension ? `${normalized}.${extension}` : normalized;
 }
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
@@ -232,6 +247,13 @@ export async function listContentLocation(folderKey?: string) {
   };
   const [folders, documents] = await Promise.all([listFolders(), listDocuments()]);
   return { folders, documents };
+}
+
+export async function loadInitialContentLocation() {
+  const root = await listContentLocation();
+  const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
+  if (!initialFolder) return { root, location: root };
+  return { root, location: await listContentLocation(initialFolder.key), initialFolder };
 }
 
 export async function readContentDocument(documentKey: string) {
@@ -381,16 +403,17 @@ export async function uploadContentDocument(file: { name: string; type: string; 
   const contentContext = getContentContext();
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const mimeType = documentMimeType(file.name, file.type);
+  const filename = documentFilename(file.name, mimeType);
   const [contentDigest, identityDigest] = await Promise.all([
     Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, file.base64),
-    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${file.name}\0${mimeType}`),
+    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${filename}\0${mimeType}`),
   ]);
   const idempotencyKey = `upload-${contentDigest}-${identityDigest}-${folderKey ?? "root"}`;
   let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     file: {
-      filename: file.name,
+      filename,
       mimeType,
       sizeBytes: file.size,
       encoding: "base64",

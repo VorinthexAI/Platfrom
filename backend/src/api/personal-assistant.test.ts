@@ -33,8 +33,19 @@ describe('personal assistant API', () => {
       run: async () => ({ type: 'note', content: 'Improved text', message: 'Improved the note.', sources: [] }),
     });
     expect(response.status).toBe(200);
-    expect(authorization).toEqual({ organizationKey, agentKey, tool: 'scope.document.search', input: {} });
+    expect(authorization).toEqual({ organizationKey, agentKey });
     expect(await response.json()).toEqual({ success: true, data: { type: 'note', content: 'Improved text', message: 'Improved the note.', sources: [] } });
+  });
+
+  test('authorizes media workspace execution against image search', async () => {
+    let authorization: unknown;
+    const response = await request({
+      getIdentity: async () => ({ key: newId(), identityType: 'user' }),
+      authorize: async (input) => { authorization = input; return { input: input as any, context: { organizationKey, runtimeScopeKey: newId(), principal: {} } as any }; },
+      run: async () => ({ type: 'answer', message: 'Found images.', sources: [] }),
+    }, { ...requestBody, input: { ...requestBody.input, surface: 'media-workspace', currentNote: { title: '', content: '' } } });
+    expect(response.status).toBe(200);
+    expect(authorization).toEqual({ organizationKey, agentKey });
   });
 
   test('rejects unknown request fields', async () => {

@@ -4,7 +4,9 @@ import { createNodeHelpers } from './base';
 export const EMAIL_ACCOUNTS_COLLECTION = 'emailAccounts';
 export const emailAccountSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), provider: z.literal('gmail'), providerAccountId: z.string().trim().min(1), email: z.string().email(),
-  syncEnabled: z.boolean(), historyId: z.string().trim().min(1).optional(), lastSyncedAt: z.string().datetime().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  connectorKey: z.string().cuid().optional(), syncEnabled: z.boolean(), historyId: z.string().trim().min(1).optional(), lastSyncedAt: z.string().datetime().optional(),
+  syncStatus: z.enum(['idle', 'syncing', 'error']).optional(), syncError: z.string().max(500).optional(), syncLeaseToken: z.string().uuid().optional(), syncLeaseExpiresAt: z.string().datetime().optional(),
+  watchRegisteredAt: z.string().datetime().optional(), watchExpiresAt: z.string().datetime().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type EmailAccount = z.infer<typeof emailAccountSchema>;
 export const emailAccountsEmbeddingFields = [] as const;

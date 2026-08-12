@@ -899,6 +899,7 @@ describe('Content runtime', () => {
         canPermanentlyDelete: () => true,
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
+        bookRuntime: { create: async () => newId(), write: async () => {} },
         runAction: async (action: string, input: any) => {
           if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
@@ -914,8 +915,10 @@ describe('Content runtime', () => {
         },
       };
       let input: any;
-      if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
-      else if (name === 'enhance') input = { content: 'Improve teh wording.' };
+       if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
+       else if (name === 'enhance') input = { content: 'Improve teh wording.' };
+       else if (name === 'book.create-context') input = { scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
+       else if (name === 'book.write') input = { bookKey: newId(), scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
       else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
       else if (name === 'folder.find') input = { folderKeys: [f.folderKey] };
       else if (name === 'folder.list') input = { scopeKey: f.scopeKey, parentFolderKey: f.folderKey };

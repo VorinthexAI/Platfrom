@@ -44,6 +44,28 @@ describe('OpenRouter image captions', () => {
     expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 80, totalTokens: 200 });
   });
 
+  test('builds a strict visual identity profile from multiple references', async () => {
+    let body: Record<string, any> = {};
+    globalThis.fetch = (async (_input, init) => {
+      body = JSON.parse(String(init?.body));
+      return Response.json(completion(JSON.stringify({ description: 'A black dog with a white chest blaze and a notch in the left ear.' })));
+    }) as typeof fetch;
+
+    const result = await createOpenRouterProvider({ apiKey: 'test-key' }).execute({
+      actionId: 'describe-visual-identity',
+      modelId: IMAGE_CAPTION_MODEL,
+      externalModelId: IMAGE_CAPTION_EXTERNAL_MODEL_ID,
+      input: { imageUrls: ['https://cdn.example.com/viggo-1.jpg', 'https://cdn.example.com/viggo-2.jpg'] },
+      organizationKey: 'organization-key',
+    });
+
+    expect(body.messages[0].content.filter((part: { type: string }) => part.type === 'image_url')).toHaveLength(2);
+    expect(body.messages[0].content[0].text).toContain('stable visible identifier');
+    expect(body.response_format.json_schema.name).toBe('visual_identity_description');
+    expect(body.provider).toEqual({ data_collection: 'deny', zdr: true });
+    expect(result.output).toEqual({ description: 'A black dog with a white chest blaze and a notch in the left ear.' });
+  });
+
   test('rejects malformed output, mismatched cardinality, and the wrong model', async () => {
     const request = {
       actionId: 'caption-image' as const,

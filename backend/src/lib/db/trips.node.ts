@@ -1,6 +1,6 @@
 import { aql } from 'arangojs';
 import { z } from 'zod';
-import { currentEmbeddingSchema } from '@/lib/embeddings';
+import { rolloutEmbeddingSchema } from '@/lib/embeddings';
 import { createNodeHelpers, withArangoKey } from './base';
 import { db } from './client';
 
@@ -8,7 +8,7 @@ export const TRIPS_COLLECTION = 'trips';
 export const tripSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), name: z.string().trim().min(1), description: z.string().trim().min(1).optional(),
   startDate: z.string().date().optional(), endDate: z.string().date().optional(), isFavorite: z.boolean().default(false),
-  embedding: currentEmbeddingSchema, deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
+  embedding: rolloutEmbeddingSchema, deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 }).superRefine((trip, context) => { if (trip.startDate && trip.endDate && trip.endDate < trip.startDate) context.addIssue({ code: z.ZodIssueCode.custom, path: ['endDate'], message: 'endDate must not precede startDate.' }); });
 export type Trip = z.infer<typeof tripSchema>;
 export const tripsEmbeddingFields = ['name', 'description'] as const;

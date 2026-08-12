@@ -11,6 +11,7 @@ import type { DomainToolContext, DomainToolExecutionOptions } from './domain-exe
 import { orchestratorChatTool, orchestratorChatToolInputSchema } from './orchestrator-chat';
 import { transcribeTool, type TranscribeToolDependencies } from './transcribe';
 import { imageCaptionTool, type ImageCaptionToolDependencies } from './image-caption';
+import { imageCreateVisualIdentityTool, type ImageCreateVisualIdentityToolDependencies } from './image-create-visual-identity';
 import { imageSearchTool, type ImageSearchInput, type ImageSearchToolDependencies } from './image-search';
 import type { ImageSimilarityOutput } from './image-similarity';
 import { PUBLIC_TOOL_DEFINITIONS } from './tool-definitions';
@@ -33,7 +34,7 @@ export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries
 export const TOOL_DEFINITIONS = PUBLIC_TOOL_DEFINITIONS.map(({ providerDefinition }) => providerDefinition);
 export { orchestratorChatToolInputSchema };
 
-export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, RetrievalDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'>, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageSearchToolDependencies, 'executeEmbedding' | 'searchImages'> {
+export interface ToolDependencies extends RouterDependencies, DocumentParseDependencies, RetrievalDependencies, Pick<TranscribeToolDependencies, 'executeTranscription'>, Pick<ImageCaptionToolDependencies, 'executeImageCaption'>, Pick<ImageCreateVisualIdentityToolDependencies, 'executeDescription'>, Pick<ImageSearchToolDependencies, 'executeEmbedding' | 'searchImages'> {
   execute?: (organizationKey: string, input: CoreChatInput) => Promise<ProviderExecuteResponse<ChatOutput>>;
   stream?: (organizationKey: string, input: CoreChatInput) => AsyncIterable<ProviderStreamChunk>;
   signal?: AbortSignal;
@@ -66,6 +67,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
   if (toolName === orchestratorChatTool.name) return orchestratorChatTool.execute(skill, rawInput, dependencies);
   if (toolName === transcribeTool.name) return transcribeTool.execute(rawInput, dependencies);
   if (toolName === imageCaptionTool.name) return imageCaptionTool.execute(rawInput, dependencies);
+  if (toolName === imageCreateVisualIdentityTool.name) return imageCreateVisualIdentityTool.execute(rawInput, dependencies);
   if (toolName === imageSearchTool.name) {
     if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
     return imageSearchTool.execute(rawInput, { ...dependencies, context: dependencies.contentContext });
@@ -92,7 +94,7 @@ export async function* streamTool(name: string, skill: string, rawInput: unknown
 
 export { sanitizeAgentInput, sanitizedAgentMessageSchema } from './input-sanitizer';
 export { retrievalTool, retrievalInputSchema, retrievalFiltersSchema, retrieveNodeDocuments } from './retrieval';
-export { imageCaptionTool, imageSearchTool, transcribeTool };
+export { imageCaptionTool, imageCreateVisualIdentityTool, imageSearchTool, transcribeTool };
 export { imageSearchInputSchema } from './image-search';
 export { imageSimilarityOutputSchema } from './image-similarity';
 export type { RetrievalContext, RetrievalDependencies, RetrievalDocument, RetrievalFilters, RetrievalNodeResult } from './retrieval';

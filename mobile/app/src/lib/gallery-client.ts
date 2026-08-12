@@ -30,6 +30,22 @@ export type GalleryOverview = {
   images: GalleryImage[];
 };
 
+export function findInitialMediaCollection(collections: GalleryCollection[]) {
+  return collections.find(({ name }) => name === "My Images");
+}
+
+export type GallerySubject = {
+  key: string;
+  name: string;
+  description: string;
+  referenceImageKey: string;
+  referenceUrl: string;
+  imageCount: number;
+  deletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type ApiResponse<T> =
   | { success: true; data: T }
   | { success: false; error: { message: string } };
@@ -112,14 +128,50 @@ export function searchGalleryImages(input: { query?: string; imageKey?: string; 
   return postGallery<{ images: GalleryImage[] }>("/gallery/images/search", input, 4 * 60_000);
 }
 
+export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {
+  return postGallery<{ image: GalleryImage }>("/gallery/images/favorite", { imageKey, isFavorite });
+}
+
+export function findGalleryCollectionDuplicates(collectionKey: string) {
+  return postGallery<{ images: GalleryImage[] }>("/gallery/collections/duplicates", { collectionKey });
+}
+
+export function deleteGalleryCollectionDuplicates(collectionKey: string, imageKeys: string[]) {
+  return postGallery<{ removedImageKeys: string[]; deletedImageKeys: string[] }>("/gallery/collections/duplicates/delete", { collectionKey, imageKeys });
+}
+
+export function transferGalleryCollectionImages(input: { sourceCollectionKey: string; destinationCollectionKeys: string[]; imageKeys: string[]; mode: "copy" | "move" }) {
+  return postGallery<{ mode: "copy" | "move"; imageKeys: string[]; destinationCollectionKeys: string[]; createdRelationCount: number }>("/gallery/collections/images/transfer", input);
+}
+
+export function listGallerySubjects(includeDeleted = false) {
+  return postGallery<{ subjects: GallerySubject[] }>("/gallery/subjects/list", { includeDeleted });
+}
+
+export function createGallerySubject(name: string, imageKeys: string[]) {
+  return postGallery<{ subject: GallerySubject }>("/gallery/subjects", { name, imageKeys }, 4 * 60_000);
+}
+
+export function listGallerySubjectImages(identityKey: string) {
+  return postGallery<{ images: GalleryImage[] }>("/gallery/subjects/images", { identityKey });
+}
+
+export function deleteGallerySubject(identityKey: string) {
+  return postGallery<{ subject: GallerySubject }>("/gallery/subjects/delete", { identityKey });
+}
+
+export function restoreGallerySubject(identityKey: string) {
+  return postGallery<{ subject: GallerySubject }>("/gallery/subjects/restore", { identityKey });
+}
+
 export async function askGalleryAssistant(message: string) {
   const state = useAuthStore.getState();
-  const context = getGalleryContext();
+  const { organizationKey } = getGalleryContext();
   const agentKey = state.contentExecution?.agentKey ?? "";
   if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
   const response = await apiClient.post<ApiResponse<{ type: "answer" | "note"; message: string }>>(
     "/assistant/respond",
-    { ...context, agentKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
+    { organizationKey, agentKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
     { timeout: 4 * 60_000 },
   );
   if (!response.data.success) throw new Error(response.data.error.message);

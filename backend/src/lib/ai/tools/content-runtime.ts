@@ -17,6 +17,7 @@ import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } 
 import { htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
+import type { BookGenerator } from '@/lib/books/service';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
@@ -95,13 +96,14 @@ export interface ContentToolDependencies extends RouterDependencies {
   maxDownloadBytes?: number;
   generateExport?: typeof generateDocumentExport;
   searchQueries?: ContentSearchQueryStore;
+  bookRuntime?: BookGenerator;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -760,7 +762,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   }
   let result: unknown;
   try {
-    if (tool === 'autocomplete') {
+    if (tool === 'book.create-context' || tool === 'book.write') {
+      const { runBookContentTool } = await import('./book-runtime');
+      result = await runBookContentTool(tool, input, context, dependencies);
+    } else if (tool === 'autocomplete') {
       const response = await action('ask', {
         systemPrompt: `Continue the user's writing with exactly ${input.wordCount} words or fewer. Match the writer's voice and direction while favoring a vivid, specific, or subtly unexpected continuation over generic filler. Keep it coherent with the supplied context. Return only the continuation, without quotation marks, labels, commentary, or repeating the supplied context.`,
         messages: [{ role: 'user', content: [{ type: 'text', text: input.context }] }],

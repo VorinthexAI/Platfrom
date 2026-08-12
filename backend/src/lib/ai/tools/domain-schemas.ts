@@ -66,6 +66,12 @@ export const domainToolInputSchemas = {
   'access.organization.explain': z.object({ organization: referenceSchema.optional(), member: referenceSchema.optional(), action: z.string().trim().min(1).max(160).optional() }).strict(),
   'access.scope.explain': z.object({ scope: referenceSchema, member: referenceSchema.optional(), action: z.string().trim().min(1).max(160).optional() }).strict(),
   'access.agent.explain': z.object({ scope: referenceSchema, agent: referenceSchema, member: referenceSchema.optional(), action: z.enum(['read', 'run', 'delegate', 'manage']).default('run') }).strict(),
+  'email.thread.list': z.object({ filter: z.enum(['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite']).default('all'), search: z.string().trim().min(1).max(200).optional() }).strict(),
+  'email.thread.read': z.object({ threadKey: z.string().cuid() }).strict(),
+  'email.read': z.object({ threads: z.array(z.object({ threadKey: z.string().cuid(), cursor: z.string().min(1).max(1000).optional(), limit: z.number().int().min(1).max(50).default(20) }).strict()).min(1).max(10) }).strict()
+    .refine(({ threads }) => new Set(threads.map(({ threadKey }) => threadKey)).size === threads.length, 'thread keys must be unique')
+    .refine(({ threads }) => threads.reduce((total, { limit }) => total + limit, 0) <= 100, 'at most 100 messages may be requested'),
+  'email.reply.draft': z.object({ threadKey: z.string().cuid(), tone: z.enum(['concise', 'warm', 'formal', 'direct']).default('concise'), instruction: z.string().trim().min(1).max(1000).optional(), profileKey: z.string().cuid().optional() }).strict(),
   ...contentToolInputSchemas,
   ...workflowExecutionToolInputSchemas,
 } as const;

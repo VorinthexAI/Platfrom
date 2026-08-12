@@ -1,19 +1,11 @@
 import { Redirect, useLocalSearchParams } from "expo-router";
-import type { ComponentType } from "react";
 
-import { AscendContent } from "@/components/capability/AscendContent";
-import { CapabilityShell } from "@/components/capability/CapabilityShell";
-import { CompassContent } from "@/components/capability/CompassContent";
+import { AscendWorkspace } from "@/components/capability/AscendWorkspace";
 import { GalleryWorkspace } from "@/components/capability/GalleryWorkspace";
 import { KnowledgeWorkspace } from "@/components/capability/KnowledgeWorkspace";
-import { SignalContent } from "@/components/capability/SignalContent";
-import { capabilitySlugSchema, getCapability, type CapabilitySlug } from "@/data/registry";
-
-const CONTENT_BY_SLUG: Record<Exclude<CapabilitySlug, "archive" | "gallery">, ComponentType> = {
-  signal: SignalContent,
-  compass: CompassContent,
-  ascend: AscendContent,
-};
+import { EmailWorkspace } from "@/components/capability/EmailWorkspace";
+import { TravelWorkspace } from "@/components/capability/TravelWorkspace";
+import { capabilitySlugSchema } from "@/data/registry";
 
 export default function CapabilityRoute() {
   const params = useLocalSearchParams<{ slug: string }>();
@@ -23,14 +15,9 @@ export default function CapabilityRoute() {
     return <Redirect href="/capability/archive" />;
   }
 
-  const capability = getCapability(parsed.data);
   if (parsed.data === "archive") return <KnowledgeWorkspace />;
   if (parsed.data === "gallery") return <GalleryWorkspace />;
-  const Content = CONTENT_BY_SLUG[parsed.data];
-
-  return (
-    <CapabilityShell capability={capability}>
-      <Content />
-    </CapabilityShell>
-  );
+  if (parsed.data === "compass") return <TravelWorkspace />;
+  if (parsed.data === "signal") return <EmailWorkspace />;
+  return <AscendWorkspace />;
 }

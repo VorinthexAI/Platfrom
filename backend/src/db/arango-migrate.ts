@@ -5,6 +5,7 @@ import { ALIAS_SLUG_PREFIX_SPACE, generateAlias, generateAliasSlug } from '../li
 import { newId } from '../lib/ids';
 import { ensureOrganizationProvidersCollection } from '../lib/ai/organization-providers/indexes';
 import { ensureOrganizationCredentialsCollection } from '../lib/ai/organization-credentials/indexes';
+import { ensureOrganizationConnectorsCollection } from '../lib/email-inbox/indexes';
 import { ensureScopeMembersCollection, ensureScopesCollection, ensureScopeScopesCollection } from '../lib/ai/scopes/indexes';
 import { reconcileOrganizationInheritedAgentMemberships, reconcileOrganizationScopeMemberships } from '../lib/ai/scopes/membership-invariant';
 import { ensureAgentRunsCollection } from '../lib/ai/agent-runs/indexes';
@@ -242,7 +243,7 @@ export async function retireRemovedActions(targetDb: Database): Promise<void> {
   `, { slugs });
 }
 
-export async function migrateContentFavorites(targetDb: Database, collectionName: 'folders' | 'documents' | 'images' | 'collections') {
+export async function migrateContentFavorites(targetDb: Database, collectionName: 'folders' | 'documents' | 'images' | 'collections' | 'emailThreads') {
   await runMigrationTransaction(targetDb, collectionName, `
     FOR resource IN @@collection
       FILTER !IS_BOOL(resource.isFavorite)
@@ -255,6 +256,31 @@ export async function migrateContentFavorites(targetDb: Database, collectionName
   `, { '@collection': collectionName });
   const invalid = await verification.next() ?? 0;
   if (invalid > 0) throw new Error(`${collectionName} favorite migration verification failed for ${invalid} row(s).`);
+}
+
+export async function migrateEmailReplyMetadata(targetDb: Database): Promise<void> {
+  const targets = await targetDb.query<{ scopeKey: string; threadKey: string }>(`
+    FOR message IN emailMessages
+      FILTER !HAS(message, "replyDepth") || ((message.inReplyTo != null || LENGTH(message.references || []) > 0) && !HAS(message, "parentMessageId"))
+      COLLECT scopeKey = message.scopeKey, threadKey = message.threadKey
+      RETURN { scopeKey, threadKey }
+  `);
+  for (const target of await targets.all()) {
+    const cursor = await targetDb.query<{ key: string; messageIdHeader?: string; inReplyTo?: string; references?: string[] }>(`
+      FOR message IN emailMessages
+        FILTER message.scopeKey == @scopeKey && message.threadKey == @threadKey
+        SORT message.sentAt ASC, message._key ASC
+        RETURN { key: message._key, messageIdHeader: message.messageIdHeader, inReplyTo: message.inReplyTo, references: message.references }
+    `, target);
+    const depths = new Map<string, number>();
+    const updates = (await cursor.all()).map((message) => {
+      const parentMessageId = message.inReplyTo ?? message.references?.at(-1);
+      const replyDepth = parentMessageId ? (depths.get(parentMessageId) ?? -1) + 1 : 0;
+      if (message.messageIdHeader) depths.set(message.messageIdHeader, replyDepth);
+      return { key: message.key, parentMessageId: parentMessageId ?? null, replyDepth };
+    });
+    if (updates.length) await targetDb.query(`FOR patch IN @updates UPDATE patch.key WITH { parentMessageId: patch.parentMessageId, replyDepth: patch.replyDepth } IN emailMessages OPTIONS { keepNull: false }`, { updates });
+  }
 }
 
 export async function migrateExactSemanticRecords(targetDb: Database, collectionName: 'folders' | 'images' | 'collections' | 'tags', embedKeys: readonly string[]) {
@@ -813,6 +839,8 @@ export const collections: CollectionSpec[] = [
   { name: 'folders', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'parentFolderKey'] }, { fields: ['scopeKey', 'parentFolderKey', 'name'], unique: true }] },
   { name: 'images', embedKeys: ['filename', 'caption'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['imageCaptionKey'], sparse: true }, { fields: ['storageKey'], unique: true }] },
   { name: 'imageCaptions', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'hashAlgorithm', 'perceptualHash'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment0'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment1'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment2'], sparse: true }, { fields: ['scopeKey', 'hashAlgorithm', 'hashSegment3'], sparse: true }] },
+  { name: 'visualIdentities', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'referenceImageKey'] }] },
+  { name: 'imageIdentities', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'identityKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'identityKey', 'confidence'] }, { fields: ['scopeKey', 'imageKey'] }, { fields: ['scopeKey', 'imageKey', 'isReference'], sparse: true }] },
   { name: 'galleryUploads', skipEmbedding: true, indexes: [{ fields: ['actorKey', 'createdAt'] }, { fields: ['storageKey'], unique: true }, { fields: ['expiresAt'] }] },
   { name: 'collections', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'name'] }, { fields: ['scopeKey', 'coverImageKey'], sparse: true }] },
   { name: 'collectionImages', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'collectionKey', 'imageKey'], unique: true }, { fields: ['scopeKey', 'collectionKey'] }, { fields: ['scopeKey', 'imageKey'] }] },
@@ -823,19 +851,19 @@ export const collections: CollectionSpec[] = [
   { name: 'documents', embedKeys: ['name', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'folderKey', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['storageKey'], unique: true, sparse: true }, { fields: ['folderKey', 'name'] }] },
   { name: 'documentVersions', embedKeys: ['label', 'content'], archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'documentKey', 'deletedAt'] }, { fields: ['documentKey', 'version'], unique: true }] },
   { name: 'shares', skipEmbedding: true, archive: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'deletedAt'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey', 'revokedAt'] }, { fields: ['tokenHash'], unique: true }, { fields: ['expiresAt'], sparse: true }] },
-  { name: 'places', embedKeys: ['name', 'description', 'country', 'region', 'city'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'isWishlist', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'countryCode'] }] },
+  { name: 'places', embedKeys: ['name', 'description', 'country', 'continent', 'region', 'city'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'isWishlist', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'countryCode'] }] },
   { name: 'trips', embedKeys: ['name', 'description'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'startDate'] }, { fields: ['scopeKey', 'endDate'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }] },
   { name: 'tripPlaces', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'tripKey', 'placeKey'], unique: true }, { fields: ['scopeKey', 'tripKey', 'position'], unique: true }, { fields: ['scopeKey', 'placeKey'] }] },
   { name: 'placeVisits', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'placeKey'] }, { fields: ['scopeKey', 'tripKey'], sparse: true }, { fields: ['scopeKey', 'arrivedAt'] }] },
-  { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'status', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }] },
+  { name: 'books', embedKeys: ['title', 'subtitle', 'description', 'goal', 'audience', 'outcome'], archive: true, indexes: [{ fields: ['scopeKey', 'deletedAt'] }, { fields: ['scopeKey', 'status', 'deletedAt'] }, { fields: ['scopeKey', 'isFavorite', 'deletedAt'] }, { fields: ['scopeKey', 'generationRequestKey'], unique: true, sparse: true }] },
   { name: 'bookContexts', embedKeys: ['userContext', 'priorKnowledge', 'priorBookContext', 'personalizationContext', 'researchContext', 'noveltyContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'bookKey'], unique: true }] },
   { name: 'bookThemes', embedKeys: ['name', 'description'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
   { name: 'bookSources', embedKeys: ['title', 'content', 'relevance'], indexes: [{ fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'bookKey', 'sourceType'] }, { fields: ['scopeKey', 'sourceType', 'sourceKey'], sparse: true }] },
   { name: 'bookParts', embedKeys: ['title', 'description', 'objective'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }] },
-  { name: 'bookChapters', embedKeys: ['title', 'description', 'objective', 'content'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'partKey'], sparse: true }] },
+  { name: 'bookChapters', embedKeys: ['title', 'description', 'objective', 'topics', 'content'], indexes: [{ fields: ['scopeKey', 'bookKey', 'position'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'partKey'], sparse: true }] },
   { name: 'chapterContexts', embedKeys: ['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief'], indexes: [{ fields: ['scopeKey', 'chapterKey'], unique: true }] },
-  { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'bookKey'] }, { fields: ['scopeKey', 'isCompleted'] }] },
-  { name: 'emailAccounts', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'provider', 'providerAccountId'], unique: true }, { fields: ['scopeKey', 'email'] }, { fields: ['scopeKey', 'syncEnabled'] }] },
+  { name: 'bookProgress', skipEmbedding: true, indexes: [{ fields: ['scopeKey', 'userKey', 'bookKey', 'chapterKey'], unique: true }, { fields: ['scopeKey', 'userKey', 'bookKey'] }, { fields: ['scopeKey', 'userKey', 'isCompleted'] }] },
+  { name: 'emailAccounts', skipEmbedding: true, indexes: [{ fields: ['scopeKey'] }, { fields: ['scopeKey', 'provider', 'providerAccountId'], unique: true }, { fields: ['scopeKey', 'email'] }, { fields: ['email', 'syncEnabled'] }, { fields: ['syncEnabled', 'watchExpiresAt'] }, { fields: ['scopeKey', 'syncEnabled'] }] },
   { name: 'emailThreads', embedKeys: ['subject', 'summary', 'intent', 'action'], archive: true, indexes: [{ fields: ['scopeKey', 'accountKey', 'providerThreadId'], unique: true }, { fields: ['scopeKey', 'accountKey', 'lastMessageAt'] }, { fields: ['scopeKey', 'state', 'priority', 'deletedAt'] }] },
   { name: 'emailMessages', embedKeys: ['subject', 'body', 'summary'], indexes: [{ fields: ['scopeKey', 'accountKey', 'providerMessageId'], unique: true }, { fields: ['scopeKey', 'threadKey', 'sentAt'] }, { fields: ['scopeKey', 'direction', 'sentAt'] }] },
   { name: 'emailContacts', embedKeys: ['name', 'relationship', 'context'], indexes: [{ fields: ['scopeKey', 'email'], unique: true }, { fields: ['scopeKey', 'emailWritingProfileKey'], sparse: true }] },
@@ -1108,10 +1136,12 @@ async function main() {
         { '@collection': spec.name },
       );
     }
-    if (spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents') {
+    if (spec.name === 'images' || spec.name === 'collections' || spec.name === 'documents' || spec.name === 'emailThreads') {
       await migrateContentFavorites(targetDb, spec.name);
     }
     if (spec.name === 'imageCaptions') await migrateImageCaptions(targetDb);
+    if (spec.name === 'emailMessages') await migrateEmailReplyMetadata(targetDb);
+    if (spec.name === 'places') await targetDb.query(`FOR place IN places FILTER !HAS(place, "kind") UPDATE place WITH { kind: "place" } IN places`);
     if (spec.name === 'folders') {
       await targetDb.query(`FOR resource IN @@collection FILTER HAS(resource, "isFavorite") UPDATE resource WITH { isFavorite: null } IN @@collection OPTIONS { keepNull: false }`, { '@collection': spec.name });
     }
@@ -1209,6 +1239,19 @@ async function main() {
     }
     if (spec.name === 'shares') {
       await migrateContentShares(targetDb);
+    }
+    if (spec.name === 'bookProgress') {
+      // Progress created before reader ownership was introduced cannot be
+      // assigned safely. Remove those rows and the scope-shared indexes before
+      // creating the per-user constraints.
+      await targetDb.query('FOR progress IN bookProgress FILTER !HAS(progress, "userKey") REMOVE progress IN bookProgress');
+      for (const index of await collection.indexes()) {
+        const fields = 'fields' in index && Array.isArray(index.fields) ? index.fields.map(String) : [];
+        if (fields.join('\0') === ['scopeKey', 'bookKey', 'chapterKey'].join('\0') || fields.join('\0') === ['scopeKey', 'bookKey'].join('\0') || fields.join('\0') === ['scopeKey', 'isCompleted'].join('\0')) {
+          await collection.dropIndex(index.id);
+          console.log(`Dropped obsolete scope-shared book progress index ${index.id}`);
+        }
+      }
     }
     const legacyIndexes = LEGACY_INDEX_FIELDS[spec.name] ?? [];
     if (legacyIndexes.length > 0) {
@@ -1393,6 +1436,7 @@ async function main() {
   }
   await ensureOrganizationProvidersCollection(targetDb);
   await ensureOrganizationCredentialsCollection(targetDb);
+  await ensureOrganizationConnectorsCollection(targetDb);
 
   // The call-level ledger cannot safely infer DB keys or provider-reported
   // usage for runs written with the retired slug-based shape. Preserve

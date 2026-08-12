@@ -46,6 +46,8 @@ export * from "./icons/menu/menu.mobile";
 export * from "./icons/minus/minus.mobile";
 export * from "./icons/more-horizontal/more-horizontal.mobile";
 export * from "./icons/more-vertical/more-vertical.mobile";
+export * from "./icons/pause/pause.mobile";
+export * from "./icons/play/play.mobile";
 export * from "./icons/plus/plus.mobile";
 export * from "./icons/profile/profile.mobile";
 export * from "./icons/save/save.mobile";

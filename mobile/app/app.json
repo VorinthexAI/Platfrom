@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.vorinthex.com",
+      "usesAppleSignIn": true,
       "associatedDomains": [
         "applinks:vorinthex.com"
       ]
@@ -53,13 +54,15 @@
       ],
       "expo-secure-store",
       "expo-web-browser",
+      "expo-apple-authentication",
       [
         "expo-image-picker",
         {
           "photosPermission": "Allow Vorinthex to add the photos you choose to Gallery.",
           "cameraPermission": "Allow Vorinthex to take photos for Gallery."
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true,

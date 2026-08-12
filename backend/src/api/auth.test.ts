@@ -16,12 +16,13 @@ import {
   isChallengeUsableForPurpose,
   isRefreshTokenActive,
   loginIdentityTypeForMembership,
+  resolveRefreshedIdentityType,
   verifyAccessToken,
   verifyAppleIdentityToken,
   verifyGoogleIdentityToken,
   verifySuccessiveTotpCodes,
 } from './auth';
-import { decryptSecret, encryptSecret, timingSafeEqual } from '@/lib/crypto';
+import { decryptSecret, encryptSecret, sha256, timingSafeEqual } from '@/lib/crypto';
 
 describe('auth helpers', () => {
   test('builds frontend magic links with token hash query param and no raw token', async () => {
@@ -105,6 +106,7 @@ describe('auth helpers', () => {
     const tokenFor = async (claims: Record<string, unknown>) => {
       const payload = encode({
         iss: 'https://appleid.apple.com',
+        sub: 'apple-user-123',
         aud: 'com.example.service',
         exp: Math.floor(Date.now() / 1000) + 300,
         email: 'verified@example.com',
@@ -122,6 +124,15 @@ describe('auth helpers', () => {
     expect(await verifyAppleIdentityToken(`${token.slice(0, token.lastIndexOf('.'))}.invalid`, loadKeys)).toBeNull();
     process.env.APPLE_OAUTH_CLIENT_ID = 'another-client';
     expect(await verifyAppleIdentityToken(token, loadKeys)).toBeNull();
+
+    const nonce = '8e3ca6b9-2ec0-4e42-9af1-661655432427';
+    const nativeToken = await tokenFor({ aud: 'app.vorinthex.com', nonce: await sha256(nonce), email_verified: true });
+    expect(await verifyAppleIdentityToken(nativeToken, loadKeys, { clientId: 'app.vorinthex.com', nonce })).toEqual({
+      email: 'verified@example.com',
+      name: null,
+      profileUrl: null,
+    });
+    expect(await verifyAppleIdentityToken(nativeToken, loadKeys, { clientId: 'app.vorinthex.com', nonce: crypto.randomUUID() })).toBeNull();
   });
 
   test('accepts only cryptographically verified Google identity tokens', async () => {
@@ -229,6 +240,13 @@ describe('auth helpers', () => {
     expect(getAuthSessionPolicy('member')).toEqual({ accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS });
     expect(getAuthSessionPolicy('member', true)).toEqual({ accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS });
     expect(getAuthSessionPolicy('superAdmin')).toEqual({ accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS });
+  });
+
+  test('preserves a durable user identity when refreshing after organization membership is created', () => {
+    expect(resolveRefreshedIdentityType('user', 'member', true, false)).toBe('user');
+    expect(resolveRefreshedIdentityType(undefined, 'member', true, false)).toBe('user');
+    expect(resolveRefreshedIdentityType('member', 'superAdmin', true, false)).toBe('member');
+    expect(resolveRefreshedIdentityType(undefined, 'superAdmin', true, true)).toBe('superAdmin');
   });
 
   test('requires two successive TOTP setup codes', async () => {

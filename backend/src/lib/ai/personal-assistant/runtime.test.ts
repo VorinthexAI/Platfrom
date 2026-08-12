@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
 import type { runContentTool } from '@/lib/ai/tools/content-runtime';
+import type { imageSearchTool } from '@/lib/ai/tools/image-search';
 import { AssistantCapabilityRegistry } from './capabilities';
 import { runPersonalAssistant } from './runtime';
 
@@ -44,7 +45,30 @@ describe('personal assistant runtime', () => {
     });
 
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['search_images']);
+    expect(chatInput.systemPrompt).toContain('Call search_images whenever');
+    expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Gallery"');
     expect(result).toEqual({ type: 'answer', message: 'I can search your Gallery.', sources: [] });
+  });
+
+  test('infers image search, executes it, and answers from the tool result', async () => {
+    let modelCalls = 0;
+    let searchInput: unknown;
+    const result = await runPersonalAssistant({ ...input, surface: 'media-workspace', message: 'Show me photos of the red dog in snow' }, domain, {
+      execute: async (_request, nextInput) => {
+        modelCalls += 1;
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'image-search-1', name: 'search_images', arguments: { query: 'red dog in snow' } }], stopReason: 'tool_use' });
+        expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', toolCallId: 'image-search-1' }] });
+        return response({ text: 'I found one matching image of a red dog in snow.', toolCalls: [], stopReason: 'end_turn' });
+      },
+      executeImageSearch: (async (nextInput: unknown) => {
+        searchInput = nextInput;
+        return { query: 'red dog in snow', images: [{ key: newId(), filename: 'dog.jpg', caption: 'A red dog standing in snow.', mimeType: 'image/jpeg', sizeBytes: 100, width: 100, height: 100, isFavorite: false, createdAt: '2026-08-11T12:00:00.000Z', updatedAt: '2026-08-11T12:00:00.000Z', score: 0.94 }] };
+      }) as unknown as typeof imageSearchTool.execute,
+    });
+
+    expect(searchInput).toEqual({ query: 'red dog in snow', limit: 50 });
+    expect(modelCalls).toBe(2);
+    expect(result).toEqual({ type: 'answer', message: 'I found one matching image of a red dog in snow.', sources: [] });
   });
 
   test('searches authorized knowledge before answering and returns sources', async () => {

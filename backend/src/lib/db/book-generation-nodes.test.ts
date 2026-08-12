@@ -33,17 +33,20 @@ describe('book generation node contracts', () => {
     expect(bookThemesEmbeddingFields).toEqual(['name', 'description']);
     expect(bookSourcesEmbeddingFields).toEqual(['title', 'content', 'relevance']);
     expect(bookPartsEmbeddingFields).toEqual(['title', 'description', 'objective']);
-    expect(bookChaptersEmbeddingFields).toEqual(['title', 'description', 'objective', 'content']);
+    expect(bookChaptersEmbeddingFields).toEqual(['title', 'description', 'objective', 'topics', 'content']);
     expect(chapterContextsEmbeddingFields).toEqual(['previousContext', 'objectiveContext', 'sourceContext', 'personalizationContext', 'noveltyContext', 'nextContext', 'generationBrief']);
     expect(buildEmbeddingText(booksEmbeddingFields, { title: 'Leadership', description: 'Grow', goal: 'Lead', audience: 'Managers', outcome: 'Coach' })).toBe('Leadership\n\nGrow\n\nLead\n\nManagers\n\nCoach');
   });
 
   test('validates book metadata and progress defaults', () => {
-    const book = bookSchema.parse({ key, scopeKey: otherKey, title: 'Leadership', description: 'A personal guide', goal: 'Lead better', audience: 'Managers', outcome: 'Build leaders', language: 'en', coverStorageKey: 'covers/book.png', estimatedMinutes: 180, chapterCount: 12, status: 'planning', embedding, createdAt: now, updatedAt: now });
+    const book = bookSchema.parse({ key, scopeKey: otherKey, title: 'Leadership', description: 'A personal guide', goal: 'Lead better', audience: 'Managers', outcome: 'Build leaders', language: 'en', status: 'planning', embedding, createdAt: now, updatedAt: now });
     expect(book).toMatchObject({ isFavorite: false, deletedAt: null, status: 'planning' });
-    expect(bookSchema.safeParse({ ...book, chapterCount: 0 }).success).toBe(false);
-    const progress = bookProgressSchema.parse({ key, scopeKey: otherKey, bookKey: key, chapterKey: otherKey, progressSeconds: 0, createdAt: now, updatedAt: now });
+    expect(book).toMatchObject({ chapterCount: 0, estimatedMinutes: 0 });
+    const chapter = bookChapterSchema.parse({ key, scopeKey: otherKey, bookKey: key, title: 'Start', description: 'Opening', objective: 'Orient the reader', embedding, position: 1, createdAt: now, updatedAt: now });
+    expect(chapter).toMatchObject({ status: 'planned', topics: [], estimatedMinutes: 0 });
+    const progress = bookProgressSchema.parse({ key, scopeKey: otherKey, userKey: key, bookKey: key, chapterKey: otherKey, progressSeconds: 0, createdAt: now, updatedAt: now });
     expect(progress.isCompleted).toBe(false);
+    expect(progress.completedAt).toBeNull();
   });
 
   test('requires internal source keys and web source URLs', () => {

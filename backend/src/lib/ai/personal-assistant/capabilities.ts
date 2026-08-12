@@ -22,6 +22,7 @@ export interface AssistantCapabilityContext {
   folderKey?: string;
   contentDependencies?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
+  executeImageSearch?: typeof imageSearchTool.execute;
 }
 
 export interface AssistantCapability {
@@ -117,7 +118,7 @@ const searchImagesCapability: AssistantCapability = {
   },
   async execute(rawInput, context) {
     const input = searchInputSchema.parse(rawInput);
-    return { kind: 'continue', result: await imageSearchTool.execute({ query: input.query, limit: 50 }, { context: context.domain }) };
+    return { kind: 'continue', result: await (context.executeImageSearch ?? imageSearchTool.execute)({ query: input.query, limit: 50 }, { context: context.domain }) };
   },
 };
 
