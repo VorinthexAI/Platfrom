@@ -7,6 +7,11 @@ import {
   useAudioPlayerStatus,
 } from "expo-audio";
 import { useEffect, useRef, useState } from "react";
+import Animated, {
+  FadeIn,
+  FadeOut,
+  useReducedMotion,
+} from "react-native-reanimated";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -27,13 +32,11 @@ import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import {
   AscendIcon,
-  CheckIcon,
   ChevronLeftIcon,
   PauseIcon,
   PlayIcon,
   PlusIcon,
   SendIcon,
-  SoundwaveIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
@@ -41,13 +44,16 @@ import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import { BOOK_AUDIO_MODE, bookAudioMetadata } from "@/lib/book-audio";
 import {
+  activeTranscriptPhrase,
+  buildTranscriptPhrases,
+} from "@/lib/book-transcript";
+import {
   askBookAssistant,
   createBook,
   fetchBookDetail,
   fetchBooksOverview,
   updateBookChapterProgress,
   type Book,
-  type BookChapter,
   type BookDetail,
   type CreateBookInput,
 } from "@/lib/books-client";
@@ -141,7 +147,7 @@ function Reader({
   onMessage: (message: string) => void;
 }) {
   const ordered = [...detail.chapters].sort((a, b) => a.position - b.position);
-  const [chapterKey, setChapterKey] = useState(
+  const [chapterKey] = useState(
     initialChapter ??
       ordered.find(({ isCompleted }) => !isCompleted)?.key ??
       ordered[0]?.key,
@@ -152,6 +158,9 @@ function Reader({
     keepAudioSessionActive: true,
   });
   const audio = useAudioPlayerStatus(player);
+  const transcriptScroll = useRef<ScrollView>(null);
+  const transcriptOffsets = useRef<Record<number, number>>({});
+  const reducedMotion = useReducedMotion();
   const latest = useRef({
     detail,
     chapter,
@@ -276,13 +285,6 @@ function Reader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function selectChapter(next: BookChapter) {
-    if (chapter?.audioUrl && audio.currentTime > 0) await save();
-    player.pause();
-    lastSaved.current = -1;
-    setChapterKey(next.key);
-  }
-
   function toggleAudio() {
     if (!chapter?.audioUrl) return;
     if (audio.playing) {
@@ -301,139 +303,117 @@ function Reader({
         (audio.currentTime || chapter?.progressSeconds || 0) / duration,
       )
     : 0;
-  return (
-    <ScrollView
-      contentContainerStyle={styles.reader}
-      showsVerticalScrollIndicator={false}
-    >
-      <View style={[styles.readerHero, compact && styles.readerStack]}>
-        <View
-          style={[styles.readerCover, compact && styles.readerCoverCompact]}
-        >
-          <BookCover book={detail.book} height={compact ? 180 : 220} />
+  const phrases = buildTranscriptPhrases(chapter?.content ?? "");
+  const activePhrase = activeTranscriptPhrase(phrases, progress);
+  useEffect(() => {
+    if (!audio.playing || activePhrase < 0) return;
+    const y = transcriptOffsets.current[activePhrase];
+    if (y !== undefined)
+      transcriptScroll.current?.scrollTo({
+        y: Math.max(0, y - 150),
+        animated: !reducedMotion,
+      });
+  }, [activePhrase, audio.playing, reducedMotion]);
+  if (!audio.playing) {
+    return (
+      <View style={styles.pausedPlayer}>
+        <View style={styles.pausedCover}>
+          <BookCover book={detail.book} height={compact ? 248 : 320} />
         </View>
-        <View style={styles.readerHeroCopy}>
-          <Text style={styles.readerTitle}>{detail.book.title}</Text>
-          <Text style={styles.readerSubtitle}>{detail.book.subtitle}</Text>
-          <Text style={styles.readerDescription}>
-            {detail.book.description}
-          </Text>
-          <Text style={styles.readerMeta}>
-            {detail.book.estimatedMinutes} MIN · {detail.book.chapterCount}{" "}
-            CHAPTERS · {Math.round(detail.book.progressPercent)}% COMPLETE
-          </Text>
+        <View style={styles.pausedIdentity}>
+          <Text style={styles.pausedBookTitle}>{detail.book.title}</Text>
+          {chapter ? (
+            <Text style={styles.pausedChapterTitle}>{chapter.title}</Text>
+          ) : null}
         </View>
-      </View>
-      <View style={[styles.readerColumns, compact && styles.readerStack]}>
-      <View style={[styles.chapterList, compact && styles.chapterListCompact]}>
-          <Text style={styles.microLabel}>CHAPTERS</Text>
-          {ordered.map((item) => (
+        {chapter?.audioUrl ? (
+          <View style={styles.pausedControls}>
             <Button
-              key={item.key}
-              accessibilityState={{ selected: item.key === chapter?.key }}
-              contentMode="raw"
-              onPress={() => void selectChapter(item)}
+              accessibilityLabel="Play chapter audio"
+              icon={<PlayIcon size="md" variant="inverse" />}
+              onPress={toggleAudio}
               size="lg"
-              style={[
-                styles.chapterButton,
-                item.key === chapter?.key && styles.chapterButtonActive,
-              ]}
-              variant="ghost"
+              variant="primary"
             >
-              <View style={styles.chapterPosition}>
-                {item.isCompleted ? (
-                  <CheckIcon size="sm" />
-                ) : (
-                  <Text style={styles.chapterNumber}>{item.position}</Text>
-                )}
-              </View>
-              <View style={styles.chapterCopy}>
-                <Text numberOfLines={2} style={styles.chapterTitle}>
-                  {item.title}
-                </Text>
-                <Text numberOfLines={2} style={styles.chapterDescription}>
-                  {item.description}
-                </Text>
-              </View>
+              {audio.currentTime > 0 || chapter.progressSeconds > 0
+                ? "Resume audio"
+                : "Play audio"}
             </Button>
-          ))}
-        </View>
-        {chapter ? (
-          <View style={styles.chapterContent}>
-            <Text style={styles.microLabel}>CHAPTER {chapter.position}</Text>
-            <Text style={styles.contentTitle}>{chapter.title}</Text>
-            <Text style={styles.contentDescription}>{chapter.description}</Text>
-            {chapter.audioUrl ? (
-              <View style={styles.audioCard}>
-                <Button
-                  accessibilityLabel={
-                    audio.playing ? "Pause chapter audio" : "Play chapter audio"
-                  }
-                  contentMode="raw"
-                  onPress={toggleAudio}
-                  size="lg"
-                  variant="primary"
-                >
-                  {audio.playing ? (
-                    <PauseIcon size="md" variant="inverse" />
-                  ) : (
-                    <PlayIcon size="md" variant="inverse" />
-                  )}
-                </Button>
-                <View style={styles.audioMain}>
-                  <View style={styles.audioHeading}>
-                    <SoundwaveIcon
-                      size="sm"
-                      variant={audio.playing ? "default" : "muted"}
-                    />
-                    <Text style={styles.audioLabel}>
-                      {audio.isBuffering
-                        ? "BUFFERING"
-                        : audio.playing
-                          ? "PLAYING"
-                          : audio.currentTime > 0
-                            ? "RESUME AUDIO"
-                            : "LISTEN"}
-                    </Text>
-                  </View>
-                  <View style={styles.audioTrack}>
-                    <View
-                      style={[
-                        styles.audioFill,
-                        { width: `${progress * 100}%` },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.audioTime}>
-                    {formatTime(audio.currentTime || chapter.progressSeconds)} /{" "}
-                    {formatTime(duration)}
-                  </Text>
-                </View>
-              </View>
-            ) : chapter.content ? (
-              <Button
-                disabled={chapter.isCompleted}
-                icon={chapter.isCompleted ? <CheckIcon size="sm" /> : undefined}
-                onPress={() =>
-                  void save(chapter, chapter.progressSeconds, true)
-                }
-                size="sm"
-                variant="secondary"
-              >
-                {chapter.isCompleted
-                  ? "Chapter completed"
-                  : "Mark chapter complete"}
-              </Button>
-            ) : null}
-            <Text selectable style={styles.chapterBody}>
-              {chapter.content ??
-                (detail.book.status === "ready"
-                  ? "This chapter is not available yet."
-                  : "This chapter is still being written. Return soon to continue reading.")}
+            <Text style={styles.pausedTime}>
+              {formatTime(audio.currentTime || chapter.progressSeconds)} /{" "}
+              {formatTime(duration)}
             </Text>
           </View>
-        ) : null}
+        ) : (
+          <Text style={styles.pausedTime}>
+            Audio is not available for this chapter.
+          </Text>
+        )}
       </View>
+    );
+  }
+  return (
+    <ScrollView
+      ref={transcriptScroll}
+      contentContainerStyle={styles.playingReader}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.playingHeader}>
+        <View style={styles.playingIdentity}>
+          <Text style={styles.microLabel}>CHAPTER {chapter?.position}</Text>
+          <Text numberOfLines={2} style={styles.playingTitle}>
+            {chapter?.title}
+          </Text>
+          <Text numberOfLines={1} style={styles.playingBookTitle}>
+            {detail.book.title}
+          </Text>
+        </View>
+        <Button
+          accessibilityLabel="Pause chapter audio"
+          contentMode="raw"
+          onPress={toggleAudio}
+          size="lg"
+          variant="primary"
+        >
+          <PauseIcon size="md" variant="inverse" />
+        </Button>
+      </View>
+      <View style={styles.playingProgress}>
+        <View style={[styles.audioFill, { width: `${progress * 100}%` }]} />
+      </View>
+      <Text style={styles.audioTime}>
+        {formatTime(audio.currentTime || chapter?.progressSeconds || 0)} /{" "}
+        {formatTime(duration)}
+      </Text>
+      {phrases.length ? (
+        <View style={styles.transcript}>
+          {phrases.map((phrase, index) => {
+            const active = index === activePhrase;
+            return (
+              <Animated.Text
+                key={`${index}-${phrase.text.slice(0, 20)}`}
+                entering={reducedMotion ? undefined : FadeIn.duration(220)}
+                exiting={reducedMotion ? undefined : FadeOut.duration(120)}
+                onLayout={({ nativeEvent }) => {
+                  transcriptOffsets.current[index] = nativeEvent.layout.y;
+                }}
+                selectable
+                style={[
+                  styles.transcriptPhrase,
+                  active && styles.transcriptPhraseActive,
+                  index < activePhrase && styles.transcriptPhrasePast,
+                ]}
+              >
+                {phrase.text}
+              </Animated.Text>
+            );
+          })}
+        </View>
+      ) : (
+        <Text selectable style={styles.chapterBody}>
+          This chapter is still being written.
+        </Text>
+      )}
     </ScrollView>
   );
 }
@@ -498,9 +478,18 @@ export function AscendWorkspace() {
     };
   }, []);
   useEffect(() => {
-    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboardVisible(true));
-    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboardVisible(false));
-    return () => { show.remove(); hide.remove(); };
+    const show = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => setKeyboardVisible(true),
+    );
+    const hide = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setKeyboardVisible(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
   }, []);
 
   function open(next: Sheet) {
@@ -579,7 +568,10 @@ export function AscendWorkspace() {
   const update = (field: keyof Draft, value: string) =>
     setDraft((current) => ({ ...current, [field]: value }));
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "height" : undefined} style={styles.root}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "height" : undefined}
+      style={styles.root}
+    >
       <View
         style={[
           styles.header,
@@ -719,7 +711,10 @@ export function AscendWorkspace() {
           <TextInput
             accessibilityLabel="Ask Core to create a book"
             editable={!assistantBusy && !busy}
-            onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }}
+            onChangeText={(value) => {
+              setAssistantInput(value);
+              assistantRequestKey.current = undefined;
+            }}
             onSubmitEditing={() => void askAssistant()}
             placeholder="Ask Core to create a book..."
             returnKeyType="send"
@@ -748,10 +743,10 @@ export function AscendWorkspace() {
               : undefined
         }
         dismissible={sheet !== "create" || !dirty}
-        mutation={sheet === "create"}
+        mutation={sheet === "create" || sheet === "reader"}
         onOpenChange={setSheetOpen}
         open={sheetOpen}
-        tall={sheet === "reader"}
+        tall={false}
         title={
           sheet === "actions"
             ? "New in Ascend"
@@ -986,7 +981,15 @@ export function AscendWorkspace() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.page },
-  header: { minHeight: 64, paddingBottom: 8, justifyContent: "center", borderBottomColor: palette.hairline, borderBottomWidth: 1, backgroundColor: palette.page, zIndex: 4 },
+  header: {
+    minHeight: 64,
+    paddingBottom: 8,
+    justifyContent: "center",
+    borderBottomColor: palette.hairline,
+    borderBottomWidth: 1,
+    backgroundColor: palette.page,
+    zIndex: 4,
+  },
   scroll: { alignSelf: "center" },
   heading: {
     paddingTop: spacing.lg,
@@ -1017,8 +1020,19 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
-  sectionHeader: { minHeight: 30, marginBottom: spacing.sm, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  sectionTitle: { color: palette.silver300, fontFamily: fonts.medium, fontSize: 10, letterSpacing: tracking.micro },
+  sectionHeader: {
+    minHeight: 30,
+    marginBottom: spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionTitle: {
+    color: palette.silver300,
+    fontFamily: fonts.medium,
+    fontSize: 10,
+    letterSpacing: tracking.micro,
+  },
   count: { color: palette.silver700, fontFamily: fonts.medium, fontSize: 11 },
   grid: { flexDirection: "row", flexWrap: "wrap" },
   bookCard: { alignItems: "stretch", paddingHorizontal: 0, paddingVertical: 0 },
@@ -1105,9 +1119,36 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   composerWrap: { position: "absolute" },
-  composer: { minHeight: 58, padding: 7, flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: 999, backgroundColor: palette.obsidian850, shadowColor: palette.voidBlack, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
-  coreMark: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
-  composerInput: { flex: 1, minHeight: 38, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
+  composer: {
+    minHeight: 58,
+    padding: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    borderWidth: 1,
+    borderColor: palette.hairlineBright,
+    borderRadius: 999,
+    backgroundColor: palette.obsidian850,
+    shadowColor: palette.voidBlack,
+    shadowOpacity: 0.45,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  coreMark: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  composerInput: {
+    flex: 1,
+    minHeight: 38,
+    paddingHorizontal: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    fontSize: 13,
+  },
   wizard: { flex: 1, gap: 14 },
   progressRow: { flexDirection: "row", gap: 6 },
   progressSegment: {
@@ -1163,6 +1204,62 @@ const styles = StyleSheet.create({
     fontFamily: fonts.regular,
     fontSize: 11,
     textAlign: "center",
+  },
+  pausedPlayer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 24,
+    paddingBottom: spacing.xl,
+  },
+  pausedCover: { width: 216, maxWidth: "70%" },
+  pausedIdentity: { maxWidth: 520, alignItems: "center", gap: 8 },
+  pausedBookTitle: {
+    color: palette.silver50,
+    fontFamily: fonts.light,
+    fontSize: 30,
+    lineHeight: 36,
+    textAlign: "center",
+  },
+  pausedChapterTitle: {
+    color: palette.silver500,
+    fontFamily: fonts.regular,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  pausedControls: { alignItems: "center", gap: 10 },
+  pausedTime: {
+    color: palette.silver500,
+    fontFamily: fonts.regular,
+    fontSize: 11,
+  },
+  playingReader: { gap: 14, paddingBottom: 180 },
+  playingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 18,
+  },
+  playingIdentity: { minWidth: 0, flex: 1 },
+  playingTitle: {
+    color: palette.silver50,
+    fontFamily: fonts.light,
+    fontSize: 25,
+    lineHeight: 31,
+  },
+  playingBookTitle: {
+    marginTop: 5,
+    color: palette.silver500,
+    fontFamily: fonts.regular,
+    fontSize: 12,
+  },
+  playingProgress: {
+    height: 3,
+    marginTop: 4,
+    overflow: "hidden",
+    borderRadius: 2,
+    backgroundColor: palette.gunmetal,
   },
   reader: { gap: 24, paddingBottom: 24 },
   readerHero: { flexDirection: "row", gap: 20 },
@@ -1261,6 +1358,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 27,
   },
+  transcript: { gap: 20, paddingTop: 12, paddingBottom: 180 },
+  transcriptPhrase: {
+    color: palette.silver700,
+    fontFamily: fonts.medium,
+    fontSize: 24,
+    lineHeight: 32,
+    opacity: 0.55,
+  },
+  transcriptPhraseActive: {
+    color: palette.silver50,
+    fontSize: 28,
+    lineHeight: 37,
+    opacity: 1,
+  },
+  transcriptPhrasePast: { color: palette.silver500, opacity: 0.42 },
   audioCard: {
     marginVertical: 8,
     padding: 12,

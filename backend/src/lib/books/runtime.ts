@@ -80,7 +80,11 @@ export function createBookRuntime(options: BookRuntimeDependencies = {}): BookGe
            if (chapter.content && chapter.audioStorageKey) { written.push(chapter); continue; }
            if (!chapter.content) await repository.updateChapter(context, chapter.key, { status: 'writing', updatedAt: now() });
            const previous = written.map((item) => `${item.title}: ${item.description}`).join('\n');
-           const content = chapter.content ?? (await ask(prompt('Write this nonfiction chapter in polished prose. Follow its objective and topics, avoid meta commentary, and return only the chapter prose.', JSON.stringify({ book: { title: initial.book.title, description: initial.book.description, goal: input.goal, audience: input.audience, tone: input.tone, language: input.language }, chapter, previous }), input.length === 'deep' ? 8_000 : input.length === 'short' ? 2_500 : 4_500), context.organizationKey)).trim();
+           const content = chapter.content ?? (await ask(prompt(`Write this nonfiction chapter as natural, human prose in ${input.language}. Follow the chapter objective and topics while matching the requested ${input.tone} tone.
+
+Use complete paragraphs, varied sentence lengths, concrete examples, and smooth transitions. Write with the confidence and rhythm of an experienced nonfiction author. Prefer plain punctuation and natural connective language.
+
+Do not use bullet lists, numbered lists, headings, fragments, slogans, canned motivational language, repetitive summaries, or meta commentary. Avoid em dashes and avoid excessive hyphens; use commas, periods, or full connecting phrases instead. Do not announce the chapter structure or say what the reader will learn. Return only the finished chapter prose.`, JSON.stringify({ book: { title: initial.book.title, description: initial.book.description, goal: input.goal, audience: input.audience, tone: input.tone, language: input.language }, chapter, previous }), input.length === 'deep' ? 8_000 : input.length === 'short' ? 2_500 : 4_500), context.organizationKey)).trim();
           const estimatedMinutes = Math.max(1, Math.ceil(content.split(/\s+/).length / 220));
           let audioStorageKey: string | undefined; let audioDurationSeconds: number | undefined;
            try {
