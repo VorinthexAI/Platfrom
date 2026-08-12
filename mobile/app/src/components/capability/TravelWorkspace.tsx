@@ -1,17 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { randomUUID } from "expo-crypto";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CalendarIcon, CheckIcon, GlobeIcon, LocationPinIcon, PlusIcon, SearchIcon, TrashIcon } from "@vorinthex/shared/ui/icons-mobile";
-import { Spinner } from "@vorinthex/shared/ui/spinner";
+import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { CalendarIcon, CheckIcon, GlobeIcon, LocationPinIcon, PlusIcon, SearchIcon, SendIcon, TrashIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
+import { ChromeIcon } from "@/components/ChromeIcon";
 import { InteractiveGlobe } from "@/components/three/InteractiveGlobe";
+import { assistantIconSource } from "@/data/capability-icons";
 import { COUNTRIES, type CountryFeature } from "@/lib/globe-data";
 import {
   addPlaceToTrip,
+  askTravelAssistant,
   createPlace,
   createTrip,
   fetchTravelOverview,
@@ -32,6 +36,11 @@ export type CountrySelection = {
 };
 
 type WorkspaceSheet = "actions" | "explore" | "newTrip" | "chooseTrip" | "trips" | "confirmRemove";
+const CORE_PROMPTS = [
+  "Plan a quiet week in Kyoto",
+  "Build a route through Portugal",
+  "What should I see in Copenhagen?",
+] as const;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "That change could not be completed.";
@@ -61,6 +70,10 @@ export function TravelWorkspace() {
   const [error, setError] = useState<string>();
   const [loadError, setLoadError] = useState<string>();
   const [pendingRemoval, setPendingRemoval] = useState<{ trip: Trip; place: Place }>();
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantMessage, setAssistantMessage] = useState<string>();
+  const assistantRequestKey = useRef<string | undefined>(undefined);
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
@@ -223,17 +236,29 @@ export function TravelWorkspace() {
     openSheet("confirmRemove");
   }
 
+  async function askAssistant() {
+    const value = assistantInput.trim();
+    if (!value) return;
+    setAssistantBusy(true);
+    setAssistantMessage(undefined);
+    try {
+      assistantRequestKey.current ??= randomUUID();
+      const response = await askTravelAssistant(value, assistantRequestKey.current);
+      setAssistantInput("");
+      assistantRequestKey.current = undefined;
+      setAssistantMessage(response.message);
+    } catch (failure) {
+      setAssistantMessage(errorMessage(failure));
+    } finally {
+      setAssistantBusy(false);
+    }
+  }
+
   const panelTitle = selectedPlace?.name ?? selectedCountry?.name;
   const panelMeta = selectedPlace
     ? [selectedPlace.city, selectedPlace.continent, selectedPlace.country].filter(Boolean).join(" · ")
     : selectedCountry ? `${selectedCountry.continent} · ${selectedCountry.countryCode}` : undefined;
   const itinerary = selectedTrip?.itinerary ?? [];
-  const globePlaces = useMemo(() => places.map((place) => ({
-    id: place.key,
-    latitude: place.latitude,
-    longitude: place.longitude,
-    status: place.visited ? "visited" as const : "planned" as const,
-  })), [places]);
   const visibleCountries = useMemo(() => {
     const normalized = countryQuery.trim().toLowerCase();
     return COUNTRIES.features
@@ -249,30 +274,24 @@ export function TravelWorkspace() {
             : selectedTrip ? selectedTrip.name : "Trips";
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "height" : undefined} style={styles.root}>
+    <KeyboardAvoidingView behavior="height" style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6, paddingLeft: Math.max(insets.left, spacing.md), paddingRight: Math.max(insets.right, spacing.md) }]}>
         <WorkspaceAppSwitcher active="compass" />
       </View>
 
       <View style={styles.globe}>
-        <InteractiveGlobe
-          onCountryPress={(country) => selectCountry(country?.properties ?? null)}
-          onPlacePress={(marker) => selectPlace(places.find(({ key }) => key === marker.id) ?? null)}
-          selectedCountryCode={selectedCountry?.countryCode}
-          selectedPlaceId={selectedPlace?.key}
-          places={globePlaces}
-        />
+        <InteractiveGlobe />
         {!loadError ? <View style={[styles.globeActions, { right: Math.max(insets.right, spacing.md) }]}>
-          <Button accessibilityLabel="Choose a country or saved place" contentMode="raw" onPress={() => openSheet("explore")} size="md" variant="icon"><SearchIcon size="sm" /></Button>
-          <Button accessibilityLabel="Show trips" contentMode="raw" onPress={() => { setSelectedTrip(undefined); openSheet("trips"); }} size="md" variant="icon"><CalendarIcon size="sm" /></Button>
+          <Button accessibilityLabel="Choose a country or saved place" contentMode="raw" disabled={loading} onPress={() => openSheet("explore")} size="md" variant="icon"><SearchIcon size="sm" /></Button>
+          <Button accessibilityLabel="Show trips" contentMode="raw" disabled={loading} onPress={() => { setSelectedTrip(undefined); openSheet("trips"); }} size="md" variant="icon"><CalendarIcon size="sm" /></Button>
         </View> : null}
-        {loading ? <View accessibilityLabel="Loading places" style={styles.loading}><Spinner size="large" /></View> : null}
+        {loading ? <View accessibilityLabel="Loading places" accessibilityRole="progressbar" style={[styles.selectionSkeleton, { bottom: insets.bottom + 86, left: (width - panelWidth) / 2, width: panelWidth }]} /> : null}
         {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void loadOverview()} size="sm" variant="secondary">Retry</Button></View> : null}
       </View>
 
-      {error && !sheetOpen && !loadError ? <View accessibilityLiveRegion="assertive" style={[styles.inlineError, styles.workspaceError]}><Text style={styles.errorText}>{error}</Text></View> : null}
+      {(error || assistantMessage) && !sheetOpen && !loadError ? <View accessibilityLiveRegion="polite" style={[styles.inlineError, styles.workspaceError]}><Text style={styles.errorText}>{error ?? assistantMessage}</Text></View> : null}
 
-      {panelTitle && !loadError ? <View style={[styles.selectionPanel, { bottom: insets.bottom + 18, left: (width - panelWidth) / 2, width: panelWidth }]}>
+      {!loading && panelTitle && !loadError ? <View style={[styles.selectionPanel, { bottom: insets.bottom + 86, left: (width - panelWidth) / 2, width: panelWidth }]}>
         <View style={styles.panelIcon}><LocationPinIcon size="md" /></View>
         <View style={styles.panelCopy}>
           <Text numberOfLines={1} style={styles.panelTitle}>{panelTitle}</Text>
@@ -280,7 +299,21 @@ export function TravelWorkspace() {
         </View>
         {selectedPlace?.visited ? <View style={styles.visited}><CheckIcon size="sm" variant="inverse" /></View> : null}
         <Button accessibilityLabel={`Actions for ${panelTitle}`} contentMode="raw" onPress={() => openSheet("actions")} size="md" variant="icon"><PlusIcon size="sm" /></Button>
-      </View> : !loadError ? <View pointerEvents="none" style={[styles.hint, { bottom: insets.bottom + 24 }]}><GlobeIcon size="sm" variant="muted" /><Text style={styles.hintText}>Rotate the globe or search for a country</Text></View> : null}
+      </View> : !loading && !loadError ? <View pointerEvents="none" style={[styles.hint, { bottom: insets.bottom + 94 }]}><GlobeIcon size="sm" variant="muted" /><Text style={styles.hintText}>Rotate freely or search for a place</Text></View> : null}
+
+      {!loadError ? <CoreComposer
+        accessibilityLabel="Ask Core about travel"
+        disabled={assistantBusy}
+        editable={!assistantBusy}
+        leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
+        loading={assistantBusy}
+        onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }}
+        onSubmit={() => void askAssistant()}
+        prompts={CORE_PROMPTS}
+        sendIcon={<SendIcon size="sm" variant="inverse" />}
+        style={{ left: Math.max(insets.left, spacing.md), right: Math.max(insets.right, spacing.md) }}
+        value={assistantInput}
+      /> : null}
 
       <BottomSheet description={activeSheet === "newTrip" ? "Use ISO dates in YYYY-MM-DD format." : undefined} dismissible={!busy} mutation={activeSheet === "newTrip"} onOpenChange={setSheetOpen} open={sheetOpen} tall={activeSheet === "trips" || activeSheet === "explore"} title={sheetTitle}>
         <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ maxHeight: height * 0.58 }}>
@@ -353,7 +386,7 @@ const styles = StyleSheet.create({
   header: { minHeight: 64, paddingBottom: 8, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomColor: palette.hairline, borderBottomWidth: 1, backgroundColor: palette.page, zIndex: 4 },
   globe: { flex: 1, overflow: "hidden", backgroundColor: palette.voidBlack },
   globeActions: { position: "absolute", top: 12, flexDirection: "row", gap: 8 },
-  loading: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.42)" },
+  selectionSkeleton: { position: "absolute", height: 72, borderRadius: radii.xl, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   loadFailure: { position: "absolute", top: 0, right: spacing.xl, bottom: 0, left: spacing.xl, alignItems: "center", justifyContent: "center", gap: 14 },
   loadFailureText: { maxWidth: 320, color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 19, textAlign: "center" },
   selectionPanel: { position: "absolute", minHeight: 72, padding: 10, flexDirection: "row", alignItems: "center", gap: 11, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: radii.xl, backgroundColor: "rgba(13,17,23,0.94)" },

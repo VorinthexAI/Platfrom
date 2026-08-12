@@ -174,11 +174,7 @@ export default function AuthRoute() {
               </>
             ) : (
               <>
-                <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" variant="secondary">Continue with Google</Button>
-                <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" variant="secondary">Continue with Apple</Button>
-                {!emailVisible ? (
-                  <Button disabled={busy} icon={<MailIcon />} onPress={() => setEmailVisible(true)} size="lg" variant="secondary">Continue with email</Button>
-                ) : (
+                {emailVisible ? (
                   <View style={styles.emailForm}>
                     <Text style={styles.inputLabel}>Email address</Text>
                     <TextInput
@@ -198,8 +194,15 @@ export default function AuthRoute() {
                       textContentType="emailAddress"
                       value={email}
                     />
-                    <Button disabled={busy || !email.trim()} loading={loading === "email"} onPress={() => void submitEmail()} size="lg" variant="primary">Send magic link</Button>
+                    <Button disabled={busy || !email.trim()} loading={loading === "email"} onPress={() => void submitEmail()} size="lg" variant="primary">Continue</Button>
+                    <Button disabled={busy} onPress={() => { setEmailVisible(false); setError(null); Keyboard.dismiss(); }} size="sm" variant="ghost">Back</Button>
                   </View>
+                ) : (
+                  <>
+                    <Button disabled={busy} icon={<GoogleIcon />} loading={loading === "google"} onPress={() => void oauth("google")} size="lg" variant="secondary">Continue with Google</Button>
+                    <Button disabled={busy} icon={<AppleIcon />} loading={loading === "apple"} onPress={() => void oauth("apple")} size="lg" variant="secondary">Continue with Apple</Button>
+                    <Button disabled={busy} icon={<MailIcon />} loading={loading === "email"} onPress={() => { setError(null); setEmailVisible(true); }} size="lg" variant="secondary">Continue with email</Button>
+                  </>
                 )}
               </>
             )}

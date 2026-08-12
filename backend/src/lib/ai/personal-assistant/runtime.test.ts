@@ -50,6 +50,21 @@ describe('personal assistant runtime', () => {
     expect(result).toEqual({ type: 'answer', message: 'I can search your Gallery.', sources: [] });
   });
 
+  test('answers in Compass with only authorized knowledge search available', async () => {
+    let chatInput: any;
+    const result = await runPersonalAssistant({ ...input, surface: 'travel-workspace' }, domain, {
+      execute: async (_request, nextInput) => {
+        chatInput = nextInput;
+        return response({ text: 'Lisbon fits a relaxed long weekend.', toolCalls: [], stopReason: 'end_turn' });
+      },
+    });
+
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['search_knowledge']);
+    expect(chatInput.systemPrompt).toContain('operating inside Compass');
+    expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
+    expect(result).toEqual({ type: 'answer', message: 'Lisbon fits a relaxed long weekend.', sources: [] });
+  });
+
   test('infers image search, executes it, and answers from the tool result', async () => {
     let modelCalls = 0;
     let searchInput: unknown;

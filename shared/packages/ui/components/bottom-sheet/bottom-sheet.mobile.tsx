@@ -85,6 +85,8 @@ export type BottomSheetProps = {
   children?: ReactNode;
   description?: string;
   dismissible?: boolean;
+  footer?: ReactNode;
+  hideHeading?: boolean;
   mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -96,6 +98,8 @@ export function BottomSheet({
   children,
   description,
   dismissible = true,
+  footer,
+  hideHeading = false,
   mutation = false,
   onOpenChange,
   open,
@@ -214,7 +218,7 @@ export function BottomSheet({
       transparent
       visible
     >
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "height" : undefined} style={styles.root}>
+      <KeyboardAvoidingView behavior="height" style={styles.root}>
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Button
             accessibilityLabel="Close bottom sheet"
@@ -246,13 +250,9 @@ export function BottomSheet({
             <View style={styles.dragTarget}>
               <View style={styles.dragHandle} />
             </View>
-            <View style={styles.header}>
-              <Text accessibilityRole="header" style={styles.title}>
-                {title}
-              </Text>
-              {description ? (
-                <Text style={styles.description}>{description}</Text>
-              ) : null}
+            <View style={[styles.header, hideHeading && styles.headerWithoutHeading]}>
+              {!hideHeading ? <Text accessibilityRole="header" style={styles.title}>{title}</Text> : null}
+              {!hideHeading && description ? <Text style={styles.description}>{description}</Text> : null}
             </View>
             <Button
               accessibilityLabel="Close bottom sheet"
@@ -266,7 +266,8 @@ export function BottomSheet({
               <CloseIcon size="sm" />
             </Button>
           </View>
-          <View style={[styles.content, tall && styles.tallContent]}>{children}</View>
+          <View style={[styles.content, (tall || mutation) && styles.flexContent]}>{children}</View>
+          {footer ? <View style={styles.footer}>{footer}</View> : null}
         </Animated.View>
       </KeyboardAvoidingView>
     </Modal>
@@ -334,6 +335,7 @@ const styles = StyleSheet.create({
     width: 42,
   },
   header: { gap: 6, paddingBottom: 18, paddingHorizontal: 4, paddingRight: 48 },
+  headerWithoutHeading: { minHeight: 42 },
   closeButton: { position: "absolute", right: 20, top: 20, zIndex: 1 },
   title: {
     color: "#F5F7F8",
@@ -348,6 +350,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   content: { gap: 6 },
-  tallContent: { flex: 1 },
+  flexContent: { flex: 1 },
+  footer: { gap: 8, marginHorizontal: -20, paddingHorizontal: 20, paddingTop: 16, backgroundColor: "#030507" },
   item: { justifyContent: "flex-start", width: "100%" },
 });

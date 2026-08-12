@@ -3,10 +3,11 @@ import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useRef, useState } from "react";
-import { Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
+import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { CameraIcon, CheckIcon, ChevronLeftIcon, ClockIcon, CloseIcon, CopyIcon, FolderIcon, GalleryIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, StarIcon, TrashIcon, UploadIcon, UsersIcon } from "@vorinthex/shared/ui/icons-mobile";
 
@@ -43,6 +44,11 @@ const COLLECTION_COLUMNS = 3;
 const IMAGE_COLUMNS = 5;
 const GRID_GAP = 5;
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+const CORE_PROMPTS = [
+  "Find photos from rainy afternoons",
+  "Show me portraits with warm light",
+  "Create a collection for architecture",
+] as const;
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Gallery could not complete that request.";
@@ -77,7 +83,6 @@ export function GalleryWorkspace() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [searching, setSearching] = useState(false);
   const [imageAction, setImageAction] = useState<"similar" | "favorite">();
   const [imageError, setImageError] = useState<string>();
@@ -137,17 +142,6 @@ export function GalleryWorkspace() {
   }
 
   useEffect(() => { void loadSubjects(); }, []);
-
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSubscription = Keyboard.addListener(showEvent, () => setKeyboardVisible(true));
-    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
-    return () => {
-      showSubscription.remove();
-      hideSubscription.remove();
-    };
-  }, []);
 
   function openSheet(sheet: GallerySheet) {
     setActiveSheet(sheet);
@@ -533,7 +527,7 @@ export function GalleryWorkspace() {
   const imageActionsBusy = imageAction !== undefined;
 
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "height" : undefined} style={styles.root}>
+    <KeyboardAvoidingView behavior="height" style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <WorkspaceAppSwitcher active="gallery" />
       </View>
@@ -547,13 +541,13 @@ export function GalleryWorkspace() {
 
         {status && contextualView ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
 
-        {!contextualView && showingCollectionOverview ? (
+        {!contextualView && (showingCollectionOverview || loading) ? (
           <View style={styles.collectionLanding}>
             <View style={styles.collectionLandingHeader}>
-              <Button accessibilityLabel="Create or add to Gallery" contentMode="raw" onPress={() => openSheet("actions")} size="md" variant="icon"><PlusIcon size="sm" /></Button>
+              <Button accessibilityLabel="Create or add to Gallery" contentMode="raw" disabled={loading} onPress={() => openSheet("actions")} size="md" variant="icon"><PlusIcon size="sm" /></Button>
             </View>
             <View style={styles.grid}>
-              {collections.map((collection) => (
+              {loading ? Array.from({ length: 6 }, (_, index) => <View key={index} style={[styles.collectionSkeleton, { width: collectionSize, height: collectionSize + 38 }]} />) : collections.map((collection) => (
                 <Button key={collection.key} accessibilityLabel={`${collection.name}, ${collection.count} images`} contentMode="raw" onPress={() => { viewRequest.current += 1; setShowingCollectionOverview(false); setLoading(true); setQuery(""); setSelectedImageKeys([]); setActiveSubject(undefined); setShowingDuplicates(false); setShowingSearchResults(false); setActiveCollection(collection); }} size="xl" style={[styles.collectionCard, { width: collectionSize }]} variant="ghost">
                   {collection.coverUrl ? <Image source={collection.coverUrl} contentFit="cover" style={[styles.collectionCover, { height: collectionSize }]} /> : <View style={[styles.emptyCover, { height: collectionSize }]}><FolderIcon size="lg" variant="muted" /></View>}
                   <Text numberOfLines={1} style={styles.collectionName}>{collection.name}</Text>
@@ -574,7 +568,7 @@ export function GalleryWorkspace() {
               {activeCollection && showingDuplicates ? <Button accessibilityLabel="Delete duplicate images" contentMode="raw" disabled={images.length === 0} hitSlop={6} onPress={() => openSheet("confirmDeleteDuplicates")} size="md" variant="icon"><TrashIcon size="sm" variant={images.length ? "danger" : "muted"} /></Button> : null}
             </View>
           </View>
-          {loading ? <Text style={styles.emptyText}>Opening Gallery...</Text> : images.length === 0 && normalCollectionView ? <View style={styles.collectionEmpty}><Text style={styles.emptyText}>{emptyGridMessage}</Text><Button accessibilityLabel="Add to this collection" onPress={() => openSheet("actions")} size="sm" textStyle={styles.emptyActionText} variant="ghost">Add images or create a collection</Button></View> : images.length === 0 ? <Text style={styles.emptyText}>{emptyGridMessage}</Text> : (
+          {loading ? <View style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS * 3 }, (_, index) => <View key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : images.length === 0 && normalCollectionView ? <View style={styles.collectionEmpty}><Text style={styles.emptyText}>{emptyGridMessage}</Text><Button accessibilityLabel="Add to this collection" onPress={() => openSheet("actions")} size="sm" textStyle={styles.emptyActionText} variant="ghost">Add images or create a collection</Button></View> : images.length === 0 ? <Text style={styles.emptyText}>{emptyGridMessage}</Text> : (
             <View style={styles.grid}>
               {images.map((image) => (
                 <Button key={image.key} accessibilityLabel={image.caption || image.filename} accessibilityState={{ selected: selectedImageKeys.includes(image.key) }} contentMode="raw" onLongPress={activeCollection && !showingDuplicates ? () => handleImageLongPress(image.key) : undefined} onPress={() => handleImagePress(image)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
@@ -589,14 +583,19 @@ export function GalleryWorkspace() {
         </View> : null}
       </ScrollView>
 
-      <View style={[styles.composerWrap, { bottom: keyboardVisible ? 6 : insets.bottom + 12 }]}>
-        {aiResponse ? <Text numberOfLines={3} style={styles.aiResponse}>{aiResponse}</Text> : null}
-        <View style={styles.composer}>
-          <View style={styles.coreMark}><ChromeIcon glow={0.35} size={24} source={assistantIconSource} /></View>
-          <TextInput accessibilityLabel="Ask Core anything" editable={!assistantBusy} onChangeText={setAiInput} onSubmitEditing={() => void askAssistant()} placeholder="Ask Core anything..." returnKeyType="send" style={styles.composerInput} value={aiInput} />
-          <Button accessibilityLabel="Send to Core" contentMode="raw" disabled={assistantBusy || !aiInput.trim()} loading={assistantBusy} onPress={() => void askAssistant()} size="sm" variant="primary"><SendIcon size="sm" variant="inverse" /></Button>
-        </View>
-      </View>
+      <CoreComposer
+        accessibilityLabel="Ask Core about your Gallery"
+        disabled={assistantBusy}
+        editable={!assistantBusy}
+        leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
+        loading={assistantBusy}
+        message={aiResponse ? <Text numberOfLines={3} style={styles.aiResponse}>{aiResponse}</Text> : null}
+        onChangeText={setAiInput}
+        onSubmit={() => void askAssistant()}
+        prompts={CORE_PROMPTS}
+        sendIcon={<SendIcon size="sm" variant="inverse" />}
+        value={aiInput}
+      />
 
       <BottomSheet open={sheetOpen} onOpenChange={setSheetOpen} title={sheetTitle} description={activeSheet === "destination" ? `${pendingFiles.length} image${pendingFiles.length === 1 ? "" : "s"} ready to upload.` : activeSheet === "confirmDeleteDuplicates" ? `This removes ${images.length} redundant image${images.length === 1 ? "" : "s"} from this collection while keeping one original from each group. Images still used elsewhere remain available there.` : activeSheet === "createSubject" ? "Gallery learns the stable visual details that distinguish this specific subject." : activeSheet === "collectionMenu" ? selectedImageKeys.length ? `${selectedImageKeys.length} image${selectedImageKeys.length === 1 ? "" : "s"} selected.` : "Long press an image to select it, then select more with a tap." : activeSheet === "transferDestination" ? "Choose up to 20 destination collections." : undefined} dismissible={!busy && !imageActionsBusy} mutation={activeSheet === "newCollection" || activeSheet === "confirmDeleteDuplicates" || activeSheet === "createSubject" || activeSheet === "transferDestination"} tall={activeSheet === "image" || activeSheet === "subjects" || activeSheet === "transferDestination" || activeSheet === "destination" || activeSheet === "createSubject"}>
         <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={[styles.sheetScroll, { maxHeight: height * 0.6 }]}>
@@ -707,12 +706,14 @@ const styles = StyleSheet.create({
   count: { color: palette.silver700, fontFamily: fonts.medium, fontSize: 11 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP },
   collectionCard: { alignItems: "stretch", paddingHorizontal: 0, paddingVertical: 0 },
+  collectionSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   collectionCover: { width: "100%", borderRadius: radii.md, backgroundColor: palette.panelRaised },
   subjectCover: { width: "100%", borderRadius: 999, backgroundColor: palette.panelRaised },
   emptyCover: { width: "100%", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.md, backgroundColor: palette.panel },
   collectionName: { marginTop: 8, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   collectionCount: { marginTop: 2, color: palette.silver500, fontFamily: fonts.regular, fontSize: 10 },
   imageButton: { paddingHorizontal: 0, paddingVertical: 0, backgroundColor: "transparent" },
+  imageSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   imageFrame: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: "transparent", borderRadius: radii.md, backgroundColor: palette.panelRaised },
   imageFrameSelected: { borderColor: palette.silver50, borderWidth: 2 },
   selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
@@ -720,11 +721,7 @@ const styles = StyleSheet.create({
   emptyText: { paddingVertical: 28, color: palette.silver500, fontFamily: fonts.regular, fontSize: 13 },
   collectionEmpty: { minHeight: 260, alignItems: "center", justifyContent: "center" },
   emptyActionText: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 12 },
-  composerWrap: { position: "absolute", left: spacing.md, right: spacing.md, gap: 6 },
   aiResponse: { paddingHorizontal: 14, paddingVertical: 9, color: palette.silver300, fontFamily: fonts.regular, fontSize: 12, lineHeight: 17, borderRadius: radii.md, backgroundColor: palette.panel },
-  composer: { minHeight: 58, padding: 7, flexDirection: "row", alignItems: "center", gap: 7, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: 999, backgroundColor: palette.obsidian850, shadowColor: palette.voidBlack, shadowOpacity: 0.45, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
-  coreMark: { width: 34, height: 34, alignItems: "center", justifyContent: "center" },
-  composerInput: { flex: 1, minHeight: 38, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", fontSize: 13 },
   sheetItem: { flexDirection: "row", alignItems: "center", gap: 12 },
   sheetScroll: { flexGrow: 0 },
   sheetContent: { gap: 4, paddingBottom: 4 },

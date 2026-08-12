@@ -46,6 +46,10 @@ export type ItineraryPlace = z.infer<typeof itineraryPlaceSchema>;
 export type Trip = z.infer<typeof tripSchema>;
 
 const overviewSchema = z.object({ places: z.array(placeSchema), trips: z.array(tripSchema) });
+const assistantResponseSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })) }),
+  z.object({ type: z.literal("note"), content: z.string(), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })) }),
+]);
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
 const createPlaceSchema = z.strictObject({
   name: z.string().trim().min(1),
@@ -151,4 +155,26 @@ export function removePlaceFromTrip(tripKey: string, placeKey: string) {
 
 export function tripContainsPlace(trip: Trip, placeKey: string) {
   return trip.itinerary.some(({ place }) => place.key === placeKey);
+}
+
+export async function askTravelAssistant(message: string, requestKey: string) {
+  const state = useAuthStore.getState();
+  const { organizationKey } = getTravelContext();
+  const agentKey = typeof state.contentExecution?.agentKey === "string" ? state.contentExecution.agentKey : "";
+  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  try {
+    const response = await apiClient.post("/assistant/respond", {
+      organizationKey,
+      agentKey,
+      input: {
+        surface: "travel-workspace",
+        requestKey: z.string().trim().min(1).max(180).parse(requestKey),
+        message: z.string().trim().min(1).max(8_000).parse(message),
+        currentNote: { title: "", content: "" },
+      },
+    }, { timeout: 60_000 });
+    return assistantResponseSchema.parse(response.data);
+  } catch (error) {
+    throw responseError(error);
+  }
 }

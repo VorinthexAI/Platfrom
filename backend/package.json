@@ -32,7 +32,8 @@
     "seed.ts": "bun run load-local-env && bun --env-file=.env.local src/lib/db/seed.ts",
     "db:seed:ci": "bun run src/lib/db/seed.ts",
     "db:seed": "bun run load-local-env && bun --env-file=.env.local src/db/seed-all.ts",
-    "seed:secrets": "bun run scripts/seed-secrets.ts"
+    "seed:secrets": "bun run scripts/seed-secrets.ts",
+    "seed:dev-archive": "bun run load-local-env && bun --env-file=.env.local run scripts/seed-dev-archive.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",

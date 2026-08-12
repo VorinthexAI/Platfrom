@@ -1,4 +1,5 @@
 import { GoogleSignin } from "@react-native-google-signin/google-signin";
+import { isAxiosError } from "axios";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as Crypto from "expo-crypto";
 import * as Linking from "expo-linking";
@@ -31,6 +32,21 @@ export function exchangeOAuthCode(code: string) {
   return operation;
 }
 
+async function launchBrowserOAuth(provider: OAuthProvider) {
+  const query = new URLSearchParams({ redirect_uri: MOBILE_OAUTH_REDIRECT_URI });
+  const start = await getJson<OAuthStart>(`/auth/mobile/oauth/${provider}?${query}`);
+  const result = await WebBrowser.openAuthSessionAsync(start.authorization_url, MOBILE_OAUTH_REDIRECT_URI);
+  if (result.type !== "success") return false;
+
+  const callback = Linking.parse(result.url).queryParams ?? {};
+  const code = typeof callback.code === "string" ? callback.code : null;
+  const providerError = typeof callback.error === "string" ? callback.error : null;
+  if (providerError) throw new Error("Additional verification is required before this account can sign in.");
+  if (!code) throw new Error("The identity provider returned an incomplete sign-in response.");
+  await exchangeOAuthCode(code);
+  return true;
+}
+
 export async function launchOAuthProvider(provider: OAuthProvider) {
   if (provider === "google" && Platform.OS === "android") {
     if (!GOOGLE_WEB_CLIENT_ID) throw new Error("Google sign in is not configured.");
@@ -40,8 +56,13 @@ export async function launchOAuthProvider(provider: OAuthProvider) {
     const response = await GoogleSignin.signIn();
     if (response.type !== "success") return false;
     if (!response.data.idToken) throw new Error("Google returned an incomplete sign-in response.");
-    await postJson<{ id_token: string }, unknown>("/auth/mobile/google", { id_token: response.data.idToken });
-    return true;
+    try {
+      await postJson<{ id_token: string }, unknown>("/auth/mobile/google", { id_token: response.data.idToken });
+      return true;
+    } catch (error) {
+      if (!isAxiosError(error) || (error.response?.status !== 404 && error.response?.status !== 405)) throw error;
+      return launchBrowserOAuth(provider);
+    }
   }
 
   if (provider === "apple" && Platform.OS === "ios") {
@@ -89,16 +110,5 @@ export async function launchOAuthProvider(provider: OAuthProvider) {
     }
   }
 
-  const query = new URLSearchParams({ redirect_uri: MOBILE_OAUTH_REDIRECT_URI });
-  const start = await getJson<OAuthStart>(`/auth/mobile/oauth/${provider}?${query}`);
-  const result = await WebBrowser.openAuthSessionAsync(start.authorization_url, MOBILE_OAUTH_REDIRECT_URI);
-  if (result.type !== "success") return false;
-
-  const callback = Linking.parse(result.url).queryParams ?? {};
-  const code = typeof callback.code === "string" ? callback.code : null;
-  const providerError = typeof callback.error === "string" ? callback.error : null;
-  if (providerError) throw new Error("Additional verification is required before this account can sign in.");
-  if (!code) throw new Error("The identity provider returned an incomplete sign-in response.");
-  await exchangeOAuthCode(code);
-  return true;
+  return launchBrowserOAuth(provider);
 }

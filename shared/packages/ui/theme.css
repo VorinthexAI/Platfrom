@@ -410,6 +410,10 @@
   padding: 0 52px 18px 4px;
 }
 
+.vui-bottom-sheet-header-empty {
+  min-height: 42px;
+}
+
 .vui-bottom-sheet-close {
   position: absolute;
   right: 24px;
@@ -436,6 +440,14 @@
 .vui-bottom-sheet-content {
   display: grid;
   gap: 6px;
+}
+
+.vui-bottom-sheet-footer {
+  background: var(--vui-color-page, #030507);
+  display: grid;
+  gap: 8px;
+  margin-inline: -20px;
+  padding: 16px 20px 0;
 }
 
 .vui-bottom-sheet-item {

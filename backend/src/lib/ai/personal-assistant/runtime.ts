@@ -65,6 +65,9 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
 - Do not claim the book is ready until book_write returns status ready.`;
   if (surface === 'book-workspace') return `${BASE_SYSTEM_PROMPT}
 - You are operating inside the user's book library.${bookRules}`;
+  if (surface === 'travel-workspace') return `${BASE_SYSTEM_PROMPT}
+- You are operating inside Compass. Help the user explore destinations, plan trips, and reason about their travel ideas.
+- Search knowledge when the request depends on stored notes or documents. Do not claim to create or modify places or trips because mutation tools are not available on this surface.`;
   return `${BASE_SYSTEM_PROMPT}
 - Search knowledge when the request depends on information stored in the user's workspace.
 - To create or edit the open note, call write_note with the complete final note. Never describe a note edit without calling write_note.
@@ -77,6 +80,8 @@ function initialMessage(input: z.output<typeof personalAssistantInputSchema>) {
     ? { request: input.message, workspace: 'Gallery' }
     : input.surface === 'book-workspace'
       ? { request: input.message, workspace: 'Book library' }
+      : input.surface === 'travel-workspace'
+        ? { request: input.message, workspace: 'Compass' }
       : { request: input.message, openNote: { title: input.currentNote.title, content: input.currentNote.content } });
 }
 

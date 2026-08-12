@@ -5,7 +5,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { ChevronLeftIcon, InboxIcon, MailIcon, MoreHorizontalIcon, SearchIcon, SendIcon, StarIcon } from "@vorinthex/shared/ui/icons-mobile";
-import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
@@ -268,7 +267,12 @@ export function EmailWorkspace() {
         </View>
       </View>
 
-      {loading ? <View accessible accessibilityLabel="Loading email" accessibilityLiveRegion="polite" accessibilityRole="progressbar" accessibilityValue={{ text: "Loading email" }} style={styles.center}><Spinner size="large" /></View> : null}
+      {loading ? <View accessible accessibilityLabel="Loading email" accessibilityLiveRegion="polite" accessibilityRole="progressbar" accessibilityValue={{ text: "Loading email" }} style={styles.inboxSkeleton}>
+        <View style={styles.accountSkeleton} />
+        <View style={styles.filterSkeletonRow}>{Array.from({ length: 4 }, (_, index) => <View key={index} style={styles.filterSkeleton} />)}</View>
+        <View style={styles.searchSkeleton} />
+        <View style={styles.threadSkeletonList}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={styles.threadSkeleton} />)}</View>
+      </View> : null}
       {!loading && loadError ? <View accessibilityRole="alert" style={styles.center}><InboxIcon size="lg" variant="muted" /><Text style={styles.centerText}>{loadError}</Text><Button onPress={() => { setLoading(true); void load(); }} size="sm" variant="secondary">Retry</Button></View> : null}
       {!loading && !loadError && !connected ? <ScrollView contentContainerStyle={[styles.connectScene, { paddingBottom: insets.bottom + 60 }]} showsVerticalScrollIndicator={false}>
         <View style={styles.signalGlyph}><MailIcon size="lg" /></View>
@@ -363,6 +367,13 @@ const styles = StyleSheet.create({
   connectCopy: { maxWidth: 430, marginTop: 18, marginBottom: 26, color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 23 },
   securityCopy: { marginTop: 14, color: palette.silver700, fontFamily: fonts.regular, fontSize: 11, textAlign: "center" },
   inboxScene: { flex: 1 },
+  inboxSkeleton: { flex: 1, paddingTop: 0 },
+  accountSkeleton: { height: 34, borderBottomWidth: 1, borderBottomColor: palette.hairline, backgroundColor: palette.panelRaised, opacity: 0.72 },
+  filterSkeletonRow: { height: 58, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", gap: 7 },
+  filterSkeleton: { width: 72, height: 32, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  searchSkeleton: { height: 44, marginHorizontal: spacing.md, marginBottom: 10, borderRadius: radii.lg, backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  threadSkeletonList: { paddingHorizontal: spacing.md, gap: 7 },
+  threadSkeleton: { width: "100%", height: 128, borderRadius: radii.lg, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   accountLine: { height: 34, paddingHorizontal: spacing.md, flexDirection: "row", alignItems: "center", gap: 8, borderBottomWidth: 1, borderBottomColor: palette.hairline },
   liveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: palette.silver100 },
   accountText: { minWidth: 0, flex: 1, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11 },

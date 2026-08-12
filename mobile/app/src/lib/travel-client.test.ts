@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
-const calls: { method: string; path: string; body: unknown }[] = [];
-const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" } };
+const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
+const authState = { organization: { key: "org-key" }, scope: { key: "scope-key" }, contentExecution: { agentKey: "agent-key" } };
 const timestamp = "2026-08-11T10:00:00.000Z";
 const place = { key: "place-key", kind: "country", name: "Iceland", latitude: 64.96, longitude: -19.02, countryCode: "IS", country: "Iceland", continent: "Europe", city: null, wishlist: false, visited: false, createdAt: timestamp, updatedAt: timestamp };
 const trip = { key: "trip-key", name: "North", description: null, startDate: null, endDate: null, itinerary: [], createdAt: timestamp, updatedAt: timestamp };
@@ -9,8 +9,9 @@ const trip = { key: "trip-key", name: "North", description: null, startDate: nul
 mock.module("@/state/auth", () => ({ useAuthStore: { getState: () => authState } }));
 mock.module("./api-client", () => ({
   apiClient: {
-    post: async (path: string, body: unknown) => {
-      calls.push({ method: "POST", path, body });
+    post: async (path: string, body: unknown, config?: unknown) => {
+      calls.push({ method: "POST", path, body, config });
+      if (path === "/assistant/respond") return { data: { type: "answer", message: "Try Iceland in winter.", sources: [] } };
       if (path.endsWith("/visits")) return { data: { success: true, data: { place: { ...place, visited: true, visitCount: 1 } } } };
       if (path === "/travel/places") return { data: { success: true, data: { place } } };
       if (path === "/travel/trips") return { data: { success: true, data: { trip } } };
@@ -55,4 +56,18 @@ test("validates date ranges and identifies existing itinerary places", async () 
     { key: "one", position: 1, arrivalDate: null, departureDate: null, place },
   ] }, "place-key")).toBe(true);
   expect(client.tripContainsPlace(trip, "place-key")).toBe(false);
+});
+
+test("asks Core through the Compass assistant surface", async () => {
+  expect(await client.askTravelAssistant("Where should I go?", "request-key")).toEqual({ type: "answer", message: "Try Iceland in winter.", sources: [] });
+  expect(calls[0]).toEqual({
+    method: "POST",
+    path: "/assistant/respond",
+    body: {
+      organizationKey: "org-key",
+      agentKey: "agent-key",
+      input: { surface: "travel-workspace", requestKey: "request-key", message: "Where should I go?", currentNote: { title: "", content: "" } },
+    },
+    config: { timeout: 60_000 },
+  });
 });

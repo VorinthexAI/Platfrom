@@ -13,9 +13,7 @@ import Animated, {
   useReducedMotion,
 } from "react-native-reanimated";
 import {
-  Keyboard,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,7 +26,7 @@ import {
   BottomSheetItem,
 } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
-import { Spinner } from "@vorinthex/shared/ui/spinner";
+import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import {
   AscendIcon,
@@ -58,6 +56,12 @@ import {
   type CreateBookInput,
 } from "@/lib/books-client";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
+
+const CORE_PROMPTS = [
+  "Write a field guide to deep work",
+  "Create a book about lucid dreaming",
+  "Turn my idea into a short handbook",
+] as const;
 
 type Sheet = "actions" | "create" | "reader";
 type Draft = CreateBookInput;
@@ -439,7 +443,6 @@ export function AscendWorkspace() {
   const [message, setMessage] = useState<string>();
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT);
   const generationRequestKey = useRef<string | undefined>(undefined);
@@ -477,21 +480,6 @@ export function AscendWorkspace() {
       active = false;
     };
   }, []);
-  useEffect(() => {
-    const show = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
-      () => setKeyboardVisible(true),
-    );
-    const hide = Keyboard.addListener(
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => setKeyboardVisible(false),
-    );
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
-
   function open(next: Sheet) {
     setSheet(next);
     setSheetOpen(true);
@@ -569,7 +557,7 @@ export function AscendWorkspace() {
     setDraft((current) => ({ ...current, [field]: value }));
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "height" : undefined}
+      behavior="height"
       style={styles.root}
     >
       <View
@@ -635,12 +623,9 @@ export function AscendWorkspace() {
           </View>
         ) : null}
         {loading ? (
-          <View accessibilityRole="progressbar" style={styles.state}>
-            <Spinner variant="muted" />
-            <Text style={styles.stateTitle}>Opening your library...</Text>
-            <Text style={styles.stateCopy}>
-              Gathering books and reading progress.
-            </Text>
+          <View accessibilityRole="progressbar">
+            <View style={styles.sectionHeader}><View style={styles.sectionTitleSkeleton} /><View style={styles.countSkeleton} /></View>
+            <View style={[styles.grid, { gap }]}>{Array.from({ length: columns * 2 }, (_, index) => <View key={index} style={[styles.bookSkeleton, { width: cardWidth, height: Math.round(cardWidth * 1.48) + 52 }]} />)}</View>
           </View>
         ) : books.length === 0 ? (
           <View style={styles.state}>
@@ -694,46 +679,22 @@ export function AscendWorkspace() {
           </>
         )}
       </ScrollView>
-      <View
-        style={[
-          styles.composerWrap,
-          {
-            bottom: keyboardVisible ? 6 : insets.bottom + 12,
-            left: Math.max(insets.left, spacing.md),
-            right: Math.max(insets.right, spacing.md),
-          },
-        ]}
-      >
-        <View style={styles.composer}>
-          <View style={styles.coreMark}>
-            <ChromeIcon glow={0.35} size={24} source={assistantIconSource} />
-          </View>
-          <TextInput
-            accessibilityLabel="Ask Core to create a book"
-            editable={!assistantBusy && !busy}
-            onChangeText={(value) => {
-              setAssistantInput(value);
-              assistantRequestKey.current = undefined;
-            }}
-            onSubmitEditing={() => void askAssistant()}
-            placeholder="Ask Core to create a book..."
-            returnKeyType="send"
-            style={styles.composerInput}
-            value={assistantInput}
-          />
-          <Button
-            accessibilityLabel="Send to Core"
-            contentMode="raw"
-            disabled={assistantBusy || busy || !assistantInput.trim()}
-            loading={assistantBusy}
-            onPress={() => void askAssistant()}
-            size="sm"
-            variant="primary"
-          >
-            <SendIcon size="sm" variant="inverse" />
-          </Button>
-        </View>
-      </View>
+      <CoreComposer
+        accessibilityLabel="Ask Core to create a book"
+        disabled={assistantBusy || busy}
+        editable={!assistantBusy && !busy}
+        leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
+        loading={assistantBusy}
+        onChangeText={(value) => {
+          setAssistantInput(value);
+          assistantRequestKey.current = undefined;
+        }}
+        onSubmit={() => void askAssistant()}
+        prompts={CORE_PROMPTS}
+        sendIcon={<SendIcon size="sm" variant="inverse" />}
+        style={{ left: Math.max(insets.left, spacing.md), right: Math.max(insets.right, spacing.md) }}
+        value={assistantInput}
+      />
       <BottomSheet
         description={
           sheet === "create"
@@ -1035,6 +996,9 @@ const styles = StyleSheet.create({
   },
   count: { color: palette.silver700, fontFamily: fonts.medium, fontSize: 11 },
   grid: { flexDirection: "row", flexWrap: "wrap" },
+  sectionTitleSkeleton: { width: 54, height: 10, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  countSkeleton: { width: 18, height: 10, borderRadius: 999, backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  bookSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   bookCard: { alignItems: "stretch", paddingHorizontal: 0, paddingVertical: 0 },
   cover: {
     width: "100%",
@@ -1117,37 +1081,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     textAlign: "center",
-  },
-  composerWrap: { position: "absolute" },
-  composer: {
-    minHeight: 58,
-    padding: 7,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    borderWidth: 1,
-    borderColor: palette.hairlineBright,
-    borderRadius: 999,
-    backgroundColor: palette.obsidian850,
-    shadowColor: palette.voidBlack,
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  coreMark: {
-    width: 34,
-    height: 34,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  composerInput: {
-    flex: 1,
-    minHeight: 38,
-    paddingHorizontal: 0,
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    fontSize: 13,
   },
   wizard: { flex: 1, gap: 14 },
   progressRow: { flexDirection: "row", gap: 6 },

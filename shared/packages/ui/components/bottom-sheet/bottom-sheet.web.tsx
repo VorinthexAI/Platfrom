@@ -16,6 +16,8 @@ export type BottomSheetProps = {
   children?: ReactNode;
   description?: string;
   dismissible?: boolean;
+  footer?: ReactNode;
+  hideHeading?: boolean;
   mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -31,6 +33,8 @@ export function BottomSheet({
   children,
   description,
   dismissible = true,
+  footer,
+  hideHeading = false,
   mutation = false,
   onOpenChange,
   open,
@@ -98,11 +102,11 @@ export function BottomSheet({
           >
             <span />
           </div>
-          <header className="vui-bottom-sheet-header">
-            <Dialog.Title className="vui-bottom-sheet-title" id={titleId}>
+          <header className={`vui-bottom-sheet-header${hideHeading ? " vui-bottom-sheet-header-empty" : ""}`}>
+            <Dialog.Title className="vui-bottom-sheet-title" hidden={hideHeading} id={titleId}>
               {title}
             </Dialog.Title>
-            {description ? (
+            {!hideHeading && description ? (
               <Dialog.Description
                 className="vui-bottom-sheet-description"
                 id={descriptionId}
@@ -123,6 +127,7 @@ export function BottomSheet({
             </Button>
           </Dialog.Close>
           <div className="vui-bottom-sheet-content">{children}</div>
+          {footer ? <footer className="vui-bottom-sheet-footer">{footer}</footer> : null}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

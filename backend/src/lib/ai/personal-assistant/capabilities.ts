@@ -4,7 +4,7 @@ import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
 import { imageSearchTool } from '@/lib/ai/tools/image-search';
 
-export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace']);
+export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace']);
 export type AssistantSurface = z.infer<typeof assistantSurfaceSchema>;
 
 export const assistantSourceSchema = z.object({
@@ -174,4 +174,5 @@ export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistr
   .register(writeBookCapability)
   .registerSurface('knowledge-workspace', ['search_knowledge', 'write_note'])
   .registerSurface('media-workspace', ['search_images'])
-  .registerSurface('book-workspace', ['book_create_context', 'book_write']);
+  .registerSurface('book-workspace', ['book_create_context', 'book_write'])
+  .registerSurface('travel-workspace', ['search_knowledge']);
