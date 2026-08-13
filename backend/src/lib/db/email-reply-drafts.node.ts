@@ -6,7 +6,7 @@ export const EMAIL_REPLY_DRAFTS_COLLECTION = 'emailReplyDrafts';
 const text = z.string().trim().min(1);
 export const emailReplyDraftSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), threadKey: z.string().cuid(), messageKey: z.string().cuid(), emailWritingProfileKey: z.string().cuid().optional(),
-  generatedContent: text, finalContent: text.optional(), status: z.enum(['generated', 'edited', 'sent', 'discarded']), embedding: currentEmbeddingSchema,
+  generatedContent: text, finalContent: text.optional(), providerMessageId: text.optional(), sendStartedAt: z.string().datetime().optional(), status: z.enum(['generated', 'edited', 'sending', 'sent', 'discarded']), embedding: currentEmbeddingSchema,
   createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type EmailReplyDraft = z.infer<typeof emailReplyDraftSchema>;

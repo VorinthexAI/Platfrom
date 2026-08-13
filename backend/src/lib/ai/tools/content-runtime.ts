@@ -17,6 +17,7 @@ import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } 
 import { htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
+import type { BookGenerator } from '@/lib/books/service';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
@@ -95,13 +96,16 @@ export interface ContentToolDependencies extends RouterDependencies {
   maxDownloadBytes?: number;
   generateExport?: typeof generateDocumentExport;
   searchQueries?: ContentSearchQueryStore;
+  bookRuntime?: BookGenerator;
+  getFolderCoverImage?: (scopeKey: string, imageKey: string) => Promise<{ storageKey: string } | null>;
+  signFolderCoverUrl?: (storageKey: string) => Promise<string>;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -127,9 +131,11 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
   return new ContentError(validation ? 'CONTENT_INVALID_INPUT' : 'CONTENT_CONFLICT', validation ? 'Content tool input or output was invalid.' : 'Content operation failed.', tool, { action, resourceKey, cause: error, retryable: !validation });
 }
 
-function folderView(folder: Folder) {
-  const { embedding: _embedding, _internalDeletion: _internalDeletion, ...safe } = folder;
-  return safe;
+async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
+  const { embedding: _embedding, coverImageKey, _internalDeletion: _internalDeletion, ...safe } = folder;
+  if (!coverImageKey) return safe;
+  const image = await dependencies.getFolderCoverImage(folder.scopeKey, coverImageKey);
+  return { ...safe, ...(image ? { coverUrl: await dependencies.signFolderCoverUrl(image.storageKey) } : {}) };
 }
 
 function documentView(document: Document) {
@@ -309,10 +315,12 @@ interface RuntimeDefaults {
   runAction: NonNullable<ContentToolDependencies['runAction']>;
   idempotency: ContentIdempotencyStore;
   generateExport: typeof generateDocumentExport;
+  getFolderCoverImage: NonNullable<ContentToolDependencies['getFolderCoverImage']>;
+  signFolderCoverUrl: NonNullable<ContentToolDependencies['signFolderCoverUrl']>;
 }
 
 async function defaults(deps: ContentToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
-  const [{ newId }, storage, processing, embeddings, router, ledger, exports] = await Promise.all([
+  const [{ newId }, storage, processing, embeddings, router, ledger, exports, images, imageUrl] = await Promise.all([
     import('@/lib/ids'),
     import('@/lib/ai/document-processing/storage'),
     import('@/lib/ai/document-processing'),
@@ -320,6 +328,8 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     import('@/lib/ai/router'),
     import('@/lib/db/content-idempotency.node'),
     import('@/lib/ai/document-processing/exports'),
+    import('@/lib/db/images.node'),
+    import('@/lib/gallery/image-url'),
   ]);
   const executeAction = deps.executeAction ?? router.executeAction;
   const embedding = deps.embed ? (text: string) => deps.embed!(text) : async (text: string, purpose: 'document' | 'query' = 'document') => {
@@ -360,6 +370,8 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
       release: ledger.releaseContentIdempotency,
     },
     generateExport: deps.generateExport ?? exports.generateDocumentExport,
+    getFolderCoverImage: deps.getFolderCoverImage ?? images.getImageInScope,
+    signFolderCoverUrl: deps.signFolderCoverUrl ?? imageUrl.signedImageUrl,
   };
 }
 
@@ -760,7 +772,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   }
   let result: unknown;
   try {
-    if (tool === 'autocomplete') {
+    if (tool === 'book.create-context' || tool === 'book.write') {
+      const { runBookContentTool } = await import('./book-runtime');
+      result = await runBookContentTool(tool, input, context, dependencies);
+    } else if (tool === 'autocomplete') {
       const response = await action('ask', {
         systemPrompt: `Continue the user's writing with exactly ${input.wordCount} words or fewer. Match the writer's voice and direction while favoring a vivid, specific, or subtly unexpected continuation over generic filler. Keep it coherent with the supplied context. Return only the continuation, without quotation marks, labels, commentary, or repeating the supplied context.`,
         messages: [{ role: 'user', content: [{ type: 'text', text: input.context }] }],
@@ -795,6 +810,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             const parent = await folder(item.parentFolderKey, 'moderator', false);
             if (parent.scopeKey !== item.scopeKey) fail('FOLDER_MOVE_FORBIDDEN', 'Parent belongs to another scope.', tool, 'insert', item.parentFolderKey);
           }
+          if (item.coverImageKey && !await d.getFolderCoverImage(item.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const embedding = await embed([item.name, item.description].filter(Boolean).join('\n\n'), item.key, item.scopeKey);
           const timestamp = now();
           const value = await repo.insertFolder({
@@ -803,12 +819,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(item.parentFolderKey ? { parentFolderKey: item.parentFolderKey } : {}),
             name: item.name,
             ...(item.description ? { description: item.description } : {}),
+            ...(item.coverImageKey ? { coverImageKey: item.coverImageKey } : {}),
             embedding,
             deletedAt: null,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
-          return { folder: folderView(value) };
+          return { folder: await folderView(value, d) };
         },
       })), false, repo);
     } else if (tool === 'folder.find') {
@@ -821,7 +838,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const allDocuments = await repo.listDocuments(current.scopeKey, true);
           return {
             folder: {
-              ...folderView(current),
+              ...await folderView(current, d),
               ...(input.includeChildrenCount ? { childrenCount: allFolders.filter((item) => item.parentFolderKey === key).length } : {}),
               ...(input.includeDocumentCount ? { documentCount: allDocuments.filter((item) => item.folderKey === key).length } : {}),
             },
@@ -844,7 +861,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         ? (await repo.listDocuments(input.scopeKey)).filter((item) => item.folderKey === input.parentFolderKey).map(documentView)
         : undefined;
       result = {
-        folders: values.slice(offset, offset + limit).map(folderView),
+        folders: await Promise.all(values.slice(offset, offset + limit).map((value) => folderView(value, d))),
         ...(documents ? { documents } : {}),
         ...(offset + limit < values.length ? { cursor: Buffer.from(String(offset + limit)).toString('base64url') } : {}),
       };
@@ -857,6 +874,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         preflight: async () => { await folder(item.folderKey, 'moderator', false); },
         run: async (mutationRepository: ContentRepository) => {
           const current = await folder(item.folderKey, 'moderator', false);
+          if (item.coverImageKey && !await d.getFolderCoverImage(current.scopeKey, item.coverImageKey)) fail('CONTENT_NOT_FOUND', 'Folder cover image was not found in this scope.', tool, 'read', item.coverImageKey);
           const changesEmbedding = item.name !== undefined || item.description !== undefined;
           const name = item.name ?? current.name;
           const description = item.description === null ? undefined : item.description ?? current.description;
@@ -864,10 +882,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const patch = {
             ...(item.name !== undefined ? { name: item.name } : {}),
             ...(item.description !== undefined ? { description: item.description ?? undefined } : {}),
+            ...(item.coverImageKey !== undefined ? { coverImageKey: item.coverImageKey ?? undefined } : {}),
             ...(embedding ? { embedding } : {}),
             updatedAt: now(),
           };
-          return { folder: folderView(await mutationRepository.updateFolder(current.key, patch)) };
+          return { folder: await folderView(await mutationRepository.updateFolder(current.key, patch), d) };
         },
       })), input.atomic, repo);
     } else if (tool === 'folder.move') {
@@ -887,7 +906,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             parentFolderKey: item.targetParentFolderKey,
             updatedAt: now(),
           });
-          return { folder: folderView(moved) };
+          return { folder: await folderView(moved, d) };
         },
       })), input.atomic, repo);
     } else if (tool === 'folder.archive' || tool === 'folder.restore') {
@@ -923,7 +942,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (restore && input.restoreAncestors) for (const ancestor of ancestors) {
             await mutationRepository.updateFolder(ancestor.key, { deletedAt: null, updatedAt: timestamp });
           }
-          return { folder: folderView({ ...root, deletedAt: restore ? null : timestamp, updatedAt: timestamp }) };
+          return { folder: await folderView({ ...root, deletedAt: restore ? null : timestamp, updatedAt: timestamp }, d) };
         },
       }));
       result = await batch(tool, lifecycleItems, input.atomic, repo);
@@ -1097,7 +1116,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               ...(include.includes('html') ? { html: current.html } : {}),
               ...(include.includes('content') ? { content: current.content } : {}),
               ...(include.includes('embedding') ? { embedding: current.embedding } : {}),
-              ...(parent ? { folder: folderView(parent) } : {}),
+              ...(parent ? { folder: await folderView(parent, d) } : {}),
               ...(include.includes('shares') ? { shares: (await repo.listShares(current.scopeKey, [current.key])).map(shareView) } : {}),
               ...(latest ? { latestVersion: versionView(latest) } : {}),
             },
@@ -1817,7 +1836,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       let embedding: number[];
       try { embedding = await embed(input.query, undefined, undefined, 'query'); }
       catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
-      const candidates = new Map<string, { score: number; document: Document; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
+      const candidates = new Map<string, { score: number; document: Document; matchedContent?: string; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
       for (const source of resolvedSources) {
         const scopeKeys = source.scopeKeys.filter((key) => allowed.includes(key) && filterScopeKeys.has(key));
         if (scopeKeys.length === 0) continue;
@@ -1852,7 +1871,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const selected = ranked.slice(0, input.topK ?? 20);
       result = {
         query: input.query,
-        results: await Promise.all(selected.map(async ({ score, document: current, source }) => {
+        results: await Promise.all(selected.map(async ({ score, document: current, matchedContent, source }) => {
           const normalizedScore = Math.max(0, Math.min(1, score));
           const parent = input.include?.includes('folder') && current.folderKey ? await repo.getFolder(current.folderKey) : undefined;
           return {
@@ -1862,10 +1881,10 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(current.folderKey ? { folderKey: current.folderKey } : {}),
             score: normalizedScore,
             matchedSource: source,
-            ...(input.include?.includes('snippet') ? { snippet: current.content.slice(0, 300) } : {}),
+            ...(input.include?.includes('snippet') ? { snippet: (matchedContent ?? current.content).slice(0, 300) } : {}),
             ...(input.include?.includes('content') ? { content: current.content } : {}),
             ...(input.include?.includes('html') ? { html: current.html } : {}),
-            ...(parent ? { folder: folderView(parent) } : {}),
+            ...(parent ? { folder: await folderView(parent, d) } : {}),
             ...(input.include?.includes('scope') ? { scope: { key: current.scopeKey } } : {}),
             ...(input.include?.includes('scoreBreakdown') ? { scoreBreakdown: { vector: normalizedScore, final: normalizedScore } } : {}),
           };

@@ -77,6 +77,7 @@ interface LoginIdentity {
   organizationTitle: string | null;
   orchestratorKey: string | null;
   organizationIsRoot: boolean;
+  organizationIsPersonal: boolean;
   organizationMfaEnabled: boolean;
   isMfaEnabled: boolean;
   totpSecret: string | null;
@@ -128,7 +129,7 @@ function jsonBase64Url(value: unknown) {
 }
 
 async function signAccessTokenPayload(payload: string) {
-  return sha256(`${payload}.${process.env.ACCESS_TOKEN_SECRET || 'dev-access-token-secret'}`);
+  return sha256(`${payload}.${requiredEnv('ACCESS_TOKEN_SECRET')}`);
 }
 
 async function createSignedOAuthState(provider: OAuthProvider, redirectUri: string, mobileRedirectUri?: string) {
@@ -175,6 +176,7 @@ async function membershipIdentity(
     organizationTitle: membership.orgTitle,
     orchestratorKey: membership.orchestratorKey,
     organizationIsRoot: organization.is_root,
+    organizationIsPersonal: organization.slug === `personal-${user.key}`,
     organizationMfaEnabled: organization.mfa_enabled,
     isMfaEnabled: membership.isMfaEnabled,
     totpSecret: membership.totpSecret,
@@ -196,28 +198,26 @@ const membershipRoleRank: Record<UserOrganization['orgRole'], number> = {
   viewer: 1,
 };
 
-function strongestMembership(
-  memberships: UserOrganization[],
-): UserOrganization | null {
-  return memberships.reduce<UserOrganization | null>((best, membership) => {
-    if (!best || membershipRoleRank[membership.orgRole] > membershipRoleRank[best.orgRole]) return membership;
+function strongestIdentity(identities: LoginIdentity[]): LoginIdentity | null {
+  return identities.reduce<LoginIdentity | null>((best, identity) => {
+    if (!best || membershipRoleRank[identity.orgRole] > membershipRoleRank[best.orgRole]) return identity;
     return best;
   }, null);
 }
 
 async function organizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
   const memberships = await listActiveUserOrganizationsByUser(user.key);
+  const identities = (await Promise.all(memberships.map((membership) => membershipIdentity(user, membership))))
+    .filter((identity): identity is LoginIdentity => identity !== null);
   // MFA-enforcing memberships always win over ordinary personal ownership.
-  for (const membership of memberships) {
-    const identity = await membershipIdentity(user, membership);
-    if (identity?.organizationIsRoot && identity.organizationMfaEnabled) return identity;
-  }
-  for (const membership of memberships) {
-    const identity = await membershipIdentity(user, membership);
-    if (identity?.organizationMfaEnabled) return identity;
-  }
-  const membership = strongestMembership(memberships);
-  return membership ? membershipIdentity(user, membership) : null;
+  const root = identities.find((identity) => identity.organizationIsRoot && identity.organizationMfaEnabled);
+  if (root) return root;
+  const enforced = identities.find((identity) => identity.organizationMfaEnabled);
+  if (enforced) return enforced;
+  // A real organization membership takes precedence over the automatically
+  // provisioned personal workspace, even when personal ownership ranks higher.
+  return strongestIdentity(identities.filter((identity) => !identity.organizationIsPersonal))
+    ?? strongestIdentity(identities);
 }
 
 async function rootOrganizationMembershipIdentity(user: User): Promise<LoginIdentity | null> {
@@ -279,6 +279,17 @@ export function getAuthSessionPolicy(identityType: AuthIdentityType, founderAssu
   return identityType === 'superAdmin' || founderAssured
     ? { accessMaxAgeSeconds: FOUNDER_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: FOUNDER_REFRESH_MAX_AGE_SECONDS }
     : { accessMaxAgeSeconds: STANDARD_ACCESS_MAX_AGE_SECONDS, refreshMaxAgeSeconds: STANDARD_REFRESH_MAX_AGE_SECONDS };
+}
+
+export function resolveRefreshedIdentityType(
+  storedIdentityType: AuthIdentityType | undefined,
+  membershipIdentityType: LoginIdentityType | undefined,
+  durableSession: boolean,
+  mfaAssured: boolean,
+): AuthIdentityType {
+  if (storedIdentityType) return storedIdentityType;
+  if (durableSession && !mfaAssured) return 'user';
+  return membershipIdentityType ?? 'user';
 }
 
 export async function createAccessToken(identity: AuthIdentity | string, sessionExpiresAt?: Date) {
@@ -359,6 +370,7 @@ export async function issueTokens(identity: LoginIdentity, sessionExpiresAt?: Da
   await insertAuthSession({
     key: sessionId,
     userId: identity.key,
+    identityType: identity.type,
     refreshTokenHash,
     expiresAt: sessionExpiresAt.toISOString(),
     revokedAt: null,
@@ -383,6 +395,7 @@ export async function issueUserTokens(user: Pick<User, 'key'>, sessionExpiresAt?
   await insertAuthSession({
     key: sessionId,
     userId: user.key,
+    identityType: 'user',
     refreshTokenHash,
     expiresAt: sessionExpiresAt.toISOString(),
     revokedAt: null,
@@ -410,10 +423,16 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
   const mfaMembershipKey = session?.founderMembershipKey ?? legacyUser?.refreshFounderMembershipKey;
   const mfaVersion = session?.founderMfaVersion ?? legacyUser?.refreshFounderMfaVersion;
   const mfaAssured = Boolean(mfaMembershipKey) && typeof mfaVersion === 'number';
+  const storedIdentityType = session?.identityType;
+  const needsMembership = storedIdentityType === 'member' || storedIdentityType === 'superAdmin';
   const identity = mfaAssured
     ? await getLoginIdentityByMembership('superAdmin', user.key, mfaMembershipKey!)
       ?? await getLoginIdentityByMembership('member', user.key, mfaMembershipKey!)
-    : await organizationMembershipIdentity(user);
+    : needsMembership || !session
+      ? await organizationMembershipIdentity(user)
+      : null;
+  if (needsMembership && !identity) return null;
+  if (storedIdentityType === 'superAdmin' && identity?.type !== 'superAdmin') return null;
   if (identity?.organizationMfaEnabled && (
     !mfaAssured ||
     !identity.isMfaEnabled ||
@@ -421,7 +440,9 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
     identity.mfaVersion !== mfaVersion
   )) return null;
   const founderAssured = refreshToken.startsWith('vrtx_refresh_founder_') && identity?.organizationIsRoot === true && mfaAssured;
-  const identityType = identity?.type ?? 'user';
+  // Legacy durable sessions without MFA were user sessions. Never infer a
+  // stronger identity from organization membership during token refresh.
+  const identityType = resolveRefreshedIdentityType(storedIdentityType, identity?.type, Boolean(session), mfaAssured);
   const policy = getAuthSessionPolicy(identityType, founderAssured);
   const sessionExpiresAt = new Date(Math.min(
     Date.parse(expiresAt!),
@@ -449,6 +470,20 @@ export async function refreshAccessToken(refreshToken: string): Promise<SessionT
     refreshTokenMaxAgeSeconds: remainingSeconds,
     sessionExpiresAt: sessionExpiresAt.toISOString(),
   };
+}
+
+export async function refreshTokenMatchesIdentity(refreshToken: string, identity: AuthIdentity): Promise<boolean> {
+  const tokenHash = await sha256(refreshToken);
+  const session = await getAuthSessionByRefreshTokenHash(tokenHash);
+  if (session) {
+    return session.key === identity.sessionId
+      && session.userId === identity.key
+      && !session.revokedAt
+      && isRefreshTokenActive(session.expiresAt);
+  }
+  if (identity.sessionId) return false;
+  const legacyUser = await getUserByRefreshTokenHash(tokenHash);
+  return legacyUser?.key === identity.key && isRefreshTokenActive(legacyUser.refreshTokenExpiresAt);
 }
 
 export async function revokeSession(identity: AuthIdentity, refreshToken?: string | null): Promise<boolean> {
@@ -663,6 +698,8 @@ function decodeJwtPart(value: string | undefined): Record<string, unknown> | nul
 
 type AppleJwk = JsonWebKey & { kid?: string; alg?: string };
 
+type GoogleJwk = JsonWebKey & { kid?: string; alg?: string; use?: string };
+
 export async function verifyAppleIdentityToken(
   token: string,
   loadKeys: () => Promise<AppleJwk[]> = async () => {
@@ -671,6 +708,7 @@ export async function verifyAppleIdentityToken(
     if (!response.ok || !Array.isArray(body?.keys)) throw new Error('Apple signing keys unavailable');
     return body.keys;
   },
+  options: { clientId?: string; nonce?: string } = {},
 ) {
   const [encodedHeader, encodedPayload, encodedSignature, extra] = token.split('.');
   if (!encodedHeader || !encodedPayload || !encodedSignature || extra) return null;
@@ -687,13 +725,60 @@ export async function verifyAppleIdentityToken(
     new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
   );
   const audience = payload.aud;
-  const expectedAudience = requiredEnv('APPLE_OAUTH_CLIENT_ID');
+  const expectedAudience = options.clientId ?? requiredEnv('APPLE_OAUTH_CLIENT_ID');
   const audienceMatches = audience === expectedAudience || (Array.isArray(audience) && audience.includes(expectedAudience));
   const now = Math.floor(Date.now() / 1000);
-  if (!validSignature || payload.iss !== 'https://appleid.apple.com' || !audienceMatches || typeof payload.exp !== 'number' || payload.exp <= now) return null;
+  const nonceMatches = !options.nonce || payload.nonce === await sha256(options.nonce);
+  if (!validSignature || payload.iss !== 'https://appleid.apple.com' || !audienceMatches || !nonceMatches
+    || typeof payload.sub !== 'string' || !payload.sub || typeof payload.exp !== 'number' || payload.exp <= now) return null;
   const email = typeof payload.email === 'string' ? payload.email : null;
   if (!email || (payload.email_verified !== true && payload.email_verified !== 'true')) return null;
   return { email, name: null, profileUrl: null };
+}
+
+export async function verifyGoogleIdentityToken(
+  token: string,
+  loadKeys: () => Promise<GoogleJwk[]> = async () => {
+    const response = await fetch('https://www.googleapis.com/oauth2/v3/certs');
+    const body = await response.json().catch(() => null) as { keys?: GoogleJwk[] } | null;
+    if (!response.ok || !Array.isArray(body?.keys)) throw new Error('Google signing keys unavailable');
+    return body.keys;
+  },
+) {
+  const [encodedHeader, encodedPayload, encodedSignature, extra] = token.split('.');
+  if (!encodedHeader || !encodedPayload || !encodedSignature || extra) return null;
+  const header = decodeJwtPart(encodedHeader);
+  const payload = decodeJwtPart(encodedPayload);
+  if (header?.alg !== 'RS256' || typeof header.kid !== 'string' || !payload) return null;
+  try {
+    const key = (await loadKeys()).find((candidate) => candidate.kid === header.kid
+      && (!candidate.alg || candidate.alg === 'RS256')
+      && (!candidate.use || candidate.use === 'sig'));
+    if (!key) return null;
+    const publicKey = await crypto.subtle.importKey('jwk', key, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+    const validSignature = await crypto.subtle.verify(
+      'RSASSA-PKCS1-v1_5',
+      publicKey,
+      Buffer.from(encodedSignature, 'base64url'),
+      new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`),
+    );
+    const audience = payload.aud;
+    const expectedAudience = requiredEnv('GOOGLE_OAUTH_CLIENT_ID');
+    const audienceMatches = audience === expectedAudience || (Array.isArray(audience) && audience.includes(expectedAudience));
+    const now = Math.floor(Date.now() / 1000);
+    const issuerMatches = payload.iss === 'https://accounts.google.com' || payload.iss === 'accounts.google.com';
+    const email = typeof payload.email === 'string' ? payload.email : null;
+    if (!validSignature || !issuerMatches || !audienceMatches || typeof payload.exp !== 'number' || payload.exp <= now
+      || typeof payload.sub !== 'string' || !payload.sub || !email
+      || (payload.email_verified !== true && payload.email_verified !== 'true')) return null;
+    return {
+      email,
+      name: typeof payload.name === 'string' ? payload.name : null,
+      profileUrl: typeof payload.picture === 'string' ? payload.picture : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function pemBodyToArrayBuffer(pem: string) {
@@ -773,18 +858,11 @@ async function exchangeAppleCode(code: string, redirectUri: string) {
   return verifyAppleIdentityToken(tokenData.id_token);
 }
 
-export async function completeOAuthSignIn(input: {
-  provider: OAuthProvider;
-  code: string;
-  state: string;
-  redirectUri: string;
-}) {
-  const state = await verifySignedOAuthState(input.provider, input.state, input.redirectUri);
-  if (!state) return null;
-  const profile = input.provider === 'google'
-    ? await exchangeGoogleCode(input.code, input.redirectUri)
-    : await exchangeAppleCode(input.code, input.redirectUri);
-  if (!profile) return null;
+async function completeOAuthProfile(
+  profile: { email: string; name: string | null; profileUrl: string | null },
+  mobileRedirectUri?: string,
+  initializeNameOnly = false,
+) {
   const normalized = normalizeEmail(profile.email);
 
   // Members of MFA-enforcing organizations never get a session through
@@ -794,15 +872,15 @@ export async function completeOAuthSignIn(input: {
   const existingUser = await getUserByEmailHash(await hashUserEmail(normalized));
   const enforced = existingUser ? await mfaEnforcedMembershipIdentity(existingUser) : null;
   if (enforced?.organizationIsRoot) {
-    return { status: 'founders_gate_required' as const, mobileRedirectUri: state.mobileRedirectUri };
+    return { status: 'founders_gate_required' as const, mobileRedirectUri };
   }
   if (enforced) {
-    return { status: 'mfa_required' as const, mobileRedirectUri: state.mobileRedirectUri };
+    return { status: 'mfa_required' as const, mobileRedirectUri };
   }
 
   const user = await upsertUserByEmail(normalized, {
-    name: profile.name ?? defaultNameFromEmail(normalized),
-    profileUrl: profile.profileUrl,
+    ...(profile.name && (!initializeNameOnly || !existingUser?.name) ? { name: profile.name } : {}),
+    ...(profile.profileUrl ? { profileUrl: profile.profileUrl } : {}),
     isVerified: true,
     lastLoginAt: new Date().toISOString(),
   });
@@ -816,8 +894,35 @@ export async function completeOAuthSignIn(input: {
     alias,
     aliasSlug: user.alias_slug,
     welcomeLine: pickWelcomeLine(user.key, alias),
-    mobileRedirectUri: state.mobileRedirectUri,
+    mobileRedirectUri,
   };
+}
+
+export async function completeOAuthSignIn(input: {
+  provider: OAuthProvider;
+  code: string;
+  state: string;
+  redirectUri: string;
+}) {
+  const state = await verifySignedOAuthState(input.provider, input.state, input.redirectUri);
+  if (!state) return null;
+  const profile = input.provider === 'google'
+    ? await exchangeGoogleCode(input.code, input.redirectUri)
+    : await exchangeAppleCode(input.code, input.redirectUri);
+  return profile ? completeOAuthProfile(profile, state.mobileRedirectUri) : null;
+}
+
+export async function completeNativeGoogleSignIn(idToken: string) {
+  const profile = await verifyGoogleIdentityToken(idToken);
+  return profile ? completeOAuthProfile(profile) : null;
+}
+
+export async function completeNativeAppleSignIn(idToken: string, nonce: string, name?: string) {
+  const profile = await verifyAppleIdentityToken(idToken, undefined, {
+    clientId: requiredEnv('APPLE_NATIVE_CLIENT_ID'),
+    nonce,
+  });
+  return profile ? completeOAuthProfile({ ...profile, name: name?.trim() || profile.name }, undefined, true) : null;
 }
 
 function allowedMobileOAuthRedirect(uri: string) {
@@ -983,24 +1088,26 @@ export async function requestSignInEmail(email: string, countryCode?: z.infer<ty
       };
     }
 
-    const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type, {
-      withHandoff: true,
-      membershipKey: identity.linkKey,
-    });
-    const magicLink = buildMagicLink(challenge.tokenHash, 'member');
-    await deliverMemberSignInEmail({
-      email: normalized,
-      name: memberGreetingName(identity),
-      magicLink,
-      mfaEnabled: false,
-      expiresAt: challenge.expiresAt,
-    });
-    return {
-      allowed: true as const,
-      expiresAt: challenge.expiresAt,
-      handoffTokenHash: challenge.handoffTokenHash,
-      handoffExpiresAt: new Date(challenge.expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
-    };
+    if (!identity.organizationIsPersonal) {
+      const challenge = await createChallenge(identity.key, 'email', EMAIL_LINK_TTL_MS, identity.type, {
+        withHandoff: true,
+        membershipKey: identity.linkKey,
+      });
+      const magicLink = buildMagicLink(challenge.tokenHash, 'member');
+      await deliverMemberSignInEmail({
+        email: normalized,
+        name: memberGreetingName(identity),
+        magicLink,
+        mfaEnabled: false,
+        expiresAt: challenge.expiresAt,
+      });
+      return {
+        allowed: true as const,
+        expiresAt: challenge.expiresAt,
+        handoffTokenHash: challenge.handoffTokenHash,
+        handoffExpiresAt: new Date(challenge.expiresAt.getTime() + HANDOFF_CLAIM_WINDOW_MS),
+      };
+    }
   }
 
   // Users without an organization membership sign in directly without TOTP.
@@ -1112,25 +1219,31 @@ export async function validateMagicLink(token: string): Promise<MagicLinkValidat
   if (emailChallenge.identityType === 'user') {
     const user = await getUserById(emailChallenge.identityKey);
     if (!user) return null;
-    // The tap proves inbox ownership: wake the browser that requested the
-    // link, wherever this one happens to be running.
-    await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
     // Signing in proves inbox ownership — it verifies the email too.
-    await updateUser(user.key, {
+    const verifiedUser = await updateUser(user.key, {
       isVerified: true,
       lastLoginAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    await provisionPersonalAuthContext(user);
-    const tokens = await issueUserTokens(user);
-    const alias = user.alias ?? generateAlias(user.key);
+    await provisionPersonalAuthContext(verifiedUser);
+    const tokens = await issueUserTokens(verifiedUser);
+    // Publish only after verification and session prerequisites are durable,
+    // otherwise the waiting client can race ahead and burn its one-shot claim.
+    try {
+      await approveHandoff({ key: emailChallenge.id, handoffTokenHash: emailChallenge.handoffTokenHash });
+    } catch (error) {
+      // The tapping client already has a valid session. Handoff failure must
+      // not turn that successful one-time link into an unrecoverable error.
+      console.warn('magic-link handoff approval failed', error instanceof Error ? error.message : String(error));
+    }
+    const alias = verifiedUser.alias ?? generateAlias(verifiedUser.key);
     return {
       status: 'authenticated',
-      identity: { key: user.key, identityType: 'user' },
+      identity: { key: verifiedUser.key, identityType: 'user' },
       ...tokens,
       alias,
-      aliasSlug: user.alias_slug,
-      welcomeLine: pickWelcomeLine(user.key, alias),
+      aliasSlug: verifiedUser.alias_slug,
+      welcomeLine: pickWelcomeLine(verifiedUser.key, alias),
     };
   }
 

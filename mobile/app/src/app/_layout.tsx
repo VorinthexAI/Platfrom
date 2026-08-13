@@ -5,11 +5,12 @@ import {
   Geist_600SemiBold,
   useFonts,
 } from "@expo-google-fonts/geist";
-import { Stack, useRouter, useSegments, type Href } from "expo-router";
+import { Stack, usePathname, useRouter, useSegments, type Href } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { BottomSheetScene } from "@vorinthex/shared/ui/bottom-sheet";
 import { useEffect } from "react";
+import { BackHandler, Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -35,6 +36,7 @@ export default function RootLayout() {
   const hydrateOnboarding = useOnboardingStore((state) => state.hydrate);
   const router = useRouter();
   const segments = useSegments();
+  const pathname = usePathname();
 
   useEffect(() => {
     void bootstrap().finally(() => {
@@ -66,6 +68,14 @@ export default function RootLayout() {
     if (status === "authenticated" && !isOnboarded && !isPublic && root !== "onboarding") router.replace("/onboarding");
     if (status === "authenticated" && isOnboarded && root === "onboarding") router.replace("/capability/archive");
   }, [router, segments, status]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android" || !pathname.startsWith("/capability/")) return;
+    return BackHandler.addEventListener("hardwareBackPress", () => {
+      if (pathname !== "/capability/archive") router.replace("/capability/archive");
+      return true;
+    }).remove;
+  }, [pathname, router]);
 
   if ((!fontsLoaded && !fontError) || status === "bootstrapping") {
     return null;

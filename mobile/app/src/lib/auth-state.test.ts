@@ -36,7 +36,8 @@ mock.module("@/lib/api-client", () => ({
   getJson: async () => {
     getCalls += 1;
     if (contextResponse instanceof Error || (contextResponse as { isAxiosError?: boolean })?.isAxiosError) {
-      if ((contextResponse as { response?: { status?: number } }).response?.status === 401) unauthorizedListener?.();
+      const response = (contextResponse as { response?: { status?: number; headers?: Record<string, string> } }).response;
+      if (response?.status === 401 && String(response.headers?.["www-authenticate"] ?? "").includes("Bearer")) unauthorizedListener?.();
       throw contextResponse;
     }
     return contextResponse;
@@ -109,11 +110,21 @@ test("retires a persisted legacy guest session", async () => {
 
 test("clears an expired server session without guest recovery", async () => {
   session = storedSession;
-  contextResponse = { isAxiosError: true, response: { status: 401 } };
+  contextResponse = { isAxiosError: true, response: { status: 401, headers: { "www-authenticate": "Bearer" } } };
 
   await useAuthStore.getState().bootstrap();
 
   expect(useAuthStore.getState().status).toBe("unauthenticated");
   expect(clearTokenCalls).toBe(1);
   expect(revokeCalls).toBe(0);
+});
+
+test("does not clear a session for a non-bearer 401", async () => {
+  session = storedSession;
+  contextResponse = { isAxiosError: true, response: { status: 401, headers: {} } };
+
+  await useAuthStore.getState().bootstrap();
+
+  expect(clearTokenCalls).toBe(0);
+  expect(session).toEqual(storedSession);
 });

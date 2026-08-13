@@ -16,3 +16,6 @@ export const capabilityIconSource: Record<CapabilitySlug, ImageSource> = {
 
 /** The real Vorinthex mark from web/app/public/logos. */
 export const vorinthexMarkSource: ImageSource = require("../../assets/brand/vorinthex-mark.png");
+
+/** Approved chrome identity used for the personal assistant surface. */
+export const assistantIconSource: ImageSource = require("../../assets/brand/product-assistant.png");

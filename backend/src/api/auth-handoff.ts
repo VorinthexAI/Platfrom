@@ -2,7 +2,10 @@ import { EventEmitter } from 'node:events';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import {
+  completeAuthChallengeHandoffClaim,
   getAuthChallengeByHandoffTokenHash,
+  leaseAuthChallengeByHandoffTokenHash,
+  releaseAuthChallengeHandoffLease,
   updateAuthChallenge,
   type AuthChallenge,
 } from '@/lib/db/auth-challenges.node';
@@ -28,6 +31,7 @@ import { createTotpChallengeForIdentity, issueUserTokens, type LoginIdentityType
 
 /** How long an approval stays claimable after the link is tapped. */
 export const HANDOFF_CLAIM_WINDOW_MS = 20 * 60 * 1000;
+const HANDOFF_CLAIM_LEASE_MS = 60 * 1000;
 
 const HANDOFF_CHANNEL = 'auth:handoff:events';
 const HANDOFF_EVENT = 'handoff-approved';
@@ -124,40 +128,67 @@ export async function getHandoffStatus(handoffPublicHash: string): Promise<Hando
  */
 export async function claimHandoff(handoffPublicHash: string): Promise<HandoffClaimResult | null> {
   const stored = await sha256(handoffPublicHash);
-  const challenge = await getAuthChallengeByHandoffTokenHash(stored);
-  if (!challenge || !isHandoffClaimable(challenge)) return null;
+  const leaseAt = new Date();
+  const challenge = await leaseAuthChallengeByHandoffTokenHash(
+    stored,
+    leaseAt.toISOString(),
+    new Date(leaseAt.getTime() - HANDOFF_CLAIM_WINDOW_MS).toISOString(),
+    new Date(leaseAt.getTime() - HANDOFF_CLAIM_LEASE_MS).toISOString(),
+  );
+  if (!challenge) return null;
 
-  await updateAuthChallenge(challenge.key, { handoffClaimedAt: new Date().toISOString() });
+  try {
+    const user = await getUserById(challenge.identityKey);
+    if (!user) {
+      await releaseAuthChallengeHandoffLease(challenge.key, leaseAt.toISOString());
+      return null;
+    }
 
-  const user = await getUserById(challenge.identityKey);
-  if (!user) return null;
+    if (challenge.identityType !== 'user') {
+      if (!challenge.membershipKey) {
+        await releaseAuthChallengeHandoffLease(challenge.key, leaseAt.toISOString());
+        return null;
+      }
+      const totp = await createTotpChallengeForIdentity(
+        challenge.identityType as LoginIdentityType,
+        challenge.identityKey,
+        challenge.membershipKey,
+      );
+      if (!totp) {
+        await releaseAuthChallengeHandoffLease(challenge.key, leaseAt.toISOString());
+        return null;
+      }
+      if (!await completeAuthChallengeHandoffClaim(challenge.key, leaseAt.toISOString(), new Date().toISOString())) {
+        throw new Error('handoff claim lease was lost');
+      }
+      return {
+        status: totp.status,
+        totpChallengeToken: totp.totpChallengeToken,
+        expiresAt: totp.expiresAt,
+      };
+    }
 
-  if (challenge.identityType !== 'user') {
-    if (!challenge.membershipKey) return null;
-    const totp = await createTotpChallengeForIdentity(
-      challenge.identityType as LoginIdentityType,
-      challenge.identityKey,
-      challenge.membershipKey,
-    );
-    if (!totp) return null;
+    if (!user.isVerified) {
+      await releaseAuthChallengeHandoffLease(challenge.key, leaseAt.toISOString());
+      return null;
+    }
+    await provisionPersonalAuthContext(user);
+    const tokens = await issueUserTokens(user);
+    if (!await completeAuthChallengeHandoffClaim(challenge.key, leaseAt.toISOString(), new Date().toISOString())) {
+      throw new Error('handoff claim lease was lost');
+    }
+    const alias = user.alias ?? generateAlias(user.key);
     return {
-      status: totp.status,
-      totpChallengeToken: totp.totpChallengeToken,
-      expiresAt: totp.expiresAt,
+      status: 'authenticated' as const,
+      ...tokens,
+      alias,
+      aliasSlug: user.alias_slug,
+      welcomeLine: pickWelcomeLine(user.key, alias),
     };
+  } catch (error) {
+    await releaseAuthChallengeHandoffLease(challenge.key, leaseAt.toISOString()).catch(() => undefined);
+    throw error;
   }
-
-  if (!user.isVerified) return null;
-  await provisionPersonalAuthContext(user);
-  const tokens = await issueUserTokens(user);
-  const alias = user.alias ?? generateAlias(user.key);
-  return {
-    status: 'authenticated' as const,
-    ...tokens,
-    alias,
-    aliasSlug: user.alias_slug,
-    welcomeLine: pickWelcomeLine(user.key, alias),
-  };
 }
 
 /**

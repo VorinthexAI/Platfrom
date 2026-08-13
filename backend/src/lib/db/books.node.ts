@@ -7,8 +7,8 @@ export const bookStatusSchema = z.enum(['planning', 'researching', 'generating',
 export const bookSchema = z.object({
   key: z.string().cuid(), scopeKey: z.string().cuid(), title: z.string().trim().min(1), subtitle: z.string().trim().min(1).optional(),
   description: z.string().trim().min(1), goal: z.string().trim().min(1), audience: z.string().trim().min(1), outcome: z.string().trim().min(1),
-  language: z.string().trim().min(1), coverStorageKey: z.string().trim().min(1), estimatedMinutes: z.number().int().positive(),
-  chapterCount: z.number().int().positive(), isFavorite: z.boolean().default(false), status: bookStatusSchema, embedding: currentEmbeddingSchema,
+  language: z.string().trim().min(1), generationRequestKey: z.string().trim().min(1).max(200).optional(), coverStorageKey: z.string().trim().min(1).optional(), estimatedMinutes: z.number().int().nonnegative().default(0),
+  chapterCount: z.number().int().nonnegative().default(0), isFavorite: z.boolean().default(false), status: bookStatusSchema, embedding: currentEmbeddingSchema,
   deletedAt: z.string().datetime().nullable().default(null), createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
 });
 export type Book = z.infer<typeof bookSchema>;

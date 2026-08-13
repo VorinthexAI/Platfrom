@@ -13,6 +13,7 @@ import { coreChatInputSchema } from '@/lib/ai/actions';
 import { executeAction } from '@/lib/ai/router';
 import type { ChatOutput } from '@/lib/ai/providers';
 import { reconcileOrganizationScopeMemberships, scopeRoleForOrganizationRole } from '@/lib/ai/scopes/membership-invariant';
+import { createEmailService, type EmailService } from '@/lib/email-inbox/service';
 
 type RecordDoc = Record<string, unknown>;
 type MemberRow = { membership: RecordDoc; user: RecordDoc };
@@ -39,6 +40,7 @@ export interface DomainToolExecutionOptions {
   workflowExecution?: Partial<Omit<WorkflowExecutionExecutionDependencies, 'authorize'>>;
   content?: Partial<Omit<ContentExecutionDependencies, 'authorize'>>;
   authorizeScope?: (scopeKey: string, roles: readonly string[]) => Promise<void>;
+  email?: Pick<EmailService, 'overview' | 'thread' | 'read' | 'draft'>;
 }
 
 function memberPrincipal(context: DomainToolContext) {
@@ -153,6 +155,15 @@ export async function executeDomainTool(action: DomainActionSlug, rawInput: unkn
   const input = domainToolInputSchemas[action].parse(rawInput) as any;
   const principal = memberPrincipal(context);
   const authorizeScope = options.authorizeScope ?? (async (scopeKey: string, roles: readonly string[]) => { await assertOperationalScope(context, scopeKey, roles); });
+  if (action.startsWith('email.')) {
+    await authorizeScope(context.runtimeScopeKey, action === 'email.reply.draft' ? ['owner', 'admin', 'moderator'] : ['owner', 'admin', 'moderator', 'viewer']);
+    const email = options.email ?? createEmailService();
+    const actor = { userKey: principal.userOrganization.userId, organizationKey: context.organizationKey, scopeKey: context.runtimeScopeKey };
+    if (action === 'email.thread.list') return result(action, await email.overview(actor, input));
+    if (action === 'email.thread.read') return result(action, await email.read(actor, [{ threadKey: input.threadKey, limit: 50 }]));
+    if (action === 'email.read') return result(action, await email.read(actor, input.threads));
+    if (action === 'email.reply.draft') return result(action, await email.draft(actor, input));
+  }
   if (isContentAction(action)) {
     const data = await executeContentLifecycleTool(action, input, { organizationKey: context.organizationKey }, {
       ...options.content,

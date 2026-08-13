@@ -9,6 +9,7 @@ import { getAuthIdentity } from './security';
 import { strictObject } from './validation';
 
 const bodySchema = strictObject({ organizationKey: z.string().trim().min(1), agentKey: z.string().cuid(), input: z.unknown() });
+const delayedDevTools = new Set(['folder.list', 'document.list', 'scope.content.search-history']);
 type ContentToolRunner = (input: Parameters<typeof runContentAgentTool>[0], options: RunContentAgentToolOptions) => Promise<unknown>;
 export interface ContentToolHandlerDependencies {
   getIdentity?: typeof getAuthIdentity;
@@ -94,6 +95,10 @@ export function createContentToolHandler(dependencies: ContentToolHandlerDepende
         if (idempotencyKey) input = { ...(input as Record<string, unknown>), idempotencyKey };
       }
       input = contentToolInputSchemas[tool].parse(input);
+      const devDelayMs = process.env.NODE_ENV !== 'production' && delayedDevTools.has(tool)
+        ? Number(process.env.CONTENT_DEV_READ_DELAY_MS ?? 0)
+        : 0;
+      if (Number.isFinite(devDelayMs) && devDelayMs > 0) await Bun.sleep(Math.min(devDelayMs, 5_000));
       if (tool === 'document.parse' && !dependencies.run && (dependencies.fargateConfigured ?? documentFargateConfigured)()) {
         const authorized = await (dependencies.authorize ?? authorizeContentAgentTool)({ organizationKey: body.organizationKey, agentKey: body.agentKey, tool, input }, { ...dependencies.serviceOptions, authenticatedUserKey: identity.key });
         const location = z.object({ scopeKey: z.string().cuid(), folderKey: z.string().cuid().optional() }).parse(input);

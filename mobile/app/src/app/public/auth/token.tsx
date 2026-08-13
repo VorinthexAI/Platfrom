@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
 
@@ -8,13 +8,15 @@ import { useAuthStore } from "@/state/auth";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
 export default function MagicTokenRoute() {
-  const params = useLocalSearchParams<{ token_hash?: string; token?: string }>();
+  const params = useLocalSearchParams<{ token_hash?: string; token?: string; flow?: string }>();
   const hydrate = useAuthStore((state) => state.hydrate);
   const tokenHash = params.token_hash ?? params.token;
+  const processedToken = useRef<string | null>(null);
   const [message, setMessage] = useState(tokenHash ? "Securing your session..." : "This sign-in link is incomplete.");
 
   useEffect(() => {
-    if (!tokenHash) return;
+    if (!tokenHash || processedToken.current === tokenHash) return;
+    processedToken.current = tokenHash;
     void postJson<{ token_hash: string }, { status: string }>("/auth/magic/validate", { token_hash: tokenHash })
       .then(async (result) => {
         if (result.status !== "authenticated") throw new Error("Additional verification is required on the web.");

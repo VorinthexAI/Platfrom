@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveS3ClientConfig } from './s3';
+import { resolvePublicS3ClientConfig, resolveS3ClientConfig } from './s3';
 
 describe('S3 client configuration', () => {
   test('prefers storage credentials over generic and provider credentials', () => {
@@ -34,5 +34,16 @@ describe('S3 client configuration', () => {
     const config = resolveS3ClientConfig({ AWS_ACCESS_KEY_ID: 'incomplete-key' });
 
     expect(config.credentials).toBeUndefined();
+  });
+
+  test('uses a browser-reachable endpoint for presigned URLs', () => {
+    const config = resolvePublicS3ClientConfig({
+      S3_ENDPOINT_URL: 'http://localstack:4566',
+      S3_PUBLIC_ENDPOINT_URL: 'http://localhost:4566',
+      S3_REGION: 'us-east-1',
+    });
+
+    expect(config.endpoint).toBe('http://localhost:4566');
+    expect(config.forcePathStyle).toBe(true);
   });
 });

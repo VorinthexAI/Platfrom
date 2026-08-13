@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import {
   StyleSheet,
   TextInput as NativeTextInput,
@@ -8,19 +9,23 @@ import { colors, radii } from "../../tokens";
 
 export type TextInputProps = NativeTextInputProps;
 
-export function TextInput({
-  placeholderTextColor = colors.muted,
-  style,
-  ...props
-}: TextInputProps) {
+export const TextInput = forwardRef<NativeTextInput, TextInputProps>(function TextInput(
+  {
+    placeholderTextColor = colors.muted,
+    style,
+    ...props
+  },
+  ref,
+) {
   return (
     <NativeTextInput
       placeholderTextColor={placeholderTextColor}
+      ref={ref}
       style={[styles.input, style]}
       {...props}
     />
   );
-}
+});
 
 const styles = StyleSheet.create({
   input: {

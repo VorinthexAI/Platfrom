@@ -68,7 +68,8 @@ export const useAuthStore = create<AuthState>((set) => ({
         if (operation === authOperation) set({ status: "authenticated", ...context });
       }
     } catch (error) {
-      if (isAxiosError(error) && error.response?.status === 401) {
+      if (isAxiosError(error) && error.response?.status === 401
+        && String(error.response.headers["www-authenticate"] ?? "").includes("Bearer")) {
         const recoveryOperation = ++authOperation;
         await tokenVault.clearIfCurrent(generation);
         await clearAuthContext();

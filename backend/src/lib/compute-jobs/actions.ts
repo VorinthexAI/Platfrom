@@ -1,7 +1,7 @@
 import { ECSClient, RunTaskCommand, type RunTaskCommandOutput } from '@aws-sdk/client-ecs';
 import { z } from 'zod';
 
-export const computeJobTypeSchema = z.enum(['document-processing']);
+export const computeJobTypeSchema = z.enum(['document-processing', 'image-hashing']);
 export type ComputeJobType = z.infer<typeof computeJobTypeSchema>;
 
 export const computeDispatchInputSchema = z.object({
@@ -18,6 +18,11 @@ const computeDefinitions: Record<ComputeJobType, {
     containerName: 'document-worker',
     command: ['src/document-worker/index.ts'],
     jobKeyEnvironmentName: 'DOCUMENT_PROCESSING_JOB_ID',
+  },
+  'image-hashing': {
+    containerName: 'document-worker',
+    command: ['src/image-worker/index.ts'],
+    jobKeyEnvironmentName: 'IMAGE_HASHING_JOB_ID',
   },
 };
 

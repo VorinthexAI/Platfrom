@@ -11,18 +11,19 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
-  KeyboardAvoidingView,
   Modal,
   PanResponder,
   Platform,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, type ButtonProps } from "../button/button.mobile";
 import { CloseIcon } from "../../icons/close/close.mobile";
+import { colors } from "../../tokens";
 
 const BottomSheetSceneContext = createContext<((open: boolean) => void) | null>(
   null,
@@ -84,6 +85,8 @@ export type BottomSheetProps = {
   children?: ReactNode;
   description?: string;
   dismissible?: boolean;
+  footer?: ReactNode;
+  hideHeading?: boolean;
   mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -95,6 +98,8 @@ export function BottomSheet({
   children,
   description,
   dismissible = true,
+  footer,
+  hideHeading = false,
   mutation = false,
   onOpenChange,
   open,
@@ -102,15 +107,19 @@ export function BottomSheet({
   title,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const setSceneSheetOpen = useContext(BottomSheetSceneContext);
   const [visible, setVisible] = useState(open);
   const [reducedMotion, setReducedMotion] = useState(false);
-  const translateY = useRef(new Animated.Value(480)).current;
+  const closedOffsetRef = useRef(windowHeight + 64);
+  closedOffsetRef.current = windowHeight + 64;
+  const translateY = useRef(new Animated.Value(closedOffsetRef.current)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const openRef = useRef(open);
   const onOpenChangeRef = useRef(onOpenChange);
   const dismissibleRef = useRef(dismissible);
   const reducedMotionRef = useRef(reducedMotion);
+  const dismissingRef = useRef(false);
   openRef.current = open;
   onOpenChangeRef.current = onOpenChange;
   dismissibleRef.current = dismissible;
@@ -124,7 +133,7 @@ export function BottomSheet({
       Animated.timing(translateY, {
         duration,
         easing: show ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
-        toValue: show ? 0 : 480,
+        toValue: show ? 0 : closedOffsetRef.current,
         useNativeDriver: true,
       }),
       Animated.timing(overlayOpacity, {
@@ -136,6 +145,14 @@ export function BottomSheet({
     ]).start(({ finished }) => {
       if (finished && !show && !openRef.current) setVisible(false);
     });
+  };
+
+  const dismiss = () => {
+    if (!dismissibleRef.current || dismissingRef.current) return;
+    dismissingRef.current = true;
+    openRef.current = false;
+    animate(false);
+    onOpenChangeRef.current(false);
   };
 
   useEffect(() => {
@@ -160,8 +177,9 @@ export function BottomSheet({
 
   useEffect(() => {
     if (open) {
+      dismissingRef.current = false;
       setVisible(true);
-      translateY.setValue(reducedMotionRef.current ? 0 : 480);
+      translateY.setValue(reducedMotionRef.current ? 0 : closedOffsetRef.current);
       overlayOpacity.setValue(reducedMotionRef.current ? 1 : 0);
       animate(true);
     } else if (visible) {
@@ -174,16 +192,27 @@ export function BottomSheet({
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (_, gesture) =>
-        gesture.dy > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-      onPanResponderMove: (_, gesture) =>
-        translateY.setValue(Math.max(0, gesture.dy)),
+        dismissibleRef.current && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
+      onMoveShouldSetPanResponderCapture: (_, gesture) =>
+        dismissibleRef.current && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.2,
+      onPanResponderGrant: () => {
+        translateY.stopAnimation();
+        overlayOpacity.stopAnimation();
+      },
+      onPanResponderMove: (_, gesture) => {
+        const distance = Math.max(0, gesture.dy);
+        translateY.setValue(distance);
+        overlayOpacity.setValue(Math.max(0, 1 - distance / 420));
+      },
       onPanResponderRelease: (_, gesture) => {
-        if (dismissibleRef.current && (gesture.dy >= 96 || gesture.vy >= 0.65)) {
-          onOpenChangeRef.current(false);
+        const projectedDistance = gesture.dy + Math.max(0, gesture.vy) * 140;
+        if (dismissibleRef.current && projectedDistance >= 88) {
+          dismiss();
         } else {
           animate(true);
         }
       },
+      onPanResponderTerminationRequest: () => false,
       onPanResponderTerminate: () => animate(true),
     }),
   ).current;
@@ -194,18 +223,18 @@ export function BottomSheet({
     <Modal
       accessibilityViewIsModal
       animationType="none"
-      onRequestClose={() => { if (dismissible) onOpenChange(false); }}
+      onRequestClose={dismiss}
       statusBarTranslucent
       transparent
       visible
     >
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.root}>
+      <View style={styles.root}>
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Button
             accessibilityLabel="Close bottom sheet"
             contentMode="raw"
             disabled={!dismissible}
-            onPress={() => onOpenChange(false)}
+            onPress={dismiss}
             style={StyleSheet.absoluteFill}
             variant="ghost"
           />
@@ -225,24 +254,21 @@ export function BottomSheet({
               transform: [{ translateY }],
             },
           ]}
+          {...panResponder.panHandlers}
         >
-          <View style={styles.headerDragTarget} {...panResponder.panHandlers}>
+          <View style={styles.headerDragTarget}>
             <View style={styles.dragTarget}>
               <View style={styles.dragHandle} />
             </View>
-            <View style={styles.header}>
-              <Text accessibilityRole="header" style={styles.title}>
-                {title}
-              </Text>
-              {description ? (
-                <Text style={styles.description}>{description}</Text>
-              ) : null}
+            <View style={[styles.header, hideHeading && styles.headerWithoutHeading]}>
+              {!hideHeading ? <Text accessibilityRole="header" style={styles.title}>{title}</Text> : null}
+              {!hideHeading && description ? <Text style={styles.description}>{description}</Text> : null}
             </View>
             <Button
               accessibilityLabel="Close bottom sheet"
               contentMode="raw"
               disabled={!dismissible}
-              onPress={() => onOpenChange(false)}
+              onPress={dismiss}
               size="sm"
               style={styles.closeButton}
               variant="icon"
@@ -250,9 +276,10 @@ export function BottomSheet({
               <CloseIcon size="sm" />
             </Button>
           </View>
-          <View style={[styles.content, tall && styles.tallContent]}>{children}</View>
+          <View style={[styles.content, (tall || mutation) && styles.flexContent]}>{children}</View>
+          {footer ? <View style={styles.footer}>{footer}</View> : null}
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -262,7 +289,7 @@ export type BottomSheetItemProps = ButtonProps;
 export function BottomSheetItem({
   size = "lg",
   style,
-  variant = "ghost",
+  variant = "secondary",
   ...props
 }: BottomSheetItemProps) {
   return (
@@ -290,7 +317,7 @@ const styles = StyleSheet.create({
     top: 0,
   },
   sheet: {
-    backgroundColor: "#0D1117",
+    backgroundColor: colors.page,
     borderColor: "rgba(221, 226, 229, 0.14)",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -309,7 +336,7 @@ const styles = StyleSheet.create({
     maxHeight: "100%",
   },
   headerDragTarget: { marginHorizontal: -20, paddingHorizontal: 20 },
-  dragTarget: { alignItems: "center", paddingBottom: 14, paddingTop: 12 },
+  dragTarget: { alignItems: "center", minHeight: 36, paddingBottom: 14, paddingTop: 12 },
   dragHandle: {
     backgroundColor: "#7B858C",
     borderRadius: 999,
@@ -318,7 +345,8 @@ const styles = StyleSheet.create({
     width: 42,
   },
   header: { gap: 6, paddingBottom: 18, paddingHorizontal: 4, paddingRight: 48 },
-  closeButton: { position: "absolute", right: 20, top: 8, zIndex: 1 },
+  headerWithoutHeading: { minHeight: 42 },
+  closeButton: { position: "absolute", right: 20, top: 20, zIndex: 1 },
   title: {
     color: "#F5F7F8",
     fontFamily: "Geist_600SemiBold",
@@ -332,6 +360,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   content: { gap: 6 },
-  tallContent: { flex: 1 },
+  flexContent: { flex: 1 },
+  footer: { gap: 8, marginHorizontal: -20, paddingHorizontal: 20, paddingTop: 16, backgroundColor: colors.page },
   item: { justifyContent: "flex-start", width: "100%" },
 });

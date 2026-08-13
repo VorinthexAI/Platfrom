@@ -22,24 +22,34 @@ export interface RunContentAgentToolOptions {
   execute?: typeof runContentTool;
 }
 
-/** Authenticated human boundary for invoking a registered Content tool. */
-export async function authorizeContentAgentTool(rawInput: z.input<typeof runContentAgentToolInputSchema>, options: Omit<RunContentAgentToolOptions, 'execute'>) {
-  const input = runContentAgentToolInputSchema.parse(rawInput);
+const agentExecutionContextSchema = z.object({
+  organizationKey: z.string().trim().min(1),
+  agentKey: z.string().cuid(),
+}).strict();
+
+/** Authenticates a human and resolves the agent's authorized domain context without selecting a tool. */
+export async function authorizeContentAgentExecution(rawInput: z.input<typeof agentExecutionContextSchema>, options: Omit<RunContentAgentToolOptions, 'execute'>) {
+  const input = agentExecutionContextSchema.parse(rawInput);
   const authenticatedUserKey = z.string().trim().min(1).parse(options.authenticatedUserKey);
   const runtime = await loadAgentRuntime(input.agentKey, options.runtimeData);
   if (runtime.organization.key !== input.organizationKey || runtime.scope.organizationKey !== input.organizationKey) {
-    throw new ContentError('CONTENT_FORBIDDEN', 'Agent does not belong to the requested organization.', input.tool, { action: 'authorization' });
+    throw new ContentError('CONTENT_FORBIDDEN', 'Agent does not belong to the requested organization.', 'agent.execution', { action: 'authorization' });
   }
   const membership = await (options.resolveMembership ?? getUserOrganizationByOrganizationAndUser)(input.organizationKey, authenticatedUserKey);
   if (!membership || membership.userId !== authenticatedUserKey) {
-    throw new ContentError('CONTENT_FORBIDDEN', 'Active organization membership is required.', input.tool, { action: 'authorization' });
+    throw new ContentError('CONTENT_FORBIDDEN', 'Active organization membership is required.', 'agent.execution', { action: 'authorization' });
   }
   const principal = await authorizeAgentExecution(runtime, { kind: 'member', userOrganizationKey: membership.key }, options.accessData);
   if (principal.kind !== 'member' || principal.user.key !== authenticatedUserKey) {
-    throw new ContentError('CONTENT_FORBIDDEN', 'Authenticated user does not match the resolved principal.', input.tool, { action: 'authorization' });
+    throw new ContentError('CONTENT_FORBIDDEN', 'Authenticated user does not match the resolved principal.', 'agent.execution', { action: 'authorization' });
   }
+  return { input, context: { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal } satisfies DomainToolContext };
+}
 
-  const context: DomainToolContext = { organizationKey: input.organizationKey, runtimeScopeKey: runtime.scope.key, principal };
+/** Authenticated human boundary for invoking a registered Content tool. */
+export async function authorizeContentAgentTool(rawInput: z.input<typeof runContentAgentToolInputSchema>, options: Omit<RunContentAgentToolOptions, 'execute'>) {
+  const input = runContentAgentToolInputSchema.parse(rawInput);
+  const { context } = await authorizeContentAgentExecution({ organizationKey: input.organizationKey, agentKey: input.agentKey }, options);
   return { input, context };
 }
 

@@ -1,6 +1,7 @@
 import { apiClient } from "./api-client";
 import * as Crypto from "expo-crypto";
 import { useAuthStore } from "@/state/auth";
+import type { AssistantChange } from "./assistant-changes";
 
 export type ContentContext = {
   organizationKey: string;
@@ -13,6 +14,7 @@ export type ContentFolder = {
   parentFolderKey?: string;
   name: string;
   description?: string;
+  coverUrl?: string;
 };
 
 export type ContentDocument = {
@@ -32,6 +34,7 @@ export type ContentDocumentVersion = {
   version: number;
   label?: string;
   createdAt: string;
+  content?: string;
 };
 
 export type ContentSearchDocument = {
@@ -42,6 +45,8 @@ export type ContentSearchDocument = {
   scopeKey?: string;
   folderKey?: string;
 };
+
+export type ContentSearchMatch = Omit<ContentSearchDocument, "summary">;
 
 export type ContentSearchResponse = {
   query: string;
@@ -66,6 +71,11 @@ export type ContentDocumentDownload = {
   encoding: "base64";
   content: string;
 };
+
+export type PersonalAssistantResponse =
+  | { type: "answer"; message: string; sources: { documentKey: string; name: string }[]; changes?: AssistantChange[] }
+  | { type: "note"; content: string; message: string; sources: { documentKey: string; name: string }[]; changes?: AssistantChange[] }
+  | { type: "unsupported"; message: string; sources: []; changes?: AssistantChange[] };
 
 type ToolResponse<T> =
   | { success: true; data: T }
@@ -93,20 +103,35 @@ export function createContentMutationKey() {
 }
 
 function documentMimeType(name: string, reported: string) {
-  if (reported && reported !== "application/octet-stream") return reported;
   const extension = name.toLowerCase().split(".").pop();
-  return extension === "txt" ? "text/plain"
+  const extensionMimeType = extension === "txt" ? "text/plain"
     : extension === "md" ? "text/markdown"
       : extension === "pdf" ? "application/pdf"
         : extension === "doc" ? "application/msword"
           : extension === "docx" ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            : reported || "application/octet-stream";
+            : undefined;
+  if (extensionMimeType) return extensionMimeType;
+  const normalized = reported.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (["application/x-pdf", "application/acrobat", "applications/vnd.pdf", "com.adobe.pdf"].includes(normalized)) return "application/pdf";
+  return normalized || "application/octet-stream";
+}
+
+function documentFilename(name: string, mimeType: string) {
+  const normalized = name.trim() || "Document";
+  if (/\.(?:txt|md|pdf|doc|docx)$/i.test(normalized)) return normalized;
+  const extension = mimeType === "application/pdf" ? "pdf"
+    : mimeType === "text/plain" ? "txt"
+      : mimeType === "text/markdown" ? "md"
+        : mimeType === "application/msword" ? "doc"
+          : mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ? "docx"
+            : undefined;
+  return extension ? `${normalized}.${extension}` : normalized;
 }
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
-async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
-  const contentContext = getContentContext();
+async function callContentTool<T>(tool: string, input: Record<string, unknown>, signal?: AbortSignal, requestContext = getContentContext()): Promise<T> {
+  const contentContext = requestContext;
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   try {
     const response = await apiClient.post<ToolResponse<T>>(`/api/v1/content/tools/${tool}`, {
@@ -129,6 +154,24 @@ export function autocompleteContent(context: string, wordCount: number, signal?:
 
 export function enhanceContent(content: string, signal?: AbortSignal) {
   return callContentTool<{ content: string }>("enhance", { content }, signal);
+}
+
+export async function askPersonalAssistant(message: string, currentNote: { documentKey?: string; title: string; content: string; selection?: { start: number; end: number } }, folderKey?: string, signal?: AbortSignal) {
+  const contentContext = getContentContext();
+  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
+  try {
+    const response = await apiClient.post<ToolResponse<PersonalAssistantResponse>>("/api/v1/assistant/respond", {
+      organizationKey: contentContext.organizationKey,
+      agentKey: contentContext.agentKey,
+      input: { surface: "knowledge-workspace", message, currentNote, requestKey: createContentMutationKey(), ...(folderKey ? { folderKey } : {}) },
+    }, { signal, timeout: 4 * 60_000 });
+    if (!response.data.success) throw new Error(response.data.error.message);
+    return response.data.data;
+  } catch (error) {
+    const failure = (error as { response?: { data?: ToolResponse<PersonalAssistantResponse> } }).response?.data;
+    if (failure && !failure.success) throw new Error(failure.error.message);
+    throw error;
+  }
 }
 
 export async function translateContentDocument(documentKey: string, targetLanguage: string) {
@@ -159,6 +202,15 @@ export async function listContentDocumentVersions(documentKey: string) {
     cursor = result.data.cursor;
   } while (cursor);
   return versions;
+}
+
+export async function findContentDocumentVersion(versionKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { version: ContentDocumentVersion }; error?: { message: string } }[];
+  }>("document.find-version", { versionKeys: [versionKey], include: ["content"] });
+  const result = data.results[0];
+  if (!result?.success || !result.data?.version.content) throw new Error(result?.error?.message ?? "The version could not be loaded.");
+  return result.data.version;
 }
 
 export async function restoreContentDocumentVersion(documentKey: string, versionKey: string) {
@@ -212,6 +264,13 @@ export async function listContentLocation(folderKey?: string) {
   return { folders, documents };
 }
 
+export async function loadInitialContentLocation() {
+  const root = await listContentLocation();
+  const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
+  if (!initialFolder) return { root, location: root };
+  return { root, location: await listContentLocation(initialFolder.key), initialFolder };
+}
+
 export async function readContentDocument(documentKey: string) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument & { content?: string } }; error?: { message: string } }[];
@@ -234,11 +293,11 @@ export async function createContentDocument(name: string, content: string, folde
   return data.document;
 }
 
-export async function saveContentDocument(documentKey: string, content: string, expectedUpdatedAt: string) {
+export async function saveContentDocument(documentKey: string, content: string, expectedUpdatedAt: string, createVersion = false) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
   }>("document.update", {
-    updates: [{ documentKey, content, createVersion: false, expectedUpdatedAt }],
+    updates: [{ documentKey, content, createVersion, expectedUpdatedAt }],
     atomic: false,
     idempotencyKey: createContentMutationKey(),
   });
@@ -342,6 +401,19 @@ export async function updateContentFolder(folderKey: string, name: string, descr
   return result.data.folder;
 }
 
+export async function setContentFolderCover(folderKey: string, coverImageKey: string | null) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
+  }>("folder.update", {
+    updates: [{ folderKey, coverImageKey }],
+    atomic: false,
+    idempotencyKey: createContentMutationKey(),
+  });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder cover could not be updated.");
+  return result.data.folder;
+}
+
 export async function moveContentFolder(folderKey: string, targetParentFolderKey?: string) {
   const data = await callContentTool<{
     results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
@@ -355,27 +427,27 @@ export async function moveContentFolder(folderKey: string, targetParentFolderKey
   return result.data.folder;
 }
 
-export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string) {
-  const contentContext = getContentContext();
+export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext()) {
   if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
   const mimeType = documentMimeType(file.name, file.type);
+  const filename = documentFilename(file.name, mimeType);
   const [contentDigest, identityDigest] = await Promise.all([
     Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, file.base64),
-    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${file.name}\0${mimeType}`),
+    Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `${filename}\0${mimeType}`),
   ]);
   const idempotencyKey = `upload-${contentDigest}-${identityDigest}-${folderKey ?? "root"}`;
   let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.parse", {
     scopeKey: contentContext.scopeKey,
     folderKey,
     file: {
-      filename: file.name,
+      filename,
       mimeType,
       sizeBytes: file.size,
       encoding: "base64",
       content: file.base64,
     },
     idempotencyKey,
-  });
+  }, undefined, contentContext);
   const deadline = Date.now() + 30 * 60_000;
   let firstPoll = true;
   while (!("document" in data)) {
@@ -400,6 +472,25 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
     minimumScore: 0.55,
     ...(folderKey ? { folderKey, includeDescendants } : {}),
   });
+}
+
+export async function searchContentMatches(query: string, signal?: AbortSignal) {
+  const contentContext = getContentContext();
+  const data = await callContentTool<{ query: string; results: ContentSearchMatch[] }>("scope.document.search", {
+    scopeKey: contentContext.scopeKey,
+    query,
+    topK: 10,
+  }, signal);
+  return data.results;
+}
+
+export async function summarizeContentDocument(documentKey: string, signal?: AbortSignal) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { text: string }; error?: { message: string } }[];
+  }>("document.summarize", { documentKeys: [documentKey], style: "brief", persist: false }, signal);
+  const result = data.results[0];
+  if (!result?.success || !result.data?.text) throw new Error(result?.error?.message ?? "The document summary could not be created.");
+  return result.data.text;
 }
 
 export async function listContentSearchHistory(folderKey?: string, includeDescendants = false) {

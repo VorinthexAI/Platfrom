@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Hono } from 'hono';
 import { FOUNDER_ACCESS_MAX_AGE_SECONDS, FOUNDER_REFRESH_MAX_AGE_SECONDS } from './auth';
 import { isResendWebhookPath } from './resend';
+import { isGmailWebhookPath } from './email-webhook';
 import { createAutoRefreshAuthTokens, isPublicFounderAuthPath, rateLimitByIp, requireEnvApiKey, sessionTokenPayload, setSessionCookies, setSessionForRequest, setSessionTokenHeaders, validateQueryParams } from './middleware';
 
 function middlewareContext(path: string, headers: Record<string, string> = {}, search = '') {
@@ -29,18 +30,24 @@ describe('api middleware webhook exemptions', () => {
     expect(isResendWebhookPath('/api/webhooks/resend')).toBe(false);
   });
 
+  test('recognizes only the v1 Gmail Pub/Sub path', () => {
+    expect(isGmailWebhookPath('/api/v1/webhooks/gmail/pubsub')).toBe(true);
+    expect(isGmailWebhookPath('/api/v1/webhooks/gmail/pubsub/')).toBe(true);
+    expect(isGmailWebhookPath('/api/webhooks/gmail/pubsub')).toBe(false);
+  });
+
   test('does not require the global API key for provider webhooks', async () => {
     const previousApiKey = process.env.API_KEY;
     process.env.API_KEY = 'server-key';
     let nextCalls = 0;
 
     try {
-      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/resend/']) {
+      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/resend/', '/api/v1/webhooks/gmail/pubsub', '/api/v1/webhooks/gmail/pubsub/']) {
         await requireEnvApiKey(middlewareContext(path), async () => {
           nextCalls += 1;
         });
       }
-      expect(nextCalls).toBe(2);
+      expect(nextCalls).toBe(4);
     } finally {
       if (previousApiKey === undefined) delete process.env.API_KEY;
       else process.env.API_KEY = previousApiKey;
@@ -54,11 +61,9 @@ describe('api middleware webhook exemptions', () => {
     let nextCalls = 0;
 
     try {
-      await rateLimitByIp(middlewareContext('/api/v1/webhooks/resend'), async () => {
-        nextCalls += 1;
-      });
+      for (const path of ['/api/v1/webhooks/resend', '/api/v1/webhooks/gmail/pubsub']) await rateLimitByIp(middlewareContext(path), async () => { nextCalls += 1; });
 
-      expect(nextCalls).toBe(1);
+      expect(nextCalls).toBe(2);
     } finally {
       if (previousRateLimitEnabled === undefined) delete process.env.RATE_LIMIT_ENABLED;
       else process.env.RATE_LIMIT_ENABLED = previousRateLimitEnabled;
@@ -77,6 +82,8 @@ describe('mobile auth API-key protection', () => {
     expect(isPublicFounderAuthPath('/api/v1/auth/handoff/claim')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/oauth/callback')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/google')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/mobile/google')).toBe(true);
+    expect(isPublicFounderAuthPath('/api/v1/auth/mobile/apple')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/apple/callback')).toBe(true);
     expect(isPublicFounderAuthPath('/api/v1/auth/mobile/oauth/github')).toBe(false);
 
@@ -366,6 +373,67 @@ describe('backend session cookies', () => {
     const response = await app.request('/', { headers: { authorization: 'Bearer vrtx_access_revoked' } });
     expect(response.status).toBe(401);
     expect(response.headers.get('www-authenticate')).toBe('Bearer');
+  });
+
+  test('clears rejected HttpOnly session cookies', async () => {
+    const app = new Hono();
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => null,
+      refreshAccessToken: async () => null,
+    }));
+    app.get('/', (c) => c.json({ error: 'Authentication required.' }, 401));
+
+    const response = await app.request('/', { headers: {
+      cookie: 'vorinthex_access=vrtx_access_expired; vorinthex_refresh=vrtx_refresh_revoked',
+    } });
+    const cookies = response.headers.get('set-cookie') ?? '';
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe('Bearer');
+    expect(cookies).toContain('vorinthex_access=;');
+    expect(cookies).toContain('vorinthex_refresh=;');
+    expect(cookies).toContain('Max-Age=0');
+  });
+
+  test('rejects access and refresh tokens from different sessions', async () => {
+    const app = new Hono();
+    let nextCalls = 0;
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => ({ key: 'user-1', identityType: 'user', sessionId: 'session-1' }),
+      refreshAccessToken: async () => null,
+      refreshTokenMatchesIdentity: async () => false,
+    }));
+    app.get('/', (c) => {
+      nextCalls += 1;
+      return c.json({ ok: true });
+    });
+
+    const response = await app.request('/', { headers: {
+      authorization: 'Bearer access-for-session-1',
+      'x-refresh-token': 'refresh-for-session-2',
+    } });
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe('Bearer');
+    expect(await response.json()).toEqual({ error: 'session credentials do not match', code: 'AUTH_SESSION_MISMATCH' });
+    expect(nextCalls).toBe(0);
+  });
+
+  test('ignores stale credentials on public sign-in routes while preserving transport selection', async () => {
+    const app = new Hono<{ Variables: { authSessionTransport: string } }>();
+    let verifyCalls = 0;
+    app.use('*', createAutoRefreshAuthTokens({
+      verifyAccessToken: async () => { verifyCalls += 1; return null; },
+      refreshAccessToken: async () => null,
+    }));
+    app.post('/api/v1/auth/login', (c) => c.json({ transport: c.get('authSessionTransport') }));
+
+    const response = await app.request('/api/v1/auth/login', { method: 'POST', headers: {
+      authorization: 'Bearer stale-access',
+      'x-refresh-token': 'stale-refresh',
+      'x-vorinthex-session-transport': 'header',
+    } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ transport: 'header' });
+    expect(verifyCalls).toBe(0);
   });
 
   test('does not emit replacement tokens while logging out', async () => {

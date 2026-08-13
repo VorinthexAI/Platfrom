@@ -49,7 +49,11 @@ if (!values || typeof values !== "object") {
 
 const lines = Object.entries(values as Record<string, unknown>)
   .filter(([, value]) => typeof value === "string" && value !== "")
-  .map(([key, value]) => `${key}=${value}`);
+  .map(([key, value]) => {
+    const stringValue = value as string;
+    const encoded = /^[A-Za-z0-9_./:@+=,-]+$/.test(stringValue) ? stringValue : JSON.stringify(stringValue);
+    return `${key}=${encoded}`;
+  });
 
 writeFileSync(resolvedOutFile, `${lines.join("\n")}\n`, "utf8");
 console.log(`Wrote ${resolvedOutFile} from secrets.${mode}.${section}`);

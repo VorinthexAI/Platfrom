@@ -3,8 +3,9 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { timingSafeEqual } from '@/lib/crypto';
 import { isResendWebhookPath } from './resend';
+import { isGmailWebhookPath } from './email-webhook';
 import { strictObject } from './validation';
-import { refreshAccessToken, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
+import { refreshAccessToken, refreshTokenMatchesIdentity, verifyAccessToken, type AuthIdentity, type SessionTokens } from './auth';
 
 export const ACCESS_COOKIE = 'vorinthex_access';
 export const REFRESH_COOKIE = 'vorinthex_refresh';
@@ -21,11 +22,14 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/api/v1/auth/oauth/start',
   '/api/v1/auth/oauth/callback',
   '/api/v1/auth/mobile/oauth/exchange',
+  '/api/v1/auth/mobile/google',
+  '/api/v1/auth/mobile/apple',
   '/api/v1/auth/totp/reset/request',
   '/api/v1/auth/totp/setup/start',
   '/api/v1/auth/totp/setup/complete',
   '/api/v1/auth/totp/verify',
 ]);
+const isProviderWebhookPath = (path: string) => isResendWebhookPath(path) || isGmailWebhookPath(path);
 
 export function isPublicFounderAuthPath(path: string) {
   return PUBLIC_AUTH_PATHS.has(path.replace(/\/$/, ''))
@@ -55,12 +59,11 @@ function cookieOptions(maxAge: number) {
   // Root-scope sessions keep authentication available across the apex site.
   // The web bridge uses the same production fallback when it persists a rotation.
   const domain = process.env.COOKIE_DOMAIN ?? (process.env.NODE_ENV === 'production' ? 'vorinthex.com' : undefined);
-  const crossSite = Boolean(domain);
   return {
     httpOnly: true,
     path: '/',
-    sameSite: crossSite ? 'None' : 'Lax',
-    secure: process.env.NODE_ENV === 'production' || crossSite,
+    sameSite: 'Lax',
+    secure: process.env.NODE_ENV === 'production' || Boolean(domain),
     domain,
     maxAge,
   } as const;
@@ -144,7 +147,12 @@ function querySchemaForPath(path: string) {
     return strictObject({ redirect_uri: z.string().url() });
   }
   if (/^\/auth\/mobile\/oauth\/(google|apple)\/callback$/.test(apiPath)) {
-    return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1).optional() });
+    return strictObject({
+      code: z.string().min(1).optional(), state: z.string().min(1).optional(), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional(),
+    });
+  }
+  if (apiPath === '/email/connectors/gmail/callback') {
+    return strictObject({ code: z.string().min(1).optional(), state: z.string().min(1), error: z.string().optional(), scope: z.string().optional(), authuser: z.string().optional(), prompt: z.string().optional(), hd: z.string().optional(), error_description: z.string().optional(), error_subtype: z.string().optional() });
   }
   if (apiPath === '/founders/artifacts' || apiPath === '/founders/artifacts/stream' || /^\/founders\/artifacts\/[^/]+$/.test(apiPath)) {
     return strictObject({ organizationKey: z.string().trim().min(1).optional(), scopeKey: z.string().cuid().optional() });
@@ -161,6 +169,7 @@ function querySchemaForPath(path: string) {
     return strictObject({ limit: z.string().regex(/^\d+$/).optional() });
   }
   if (/^\/content\/tools\/[^/]+$/.test(apiPath)) return strictObject({});
+  if (apiPath === '/books' || apiPath === '/books/overview' || /^\/books\/[^/]+\/detail$/.test(apiPath) || /^\/books\/[^/]+\/chapters\/[^/]+\/progress$/.test(apiPath)) return strictObject({});
   return strictObject({});
 }
 
@@ -172,7 +181,7 @@ export const validateQueryParams: MiddlewareHandler = async (c, next) => {
 
 export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   // Provider webhooks authenticate via signature verification, not our API key.
-  if (isResendWebhookPath(c.req.path)) return next();
+  if (isProviderWebhookPath(c.req.path)) return next();
   // Health checks are hit by Docker/Caddy probes that can't carry the API key.
   if (c.req.path === '/api/v1/health') return next();
   // Guest bootstrap creates a revocable per-install session and is protected by
@@ -180,6 +189,7 @@ export const requireEnvApiKey: MiddlewareHandler = async (c, next) => {
   if (c.req.path.replace(/\/$/, '') === '/api/v1/auth/guest') return next();
   // OAuth providers redirect here directly and cannot attach application headers.
   if (/^\/api\/v1\/auth\/mobile\/oauth\/(google|apple)\/callback\/?$/.test(c.req.path)) return next();
+  if (c.req.path.replace(/\/$/, '') === '/api/v1/email/connectors/gmail/callback') return next();
   const expected = process.env.API_KEY;
   if (!expected) {
     if (process.env.NODE_ENV === 'production') {
@@ -212,7 +222,17 @@ export const requestLogger: MiddlewareHandler = async (c, next) => {
   }
 };
 
-export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, refreshAccessToken }): MiddlewareHandler {
+interface AutoRefreshDependencies {
+  verifyAccessToken: typeof verifyAccessToken;
+  refreshAccessToken: typeof refreshAccessToken;
+  refreshTokenMatchesIdentity?: typeof refreshTokenMatchesIdentity;
+}
+
+export function createAutoRefreshAuthTokens(dependencies: AutoRefreshDependencies = {
+  verifyAccessToken,
+  refreshAccessToken,
+  refreshTokenMatchesIdentity,
+}): MiddlewareHandler {
   return async (c, next) => {
     const bearerToken = getBearerToken(c);
     const headerRefreshToken = c.req.header('x-refresh-token');
@@ -232,14 +252,30 @@ export function createAutoRefreshAuthTokens(dependencies = { verifyAccessToken, 
     c.set('authSessionTransport', headerTransport ? HEADER_SESSION_TRANSPORT : 'cookie');
     if (refreshToken) c.set('authRefreshToken', refreshToken);
 
-    const identity = accessToken ? await dependencies.verifyAccessToken(accessToken) : null;
-    if (identity) setAuthIdentity(c, identity);
+    // Public authentication handlers issue their own session and only need the
+    // selected response transport; stale credentials must not block sign-in.
+    if (isPublicFounderAuthPath(c.req.path) || c.req.path === '/api/v1/health' || isProviderWebhookPath(c.req.path)) {
+      return next();
+    }
 
-    if (identity) return next();
+    const identity = accessToken ? await dependencies.verifyAccessToken(accessToken) : null;
+    if (identity) {
+      if (refreshToken && dependencies.refreshTokenMatchesIdentity
+        && !await dependencies.refreshTokenMatchesIdentity(refreshToken, identity)) {
+        if (!headerTransport) clearSessionCookies(c);
+        c.header('WWW-Authenticate', 'Bearer');
+        return c.json({ error: 'session credentials do not match', code: 'AUTH_SESSION_MISMATCH' }, 401);
+      }
+      setAuthIdentity(c, identity);
+      return next();
+    }
 
     const continueWithoutIdentity = async () => {
       await next();
-      if (hadSessionCredentials && c.res.status === 401) c.header('WWW-Authenticate', 'Bearer');
+      if (hadSessionCredentials && c.res.status === 401) {
+        if (!headerTransport) clearSessionCookies(c);
+        c.header('WWW-Authenticate', 'Bearer');
+      }
     };
     if (!refreshToken) return continueWithoutIdentity();
 
@@ -261,7 +297,7 @@ export const autoRefreshAuthTokens = createAutoRefreshAuthTokens();
 export const rateLimitByIp: MiddlewareHandler = async (c, next) => {
   // Provider webhook retries burst from a small IP pool; rate-limiting them
   // would drop or delay deliveries. The endpoint is protected by signatures.
-  if (isResendWebhookPath(c.req.path)) return next();
+  if (isProviderWebhookPath(c.req.path)) return next();
 
   const authPath = isPublicFounderAuthPath(c.req.path);
   if (!authPath && process.env.RATE_LIMIT_ENABLED !== 'true') return next();

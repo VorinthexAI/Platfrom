@@ -21,4 +21,15 @@ export function resolveS3ClientConfig(env: NodeJS.ProcessEnv = process.env): S3C
 
 export const s3 = new S3Client(resolveS3ClientConfig());
 
+export function resolvePublicS3ClientConfig(env: NodeJS.ProcessEnv = process.env) {
+  return resolveS3ClientConfig({
+    ...env,
+    ...(env.S3_PUBLIC_ENDPOINT_URL ? { S3_ENDPOINT_URL: env.S3_PUBLIC_ENDPOINT_URL } : {}),
+  });
+}
+
+export function createPublicS3Client(env: NodeJS.ProcessEnv = process.env) {
+  return new S3Client(resolvePublicS3ClientConfig(env));
+}
+
 export const S3_BUCKET = process.env.S3_BUCKET ?? 'vorinthex-dev';

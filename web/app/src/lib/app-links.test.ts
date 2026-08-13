@@ -8,7 +8,6 @@ describe("mobile app associations", () => {
         details: [{
           appIDs: ["3RMYX67679.app.vorinthex.com"],
           components: [
-            { "/": "/auth/mfa", comment: "Founder sign-in and MFA recovery" },
             { "/": "/public/auth/token", comment: "Mobile magic-link sign in" },
           ],
         }],

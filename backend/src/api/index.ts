@@ -5,6 +5,8 @@ import { websocket } from 'hono/bun';
 import { errorHandler } from './errors';
 import { autoRefreshAuthTokens, rateLimitByIp, requestLogger, requireEnvApiKey, validateQueryParams } from './middleware';
 import { handleResendWebhook, RESEND_WEBHOOK_V1_PATH } from './resend';
+import { GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook } from './email-webhook';
+import { closeEmailSyncQueue, enqueueEmailWatchRenewal, startEmailSyncWorker } from '@/lib/email-inbox/sync-queue';
 import { registerRoutes } from './routes';
 
 export const app = new Hono();
@@ -31,12 +33,13 @@ app.use('*', cors({
     'Idempotency-Key',
     'X-API-Key',
     'X-Vorinthex-API-Key',
+    'X-Vorinthex-Session-Transport',
     'X-Refresh-Token',
     'svix-id',
     'svix-timestamp',
     'svix-signature',
   ],
-  exposeHeaders: ['X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
+  exposeHeaders: ['WWW-Authenticate', 'X-Access-Token', 'X-Refresh-Token', 'X-Access-Token-Max-Age', 'X-Refresh-Token-Max-Age'],
 }));
 app.use('*', requestLogger);
 app.use('*', rateLimitByIp);
@@ -48,6 +51,8 @@ api.get('/health', (c) => c.json({ ok: true }));
 registerRoutes(api);
 app.post(RESEND_WEBHOOK_V1_PATH, handleResendWebhook);
 app.post(`${RESEND_WEBHOOK_V1_PATH}/`, handleResendWebhook);
+app.post(GMAIL_WEBHOOK_V1_PATH, handleGmailWebhook);
+app.post(`${GMAIL_WEBHOOK_V1_PATH}/`, handleGmailWebhook);
 
 if (import.meta.main) {
   const port = Number(process.env.PORT ?? 3001);
@@ -58,8 +63,14 @@ if (import.meta.main) {
     websocket,
   });
   console.log(`vorinthex app listening on ${port}`);
+  const emailWorker = startEmailSyncWorker();
+  void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error }));
+  const renewalTimer = setInterval(() => { void enqueueEmailWatchRenewal().catch((error) => console.error('email watch renewal enqueue failed', { error })); }, 6 * 60 * 60_000);
 
   const shutdown = async () => {
+    clearInterval(renewalTimer);
+    await emailWorker.close();
+    await closeEmailSyncQueue();
     server.stop();
     process.exit(0);
   };

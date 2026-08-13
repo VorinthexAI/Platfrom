@@ -104,6 +104,33 @@ describe('Content runtime', () => {
     expect(f.patches.at(-1)).not.toHaveProperty('embedding');
   });
 
+  test('sets, projects, clears, and scope-validates folder covers', async () => {
+    const f = fixture('moderator');
+    const imageKey = newId();
+    const dependencies = {
+      repository: f.repository,
+      embed: async () => embedding,
+      getFolderCoverImage: async (candidateScopeKey: string, candidateImageKey: string) => candidateScopeKey === f.scopeKey && candidateImageKey === imageKey ? { storageKey: 'gallery/cover.jpg' } : null,
+      signFolderCoverUrl: async (storageKey: string) => `https://images.example/${storageKey}`,
+    };
+    const set = await runContentTool('folder.update', { updates: [{ folderKey: f.folderKey, coverImageKey: imageKey }] }, f.context, dependencies);
+    expect(set.results[0]).toMatchObject({ success: true, data: { folder: { key: f.folderKey, coverUrl: 'https://images.example/gallery/cover.jpg' } } });
+    const setResult = set.results[0];
+    if (!setResult?.success || !setResult.data) throw new Error('Folder cover update failed.');
+    expect(setResult.data.folder).not.toHaveProperty('coverImageKey');
+    expect(f.patches.at(-1)).toMatchObject({ coverImageKey: imageKey });
+
+    const cleared = await runContentTool('folder.update', { updates: [{ folderKey: f.folderKey, coverImageKey: null }] }, f.context, dependencies);
+    expect(cleared.results[0]).toMatchObject({ success: true, data: { folder: { key: f.folderKey } } });
+    const clearedResult = cleared.results[0];
+    if (!clearedResult?.success || !clearedResult.data) throw new Error('Folder cover clear failed.');
+    expect(clearedResult.data.folder).not.toHaveProperty('coverUrl');
+    expect(f.patches.at(-1)).toHaveProperty('coverImageKey', undefined);
+
+    const rejected = await runContentTool('folder.update', { updates: [{ folderKey: f.folderKey, coverImageKey: newId() }] }, f.context, dependencies);
+    expect(rejected.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_NOT_FOUND' } });
+  });
+
   test('supports root documents as an explicit scoped location', async () => {
     const f = fixture('owner');
     const rootKey = f.addDocument('Root content');
@@ -225,9 +252,9 @@ describe('Content runtime', () => {
 
   test('filters semantic search to authorized scopes and rejects unresolved projects', async () => {
     const f = fixture('viewer'); f.addDocument('Roadmap launch'); let authorized: string[] = [];
-    f.repository.semanticSearch = async (input) => { authorized = input.authorizedScopeKeys; return [...f.documents.values()].map((document) => ({ score: 0.8, document })); };
-    const output = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap' }, f.context, { repository: f.repository, embed: async () => embedding });
-    expect(authorized).toEqual([f.scopeKey]); expect(output.results[0]?.score).toBe(0.8);
+    f.repository.semanticSearch = async (input) => { authorized = input.authorizedScopeKeys; return [...f.documents.values()].map((document) => ({ score: 0.8, document, matchedContent: 'Matched passage later in the document.' })); };
+    const output = await runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', include: ['snippet'] }, f.context, { repository: f.repository, embed: async () => embedding });
+    expect(authorized).toEqual([f.scopeKey]); expect(output.results[0]).toMatchObject({ score: 0.8, snippet: 'Matched passage later in the document.' });
     await expect(runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toMatchObject({ code: 'CONTENT_SEARCH_INVALID_SOURCE' });
   });
 
@@ -899,6 +926,7 @@ describe('Content runtime', () => {
         canPermanentlyDelete: () => true,
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
+        bookRuntime: { create: async () => newId(), write: async () => {} },
         runAction: async (action: string, input: any) => {
           if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
           if (action === 'speak') return { audio: new Uint8Array([1]), mimeType: 'audio/mpeg' };
@@ -914,8 +942,10 @@ describe('Content runtime', () => {
         },
       };
       let input: any;
-      if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
-      else if (name === 'enhance') input = { content: 'Improve teh wording.' };
+       if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
+       else if (name === 'enhance') input = { content: 'Improve teh wording.' };
+       else if (name === 'book.create-context') input = { scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
+       else if (name === 'book.write') input = { bookKey: newId(), scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
       else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };
       else if (name === 'folder.find') input = { folderKeys: [f.folderKey] };
       else if (name === 'folder.list') input = { scopeKey: f.scopeKey, parentFolderKey: f.folderKey };

@@ -26,11 +26,13 @@ describe('user helpers', () => {
   // account created via magic link and later signed into via OAuth (or vice
   // versa) with a differently-cased/whitespaced but otherwise identical
   // provider-supplied email resolves to the SAME user, never a duplicate.
-  test('an OAuth-provider email hashes identically to a manually-typed magic-link email', async () => {
+  test('OAuth-provider emails hash identically to a manually-typed magic-link email', async () => {
     const magicLinkEmail = 'person@example.com';
     const googleProfileEmail = ' Person@Example.com ';
+    const appleProfileEmail = 'PERSON@example.com';
 
     expect(await hashUserEmail(googleProfileEmail)).toBe(await hashUserEmail(magicLinkEmail));
+    expect(await hashUserEmail(appleProfileEmail)).toBe(await hashUserEmail(magicLinkEmail));
   });
 
   test('defaults new users to subscribed to updates', () => {

@@ -12,6 +12,7 @@ export const folderSchema = z.object({
   parentFolderKey: z.string().cuid().optional(),
   name: z.string().trim().min(1),
   description: z.string().trim().min(1).optional(),
+  coverImageKey: z.string().cuid().optional(),
   embedding: currentEmbeddingSchema,
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({

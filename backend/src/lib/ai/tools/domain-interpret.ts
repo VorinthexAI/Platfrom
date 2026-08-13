@@ -90,6 +90,10 @@ export const domainToolJsonSchemas: Record<string, Record<string, unknown>> = {
   'access.organization.explain': objectSchema({ organization: { type: 'string' }, member: { type: 'string' }, action: { type: 'string' } }),
   'access.scope.explain': objectSchema({ scope: { type: 'string' }, member: { type: 'string' }, action: { type: 'string' } }, ['scope']),
   'access.agent.explain': objectSchema({ scope: { type: 'string' }, agent: { type: 'string' }, member: { type: 'string' }, action: { type: 'string', enum: ['read', 'run', 'delegate', 'manage'] } }, ['scope', 'agent']),
+  'email.thread.list': objectSchema({ filter: { type: 'string', enum: ['all', 'important', 'urgent', 'needs_action', 'filtered', 'unread', 'favorite'] }, search: { type: 'string', maxLength: 200 } }),
+  'email.thread.read': objectSchema({ threadKey: { type: 'string' } }, ['threadKey']),
+  'email.read': objectSchema({ threads: { type: 'array', minItems: 1, maxItems: 10, items: objectSchema({ threadKey: { type: 'string' }, cursor: { type: 'string', maxLength: 1000 }, limit: { type: 'integer', minimum: 1, maximum: 50 } }, ['threadKey']) } }, ['threads']),
+  'email.reply.draft': objectSchema({ threadKey: { type: 'string' }, tone: { type: 'string', enum: ['concise', 'warm', 'formal', 'direct'] }, instruction: { type: 'string', maxLength: 1000 }, profileKey: { type: 'string' } }, ['threadKey']),
   ...contentToolJsonSchemas,
   ...workflowExecutionToolJsonSchemas,
 };

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
 
-import { postJson } from "@/lib/api-client";
+import { exchangeOAuthCode } from "@/lib/oauth";
 import { useAuthStore } from "@/state/auth";
 import { fonts, palette, spacing } from "@/theme/tokens";
 
@@ -16,7 +16,7 @@ export default function OAuthCompleteRoute() {
 
   useEffect(() => {
     if (error || !code) return;
-    void postJson<{ code: string }, unknown>("/auth/mobile/oauth/exchange", { code })
+    void exchangeOAuthCode(code)
       .then(async () => {
         await hydrate();
       })

@@ -32,12 +32,16 @@ jobs:
           set -euo pipefail
           EXPO_TOKEN="$(jq -re '.secrets.prod.mobile.EXPO_TOKEN' .github/environments.json)"
           EXPO_PUBLIC_API_BASE_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_API_BASE_URL' .github/environments.json)"
+          EXPO_PUBLIC_FRONTEND_URL="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_FRONTEND_URL' .github/environments.json)"
+          EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID' .github/environments.json)"
           EXPO_PUBLIC_BACKEND_API_KEY="$(jq -re '.secrets.prod.mobile.env.EXPO_PUBLIC_BACKEND_API_KEY' .github/environments.json)"
           echo "::add-mask::$EXPO_TOKEN"
           echo "::add-mask::$EXPO_PUBLIC_BACKEND_API_KEY"
           {
             echo "EXPO_TOKEN=$EXPO_TOKEN"
             echo "EXPO_PUBLIC_API_BASE_URL=$EXPO_PUBLIC_API_BASE_URL"
+            echo "EXPO_PUBLIC_FRONTEND_URL=$EXPO_PUBLIC_FRONTEND_URL"
+            echo "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID"
             echo "EXPO_PUBLIC_BACKEND_API_KEY=$EXPO_PUBLIC_BACKEND_API_KEY"
           } >> "$GITHUB_ENV"
 
@@ -77,5 +81,7 @@ jobs:
         working-directory: mobile/app
         run: |
           eas env:set --name EXPO_PUBLIC_API_BASE_URL --value "$EXPO_PUBLIC_API_BASE_URL" --environment production --visibility plaintext --non-interactive
+          eas env:set --name EXPO_PUBLIC_FRONTEND_URL --value "$EXPO_PUBLIC_FRONTEND_URL" --environment production --visibility plaintext --non-interactive
+          eas env:set --name EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID --value "$EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID" --environment production --visibility plaintext --non-interactive
           eas env:set --name EXPO_PUBLIC_BACKEND_API_KEY --value "$EXPO_PUBLIC_BACKEND_API_KEY" --environment production --visibility plaintext --non-interactive
           eas build --platform android --profile production --non-interactive --no-wait

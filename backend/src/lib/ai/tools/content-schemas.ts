@@ -21,6 +21,7 @@ export const contentFolderSchema = z.object({
   parentFolderKey: keySchema.optional(),
   name: nameSchema,
   description: textSchema.optional(),
+  coverUrl: z.string().url().optional(),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
@@ -134,9 +135,20 @@ const canonicalRepresentationSchema = z.object({
 }).strict().superRefine((value, context) => {
   if (Number(value.html !== undefined) + Number(value.content !== undefined) !== 1) context.addIssue({ code: z.ZodIssueCode.custom, message: 'exactly one of html or content is required' });
 });
+const bookBriefShape = {
+  scopeKey: keySchema,
+  topic: z.string().trim().min(1).max(500),
+  goal: z.string().trim().min(1).max(1_000),
+  audience: z.string().trim().min(1).max(500),
+  tone: z.string().trim().min(1).max(200),
+  length: z.enum(['short', 'standard', 'deep']),
+  language: z.string().trim().min(1).max(100),
+  sourceNotes: z.string().trim().min(1).max(40_000).optional(),
+} as const;
+const bookToolDataSchema = z.object({ bookKey: keySchema, status: z.enum(['planning', 'researching', 'generating', 'ready', 'failed']) }).strict();
 
-const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional() }).strict()
-  .refine((value) => value.name !== undefined || value.description !== undefined, 'name or description is required');
+const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional(), coverImageKey: keySchema.nullable().optional() }).strict()
+  .refine((value) => value.name !== undefined || value.description !== undefined || value.coverImageKey !== undefined, 'folder metadata is required');
 const documentUpdateSchema = z.object({
   documentKey: keySchema,
   html: z.string().min(1).optional(),
@@ -220,7 +232,9 @@ const documentReadDataSchema = z.union([
 export const contentToolContracts = {
   autocomplete: { description: 'Complete the text immediately following a writing context.', input: z.object({ context: z.string().trim().min(1).max(12_000), wordCount: z.number().int().min(1).max(24) }).strict(), output: autocompleteDataSchema },
   enhance: { description: 'Correct spelling, grammar, wording, and clarity while preserving meaning and formatting.', input: z.object({ content: z.string().trim().min(1).max(40_000) }).strict(), output: enhancedContentDataSchema },
-  'folder.create': { description: 'Create one or more Content folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
+  'book.create-context': { description: 'Create a resumable book and its generation context from a broad reader brief.', input: z.object({ ...bookBriefShape, ...idempotencyShape }).strict(), output: bookToolDataSchema },
+  'book.write': { description: 'Generate or resume an outlined book, chapter prose, speech, and cover.', input: z.object({ bookKey: keySchema, ...bookBriefShape, ...idempotencyShape }).strict(), output: bookToolDataSchema },
+  'folder.create': { description: 'Create one or more Content folders.', input: z.object({ folders: z.array(z.object({ key: keySchema.optional(), scopeKey: keySchema, parentFolderKey: keySchema.optional(), name: nameSchema, description: textSchema.optional(), coverImageKey: keySchema.optional() }).strict()).min(1).max(100), ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.find': { description: 'Find Content folders by key.', input: z.object({ folderKeys: keysSchema, includeArchived: z.boolean().optional(), includeChildrenCount: z.boolean().optional(), includeDocumentCount: z.boolean().optional() }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.list': { description: 'List folders under a scope or parent folder.', input: z.object({ scopeKey: keySchema, parentFolderKey: keySchema.optional(), includeArchived: z.boolean().optional(), includeDocuments: z.boolean().optional(), cursor: cursorSchema.optional(), limit: limitSchema.optional(), sort: folderSortSchema.optional() }).strict(), output: z.object({ folders: z.array(contentFolderSchema), documents: z.array(contentDocumentSchema).optional(), cursor: cursorSchema.optional() }).strict() },
   'folder.update': { description: 'Update folder metadata.', input: z.object({ updates: z.array(folderUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
