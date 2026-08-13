@@ -6,7 +6,7 @@ import { getUserByEmailHash } from '@/lib/db/users.node';
 import { getPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { hashUserEmail } from '@/api/users';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { documentSemanticHash } from '@/lib/ai/document-processing/chunking';
+import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { htmlToDocx } from '@/lib/ai/document-processing/exports';
 
@@ -32,6 +32,21 @@ const KEYS = {
   markdownDecisions: 'cmsrt115v00063g7kck57g4w6',
   textInterviews: 'cmsrt115v00073g7k406886ls',
   textIdeas: 'cmsrt115v00083g7kh2u2beac',
+  longPdfStrategy: 'cmsrtkoe40000os7khvz2ae38',
+  longPdfResearch: 'cmsrtkoe40001os7k0pywd4yc',
+  longPdfOperations: 'cmsrtkoe40002os7k4sq32dv1',
+  longDocNarrative: 'cmsrtkoe40003os7k1r4c0biv',
+  longDocWorkshop: 'cmsrtkoe40004os7kbwao5go4',
+  longDocRetrospective: 'cmsrtkoe40005os7k5ylya4zv',
+  longDocxPlan: 'cmsrtkoe40006os7k8jqta729',
+  longDocxReview: 'cmsrtkoe40007os7k4zzidslt',
+  longDocxHandbook: 'cmsrtkoe40008os7k89zz3n8z',
+  longMarkdownGuide: 'cmsrtkoe40009os7k0jl4gjfl',
+  longMarkdownArchitecture: 'cmsrtkoe4000aos7kebwzhzwx',
+  longMarkdownResearch: 'cmsrtkoe4000bos7k49hphiot',
+  longTextTranscript: 'cmsrtkoe4000cos7ke5ita5ss',
+  longTextJournal: 'cmsrtkoe4000dos7k9gr17azv',
+  longTextBacklog: 'cmsrtkoe4000eos7k74iqglwl',
 } as const;
 
 function requireLocalEndpoint(name: string, value: string | undefined) {
@@ -49,8 +64,8 @@ function escapeHtml(value: string) {
 }
 
 function minimalPdf(text: string) {
-  const safeText = text.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
-  const stream = `BT /F1 18 Tf 72 720 Td (${safeText}) Tj ET`;
+  const lines = text.match(/.{1,82}(?:\s+|$)/g)?.map((line) => line.trim()).filter(Boolean) ?? [text];
+  const stream = `BT /F1 10 Tf 52 740 Td 0 -14 Td ${lines.slice(0, 48).map((line) => `(${line.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)')}) Tj T*`).join(' ')} ET`;
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -69,6 +84,25 @@ function minimalPdf(text: string) {
   body += offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('');
   body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return new TextEncoder().encode(body);
+}
+
+function longContent(title: string, subject: string) {
+  return [
+    title,
+    `Context\n\n${subject} matters because useful systems have to preserve enough context for a person to understand not only what was decided, but why the decision was made. This document captures the assumptions, constraints, evidence, and unresolved questions that shaped the current direction. It is intentionally detailed so search, summaries, downloads, and document navigation can be exercised with realistic material rather than one-line placeholders.`,
+    `Current understanding\n\nThe strongest signal is that speed alone is not the goal. People want a dependable path from scattered information to a confident next action. That requires clear ownership, visible tradeoffs, and a record of what changed over time. The working approach is to keep source material close to the decision, distinguish facts from interpretations, and state uncertainty directly instead of hiding it behind polished language.`,
+    `Plan\n\nFirst, collect representative examples and note where the current flow creates hesitation. Second, reduce unnecessary choices while preserving escape hatches for advanced work. Third, validate the result with concrete tasks rather than broad preference questions. Each milestone should have an owner, a measurable outcome, a review date, and a rollback condition. Progress should be summarized weekly so new contributors can enter without reconstructing the entire history.`,
+    `Risks and mitigations\n\nThe main risks are stale context, premature automation, and interfaces that appear simple but conceal important state. Mitigate these by refreshing time-sensitive references, requiring confirmation before consequential mutations, and making loading, saving, failure, and completion states explicit. Keep private source files private, use short-lived access URLs, and ensure every automated action converges with the same cache and persistence paths used by direct user actions.`,
+    `Open questions\n\nWhich signals best predict that the workflow is genuinely useful? Where should the system ask for clarification instead of guessing? How long should historical context remain prominent? What information must be visible on mobile when space is constrained? The next review should answer these questions with observed behavior, document the evidence, and update this plan without erasing the reasoning that came before.`,
+  ].join('\n\n');
+}
+
+function longHtml(content: string) {
+  return content.split(/\n\n/).map((block, index) => index % 2 === 0 ? `<h2>${escapeHtml(block)}</h2>` : `<p>${escapeHtml(block)}</p>`).join('');
+}
+
+function longMarkdown(content: string) {
+  return content.split(/\n\n/).map((block, index) => index % 2 === 0 ? `## ${block}` : block).join('\n\n');
 }
 
 async function upsert(collectionName: string, value: { key: string }) {
@@ -102,6 +136,23 @@ async function main() {
   const pdfStorageKey = `content/${scopeKey}/${KEYS.references}/${KEYS.pdf}/dev-seed/original.pdf`;
   await documentStorage.upload({ key: pdfStorageKey, bytes: pdfBytes, mimeType: 'application/pdf' });
 
+  const longDocuments = [
+    [KEYS.longPdfStrategy, 'Product strategy narrative', KEYS.references, 'pdf', 'How Archive supports durable personal knowledge and deliberate action.'],
+    [KEYS.longPdfResearch, 'Research synthesis report', KEYS.research, 'pdf', 'A synthesis of interviews about retrieval, trust, organization, and collaboration.'],
+    [KEYS.longPdfOperations, 'Operating model reference', KEYS.projects, 'pdf', 'An operating model for weekly planning, decision review, and cross-functional execution.'],
+    [KEYS.longDocNarrative, 'Company narrative - legacy Word', KEYS.projects, 'doc', 'A detailed narrative connecting customer problems, product principles, and market direction.'],
+    [KEYS.longDocWorkshop, 'Discovery workshop transcript - legacy Word', KEYS.research, 'doc', 'Notes and conclusions from a long-form product discovery workshop.'],
+    [KEYS.longDocRetrospective, 'Launch retrospective - legacy Word', KEYS.launch, 'doc', 'A retrospective covering preparation, release execution, incidents, and follow-up actions.'],
+    [KEYS.longDocxPlan, 'Annual product plan', KEYS.projects, 'docx', 'A detailed annual plan with outcomes, sequencing, dependencies, and operating assumptions.'],
+    [KEYS.longDocxReview, 'Customer evidence review', KEYS.research, 'docx', 'A review of customer evidence organized by repeated needs, objections, and behavior.'],
+    [KEYS.longDocxHandbook, 'Team operating handbook', KEYS.references, 'docx', 'A practical handbook for decisions, meetings, documentation, and incident response.'],
+    [KEYS.longMarkdownGuide, 'Release engineering guide', KEYS.launch, 'md', 'A release guide covering readiness, deployment, smoke testing, communication, and rollback.'],
+    [KEYS.longMarkdownArchitecture, 'Archive architecture notes', KEYS.references, 'md', 'Architecture notes for storage, signed access, canonical actions, and cache convergence.'],
+    [KEYS.longMarkdownResearch, 'Research repository guide', KEYS.research, 'md', 'A guide for capturing observations, tagging evidence, and turning research into decisions.'],
+    [KEYS.longTextTranscript, 'Extended customer transcript', KEYS.research, 'txt', 'An extended interview transcript about information overload, retrieval, and confidence.'],
+    [KEYS.longTextJournal, 'Monthly reflection', KEYS.journal, 'txt', 'A long reflection on attention, decisions, habits, energy, and lessons from the month.'],
+    [KEYS.longTextBacklog, 'Detailed idea backlog', KEYS.personal, 'txt', 'A detailed backlog of product, workflow, writing, and research ideas with next steps.'],
+  ] as const;
   const imported = [
     { key: KEYS.pdfBrief, name: 'Product discovery brief', folderKey: KEYS.references, extension: 'pdf' as const, mimeType: 'application/pdf', content: 'Product discovery brief covering customer pain, desired outcomes, risks, and the next validation interviews.', html: '<h1>Product discovery brief</h1><p>Customer pain, desired outcomes, risks, and the next validation interviews.</p>', bytes: minimalPdf('Product discovery: customer pain, outcomes, risks, and next interviews.') },
     { key: KEYS.docBrief, name: 'Partner briefing - legacy Word', folderKey: KEYS.references, extension: 'doc' as const, mimeType: 'application/msword', content: 'Partner briefing with launch context, responsibilities, dependencies, and open commercial questions.', html: '<h1>Partner briefing</h1><p>Launch context, responsibilities, dependencies, and open commercial questions.</p>' },
@@ -112,6 +163,21 @@ async function main() {
     { key: KEYS.markdownDecisions, name: 'Architecture decisions', folderKey: KEYS.research, extension: 'md' as const, mimeType: 'text/markdown', content: 'Architecture decisions documenting private storage, signed URLs, canonical actions, cache convergence, and product-neutral tool names.', html: '<h1>Architecture decisions</h1><p>Private storage, signed URLs, canonical actions, cache convergence, and product-neutral tool names.</p>', source: '# Architecture decisions\n\n1. Keep originals private.\n2. Return short-lived signed URLs.\n3. Share canonical actions across tools and APIs.\n4. Use product-neutral tool names.\n' },
     { key: KEYS.textInterviews, name: 'Customer interview notes', folderKey: KEYS.research, extension: 'txt' as const, mimeType: 'text/plain', content: 'Customer interview notes\n\nPeople want faster retrieval, fewer duplicated decisions, and a clear next action after every research session.', html: '<pre><code>Customer interview notes\n\nPeople want faster retrieval, fewer duplicated decisions, and a clear next action after every research session.</code></pre>' },
     { key: KEYS.textIdeas, name: 'Idea inbox', folderKey: KEYS.personal, extension: 'txt' as const, mimeType: 'text/plain', content: 'Idea inbox\n\nCreate a weekly review ritual. Link decisions to evidence. Keep a short list of unanswered questions. Protect one quiet writing block.', html: '<pre><code>Idea inbox\n\nCreate a weekly review ritual. Link decisions to evidence. Keep a short list of unanswered questions. Protect one quiet writing block.</code></pre>' },
+    ...longDocuments.map(([key, name, folderKey, extension, subject]) => {
+      const content = longContent(name, subject);
+      const html = longHtml(content);
+      return {
+        key,
+        name,
+        folderKey,
+        extension,
+        mimeType: extension === 'pdf' ? 'application/pdf' : extension === 'doc' ? 'application/msword' : extension === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : extension === 'md' ? 'text/markdown' : 'text/plain',
+        content,
+        html,
+        ...(extension === 'pdf' ? { bytes: minimalPdf(content) } : {}),
+        ...(extension === 'md' ? { source: longMarkdown(content) } : {}),
+      };
+    }),
   ];
   const encoder = new TextEncoder();
   const importedDocuments = [];
@@ -135,15 +201,15 @@ async function main() {
     ...importedDocuments,
   ];
   for (const document of documents) {
-    const contentChunks = [document.content];
+    const contentChunks = chunkDocumentContent(document.content);
     await upsert(DOCUMENTS_COLLECTION, documentSchema.parse({
       ...document,
       scopeKey,
       html: 'html' in document ? document.html : `<p>${escapeHtml(document.content)}</p>`,
       embedding: vector,
       contentChunks,
-      chunkEmbeddings: [vector],
-      semanticChunkCount: 1,
+      chunkEmbeddings: contentChunks.map(() => vector),
+      semanticChunkCount: contentChunks.length,
       semanticContentHash: documentSemanticHash(document.content),
       isFavorite: document.key === KEYS.researchNote,
       deletedAt: null,
