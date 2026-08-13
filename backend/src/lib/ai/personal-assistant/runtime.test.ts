@@ -32,10 +32,10 @@ describe('personal assistant runtime', () => {
 
     expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'amazon.nova-lite' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'archive_folder_list', 'archive_folder_create', 'archive_folder_update', 'archive_folder_move',
-      'archive_document_list', 'archive_document_find', 'archive_document_create', 'archive_document_update',
-      'archive_document_rename', 'archive_document_move', 'archive_document_copy', 'archive_document_translate',
-      'archive_document_versions', 'archive_document_version_restore', 'archive_document_download', 'search_knowledge', 'write_note', 'unsupported_request',
+      'folder.list', 'folder.create', 'folder.update', 'folder.move',
+      'document.list', 'document.find', 'document.create', 'document.update',
+      'document.rename', 'document.move', 'document.copy', 'document.translate',
+      'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'assistant.unsupported',
     ]);
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Archive. Core can search your documents or help write the open note.', sources: [] });
   });
@@ -50,12 +50,12 @@ describe('personal assistant runtime', () => {
     });
 
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'gallery_overview', 'gallery_collection_create', 'search_images', 'gallery_image_favorite', 'gallery_duplicates_find',
-      'gallery_duplicates_delete', 'gallery_collection_transfer', 'gallery_subject_list', 'gallery_subject_create',
-      'gallery_subject_images', 'gallery_subject_delete', 'gallery_subject_restore', 'gallery_upload_reserve',
-      'gallery_upload_status', 'gallery_upload_complete', 'unsupported_request',
+      'collection.list', 'collection.create', 'image.search', 'image.favorite', 'collection.duplicates.find',
+      'collection.duplicates.delete', 'collection.image.transfer', 'subject.list', 'subject.create',
+      'subject.image.list', 'subject.delete', 'subject.restore', 'image.upload.reserve',
+      'image.upload.status', 'image.upload.complete', 'assistant.unsupported',
     ]);
-    expect(chatInput.systemPrompt).toContain('Call search_images whenever');
+    expect(chatInput.systemPrompt).toContain('Call image.search whenever');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Gallery"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Gallery. Core can search your images.', sources: [] });
   });
@@ -69,7 +69,7 @@ describe('personal assistant runtime', () => {
       },
     });
 
-    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['compass_overview', 'compass_place_create', 'compass_visit_create', 'compass_trip_create', 'compass_trip_place_add', 'compass_trip_place_remove', 'unsupported_request']);
+    expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual(['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove', 'assistant.unsupported']);
     expect(chatInput.systemPrompt).toContain('operating inside Compass');
     expect(chatInput.messages[0].content[0].text).toContain('"workspace":"Compass"');
     expect(result).toEqual({ type: 'unsupported', message: 'This request is not supported in Compass. Core can search your saved knowledge for travel context.', sources: [] });
@@ -81,7 +81,7 @@ describe('personal assistant runtime', () => {
     const result = await runPersonalAssistant({ ...input, surface: 'media-workspace', message: 'Show me photos of the red dog in snow' }, domain, {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
-        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'image-search-1', name: 'search_images', arguments: { query: 'red dog in snow' } }], stopReason: 'tool_use' });
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'image-search-1', name: 'image.search', arguments: { query: 'red dog in snow' } }], stopReason: 'tool_use' });
         expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', toolCallId: 'image-search-1' }] });
         return response({ text: 'I found one matching image of a red dog in snow.', toolCalls: [], stopReason: 'end_turn' });
       },
@@ -102,7 +102,7 @@ describe('personal assistant runtime', () => {
     const result = await runPersonalAssistant(input, domain, {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
-        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'search-1', name: 'search_knowledge', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' });
+        if (modelCalls === 1) return response({ text: '', toolCalls: [{ id: 'search-1', name: 'knowledge.search', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' });
         expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', toolCallId: 'search-1' }] });
         return response({ text: 'The launch is in October.', toolCalls: [], stopReason: 'end_turn' });
       },
@@ -123,7 +123,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         modelCalls += 1;
         return modelCalls === 1
-          ? response({ text: '<thinking>I should search first.</thinking>', toolCalls: [{ id: 'search-1', name: 'search_knowledge', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' })
+          ? response({ text: '<thinking>I should search first.</thinking>', toolCalls: [{ id: 'search-1', name: 'knowledge.search', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' })
           : response({ text: '<thinking>The launch is in October.</thinking>\n<response>The saved roadmap says the launch is in October.</response>', toolCalls: [], stopReason: 'end_turn' });
       },
       executeContent: (async () => ({ query: 'roadmap', results: [{ documentKey, scopeKey, name: 'Roadmap', score: 0.9, snippet: 'Launch in October.' }], totalCandidates: 1 })) as any,
@@ -137,7 +137,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         modelCalls += 1;
         return modelCalls === 1
-          ? response({ text: '', toolCalls: [{ id: 'image-1', name: 'search_images', arguments: { query: 'red dog' } }], stopReason: 'tool_use' })
+          ? response({ text: '', toolCalls: [{ id: 'image-1', name: 'image.search', arguments: { query: 'red dog' } }], stopReason: 'tool_use' })
           : response({ text: '<analysis>I found an image but forgot the response.</analysis>', toolCalls: [], stopReason: 'end_turn' });
       },
       gallery: { search: async () => ({ query: 'red dog', images: [] }) },
@@ -151,7 +151,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         modelCalls += 1;
         return modelCalls === 1
-          ? response({ text: '', toolCalls: [{ id: 'search-1', name: 'search_knowledge', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' })
+          ? response({ text: '', toolCalls: [{ id: 'search-1', name: 'knowledge.search', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' })
           : response({ text: '&lt;thinking&gt;Internal reasoning&lt;/thinking&gt;\n<response<The roadmap launches in October.</response<', toolCalls: [], stopReason: 'end_turn' });
       },
       executeContent: (async () => ({ query: 'roadmap', results: [{ documentKey, scopeKey, name: 'Roadmap', score: 0.9, snippet: 'Launch in October.' }], totalCandidates: 1 })) as any,
@@ -161,7 +161,7 @@ describe('personal assistant runtime', () => {
 
   test('returns a structured full-note replacement from the write capability', async () => {
     const result = await runPersonalAssistant(input, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'write-1', name: 'write_note', arguments: { content: 'Rewritten text', message: 'Rewrote the note.' } }], stopReason: 'tool_use' }),
+      execute: async () => response({ text: '', toolCalls: [{ id: 'write-1', name: 'note.write', arguments: { content: 'Rewritten text', message: 'Rewrote the note.' } }], stopReason: 'tool_use' }),
     });
     expect(result).toEqual({ type: 'note', content: 'Rewritten text', message: 'Rewrote the note.', sources: [] });
   });
@@ -175,13 +175,13 @@ describe('personal assistant runtime', () => {
       execute: async (_request, nextInput) => {
         modelCalls += 1;
         if (modelCalls === 1) {
-          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['ascend_overview', 'ascend_detail', 'ascend_progress', 'book_create_context', 'book_write', 'unsupported_request']);
-          expect(nextInput.systemPrompt).toContain('Call book_create_context first');
-          return response({ text: '', toolCalls: [{ id: 'book-context-1', name: 'book_create_context', arguments: brief }], stopReason: 'tool_use' });
+          expect(nextInput.tools?.map(({ name }) => name)).toEqual(['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write', 'assistant.unsupported']);
+          expect(nextInput.systemPrompt).toContain('Call book.create-context first');
+          return response({ text: '', toolCalls: [{ id: 'book-context-1', name: 'book.create-context', arguments: brief }], stopReason: 'tool_use' });
         }
         if (modelCalls === 2) {
           expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', result: { bookKey, status: 'planning' } }] });
-          return response({ text: '', toolCalls: [{ id: 'book-write-1', name: 'book_write', arguments: { bookKey, ...brief } }], stopReason: 'tool_use' });
+          return response({ text: '', toolCalls: [{ id: 'book-write-1', name: 'book.write', arguments: { bookKey, ...brief } }], stopReason: 'tool_use' });
         }
         expect(nextInput.messages.at(-1)).toMatchObject({ role: 'tool', content: [{ type: 'tool-result', result: { bookKey, status: 'ready' } }] });
         return response({ text: 'Your book is ready in Ascend.', toolCalls: [], stopReason: 'end_turn' });
@@ -202,7 +202,7 @@ describe('personal assistant runtime', () => {
 
   test('enforces the server-owned book creation sequence and matching brief', async () => {
     await expect(runPersonalAssistant({ ...input, surface: 'book-workspace' }, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'write-first', name: 'book_write', arguments: { bookKey: newId(), topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' }),
+      execute: async () => response({ text: '', toolCalls: [{ id: 'write-first', name: 'book.write', arguments: { bookKey: newId(), topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' }),
     })).rejects.toThrow('before creating');
 
     const bookKey = newId();
@@ -211,8 +211,8 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         call += 1;
         return call === 1
-          ? response({ text: '', toolCalls: [{ id: 'create', name: 'book_create_context', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' })
-          : response({ text: '', toolCalls: [{ id: 'write', name: 'book_write', arguments: { bookKey, topic: 'Changed', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' });
+          ? response({ text: '', toolCalls: [{ id: 'create', name: 'book.create-context', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' })
+          : response({ text: '', toolCalls: [{ id: 'write', name: 'book.write', arguments: { bookKey, topic: 'Changed', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' });
       },
       executeContent: (async () => ({ bookKey, status: 'planning' })) as any,
     })).rejects.toThrow('did not match');
@@ -222,7 +222,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         stoppedCall += 1;
         return stoppedCall === 1
-          ? response({ text: '', toolCalls: [{ id: 'create', name: 'book_create_context', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' })
+          ? response({ text: '', toolCalls: [{ id: 'create', name: 'book.create-context', arguments: { topic: 'Topic', goal: 'Goal', audience: 'Readers', tone: 'Clear', length: 'short', language: 'English' } }], stopReason: 'tool_use' })
           : response({ text: 'Your book is ready.', toolCalls: [], stopReason: 'end_turn' });
       },
       executeContent: (async () => ({ bookKey: newId(), status: 'planning' })) as any,
@@ -238,7 +238,7 @@ describe('personal assistant runtime', () => {
   test('returns server-owned unsupported messages without executing a domain tool', async () => {
     let contentCalls = 0;
     const result = await runPersonalAssistant({ ...input, surface: 'travel-workspace', message: 'What is the weather today?' }, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'unsupported-1', name: 'unsupported_request', arguments: {} }], stopReason: 'tool_use' }),
+      execute: async () => response({ text: '', toolCalls: [{ id: 'unsupported-1', name: 'assistant.unsupported', arguments: {} }], stopReason: 'tool_use' }),
       executeContent: (async () => { contentCalls += 1; return {}; }) as any,
     });
     expect(contentCalls).toBe(0);
@@ -252,7 +252,7 @@ describe('personal assistant runtime', () => {
       execute: async () => {
         modelCalls += 1;
         return modelCalls === 1
-          ? response({ text: '', toolCalls: [{ id: 'folder-1', name: 'archive_folder_create', arguments: { name: 'xyz' } }], stopReason: 'tool_use' })
+          ? response({ text: '', toolCalls: [{ id: 'folder-1', name: 'folder.create', arguments: { name: 'xyz' } }], stopReason: 'tool_use' })
           : response({ text: 'Created the xyz folder.', toolCalls: [], stopReason: 'end_turn' });
       },
       executeContent: (async (name: string, nextInput: any) => { calls.push({ name, input: nextInput }); return { results: [], summary: { requested: 1, succeeded: 1, failed: 0 } }; }) as any,
@@ -260,26 +260,26 @@ describe('personal assistant runtime', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.name).toBe('folder.create');
     expect(calls[0]?.input).toMatchObject({ folders: [{ scopeKey, name: 'xyz' }] });
-    expect(calls[0]?.input.idempotencyKey).toMatch(/^([a-f0-9]{64}):archive_folder_create$/);
+    expect(calls[0]?.input.idempotencyKey).toMatch(/^([a-f0-9]{64}):folder\.create$/);
     expect(result).toEqual({ type: 'answer', message: 'Created the xyz folder.', sources: [], changes: [{ workspace: 'archive' }] });
   });
 
   test('strictly rejects unsupported control arguments', async () => {
     await expect(runPersonalAssistant(input, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'unsupported-1', name: 'unsupported_request', arguments: { reason: 'weather' } }], stopReason: 'tool_use' }),
+      execute: async () => response({ text: '', toolCalls: [{ id: 'unsupported-1', name: 'assistant.unsupported', arguments: { reason: 'weather' } }], stopReason: 'tool_use' }),
     })).rejects.toThrow();
   });
 
   test('rejects truncated tool calls and bounds repeated searches', async () => {
     await expect(runPersonalAssistant(input, domain, {
-      execute: async () => response({ text: '', toolCalls: [{ id: 'write-1', name: 'write_note', arguments: { content: 'Partial', message: 'Changed it.' } }], stopReason: 'max_tokens' }),
+      execute: async () => response({ text: '', toolCalls: [{ id: 'write-1', name: 'note.write', arguments: { content: 'Partial', message: 'Changed it.' } }], stopReason: 'max_tokens' }),
     })).rejects.toThrow('ended unexpectedly');
 
     let calls = 0;
     await expect(runPersonalAssistant(input, domain, {
       execute: async () => {
         calls += 1;
-        return response({ text: '', toolCalls: [{ id: `search-${calls}`, name: 'search_knowledge', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' });
+        return response({ text: '', toolCalls: [{ id: `search-${calls}`, name: 'knowledge.search', arguments: { query: 'roadmap' } }], stopReason: 'tool_use' });
       },
       executeContent: (async () => ({ query: 'roadmap', results: [], totalCandidates: 0 })) as any,
     })).rejects.toThrow('iteration limit');
@@ -289,9 +289,9 @@ describe('personal assistant runtime', () => {
   test('supports independently configured surface registries', () => {
     const registry = new AssistantCapabilityRegistry().register({
       inputSchema: z.object({}).strict(),
-      definition: { name: 'future_capability', description: 'Future behavior.', inputSchema: { type: 'object' } },
+      definition: { name: 'future.capability', description: 'Future behavior.', inputSchema: { type: 'object' } },
       async execute() { return { kind: 'continue', result: {} }; },
-    }).registerSurface('knowledge-workspace', ['future_capability']);
-    expect(registry.resolve('knowledge-workspace').map(({ definition }) => definition.name)).toEqual(['future_capability']);
+    }).registerSurface('knowledge-workspace', ['future.capability']);
+    expect(registry.resolve('knowledge-workspace').map(({ definition }) => definition.name)).toEqual(['future.capability']);
   });
 });

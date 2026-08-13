@@ -13,10 +13,10 @@ const domain = {
 } as unknown as DomainToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['archive_folder_list', 'archive_folder_create', 'archive_folder_update', 'archive_folder_move', 'archive_document_list', 'archive_document_find', 'archive_document_create', 'archive_document_update', 'archive_document_rename', 'archive_document_move', 'archive_document_copy', 'archive_document_translate', 'archive_document_versions', 'archive_document_version_restore', 'archive_document_download', 'search_knowledge', 'write_note']],
-  ['travel-workspace', ['compass_overview', 'compass_place_create', 'compass_visit_create', 'compass_trip_create', 'compass_trip_place_add', 'compass_trip_place_remove']],
-  ['signal-workspace', ['signal_overview', 'signal_sync', 'signal_thread', 'signal_favorite', 'signal_draft', 'signal_draft_update', 'signal_draft_send', 'signal_disconnect']],
-  ['book-workspace', ['ascend_overview', 'ascend_detail', 'ascend_progress', 'book_create_context', 'book_write']],
+  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write']],
+  ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
+  ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
+  ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write']],
 ];
 
 describe('personal assistant service capabilities', () => {
@@ -65,23 +65,23 @@ describe('personal assistant service capabilities', () => {
     };
     const context: any = { domain, requestKey: 'request-1', travel, email, books };
     const cases: Array<[AssistantSurface, string, unknown]> = [
-      ['travel-workspace', 'compass_overview', {}],
-      ['travel-workspace', 'compass_place_create', { name: 'Lisbon', latitude: 38.72, longitude: -9.14, countryCode: 'PT' }],
-      ['travel-workspace', 'compass_visit_create', { placeKey }],
-      ['travel-workspace', 'compass_trip_create', { name: 'Portugal' }],
-      ['travel-workspace', 'compass_trip_place_add', { tripKey, placeKey }],
-      ['travel-workspace', 'compass_trip_place_remove', { tripKey, placeKey }],
-      ['signal-workspace', 'signal_overview', {}],
-      ['signal-workspace', 'signal_sync', {}],
-      ['signal-workspace', 'signal_thread', { threadKey }],
-      ['signal-workspace', 'signal_favorite', { threadKey, isFavorite: true }],
-      ['signal-workspace', 'signal_draft', { threadKey, tone: 'warm' }],
-      ['signal-workspace', 'signal_draft_update', { draftKey, finalContent: 'Thanks.' }],
-      ['signal-workspace', 'signal_draft_send', { draftKey }],
-      ['signal-workspace', 'signal_disconnect', {}],
-      ['book-workspace', 'ascend_overview', {}],
-      ['book-workspace', 'ascend_detail', { bookKey }],
-      ['book-workspace', 'ascend_progress', { bookKey, chapterKey, progressSeconds: 30, isCompleted: false }],
+      ['travel-workspace', 'place.list', {}],
+      ['travel-workspace', 'place.create', { name: 'Lisbon', latitude: 38.72, longitude: -9.14, countryCode: 'PT' }],
+      ['travel-workspace', 'place.visit.create', { placeKey }],
+      ['travel-workspace', 'trip.create', { name: 'Portugal' }],
+      ['travel-workspace', 'trip.place.add', { tripKey, placeKey }],
+      ['travel-workspace', 'trip.place.remove', { tripKey, placeKey }],
+      ['signal-workspace', 'email.overview', {}],
+      ['signal-workspace', 'email.sync', {}],
+      ['signal-workspace', 'email.thread.read', { threadKey }],
+      ['signal-workspace', 'email.thread.favorite', { threadKey, isFavorite: true }],
+      ['signal-workspace', 'email.draft.create', { threadKey, tone: 'warm' }],
+      ['signal-workspace', 'email.draft.update', { draftKey, finalContent: 'Thanks.' }],
+      ['signal-workspace', 'email.draft.send', { draftKey }],
+      ['signal-workspace', 'email.disconnect', {}],
+      ['book-workspace', 'book.list', {}],
+      ['book-workspace', 'book.detail', { bookKey }],
+      ['book-workspace', 'book.chapter.progress', { bookKey, chapterKey, progressSeconds: 30, isCompleted: false }],
     ];
     for (const [surface, capabilityName, input] of cases) await defaultAssistantCapabilityRegistry.resolve(surface).find(({ definition }) => definition.name === capabilityName)!.execute(input, context);
     const serviceContext = { organizationKey, scopeKey };
@@ -95,13 +95,13 @@ describe('personal assistant service capabilities', () => {
   test('injects runtime scope and stable request idempotency into Archive mutations', async () => {
     const calls: unknown[] = [];
     const executeContent = async (...args: unknown[]) => { calls.push(args); return {}; };
-    const create = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'archive_folder_create')!;
+    const create = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'folder.create')!;
     const context: any = { domain, requestKey: 'stable-request', executeContent };
     await create.execute({ name: 'xyz' }, context);
     await create.execute({ name: 'xyz' }, context);
     expect(calls).toEqual([
-      ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:archive_folder_create' }, domain, undefined],
-      ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:archive_folder_create' }, domain, undefined],
+      ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
+      ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
     ]);
   });
 });

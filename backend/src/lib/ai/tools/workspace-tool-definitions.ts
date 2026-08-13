@@ -50,4 +50,8 @@ export const WORKSPACE_TOOL_DEFINITIONS = Object.freeze([
   ...compassCapabilities,
   ...signalCapabilities,
   ...ascendCapabilities,
-].map(publicDefinition));
+].filter(({ definition }) => !new Set([
+  'folder.list', 'folder.create', 'folder.update', 'folder.move',
+  'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download',
+  'image.search', 'email.thread.read',
+]).has(definition.name)).map(publicDefinition));

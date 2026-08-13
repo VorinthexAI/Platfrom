@@ -83,7 +83,7 @@ const bookWriteInputSchema = bookBriefSchema.extend({ bookKey: z.string().cuid()
 const searchKnowledgeCapability: AssistantCapability = {
   inputSchema: searchInputSchema,
   definition: {
-    name: 'search_knowledge',
+    name: 'knowledge.search',
     description: 'Search knowledge the user is authorized to access. Use this before answering requests that depend on stored notes or documents.',
     inputSchema: {
       type: 'object',
@@ -112,7 +112,7 @@ const searchKnowledgeCapability: AssistantCapability = {
 const writeNoteCapability: AssistantCapability = {
   inputSchema: writeNoteInputSchema,
   definition: {
-    name: 'write_note',
+    name: 'note.write',
     description: 'Replace the open note with complete new content. Use for both writing a blank note and editing an existing note. The content argument must contain the entire resulting note, not a patch.',
     inputSchema: {
       type: 'object',
@@ -133,7 +133,7 @@ const writeNoteCapability: AssistantCapability = {
 const searchImagesCapability: AssistantCapability = {
   inputSchema: searchInputSchema,
   definition: {
-    name: 'search_images',
+    name: 'image.search',
     description: 'Search the user\'s Gallery images by visible subjects, objects, actions, setting, style, colors, lighting, or readable text.',
     inputSchema: {
       type: 'object',
@@ -151,8 +151,8 @@ const searchImagesCapability: AssistantCapability = {
 const createBookContextCapability: AssistantCapability = {
   inputSchema: bookBriefSchema,
   definition: {
-    name: 'book_create_context',
-    description: 'Create the planning context for a new personalized book after the user explicitly asks to create one. Call this before book_write.',
+    name: 'book.create-context',
+    description: 'Create the planning context for a new personalized book after the user explicitly asks to create one. Call this before book.write.',
     inputSchema: contentZodToJsonSchema(bookBriefSchema),
   },
   async execute(rawInput, context) {
@@ -165,8 +165,8 @@ const writeBookCapability: AssistantCapability = {
   inputSchema: bookWriteInputSchema,
   mutationWorkspace: 'ascend',
   definition: {
-    name: 'book_write',
-    description: 'Write, narrate, and finish a book created by book_create_context. Use the returned bookKey and the exact same brief.',
+    name: 'book.write',
+    description: 'Write, narrate, and finish a book created by book.create-context. Use the returned bookKey and the exact same brief.',
     inputSchema: contentZodToJsonSchema(bookWriteInputSchema),
   },
   async execute(rawInput, context) {
@@ -184,8 +184,8 @@ defaultAssistantCapabilityRegistry
   .register(writeNoteCapability)
   .register(createBookContextCapability)
   .register(writeBookCapability)
-  .registerSurface('knowledge-workspace', [...archiveCapabilities.map(({ definition }) => definition.name), 'search_knowledge', 'write_note'])
+  .registerSurface('knowledge-workspace', [...archiveCapabilities.map(({ definition }) => definition.name), 'knowledge.search', 'note.write'])
   .registerSurface('media-workspace', galleryAssistantCapabilityNames)
-  .registerSurface('book-workspace', [...ascendCapabilities.map(({ definition }) => definition.name), 'book_create_context', 'book_write'])
+  .registerSurface('book-workspace', [...ascendCapabilities.map(({ definition }) => definition.name), 'book.create-context', 'book.write'])
   .registerSurface('travel-workspace', compassCapabilities.map(({ definition }) => definition.name))
   .registerSurface('signal-workspace', signalCapabilities.map(({ definition }) => definition.name));

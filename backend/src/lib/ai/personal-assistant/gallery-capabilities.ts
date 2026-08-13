@@ -7,6 +7,12 @@ type GalleryExecutor = (input: unknown, context: GalleryOperationContext) => Pro
 
 const key = z.string().cuid();
 const keys = (maxItems: number) => z.array(key).min(1).max(maxItems);
+const toolNames: Record<string, string> = {
+  gallery_overview: 'collection.list', gallery_collection_create: 'collection.create', search_images: 'image.search', gallery_image_favorite: 'image.favorite',
+  gallery_duplicates_find: 'collection.duplicates.find', gallery_duplicates_delete: 'collection.duplicates.delete', gallery_collection_transfer: 'collection.image.transfer',
+  gallery_subject_list: 'subject.list', gallery_subject_create: 'subject.create', gallery_subject_images: 'subject.image.list', gallery_subject_delete: 'subject.delete', gallery_subject_restore: 'subject.restore',
+  gallery_upload_reserve: 'image.upload.reserve', gallery_upload_status: 'image.upload.status', gallery_upload_complete: 'image.upload.complete',
+};
 
 const definitions: Array<{
   operation: GalleryOperationName;
@@ -43,7 +49,9 @@ function trustedContext(context: AssistantCapabilityContext): GalleryOperationCo
 }
 
 export function createGalleryAssistantCapabilities(operations: Partial<Record<GalleryOperationName, GalleryExecutor>> = galleryOperations): AssistantCapability[] {
-  return definitions.map(({ operation, name, description, schema, mutation }) => ({
+  return definitions.map(({ operation, name: configuredName, description, schema, mutation }) => {
+    const name = toolNames[configuredName] ?? configuredName;
+    return ({
     inputSchema: schema,
     ...(mutation ? { mutationWorkspace: 'gallery' as const } : {}),
     definition: { name, description, inputSchema: contentZodToJsonSchema(schema) },
@@ -52,7 +60,8 @@ export function createGalleryAssistantCapabilities(operations: Partial<Record<Ga
       if (!execute) throw new Error(`Gallery operation is unavailable: ${operation}`);
       return { kind: 'continue', result: await execute(schema.parse(input), trustedContext(context)) };
     },
-  }));
+    });
+  });
 }
 
 export const galleryAssistantCapabilities = createGalleryAssistantCapabilities();

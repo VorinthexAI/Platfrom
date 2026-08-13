@@ -113,6 +113,7 @@ After SEO-affecting changes, verify `/llms.txt`, `/llms-full.txt`,
 - ArangoDB documents: application code and schemas ALWAYS use `key` as the public primary-key field — never read or write Arango's `_key` directly. The only place that translates between them is `toArangoDoc`/`withArangoKey` in `backend/src/lib/db/base.ts`; document schemas parse in Zod's default strip mode so `_key`/`_id`/`_rev` drop away on read.
 - Keep backend HTTP endpoints behind the env API key middleware and Redis-backed per-IP rate limiting unless a task explicitly changes that security model.
 - Every user-facing API operation for Archive, Gallery, Signal, Compass, or Ascend must have a corresponding executable definition in the unified backend tool registry. HTTP handlers and tools must call the same canonical action/service/repository operation; never reimplement business logic in a tool or call the local HTTP API from a tool. Model-visible schemas must omit and server-inject authenticated user, membership, organization, scope, agent, and idempotency fields. Register CRUD mutations in the appropriate Core surface allowlist, mark their workspace mutation metadata, and update the matching TanStack Query keys so direct API and Core-driven changes converge in the UI. OAuth handshakes and raw signed-byte transfers remain user-mediated unless a task explicitly establishes a safe agent flow.
+- Tool names always use product-neutral dot notation (`folder.create`, `email.draft.send`), never underscores or current/future product names.
 
 ## Notes For Agents
 

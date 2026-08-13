@@ -10,6 +10,13 @@ import type { AssistantCapability, AssistantCapabilityContext } from './capabili
 
 const key = z.string().cuid();
 const name = z.string().trim().min(1).max(255);
+const toolNames: Record<string, string> = {
+  archive_folder_list: 'folder.list', archive_folder_create: 'folder.create', archive_folder_update: 'folder.update', archive_folder_move: 'folder.move',
+  archive_document_list: 'document.list', archive_document_find: 'document.find', archive_document_create: 'document.create', archive_document_update: 'document.update', archive_document_rename: 'document.rename', archive_document_move: 'document.move', archive_document_copy: 'document.copy', archive_document_translate: 'document.translate', archive_document_versions: 'document.list-versions', archive_document_version_restore: 'document.restore-version', archive_document_download: 'document.download',
+  compass_overview: 'place.list', compass_place_create: 'place.create', compass_visit_create: 'place.visit.create', compass_trip_create: 'trip.create', compass_trip_place_add: 'trip.place.add', compass_trip_place_remove: 'trip.place.remove',
+  signal_overview: 'email.overview', signal_sync: 'email.sync', signal_thread: 'email.thread.read', signal_favorite: 'email.thread.favorite', signal_draft: 'email.draft.create', signal_draft_update: 'email.draft.update', signal_draft_send: 'email.draft.send', signal_disconnect: 'email.disconnect',
+  ascend_overview: 'book.list', ascend_detail: 'book.detail', ascend_progress: 'book.chapter.progress',
+};
 
 function identity(context: AssistantCapabilityContext) {
   const { domain } = context;
@@ -24,6 +31,7 @@ function identity(context: AssistantCapabilityContext) {
 }
 
 function capability<Schema extends z.ZodTypeAny>(name: string, description: string, schema: Schema, execute: (input: z.output<Schema>, context: AssistantCapabilityContext) => Promise<unknown>, mutationWorkspace?: AssistantCapability['mutationWorkspace']): AssistantCapability<Schema> {
+  name = toolNames[name] ?? name;
   return {
     inputSchema: schema,
     mutationWorkspace,
@@ -35,6 +43,7 @@ function capability<Schema extends z.ZodTypeAny>(name: string, description: stri
 }
 
 function archive<Schema extends z.ZodTypeAny>(name: string, description: string, schema: Schema, tool: ContentToolName, transform: (input: z.output<Schema>, context: AssistantCapabilityContext) => Record<string, unknown>, mutation = false) {
+  name = toolNames[name] ?? name;
   return capability(name, description, schema, async (input, context) => {
     const canonicalInput = transform(input, context);
     if (mutation) {
