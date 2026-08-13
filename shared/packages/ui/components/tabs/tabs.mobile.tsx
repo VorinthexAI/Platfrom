@@ -7,6 +7,6 @@ export function Tabs({ style, ...props }: TabsProps) {
 const styles = StyleSheet.create({
   root: {
     borderColor: "#262D36",
-    borderRadius: 12,
+    borderRadius: 999,
   },
 });

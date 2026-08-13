@@ -119,6 +119,7 @@ export function BottomSheet({
   const onOpenChangeRef = useRef(onOpenChange);
   const dismissibleRef = useRef(dismissible);
   const reducedMotionRef = useRef(reducedMotion);
+  const dismissingRef = useRef(false);
   openRef.current = open;
   onOpenChangeRef.current = onOpenChange;
   dismissibleRef.current = dismissible;
@@ -146,6 +147,14 @@ export function BottomSheet({
     });
   };
 
+  const dismiss = () => {
+    if (!dismissibleRef.current || dismissingRef.current) return;
+    dismissingRef.current = true;
+    openRef.current = false;
+    animate(false);
+    onOpenChangeRef.current(false);
+  };
+
   useEffect(() => {
     let mounted = true;
     void AccessibilityInfo.isReduceMotionEnabled().then((enabled) => {
@@ -168,6 +177,7 @@ export function BottomSheet({
 
   useEffect(() => {
     if (open) {
+      dismissingRef.current = false;
       setVisible(true);
       translateY.setValue(reducedMotionRef.current ? 0 : closedOffsetRef.current);
       overlayOpacity.setValue(reducedMotionRef.current ? 1 : 0);
@@ -197,7 +207,7 @@ export function BottomSheet({
       onPanResponderRelease: (_, gesture) => {
         const projectedDistance = gesture.dy + Math.max(0, gesture.vy) * 140;
         if (dismissibleRef.current && projectedDistance >= 88) {
-          onOpenChangeRef.current(false);
+          dismiss();
         } else {
           animate(true);
         }
@@ -213,7 +223,7 @@ export function BottomSheet({
     <Modal
       accessibilityViewIsModal
       animationType="none"
-      onRequestClose={() => { if (dismissible) onOpenChange(false); }}
+      onRequestClose={dismiss}
       statusBarTranslucent
       transparent
       visible
@@ -224,7 +234,7 @@ export function BottomSheet({
             accessibilityLabel="Close bottom sheet"
             contentMode="raw"
             disabled={!dismissible}
-            onPress={() => onOpenChange(false)}
+            onPress={dismiss}
             style={StyleSheet.absoluteFill}
             variant="ghost"
           />
@@ -258,7 +268,7 @@ export function BottomSheet({
               accessibilityLabel="Close bottom sheet"
               contentMode="raw"
               disabled={!dismissible}
-              onPress={() => onOpenChange(false)}
+              onPress={dismiss}
               size="sm"
               style={styles.closeButton}
               variant="icon"

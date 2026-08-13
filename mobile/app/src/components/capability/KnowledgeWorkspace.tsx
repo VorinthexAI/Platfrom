@@ -196,6 +196,9 @@ export function KnowledgeWorkspace() {
   const [folderCreating, setFolderCreating] = useState(false);
   const [saveRetry, setSaveRetry] = useState(0);
   const [libraryQuery, setLibraryQuery] = useState("");
+  const [rootSearchQuery, setRootSearchQuery] = useState("");
+  const [rootSearchResults, setRootSearchResults] = useState<ContentSearchResponse>();
+  const [rootSearching, setRootSearching] = useState(false);
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
   const revision = useRef(0);
@@ -322,21 +325,6 @@ export function KnowledgeWorkspace() {
     sheetBackStack.current = [];
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     sheetCloseTimer.current = setTimeout(() => setActiveSheet(undefined), 240);
-  };
-
-  const dismissSheetLayer = () => {
-    const previous = sheetBackStack.current.pop();
-    if (!previous) {
-      closeSheet();
-      return;
-    }
-    setSheetOpen(false);
-    if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
-    sheetCloseTimer.current = setTimeout(() => {
-      setSheetError(undefined);
-      setActiveSheet(previous);
-      setSheetOpen(true);
-    }, 240);
   };
 
   useEffect(() => () => {
@@ -1187,6 +1175,22 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const runRootSearch = async () => {
+    const normalized = rootSearchQuery.trim();
+    if (!normalized || !hasContentContext) return;
+    const generation = ++navigationGeneration.current;
+    setRootSearching(true);
+    setError(undefined);
+    try {
+      const response = await searchContent(normalized);
+      if (generation === navigationGeneration.current) setRootSearchResults(response);
+    } catch (cause) {
+      if (generation === navigationGeneration.current) setError(cause instanceof Error ? cause.message : "Search failed.");
+    } finally {
+      if (generation === navigationGeneration.current) setRootSearching(false);
+    }
+  };
+
   const submitFolder = async () => {
     const name = folderName.trim();
     if (!name || folderCreating) return;
@@ -1633,15 +1637,27 @@ export function KnowledgeWorkspace() {
           <View style={styles.archiveRoot}>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
             <View style={styles.rootActions}>
+              <View style={styles.rootSearch}>
+                <SearchIcon size="sm" variant="muted" />
+                <TextInput accessibilityLabel="Search all Archive documents" editable={!rootSearching} onChangeText={(value) => { setRootSearchQuery(value); if (!value.trim()) setRootSearchResults(undefined); }} onSubmitEditing={() => void runRootSearch()} placeholder="Search all documents" returnKeyType="search" style={styles.rootSearchInput} value={rootSearchQuery} />
+                {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" disabled={rootSearching} onPress={() => { setRootSearchQuery(""); setRootSearchResults(undefined); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button> : null}
+                <Button accessibilityLabel="Search Archive" contentMode="raw" disabled={!rootSearchQuery.trim()} loading={rootSearching} onPress={() => void runRootSearch()} size="sm" variant="icon"><SearchIcon size="sm" /></Button>
+              </View>
               <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="md" variant="icon"><PlusIcon size="sm" /></Button>
             </View>
-            <View style={[styles.rootFolderGrid, archiveLocationLoading && styles.loadingGrid]}>
-              {archiveLocationLoading ? Array.from({ length: 6 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />) : rootFolders.map((folder) => (
+            {rootSearchResults ? <View style={styles.rootSearchResults}>
+              {rootSearchResults.documents.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => { setSelectedSummary(document); openSheet("summary"); }} size="sm" style={styles.documentButton} variant="secondary">
+                <FileIcon size="sm" />
+                <View style={styles.resultText}><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>{document.summary}</Text></View>
+              </Button>)}
+              {rootSearchResults.documents.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
+            </View> : <View style={[styles.rootFolderGrid, archiveLocationLoading && styles.loadingGrid]}>
+              {archiveLocationLoading ? <View style={[styles.rootLoadingSkeleton, styles.skeletonCard]} /> : rootFolders.map((folder) => (
                 <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
                   <Button contentMode="raw" onPress={() => void (hasContentContext ? openFolder(folder) : selectFolder(folder))} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button>
                 </View>
               ))}
-            </View>
+            </View>}
           </View>
         ) : workspaceMode === "folder" ? (
           <View style={styles.archiveFolder}>
@@ -1655,12 +1671,12 @@ export function KnowledgeWorkspace() {
             </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders ({folders.length})</Button>
-              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents ({documents.length})</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
             </Tabs>
-            {folderContentTab === "folders" ? (
+            {archiveLocationLoading ? <View accessibilityLabel="Loading folder contents" accessibilityRole="progressbar" style={[styles.folderLoadingSkeleton, styles.skeletonCard]} /> : folderContentTab === "folders" ? (
               <View style={[styles.rootFolderGrid, archiveLocationLoading && styles.loadingGrid]}>
-                {archiveLocationLoading ? Array.from({ length: 6 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />) : folders.length ? folders.map((folder) => (
+                {folders.length ? folders.map((folder) => (
                   <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
                     <Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button>
                   </View>
@@ -1668,9 +1684,9 @@ export function KnowledgeWorkspace() {
               </View>
             ) : (
               <View style={styles.folderDocuments}>
-                {archiveLocationLoading ? Array.from({ length: 5 }, (_, index) => <View key={index} style={[styles.documentButton, styles.skeletonCard]} />) : documents.length ? documents.map((document) => (
+                {documents.length ? documents.map((document) => (
                   <Button contentMode="raw" disabled={openingDocumentKey !== undefined} key={document.key} loading={openingDocumentKey === document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
-                    {document.isFavorite ? <StarIcon size="sm" /> : <FileIcon size="sm" />}
+                    <FileIcon size="sm" />
                     <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                   </Button>
                 )) : <Text style={styles.empty}>No documents here yet.</Text>}
@@ -1780,7 +1796,7 @@ export function KnowledgeWorkspace() {
                       <Button accessibilityLabel={`Manage ${folder.name}`} contentMode="raw" onPress={() => showFolderActions(folder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
                     </View>
                   ))}
-                  {documents.slice(0, 3).map((document) => <Button disabled={openingDocumentKey !== undefined} key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" variant="ghost" icon={document.isFavorite ? <StarIcon size="sm" /> : <FileIcon size="sm" />}>{document.name}</Button>)}
+                  {documents.slice(0, 3).map((document) => <Button disabled={openingDocumentKey !== undefined} key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" variant="ghost" icon={<FileIcon size="sm" />}>{document.name}</Button>)}
                 </View>
               ) : null}
             </>
@@ -1831,7 +1847,7 @@ export function KnowledgeWorkspace() {
         footer={mutationFooter()}
         hideHeading={activeSheet === "create"}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "destinationFolder" || activeSheet === "folders" || activeSheet === "translate" || activeSheet === "rename" || activeSheet === "destination" || activeSheet === "folderDetails"}
-        onOpenChange={(open) => { if (!open) dismissSheetLayer(); }}
+        onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "destination" || activeSheet === "uploads"}
         title={activeSheet === "enhance" ? "AI actions" : activeSheet === "translate" ? "Translate note" : activeSheet === "versions" ? "Version history" : activeSheet === "restoreVersion" ? "Restore this version?" : activeSheet === "folder" || activeSheet === "destinationFolder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename document" : "Rename note" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "uploads" ? "Upload progress" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
@@ -2032,7 +2048,7 @@ export function KnowledgeWorkspace() {
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (
-                <Button icon={document.isFavorite ? <StarIcon size="md" /> : <FileIcon size="md" />} key={document.key} loading={openingDocumentKey === document.key} onPress={() => void openArchiveDocument(document, true)} size="lg" style={styles.folderTile} variant="secondary">
+                <Button icon={<FileIcon size="md" />} key={document.key} loading={openingDocumentKey === document.key} onPress={() => void openArchiveDocument(document, true)} size="lg" style={styles.folderTile} variant="secondary">
                   {document.name}
                 </Button>
               ))}
@@ -2055,13 +2071,18 @@ const styles = StyleSheet.create({
   archiveFolder: { flexGrow: 1, gap: spacing.md },
   editorScene: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.sm },
   editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center" },
-  rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", marginBottom: spacing.md },
+  rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
+  rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
+  rootSearchResults: { gap: 7 },
   rootFolderGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10 },
   loadingGrid: { flex: 1 },
   rootFolderCard: { position: "relative", borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
   rootFolderMain: { height: "100%", width: "100%", flexDirection: "column", justifyContent: "center", gap: 10, paddingHorizontal: 8 },
   archiveCardLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
   skeletonCard: { backgroundColor: palette.hairlineBright, opacity: 0.72 },
+  rootLoadingSkeleton: { width: "100%", minHeight: 320, borderRadius: radii.xl },
+  folderLoadingSkeleton: { width: "100%", minHeight: 360, borderRadius: radii.xl },
   workspacePanel: { flexGrow: 1, gap: spacing.md, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   folderTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
   folderTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
