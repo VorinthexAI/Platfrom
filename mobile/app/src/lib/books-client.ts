@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
+import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
 
 const keySchema = z.string().trim().min(1);
@@ -53,7 +54,10 @@ export const chapterProgressRequestSchema = contextSchema.extend({
 const overviewResponseSchema = z.strictObject({ books: z.array(bookSchema) });
 const detailResponseSchema = z.strictObject({ book: bookSchema, chapters: z.array(bookChapterSchema) });
 const progressResponseSchema = z.strictObject({ chapter: bookChapterSchema, book: bookSchema });
-const assistantResponseSchema = z.strictObject({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.strictObject({ documentKey: keySchema, name: z.string().min(1) })) });
+const assistantResponseSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.strictObject({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
+  z.strictObject({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
+]);
 const failureSchema = z.strictObject({ success: z.literal(false), error: z.strictObject({ message: z.string().min(1) }) });
 
 export type Book = z.infer<typeof bookSchema>;

@@ -1,4 +1,5 @@
 import { randomUUID } from "expo-crypto";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,12 +20,15 @@ import {
   createPlace,
   createTrip,
   fetchTravelOverview,
+  getTravelContext,
   markPlaceVisited,
   removePlaceFromTrip,
   tripContainsPlace,
   type Place,
   type Trip,
 } from "@/lib/travel-client";
+import { getContentContext } from "@/lib/content-client";
+import { compassQueryKeys, invalidateAssistantChanges, patchCompassOverview } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 export type CountrySelection = {
@@ -52,6 +56,8 @@ function dateRange(trip: Trip) {
 }
 
 export function TravelWorkspace() {
+  const queryClient = useQueryClient();
+  const travelContext = getTravelContext();
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
   const [places, setPlaces] = useState<Place[]>([]);
@@ -73,13 +79,15 @@ export function TravelWorkspace() {
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState<string>();
+  const [assistantFailed, setAssistantFailed] = useState(false);
   const assistantRequestKey = useRef<string | undefined>(undefined);
+  const overviewQuery = useQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
 
   const loadOverview = useCallback(async () => {
     setLoading(true);
     setLoadError(undefined);
     try {
-      const overview = await fetchTravelOverview();
+      const overview = await queryClient.fetchQuery({ queryKey: compassQueryKeys.overview(travelContext), queryFn: fetchTravelOverview });
       setPlaces(overview.places);
       setTrips(overview.trips);
       setError(undefined);
@@ -88,22 +96,21 @@ export function TravelWorkspace() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [queryClient, travelContext.organizationKey, travelContext.scopeKey]);
 
   useEffect(() => {
-    let active = true;
-    void fetchTravelOverview().then((overview) => {
-      if (!active) return;
+    const overview = overviewQuery.data;
+    if (overview) {
       setPlaces(overview.places);
       setTrips(overview.trips);
       setError(undefined);
-    }).catch((failure: unknown) => {
-      if (active) setLoadError(errorMessage(failure));
-    }).finally(() => {
-      if (active) setLoading(false);
-    });
-    return () => { active = false; };
-  }, []);
+      setLoadError(undefined);
+      setLoading(false);
+    } else if (overviewQuery.error) {
+      setLoadError(errorMessage(overviewQuery.error));
+      setLoading(false);
+    }
+  }, [overviewQuery.data, overviewQuery.error]);
 
   function openSheet(sheet: WorkspaceSheet) {
     if (!loadError) setError(undefined);
@@ -147,6 +154,7 @@ export function TravelWorkspace() {
         wishlist: true,
       });
       setPlaces((current) => [...current.filter(({ key }) => key !== place.key), place]);
+      patchCompassOverview(queryClient, travelContext, place);
       setSelectedPlace(place);
       setSheetOpen(false);
     } catch (failure) {
@@ -163,6 +171,7 @@ export function TravelWorkspace() {
     try {
       const place = await markPlaceVisited(selectedPlace.key);
       setPlaces((current) => current.map((item) => item.key === place.key ? place : item));
+      patchCompassOverview(queryClient, travelContext, place);
       setSelectedPlace(place);
       setSheetOpen(false);
     } catch (failure) {
@@ -185,6 +194,7 @@ export function TravelWorkspace() {
       setSelectedTrip(trip);
       const savedTrip = selectedPlace ? await addPlaceToTrip(trip.key, { placeKey: selectedPlace.key }) : trip;
       setTrips((current) => [...current.filter(({ key }) => key !== savedTrip.key), savedTrip]);
+      patchCompassOverview(queryClient, travelContext, savedTrip);
       setSelectedTrip(savedTrip);
       setTripName("");
       setStartDate("");
@@ -206,6 +216,7 @@ export function TravelWorkspace() {
         placeKey: selectedPlace.key,
       });
       setTrips((current) => current.map((item) => item.key === updated.key ? updated : item));
+      patchCompassOverview(queryClient, travelContext, updated);
       setSelectedTrip(updated);
       setActiveSheet("trips");
     } catch (failure) {
@@ -221,6 +232,7 @@ export function TravelWorkspace() {
     try {
       const updated = await removePlaceFromTrip(trip.key, placeKey);
       setTrips((current) => current.map((item) => item.key === updated.key ? updated : item));
+      patchCompassOverview(queryClient, travelContext, updated);
       setSelectedTrip(updated);
       return true;
     } catch (failure) {
@@ -241,14 +253,17 @@ export function TravelWorkspace() {
     if (!value) return;
     setAssistantBusy(true);
     setAssistantMessage(undefined);
+    setAssistantFailed(false);
     try {
       assistantRequestKey.current ??= randomUUID();
       const response = await askTravelAssistant(value, assistantRequestKey.current);
       setAssistantInput("");
       assistantRequestKey.current = undefined;
       setAssistantMessage(response.message);
+      await invalidateAssistantChanges(queryClient, getContentContext(), response.changes);
     } catch (failure) {
       setAssistantMessage(errorMessage(failure));
+      setAssistantFailed(true);
     } finally {
       setAssistantBusy(false);
     }
@@ -289,7 +304,7 @@ export function TravelWorkspace() {
         {loadError && !loading ? <View style={styles.loadFailure}><GlobeIcon size="lg" variant="muted" /><Text style={styles.loadFailureText}>{loadError}</Text><Button onPress={() => void loadOverview()} size="sm" variant="secondary">Retry</Button></View> : null}
       </View>
 
-      {(error || assistantMessage) && !sheetOpen && !loadError ? <View accessibilityLiveRegion="polite" style={[styles.inlineError, styles.workspaceError]}><Text style={styles.errorText}>{error ?? assistantMessage}</Text></View> : null}
+      {error && !sheetOpen && !loadError ? <View accessibilityLiveRegion="polite" style={[styles.inlineError, styles.workspaceError]}><Text style={styles.errorText}>{error}</Text></View> : null}
 
       {!loading && panelTitle && !loadError ? <View style={[styles.selectionPanel, { bottom: insets.bottom + 86, left: (width - panelWidth) / 2, width: panelWidth }]}>
         <View style={styles.panelIcon}><LocationPinIcon size="md" /></View>
@@ -307,7 +322,14 @@ export function TravelWorkspace() {
         editable={!assistantBusy}
         leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
         loading={assistantBusy}
+        message={assistantMessage ? <View style={assistantFailed ? styles.inlineError : styles.inlineNotice}><Text style={styles.errorText}>{assistantMessage}</Text></View> : null}
         onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }}
+        onFocusChange={(focused) => {
+          if (!focused) {
+            setAssistantMessage(undefined);
+            setAssistantFailed(false);
+          }
+        }}
         onSubmit={() => void askAssistant()}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
@@ -399,6 +421,7 @@ const styles = StyleSheet.create({
   hintText: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 11, letterSpacing: tracking.micro },
   workspaceError: { position: "absolute", top: 92, left: spacing.md, right: spacing.md, zIndex: 3 },
   inlineError: { paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: "rgba(176,74,74,0.45)", borderRadius: radii.md, backgroundColor: "rgba(64,20,20,0.9)" },
+  inlineNotice: { paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: palette.hairlineBright, borderRadius: radii.md, backgroundColor: palette.panelRaised },
   errorText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   sheetContent: { gap: 6, paddingBottom: 6 },
   countrySearch: { minHeight: 48, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: palette.hairline, borderRadius: radii.lg, backgroundColor: palette.panelRaised },

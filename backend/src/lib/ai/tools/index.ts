@@ -16,6 +16,7 @@ import { imageSearchTool, type ImageSearchInput, type ImageSearchToolDependencie
 import type { ImageSimilarityOutput } from './image-similarity';
 import { PUBLIC_TOOL_DEFINITIONS } from './tool-definitions';
 import type { PublicToolDependencies } from './tool-definition';
+import { WORKSPACE_TOOL_DEFINITIONS, type WorkspaceToolDependencies } from './workspace-tool-definitions';
 import type { RetrievalContext, RetrievalDependencies } from './retrieval';
 
 /**
@@ -25,6 +26,7 @@ import type { RetrievalContext, RetrievalDependencies } from './retrieval';
 export const TOOL_NAMES = PUBLIC_TOOL_DEFINITIONS.map(({ name }) => name) as [string, ...string[]];
 export const toolNameSchema = z.enum(TOOL_NAMES);
 const publicToolDefinitionsByName = new Map(PUBLIC_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
+const workspaceToolDefinitionsByName = new Map(WORKSPACE_TOOL_DEFINITIONS.map((definition) => [definition.name, definition]));
 
 /** Input validation for the one canonical definition of each public tool. */
 export const toolInputSchemas: Record<string, z.ZodTypeAny> = Object.fromEntries(
@@ -46,6 +48,11 @@ export interface ToolDependencies extends RouterDependencies, DocumentParseDepen
   contentDependencies?: ContentToolDependencies;
   domainDependencies?: DomainToolExecutionOptions;
   timeoutMs?: number;
+  requestKey?: string;
+  travelService?: WorkspaceToolDependencies['travel'];
+  emailService?: WorkspaceToolDependencies['email'];
+  bookService?: WorkspaceToolDependencies['books'];
+  executeWorkspaceContent?: WorkspaceToolDependencies['executeContent'];
 }
 
 const chatOutputSchema = z.object({
@@ -73,8 +80,23 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
     return imageSearchTool.execute(rawInput, { ...dependencies, context: dependencies.contentContext });
   }
   if (!dependencies.contentContext) throw new Error(`Tool ${toolName} requires contentContext.`);
+  const workspaceDefinition = workspaceToolDefinitionsByName.get(toolName);
+  if (workspaceDefinition) return workspaceDefinition.execute(rawInput, {
+    context: dependencies.contentContext,
+    requestKey: dependencies.requestKey,
+    executeContent: dependencies.executeWorkspaceContent,
+    travel: dependencies.travelService,
+    email: dependencies.emailService,
+    books: dependencies.bookService,
+    content: {
+      adapters: dependencies.adapters,
+      credentials: dependencies.credentials,
+      ...dependencies.contentDependencies,
+      ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
+    },
+  });
   const definition = publicToolDefinitionsByName.get(toolName) as Exclude<(typeof PUBLIC_TOOL_DEFINITIONS)[number], typeof orchestratorChatTool | typeof transcribeTool>;
-  return definition.execute(rawInput, {
+  return (definition.execute as (input: unknown, dependencies: PublicToolDependencies) => Promise<unknown>)(rawInput, {
     context: dependencies.contentContext,
     domain: dependencies.domainDependencies,
     content: {
@@ -83,7 +105,7 @@ export async function runTool(name: string, skill: string, rawInput: unknown, de
       ...dependencies.contentDependencies,
       ingestion: { ...dependencies, ...dependencies.contentDependencies?.ingestion },
     },
-  } satisfies PublicToolDependencies);
+  });
 }
 
 export async function* streamTool(name: string, skill: string, rawInput: unknown, dependencies: ToolDependencies = {}): AsyncIterable<ProviderStreamChunk> {

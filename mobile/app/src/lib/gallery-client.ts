@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import type { AssistantChange } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
 
 export type GalleryCollection = {
@@ -169,7 +170,7 @@ export async function askGalleryAssistant(message: string) {
   const { organizationKey } = getGalleryContext();
   const agentKey = state.contentExecution?.agentKey ?? "";
   if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
-  const response = await apiClient.post<ApiResponse<{ type: "answer" | "note"; message: string }>>(
+  const response = await apiClient.post<ApiResponse<{ type: "answer" | "note" | "unsupported"; message: string; changes?: AssistantChange[] }>>(
     "/assistant/respond",
     { organizationKey, agentKey, input: { surface: "media-workspace", message, currentNote: { title: "", content: "" } } },
     { timeout: 4 * 60_000 },

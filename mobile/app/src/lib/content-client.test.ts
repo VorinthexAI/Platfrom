@@ -207,7 +207,7 @@ test("sends Archive requests to the personal assistant surface", async () => {
   expect(calls[0]?.body).toEqual({
     organizationKey: "org-authenticated",
     agentKey: "agent-authenticated",
-    input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { title: "Untitled note", content: "" }, folderKey: "folder" },
+    input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { title: "Untitled note", content: "" }, requestKey: expect.any(String), folderKey: "folder" },
   });
 });
 

@@ -71,6 +71,12 @@ export function createPersonalAssistantHandler(dependencies: PersonalAssistantHa
         return c.json({ success: false, error: { code: 'ASSISTANT_FORBIDDEN', message: 'Assistant execution access denied.' } }, 403);
       }
       if (error instanceof AgentRuntimeNotFoundError) return c.json({ success: false, error: { code: 'ASSISTANT_NOT_FOUND', message: 'Assistant runtime was not found.' } }, 404);
+      console.error('personal assistant execution failed', {
+        organizationKey: body.organizationKey,
+        agentKey: body.agentKey,
+        surface: body.input.surface,
+        error,
+      });
       return c.json({ success: false, error: { code: 'ASSISTANT_EXECUTION_FAILED', message: 'Assistant execution failed.' } }, 500);
     }
   };

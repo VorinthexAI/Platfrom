@@ -341,7 +341,7 @@
 
 .vui-bottom-sheet {
   animation: vui-bottom-sheet-in 320ms var(--vui-ease-luxury);
-  background: var(--vui-gradient-panel);
+  background: var(--vui-color-page, #030507);
   border: 1px solid var(--vui-color-border);
   border-bottom: 0;
   border-radius: var(--vui-radius-lg) var(--vui-radius-lg) 0 0;

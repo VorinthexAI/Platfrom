@@ -11,7 +11,9 @@ mock.module("./api-client", () => ({
   apiClient: {
     post: async (path: string, body: unknown, config?: unknown) => {
       calls.push({ method: "POST", path, body, config });
-      if (path === "/assistant/respond") return { data: { type: "answer", message: "Try Iceland in winter.", sources: [] } };
+      if (path === "/assistant/respond") return { data: (body as { input?: { message?: string } }).input?.message.includes("weather")
+        ? { type: "unsupported", message: "This request is not supported in Compass.", sources: [] }
+        : { type: "answer", message: "Try Iceland in winter.", sources: [] } };
       if (path.endsWith("/visits")) return { data: { success: true, data: { place: { ...place, visited: true, visitCount: 1 } } } };
       if (path === "/travel/places") return { data: { success: true, data: { place } } };
       if (path === "/travel/trips") return { data: { success: true, data: { trip } } };
@@ -70,4 +72,8 @@ test("asks Core through the Compass assistant surface", async () => {
     },
     config: { timeout: 60_000 },
   });
+});
+
+test("parses unsupported Compass requests", async () => {
+  expect(await client.askTravelAssistant("What is the weather?", "request-key")).toEqual({ type: "unsupported", message: "This request is not supported in Compass.", sources: [] });
 });

@@ -3,6 +3,7 @@ import * as WebBrowser from "expo-web-browser";
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
+import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
 
 const keySchema = z.string().min(1);
@@ -43,6 +44,10 @@ const overviewSchema = z.object({
   counts: z.object({ all: z.number().int(), important: z.number().int(), urgent: z.number().int(), needsAction: z.number().int(), filtered: z.number().int(), unread: z.number().int(), favorite: z.number().int() }),
 });
 const threadDetailSchema = z.object({ thread: emailThreadSchema, messages: z.array(emailMessageSchema) });
+const assistantResponseSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.strictObject({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
+  z.strictObject({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
+]);
 export type EmailOverview = z.infer<typeof overviewSchema>;
 export type EmailThread = z.infer<typeof emailThreadSchema>;
 export type EmailMessage = z.infer<typeof emailMessageSchema>;
@@ -98,6 +103,20 @@ export function createEmailDraft(input: { threadKey: string; tone: EmailTone; in
 export function updateEmailDraft(draftKey: string, finalContent: string) { return request("patch", `/email/drafts/${keySchema.parse(draftKey)}`, { finalContent }, emailDraftSchema); }
 export function sendEmailDraft(draftKey: string) { return request("post", `/email/drafts/${keySchema.parse(draftKey)}/send`, {}, z.object({ sent: z.literal(true), providerMessageId: z.string().min(1), threadKey: keySchema })); }
 export function disconnectEmail() { return request("post", "/email/disconnect", {}, z.object({ disconnected: z.literal(true) })); }
+export async function askEmailAssistant(message: string, requestKey: string) {
+  const state = useAuthStore.getState();
+  const { organizationKey } = getEmailContext();
+  const agentKey = typeof state.contentExecution?.agentKey === "string" ? state.contentExecution.agentKey : "";
+  if (!agentKey) throw new Error("Your personal assistant is unavailable for this session.");
+  try {
+    const response = await apiClient.post("/assistant/respond", {
+      organizationKey,
+      agentKey,
+      input: { surface: "signal-workspace", requestKey: z.string().trim().min(1).max(180).parse(requestKey), message: z.string().trim().min(1).max(8_000).parse(message), currentNote: { title: "", content: "" } },
+    }, { timeout: 4 * 60_000 });
+    return unwrap(response.data, assistantResponseSchema);
+  } catch (error) { throw responseError(error); }
+}
 
 const connectionExchanges = new Map<string, Promise<void>>();
 export function exchangeEmailConnection(code: string) {

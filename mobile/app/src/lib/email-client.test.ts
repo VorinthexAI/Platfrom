@@ -1,7 +1,7 @@
 import { beforeEach, expect, mock, test } from "bun:test";
 
 const calls: { method: string; path: string; body: unknown; config?: unknown }[] = [];
-const authState = { organization: { key: "org-key", role: "member" }, scope: { key: "scope-key", role: "moderator" } };
+const authState = { organization: { key: "org-key", role: "member" }, scope: { key: "scope-key", role: "moderator" }, contentExecution: { agentKey: "agent-key" } };
 const now = "2026-08-11T10:00:00.000Z";
 const thread = { key: "thread-key", scopeKey: "scope-key", accountKey: "account-key", providerThreadId: "provider-thread", subject: "Subject", summary: "Summary", intent: "Review message", priority: "normal", state: "needs_action", lastMessageAt: now, latestFrom: "sender@example.com", isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now };
 const draft = { key: "draft-key", scopeKey: "scope-key", threadKey: "thread-key", messageKey: "message-key", generatedContent: "Reply", status: "generated", createdAt: now, updatedAt: now };
@@ -17,7 +17,8 @@ mock.module("./api-client", () => ({ apiClient: {
         : path.endsWith("/favorite") ? { ...thread, isFavorite: true }
         : path.endsWith("/send") ? { sent: true, providerMessageId: "sent-1", threadKey: "thread-key" }
           : path === "/email/sync" ? { synced: 1, lastSyncedAt: now }
-            : {};
+            : path === "/assistant/respond" ? { type: "answer", message: "Synced Signal.", sources: [], changes: [{ workspace: "signal" }] }
+              : {};
     return { data: { success: true, data } };
   },
   patch: async (path: string, body: unknown) => { calls.push({ method: "PATCH", path, body }); return { data: { success: true, data: { ...draft, finalContent: "Edited", status: "edited" } } }; },
@@ -45,4 +46,13 @@ test("sends scoped overview, sync, draft, edit, and send requests", async () => 
 test("rejects invalid drafting tones before a request", () => {
   expect(() => client.emailToneSchema.parse("deceptive")).toThrow();
   expect(client.getEmailPermissions()).toEqual({ canManageConnector: false, canMutate: true });
+});
+
+test("sends Signal assistant requests with a replay key and accepts workspace changes", async () => {
+  expect(await client.askEmailAssistant("Sync my inbox", "request-1")).toEqual({ type: "answer", message: "Synced Signal.", sources: [], changes: [{ workspace: "signal" }] });
+  expect(calls[0]).toMatchObject({
+    method: "POST",
+    path: "/assistant/respond",
+    body: { organizationKey: "org-key", agentKey: "agent-key", input: { surface: "signal-workspace", requestKey: "request-1", message: "Sync my inbox" } },
+  });
 });

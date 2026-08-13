@@ -1,6 +1,7 @@
 import { apiClient } from "./api-client";
 import * as Crypto from "expo-crypto";
 import { useAuthStore } from "@/state/auth";
+import type { AssistantChange } from "./assistant-changes";
 
 export type ContentContext = {
   organizationKey: string;
@@ -68,8 +69,9 @@ export type ContentDocumentDownload = {
 };
 
 export type PersonalAssistantResponse =
-  | { type: "answer"; message: string; sources: { documentKey: string; name: string }[] }
-  | { type: "note"; content: string; message: string; sources: { documentKey: string; name: string }[] };
+  | { type: "answer"; message: string; sources: { documentKey: string; name: string }[]; changes?: AssistantChange[] }
+  | { type: "note"; content: string; message: string; sources: { documentKey: string; name: string }[]; changes?: AssistantChange[] }
+  | { type: "unsupported"; message: string; sources: []; changes?: AssistantChange[] };
 
 type ToolResponse<T> =
   | { success: true; data: T }
@@ -157,7 +159,7 @@ export async function askPersonalAssistant(message: string, currentNote: { title
     const response = await apiClient.post<ToolResponse<PersonalAssistantResponse>>("/api/v1/assistant/respond", {
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
-      input: { surface: "knowledge-workspace", message, currentNote, ...(folderKey ? { folderKey } : {}) },
+      input: { surface: "knowledge-workspace", message, currentNote, requestKey: createContentMutationKey(), ...(folderKey ? { folderKey } : {}) },
     }, { signal, timeout: 4 * 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;

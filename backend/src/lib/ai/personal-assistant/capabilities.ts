@@ -1,10 +1,17 @@
 import { z } from 'zod';
 import type { CoreChatToolDefinition } from '@/lib/ai/actions/core-chat';
+import { contentZodToJsonSchema } from '@/lib/ai/tools/content-json-schema';
 import type { DomainToolContext } from '@/lib/ai/tools/domain-execute';
 import { runContentTool, type ContentToolDependencies } from '@/lib/ai/tools/content-runtime';
 import { imageSearchTool } from '@/lib/ai/tools/image-search';
+import type { TravelService } from '@/lib/travel/service';
+import type { EmailService } from '@/lib/email-inbox/service';
+import type { BookService } from '@/lib/books/service';
+import type { GalleryOperationContext, GalleryOperationName } from '@/lib/gallery/operations';
+import { archiveCapabilities, ascendCapabilities, compassCapabilities, signalCapabilities } from './service-capabilities';
+import { galleryAssistantCapabilities, galleryAssistantCapabilityNames } from './gallery-capabilities';
 
-export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace']);
+export const assistantSurfaceSchema = z.enum(['knowledge-workspace', 'media-workspace', 'book-workspace', 'travel-workspace', 'signal-workspace']);
 export type AssistantSurface = z.infer<typeof assistantSurfaceSchema>;
 
 export const assistantSourceSchema = z.object({
@@ -24,10 +31,16 @@ export interface AssistantCapabilityContext {
   contentDependencies?: ContentToolDependencies;
   executeContent?: typeof runContentTool;
   executeImageSearch?: typeof imageSearchTool.execute;
+  travel?: TravelService;
+  email?: EmailService;
+  books?: BookService;
+  gallery?: Partial<Record<GalleryOperationName, (input: unknown, context: GalleryOperationContext) => Promise<unknown>>>;
 }
 
-export interface AssistantCapability {
+export interface AssistantCapability<Schema extends z.ZodTypeAny = z.ZodTypeAny> {
+  inputSchema: Schema;
   definition: CoreChatToolDefinition;
+  mutationWorkspace?: 'archive' | 'gallery' | 'signal' | 'compass' | 'ascend';
   execute(input: unknown, context: AssistantCapabilityContext): Promise<AssistantCapabilityResult>;
 }
 
@@ -67,17 +80,8 @@ const bookBriefSchema = z.object({
   sourceNotes: z.string().trim().min(1).max(12_000).optional(),
 }).strict();
 const bookWriteInputSchema = bookBriefSchema.extend({ bookKey: z.string().cuid() }).strict();
-const bookBriefJsonSchema = {
-  topic: { type: 'string', minLength: 3, maxLength: 500 },
-  goal: { type: 'string', minLength: 3, maxLength: 1_000 },
-  audience: { type: 'string', minLength: 2, maxLength: 500 },
-  tone: { type: 'string', minLength: 2, maxLength: 200 },
-  length: { type: 'string', enum: ['short', 'standard', 'deep'] },
-  language: { type: 'string', minLength: 2, maxLength: 100 },
-  sourceNotes: { type: 'string', minLength: 1, maxLength: 12_000 },
-} as const;
-
 const searchKnowledgeCapability: AssistantCapability = {
+  inputSchema: searchInputSchema,
   definition: {
     name: 'search_knowledge',
     description: 'Search knowledge the user is authorized to access. Use this before answering requests that depend on stored notes or documents.',
@@ -106,6 +110,7 @@ const searchKnowledgeCapability: AssistantCapability = {
 };
 
 const writeNoteCapability: AssistantCapability = {
+  inputSchema: writeNoteInputSchema,
   definition: {
     name: 'write_note',
     description: 'Replace the open note with complete new content. Use for both writing a blank note and editing an existing note. The content argument must contain the entire resulting note, not a patch.',
@@ -126,6 +131,7 @@ const writeNoteCapability: AssistantCapability = {
 };
 
 const searchImagesCapability: AssistantCapability = {
+  inputSchema: searchInputSchema,
   definition: {
     name: 'search_images',
     description: 'Search the user\'s Gallery images by visible subjects, objects, actions, setting, style, colors, lighting, or readable text.',
@@ -143,10 +149,11 @@ const searchImagesCapability: AssistantCapability = {
 };
 
 const createBookContextCapability: AssistantCapability = {
+  inputSchema: bookBriefSchema,
   definition: {
     name: 'book_create_context',
     description: 'Create the planning context for a new personalized book after the user explicitly asks to create one. Call this before book_write.',
-    inputSchema: { type: 'object', properties: bookBriefJsonSchema, required: ['topic', 'goal', 'audience', 'tone', 'length', 'language'], additionalProperties: false },
+    inputSchema: contentZodToJsonSchema(bookBriefSchema),
   },
   async execute(rawInput, context) {
     const input = bookBriefSchema.parse(rawInput);
@@ -155,10 +162,12 @@ const createBookContextCapability: AssistantCapability = {
 };
 
 const writeBookCapability: AssistantCapability = {
+  inputSchema: bookWriteInputSchema,
+  mutationWorkspace: 'ascend',
   definition: {
     name: 'book_write',
     description: 'Write, narrate, and finish a book created by book_create_context. Use the returned bookKey and the exact same brief.',
-    inputSchema: { type: 'object', properties: { bookKey: { type: 'string', minLength: 20, maxLength: 30 }, ...bookBriefJsonSchema }, required: ['bookKey', 'topic', 'goal', 'audience', 'tone', 'length', 'language'], additionalProperties: false },
+    inputSchema: contentZodToJsonSchema(bookWriteInputSchema),
   },
   async execute(rawInput, context) {
     const input = bookWriteInputSchema.parse(rawInput);
@@ -166,13 +175,17 @@ const writeBookCapability: AssistantCapability = {
   },
 };
 
-export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistry()
+export const defaultAssistantCapabilityRegistry = new AssistantCapabilityRegistry();
+
+for (const item of [...archiveCapabilities, ...galleryAssistantCapabilities, ...compassCapabilities, ...signalCapabilities, ...ascendCapabilities]) defaultAssistantCapabilityRegistry.register(item);
+
+defaultAssistantCapabilityRegistry
   .register(searchKnowledgeCapability)
   .register(writeNoteCapability)
-  .register(searchImagesCapability)
   .register(createBookContextCapability)
   .register(writeBookCapability)
-  .registerSurface('knowledge-workspace', ['search_knowledge', 'write_note'])
-  .registerSurface('media-workspace', ['search_images'])
-  .registerSurface('book-workspace', ['book_create_context', 'book_write'])
-  .registerSurface('travel-workspace', ['search_knowledge']);
+  .registerSurface('knowledge-workspace', [...archiveCapabilities.map(({ definition }) => definition.name), 'search_knowledge', 'write_note'])
+  .registerSurface('media-workspace', galleryAssistantCapabilityNames)
+  .registerSurface('book-workspace', [...ascendCapabilities.map(({ definition }) => definition.name), 'book_create_context', 'book_write'])
+  .registerSurface('travel-workspace', compassCapabilities.map(({ definition }) => definition.name))
+  .registerSurface('signal-workspace', signalCapabilities.map(({ definition }) => definition.name));

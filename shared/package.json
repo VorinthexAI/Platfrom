@@ -27,6 +27,10 @@
       "react-native": "./packages/ui/components/core-composer/core-composer.mobile.tsx",
       "default": "./packages/ui/components/core-composer/core-composer.web.tsx"
     },
+    "./ui/tabs": {
+      "react-native": "./packages/ui/components/tabs/tabs.mobile.tsx",
+      "default": "./packages/ui/components/tabs/tabs.web.tsx"
+    },
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
     "./ui/icons-mobile": "./packages/ui/icons-mobile.ts",

@@ -1,20 +1,26 @@
 import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
+import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { ChevronLeftIcon, InboxIcon, MailIcon, MoreHorizontalIcon, SearchIcon, SendIcon, StarIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
+import { ChromeIcon } from "@/components/ChromeIcon";
+import { assistantIconSource } from "@/data/capability-icons";
 import { type CapabilitySlug } from "@/data/registry";
 import {
   createEmailDraft,
+  askEmailAssistant,
   disconnectEmail,
   exchangeEmailConnection,
   fetchEmailOverview,
   fetchEmailThread,
+  getEmailContext,
   getEmailPermissions,
   launchEmailConnection,
   sendEmailDraft,
@@ -28,6 +34,7 @@ import {
   type EmailThread,
   type EmailTone,
 } from "@/lib/email-client";
+import { invalidateAssistantChanges, patchSignalThread, signalQueryKeys } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 type Sheet = "reply" | "account" | "disconnect" | "discard";
@@ -58,11 +65,14 @@ function stateLabel(thread: EmailThread) {
 const EMPTY_COUNTS: EmailOverview["counts"] = { all: 0, important: 0, urgent: 0, needsAction: 0, filtered: 0, unread: 0, favorite: 0 };
 
 export function EmailWorkspace() {
+  const queryClient = useQueryClient();
+  const emailContext = getEmailContext();
   const navigation = useNavigation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ email_connection_code?: string; email_connection_error?: string }>();
   const processedConnectionCode = useRef<string | undefined>(undefined);
+  const assistantRequestKey = useRef<string | undefined>(undefined);
   const overviewRequest = useRef(0);
   const [overview, setOverview] = useState<EmailOverview>();
   const [filter, setFilter] = useState<EmailFilter>("all");
@@ -83,6 +93,9 @@ export function EmailWorkspace() {
   const [pendingExit, setPendingExit] = useState<"inbox" | "native" | "disconnect" | CapabilitySlug>();
   const [loadError, setLoadError] = useState<string>();
   const [error, setError] = useState<string | undefined>(params.email_connection_error ? "Gmail connection was not completed." : undefined);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantMessage, setAssistantMessage] = useState<string>();
+  const [assistantBusy, setAssistantBusy] = useState(false);
   const nativeNavigationAction = useRef<Parameters<typeof navigation.dispatch>[0] | undefined>(undefined);
   const allowNavigation = useRef(false);
   const replyDirty = Boolean(draft || draftText.trim() || instruction.trim());
@@ -92,7 +105,7 @@ export function EmailWorkspace() {
     const request = ++overviewRequest.current;
     setLoadError(undefined);
     try {
-      const value = await fetchEmailOverview({ filter: nextFilter, search: nextQuery || undefined });
+      const value = await queryClient.fetchQuery({ queryKey: signalQueryKeys.overview(emailContext, nextFilter, nextQuery), queryFn: () => fetchEmailOverview({ filter: nextFilter, search: nextQuery || undefined }) });
       if (request === overviewRequest.current) setOverview(value);
       return true;
     } catch (failure) {
@@ -109,9 +122,9 @@ export function EmailWorkspace() {
   useEffect(() => {
     let active = true;
     const request = ++overviewRequest.current;
-    void fetchEmailOverview().then((value) => { if (active && request === overviewRequest.current) setOverview(value); }).catch((failure: unknown) => { if (active && request === overviewRequest.current) setLoadError(messageFor(failure)); }).finally(() => { if (active && request === overviewRequest.current) setLoading(false); });
+    void queryClient.fetchQuery({ queryKey: signalQueryKeys.overview(emailContext), queryFn: () => fetchEmailOverview() }).then((value) => { if (active && request === overviewRequest.current) setOverview(value); }).catch((failure: unknown) => { if (active && request === overviewRequest.current) setLoadError(messageFor(failure)); }).finally(() => { if (active && request === overviewRequest.current) setLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [emailContext.organizationKey, emailContext.scopeKey, queryClient]);
 
   useEffect(() => {
     const code = typeof params.email_connection_code === "string" ? params.email_connection_code : undefined;
@@ -156,7 +169,7 @@ export function EmailWorkspace() {
   async function openThread(thread: EmailThread) {
     setOpeningThreadKey(thread.key); setError(undefined);
     try {
-      const detail = await fetchEmailThread(thread.key);
+      const detail = await queryClient.fetchQuery({ queryKey: signalQueryKeys.detail(emailContext, thread.key), queryFn: () => fetchEmailThread(thread.key) });
       setDraft(undefined); setDraftText(""); setInstruction(""); setTone("concise");
       setSelected(detail);
       const becameRead = Boolean(thread.unread && !detail.thread.unread);
@@ -200,6 +213,8 @@ export function EmailWorkspace() {
       const updated = await setEmailThreadFavorite(selected.thread.key, !selected.thread.isFavorite);
       const delta = updated.isFavorite ? 1 : -1;
       setSelected((current) => current ? { ...current, thread: updated } : current);
+      patchSignalThread(queryClient, emailContext, updated);
+      await queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(emailContext), refetchType: "none" });
       setOverview((current) => current ? {
         ...current,
         threads: current.threads.map((thread) => thread.key === updated.key ? updated : thread).filter((thread) => filter !== "favorite" || thread.isFavorite),
@@ -223,6 +238,10 @@ export function EmailWorkspace() {
     try {
       const prepared = draftText.trim() === (draft.finalContent ?? draft.generatedContent).trim() ? draft : await updateEmailDraft(draft.key, draftText.trim());
       await sendEmailDraft(prepared.key);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: signalQueryKeys.overviews(emailContext) }),
+        selected ? queryClient.invalidateQueries({ queryKey: signalQueryKeys.detail(emailContext, selected.thread.key), exact: true }) : Promise.resolve(),
+      ]);
       setSheetOpen(false); resetReply();
       const threadKey = selected?.thread.key;
       try {
@@ -238,6 +257,7 @@ export function EmailWorkspace() {
     setBusy("disconnect"); setError(undefined);
     try {
       await disconnectEmail();
+      await queryClient.invalidateQueries({ queryKey: signalQueryKeys.all(emailContext) });
       setSheetOpen(false); setSelected(undefined); resetReply();
       setFilter("all"); setPendingFilter(undefined); setQuery(""); setSubmittedQuery("");
       setOverview({ account: null, connector: null, threads: [], counts: EMPTY_COUNTS });
@@ -245,6 +265,24 @@ export function EmailWorkspace() {
       catch { setError("Gmail was disconnected. Refresh Signal to confirm the latest account state."); }
     } catch (failure) { setError(messageFor(failure)); }
     finally { setBusy(undefined); }
+  }
+  async function askAssistant() {
+    const value = assistantInput.trim();
+    if (!value) return;
+    setAssistantBusy(true); setAssistantMessage(undefined);
+    try {
+      assistantRequestKey.current ??= `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const result = await askEmailAssistant(value, assistantRequestKey.current);
+      assistantRequestKey.current = undefined;
+      await invalidateAssistantChanges(queryClient, emailContext, result.changes);
+      setAssistantMessage(result.message);
+      setAssistantInput("");
+      if (result.changes?.some(({ workspace }) => workspace === "signal")) {
+        await load();
+        if (selected) setSelected(await queryClient.fetchQuery({ queryKey: signalQueryKeys.detail(emailContext, selected.thread.key), queryFn: () => fetchEmailThread(selected.thread.key) }));
+      }
+    } catch (failure) { setAssistantMessage(messageFor(failure)); }
+    finally { setAssistantBusy(false); }
   }
 
   const connected = Boolean(overview?.connector && overview.account);
@@ -321,6 +359,22 @@ export function EmailWorkspace() {
         {permissions.canMutate ? <View style={[styles.replyDock, { paddingBottom: Math.max(insets.bottom, 12) }]}><Button disabled={Boolean(busy)} icon={<SendIcon size="sm" variant="inverse" />} onPress={openReply} size="lg" variant="primary">Draft reply</Button></View> : null}
       </View> : null}
 
+      {!loading && !loadError && connected ? <View style={[styles.assistantDock, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <CoreComposer
+          accessibilityLabel="Ask Core about Signal"
+          disabled={assistantBusy || workspaceBusy}
+          editable={!assistantBusy && !workspaceBusy}
+          leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
+          loading={assistantBusy}
+          message={assistantMessage ? <Text style={styles.assistantMessage}>{assistantMessage}</Text> : null}
+          onChangeText={(value) => { setAssistantInput(value); assistantRequestKey.current = undefined; }}
+          onSubmit={() => void askAssistant()}
+          prompts={["Show urgent messages", "Sync my inbox", "Draft a warm reply"]}
+          sendIcon={<SendIcon size="sm" />}
+          value={assistantInput}
+        />
+      </View> : null}
+
       <BottomSheet description={sheetDescription} dismissible={!busy} mutation={sheet === "reply" || sheet === "disconnect" || sheet === "discard"} onOpenChange={(open) => { setSheetOpen(open); if (!open && sheet === "discard") setPendingExit(undefined); }} open={sheetOpen} tall={sheet === "reply"} title={sheetTitle}>
         <ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {error ? <View accessibilityLiveRegion="assertive" accessibilityRole="alert" style={styles.inlineError}><Text style={styles.errorText}>{error}</Text></View> : null}
@@ -358,6 +412,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.voidBlack },
   header: { minHeight: 64, paddingBottom: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: palette.hairline, backgroundColor: palette.page, zIndex: 4 },
   headerActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  assistantDock: { paddingHorizontal: spacing.md, paddingTop: 8, borderTopWidth: 1, borderTopColor: palette.hairline, backgroundColor: palette.page },
+  assistantMessage: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 12, lineHeight: 18 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 14, paddingHorizontal: spacing.xl },
   centerText: { maxWidth: 320, color: palette.silver300, fontFamily: fonts.regular, fontSize: 13, lineHeight: 20, textAlign: "center" },
   connectScene: { flexGrow: 1, justifyContent: "center", paddingHorizontal: spacing.xl },

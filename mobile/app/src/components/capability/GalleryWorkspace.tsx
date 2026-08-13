@@ -1,4 +1,5 @@
 import { Image } from "expo-image";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
@@ -24,6 +25,7 @@ import {
   fetchGalleryUploadStatus,
   findInitialMediaCollection,
   findGalleryCollectionDuplicates,
+  getGalleryContext,
   listGallerySubjectImages,
   listGallerySubjects,
   restoreGallerySubject,
@@ -36,6 +38,8 @@ import {
   type GallerySubject,
   type PreparedGalleryUpload,
 } from "@/lib/gallery-client";
+import { getContentContext } from "@/lib/content-client";
+import { galleryQueryKeys, invalidateAssistantChanges, patchGalleryImage } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 type GallerySheet = "actions" | "source" | "destination" | "newCollection" | "image" | "collectionMenu" | "confirmDeleteDuplicates" | "createSubject" | "subjects" | "transferDestination";
@@ -55,6 +59,8 @@ function errorMessage(error: unknown) {
 }
 
 export function GalleryWorkspace() {
+  const queryClient = useQueryClient();
+  const galleryContext = getGalleryContext();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const [collections, setCollections] = useState<GalleryCollection[]>([]);
@@ -99,7 +105,7 @@ export function GalleryWorkspace() {
     const request = ++viewRequest.current;
     setLoading(true);
     try {
-      const overview = await fetchGalleryOverview(collection?.key);
+      const overview = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collection?.key), queryFn: () => fetchGalleryOverview(collection?.key) });
       if (request !== viewRequest.current) return;
       setCollections(overview.collections);
       setImages(overview.images);
@@ -115,7 +121,7 @@ export function GalleryWorkspace() {
     if (showingSearchResults || activeSubject) return;
     const request = ++viewRequest.current;
     setLoading(true);
-    void fetchGalleryOverview(activeCollection?.key).then((overview) => {
+    void queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, activeCollection?.key), queryFn: () => fetchGalleryOverview(activeCollection?.key) }).then((overview) => {
       if (request !== viewRequest.current) return;
       setCollections(overview.collections);
       if (!activeCollection && !initialCollectionResolved.current) {
@@ -131,7 +137,7 @@ export function GalleryWorkspace() {
       setImages(overview.images);
       setStatus(undefined);
     }).catch((error: unknown) => { if (request === viewRequest.current) setStatus(errorMessage(error)); }).finally(() => { if (request === viewRequest.current) setLoading(false); });
-  }, [activeCollection?.key, activeSubject?.key, showingSearchResults]);
+  }, [activeCollection?.key, activeSubject?.key, showingSearchResults, galleryContext.organizationKey, galleryContext.scopeKey, queryClient]);
 
   async function loadSubjects() {
     try {
@@ -219,6 +225,7 @@ export function GalleryWorkspace() {
           const current = await fetchGalleryUploadStatus(uploadKeys);
           if (current.jobs.every(({ status: jobStatus }) => jobStatus === "completed" || jobStatus === "failed")) break;
         }
+        await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
         if (uploadView === viewRequest.current) await load();
         await loadSubjects();
       })().catch((error: unknown) => setStatus(errorMessage(error)));
@@ -235,6 +242,7 @@ export function GalleryWorkspace() {
     setBusy(true);
     try {
       const collection = await createGalleryCollection(name);
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       setCollections((current) => [...current, collection]);
       setNewCollectionName("");
       if (pendingFiles.length) await uploadTo(collection.key);
@@ -302,6 +310,7 @@ export function GalleryWorkspace() {
       if (request !== imageSheetRequest.current) return;
       setSelectedImage(image);
       setImages((current) => current.map((candidate) => candidate.key === image.key ? image : candidate));
+      patchGalleryImage(queryClient, galleryContext, image);
     } catch (error) {
       setImageError(errorMessage(error));
     } finally {
@@ -340,6 +349,7 @@ export function GalleryWorkspace() {
     setBusy(true);
     try {
       const deleted = await deleteGalleryCollectionDuplicates(activeCollection.key, images.map(({ key }) => key));
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       setCollections((current) => current.map((collection) => collection.key === activeCollection.key
         ? { ...collection, count: Math.max(0, collection.count - deleted.removedImageKeys.length) }
         : collection));
@@ -451,6 +461,7 @@ export function GalleryWorkspace() {
     setBusy(true);
     try {
       const result = await transferGalleryCollectionImages({ sourceCollectionKey: activeCollection.key, destinationCollectionKeys, imageKeys: selectedImageKeys, mode: transferMode });
+      await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
       setSheetOpen(false);
       setSelectedImageKeys([]);
       setDestinationCollectionKeys([]);
@@ -474,23 +485,23 @@ export function GalleryWorkspace() {
     setAssistantBusy(true);
     setAiInput("");
     try {
-      const searchRequest = searchGalleryImages({ query: message, limit: 50 }).then((result) => {
-        if (request !== viewRequest.current) return result;
-        setActiveCollection(undefined);
-        setActiveSubject(undefined);
-        setShowingDuplicates(false);
-        setShowingSearchResults(true);
-        setSelectedImageKeys([]);
-        setImages(result.images);
-        setStatus(`${result.images.length} image${result.images.length === 1 ? "" : "s"} found by your Gallery assistant.`);
-        return result;
-      });
-      const [assistantResult, searchResult] = await Promise.allSettled([askGalleryAssistant(message), searchRequest]);
+      const assistantResult = await askGalleryAssistant(message);
+      await invalidateAssistantChanges(queryClient, getContentContext(), assistantResult.changes);
       if (request !== viewRequest.current) return;
-      if (searchResult.status === "fulfilled" && searchResult.value.images.length > 0) setAiResponse(`I found ${searchResult.value.images.length} matching image${searchResult.value.images.length === 1 ? "" : "s"}.`);
-      else if (assistantResult.status === "fulfilled") setAiResponse(assistantResult.value.message);
-      else if (searchResult.status === "fulfilled") setAiResponse("I could not find a matching image.");
-      else throw assistantResult.reason;
+      if (assistantResult.type === "unsupported") {
+        setAiResponse(assistantResult.message);
+        return;
+      }
+      const searchResult = await searchGalleryImages({ query: message, limit: 50 });
+      if (request !== viewRequest.current) return;
+      setActiveCollection(undefined);
+      setActiveSubject(undefined);
+      setShowingDuplicates(false);
+      setShowingSearchResults(true);
+      setSelectedImageKeys([]);
+      setImages(searchResult.images);
+      setStatus(`${searchResult.images.length} image${searchResult.images.length === 1 ? "" : "s"} found by your Gallery assistant.`);
+      setAiResponse(searchResult.images.length > 0 ? `I found ${searchResult.images.length} matching image${searchResult.images.length === 1 ? "" : "s"}.` : assistantResult.message);
     } catch (error) {
       if (request === viewRequest.current) setAiResponse(errorMessage(error));
     } finally {
@@ -591,6 +602,7 @@ export function GalleryWorkspace() {
         loading={assistantBusy}
         message={aiResponse ? <Text numberOfLines={3} style={styles.aiResponse}>{aiResponse}</Text> : null}
         onChangeText={setAiInput}
+        onFocusChange={(focused) => { if (!focused) setAiResponse(undefined); }}
         onSubmit={() => void askAssistant()}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiClient } from "@/lib/api-client";
+import { assistantChangesSchema } from "@/lib/assistant-changes";
 import { useAuthStore } from "@/state/auth";
 
 const keySchema = z.string().min(1);
@@ -47,8 +48,9 @@ export type Trip = z.infer<typeof tripSchema>;
 
 const overviewSchema = z.object({ places: z.array(placeSchema), trips: z.array(tripSchema) });
 const assistantResponseSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })) }),
-  z.object({ type: z.literal("note"), content: z.string(), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })) }),
+  z.object({ type: z.literal("answer"), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
+  z.object({ type: z.literal("note"), content: z.string(), message: z.string().min(1), sources: z.array(z.object({ documentKey: keySchema, name: z.string().min(1) })), changes: assistantChangesSchema }),
+  z.object({ type: z.literal("unsupported"), message: z.string().min(1), sources: z.tuple([]), changes: assistantChangesSchema }),
 ]);
 const contextSchema = z.strictObject({ organizationKey: keySchema, scopeKey: keySchema });
 const createPlaceSchema = z.strictObject({

@@ -1,4 +1,5 @@
 import { Image } from "expo-image";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { randomUUID } from "expo-crypto";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -50,11 +51,14 @@ import {
   createBook,
   fetchBookDetail,
   fetchBooksOverview,
+  getBooksContext,
   updateBookChapterProgress,
   type Book,
   type BookDetail,
   type CreateBookInput,
 } from "@/lib/books-client";
+import { getContentContext } from "@/lib/content-client";
+import { addCachedBook, ascendQueryKeys, invalidateAssistantChanges, patchCachedBookDetail } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 
 const CORE_PROMPTS = [
@@ -423,6 +427,8 @@ function Reader({
 }
 
 export function AscendWorkspace() {
+  const queryClient = useQueryClient();
+  const booksContext = getBooksContext();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const horizontalInset = Math.max(insets.left, insets.right, spacing.md);
@@ -441,12 +447,14 @@ export function AscendWorkspace() {
   const [busy, setBusy] = useState(false);
   const [openingBookKey, setOpeningBookKey] = useState<string>();
   const [message, setMessage] = useState<string>();
+  const [assistantMessage, setAssistantMessage] = useState<string>();
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT);
   const generationRequestKey = useRef<string | undefined>(undefined);
   const assistantRequestKey = useRef<string | undefined>(undefined);
+  const overviewQuery = useQuery({ queryKey: ascendQueryKeys.overview(booksContext), queryFn: fetchBooksOverview });
   const dirty = Object.entries(draft).some(
     ([key, value]) => value !== INITIAL_DRAFT[key as keyof Draft],
   );
@@ -454,7 +462,7 @@ export function AscendWorkspace() {
   async function load() {
     setLoading(true);
     try {
-      setBooks((await fetchBooksOverview()).books);
+      setBooks((await queryClient.fetchQuery({ queryKey: ascendQueryKeys.overview(booksContext), queryFn: fetchBooksOverview })).books);
       setLoadError(undefined);
     } catch (error) {
       setLoadError(errorMessage(error));
@@ -463,23 +471,15 @@ export function AscendWorkspace() {
     }
   }
   useEffect(() => {
-    let active = true;
-    void fetchBooksOverview()
-      .then((overview) => {
-        if (!active) return;
-        setBooks(overview.books);
-        setLoadError(undefined);
-      })
-      .catch((error: unknown) => {
-        if (active) setLoadError(errorMessage(error));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (overviewQuery.data) {
+      setBooks(overviewQuery.data.books);
+      setLoadError(undefined);
+      setLoading(false);
+    } else if (overviewQuery.error) {
+      setLoadError(errorMessage(overviewQuery.error));
+      setLoading(false);
+    }
+  }, [overviewQuery.data, overviewQuery.error]);
   function open(next: Sheet) {
     setSheet(next);
     setSheetOpen(true);
@@ -502,7 +502,7 @@ export function AscendWorkspace() {
     setOpeningBookKey(book.key);
     setMessage(undefined);
     try {
-      const next = await fetchBookDetail(book.key);
+      const next = await queryClient.fetchQuery({ queryKey: ascendQueryKeys.detail(booksContext, book.key), queryFn: () => fetchBookDetail(book.key) });
       setDetail(next);
       open("reader");
     } catch (error) {
@@ -516,16 +516,16 @@ export function AscendWorkspace() {
     const value = assistantInput.trim();
     if (!value) return;
     setAssistantBusy(true);
-    setMessage(undefined);
+    setAssistantMessage(undefined);
     try {
       assistantRequestKey.current ??= randomUUID();
       const result = await askBookAssistant(value, assistantRequestKey.current);
       setAssistantInput("");
       assistantRequestKey.current = undefined;
-      setMessage(result.message);
-      await load();
+      setAssistantMessage(result.message);
+      await invalidateAssistantChanges(queryClient, getContentContext(), result.changes);
     } catch (error) {
-      setMessage(errorMessage(error));
+      setAssistantMessage(errorMessage(error));
     } finally {
       setAssistantBusy(false);
     }
@@ -542,6 +542,7 @@ export function AscendWorkspace() {
         generationRequestKey.current,
       );
       setBooks((current) => [created, ...current]);
+      addCachedBook(queryClient, booksContext, created);
       setSheetOpen(false);
       setDraft(INITIAL_DRAFT);
       generationRequestKey.current = undefined;
@@ -685,10 +686,12 @@ export function AscendWorkspace() {
         editable={!assistantBusy && !busy}
         leading={<ChromeIcon glow={0.35} size={24} source={assistantIconSource} />}
         loading={assistantBusy}
+        message={assistantMessage ? <View style={styles.message}><Text style={styles.messageText}>{assistantMessage}</Text></View> : null}
         onChangeText={(value) => {
           setAssistantInput(value);
           assistantRequestKey.current = undefined;
         }}
+        onFocusChange={(focused) => { if (!focused) setAssistantMessage(undefined); }}
         onSubmit={() => void askAssistant()}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" variant="inverse" />}
@@ -926,6 +929,7 @@ export function AscendWorkspace() {
             initialChapter={detail.book.currentChapterKey}
             onChange={(next) => {
               setDetail(next);
+              patchCachedBookDetail(queryClient, booksContext, next);
               setBooks((current) =>
                 current.map((book) =>
                   book.key === next.book.key ? next.book : book,

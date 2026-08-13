@@ -9,7 +9,7 @@ mock.module("@/state/auth", () => ({ useAuthStore: { getState: () => authState }
 mock.module("./api-client", () => ({ apiClient: {
   post: async (path: string, body: unknown, config?: unknown) => {
     calls.push({ method: "POST", path, body, config });
-    const data = path === "/books/overview" ? { books: [book] } : path === "/books" ? book : path === "/assistant/respond" ? { type: "answer", message: "Your book is ready.", sources: [] } : { book, chapters: [chapter] };
+    const data = path === "/books/overview" ? { books: [book] } : path === "/books" ? book : path === "/assistant/respond" ? (body as { input?: { message?: string } }).input?.message.includes("weather") ? { type: "unsupported", message: "This request is not supported in Ascend.", sources: [] } : { type: "answer", message: "Your book is ready.", sources: [] } : { book, chapters: [chapter] };
     return { data: { success: true, data } };
   },
   patch: async (path: string, body: unknown, config?: unknown) => {
@@ -45,4 +45,8 @@ test("asks Core to create books on the scoped book workspace", async () => {
   expect(await client.askBookAssistant("Create a short book about useful habits", "request-key")).toEqual({ type: "answer", message: "Your book is ready.", sources: [] });
   expect(calls[0]).toMatchObject({ method: "POST", path: "/assistant/respond", config: { timeout: 15 * 60_000 } });
   expect(calls[0]?.body).toEqual({ organizationKey: "org-key", agentKey: "agent-key", input: { surface: "book-workspace", requestKey: "request-key", message: "Create a short book about useful habits", currentNote: { title: "", content: "" } } });
+});
+
+test("parses unsupported Ascend requests", async () => {
+  expect(await client.askBookAssistant("What is the weather?", "request-key")).toEqual({ type: "unsupported", message: "This request is not supported in Ascend.", sources: [] });
 });

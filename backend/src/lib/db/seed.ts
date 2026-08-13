@@ -6,7 +6,7 @@ import { getProviderBySlug, insertProvider, updateProvider, type Provider } from
 import { getModelBySlug, insertModel, updateModel as updatePersistedModel, type Model } from './models.node';
 import { getModelActionById, getModelActionByPair, insertModelAction, modelActionSeedSchema, updateModelAction } from './model-actions.node';
 import { isArangoUniqueConstraintError } from './base';
-import { getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
+import { getModelProviderById, getModelProviderByPair, insertModelProvider, modelProviderSeedSchema, updateModelProvider, type ModelProvider } from './model-providers.node';
 import { getRootOrganization, insertOrganization, updateOrganization, type Organization } from './organizations.node';
 import { getUserOrganizationByOrganizationAndUser, updateUserOrganization } from './user-organization.node';
 import { getUserByEmail } from './users.node';
@@ -1235,14 +1235,16 @@ async function upsertSeedModelProvider(seed: (typeof SEEDED_MODEL_PROVIDERS)[num
 
   const existing = await getModelProviderByPair(model.key, provider.key);
   if (!existing) {
+    const keyOwner = await getModelProviderById(parsed.key);
+    const key = keyOwner ? newId() : parsed.key;
     await insertModelProvider({
-      key: parsed.key,
+      key,
       modelKey: model.key,
       providerKey: provider.key,
       providerModelId: parsed.providerModelId,
       enabled: parsed.enabled,
     });
-    return { collection: 'modelProviders', key: parsed.key, status: 'created' };
+    return { collection: 'modelProviders', key, status: 'created' };
   }
 
   await updateModelProvider(existing.key, {

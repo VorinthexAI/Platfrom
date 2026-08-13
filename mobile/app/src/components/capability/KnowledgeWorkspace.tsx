@@ -1,12 +1,13 @@
 import { useNavigation } from "expo-router";
-import { Directory, File, Paths } from "expo-file-system";
-import { EncodingType, writeAsStringAsync } from "expo-file-system/legacy";
+import { File, Paths } from "expo-file-system";
 import { useEffect, useRef, useState } from "react";
 import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import {
   ArchiveIcon,
@@ -41,13 +42,9 @@ import {
   downloadContentDocument,
   enhanceContent,
   isContentContextConfigured,
-  loadInitialContentLocation,
   listContentDocumentVersions,
-  listContentLocation,
-  listContentSearchHistory,
   moveContentFolder,
   moveContentDocument,
-  readContentDocument,
   renameContentDocument,
   restoreContentDocumentVersion,
   saveContentDocument,
@@ -64,12 +61,27 @@ import {
   type ContentSearchResponse,
   type PersonalAssistantResponse,
 } from "@/lib/content-client";
+import {
+  contentQueryKeys,
+  getContentDocument,
+  getContentHistory,
+  getContentLocation,
+  invalidateContentLocations,
+  refreshContentDocument,
+  refreshContentHistory,
+  refreshContentLocation,
+  replaceCachedContentDocument,
+  replaceCachedContentFolder,
+} from "@/lib/content-query-cache";
+import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { applyEnhancement, resolveEnhancementTarget, type TextRange } from "@/lib/note-enhancement";
+import { saveBase64Download } from "@/lib/device-download";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor";
+type FolderContentTab = "folders" | "documents";
 type ArchiveSheet = "create" | "folder" | "destinationFolder" | "library" | "documents" | "folders" | "enhance" | "translate" | "versions" | "restoreVersion" | "documentActions" | "destination" | "rename" | "summary" | "uploads" | "folderActions" | "folderDetails";
 type DestinationAction = "upload" | "move" | "copy" | "moveFolder";
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
@@ -111,6 +123,7 @@ function lastWords(value: string, count: number) {
 }
 
 export function KnowledgeWorkspace() {
+  const queryClient = useQueryClient();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
@@ -122,11 +135,13 @@ export function KnowledgeWorkspace() {
   const reconnectContentContext = useAuthStore((state) => state.reconnectContentContext);
   const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
   const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
+  const contentContext = { organizationKey, scopeKey, agentKey };
   const draftIdentity = userKey && organizationKey && scopeKey ? `${userKey}:${organizationKey}:${scopeKey}` : "";
   const localDraftFile = draftFileFor(draftIdentity || "unavailable");
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
+  const [sheetStatus, setSheetStatus] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -155,6 +170,7 @@ export function KnowledgeWorkspace() {
   const [rootDocuments, setRootDocuments] = useState<ContentDocument[]>([]);
   const [folderStack, setFolderStack] = useState<ContentFolder[]>([]);
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("folders");
+  const [folderContentTab, setFolderContentTab] = useState<FolderContentTab>("folders");
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [locationLoading, setLocationLoading] = useState(true);
@@ -270,6 +286,7 @@ export function KnowledgeWorkspace() {
   const openSheet = (sheet: ArchiveSheet) => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     setSheetError(undefined);
+    setSheetStatus(undefined);
     sheetBackStack.current = [];
     setActiveSheet(sheet);
     setSheetOpen(true);
@@ -279,6 +296,7 @@ export function KnowledgeWorkspace() {
     const current = activeSheetRef.current;
     if (current) sheetBackStack.current.push(current);
     setSheetError(undefined);
+    setSheetStatus(undefined);
     setActiveSheet(sheet);
   };
 
@@ -286,6 +304,7 @@ export function KnowledgeWorkspace() {
     const previous = sheetBackStack.current.pop();
     if (!previous) return;
     setSheetError(undefined);
+    setSheetStatus(undefined);
     setActiveSheet(previous);
   };
 
@@ -361,8 +380,10 @@ export function KnowledgeWorkspace() {
     setError("Wait for the current note to save before leaving.");
   }), [hasContentContext, navigation, saveState]);
 
-  const loadLocation = async (folderKey?: string) => {
-    const location = await listContentLocation(folderKey);
+  const loadLocation = async (folderKey?: string, refresh = false) => {
+    const location = await (refresh
+      ? refreshContentLocation(queryClient, contentContext, folderKey)
+      : getContentLocation(queryClient, contentContext, folderKey));
     setFolders(location.folders);
     if (!folderKey) {
       setRootFolders(location.folders);
@@ -381,7 +402,7 @@ export function KnowledgeWorkspace() {
       const draft = JSON.parse(value) as LocalDraft;
       const draftDocumentKey = typeof draft.documentKey === "string" ? draft.documentKey : undefined;
       if (hasContentContext && draftDocumentKey && !pendingCreateFrom(draft.pendingCreate)) {
-        const remote = await readContentDocument(draftDocumentKey);
+        const remote = await getContentDocument(queryClient, contentContext, draftDocumentKey);
         if (revision.current !== initialRevision || draftIdentityRef.current !== expectedDraftIdentity) return;
         if (remote.extension) {
           localDraftFile.delete();
@@ -484,9 +505,11 @@ export function KnowledgeWorkspace() {
       setLocationLoading(true);
     }
     void (async () => {
-      const initial = await loadInitialContentLocation();
+      const root = await getContentLocation(queryClient, contentContext);
+      const initialFolder = root.folders.find((folder) => folder.name === "My Documents");
+      const initial = { root, location: initialFolder ? await getContentLocation(queryClient, contentContext, initialFolder.key) : root, initialFolder };
       const useInitialFolder = workspaceModeRef.current !== "folders" && Boolean(initial.initialFolder);
-      const recent = await listContentSearchHistory(useInitialFolder ? initial.initialFolder?.key : undefined, true);
+      const recent = await getContentHistory(queryClient, contentContext, useInitialFolder ? initial.initialFolder?.key : undefined);
       return { initial, recent, useInitialFolder };
     })()
       .then(({ initial, recent, useInitialFolder }) => {
@@ -584,7 +607,16 @@ export function KnowledgeWorkspace() {
         } else {
           setSaveState("dirty");
         }
-        await loadLocation(currentFolder?.key);
+        if (activeKey) queryClient.setQueryData(contentQueryKeys.document(contentContext, activeKey), (cached: (ContentDocument & { content: string }) | undefined) => ({
+          ...cached,
+          key: activeKey,
+          name: nextTitle,
+          folderKey: currentFolder?.key,
+          isFavorite: cached?.isFavorite ?? activeDocument?.isFavorite ?? false,
+          updatedAt: activeUpdatedAt!,
+          content: nextContent,
+        }));
+        await loadLocation(currentFolder?.key, true);
       })().catch((cause: unknown) => {
         if (session !== editorSession.current) return;
         setSaveState("error");
@@ -691,6 +723,7 @@ export function KnowledgeWorkspace() {
         return;
       }
       setAiResponse(result);
+      await invalidateAssistantChanges(queryClient, contentContext, result.changes);
       setAiInstruction("");
       if (result.type === "note") {
         contentRef.current = result.content;
@@ -748,11 +781,11 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       await translateContentDocument(documentKey, language);
-      const document = await readContentDocument(documentKey);
+      const document = await refreshContentDocument(queryClient, contentContext, documentKey);
       if (generation !== translationGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
       applyRemoteDocument(document);
       setTargetLanguage("");
-      const location = await listContentLocation(visibleFolderKey);
+      const location = await refreshContentLocation(queryClient, contentContext, visibleFolderKey);
       if (generation !== translationGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
       if (currentFolderKeyRef.current === visibleFolderKey) {
         setFolders(location.folders);
@@ -804,10 +837,10 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       await restoreContentDocumentVersion(documentKey, versionKey);
-      const document = await readContentDocument(documentKey);
+      const document = await refreshContentDocument(queryClient, contentContext, documentKey);
       if (generation !== restoreGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
       applyRemoteDocument(document);
-      const location = await listContentLocation(visibleFolderKey);
+      const location = await refreshContentLocation(queryClient, contentContext, visibleFolderKey);
       if (generation !== restoreGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
       if (currentFolderKeyRef.current === visibleFolderKey) {
         setFolders(location.folders);
@@ -924,7 +957,7 @@ export function KnowledgeWorkspace() {
     workspaceModeRef.current = "editor";
     setWorkspaceMode("editor");
     try {
-      const opened = await readContentDocument(document.key);
+      const opened = await getContentDocument(queryClient, contentContext, document.key);
       if (generation !== navigationGeneration.current) return false;
       if (opened.extension) {
         setSelectedDocument(opened);
@@ -980,6 +1013,7 @@ export function KnowledgeWorkspace() {
     setRootFolders((current) => current.map(replace));
     setFolderStack((current) => current.map(replace));
     setDestinationFolders((current) => current.map(replace));
+    replaceCachedContentFolder(queryClient, contentContext, updated);
     if (select) setSelectedFolder(updated);
   };
 
@@ -987,6 +1021,7 @@ export function KnowledgeWorkspace() {
     const replace = (document: ContentDocument) => document.key === updated.key ? updated : document;
     setDocuments((current) => current.map(replace));
     setRootDocuments((current) => current.map(replace));
+    replaceCachedContentDocument(queryClient, contentContext, updated);
     if (select) setSelectedDocument(updated);
   };
 
@@ -1032,15 +1067,19 @@ export function KnowledgeWorkspace() {
     clearCompletion();
     const generation = ++navigationGeneration.current;
     setError(undefined);
-    setLocationLoading(true);
-    setFolders([]);
-    setDocuments([]);
+    const cached = queryClient.getQueryData<{ folders: ContentFolder[]; documents: ContentDocument[] }>(contentQueryKeys.location(contentContext, folder.key));
+    setLocationLoading(!cached);
+    if (cached) {
+      setFolders(cached.folders);
+      setDocuments(cached.documents);
+    }
     setFolderStack((current) => [...current, folder]);
+    setFolderContentTab("folders");
     workspaceModeRef.current = "folder";
     setWorkspaceMode("folder");
     setResults(undefined);
     try {
-      const [location, recent] = await Promise.all([listContentLocation(folder.key), listContentSearchHistory(folder.key, true)]);
+      const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, folder.key), getContentHistory(queryClient, contentContext, folder.key)]);
       if (generation !== navigationGeneration.current) return;
       setFolders(location.folders);
       setDocuments(location.documents);
@@ -1069,17 +1108,21 @@ export function KnowledgeWorkspace() {
     const generation = ++navigationGeneration.current;
     const nextStack = folderStack.slice(0, -1);
     setError(undefined);
-    setLocationLoading(true);
-    setFolders([]);
-    setDocuments([]);
+    const nextFolderKey = nextStack.at(-1)?.key;
+    const cached = queryClient.getQueryData<{ folders: ContentFolder[]; documents: ContentDocument[] }>(contentQueryKeys.location(contentContext, nextFolderKey));
+    setLocationLoading(!cached);
+    if (cached) {
+      setFolders(cached.folders);
+      setDocuments(cached.documents);
+    }
     setFolderStack(nextStack);
+    setFolderContentTab("folders");
     const nextMode = nextStack.length > 0 ? "folder" : "folders";
     workspaceModeRef.current = nextMode;
     setWorkspaceMode(nextMode);
     setResults(undefined);
     try {
-      const nextFolderKey = nextStack.at(-1)?.key;
-      const [location, recent] = await Promise.all([listContentLocation(nextFolderKey), listContentSearchHistory(nextFolderKey, true)]);
+      const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, nextFolderKey), getContentHistory(queryClient, contentContext, nextFolderKey)]);
       if (generation !== navigationGeneration.current) return;
       setFolders(location.folders);
       setDocuments(location.documents);
@@ -1132,7 +1175,7 @@ export function KnowledgeWorkspace() {
     try {
       const response = await searchContent(normalized, folderKey, true);
       if (generation !== navigationGeneration.current) return;
-      const recent = await listContentSearchHistory(folderKey, true);
+      const recent = await refreshContentHistory(queryClient, contentContext, folderKey);
       if (generation !== navigationGeneration.current) return;
       setQuery(response.query);
       setResults(response);
@@ -1155,7 +1198,7 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       await createContentFolder(name, currentFolder?.key, folderDescription.trim() || undefined);
-      await loadLocation(currentFolder?.key);
+      await loadLocation(currentFolder?.key, true);
       setFolderName("");
       setFolderDescription("");
       closeSheet();
@@ -1176,7 +1219,7 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       if (hasContentContext) {
-        const [location, recent] = await Promise.all([listContentLocation(), listContentSearchHistory(undefined, true)]);
+        const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext), getContentHistory(queryClient, contentContext)]);
         if (generation !== navigationGeneration.current) return;
         setFolders(location.folders);
         setRootFolders(location.folders);
@@ -1209,7 +1252,7 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       if (hasContentContext) {
-        const [location, recent] = await Promise.all([listContentLocation(folder.key), listContentSearchHistory(folder.key, true)]);
+        const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, folder.key), getContentHistory(queryClient, contentContext, folder.key)]);
         if (generation !== navigationGeneration.current) return;
         setFolders(location.folders);
         setDocuments(location.documents);
@@ -1273,7 +1316,7 @@ export function KnowledgeWorkspace() {
     if (sheetOpen) pushSheet("destination");
     else openSheet("destination");
     try {
-      const next = (await listContentLocation(startsAtRoot ? undefined : currentFolder?.key)).folders;
+      const next = (await getContentLocation(queryClient, contentContext, startsAtRoot ? undefined : currentFolder?.key)).folders;
       if (generation === destinationGeneration.current) setDestinationFolders(next);
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
@@ -1288,7 +1331,7 @@ export function KnowledgeWorkspace() {
     setDestinationLoading(true);
     setSheetError(undefined);
     try {
-      const next = (await listContentLocation(nextStack.at(-1)?.key)).folders;
+      const next = (await getContentLocation(queryClient, contentContext, nextStack.at(-1)?.key)).folders;
       if (generation !== destinationGeneration.current) return;
       setDestinationFolders(next);
       setDestinationStack(nextStack);
@@ -1308,6 +1351,7 @@ export function KnowledgeWorkspace() {
     setSheetError(undefined);
     try {
       const folder = await createContentFolder(name, parentFolderKey, destinationFolderDescription.trim() || undefined);
+      await invalidateContentLocations(queryClient, contentContext, [parentFolderKey]);
       if (generation !== destinationGeneration.current) return;
       const appendFolder = (current: ContentFolder[]) => current.some((item) => item.key === folder.key) ? current : [...current, folder].sort((left, right) => left.name.localeCompare(right.name));
       if (currentFolderKeyRef.current === parentFolderKey) setFolders(appendFolder);
@@ -1353,8 +1397,11 @@ export function KnowledgeWorkspace() {
         }
       };
       await Promise.all(Array.from({ length: Math.min(2, batch.length) }, () => worker()));
-      const location = await listContentLocation(visibleFolderKey);
-      if (currentFolderKeyRef.current === visibleFolderKey) {
+      await invalidateContentLocations(queryClient, contentContext, [folderKey]);
+      const location = visibleFolderKey === folderKey
+        ? await getContentLocation(queryClient, contentContext, visibleFolderKey)
+        : undefined;
+      if (location && currentFolderKeyRef.current === visibleFolderKey) {
         setFolders(location.folders);
         setDocuments(location.documents);
         if (!visibleFolderKey) {
@@ -1387,11 +1434,12 @@ export function KnowledgeWorkspace() {
       setSheetError(undefined);
       try {
         const moved = await moveContentFolder(selectedFolder.key, folderKey);
+        await invalidateContentLocations(queryClient, contentContext, [sourceParentFolderKey, folderKey]);
         const shouldRefreshVisible = visibleFolderKey !== undefined && (visibleFolderKey === sourceParentFolderKey || visibleFolderKey === folderKey);
         const [location, recent, visibleLocation] = await Promise.all([
-          listContentLocation(),
-          listContentSearchHistory(undefined, true),
-          shouldRefreshVisible ? listContentLocation(visibleFolderKey) : Promise.resolve(undefined),
+          refreshContentLocation(queryClient, contentContext),
+          refreshContentHistory(queryClient, contentContext),
+          shouldRefreshVisible ? refreshContentLocation(queryClient, contentContext, visibleFolderKey) : Promise.resolve(undefined),
         ]);
         if (contentContextKeyRef.current !== requestContextKey) return;
         setRootFolders(location.folders);
@@ -1426,17 +1474,26 @@ export function KnowledgeWorkspace() {
     setDestinationLoading(true);
     setSheetError(undefined);
     try {
+      const sourceFolderKey = selectedDocument.folderKey;
       if (destinationAction === "move") {
         const movingDocumentKey = selectedDocument.key;
         const updated = await trackActiveDocumentMutation(movingDocumentKey, moveContentDocument(movingDocumentKey, folderKey), (result) => {
           if (result.key === documentKeyRef.current) updatedAtRef.current = result.updatedAt;
         });
+        replaceCachedContentDocument(queryClient, contentContext, updated);
         if (generation === destinationGeneration.current) setSelectedDocument(updated);
+        await invalidateContentLocations(queryClient, contentContext, [sourceFolderKey, folderKey]);
       } else {
         await copyContentDocument(selectedDocument.key, folderKey);
+        await invalidateContentLocations(queryClient, contentContext, [folderKey]);
       }
-      const location = await listContentLocation(visibleFolderKey);
-      if (contentContextKeyRef.current === requestContextKey && currentFolderKeyRef.current === visibleFolderKey) {
+      const visibleLocationChanged = destinationAction === "move"
+        ? visibleFolderKey === sourceFolderKey || visibleFolderKey === folderKey
+        : visibleFolderKey === folderKey;
+      const location = visibleLocationChanged
+        ? await getContentLocation(queryClient, contentContext, visibleFolderKey)
+        : undefined;
+      if (location && contentContextKeyRef.current === requestContextKey && currentFolderKeyRef.current === visibleFolderKey) {
         setFolders(location.folders);
         setDocuments(location.documents);
         if (!visibleFolderKey) {
@@ -1476,14 +1533,13 @@ export function KnowledgeWorkspace() {
     const generation = ++documentActionGeneration.current;
     setDocumentActionLoading("download");
     setSheetError(undefined);
+    setSheetStatus(undefined);
     try {
       const download = await downloadContentDocument(selectedDocument.key, selectedDocument.extension ? "original" : "txt");
-      const directory = await Directory.pickDirectoryAsync();
-      const file = directory.createFile(download.fileName, download.mimeType);
-      await writeAsStringAsync(file.uri, download.content, { encoding: EncodingType.Base64 });
+      const location = await saveBase64Download(download.fileName, download.mimeType, download.content);
       if (generation === documentActionGeneration.current && activeSheetRef.current === "documentActions") {
         setDocumentActionLoading(undefined);
-        closeSheet();
+        setSheetStatus(`Saved to ${location}`);
       }
     } catch (cause) {
       if (generation === documentActionGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The original file could not be downloaded.");
@@ -1598,17 +1654,28 @@ export function KnowledgeWorkspace() {
               </View>
             </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
-            <View style={[styles.rootFolderGrid, archiveLocationLoading && styles.loadingGrid]}>
-              {archiveLocationLoading ? Array.from({ length: 6 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />) : folders.map((folder) => (
-                    <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
-                      <Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button>
-                    </View>
-              )).concat(archiveLocationLoading ? [] : documents.map((document) => (
-                <View key={document.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
-                  <Button contentMode="raw" disabled={openingDocumentKey !== undefined} onPress={() => void openArchiveDocument(document)} size="xl" style={styles.rootFolderMain} variant="ghost">{document.isFavorite ? <StarIcon size="lg" /> : <FileIcon size="lg" />}<Text numberOfLines={1} style={styles.archiveCardLabel}>{document.name}</Text></Button>
-                </View>
-              )))}
-            </View>
+            <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders ({folders.length})</Button>
+              <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents ({documents.length})</Button>
+            </Tabs>
+            {folderContentTab === "folders" ? (
+              <View style={[styles.rootFolderGrid, archiveLocationLoading && styles.loadingGrid]}>
+                {archiveLocationLoading ? Array.from({ length: 6 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />) : folders.length ? folders.map((folder) => (
+                  <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
+                    <Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button>
+                  </View>
+                )) : <Text style={styles.empty}>No folders here yet.</Text>}
+              </View>
+            ) : (
+              <View style={styles.folderDocuments}>
+                {archiveLocationLoading ? Array.from({ length: 5 }, (_, index) => <View key={index} style={[styles.documentButton, styles.skeletonCard]} />) : documents.length ? documents.map((document) => (
+                  <Button contentMode="raw" disabled={openingDocumentKey !== undefined} key={document.key} loading={openingDocumentKey === document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
+                    {document.isFavorite ? <StarIcon size="sm" /> : <FileIcon size="sm" />}
+                    <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
+                  </Button>
+                )) : <Text style={styles.empty}>No documents here yet.</Text>}
+              </View>
+            )}
           </View>
         ) : (
         <View style={styles.editorScene}>
@@ -1744,7 +1811,13 @@ export function KnowledgeWorkspace() {
           ) : null}
         </>}
         onChangeText={(value) => { setAiInstruction(value); if (aiInstructionError) setAiInstructionError(undefined); }}
-        onFocusChange={setAiInputFocused}
+        onFocusChange={(focused) => {
+          setAiInputFocused(focused);
+          if (!focused) {
+            setAiResponse(undefined);
+            setAiInstructionError(undefined);
+          }
+        }}
         onLeadingPress={openEnhanceSheet}
         onSubmit={() => void runNoteInstruction()}
         prompts={CORE_PROMPTS}
@@ -1764,6 +1837,7 @@ export function KnowledgeWorkspace() {
         title={activeSheet === "enhance" ? "AI actions" : activeSheet === "translate" ? "Translate note" : activeSheet === "versions" ? "Version history" : activeSheet === "restoreVersion" ? "Restore this version?" : activeSheet === "folder" || activeSheet === "destinationFolder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename document" : "Rename note" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "uploads" ? "Upload progress" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
+        {sheetStatus ? <Text accessibilityLiveRegion="polite" style={styles.sheetStatus}>{sheetStatus}</Text> : null}
         {activeSheet === "create" ? (
           <>
             <BottomSheetItem icon={<FileIcon />} onPress={() => { void startNewNote(); }} variant="secondary">New document</BottomSheetItem>
@@ -1992,6 +2066,11 @@ const styles = StyleSheet.create({
   folderTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
   folderTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
   folderTitleActions: { flexDirection: "row", alignItems: "center", gap: 4 },
+  folderTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
+  folderTab: { flex: 1 },
+  folderDocuments: { gap: 7 },
+  documentButton: { width: "100%", minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 },
+  documentButtonLabel: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "left" },
   sectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
   documentRow: { justifyContent: "flex-start" },
   folderEmpty: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center" },
@@ -2008,6 +2087,7 @@ const styles = StyleSheet.create({
   folderContextBack: { flex: 1, justifyContent: "flex-start" },
   meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
+  sheetStatus: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver100, backgroundColor: palette.panel, borderColor: palette.hairlineBright, borderWidth: 1, fontFamily: fonts.regular, fontSize: 12 },
   saveStatus: { marginBottom: 8, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
   saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
   saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },

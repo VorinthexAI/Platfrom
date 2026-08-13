@@ -144,6 +144,7 @@ import { taskSummarizeTool } from './task-summarize';
 import { taskTranslateTool } from './task-translate';
 import { taskUpdateTool } from './task-update';
 import { transcribeTool } from './transcribe';
+import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   orchestratorChatTool,
@@ -165,4 +166,5 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   projectContentTool, projectCreateTool, projectDeleteTool, projectFindTool, projectListTool, projectMoveTool, projectRenameTool, projectRestoreTool, projectUpdateTool,
   scopeAgentAccessThresholdUpdateTool, scopeAgentAddTool, scopeAgentContentTool, scopeAgentListTool, scopeAgentMoveTool, scopeAgentReadTool, scopeAgentRemoveTool, scopeAgentRestoreTool, scopeContentTool, scopeContentSearchToolDefinition, scopeContentSearchHistoryToolDefinition, scopeCreateTool, scopeDocumentSearchToolDefinition, scopeListTool, scopeMemberActivateTool, scopeMemberAddTool, scopeMemberListTool, scopeMemberReadTool, scopeMemberRemoveTool, scopeMemberRoleUpdateTool, scopeMemberSuspendTool, scopeMoveTool, scopeProjectSearchTool, scopeReadTool, scopeRemoveTool, scopeRestoreTool, scopeUpdateTool,
   taskContentTool, taskChangeStatusTool, taskCompleteTool, taskCreateTool, taskDeleteTool, taskFindTool, taskListTool, taskMoveTool, taskReopenTool, taskReorderTool, taskRenameTool, taskRestoreTool, taskRewriteTool, taskSummarizeTool, taskTranslateTool, taskUpdateTool,
+  ...WORKSPACE_TOOL_DEFINITIONS,
 ] as const);
