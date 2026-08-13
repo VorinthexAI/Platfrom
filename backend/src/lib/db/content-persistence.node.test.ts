@@ -19,6 +19,7 @@ describe('scoped Content persistence', () => {
     const result = await createContentPersistence(executor).updateFolder(scopeKey, folderKey, {
       parentFolderKey: undefined,
       description: undefined,
+      coverImageKey: undefined,
       deletedAt: null,
       updatedAt: timestamp,
     });
@@ -27,7 +28,7 @@ describe('scoped Content persistence', () => {
     expect(calls[0]?.query).toContain('current._internalDeletion');
     expect(calls[0]?.query).toContain('DOCUMENT(folders, @destinationKey)');
     expect(calls[0]?.query).toContain('REPLACE current WITH UNSET');
-    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description'], patch: { deletedAt: null, updatedAt: timestamp } });
+    expect(calls[0]?.bindVars).toMatchObject({ key: folderKey, scopeKey, unset: ['parentFolderKey', 'description', 'coverImageKey'], patch: { deletedAt: null, updatedAt: timestamp } });
     expect(calls[0]?.bindVars).not.toHaveProperty('changesLocation');
   });
 

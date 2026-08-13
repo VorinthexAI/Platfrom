@@ -55,6 +55,7 @@ const {
   copyContentDocument,
   downloadContentDocument,
   enhanceContent,
+  findContentDocumentVersion,
   loadInitialContentLocation,
   listContentSearchHistory,
   moveContentFolder,
@@ -62,9 +63,12 @@ const {
   renameContentDocument,
   saveContentDocument,
   searchContent,
+  searchContentMatches,
+  summarizeContentDocument,
   setContentDocumentFavorite,
   translateContentDocument,
   updateContentFolder,
+  setContentFolderCover,
   uploadContentDocument,
 } = await import("./content-client");
 
@@ -149,7 +153,7 @@ test("sends exact document action payloads and returns their results", async () 
   expect((await setContentDocumentFavorite("document", true)).isFavorite).toBe(true);
   expect((await renameContentDocument("document", "Renamed")).key).toBe("document.rename");
   expect((await moveContentDocument("document", "destination")).key).toBe("document.move");
-  expect((await copyContentDocument("document")).key).toBe("document.copy");
+  expect((await copyContentDocument("document", "nested-destination")).key).toBe("document.copy");
   expect((await downloadContentDocument("document")).fileName).toBe("Note.pdf");
 
   expect(calls.map(({ url }) => url)).toEqual([
@@ -163,7 +167,7 @@ test("sends exact document action payloads and returns their results", async () 
   expect(calls[1]?.body.input).toEqual({ renames: [{ documentKey: "document", name: "Renamed" }], atomic: false, idempotencyKey: expect.any(String) });
   expect(calls[2]?.body.input).toEqual({ moves: [{ documentKey: "document", targetScopeKey: "scope-authenticated", targetFolderKey: "destination" }], atomic: false, idempotencyKey: expect.any(String) });
   expect(calls[3]?.body.input).toEqual({
-    copies: [{ documentKey: "document", targetScopeKey: "scope-authenticated", includeVersions: false, includeShares: false }],
+    copies: [{ documentKey: "document", targetScopeKey: "scope-authenticated", targetFolderKey: "nested-destination", includeVersions: false, includeShares: false }],
     atomic: false,
     idempotencyKey: expect.any(String),
   });
@@ -179,6 +183,14 @@ test("updates folder details and moves folders with exact payloads", async () =>
   expect((await moveContentFolder("folder", "parent")).key).toBe("folder");
   expect(calls[0]?.body.input).toEqual({ updates: [{ folderKey: "folder", name: "Plans", description: "Current plans" }], atomic: false, idempotencyKey: expect.any(String) });
   expect(calls[1]?.body.input).toEqual({ moves: [{ folderKey: "folder", targetParentFolderKey: "parent" }], atomic: false, idempotencyKey: expect.any(String) });
+});
+
+test("sets and clears folder covers with exact payloads", async () => {
+  responseForTool = () => ({ data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Plans" } } }] } } });
+  await setContentFolderCover("folder", "image");
+  await setContentFolderCover("folder", null);
+  expect(calls[0]?.body.input).toEqual({ updates: [{ folderKey: "folder", coverImageKey: "image" }], atomic: false, idempotencyKey: expect.any(String) });
+  expect(calls[1]?.body.input).toEqual({ updates: [{ folderKey: "folder", coverImageKey: null }], atomic: false, idempotencyKey: expect.any(String) });
 });
 
 test("runs note autocomplete, enhancement, translation, and rename through document tools", async () => {
@@ -202,13 +214,20 @@ test("runs note autocomplete, enhancement, translation, and rename through docum
 test("sends Archive requests to the personal assistant surface", async () => {
   responseForTool = (tool) => tool === "respond" ? { data: { success: true, data: { type: "note", content: "Generated note", message: "Wrote the note.", sources: [] } } } : undefined;
 
-  expect(await askPersonalAssistant("Write a launch plan", { title: "Untitled note", content: "" }, "folder")).toEqual({ type: "note", content: "Generated note", message: "Wrote the note.", sources: [] });
+  expect(await askPersonalAssistant("Write a launch plan", { documentKey: "document", title: "Untitled note", content: "Draft", selection: { start: 0, end: 5 } }, "folder")).toEqual({ type: "note", content: "Generated note", message: "Wrote the note.", sources: [] });
   expect(calls[0]?.url).toBe("/api/v1/assistant/respond");
   expect(calls[0]?.body).toEqual({
     organizationKey: "org-authenticated",
     agentKey: "agent-authenticated",
-    input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { title: "Untitled note", content: "" }, requestKey: expect.any(String), folderKey: "folder" },
+    input: { surface: "knowledge-workspace", message: "Write a launch plan", currentNote: { documentKey: "document", title: "Untitled note", content: "Draft", selection: { start: 0, end: 5 } }, requestKey: expect.any(String), folderKey: "folder" },
   });
+});
+
+test("loads version snapshot content before restoration", async () => {
+  responseForTool = (tool) => tool === "document.find-version" ? { data: { success: true, data: { results: [{ success: true, data: { version: { key: "version", documentKey: "document", version: 1, createdAt: "2026-08-10T00:00:00.000Z", content: "Earlier text" } } }] } } } : undefined;
+
+  expect((await findContentDocumentVersion("version")).content).toBe("Earlier text");
+  expect(calls[0]?.body.input).toEqual({ versionKeys: ["version"], include: ["content"] });
 });
 
 test("can preserve the previous note as a version during an AI autosave", async () => {
@@ -231,6 +250,18 @@ test("scopes search and replayable history to a folder", async () => {
   expect((await listContentSearchHistory("folder", true))[0]?.documents).toEqual(documents);
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", minimumScore: 0.55, folderKey: "folder", includeDescendants: true });
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 8 });
+});
+
+test("runs fast top-ten semantic search without a score threshold and summarizes on demand", async () => {
+  responseForTool = (tool) => tool === "scope.document.search"
+    ? { data: { success: true, data: { query: "roadmap", results: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", score: 0.12 }] } } }
+    : { data: { success: true, data: { results: [{ success: true, data: { text: "A concise roadmap summary." } }] } } };
+
+  expect(await searchContentMatches("roadmap")).toHaveLength(1);
+  expect(await summarizeContentDocument("document")).toBe("A concise roadmap summary.");
+  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", topK: 10 });
+  expect(calls[0]?.body.input).not.toHaveProperty("minimumScore");
+  expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], style: "brief", persist: false });
 });
 
 test("loads an existing My Documents folder as the initial Archive location", async () => {

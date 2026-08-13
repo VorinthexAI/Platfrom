@@ -79,3 +79,15 @@ export async function invalidateContentLocations(queryClient: QueryClient, conte
     refetchType: "none",
   })));
 }
+
+export async function invalidateContentHistories(queryClient: QueryClient, context: ContentContext, folderKeys: (string | undefined)[]) {
+  await Promise.all([...new Set(folderKeys)].map((folderKey) => queryClient.invalidateQueries({
+    queryKey: contentQueryKeys.history(context, folderKey),
+    exact: true,
+    refetchType: "none",
+  })));
+}
+
+export function replaceCachedContentDocumentDetail(queryClient: QueryClient, context: ContentContext, updated: ContentDocument) {
+  queryClient.setQueryData<ContentDocument & { content: string }>(contentQueryKeys.document(context, updated.key), (document) => document ? { ...document, ...updated } : document);
+}

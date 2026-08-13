@@ -1,4 +1,4 @@
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { z, ZodError } from 'zod';
 import { collectionSchema } from '@/lib/db/collections.node';
@@ -19,6 +19,7 @@ import { newId } from '@/lib/ids';
 import { getDefaultGalleryRepository } from './repository';
 import { createPublicS3Client, s3, S3_BUCKET } from '@/lib/s3';
 import { strictObject } from '@/api/validation';
+import { signedImageUrl } from './image-url';
 
 const overviewSchema = strictObject({ collectionKey: z.string().cuid().optional() });
 const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(1_000).optional() });
@@ -51,7 +52,7 @@ const publicS3 = createPublicS3Client();
 // the runtime SDK versions are aligned. Keep that package-only mismatch local.
 const signUrl = getSignedUrl as unknown as (
   client: S3Client,
-  command: GetObjectCommand | PutObjectCommand,
+  command: PutObjectCommand,
   options: { expiresIn: number },
 ) => Promise<string>;
 
@@ -77,9 +78,7 @@ export function normalizeGalleryOperationError(error: unknown) {
   return new GalleryOperationError(500, 'GALLERY_FAILED', 'Gallery request failed.');
 }
 
-async function imageUrl(storageKey: string) {
-  return signUrl(publicS3, new GetObjectCommand({ Bucket: S3_BUCKET, Key: storageKey }), { expiresIn: 15 * 60 });
-}
+const imageUrl = signedImageUrl;
 
 async function safeImage(image: z.infer<typeof imageSchema>, score?: number) {
   return {

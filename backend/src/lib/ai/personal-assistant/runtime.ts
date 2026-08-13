@@ -12,9 +12,13 @@ import type { RouteRequestInput } from '@/lib/ai/router/route-request';
 import { assistantSourceSchema, assistantSurfaceSchema, defaultAssistantCapabilityRegistry, type AssistantCapability, type AssistantCapabilityContext, type AssistantCapabilityRegistry } from './capabilities';
 
 const currentNoteSchema = z.object({
+  documentKey: z.string().cuid().optional(),
   title: z.string().max(500).default(''),
   content: z.string().max(15_000),
-}).strict();
+  selection: z.object({ start: z.number().int().nonnegative(), end: z.number().int().nonnegative() }).strict().optional(),
+}).strict().superRefine((note, context) => {
+  if (note.selection && (note.selection.end <= note.selection.start || note.selection.end > note.content.length)) context.addIssue({ code: z.ZodIssueCode.custom, path: ['selection'], message: 'selection must identify non-empty text inside the note' });
+});
 
 export const personalAssistantInputSchema = z.object({
   surface: assistantSurfaceSchema,
@@ -122,6 +126,8 @@ function systemPrompt(surface: z.infer<typeof assistantSurfaceSchema>) {
   return `${BASE_SYSTEM_PROMPT}
 - Use Archive folder and document tools for requested CRUD operations. Search knowledge when the request depends on stored information.
 - To create or edit the open note, call note.write with the complete final note. Never describe a note edit without calling note.write.
+- For proofreading, grammar, spelling, punctuation, wording, or clarity improvements, call note.enhance. Use target selection only when openNote.selection is present and the request refers to selected or marked text; otherwise use target document.
+- For translation of a saved open document, call document.translate with the exact target language requested by the user. Never substitute English or a different language.
 - Preserve useful existing note content unless the user asks to replace or remove it.
 - After search, answer only from returned evidence or call note.write if the user requested a note change.`;
 }
@@ -135,7 +141,7 @@ function initialMessage(input: z.output<typeof personalAssistantInputSchema>) {
         ? { request: input.message, workspace: 'Compass' }
       : input.surface === 'signal-workspace'
         ? { request: input.message, workspace: 'Signal' }
-      : { request: input.message, openNote: { title: input.currentNote.title, content: input.currentNote.content } });
+      : { request: input.message, openNote: input.currentNote });
 }
 
 /** Executes a small, bounded agent loop over capabilities selected by the server-owned surface registry. */
@@ -203,6 +209,8 @@ export async function runPersonalAssistant(
       if (bookKey !== createdBook.bookKey || canonicalJson(brief) !== canonicalJson(createdBook.brief)) throw new Error('Assistant book write did not match the newly created book brief.');
     }
     const result = await capability.execute(toolCall.arguments, {
+      currentDocumentKey: input.currentNote.documentKey,
+      currentNote: { content: input.currentNote.content, selection: input.currentNote.selection },
       domain,
       folderKey: input.folderKey,
       requestKey,

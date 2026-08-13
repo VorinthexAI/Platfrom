@@ -1,5 +1,8 @@
 import { useNavigation } from "expo-router";
 import { File, Paths } from "expo-file-system";
+import * as ImageManipulator from "expo-image-manipulator";
+import * as ImagePicker from "expo-image-picker";
+import { Image } from "expo-image";
 import { useEffect, useRef, useState } from "react";
 import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,19 +17,15 @@ import {
   BrainIcon,
   CheckIcon,
   ChevronLeftIcon,
-  CopyIcon,
   ClockIcon,
   DownloadIcon,
-  EditIcon,
   FileIcon,
   FolderIcon,
-  GlobeIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
   SendIcon,
-  StarIcon,
-  UploadIcon,
+  CloseIcon,
 } from "@vorinthex/shared/ui/icons-mobile";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
@@ -40,24 +39,27 @@ import {
   createContentMutationKey,
   copyContentDocument,
   downloadContentDocument,
-  enhanceContent,
+  findContentDocumentVersion,
+  getContentContext,
   isContentContextConfigured,
   listContentDocumentVersions,
   moveContentFolder,
   moveContentDocument,
   renameContentDocument,
-  restoreContentDocumentVersion,
   saveContentDocument,
   searchContent,
+  searchContentMatches,
   setContentDocumentFavorite,
-  translateContentDocument,
+  summarizeContentDocument,
   uploadContentDocument,
   updateContentFolder,
+  setContentFolderCover,
   type ContentDocument,
   type ContentDocumentVersion,
   type ContentFolder,
   type ContentSearchHistoryItem,
   type ContentSearchDocument,
+  type ContentSearchMatch,
   type ContentSearchResponse,
   type PersonalAssistantResponse,
 } from "@/lib/content-client";
@@ -67,22 +69,24 @@ import {
   getContentHistory,
   getContentLocation,
   invalidateContentLocations,
+  invalidateContentHistories,
   refreshContentDocument,
   refreshContentHistory,
   refreshContentLocation,
   replaceCachedContentDocument,
+  replaceCachedContentDocumentDetail,
   replaceCachedContentFolder,
 } from "@/lib/content-query-cache";
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
-import { applyEnhancement, resolveEnhancementTarget, type TextRange } from "@/lib/note-enhancement";
-import { saveBase64Download } from "@/lib/device-download";
+import { saveBase64Download, saveTextDownload } from "@/lib/device-download";
+import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor";
 type FolderContentTab = "folders" | "documents";
-type ArchiveSheet = "create" | "folder" | "destinationFolder" | "library" | "documents" | "folders" | "enhance" | "translate" | "versions" | "restoreVersion" | "documentActions" | "destination" | "rename" | "summary" | "uploads" | "folderActions" | "folderDetails";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "versions" | "documentActions" | "destination" | "destinationBrowser" | "rename" | "summary" | "uploads" | "folderActions" | "folderDetails";
 type DestinationAction = "upload" | "move" | "copy" | "moveFolder";
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
@@ -101,9 +105,10 @@ const AUTOCOMPLETE_WORD_COUNT = 8;
 const UPLOAD_MIME_TYPES = ["text/plain", "text/markdown", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
 const CORE_PROMPTS = [
   "Summarize what I saved about systems",
-  "Find my notes on long-term planning",
   "Rewrite this note more clearly",
+  "Translate this note to Spanish",
 ] as const;
+const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 function draftFileFor(identity: string) {
   const safeIdentity = identity.replace(/[^A-Za-z0-9_-]/g, "-");
@@ -127,7 +132,7 @@ export function KnowledgeWorkspace() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const archiveCardSize = Math.floor((width - spacing.md * 2 - 10) / 2);
+  const archiveCardSize = Math.floor((width - spacing.md * 2 - 20) / 3);
   const userKey = useAuthStore((state) => state.user?.key ?? "");
   const organizationKey = useAuthStore((state) => typeof state.organization?.key === "string" ? state.organization.key : "");
   const scopeKey = useAuthStore((state) => typeof state.scope?.key === "string" ? state.scope.key : "");
@@ -149,20 +154,16 @@ export function KnowledgeWorkspace() {
   const [content, setContent] = useState("");
   const [completion, setCompletion] = useState("");
   const [autocompleteRevision, setAutocompleteRevision] = useState(0);
-  const [enhancing, setEnhancing] = useState(false);
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiInstructionError, setAiInstructionError] = useState<string>();
   const [aiResponse, setAiResponse] = useState<PersonalAssistantResponse>();
   const [instructing, setInstructing] = useState(false);
-  const [enhanceRange, setEnhanceRange] = useState<TextRange>();
-  const [targetLanguage, setTargetLanguage] = useState("");
-  const [translating, setTranslating] = useState(false);
+  const [coreOpenRequest, setCoreOpenRequest] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [uploadBatch, setUploadBatch] = useState<UploadBatchItem[]>([]);
   const [versions, setVersions] = useState<ContentDocumentVersion[]>([]);
-  const [selectedVersion, setSelectedVersion] = useState<ContentDocumentVersion>();
   const [loadingVersions, setLoadingVersions] = useState(false);
-  const [restoringVersionKey, setRestoringVersionKey] = useState<string>();
+  const [versionActionKey, setVersionActionKey] = useState<string>();
   const [saveState, setSaveState] = useState<SaveState>(hasContentContext ? "saved" : "local");
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [rootFolders, setRootFolders] = useState<ContentFolder[]>([]);
@@ -185,10 +186,9 @@ export function KnowledgeWorkspace() {
   const [destinationAction, setDestinationAction] = useState<DestinationAction>();
   const [destinationStack, setDestinationStack] = useState<ContentFolder[]>([]);
   const [destinationFolders, setDestinationFolders] = useState<ContentFolder[]>([]);
-  const [destinationFolderName, setDestinationFolderName] = useState("");
-  const [destinationFolderDescription, setDestinationFolderDescription] = useState("");
   const [destinationLoading, setDestinationLoading] = useState(false);
   const [folderActionLoading, setFolderActionLoading] = useState(false);
+  const [coverActionLoading, setCoverActionLoading] = useState(false);
   const [folderDetailsName, setFolderDetailsName] = useState("");
   const [folderDetailsDescription, setFolderDetailsDescription] = useState("");
   const [folderName, setFolderName] = useState("");
@@ -197,8 +197,9 @@ export function KnowledgeWorkspace() {
   const [saveRetry, setSaveRetry] = useState(0);
   const [libraryQuery, setLibraryQuery] = useState("");
   const [rootSearchQuery, setRootSearchQuery] = useState("");
-  const [rootSearchResults, setRootSearchResults] = useState<ContentSearchResponse>();
+  const [rootSearchResults, setRootSearchResults] = useState<ContentSearchMatch[]>();
   const [rootSearching, setRootSearching] = useState(false);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
   const revision = useRef(0);
@@ -216,6 +217,7 @@ export function KnowledgeWorkspace() {
   const navigationGeneration = useRef(0);
   const destinationGeneration = useRef(0);
   const sheetCloseTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const coreOpenTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeSheetRef = useRef<ArchiveSheet | undefined>(undefined);
   const sheetBackStack = useRef<ArchiveSheet[]>([]);
   const currentFolderKeyRef = useRef<string | undefined>(undefined);
@@ -223,12 +225,12 @@ export function KnowledgeWorkspace() {
   const selectionRef = useRef({ start: 0, end: 0 });
   const autocompleteRequest = useRef<AbortController | undefined>(undefined);
   const autocompleteGeneration = useRef(0);
-  const enhanceRequest = useRef<AbortController | undefined>(undefined);
-  const enhanceGeneration = useRef(0);
   const instructionRequest = useRef<AbortController | undefined>(undefined);
+  const rootSearchRequest = useRef<AbortController | undefined>(undefined);
+  const summaryRequest = useRef<AbortController | undefined>(undefined);
   const instructionGeneration = useRef(0);
-  const translationGeneration = useRef(0);
   const restoreGeneration = useRef(0);
+  const uploadGeneration = useRef(0);
   const documentActionGeneration = useRef(0);
   const folderActionGeneration = useRef(0);
   const contentContextKeyRef = useRef(contentContextKey);
@@ -312,15 +314,14 @@ export function KnowledgeWorkspace() {
   };
 
   const closeSheet = () => {
-    if (activeSheet === "enhance") {
-      enhanceGeneration.current += 1;
-      enhanceRequest.current?.abort();
-      enhanceRequest.current = undefined;
-      setEnhancing(false);
-    }
-    if (activeSheetRef.current === "destination" || activeSheetRef.current === "destinationFolder") destinationGeneration.current += 1;
+    if (activeSheetRef.current === "destination" || activeSheetRef.current === "destinationBrowser") destinationGeneration.current += 1;
     if (activeSheetRef.current === "documentActions" || activeSheetRef.current === "rename") documentActionGeneration.current += 1;
     if (activeSheetRef.current === "folderActions" || activeSheetRef.current === "folderDetails") folderActionGeneration.current += 1;
+    if (activeSheetRef.current === "summary") {
+      summaryRequest.current?.abort();
+      summaryRequest.current = undefined;
+      setSummaryLoading(false);
+    }
     setSheetOpen(false);
     sheetBackStack.current = [];
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
@@ -329,8 +330,8 @@ export function KnowledgeWorkspace() {
 
   useEffect(() => () => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
+    if (coreOpenTimer.current) clearTimeout(coreOpenTimer.current);
     autocompleteRequest.current?.abort();
-    enhanceRequest.current?.abort();
     instructionRequest.current?.abort();
   }, []);
 
@@ -441,25 +442,21 @@ export function KnowledgeWorkspace() {
       destinationGeneration.current += 1;
       documentActionGeneration.current += 1;
       folderActionGeneration.current += 1;
-      translationGeneration.current += 1;
       restoreGeneration.current += 1;
+      uploadGeneration.current += 1;
       documentMetadataMutation.current = null;
-      enhanceGeneration.current += 1;
-      enhanceRequest.current?.abort();
-      enhanceRequest.current = undefined;
       instructionGeneration.current += 1;
       instructionRequest.current?.abort();
       instructionRequest.current = undefined;
-      setEnhancing(false);
       setInstructing(false);
       setAiInstruction("");
       setAiInstructionError(undefined);
       setAiResponse(undefined);
-      setTranslating(false);
-      setTargetLanguage("");
       setVersions([]);
       setLoadingVersions(false);
-      setRestoringVersionKey(undefined);
+      setVersionActionKey(undefined);
+      setUploading(false);
+      setUploadBatch([]);
       editorSession.current += 1;
       revision.current = 0;
       dirty.current = false;
@@ -569,7 +566,7 @@ export function KnowledgeWorkspace() {
           const shouldCreateVersion = createVersionOnNextSave.current;
           const saved = await saveContentDocument(activeKey, nextContent, activeUpdatedAt!, shouldCreateVersion);
           if (session !== editorSession.current) return;
-          if (shouldCreateVersion && savingRevision === revision.current) createVersionOnNextSave.current = false;
+          if (shouldCreateVersion) createVersionOnNextSave.current = false;
           activeUpdatedAt = saved.updatedAt;
           updatedAtRef.current = saved.updatedAt;
           savedContentRef.current = nextContent;
@@ -645,44 +642,25 @@ export function KnowledgeWorkspace() {
   };
 
   const openEnhanceSheet = () => {
-    const target = resolveEnhancementTarget(contentRef.current, selectionRef.current);
-    setEnhanceRange(target.range);
     clearCompletion();
     openSheet("enhance");
   };
 
-  const runEnhancement = async () => {
-    if (!hasContentContext || !contentRef.current.trim()) return;
-    const original = contentRef.current;
-    const target = resolveEnhancementTarget(original, enhanceRange ?? { start: 0, end: 0 });
-    const generation = ++enhanceGeneration.current;
-    const controller = new AbortController();
-    enhanceRequest.current?.abort();
-    enhanceRequest.current = controller;
-    setEnhancing(true);
-    setSheetError(undefined);
-    try {
-      const result = await enhanceContent(target.content, controller.signal);
-      if (controller.signal.aborted || generation !== enhanceGeneration.current) return;
-      if (contentRef.current !== original) {
-        setSheetError("The note changed while it was being enhanced. Try again.");
-        return;
-      }
-      const next = applyEnhancement(original, result.content, target.range);
-      clearCompletion();
-      contentRef.current = next;
-      const caret = target.range ? target.range.start + result.content.length : next.length;
-      selectionRef.current = { start: caret, end: caret };
-      setContent(next);
-      markDirty();
-      persistLocalDraft(titleRef.current, next);
-      closeSheet();
-    } catch (cause) {
-      if (!controller.signal.aborted) setSheetError(cause instanceof Error ? cause.message : "The note could not be enhanced.");
-    } finally {
-      if (enhanceRequest.current === controller) enhanceRequest.current = undefined;
-      if (generation === enhanceGeneration.current) setEnhancing(false);
-    }
+  const openCoreConfirmation = (prompt: string) => {
+    setAiInstruction(prompt);
+    setAiInstructionError(undefined);
+    setAiResponse(undefined);
+    closeSheet();
+    if (coreOpenTimer.current) clearTimeout(coreOpenTimer.current);
+    coreOpenTimer.current = setTimeout(() => setCoreOpenRequest((current) => current + 1), 240);
+  };
+
+  const confirmEnhancementWithCore = () => {
+    openCoreConfirmation("Enhance this document. Correct wording, grammar, punctuation, and spelling mistakes while preserving its meaning, facts, tone, and structure.");
+  };
+
+  const confirmTranslationWithCore = () => {
+    openCoreConfirmation("Translate this document to English while preserving its meaning and structure.");
   };
 
   const runNoteInstruction = async () => {
@@ -704,7 +682,7 @@ export function KnowledgeWorkspace() {
     setAiInstructionError(undefined);
     setAiResponse(undefined);
     try {
-      const result = await askPersonalAssistant(instruction, { title: titleRef.current, content: original }, currentFolderKeyRef.current, controller.signal);
+      const result = await askPersonalAssistant(instruction, { documentKey, title: titleRef.current, content: original }, currentFolderKeyRef.current, controller.signal);
       if (controller.signal.aborted || generation !== instructionGeneration.current) return;
       if (session !== editorSession.current || documentKeyRef.current !== documentKey || contentRef.current !== original) {
         setAiInstructionError("The note changed while Core was responding. Try again.");
@@ -720,6 +698,10 @@ export function KnowledgeWorkspace() {
         setContent(result.content);
         markDirty();
         persistLocalDraft(titleRef.current, result.content);
+      } else if (documentKey && result.changes?.some(({ workspace }) => workspace === "archive")) {
+        const document = await refreshContentDocument(queryClient, contentContext, documentKey);
+        if (controller.signal.aborted || generation !== instructionGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
+        applyRemoteDocument(document);
       }
     } catch (cause) {
       if (!controller.signal.aborted) setAiInstructionError(cause instanceof Error ? cause.message : "Core could not respond.");
@@ -729,7 +711,7 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const applyRemoteDocument = (document: ContentDocument & { content: string }) => {
+  function applyRemoteDocument(document: ContentDocument & { content: string }) {
     clearCompletion();
     revision.current += 1;
     dirty.current = false;
@@ -747,49 +729,7 @@ export function KnowledgeWorkspace() {
     setSaveState("saved");
     setError(undefined);
     if (localDraftFile.exists) localDraftFile.delete();
-  };
-
-  const openTranslationSheet = () => {
-    setTargetLanguage("");
-    pushSheet("translate");
-  };
-
-  const runTranslation = async () => {
-    const documentKey = documentKeyRef.current;
-    const language = targetLanguage.trim();
-    if (!documentKey || !language) return;
-    if (dirty.current || saveInFlight.current || saveState !== "saved") {
-      setSheetError("Wait for the note to finish saving before translating it.");
-      return;
-    }
-    const session = editorSession.current;
-    const generation = ++translationGeneration.current;
-    const visibleFolderKey = currentFolder?.key;
-    setTranslating(true);
-    setSheetError(undefined);
-    try {
-      await translateContentDocument(documentKey, language);
-      const document = await refreshContentDocument(queryClient, contentContext, documentKey);
-      if (generation !== translationGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
-      applyRemoteDocument(document);
-      setTargetLanguage("");
-      const location = await refreshContentLocation(queryClient, contentContext, visibleFolderKey);
-      if (generation !== translationGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
-      if (currentFolderKeyRef.current === visibleFolderKey) {
-        setFolders(location.folders);
-        setDocuments(location.documents);
-        if (!visibleFolderKey) {
-          setRootFolders(location.folders);
-          setRootDocuments(location.documents);
-        }
-      }
-      if (activeSheetRef.current === "translate") closeSheet();
-    } catch (cause) {
-      if (generation === translationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The note could not be translated.");
-    } finally {
-      if (generation === translationGeneration.current) setTranslating(false);
-    }
-  };
+  }
 
   const openVersionHistory = async () => {
     const documentKey = documentKeyRef.current;
@@ -809,40 +749,50 @@ export function KnowledgeWorkspace() {
       const history = await listContentDocumentVersions(documentKey);
       if (session === editorSession.current && documentKeyRef.current === documentKey) setVersions(history);
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "Version history could not be loaded.");
+      if (session === editorSession.current && documentKeyRef.current === documentKey && activeSheetRef.current === "versions") setSheetError(cause instanceof Error ? cause.message : "Version history could not be loaded.");
     } finally {
       if (session === editorSession.current) setLoadingVersions(false);
     }
   };
 
-  const restoreVersion = async (versionKey: string) => {
-    const documentKey = documentKeyRef.current;
-    if (!documentKey || dirty.current || saveInFlight.current || saveState !== "saved") return;
-    const session = editorSession.current;
+  const loadVersionIntoEditor = async (version: ContentDocumentVersion) => {
+    if (dirty.current || saveInFlight.current || saveState !== "saved") return;
     const generation = ++restoreGeneration.current;
-    const visibleFolderKey = currentFolder?.key;
-    setRestoringVersionKey(versionKey);
+    setVersionActionKey(version.key);
     setSheetError(undefined);
     try {
-      await restoreContentDocumentVersion(documentKey, versionKey);
-      const document = await refreshContentDocument(queryClient, contentContext, documentKey);
-      if (generation !== restoreGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
-      applyRemoteDocument(document);
-      const location = await refreshContentLocation(queryClient, contentContext, visibleFolderKey);
-      if (generation !== restoreGeneration.current || session !== editorSession.current || documentKeyRef.current !== documentKey) return;
-      if (currentFolderKeyRef.current === visibleFolderKey) {
-        setFolders(location.folders);
-        setDocuments(location.documents);
-        if (!visibleFolderKey) {
-          setRootFolders(location.folders);
-          setRootDocuments(location.documents);
-        }
-      }
-      if (activeSheetRef.current === "versions" || activeSheetRef.current === "restoreVersion") closeSheet();
+      const snapshot = await findContentDocumentVersion(version.key);
+      if (generation !== restoreGeneration.current || !snapshot.content) return;
+      clearCompletion();
+      createVersionOnNextSave.current = true;
+      contentRef.current = snapshot.content;
+      selectionRef.current = { start: snapshot.content.length, end: snapshot.content.length };
+      setContent(snapshot.content);
+      markDirty();
+      persistLocalDraft(titleRef.current, snapshot.content);
+      closeSheet();
     } catch (cause) {
-      if (generation === restoreGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The version could not be restored.");
+      if (generation === restoreGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The version could not be loaded.");
     } finally {
-      if (generation === restoreGeneration.current) setRestoringVersionKey(undefined);
+      if (generation === restoreGeneration.current) setVersionActionKey(undefined);
+    }
+  };
+
+  const downloadVersion = async (version: ContentDocumentVersion) => {
+    const generation = ++restoreGeneration.current;
+    setVersionActionKey(version.key);
+    setSheetError(undefined);
+    setSheetStatus(undefined);
+    try {
+      const snapshot = await findContentDocumentVersion(version.key);
+      if (generation !== restoreGeneration.current || !snapshot.content) return;
+      const baseName = (titleRef.current.trim() || "document").replace(/\.txt$/i, "");
+      const location = await saveTextDownload(`${baseName}-version-${version.version}.txt`, snapshot.content);
+      if (generation === restoreGeneration.current) setSheetStatus(`Saved to ${location}`);
+    } catch (cause) {
+      if (generation === restoreGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The version could not be downloaded.");
+    } finally {
+      if (generation === restoreGeneration.current) setVersionActionKey(undefined);
     }
   };
 
@@ -868,14 +818,12 @@ export function KnowledgeWorkspace() {
     instructionGeneration.current += 1;
     instructionRequest.current?.abort();
     instructionRequest.current = undefined;
-    translationGeneration.current += 1;
     restoreGeneration.current += 1;
-    setTranslating(false);
     setInstructing(false);
     setAiInstruction("");
     setAiResponse(undefined);
     setAiInstructionError(undefined);
-    setRestoringVersionKey(undefined);
+    setVersionActionKey(undefined);
     setVersions([]);
     editorSession.current += 1;
     revision.current = 0;
@@ -930,13 +878,11 @@ export function KnowledgeWorkspace() {
     instructionGeneration.current += 1;
     instructionRequest.current?.abort();
     instructionRequest.current = undefined;
-    translationGeneration.current += 1;
     restoreGeneration.current += 1;
-    setTranslating(false);
     setInstructing(false);
     setAiInstructionError(undefined);
     setAiResponse(undefined);
-    setRestoringVersionKey(undefined);
+    setVersionActionKey(undefined);
     setOpeningDocumentKey(document.key);
     setError(undefined);
     const previousMode = workspaceModeRef.current;
@@ -993,6 +939,55 @@ export function KnowledgeWorkspace() {
     setFolderDetailsName(selectedFolder.name);
     setFolderDetailsDescription(selectedFolder.description ?? "");
     pushSheet("folderDetails");
+  };
+
+  const chooseFolderCover = async () => {
+    if (!selectedFolder || coverActionLoading) return;
+    const folderKey = selectedFolder.key;
+    setCoverActionLoading(true);
+    setSheetError(undefined);
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) throw new Error("Photo access is required to choose a folder cover.");
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsMultipleSelection: false, quality: 1 });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset) return;
+      const maxSide = Math.max(asset.width, asset.height);
+      const actions: ImageManipulator.Action[] = maxSide > 2400 ? [{ resize: asset.width >= asset.height ? { width: 2400 } : { height: 2400 } }] : [];
+      const output = await ImageManipulator.manipulateAsync(asset.uri, actions, { compress: 0.88, format: ImageManipulator.SaveFormat.JPEG });
+      const blob = await (await fetch(output.uri)).blob();
+      const upload = await uploadGalleryImages([{ clientKey: `${Date.now()}-${folderKey}`, filename: `folder-cover-${Date.now()}.jpg`, uri: output.uri, sizeBytes: blob.size }]);
+      const job = upload.jobs[0];
+      if (!job) throw new Error("The folder cover upload could not be started.");
+      let status = job.status;
+      for (let attempt = 0; status !== "completed" && status !== "failed" && attempt < 40; attempt += 1) {
+        await wait(3_000);
+        status = (await fetchGalleryUploadStatus([job.key])).jobs[0]?.status ?? status;
+      }
+      if (status !== "completed") throw new Error("The folder cover could not be processed.");
+      const updated = await setContentFolderCover(folderKey, job.imageKey);
+      replaceFolder(updated);
+      closeSheet();
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The folder cover could not be updated.");
+    } finally {
+      setCoverActionLoading(false);
+    }
+  };
+
+  const clearFolderCover = async () => {
+    if (!selectedFolder || coverActionLoading) return;
+    setCoverActionLoading(true);
+    setSheetError(undefined);
+    try {
+      replaceFolder(await setContentFolderCover(selectedFolder.key, null));
+      closeSheet();
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The folder cover could not be cleared.");
+    } finally {
+      setCoverActionLoading(false);
+    }
   };
 
   const replaceFolder = (updated: ContentFolder, select = true) => {
@@ -1175,19 +1170,49 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const runRootSearch = async () => {
+  useEffect(() => {
     const normalized = rootSearchQuery.trim();
-    if (!normalized || !hasContentContext) return;
-    const generation = ++navigationGeneration.current;
-    setRootSearching(true);
-    setError(undefined);
+    rootSearchRequest.current?.abort();
+    if (!normalized || !hasContentContext) {
+      setRootSearching(false);
+      setRootSearchResults(undefined);
+      return;
+    }
+    setRootSearchResults(undefined);
+    const controller = new AbortController();
+    rootSearchRequest.current = controller;
+    const timeout = setTimeout(() => {
+      setRootSearching(true);
+      setError(undefined);
+      void searchContentMatches(normalized, controller.signal).then((matches) => {
+        if (!controller.signal.aborted) setRootSearchResults(matches);
+      }).catch((cause) => {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Search failed.");
+      }).finally(() => {
+        if (!controller.signal.aborted) setRootSearching(false);
+      });
+    }, 300);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [hasContentContext, rootSearchQuery]);
+
+  const openSearchSummary = async (document: ContentSearchMatch) => {
+    summaryRequest.current?.abort();
+    const controller = new AbortController();
+    summaryRequest.current = controller;
+    setSelectedSummary({ ...document, summary: "" });
+    setSummaryLoading(true);
+    setSheetError(undefined);
+    openSheet("summary");
     try {
-      const response = await searchContent(normalized);
-      if (generation === navigationGeneration.current) setRootSearchResults(response);
+      const summary = await summarizeContentDocument(document.documentKey, controller.signal);
+      if (!controller.signal.aborted) setSelectedSummary({ ...document, summary });
     } catch (cause) {
-      if (generation === navigationGeneration.current) setError(cause instanceof Error ? cause.message : "Search failed.");
+      if (!controller.signal.aborted) setSheetError(cause instanceof Error ? cause.message : "The document summary could not be created.");
     } finally {
-      if (generation === navigationGeneration.current) setRootSearching(false);
+      if (!controller.signal.aborted) setSummaryLoading(false);
     }
   };
 
@@ -1300,30 +1325,39 @@ export function KnowledgeWorkspace() {
     pushSheet("folder");
   };
 
-  const openNewDestinationFolder = () => {
-    setDestinationFolderName("");
-    setDestinationFolderDescription("");
-    pushSheet("destinationFolder");
-  };
-
   const openDestinationPicker = async (action: DestinationAction) => {
     if (!hasContentContext) {
       setSheetError("This action requires a connected Archive.");
       return;
     }
     const generation = ++destinationGeneration.current;
-    const startsAtRoot = action === "moveFolder";
+    const startsAtRoot = action !== "upload";
     setDestinationAction(action);
     setDestinationStack(startsAtRoot ? [] : folderStack);
-    setDestinationFolderName("");
-    setDestinationLoading(true);
     if (sheetOpen) pushSheet("destination");
     else openSheet("destination");
+    if (action !== "upload") return;
+    setDestinationLoading(true);
     try {
-      const next = (await getContentLocation(queryClient, contentContext, startsAtRoot ? undefined : currentFolder?.key)).folders;
+      const next = (await getContentLocation(queryClient, contentContext, currentFolder?.key)).folders;
       if (generation === destinationGeneration.current) setDestinationFolders(next);
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
+      if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
+    } finally {
+      if (generation === destinationGeneration.current) setDestinationLoading(false);
+    }
+  };
+
+  const openDestinationBrowser = async () => {
+    const generation = ++destinationGeneration.current;
+    setDestinationLoading(true);
+    setSheetError(undefined);
+    pushSheet("destinationBrowser");
+    try {
+      const children = (await getContentLocation(queryClient, contentContext, destinationFolder?.key)).folders;
+      if (generation === destinationGeneration.current) setDestinationFolders(children);
+    } catch (cause) {
+      if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
     } finally {
       if (generation === destinationGeneration.current) setDestinationLoading(false);
     }
@@ -1340,33 +1374,7 @@ export function KnowledgeWorkspace() {
       setDestinationFolders(next);
       setDestinationStack(nextStack);
     } catch (cause) {
-      setSheetError(cause instanceof Error ? cause.message : "The folder could not be opened.");
-    } finally {
-      if (generation === destinationGeneration.current) setDestinationLoading(false);
-    }
-  };
-
-  const createDestinationFolder = async () => {
-    const name = destinationFolderName.trim();
-    if (!name) return;
-    const parentFolderKey = destinationFolder?.key;
-    const generation = ++destinationGeneration.current;
-    setDestinationLoading(true);
-    setSheetError(undefined);
-    try {
-      const folder = await createContentFolder(name, parentFolderKey, destinationFolderDescription.trim() || undefined);
-      await invalidateContentLocations(queryClient, contentContext, [parentFolderKey]);
-      if (generation !== destinationGeneration.current) return;
-      const appendFolder = (current: ContentFolder[]) => current.some((item) => item.key === folder.key) ? current : [...current, folder].sort((left, right) => left.name.localeCompare(right.name));
-      if (currentFolderKeyRef.current === parentFolderKey) setFolders(appendFolder);
-      if (!parentFolderKey) setRootFolders(appendFolder);
-      setDestinationStack((current) => [...current, folder]);
-      setDestinationFolders([]);
-      setDestinationFolderName("");
-      setDestinationFolderDescription("");
-      goBackSheet();
-    } catch (cause) {
-      if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The folder could not be created.");
+      if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The folder could not be opened.");
     } finally {
       if (generation === destinationGeneration.current) setDestinationLoading(false);
     }
@@ -1374,6 +1382,9 @@ export function KnowledgeWorkspace() {
 
   const pickAndUpload = async (folderKey?: string) => {
     const visibleFolderKey = currentFolder?.key;
+    const requestContext = getContentContext();
+    const requestContextKey = `${requestContext.organizationKey}:${requestContext.scopeKey}:${requestContext.agentKey}`;
+    const generation = ++uploadGeneration.current;
     setSheetError(undefined);
     try {
       const picked = await File.pickFileAsync({ multipleFiles: true, mimeTypes: UPLOAD_MIME_TYPES });
@@ -1393,14 +1404,17 @@ export function KnowledgeWorkspace() {
           update(item.id, { status: "uploading" });
           try {
             if (item.file.size > MAX_MOBILE_UPLOAD_BYTES) throw new Error("Mobile uploads must be 8 MB or smaller.");
-            await uploadContentDocument({ name: item.file.name, type: item.file.type, size: item.file.size, base64: await item.file.base64() }, folderKey);
+            await uploadContentDocument({ name: item.file.name, type: item.file.type, size: item.file.size, base64: await item.file.base64() }, folderKey, requestContext);
+            if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
             update(item.id, { status: "success" });
           } catch (cause) {
+            if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
             update(item.id, { status: "error", error: cause instanceof Error ? cause.message : "Upload failed." });
           }
         }
       };
       await Promise.all(Array.from({ length: Math.min(2, batch.length) }, () => worker()));
+      if (generation !== uploadGeneration.current || contentContextKeyRef.current !== requestContextKey) return;
       await invalidateContentLocations(queryClient, contentContext, [folderKey]);
       const location = visibleFolderKey === folderKey
         ? await getContentLocation(queryClient, contentContext, visibleFolderKey)
@@ -1416,7 +1430,7 @@ export function KnowledgeWorkspace() {
     } catch (cause) {
       setSheetError(cause instanceof Error ? cause.message : "Documents could not be selected.");
     } finally {
-      setUploading(false);
+      if (generation === uploadGeneration.current) setUploading(false);
     }
   };
 
@@ -1462,7 +1476,7 @@ export function KnowledgeWorkspace() {
         }
         if (generation === destinationGeneration.current) {
           setSelectedFolder(moved);
-          if (activeSheetRef.current === "destination") closeSheet();
+          if (activeSheetRef.current === "destinationBrowser") closeSheet();
         }
       } catch (cause) {
         if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "The folder could not be moved.");
@@ -1484,19 +1498,27 @@ export function KnowledgeWorkspace() {
         const updated = await trackActiveDocumentMutation(movingDocumentKey, moveContentDocument(movingDocumentKey, folderKey), (result) => {
           if (result.key === documentKeyRef.current) updatedAtRef.current = result.updatedAt;
         });
-        replaceCachedContentDocument(queryClient, contentContext, updated);
+        replaceCachedContentDocumentDetail(queryClient, contentContext, updated);
         if (generation === destinationGeneration.current) setSelectedDocument(updated);
-        await invalidateContentLocations(queryClient, contentContext, [sourceFolderKey, folderKey]);
+        await Promise.all([
+          invalidateContentLocations(queryClient, contentContext, [sourceFolderKey, folderKey]),
+          invalidateContentHistories(queryClient, contentContext, [sourceFolderKey, folderKey]),
+        ]);
       } else {
         await copyContentDocument(selectedDocument.key, folderKey);
-        await invalidateContentLocations(queryClient, contentContext, [folderKey]);
+        await Promise.all([
+          invalidateContentLocations(queryClient, contentContext, [folderKey]),
+          invalidateContentHistories(queryClient, contentContext, [folderKey]),
+        ]);
       }
       const visibleLocationChanged = destinationAction === "move"
         ? visibleFolderKey === sourceFolderKey || visibleFolderKey === folderKey
         : visibleFolderKey === folderKey;
-      const location = visibleLocationChanged
-        ? await getContentLocation(queryClient, contentContext, visibleFolderKey)
-        : undefined;
+      const rootChanged = (sourceFolderKey === undefined && destinationAction === "move") || folderKey === undefined;
+      const [location, rootLocation] = await Promise.all([
+        visibleLocationChanged ? getContentLocation(queryClient, contentContext, visibleFolderKey) : Promise.resolve(undefined),
+        rootChanged && visibleFolderKey !== undefined ? getContentLocation(queryClient, contentContext) : Promise.resolve(undefined),
+      ]);
       if (location && contentContextKeyRef.current === requestContextKey && currentFolderKeyRef.current === visibleFolderKey) {
         setFolders(location.folders);
         setDocuments(location.documents);
@@ -1505,7 +1527,11 @@ export function KnowledgeWorkspace() {
           setRootDocuments(location.documents);
         }
       }
-      if (generation === destinationGeneration.current && activeSheetRef.current === "destination") closeSheet();
+      if (rootLocation && contentContextKeyRef.current === requestContextKey) {
+        setRootFolders(rootLocation.folders);
+        setRootDocuments(rootLocation.documents);
+      }
+      if (generation === destinationGeneration.current && activeSheetRef.current === "destinationBrowser") closeSheet();
     } catch (cause) {
       if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : `The document could not be ${destinationAction === "move" ? "moved" : "copied"}.`);
     } finally {
@@ -1594,21 +1620,13 @@ export function KnowledgeWorkspace() {
       <Button disabled={!renameName.trim() || Boolean(documentActionLoading)} loading={documentActionLoading === "rename"} onPress={() => void submitRename()} size="lg" variant="primary">Rename</Button>
       {close(Boolean(documentActionLoading))}
     </>;
-    if (activeSheet === "destination") return <>
-      <Button disabled={destinationLoading} icon={<CheckIcon size="sm" />} loading={destinationLoading} onPress={() => void selectDestination()} size="lg" variant="primary">{destinationAction === "upload" ? "Choose files for this folder" : destinationAction === "moveFolder" ? "Move folder here" : destinationAction === "move" ? "Move document here" : "Copy document here"}</Button>
+    if (activeSheet === "destinationBrowser") return <>
+      <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">Choose folder</Button>
       {close(destinationLoading)}
     </>;
-    if (activeSheet === "destinationFolder") return <>
-      <Button disabled={!destinationFolderName.trim() || destinationLoading} loading={destinationLoading} onPress={() => void createDestinationFolder()} size="lg" variant="primary">Create folder</Button>
+    if (activeSheet === "destination" && destinationAction === "upload") return <>
+      <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => void selectDestination()} size="lg" variant="primary">Choose files for this folder</Button>
       {close(destinationLoading)}
-    </>;
-    if (activeSheet === "translate") return <>
-      <Button disabled={!targetLanguage.trim() || translating} icon={<GlobeIcon size="sm" />} loading={translating} onPress={() => void runTranslation()} size="lg" variant="primary">Translate</Button>
-      {close(translating)}
-    </>;
-    if (activeSheet === "restoreVersion" && selectedVersion) return <>
-      <Button disabled={Boolean(restoringVersionKey)} loading={restoringVersionKey === selectedVersion.key} onPress={() => void restoreVersion(selectedVersion.key)} size="lg" variant="primary">Restore version</Button>
-      {close(Boolean(restoringVersionKey))}
     </>;
     if (activeSheet === "folder") return <>
       <Button disabled={!folderName.trim() || folderCreating} loading={folderCreating} onPress={() => void submitFolder()} size="lg" variant="primary">Create folder</Button>
@@ -1639,22 +1657,22 @@ export function KnowledgeWorkspace() {
             <View style={styles.rootActions}>
               <View style={styles.rootSearch}>
                 <SearchIcon size="sm" variant="muted" />
-                <TextInput accessibilityLabel="Search all Archive documents" editable={!rootSearching} onChangeText={(value) => { setRootSearchQuery(value); if (!value.trim()) setRootSearchResults(undefined); }} onSubmitEditing={() => void runRootSearch()} placeholder="Search all documents" returnKeyType="search" style={styles.rootSearchInput} value={rootSearchQuery} />
-                {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" disabled={rootSearching} onPress={() => { setRootSearchQuery(""); setRootSearchResults(undefined); }} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button> : null}
-                <Button accessibilityLabel="Search Archive" contentMode="raw" disabled={!rootSearchQuery.trim()} loading={rootSearching} onPress={() => void runRootSearch()} size="sm" variant="icon"><SearchIcon size="sm" /></Button>
+                <TextInput accessibilityLabel="Search all Archive documents" onChangeText={setRootSearchQuery} placeholder="Search all documents" style={styles.rootSearchInput} value={rootSearchQuery} />
+                {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
               <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="md" variant="icon"><PlusIcon size="sm" /></Button>
             </View>
-            {rootSearchResults ? <View style={styles.rootSearchResults}>
-              {rootSearchResults.documents.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => { setSelectedSummary(document); openSheet("summary"); }} size="sm" style={styles.documentButton} variant="secondary">
+            {rootSearchQuery.trim() ? <View style={styles.rootSearchResults}>
+              {(rootSearchResults ?? []).map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchSummary(document)} size="sm" style={styles.documentButton} variant="secondary">
                 <FileIcon size="sm" />
-                <View style={styles.resultText}><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>{document.summary}</Text></View>
+                <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
               </Button>)}
-              {rootSearchResults.documents.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
+              {rootSearching || !rootSearchResults ? <Text style={styles.empty}>Searching...</Text> : rootSearchResults.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
             </View> : <View style={[styles.rootFolderGrid, archiveLocationLoading && styles.loadingGrid]}>
-              {archiveLocationLoading ? <View style={[styles.rootLoadingSkeleton, styles.skeletonCard]} /> : rootFolders.map((folder) => (
+              {archiveLocationLoading ? Array.from({ length: 9 }, (_, index) => <View accessibilityLabel={index === 0 ? "Loading folders" : undefined} accessibilityRole={index === 0 ? "progressbar" : undefined} key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />) : rootFolders.map((folder) => (
                 <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
-                  <Button contentMode="raw" onPress={() => void (hasContentContext ? openFolder(folder) : selectFolder(folder))} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button>
+                  {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
+                  <Button contentMode="raw" onPress={() => void (hasContentContext ? openFolder(folder) : selectFolder(folder))} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                 </View>
               ))}
             </View>}
@@ -1674,22 +1692,23 @@ export function KnowledgeWorkspace() {
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
             </Tabs>
-            {archiveLocationLoading ? <View accessibilityLabel="Loading folder contents" accessibilityRole="progressbar" style={[styles.folderLoadingSkeleton, styles.skeletonCard]} /> : folderContentTab === "folders" ? (
-              <View style={[styles.rootFolderGrid, archiveLocationLoading && styles.loadingGrid]}>
+            {archiveLocationLoading ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent]}>{Array.from({ length: 9 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel="Loading documents" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 10 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
+              <View style={[styles.rootFolderGrid, styles.folderTabContent, archiveLocationLoading && styles.loadingGrid]}>
                 {folders.length ? folders.map((folder) => (
                   <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
-                    <Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button>
+                    {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
+                    <Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                   </View>
-                )) : <Text style={styles.empty}>No folders here yet.</Text>}
+                )) : <View style={styles.folderEmptyState}><Text style={styles.empty}>No folders here yet.</Text><Button icon={<PlusIcon size="sm" />} onPress={openNewFolder} size="md" variant="secondary">Create folder</Button></View>}
               </View>
             ) : (
-              <View style={styles.folderDocuments}>
+              <View style={[styles.folderDocuments, styles.folderTabContent]}>
                 {documents.length ? documents.map((document) => (
                   <Button contentMode="raw" disabled={openingDocumentKey !== undefined} key={document.key} loading={openingDocumentKey === document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
                     <FileIcon size="sm" />
                     <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                   </Button>
-                )) : <Text style={styles.empty}>No documents here yet.</Text>}
+                )) : <View style={styles.folderEmptyState}><Text style={styles.empty}>No documents here yet.</Text><Button icon={<PlusIcon size="sm" />} onPress={() => { void startNewNote(); }} size="md" variant="secondary">Create document</Button></View>}
               </View>
             )}
           </View>
@@ -1697,6 +1716,10 @@ export function KnowledgeWorkspace() {
         <View style={styles.editorScene}>
           <View style={styles.editorHeader}>
             <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+            <View style={styles.editorHeaderActions}>
+              <Button accessibilityLabel="AI note actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
+              <Button accessibilityLabel="Document version history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => void openVersionHistory()} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
+            </View>
           </View>
           <View style={[styles.noteSheet, (editorFocused || aiInputFocused) && styles.noteSheetFocused]}>
           {openingDocumentKey ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.editorSkeleton}>
@@ -1836,44 +1859,47 @@ export function KnowledgeWorkspace() {
         }}
         onLeadingPress={openEnhanceSheet}
         onSubmit={() => void runNoteInstruction()}
+        openRequest={coreOpenRequest}
         prompts={CORE_PROMPTS}
         sendIcon={<SendIcon size="sm" />}
         value={aiInstruction}
       />
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "folder" ? `Create a folder inside ${currentFolder?.name ?? "Archive"}.` : activeSheet === "destinationFolder" ? `Create a folder inside ${destinationFolder?.name ?? "Archive"}.` : activeSheet === "enhance" ? "Correct spelling and improve wording while preserving meaning." : activeSheet === "translate" ? "Translate the full note into any language." : activeSheet === "versions" ? "Choose an earlier snapshot to review before restoring it." : activeSheet === "restoreVersion" ? "The current text will be backed up before this version is restored." : activeSheet === "destination" ? `Choose where to ${destinationAction === "moveFolder" ? "move this folder" : destinationAction === "upload" ? "upload documents" : `${destinationAction ?? "continue"} this document`}.` : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "folderDetails" ? "Rename this folder or add context that describes what belongs inside." : undefined}
-        dismissible={!enhancing && !uploading && !translating && !restoringVersionKey && !folderCreating && !folderActionLoading && !destinationLoading && !documentActionLoading}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "folderDetails" ? "Rename this folder or add context that describes what belongs inside." : undefined}
+        dismissible={!uploading && !versionActionKey && !folderCreating && !folderActionLoading && !coverActionLoading && !destinationLoading && !documentActionLoading}
         footer={mutationFooter()}
-        hideHeading={activeSheet === "create"}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "destinationFolder" || activeSheet === "folders" || activeSheet === "translate" || activeSheet === "rename" || activeSheet === "destination" || activeSheet === "folderDetails"}
+        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "destination" || activeSheet === "uploads"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "translate" ? "Translate note" : activeSheet === "versions" ? "Version history" : activeSheet === "restoreVersion" ? "Restore this version?" : activeSheet === "folder" || activeSheet === "destinationFolder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename document" : "Rename note" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "uploads" ? "Upload progress" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "destinationBrowser" || activeSheet === "uploads"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "versions" ? "Version history" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationFolder?.name ?? "Archive" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload documents" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename document" : "Rename note" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "uploads" ? "Upload progress" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {sheetStatus ? <Text accessibilityLiveRegion="polite" style={styles.sheetStatus}>{sheetStatus}</Text> : null}
         {activeSheet === "create" ? (
           <>
-            <BottomSheetItem icon={<FileIcon />} onPress={() => { void startNewNote(); }} variant="secondary">New document</BottomSheetItem>
-            <BottomSheetItem icon={<FolderIcon />} onPress={openNewFolder} variant="secondary">New folder</BottomSheetItem>
-            <BottomSheetItem disabled={uploading} icon={<UploadIcon />} loading={uploading} onPress={() => void openDestinationPicker("upload")} variant="secondary">Upload documents</BottomSheetItem>
+            <BottomSheetItem onPress={() => { void startNewNote(); }} variant="secondary">New document</BottomSheetItem>
+            <BottomSheetItem onPress={openNewFolder} variant="secondary">New folder</BottomSheetItem>
+            <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void openDestinationPicker("upload")} variant="secondary">Upload documents</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} icon={<StarIcon />} loading={documentActionLoading === "favorite"} onPress={() => void toggleFavorite()}>{selectedDocument.isFavorite ? "Remove from favorites" : "Add to favorites"}</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} icon={<DownloadIcon />} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()}>{selectedDocument.extension ? "Download original" : "Download as text"}</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} icon={<EditIcon />} onPress={() => { setRenameName(selectedDocument.name); pushSheet("rename"); }}>Rename</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} icon={<FolderIcon />} onPress={() => void openDestinationPicker("move")}>Move to folder</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} icon={<CopyIcon />} onPress={() => void openDestinationPicker("copy")}>Copy to folder</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "favorite"} onPress={() => void toggleFavorite()}>{selectedDocument.isFavorite ? "Remove from favorites" : "Add to favorites"}</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()}>{selectedDocument.extension ? "Download original" : "Download as text"}</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => { setRenameName(selectedDocument.name); pushSheet("rename"); }}>Rename</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("move")}>Move to folder</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("copy")}>Copy to folder</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "folderActions" && selectedFolder ? (
           <>
-            <BottomSheetItem disabled={folderActionLoading} icon={<EditIcon />} onPress={openFolderDetails}>Edit name and description</BottomSheetItem>
-            <BottomSheetItem disabled={folderActionLoading} icon={<FolderIcon />} onPress={() => void openDestinationPicker("moveFolder")}>Move folder</BottomSheetItem>
+            <BottomSheetItem disabled={folderActionLoading} onPress={openFolderDetails}>Edit name and description</BottomSheetItem>
+            <BottomSheetItem disabled={folderActionLoading} onPress={() => void openDestinationPicker("moveFolder")}>Move folder</BottomSheetItem>
+            <BottomSheetItem disabled={folderActionLoading || coverActionLoading} loading={coverActionLoading} onPress={() => void chooseFolderCover()}>{selectedFolder.coverUrl ? "Change cover" : "Set cover"}</BottomSheetItem>
+            {selectedFolder.coverUrl ? <BottomSheetItem disabled={folderActionLoading || coverActionLoading} onPress={() => void clearFolderCover()}>Remove cover</BottomSheetItem> : null}
           </>
         ) : null}
         {activeSheet === "folderDetails" && selectedFolder ? (
@@ -1896,28 +1922,21 @@ export function KnowledgeWorkspace() {
               <FileIcon size="lg" variant="accent" />
               <View style={styles.enhanceCopy}><Text style={styles.rowTitle}>{selectedSummary.name}</Text><Text style={styles.meta}>SEARCH SUMMARY</Text></View>
             </View>
-            <Text style={styles.summaryText}>{selectedSummary.summary}</Text>
-            <Button loading={openingDocumentKey === selectedSummary.documentKey} onPress={() => void openSummaryDocument()} size="lg" variant="primary">Open document</Button>
+            {summaryLoading ? <Text style={styles.empty}>Creating summary...</Text> : selectedSummary.summary ? <Text style={styles.summaryText}>{selectedSummary.summary}</Text> : null}
+            <Button disabled={summaryLoading} loading={openingDocumentKey === selectedSummary.documentKey} onPress={() => void openSummaryDocument()} size="lg" variant="primary">Open document</Button>
           </View>
         ) : null}
         {activeSheet === "destination" ? (
           <View style={styles.destinationPanel}>
-            <Text style={styles.meta}>CURRENT DESTINATION: {destinationFolder?.name.toUpperCase() ?? "ARCHIVE"}</Text>
-            {destinationStack.length > 0 ? <Button disabled={destinationLoading} icon={<ChevronLeftIcon size="sm" />} onPress={() => void browseDestination(undefined, true)} size="sm" variant="ghost">Back to {destinationStack.at(-2)?.name ?? "Archive"}</Button> : null}
-            <ScrollView contentContainerStyle={styles.destinationFolders} keyboardShouldPersistTaps="handled" style={styles.folderList}>
-              {destinationFolders.filter((folder) => destinationAction !== "moveFolder" || folder.key !== selectedFolder?.key).map((folder) => <Button disabled={destinationLoading} icon={<FolderIcon size="md" />} key={folder.key} onPress={() => void browseDestination(folder)} size="lg" variant="secondary">{folder.name}</Button>)}
-              {!destinationLoading && destinationFolders.filter((folder) => destinationAction !== "moveFolder" || folder.key !== selectedFolder?.key).length === 0 ? <Text style={styles.empty}>No nested folders here.</Text> : null}
-            </ScrollView>
-            <Button disabled={destinationLoading} icon={<PlusIcon size="sm" />} onPress={openNewDestinationFolder} size="md" variant="secondary">New folder here</Button>
+            <BottomSheetItem disabled={destinationLoading} loading={destinationLoading} onPress={() => void openDestinationBrowser()}>Choose folder</BottomSheetItem>
           </View>
         ) : null}
-        {activeSheet === "destinationFolder" ? (
-          <View style={styles.namingForm}>
-            <Text style={styles.inputLabel}>Folder name</Text>
-            <TextInput accessibilityLabel="New destination folder name" autoFocus editable={!destinationLoading} maxLength={255} onChangeText={setDestinationFolderName} placeholder="Folder name" value={destinationFolderName} />
-            <Text style={styles.inputLabel}>Description</Text>
-            <TextInput accessibilityLabel="New destination folder description" editable={!destinationLoading} maxLength={2000} multiline onChangeText={setDestinationFolderDescription} placeholder="What belongs in this folder?" style={styles.folderDescriptionInput} textAlignVertical="top" value={destinationFolderDescription} />
-          </View>
+        {activeSheet === "destinationBrowser" ? (
+          <ScrollView contentContainerStyle={styles.destinationFolderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
+            {destinationStack.length > 0 ? <View style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}><Button accessibilityLabel={`Back to ${destinationStack.at(-2)?.name ?? "Archive"}`} contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(undefined, true)} size="xl" style={styles.rootFolderMain} variant="ghost"><ChevronLeftIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{destinationStack.at(-2)?.name ?? "Archive"}</Text></Button></View> : null}
+            {destinationFolders.filter((folder) => destinationAction !== "moveFolder" || folder.key !== selectedFolder?.key).map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>{folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}<Button contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button></View>)}
+            {!destinationLoading && destinationFolders.filter((folder) => destinationAction !== "moveFolder" || folder.key !== selectedFolder?.key).length === 0 ? <Text style={styles.empty}>No nested folders here.</Text> : null}
+          </ScrollView>
         ) : null}
         {activeSheet === "uploads" ? (
           <View style={styles.uploadPanel}>
@@ -1933,79 +1952,20 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "enhance" ? (
           <View style={styles.enhancePanel}>
-            <View style={styles.enhanceIdentity}>
-              <BrainIcon size="lg" variant="accent" />
-              <View style={styles.enhanceCopy}>
-                <Text style={styles.rowTitle}>{enhanceRange ? "Selected text" : "Entire note"}</Text>
-                <Text style={styles.rowSubtitle}>{enhanceRange ? "Only the highlighted passage will be replaced." : "No text is selected, so the full note will be replaced."}</Text>
-              </View>
-            </View>
-            <Button disabled={enhancing} icon={<BrainIcon size="sm" />} loading={enhancing} onPress={() => void runEnhancement()} size="lg" variant="primary">
-              {enhanceRange ? "Enhance selection" : "Enhance note"}
-            </Button>
-            <Button disabled={!documentKeyRef.current || saveState !== "saved"} icon={<GlobeIcon size="sm" />} onPress={openTranslationSheet} size="lg" variant="secondary">
-              Translate note
-            </Button>
-            <Button disabled={!documentKeyRef.current || saveState !== "saved"} icon={<ClockIcon size="sm" />} onPress={() => void openVersionHistory()} size="lg" variant="secondary">
-              Version history
-            </Button>
-            {!documentKeyRef.current || saveState !== "saved" ? <Text style={styles.rowSubtitle}>Translation and version history become available after the note is saved.</Text> : null}
-          </View>
-        ) : null}
-        {activeSheet === "translate" ? (
-          <View style={styles.enhancePanel}>
-            <View style={styles.enhanceIdentity}>
-              <GlobeIcon size="lg" variant="accent" />
-              <View style={styles.enhanceCopy}>
-                <Text style={styles.rowTitle}>Translate entire note</Text>
-                <Text style={styles.rowSubtitle}>The current text will be saved as a version before the translation replaces it.</Text>
-              </View>
-            </View>
-            <TextInput
-              accessibilityLabel="Translation language"
-              autoCapitalize="words"
-              autoFocus
-              maxLength={120}
-              onChangeText={setTargetLanguage}
-              onSubmitEditing={() => void runTranslation()}
-              placeholder="Language, for example Spanish or Japanese"
-              returnKeyType="done"
-              value={targetLanguage}
-            />
+            <Button onPress={confirmEnhancementWithCore} size="lg" variant="secondary">Enhance document</Button>
+            <Button disabled={!documentKeyRef.current || saveState !== "saved"} onPress={confirmTranslationWithCore} size="lg" variant="secondary">Translate document</Button>
           </View>
         ) : null}
         {activeSheet === "versions" ? (
           <View style={styles.versionPanel}>
-            <View style={styles.currentVersion}>
-              <CheckIcon size="sm" variant="accent" />
-              <View style={styles.enhanceCopy}>
-                <Text style={styles.rowTitle}>Current document</Text>
-                <Text style={styles.rowSubtitle}>Restoring history will save this current text as another version.</Text>
-              </View>
-            </View>
             {loadingVersions ? <Text style={styles.empty}>Loading version history...</Text> : null}
-            {!loadingVersions && versions.length === 0 ? <Text style={styles.empty}>No previous versions yet. Translating this note will create one.</Text> : null}
+            {!loadingVersions && versions.length === 0 ? <Text style={styles.empty}>No previous versions yet.</Text> : null}
             {versions.map((version) => (
-              <Button contentMode="raw" disabled={Boolean(restoringVersionKey)} key={version.key} onPress={() => { setSelectedVersion(version); pushSheet("restoreVersion"); }} size="lg" style={styles.resultRow} variant="secondary">
-                <ClockIcon size="md" variant="accent" />
-                <View style={styles.resultText}>
-                  <Text style={styles.rowTitle}>{version.label ?? `Version ${version.version}`}</Text>
-                  <Text style={styles.rowSubtitle}>{new Date(version.createdAt).toLocaleString()}</Text>
-                </View>
-              </Button>
-            ))}
-          </View>
-        ) : null}
-        {activeSheet === "restoreVersion" && selectedVersion ? (
-          <View style={styles.enhancePanel}>
-            <View style={styles.currentVersion}>
-              <ClockIcon size="md" variant="accent" />
-              <View style={styles.enhanceCopy}>
-                <Text style={styles.rowTitle}>{selectedVersion.label ?? `Version ${selectedVersion.version}`}</Text>
-                <Text style={styles.rowSubtitle}>{new Date(selectedVersion.createdAt).toLocaleString()}</Text>
+              <View key={version.key} style={styles.versionRow}>
+                <Button contentMode="raw" disabled={Boolean(versionActionKey)} loading={versionActionKey === version.key} onPress={() => void loadVersionIntoEditor(version)} size="lg" style={styles.versionMain} variant="secondary"><ClockIcon size="md" variant="accent" /><View style={styles.resultText}><Text style={styles.rowTitle}>{version.label ?? `Version ${version.version}`}</Text><Text style={styles.rowSubtitle}>{new Date(version.createdAt).toLocaleString()}</Text></View></Button>
+                <Button accessibilityLabel={`Download ${version.label ?? `version ${version.version}`} as TXT`} contentMode="raw" disabled={Boolean(versionActionKey)} onPress={() => void downloadVersion(version)} size="lg" variant="icon"><DownloadIcon size="md" /></Button>
               </View>
-            </View>
-            <Text style={styles.summaryText}>Restore this snapshot as the current note? Your current text will remain available in version history.</Text>
+            ))}
           </View>
         ) : null}
         {activeSheet === "folder" ? (
@@ -2070,7 +2030,8 @@ const styles = StyleSheet.create({
   archiveRoot: { flexGrow: 1 },
   archiveFolder: { flexGrow: 1, gap: spacing.md },
   editorScene: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.sm },
-  editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center" },
+  editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  editorHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
   rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
@@ -2079,10 +2040,12 @@ const styles = StyleSheet.create({
   loadingGrid: { flex: 1 },
   rootFolderCard: { position: "relative", borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
   rootFolderMain: { height: "100%", width: "100%", flexDirection: "column", justifyContent: "center", gap: 10, paddingHorizontal: 8 },
+  folderCover: StyleSheet.absoluteFill,
+  coveredFolderMain: { justifyContent: "flex-end", paddingBottom: 10, backgroundColor: "rgba(0, 0, 0, 0.16)" },
   archiveCardLabel: { width: "100%", color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
+  coveredFolderLabel: { paddingHorizontal: 5, paddingVertical: 4, borderRadius: radii.sm, backgroundColor: "rgba(0, 0, 0, 0.68)", color: "#FFFFFF" },
   skeletonCard: { backgroundColor: palette.hairlineBright, opacity: 0.72 },
-  rootLoadingSkeleton: { width: "100%", minHeight: 320, borderRadius: radii.xl },
-  folderLoadingSkeleton: { width: "100%", minHeight: 360, borderRadius: radii.xl },
+  documentSkeleton: { width: "100%", minHeight: 38, borderRadius: 999 },
   workspacePanel: { flexGrow: 1, gap: spacing.md, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   folderTitleRow: { minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8 },
   folderTitle: { flex: 1, color: palette.silver50, fontFamily: fonts.medium, fontSize: 24 },
@@ -2090,6 +2053,8 @@ const styles = StyleSheet.create({
   folderTabs: { flexDirection: "row", gap: 4, padding: 3, borderWidth: 1, backgroundColor: palette.panel },
   folderTab: { flex: 1 },
   folderDocuments: { gap: 7 },
+  folderTabContent: { flexGrow: 1 },
+  folderEmptyState: { flex: 1, minHeight: 360, alignItems: "center", justifyContent: "center", gap: 14 },
   documentButton: { width: "100%", minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 },
   documentButtonLabel: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "left" },
   sectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
@@ -2129,13 +2094,16 @@ const styles = StyleSheet.create({
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },
   versionPanel: { gap: 10 },
+  versionRow: { flexDirection: "row", alignItems: "stretch", gap: 8 },
+  versionMain: { flex: 1, justifyContent: "flex-start", paddingHorizontal: 14 },
   summaryPanel: { gap: 16 },
   summaryText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 24 },
   destinationPanel: { flex: 1, gap: 12 },
   destinationFolders: { gap: 8, paddingVertical: 4 },
+  destinationFolderGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, paddingVertical: 4 },
+  uploadDestinationButton: { justifyContent: "flex-start", paddingHorizontal: 14 },
   uploadPanel: { gap: 10 },
   uploadRow: { minHeight: 54, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
-  currentVersion: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   locationPreview: { gap: 4, marginTop: 10 },
   locationRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   locationItem: { flex: 1, justifyContent: "flex-start" },

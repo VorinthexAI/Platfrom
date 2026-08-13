@@ -13,7 +13,7 @@ const domain = {
 } as unknown as DomainToolContext;
 
 const expected: Array<[AssistantSurface, string[]]> = [
-  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write']],
+  ['knowledge-workspace', ['folder.list', 'folder.create', 'folder.update', 'folder.move', 'document.list', 'document.find', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.translate', 'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance']],
   ['travel-workspace', ['place.list', 'place.create', 'place.visit.create', 'trip.create', 'trip.place.add', 'trip.place.remove']],
   ['signal-workspace', ['email.overview', 'email.sync', 'email.thread.read', 'email.thread.favorite', 'email.draft.create', 'email.draft.update', 'email.draft.send', 'email.disconnect']],
   ['book-workspace', ['book.list', 'book.detail', 'book.chapter.progress', 'book.create-context', 'book.write']],
@@ -103,5 +103,24 @@ describe('personal assistant service capabilities', () => {
       ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
       ['folder.create', { folders: [{ scopeKey, name: 'xyz' }], idempotencyKey: 'stable-request:folder.create' }, domain, undefined],
     ]);
+  });
+
+  test('injects the trusted open document into document-specific Core actions', async () => {
+    const calls: unknown[] = [];
+    const currentDocumentKey = newId();
+    const executeContent = async (...args: unknown[]) => { calls.push(args); return {}; };
+    const translate = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'document.translate')!;
+    await translate.execute({ targetLanguage: 'Spanish' }, { domain, currentDocumentKey, requestKey: 'translate-request', executeContent: executeContent as any });
+    expect(calls).toEqual([
+      ['document.translate', { documentKeys: [currentDocumentKey], targetLanguage: 'Spanish', preserveFormatting: true, mode: 'replace', idempotencyKey: 'translate-request:document.translate' }, domain, undefined],
+    ]);
+  });
+
+  test('passes any requested target language through unchanged', async () => {
+    const calls: unknown[] = [];
+    const currentDocumentKey = newId();
+    const translate = defaultAssistantCapabilityRegistry.resolve('knowledge-workspace').find(({ definition }) => definition.name === 'document.translate')!;
+    await translate.execute({ targetLanguage: 'Welsh' }, { domain, currentDocumentKey, requestKey: 'welsh-request', executeContent: (async (...args: unknown[]) => { calls.push(args); return {}; }) as any });
+    expect(calls[0]).toEqual(['document.translate', { documentKeys: [currentDocumentKey], targetLanguage: 'Welsh', preserveFormatting: true, mode: 'replace', idempotencyKey: 'welsh-request:document.translate' }, domain, undefined]);
   });
 });

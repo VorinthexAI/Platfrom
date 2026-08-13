@@ -54,6 +54,12 @@ function archive<Schema extends z.ZodTypeAny>(name: string, description: string,
   }, mutation ? 'archive' : undefined);
 }
 
+function currentDocumentKey(documentKey: string | undefined, context: AssistantCapabilityContext) {
+  const resolved = documentKey ?? context.currentDocumentKey;
+  if (!resolved) throw new Error('Open or identify an Archive document before using this action.');
+  return resolved;
+}
+
 export const archiveCapabilities = [
   archive('archive_folder_list', 'List Archive folders under the root or a parent folder.', z.object({ parentFolderKey: key.optional(), includeArchived: z.boolean().optional(), includeDocuments: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(), 'folder.list', (input, context) => ({ scopeKey: context.domain.runtimeScopeKey, ...input })),
   archive('archive_folder_create', 'Create a folder in Archive. Use this whenever the user asks to create or add a folder.', z.object({ name, parentFolderKey: key.optional(), description: z.string().trim().min(1).max(10_000).optional() }).strict(), 'folder.create', (input, context) => ({ folders: [{ scopeKey: context.domain.runtimeScopeKey, ...input }] }), true),
@@ -66,9 +72,9 @@ export const archiveCapabilities = [
   archive('archive_document_rename', 'Rename an Archive document.', z.object({ documentKey: key, name }).strict(), 'document.rename', (input) => ({ renames: [input] }), true),
   archive('archive_document_move', 'Move an Archive document to a folder or the Archive root.', z.object({ documentKey: key, targetFolderKey: key.optional() }).strict(), 'document.move', (input, context) => ({ moves: [{ ...input, targetScopeKey: context.domain.runtimeScopeKey }] }), true),
   archive('archive_document_copy', 'Copy an Archive document to a folder or the Archive root.', z.object({ documentKey: key, targetFolderKey: key.optional(), newName: name.optional(), includeVersions: z.boolean().optional() }).strict(), 'document.copy', (input, context) => ({ copies: [{ ...input, targetScopeKey: context.domain.runtimeScopeKey }] }), true),
-  archive('archive_document_translate', 'Translate an Archive document in place while preserving formatting.', z.object({ documentKey: key, targetLanguage: z.string().trim().min(2).max(100) }).strict(), 'document.translate', ({ documentKey, targetLanguage }) => ({ documentKeys: [documentKey], targetLanguage, preserveFormatting: true, mode: 'replace' }), true),
-  archive('archive_document_versions', 'List saved versions of an Archive document.', z.object({ documentKey: key, limit: z.number().int().min(1).max(100).optional() }).strict(), 'document.list-versions', ({ documentKey, ...input }) => ({ documentKeys: [documentKey], ...input })),
-  archive('archive_document_version_restore', 'Restore one saved version of an Archive document and preserve the current content as a backup version.', z.object({ documentKey: key, versionKey: key }).strict(), 'document.restore-version', ({ documentKey, versionKey }) => ({ restores: [{ documentKey, versionKey, createBackupVersion: true }] }), true),
+  archive('archive_document_translate', 'Translate the open Archive document, or an explicitly identified document, in place while preserving formatting.', z.object({ documentKey: key.optional(), targetLanguage: z.string().trim().min(2).max(100) }).strict(), 'document.translate', ({ documentKey, targetLanguage }, context) => ({ documentKeys: [currentDocumentKey(documentKey, context)], targetLanguage, preserveFormatting: true, mode: 'replace' }), true),
+  archive('archive_document_versions', 'List saved versions of the open Archive document, or an explicitly identified document.', z.object({ documentKey: key.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(), 'document.list-versions', ({ documentKey, ...input }, context) => ({ documentKeys: [currentDocumentKey(documentKey, context)], ...input })),
+  archive('archive_document_version_restore', 'Restore one saved version of the open Archive document, or an explicitly identified document, and preserve the current content as a backup version.', z.object({ documentKey: key.optional(), versionKey: key }).strict(), 'document.restore-version', ({ documentKey, versionKey }, context) => ({ restores: [{ documentKey: currentDocumentKey(documentKey, context), versionKey, createBackupVersion: true }] }), true),
   archive('archive_document_download', 'Download an Archive document as its original file or plain text.', z.object({ documentKey: key, format: z.enum(['original', 'txt']).optional() }).strict(), 'document.download', ({ documentKey, ...input }) => ({ documentKeys: [documentKey], ...input })),
 ];
 

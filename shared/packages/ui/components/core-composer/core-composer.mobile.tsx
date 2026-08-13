@@ -43,6 +43,7 @@ export type CoreComposerProps = {
   onFocusChange?: (focused: boolean) => void;
   onLeadingPress?: () => void;
   onSubmit: () => void;
+  openRequest?: number;
   prompts: readonly string[];
   sendIcon: ReactNode;
   style?: StyleProp<ViewStyle>;
@@ -160,6 +161,7 @@ export function CoreComposer({
   onFocusChange,
   onLeadingPress,
   onSubmit,
+  openRequest = 0,
   prompts,
   sendIcon,
   style,
@@ -168,8 +170,11 @@ export function CoreComposer({
   const insets = useSafeAreaInsets();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [inputHeight, setInputHeight] = useState(38);
   const [sheetTranslateY] = useState(() => new Animated.Value(0));
   const inputRef = useRef<NativeTextInput>(null);
+  const onFocusChangeRef = useRef(onFocusChange);
+  onFocusChangeRef.current = onFocusChange;
   const showPrompt = value.length === 0;
 
   const closeSheet = useCallback(() => {
@@ -203,8 +208,16 @@ export function CoreComposer({
   function openSheet() {
     if (sheetOpen) return;
     setSheetOpen(true);
-    onFocusChange?.(true);
+    onFocusChangeRef.current?.(true);
   }
+
+  useEffect(() => {
+    if (openRequest <= 0) return;
+    setSheetOpen(true);
+    onFocusChange?.(true);
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [openRequest]);
 
   // Responder callbacks run only after gestures; the compiler otherwise treats the captured input ref as a render read.
   // eslint-disable-next-line react-hooks/refs
@@ -259,7 +272,7 @@ export function CoreComposer({
         ) : null}
         <View style={styles.sheetBody}>
           {sheetOpen ? message : null}
-          <View style={[styles.composer, sheetOpen && styles.composerFocused]}>
+          <View style={[styles.composer, sheetOpen && styles.composerOpen]}>
           {onLeadingPress ? (
             <Button
               accessibilityLabel={leadingAccessibilityLabel ?? "Core actions"}
@@ -290,13 +303,17 @@ export function CoreComposer({
               accessibilityLabel={accessibilityLabel}
               editable={editable}
               maxLength={maxLength}
+              multiline
               onChangeText={onChangeText}
+              onContentSizeChange={({ nativeEvent }) => setInputHeight(Math.min(120, Math.max(38, nativeEvent.contentSize.height)))}
               onFocus={openSheet}
               onSubmitEditing={submit}
               placeholder=""
               ref={inputRef}
-              returnKeyType="send"
-              style={styles.input}
+              returnKeyType={sheetOpen ? "default" : "send"}
+              scrollEnabled={inputHeight >= 120}
+              style={[styles.input, { height: inputHeight }]}
+              textAlignVertical={inputHeight > 38 ? "top" : "center"}
               value={value}
             />
           </View>
@@ -407,8 +424,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.45,
     shadowRadius: 18,
   },
-  composerFocused: {
+  composerOpen: {
     borderColor: "#55616C",
+    borderRadius: 24,
     shadowOpacity: 0.7,
   },
   leading: {

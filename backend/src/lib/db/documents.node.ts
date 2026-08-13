@@ -229,7 +229,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         LET bestVector = FIRST(rankedVectors)
         LET score = bestVector.score
         FILTER score != null
-        FILTER score >= ${input.minScore ?? 0}
+        FILTER score >= ${input.minScore ?? -1}
         LET matchedContent = IS_ARRAY(document.contentChunks) && bestVector.index < LENGTH(document.contentChunks) ? document.contentChunks[bestVector.index] : LEFT(document.content, 16000)
         RETURN { source: "document", score, document, matchedContent }
     ) : []
@@ -256,7 +256,7 @@ export async function semanticSearchContent(input: ContentSemanticSearchInput): 
         FILTER ${folderKeys} == null || document.folderKey IN ${folderKeys ?? []}
         FILTER ${extensions} == null || document.extension IN ${extensions ?? []}
         FILTER ${mimeTypes} == null || document.mimeType IN ${mimeTypes ?? []}
-        FILTER score >= ${input.minScore ?? 0}
+        FILTER score >= ${input.minScore ?? -1}
         RETURN { source: "version", score, document, version }
     ) : []
     FOR match IN APPEND(documentMatches, versionMatches)

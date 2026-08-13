@@ -3,8 +3,10 @@ import { QueryClient } from "@tanstack/react-query";
 
 import {
   contentQueryKeys,
+  invalidateContentHistories,
   invalidateContentLocations,
   replaceCachedContentDocument,
+  replaceCachedContentDocumentDetail,
   replaceCachedContentFolder,
 } from "./content-query-cache";
 import type { ContentContext } from "./content-client";
@@ -61,4 +63,24 @@ test("invalidates only the affected source and destination locations", async () 
   expect(client.getQueryState(source)?.isInvalidated).toBe(true);
   expect(client.getQueryState(destination)?.isInvalidated).toBe(true);
   expect(client.getQueryState(unrelated)?.isInvalidated).toBe(false);
+});
+
+test("invalidates affected histories and patches moved document detail without corrupting locations", async () => {
+  const client = new QueryClient();
+  const source = contentQueryKeys.location(context, "source");
+  const sourceHistory = contentQueryKeys.history(context, "source");
+  const destinationHistory = contentQueryKeys.history(context, "destination");
+  const documentKey = contentQueryKeys.document(context, "document-a");
+  client.setQueryData(source, { folders: [], documents: [{ key: "document-a", name: "Note", folderKey: "source", isFavorite: false, updatedAt: "before" }] });
+  client.setQueryData(sourceHistory, []);
+  client.setQueryData(destinationHistory, []);
+  client.setQueryData(documentKey, { key: "document-a", name: "Note", folderKey: "source", isFavorite: false, updatedAt: "before", content: "Body" });
+
+  replaceCachedContentDocumentDetail(client, context, { key: "document-a", name: "Note", folderKey: "destination", isFavorite: false, updatedAt: "after" });
+  await invalidateContentHistories(client, context, ["source", "destination"]);
+
+  expect(client.getQueryData<any>(source).documents[0].folderKey).toBe("source");
+  expect(client.getQueryData<any>(documentKey)).toMatchObject({ folderKey: "destination", content: "Body" });
+  expect(client.getQueryState(sourceHistory)?.isInvalidated).toBe(true);
+  expect(client.getQueryState(destinationHistory)?.isInvalidated).toBe(true);
 });

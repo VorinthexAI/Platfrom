@@ -91,6 +91,7 @@ describe('Content node contracts', () => {
     expect(searchSource).toContain('document.chunkEmbeddings');
     expect(searchSource).toContain('version.chunkEmbeddings');
     expect(searchSource).toContain('LET score = MAX(scores)');
+    expect(searchSource.match(/input\.minScore \?\? -1/g)).toHaveLength(2);
     expect(searchSource).not.toContain('version.updatedAt');
     expect(shareSource).toContain('document != null && document.scopeKey == share.scopeKey');
     expect(shareSource).toContain('folder == null || folder.scopeKey == share.scopeKey');

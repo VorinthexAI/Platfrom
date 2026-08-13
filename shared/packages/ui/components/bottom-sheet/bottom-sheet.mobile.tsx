@@ -11,7 +11,6 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
-  KeyboardAvoidingView,
   Modal,
   PanResponder,
   Platform,
@@ -24,6 +23,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Button, type ButtonProps } from "../button/button.mobile";
 import { CloseIcon } from "../../icons/close/close.mobile";
+import { colors } from "../../tokens";
 
 const BottomSheetSceneContext = createContext<((open: boolean) => void) | null>(
   null,
@@ -228,7 +228,7 @@ export function BottomSheet({
       transparent
       visible
     >
-      <KeyboardAvoidingView behavior="height" style={styles.root}>
+      <View style={styles.root}>
         <Animated.View style={[styles.overlay, { opacity: overlayOpacity }]}>
           <Button
             accessibilityLabel="Close bottom sheet"
@@ -279,7 +279,7 @@ export function BottomSheet({
           <View style={[styles.content, (tall || mutation) && styles.flexContent]}>{children}</View>
           {footer ? <View style={styles.footer}>{footer}</View> : null}
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -289,7 +289,7 @@ export type BottomSheetItemProps = ButtonProps;
 export function BottomSheetItem({
   size = "lg",
   style,
-  variant = "ghost",
+  variant = "secondary",
   ...props
 }: BottomSheetItemProps) {
   return (
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
     top: 0,
   },
   sheet: {
-    backgroundColor: "#030507",
+    backgroundColor: colors.page,
     borderColor: "rgba(221, 226, 229, 0.14)",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -361,6 +361,6 @@ const styles = StyleSheet.create({
   },
   content: { gap: 6 },
   flexContent: { flex: 1 },
-  footer: { gap: 8, marginHorizontal: -20, paddingHorizontal: 20, paddingTop: 16, backgroundColor: "#030507" },
+  footer: { gap: 8, marginHorizontal: -20, paddingHorizontal: 20, paddingTop: 16, backgroundColor: colors.page },
   item: { justifyContent: "flex-start", width: "100%" },
 });

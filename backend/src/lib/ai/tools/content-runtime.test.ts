@@ -104,6 +104,33 @@ describe('Content runtime', () => {
     expect(f.patches.at(-1)).not.toHaveProperty('embedding');
   });
 
+  test('sets, projects, clears, and scope-validates folder covers', async () => {
+    const f = fixture('moderator');
+    const imageKey = newId();
+    const dependencies = {
+      repository: f.repository,
+      embed: async () => embedding,
+      getFolderCoverImage: async (candidateScopeKey: string, candidateImageKey: string) => candidateScopeKey === f.scopeKey && candidateImageKey === imageKey ? { storageKey: 'gallery/cover.jpg' } : null,
+      signFolderCoverUrl: async (storageKey: string) => `https://images.example/${storageKey}`,
+    };
+    const set = await runContentTool('folder.update', { updates: [{ folderKey: f.folderKey, coverImageKey: imageKey }] }, f.context, dependencies);
+    expect(set.results[0]).toMatchObject({ success: true, data: { folder: { key: f.folderKey, coverUrl: 'https://images.example/gallery/cover.jpg' } } });
+    const setResult = set.results[0];
+    if (!setResult?.success || !setResult.data) throw new Error('Folder cover update failed.');
+    expect(setResult.data.folder).not.toHaveProperty('coverImageKey');
+    expect(f.patches.at(-1)).toMatchObject({ coverImageKey: imageKey });
+
+    const cleared = await runContentTool('folder.update', { updates: [{ folderKey: f.folderKey, coverImageKey: null }] }, f.context, dependencies);
+    expect(cleared.results[0]).toMatchObject({ success: true, data: { folder: { key: f.folderKey } } });
+    const clearedResult = cleared.results[0];
+    if (!clearedResult?.success || !clearedResult.data) throw new Error('Folder cover clear failed.');
+    expect(clearedResult.data.folder).not.toHaveProperty('coverUrl');
+    expect(f.patches.at(-1)).toHaveProperty('coverImageKey', undefined);
+
+    const rejected = await runContentTool('folder.update', { updates: [{ folderKey: f.folderKey, coverImageKey: newId() }] }, f.context, dependencies);
+    expect(rejected.results[0]).toMatchObject({ success: false, error: { code: 'CONTENT_NOT_FOUND' } });
+  });
+
   test('supports root documents as an explicit scoped location', async () => {
     const f = fixture('owner');
     const rootKey = f.addDocument('Root content');
