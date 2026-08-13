@@ -182,7 +182,7 @@ export function BottomSheet({
       translateY.setValue(reducedMotionRef.current ? 0 : closedOffsetRef.current);
       overlayOpacity.setValue(reducedMotionRef.current ? 1 : 0);
       animate(true);
-    } else if (visible) {
+    } else if (visible && !dismissingRef.current) {
       animate(false);
     }
     // Animated values are stable refs; visibility is intentionally driven by open.
@@ -248,7 +248,7 @@ export function BottomSheet({
             mutation && styles.mutationSheet,
             Platform.OS === "android" && styles.androidSheet,
             {
-              marginTop: mutation ? insets.top : 0,
+              top: mutation ? insets.top : undefined,
               marginBottom: Platform.OS === "android" ? Math.max(insets.bottom, 12) : 0,
               paddingBottom: Platform.OS === "android" ? 16 : Math.max(insets.bottom, 16),
               transform: [{ translateY }],
@@ -331,9 +331,11 @@ const styles = StyleSheet.create({
   },
   tallSheet: { height: "72%" },
   mutationSheet: {
-    flex: 1,
-    height: "100%",
+    bottom: 0,
+    left: 0,
     maxHeight: "100%",
+    position: "absolute",
+    right: 0,
   },
   headerDragTarget: { marginHorizontal: -20, paddingHorizontal: 20 },
   dragTarget: { alignItems: "center", minHeight: 36, paddingBottom: 14, paddingTop: 12 },

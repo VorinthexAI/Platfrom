@@ -50,6 +50,11 @@ export type CoreComposerProps = {
   value: string;
 };
 
+const COLLAPSED_INPUT_HEIGHT = 38;
+const INPUT_LINE_HEIGHT = 18;
+const INPUT_VERTICAL_PADDING = 10;
+const MAX_INPUT_HEIGHT = INPUT_LINE_HEIGHT * 6 + INPUT_VERTICAL_PADDING * 2;
+
 function useReducedMotion() {
   const [reducedMotion, setReducedMotion] = useState(true);
 
@@ -170,7 +175,7 @@ export function CoreComposer({
   const insets = useSafeAreaInsets();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [inputHeight, setInputHeight] = useState(38);
+  const [inputHeight, setInputHeight] = useState(COLLAPSED_INPUT_HEIGHT);
   const [sheetTranslateY] = useState(() => new Animated.Value(0));
   const inputRef = useRef<NativeTextInput>(null);
   const onFocusChangeRef = useRef(onFocusChange);
@@ -180,7 +185,6 @@ export function CoreComposer({
   const closeSheet = useCallback(() => {
     Keyboard.dismiss();
     inputRef.current?.blur();
-    sheetTranslateY.setValue(0);
     setSheetOpen(false);
     onFocusChange?.(false);
   }, [onFocusChange, sheetTranslateY]);
@@ -207,12 +211,14 @@ export function CoreComposer({
 
   function openSheet() {
     if (sheetOpen) return;
+    sheetTranslateY.setValue(0);
     setSheetOpen(true);
     onFocusChangeRef.current?.(true);
   }
 
   useEffect(() => {
     if (openRequest <= 0) return;
+    sheetTranslateY.setValue(0);
     setSheetOpen(true);
     onFocusChange?.(true);
     const frame = requestAnimationFrame(() => inputRef.current?.focus());
@@ -303,17 +309,20 @@ export function CoreComposer({
               accessibilityLabel={accessibilityLabel}
               editable={editable}
               maxLength={maxLength}
-              multiline
+              multiline={sheetOpen}
+              numberOfLines={sheetOpen ? 6 : 1}
               onChangeText={onChangeText}
-              onContentSizeChange={({ nativeEvent }) => setInputHeight(Math.min(120, Math.max(38, nativeEvent.contentSize.height)))}
+              onContentSizeChange={({ nativeEvent }) => {
+                if (sheetOpen) setInputHeight(Math.min(MAX_INPUT_HEIGHT, Math.max(COLLAPSED_INPUT_HEIGHT, nativeEvent.contentSize.height)));
+              }}
               onFocus={openSheet}
               onSubmitEditing={submit}
               placeholder=""
               ref={inputRef}
               returnKeyType={sheetOpen ? "default" : "send"}
-              scrollEnabled={inputHeight >= 120}
-              style={[styles.input, { height: inputHeight }]}
-              textAlignVertical={inputHeight > 38 ? "top" : "center"}
+              scrollEnabled={sheetOpen && inputHeight >= MAX_INPUT_HEIGHT}
+              style={[styles.input, { height: sheetOpen ? inputHeight : COLLAPSED_INPUT_HEIGHT }]}
+              textAlignVertical="top"
               value={value}
             />
           </View>
@@ -452,7 +461,9 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     flex: 1,
     fontSize: 13,
+    lineHeight: INPUT_LINE_HEIGHT,
     minHeight: 38,
     paddingHorizontal: 0,
+    paddingVertical: INPUT_VERTICAL_PADDING,
   },
 });
