@@ -2,6 +2,7 @@ import { useNavigation } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
+import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -42,23 +43,24 @@ import {
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { DocumentScanModal, type DocumentScanPage } from "@/components/capability/DocumentScanModal";
 import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-session";
+import { normalizeStructurallyCoveredResources } from "@/lib/content-selection-ancestry";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
   archiveContentDocument,
+  archiveContentSelection,
   askPersonalAssistant,
   createContentDocument,
   createContentFolder,
   createContentMutationKey,
-  copyContentDocument,
+  copyContentSelection,
   downloadContentDocument,
   findContentDocumentVersion,
   generateContentDocumentAudio,
   getContentContext,
   isContentContextConfigured,
   listContentDocumentVersions,
-  moveContentFolder,
-  moveContentDocument,
+  moveContentSelection,
   renameContentDocument,
   readContentDocumentSources,
   saveContentDocument,
@@ -66,6 +68,8 @@ import {
   searchContent,
   searchContentMatches,
   setContentDocumentFavorite,
+  setContentFolderFavorite,
+  setContentSelectionFavorite,
   uploadContentDocument,
   updateContentFolder,
   setContentFolderCover,
@@ -79,6 +83,7 @@ import {
   type ContentSearchDocument,
   type ContentSearchMatch,
   type ContentSearchResponse,
+  type ContentSelection,
   type PersonalAssistantResponse,
 } from "@/lib/content-client";
 import {
@@ -99,9 +104,14 @@ import {
   replaceCachedContentDocument,
   replaceCachedContentDocumentDetail,
   replaceCachedContentFolder,
+  replaceCachedContentDocuments,
+  replaceCachedContentFolders,
   removeCachedContentDocument,
   removeCachedContentDocumentEverywhere,
   removeCachedContentFolder,
+  removeCachedContentDocumentsEverywhere,
+  removeCachedContentFoldersEverywhere,
+  type ContentLocation,
 } from "@/lib/content-query-cache";
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
@@ -114,8 +124,9 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails";
-type DestinationAction = "upload" | "move" | "copy" | "moveFolder";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "historyChooser" | "versions" | "audioVersions" | "documentActions" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails" | "bulkActions" | "bulkDelete";
+type DestinationAction = "upload" | "move" | "copy";
+type DestinationChoice = { folder?: ContentFolder; stack: ContentFolder[] };
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type NarrationChunk = { durationMs: number; url: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
@@ -149,6 +160,7 @@ const CORE_PROMPTS = [
   "Translate this document to Spanish",
 ] as const;
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+const MAX_SELECTED_CONTENT_RESOURCES = 100;
 
 function draftFileFor(identity: string) {
   const safeIdentity = identity.replace(/[^A-Za-z0-9_-]/g, "-");
@@ -254,7 +266,15 @@ export function KnowledgeWorkspace() {
   const [destinationAction, setDestinationAction] = useState<DestinationAction>();
   const [destinationStack, setDestinationStack] = useState<ContentFolder[]>([]);
   const [destinationFolders, setDestinationFolders] = useState<ContentFolder[]>([]);
+  const [destinationChoices, setDestinationChoices] = useState<DestinationChoice[]>([]);
+  const [destinationUsesDirectSelection, setDestinationUsesDirectSelection] = useState(false);
   const [destinationLoading, setDestinationLoading] = useState(false);
+  const [selectedFolders, setSelectedFolders] = useState<ContentFolder[]>([]);
+  const [selectedDocuments, setSelectedDocuments] = useState<ContentDocument[]>([]);
+  const [hydratingFolderKeys, setHydratingFolderKeys] = useState<string[]>([]);
+  const [hydratingDocumentKeys, setHydratingDocumentKeys] = useState<string[]>([]);
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [temporarySingleSelection, setTemporarySingleSelection] = useState(false);
   const [coverActionLoading, setCoverActionLoading] = useState(false);
   const [folderDetailsName, setFolderDetailsName] = useState("");
   const [folderDetailsDescription, setFolderDetailsDescription] = useState("");
@@ -291,6 +311,7 @@ export function KnowledgeWorkspace() {
   const sheetBackStack = useRef<ArchiveSheet[]>([]);
   const currentFolderKeyRef = useRef<string | undefined>(undefined);
   const loadedContentContextKey = useRef<string | undefined>(undefined);
+  const selectionContentContextKey = useRef(contentContextKey);
   const instructionRequest = useRef<AbortController | undefined>(undefined);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
   const folderSearchRequest = useRef<AbortController | undefined>(undefined);
@@ -313,6 +334,7 @@ export function KnowledgeWorkspace() {
   const uploadBatchRef = useRef<UploadBatchItem[]>([]);
   const documentActionGeneration = useRef(0);
   const folderActionGeneration = useRef(0);
+  const longPressedItem = useRef<string | undefined>(undefined);
   const contentContextKeyRef = useRef(contentContextKey);
   const draftIdentityRef = useRef(draftIdentity);
   const folderStackRef = useRef(folderStack);
@@ -323,6 +345,11 @@ export function KnowledgeWorkspace() {
   workspaceModeRef.current = workspaceMode;
   const currentFolder = folderStack.at(-1);
   const destinationFolder = destinationStack.at(-1);
+  const contentSelection: ContentSelection = { folderKeys: selectedFolders.map(({ key }) => key), documentKeys: selectedDocuments.map(({ key }) => key) };
+  const selectedCount = selectedFolders.length + selectedDocuments.length;
+  const selectionActive = selectedCount > 0;
+  const allSelectedFavorite = selectionActive && [...selectedFolders, ...selectedDocuments].every((item) => Boolean(item.isFavorite));
+  const selectionMetadataLoading = hydratingFolderKeys.length > 0 || hydratingDocumentKeys.length > 0;
   const activeDocument = documentKeyRef.current
     ? [...documents, ...rootDocuments].find((document) => document.key === documentKeyRef.current)
       ?? (selectedDocument?.key === documentKeyRef.current ? selectedDocument : {
@@ -483,11 +510,6 @@ export function KnowledgeWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [narrationAudio.didJustFinish]);
 
-  useEffect(() => () => {
-    narrationPlayer.pause();
-    narrationPlayer.clearLockScreenControls();
-  }, [narrationPlayer]);
-
   useEffect(() => {
     if (hasContentContext) return;
     void reconnectContentContext().catch((cause: unknown) => {
@@ -522,12 +544,27 @@ export function KnowledgeWorkspace() {
   const goBackSheet = () => {
     const previous = sheetBackStack.current.pop();
     if (!previous) return;
+    if (temporarySingleSelection && (activeSheetRef.current === "destinationBrowser" || activeSheetRef.current === "bulkDelete")) {
+      clearSelection();
+      setTemporarySingleSelection(false);
+      setDestinationUsesDirectSelection(false);
+      setDestinationChoices([]);
+    }
     setSheetError(undefined);
     setActiveSheet(previous);
   };
 
-  const closeSheet = () => {
-    if (activeSheetRef.current === "destination" || activeSheetRef.current === "destinationBrowser") destinationGeneration.current += 1;
+  const closeSheet = (preserveSelection = false) => {
+    if (activeSheetRef.current === "destination" || activeSheetRef.current === "destinationBrowser") {
+      destinationGeneration.current += 1;
+      if (!preserveSelection && destinationUsesDirectSelection) clearSelection();
+      setDestinationUsesDirectSelection(false);
+      setDestinationChoices([]);
+      setDestinationStack([]);
+      setDestinationFolders([]);
+    }
+    if (!preserveSelection && temporarySingleSelection) clearSelection();
+    setTemporarySingleSelection(false);
     if (activeSheetRef.current === "documentActions" || activeSheetRef.current === "rename") documentActionGeneration.current += 1;
     if (activeSheetRef.current === "folderActions" || activeSheetRef.current === "folderDetails") folderActionGeneration.current += 1;
     if (activeSheetRef.current === "summary") {
@@ -617,8 +654,28 @@ export function KnowledgeWorkspace() {
   }, [draftIdentity, hasContentContext]);
 
   useEffect(() => {
+    if (selectionContentContextKey.current === contentContextKey) return;
+    selectionContentContextKey.current = contentContextKey;
+    destinationGeneration.current += 1;
+    setSelectedFolders([]);
+    setSelectedDocuments([]);
+    setHydratingFolderKeys([]);
+    setHydratingDocumentKeys([]);
+    setDestinationChoices([]);
+    setDestinationStack([]);
+    setDestinationFolders([]);
+    setDestinationAction(undefined);
+    setDestinationLoading(false);
+    setDestinationUsesDirectSelection(false);
+    setTemporarySingleSelection(false);
+    setBulkLoading(false);
+    longPressedItem.current = undefined;
+  }, [contentContextKey]);
+
+  useEffect(() => {
     if (!hasContentContext) {
       if (loadedContentContextKey.current) {
+        destinationGeneration.current += 1;
         stopNarration();
         previewFileRef.current?.delete();
         previewFileRef.current = undefined;
@@ -626,6 +683,19 @@ export function KnowledgeWorkspace() {
         setFilePreview(undefined);
         setFilePreviewUri(undefined);
         setDocumentSearchQuery("");
+        setSelectedFolders([]);
+        setSelectedDocuments([]);
+        setHydratingFolderKeys([]);
+        setHydratingDocumentKeys([]);
+        setDestinationChoices([]);
+        setDestinationStack([]);
+        setDestinationFolders([]);
+        setDestinationAction(undefined);
+        setDestinationLoading(false);
+        setDestinationUsesDirectSelection(false);
+        setTemporarySingleSelection(false);
+        setBulkLoading(false);
+        longPressedItem.current = undefined;
         loadedContentContextKey.current = undefined;
       }
       return;
@@ -689,6 +759,19 @@ export function KnowledgeWorkspace() {
       setFilePreviewUri(undefined);
       setDocumentSearchQuery("");
       setSelectedFolder(undefined);
+      setSelectedFolders([]);
+      setSelectedDocuments([]);
+      setHydratingFolderKeys([]);
+      setHydratingDocumentKeys([]);
+      setDestinationChoices([]);
+      setDestinationStack([]);
+      setDestinationFolders([]);
+      setDestinationAction(undefined);
+      setDestinationLoading(false);
+      setDestinationUsesDirectSelection(false);
+      setTemporarySingleSelection(false);
+      setBulkLoading(false);
+      longPressedItem.current = undefined;
       setSheetOpen(false);
       sheetBackStack.current = [];
       setActiveSheet(undefined);
@@ -1286,6 +1369,166 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const clearSelection = () => {
+    setSelectedFolders([]);
+    setSelectedDocuments([]);
+    setHydratingFolderKeys([]);
+    setHydratingDocumentKeys([]);
+  };
+
+  const showSelectionLimit = () => showToast({ title: "Selection limit reached", description: `Select no more than ${MAX_SELECTED_CONTENT_RESOURCES} folders, documents, and files at once.` });
+
+  const toggleFolderSelection = (folder: ContentFolder) => {
+    setSelectedFolders((current) => {
+      if (current.some(({ key }) => key === folder.key)) return current.filter(({ key }) => key !== folder.key);
+      if (current.length + selectedDocuments.length >= MAX_SELECTED_CONTENT_RESOURCES) { showSelectionLimit(); return current; }
+      return [...current, folder];
+    });
+  };
+
+  const toggleDocumentSelection = (document: ContentDocument) => {
+    setSelectedDocuments((current) => {
+      if (current.some(({ key }) => key === document.key)) return current.filter(({ key }) => key !== document.key);
+      if (current.length + selectedFolders.length >= MAX_SELECTED_CONTENT_RESOURCES) { showSelectionLimit(); return current; }
+      return [...current, document];
+    });
+  };
+
+  const markLongPress = (id: string) => {
+    longPressedItem.current = id;
+    void Haptics.selectionAsync();
+  };
+
+  const consumeLongPress = (id: string) => {
+    const marker = longPressedItem.current;
+    if (marker !== id) return false;
+    longPressedItem.current = undefined;
+    return true;
+  };
+
+  const hydrateSelectedFolder = (folder: ContentFolder) => {
+    if (folder.isFavorite !== undefined) return;
+    setHydratingFolderKeys((current) => [...current.filter((key) => key !== folder.key), folder.key]);
+    void getContentLocation(queryClient, contentContext, folder.parentFolderKey).then((location) => {
+      const resolved = location.folders.find(({ key }) => key === folder.key);
+      setSelectedFolders((current) => current.map((item) => item.key === folder.key ? resolved ?? { ...item, isFavorite: false } : item));
+    }).catch(() => {
+      setSelectedFolders((current) => current.map((item) => item.key === folder.key ? { ...item, isFavorite: false } : item));
+    }).finally(() => setHydratingFolderKeys((current) => current.filter((key) => key !== folder.key)));
+  };
+
+  const handleFolderLongPress = (folder: ContentFolder) => {
+    markLongPress(`folder:${folder.key}`);
+    const selecting = !selectedFolders.some(({ key }) => key === folder.key);
+    toggleFolderSelection(folder);
+    if (selecting && selectedCount < MAX_SELECTED_CONTENT_RESOURCES) hydrateSelectedFolder(folder);
+  };
+
+  const handleFolderPress = (folder: ContentFolder) => {
+    const id = `folder:${folder.key}`;
+    if (consumeLongPress(id)) return;
+    if (selectionActive) {
+      const selecting = !selectedFolders.some(({ key }) => key === folder.key);
+      toggleFolderSelection(folder);
+      if (selecting && selectedCount < MAX_SELECTED_CONTENT_RESOURCES) hydrateSelectedFolder(folder);
+    }
+    else void (hasContentContext ? openFolder(folder) : selectFolder(folder));
+  };
+
+  const handleDocumentLongPress = (document: ContentDocument) => {
+    markLongPress(`document:${document.key}`);
+    toggleDocumentSelection(document);
+  };
+
+  const handleSearchDocumentLongPress = (document: ContentSearchDocument) => {
+    const provisional: ContentDocument = { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: false, updatedAt: "" };
+    const selecting = !selectedDocuments.some(({ key }) => key === document.documentKey);
+    handleDocumentLongPress(provisional);
+    if (!selecting || selectedCount >= MAX_SELECTED_CONTENT_RESOURCES) return;
+    setHydratingDocumentKeys((current) => [...current.filter((key) => key !== document.documentKey), document.documentKey]);
+    void getContentDocument(queryClient, contentContext, document.documentKey).then((resolved) => {
+      setSelectedDocuments((current) => current.map((item) => item.key === resolved.key ? resolved : item));
+    }).catch(() => undefined).finally(() => setHydratingDocumentKeys((current) => current.filter((key) => key !== document.documentKey)));
+  };
+
+  const handleDocumentPress = (document: ContentDocument) => {
+    const id = `document:${document.key}`;
+    if (consumeLongPress(id)) return;
+    if (selectionActive) toggleDocumentSelection(document);
+    else void openArchiveDocument(document);
+  };
+
+  const handleSearchDocumentPress = (document: ContentSearchDocument) => {
+    const id = `document:${document.documentKey}`;
+    if (consumeLongPress(id)) return;
+    if (selectionActive) {
+      const existing = selectedDocuments.find(({ key }) => key === document.documentKey);
+      toggleDocumentSelection(existing ?? { key: document.documentKey, name: document.name, folderKey: document.folderKey, extension: document.extension, isFavorite: false, updatedAt: "" });
+      if (!existing && selectedCount < MAX_SELECTED_CONTENT_RESOURCES) {
+        setHydratingDocumentKeys((current) => [...current.filter((key) => key !== document.documentKey), document.documentKey]);
+        void getContentDocument(queryClient, contentContext, document.documentKey).then((resolved) => {
+          setSelectedDocuments((current) => current.map((item) => item.key === resolved.key ? resolved : item));
+        }).catch(() => undefined).finally(() => setHydratingDocumentKeys((current) => current.filter((key) => key !== document.documentKey)));
+      }
+    } else void openSearchDocument(document);
+  };
+
+  const beginSingleSelection = (item: ContentFolder | ContentDocument, kind: "folder" | "document") => {
+    setSelectedFolders(kind === "folder" ? [item as ContentFolder] : []);
+    setSelectedDocuments(kind === "document" ? [item as ContentDocument] : []);
+  };
+
+  const resolveStructuralResources = async (selectedFoldersSnapshot: readonly ContentFolder[], selectedDocumentsSnapshot: readonly ContentDocument[]) => {
+    if (selectedFoldersSnapshot.length === 0) return { folders: [...selectedFoldersSnapshot], documents: [...selectedDocumentsSnapshot] };
+    const requiredFolderKeys = [...new Set([
+      ...selectedFoldersSnapshot.map(({ key }) => key),
+      ...selectedDocumentsSnapshot.flatMap(({ folderKey }) => folderKey ? [folderKey] : []),
+    ])];
+    const parentByKey = new Map<string, string | undefined>();
+    const expanded = new Set<string | undefined>();
+    const queued = new Set<string>();
+    const queue: string[] = [];
+    const enqueue = (folderKey: string) => {
+      if (expanded.has(folderKey) || queued.has(folderKey)) return;
+      queued.add(folderKey);
+      queue.push(folderKey);
+    };
+    const addFolder = (folder: ContentFolder, fallbackParentKey?: string, shouldEnqueue = true) => {
+      parentByKey.set(folder.key, folder.parentFolderKey ?? fallbackParentKey);
+      if (shouldEnqueue) enqueue(folder.key);
+    };
+    const addLocation = (parentFolderKey: string | undefined, location: ContentLocation) => {
+      expanded.add(parentFolderKey);
+      location.folders.forEach((folder) => addFolder(folder, parentFolderKey));
+    };
+    selectedFoldersSnapshot.forEach((folder) => addFolder(folder, undefined, false));
+    folderStack.forEach((folder) => addFolder(folder, undefined, false));
+    queryClient.getQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(contentContext) }).forEach(([queryKey, location]) => {
+      if (!location) return;
+      const cacheFolderKey = queryKey.at(-1);
+      addLocation(typeof cacheFolderKey === "string" ? cacheFolderKey : undefined, location);
+    });
+    const chainsComplete = () => requiredFolderKeys.every((requiredFolderKey) => {
+      let key: string | undefined = requiredFolderKey;
+      const visited = new Set<string>();
+      while (key) {
+        if (visited.has(key) || !parentByKey.has(key)) return false;
+        visited.add(key);
+        key = parentByKey.get(key);
+      }
+      return true;
+    });
+    if (!chainsComplete() && !expanded.has(undefined)) addLocation(undefined, await getContentLocation(queryClient, contentContext));
+    while (!chainsComplete()) {
+      const folderKey = queue.shift();
+      if (!folderKey) throw new Error("Archive could not verify the selected resources' folder ancestry. Refresh Archive and try again.");
+      queued.delete(folderKey);
+      if (expanded.has(folderKey)) continue;
+      addLocation(folderKey, await getContentLocation(queryClient, contentContext, folderKey));
+    }
+    return normalizeStructurallyCoveredResources(selectedFoldersSnapshot, selectedDocumentsSnapshot, parentByKey);
+  };
+
   const showFolderActions = (folder: ContentFolder) => {
     folderActionGeneration.current += 1;
     setSelectedFolder(folder);
@@ -1540,6 +1783,10 @@ export function KnowledgeWorkspace() {
   useEffect(() => {
     if (Platform.OS !== "android") return;
     return BackHandler.addEventListener("hardwareBackPress", () => {
+      if (selectionActive) {
+        clearSelection();
+        return true;
+      }
       if (workspaceModeRef.current === "editor") {
         leaveEditor();
         return true;
@@ -1554,7 +1801,7 @@ export function KnowledgeWorkspace() {
       }
       return false;
     }).remove;
-  }, [folderStack, hasContentContext]);
+  }, [folderStack, hasContentContext, selectionActive]);
 
   const runSearch = async (searchQuery = query) => {
     const normalized = searchQuery.trim();
@@ -1777,21 +2024,27 @@ export function KnowledgeWorkspace() {
     else openSheet("folder");
   };
 
-  const openDestinationPicker = async (action: DestinationAction) => {
+  const openDestinationPicker = async (action: DestinationAction, directSelection?: { folder?: ContentFolder; document?: ContentDocument }) => {
     if (!hasContentContext) {
       setSheetError("This action requires a connected Archive.");
       return;
     }
     const generation = ++destinationGeneration.current;
-    const startsAtRoot = action !== "upload";
+    if (directSelection?.folder) beginSingleSelection(directSelection.folder, "folder");
+    if (directSelection?.document) beginSingleSelection(directSelection.document, "document");
+    setDestinationUsesDirectSelection(Boolean(directSelection));
+    setTemporarySingleSelection(Boolean(directSelection));
     setDestinationAction(action);
-    setDestinationStack(startsAtRoot ? [] : folderStack);
-    if (sheetOpen) pushSheet("destination");
-    else openSheet("destination");
-    if (action !== "upload") return;
+    setDestinationChoices([]);
+    setDestinationStack(action === "upload" ? folderStack : []);
+    if (action === "upload") {
+      if (sheetOpen) pushSheet("destination");
+      else openSheet("destination");
+    } else if (sheetOpen) pushSheet("destinationBrowser");
+    else openSheet("destinationBrowser");
     setDestinationLoading(true);
     try {
-      const next = (await getContentLocation(queryClient, contentContext, currentFolder?.key)).folders;
+      const next = (await getContentLocation(queryClient, contentContext, action === "upload" ? currentFolder?.key : undefined)).folders;
       if (generation === destinationGeneration.current) setDestinationFolders(next);
     } catch (cause) {
       if (generation === destinationGeneration.current) setSheetError(cause instanceof Error ? cause.message : "Folders could not be loaded.");
@@ -1813,6 +2066,16 @@ export function KnowledgeWorkspace() {
     } finally {
       if (generation === destinationGeneration.current) setDestinationLoading(false);
     }
+  };
+
+  const toggleDestinationChoice = (folder: ContentFolder | undefined, stack: ContentFolder[]) => {
+    const key = folder?.key;
+    setDestinationChoices((current) => {
+      const selected = current.some((choice) => choice.folder?.key === key);
+      if (selected) return current.filter((choice) => choice.folder?.key !== key);
+      const choice = { folder, stack };
+      return destinationAction === "move" ? [choice] : [...current, choice];
+    });
   };
 
   const browseDestination = async (folder?: ContentFolder, back = false) => {
@@ -1945,107 +2208,148 @@ export function KnowledgeWorkspace() {
   };
 
   const selectDestination = async () => {
-    const folderKey = destinationFolder?.key;
     if (destinationAction === "upload") {
       destinationGeneration.current += 1;
-      await pickAndUpload(folderKey);
+      await pickAndUpload(destinationFolder?.key);
       return;
     }
-    if (destinationAction === "moveFolder") {
-      if (!selectedFolder) return;
-      const previous = selectedFolder;
-      const sourceParentFolderKey = previous.parentFolderKey;
-      if (sourceParentFolderKey === folderKey) { closeSheet(); return; }
-      const movedOptimistic = { ...previous, parentFolderKey: folderKey };
-      const previousFolders = folders;
-      const previousRootFolders = rootFolders;
-      const previousFolderStack = folderStack;
-      const previousMode = workspaceModeRef.current;
-      const sourceCacheKey = contentQueryKeys.location(contentContext, sourceParentFolderKey);
-      const destinationCacheKey = contentQueryKeys.location(contentContext, folderKey);
-      const sourceCache = queryClient.getQueryData(sourceCacheKey);
-      const destinationCache = queryClient.getQueryData(destinationCacheKey);
-      removeCachedContentFolder(queryClient, contentContext, sourceParentFolderKey, previous.key);
-      addCachedContentFolder(queryClient, contentContext, folderKey, movedOptimistic);
-      if (currentFolder?.key === sourceParentFolderKey) setFolders((current) => current.filter(({ key }) => key !== previous.key));
-      if (currentFolder?.key === folderKey) setFolders((current) => [...current.filter(({ key }) => key !== previous.key), movedOptimistic]);
-      if (!sourceParentFolderKey) setRootFolders((current) => current.filter(({ key }) => key !== previous.key));
-      if (!folderKey) setRootFolders((current) => [...current.filter(({ key }) => key !== previous.key), movedOptimistic]);
-      setSelectedFolder(movedOptimistic);
-      if (folderStack.some(({ key }) => key === previous.key)) {
+    if (!destinationAction || !destinationChoices.length || !selectedCount) return;
+    const action = destinationAction;
+    const choices = action === "move" ? destinationChoices.slice(0, 1) : destinationChoices;
+    const destinationKeys = choices.map((choice) => choice.folder?.key);
+    const first = choices[0];
+    if (!first) return;
+    const selectedFoldersSnapshot = [...selectedFolders];
+    const selectedDocumentsSnapshot = [...selectedDocuments];
+    setBulkLoading(true);
+    setSheetError(undefined);
+    try {
+      const { folders: operationFolders, documents: operationDocuments } = await resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot);
+      const sourceFolderKeys = [...operationFolders.map(({ parentFolderKey }) => parentFolderKey), ...operationDocuments.map(({ folderKey }) => folderKey)];
+      const operationSelection: ContentSelection = { folderKeys: operationFolders.map(({ key }) => key), documentKeys: operationDocuments.map(({ key }) => key) };
+      setSelectedFolders(operationFolders);
+      setSelectedDocuments(operationDocuments);
+      const outcome = action === "move"
+        ? await moveContentSelection(operationSelection, destinationKeys[0])
+        : await copyContentSelection(operationSelection, destinationKeys);
+      if (outcome.succeeded === 0) throw new Error(outcome.failures[0]?.message ?? `The items could not be ${action === "move" ? "moved" : "copied"}.`);
+      if (action === "move") {
+        replaceCachedContentFolders(queryClient, contentContext, outcome.folders);
+        replaceCachedContentDocuments(queryClient, contentContext, outcome.documents);
+        outcome.documents.forEach((document) => replaceCachedContentDocumentDetail(queryClient, contentContext, document));
+      }
+      await invalidateContentLocations(queryClient, contentContext, [...sourceFolderKeys, ...destinationKeys]);
+      await invalidateContentHistories(queryClient, contentContext, [...sourceFolderKeys, ...destinationKeys, undefined]);
+      const location = await getContentLocation(queryClient, contentContext, first.folder?.key);
+      setFolders(location.folders);
+      setDocuments(location.documents);
+      if (first.folder) {
+        setFolderStack(first.stack);
+        workspaceModeRef.current = "folder";
+        setWorkspaceMode("folder");
+      } else {
+        setRootFolders(location.folders);
+        setRootDocuments(location.documents);
         setFolderStack([]);
         workspaceModeRef.current = "folders";
         setWorkspaceMode("folders");
       }
-      closeSheet();
-      const generation = ++destinationGeneration.current;
-      try {
-        const moved = await moveContentFolder(previous.key, folderKey);
-        if (generation !== destinationGeneration.current) return;
-        replaceFolder(moved);
-        void invalidateContentLocations(queryClient, contentContext, [sourceParentFolderKey, folderKey]);
-        void invalidateContentHistories(queryClient, contentContext, [sourceParentFolderKey, folderKey]);
-      } catch (cause) {
-        if (generation !== destinationGeneration.current) return;
-        queryClient.setQueryData(sourceCacheKey, sourceCache);
-        queryClient.setQueryData(destinationCacheKey, destinationCache);
-        setFolders(previousFolders);
-        setRootFolders(previousRootFolders);
-        setFolderStack(previousFolderStack);
-        workspaceModeRef.current = previousMode;
-        setWorkspaceMode(previousMode);
-        setSelectedFolder(previous);
-        showToast({ title: "Folder move failed", description: cause instanceof Error ? cause.message : "The folder could not be moved." });
-      }
-      return;
-    }
-    if (!selectedDocument || !destinationAction) return;
-    const previous = selectedDocument;
-    const sourceFolderKey = previous.folderKey;
-    if (destinationAction === "move" && sourceFolderKey === folderKey) { closeSheet(); return; }
-    const sourceCacheKey = contentQueryKeys.location(contentContext, sourceFolderKey);
-    const destinationCacheKey = contentQueryKeys.location(contentContext, folderKey);
-    const sourceCache = queryClient.getQueryData(sourceCacheKey);
-    const destinationCache = queryClient.getQueryData(destinationCacheKey);
-    const previousDocuments = documents;
-    const previousRootDocuments = rootDocuments;
-    const temporaryKey = `optimistic-${createContentMutationKey()}`;
-    const optimistic = destinationAction === "move" ? { ...previous, folderKey } : { ...previous, key: temporaryKey, folderKey };
-    if (destinationAction === "move") removeCachedContentDocument(queryClient, contentContext, sourceFolderKey, previous.key);
-    addCachedContentDocument(queryClient, contentContext, folderKey, optimistic);
-    if (currentFolder?.key === sourceFolderKey && destinationAction === "move") setDocuments((current) => current.filter(({ key }) => key !== previous.key));
-    if (currentFolder?.key === folderKey) setDocuments((current) => [...current.filter(({ key }) => key !== optimistic.key), optimistic]);
-    if (!sourceFolderKey && destinationAction === "move") setRootDocuments((current) => current.filter(({ key }) => key !== previous.key));
-    if (!folderKey) setRootDocuments((current) => [...current.filter(({ key }) => key !== optimistic.key), optimistic]);
-    if (destinationAction === "move") setSelectedDocument(optimistic);
-    closeSheet();
-    const generation = ++destinationGeneration.current;
-    try {
-      if (destinationAction === "move") {
-        const updated = await trackActiveDocumentMutation(previous.key, moveContentDocument(previous.key, folderKey), (result) => {
-          if (result.key === documentKeyRef.current) updatedAtRef.current = result.updatedAt;
-        });
-        if (generation !== destinationGeneration.current) return;
-        replaceCachedContentDocumentDetail(queryClient, contentContext, updated);
-        replaceDocument(updated);
-      } else {
-        const copied = await copyContentDocument(previous.key, folderKey);
-        if (generation !== destinationGeneration.current) return;
-        removeCachedContentDocument(queryClient, contentContext, folderKey, temporaryKey);
-        addCachedContentDocument(queryClient, contentContext, folderKey, copied);
-        if (currentFolderKeyRef.current === folderKey) setDocuments((current) => [...current.filter(({ key }) => key !== temporaryKey), copied]);
-        if (!folderKey) setRootDocuments((current) => [...current.filter(({ key }) => key !== temporaryKey), copied]);
-      }
-      void invalidateContentLocations(queryClient, contentContext, destinationAction === "move" ? [sourceFolderKey, folderKey] : [folderKey]);
-      void invalidateContentHistories(queryClient, contentContext, destinationAction === "move" ? [sourceFolderKey, folderKey] : [folderKey]);
+      setRootSearchQuery("");
+      setRootSearchResults(undefined);
+      setQuery("");
+      setResults(undefined);
+      setFolderSearchResults(undefined);
+      const failedFolderKeys = new Set(outcome.failures.filter(({ kind }) => kind === "folder").map(({ key }) => key));
+      const failedDocumentKeys = new Set(outcome.failures.filter(({ kind }) => kind === "document").map(({ key }) => key));
+      setSelectedFolders(operationFolders.filter(({ key }) => failedFolderKeys.has(key)));
+      setSelectedDocuments(operationDocuments.filter(({ key }) => failedDocumentKeys.has(key)));
+      setDestinationChoices([]);
+      closeSheet(outcome.failed > 0);
+      const resourceNames = new Map<string, string>([...operationFolders, ...operationDocuments].map((item) => [item.key, item.name]));
+      const destinationNames = new Map(choices.map((choice) => [choice.folder?.key, choice.folder?.name ?? "Archive"]));
+      const copyFailureDetails = action === "copy" && outcome.failed
+        ? [...new Set(outcome.failures.map((failure) => `${resourceNames.get(failure.key) ?? failure.key} to ${destinationNames.get(failure.destinationFolderKey) ?? "Archive"}`))].join(", ")
+        : undefined;
+      showToast({
+        title: `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${action === "move" ? "moved" : "copied"}`,
+        ...(outcome.failed ? { description: `${outcome.failed} of ${outcome.requested} operations failed${copyFailureDetails ? `: ${copyFailureDetails}` : ""}. Failed resources remain selected${copyFailureDetails ? "; retry each listed source and destination pair separately to avoid duplicate copies" : ""}. ${outcome.failures[0]?.message ?? "Try those items again."}` } : {}),
+      });
     } catch (cause) {
-      if (generation !== destinationGeneration.current) return;
-      queryClient.setQueryData(sourceCacheKey, sourceCache);
-      queryClient.setQueryData(destinationCacheKey, destinationCache);
-      setDocuments(previousDocuments);
-      setRootDocuments(previousRootDocuments);
-      setSelectedDocument(previous);
-      showToast({ title: destinationAction === "move" ? "Document move failed" : "Document copy failed", description: cause instanceof Error ? cause.message : `The document could not be ${destinationAction === "move" ? "moved" : "copied"}.` });
+      setSheetError(cause instanceof Error ? cause.message : `The items could not be ${action === "move" ? "moved" : "copied"}.`);
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const updateSelectionFavorite = async () => {
+    const nextFavorite = !allSelectedFavorite;
+    setBulkLoading(true);
+    setSheetError(undefined);
+    try {
+      const outcome = await setContentSelectionFavorite(contentSelection, nextFavorite);
+      if (outcome.folders.length) {
+        replaceCachedContentFolders(queryClient, contentContext, outcome.folders);
+        outcome.folders.forEach((folder) => replaceFolder(folder, false));
+      }
+      if (outcome.documents.length) {
+        replaceCachedContentDocuments(queryClient, contentContext, outcome.documents);
+        outcome.documents.forEach((document) => replaceDocument(document, false));
+      }
+      await invalidateContentLocations(queryClient, contentContext, [...selectedFolders.map(({ parentFolderKey }) => parentFolderKey), ...selectedDocuments.map(({ folderKey }) => folderKey)]);
+      const failedFolderKeys = new Set(outcome.failures.filter(({ kind }) => kind === "folder").map(({ key }) => key));
+      const failedDocumentKeys = new Set(outcome.failures.filter(({ kind }) => kind === "document").map(({ key }) => key));
+      setSelectedFolders((current) => current.filter(({ key }) => failedFolderKeys.has(key)));
+      setSelectedDocuments((current) => current.filter(({ key }) => failedDocumentKeys.has(key)));
+      if (outcome.succeeded) {
+        closeSheet(outcome.failed > 0);
+      }
+      showToast({
+        title: outcome.succeeded ? `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} ${nextFavorite ? "favorited" : "unfavorited"}` : "Favorites could not be updated",
+        ...(outcome.failed ? { description: `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` } : {}),
+      });
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "Favorites could not be updated.");
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const deleteContentSelection = async () => {
+    const selectedFoldersSnapshot = [...selectedFolders];
+    const selectedDocumentsSnapshot = [...selectedDocuments];
+    setBulkLoading(true);
+    setSheetError(undefined);
+    try {
+      const { folders: operationFolders, documents: operationDocuments } = await resolveStructuralResources(selectedFoldersSnapshot, selectedDocumentsSnapshot);
+      const operationSelection: ContentSelection = { folderKeys: operationFolders.map(({ key }) => key), documentKeys: operationDocuments.map(({ key }) => key) };
+      setSelectedFolders(operationFolders);
+      setSelectedDocuments(operationDocuments);
+      const outcome = await archiveContentSelection(operationSelection);
+      const failedFolders = new Set(outcome.failures.filter(({ kind }) => kind === "folder").map(({ key }) => key));
+      const failedDocuments = new Set(outcome.failures.filter(({ kind }) => kind === "document").map(({ key }) => key));
+      const archivedFolderKeys = operationFolders.map(({ key }) => key).filter((key) => !failedFolders.has(key));
+      const archivedDocumentKeys = operationDocuments.map(({ key }) => key).filter((key) => !failedDocuments.has(key));
+      removeCachedContentFoldersEverywhere(queryClient, contentContext, archivedFolderKeys);
+      removeCachedContentDocumentsEverywhere(queryClient, contentContext, archivedDocumentKeys);
+      setFolders((current) => current.filter(({ key }) => !archivedFolderKeys.includes(key)));
+      setRootFolders((current) => current.filter(({ key }) => !archivedFolderKeys.includes(key)));
+      setDocuments((current) => current.filter(({ key }) => !archivedDocumentKeys.includes(key)));
+      setRootDocuments((current) => current.filter(({ key }) => !archivedDocumentKeys.includes(key)));
+      await queryClient.invalidateQueries({ queryKey: contentQueryKeys.locations(contentContext), refetchType: "none" });
+      await invalidateContentHistories(queryClient, contentContext, [currentFolder?.key, undefined]);
+      setSelectedFolders(operationFolders.filter(({ key }) => failedFolders.has(key)));
+      setSelectedDocuments(operationDocuments.filter(({ key }) => failedDocuments.has(key)));
+      if (outcome.succeeded) {
+        closeSheet(outcome.failed > 0);
+      }
+      showToast({
+        title: outcome.succeeded ? `${outcome.succeeded} ${outcome.succeeded === 1 ? "item" : "items"} deleted` : "Items could not be deleted",
+        description: outcome.failed ? `${outcome.failed} ${outcome.failed === 1 ? "item" : "items"} failed. ${outcome.failures[0]?.message ?? "Try again."}` : "Moved to Archive trash.",
+      });
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The selected items could not be deleted.");
+    } finally {
+      setBulkLoading(false);
     }
   };
 
@@ -2068,6 +2372,32 @@ export function KnowledgeWorkspace() {
       replaceDocument(previous);
       showToast({ title: "Favorite update failed", description: cause instanceof Error ? cause.message : "The favorite could not be updated." });
     }
+  };
+
+  const toggleSelectedFolderFavorite = async () => {
+    if (!selectedFolder) return;
+    const previous = selectedFolder;
+    const optimistic = { ...previous, isFavorite: !previous.isFavorite };
+    replaceFolder(optimistic);
+    closeSheet();
+    const generation = ++folderActionGeneration.current;
+    try {
+      const updated = await setContentFolderFavorite(previous.key, optimistic.isFavorite);
+      if (generation !== folderActionGeneration.current) return;
+      replaceFolder(updated);
+      void invalidateContentLocations(queryClient, contentContext, [updated.parentFolderKey]);
+    } catch (cause) {
+      if (generation !== folderActionGeneration.current) return;
+      replaceFolder(previous);
+      showToast({ title: "Favorite update failed", description: cause instanceof Error ? cause.message : "The folder favorite could not be updated." });
+    }
+  };
+
+  const confirmSelectedFolderDelete = () => {
+    if (!selectedFolder) return;
+    beginSingleSelection(selectedFolder, "folder");
+    setTemporarySingleSelection(true);
+    pushSheet("bulkDelete");
   };
 
   const downloadOriginal = async () => {
@@ -2187,7 +2517,7 @@ export function KnowledgeWorkspace() {
   };
 
   function mutationFooter() {
-    const close = (disabled: boolean) => <Button disabled={disabled} onPress={closeSheet} size="lg" variant="secondary">Close</Button>;
+    const close = (disabled: boolean) => <Button disabled={disabled} onPress={() => closeSheet()} size="lg" variant="secondary">Close</Button>;
     if (activeSheet === "audioVersions") return <>
       <Button disabled={generatingAudioVersion || loadingAudioVersions} loading={generatingAudioVersion} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>
       {close(generatingAudioVersion)}
@@ -2204,9 +2534,13 @@ export function KnowledgeWorkspace() {
       <Button disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "delete"} onPress={() => void deleteSelectedDocument()} size="lg" variant="danger">Delete</Button>
       {close(Boolean(documentActionLoading))}
     </>;
+    if (activeSheet === "bulkDelete") return <>
+      <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void deleteContentSelection()} size="lg" variant="primary">Delete</Button>
+      {close(bulkLoading)}
+    </>;
     if (activeSheet === "destinationBrowser") return <>
-      <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">Choose folder</Button>
-      {close(destinationLoading)}
+      <Button disabled={destinationLoading || destinationAction !== "upload" && destinationChoices.length === 0 || bulkLoading} loading={destinationLoading || bulkLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">{destinationAction === "upload" ? "Choose folder" : destinationAction === "move" ? "Move here" : `Copy to ${destinationChoices.length} ${destinationChoices.length === 1 ? "folder" : "folders"}`}</Button>
+      {close(destinationLoading || bulkLoading)}
     </>;
     if (activeSheet === "destination" && destinationAction === "upload") return <>
       <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => void selectDestination()} size="lg" variant="primary">Choose files for this folder</Button>
@@ -2263,6 +2597,10 @@ export function KnowledgeWorkspace() {
   ) : undefined;
   const selectedAudioVersionIndex = audioVersions.findIndex((version) => version.key === selectedAudioVersionKey);
   const selectedAudioVersion = selectedAudioVersionIndex >= 0 ? audioVersions[selectedAudioVersionIndex] : undefined;
+  const bulkToolbar = selectionActive ? <View style={styles.bulkToolbar}>
+    <Button accessibilityLabel="Clear selection" contentMode="raw" onPress={clearSelection} size="xs" style={styles.bulkToolbarAction} variant="ghost"><CloseIcon size="sm" /><Text style={styles.bulkSelectionText}>{selectedCount} selected</Text></Button>
+    <Button accessibilityLabel="Selected item actions" contentMode="raw" disabled={selectionMetadataLoading} loading={selectionMetadataLoading} onPress={() => openSheet("bulkActions")} size="xs" style={styles.bulkToolbarIcon} variant="icon"><MoreHorizontalIcon size="sm" /></Button>
+  </View> : null;
 
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
@@ -2301,6 +2639,7 @@ export function KnowledgeWorkspace() {
               </View>
               <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="md" style={styles.rootCreateButton} variant="icon"><PlusIcon size="sm" /></Button>
             </View>
+            {bulkToolbar}
             <View style={styles.rootContent}>
               <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
@@ -2308,25 +2647,26 @@ export function KnowledgeWorkspace() {
                 <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => setFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
               </Tabs>
               {rootSearchQuery.trim() ? rootSearching || !rootSearchResults ? <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? <View accessibilityLiveRegion="polite" style={styles.rootFolderGrid}>
-                {rootSearchFolders.map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}><Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button></View>)}
+                {rootSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}><Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} size="xl" style={styles.rootFolderMain} variant="ghost"><FolderIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{folder.name}</Text></Button></View>; })}
                 {rootSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
               </View> : <View accessibilityLiveRegion="polite" style={styles.rootDocuments}>
-                {rootSearchDocuments.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchDocument(document)} size="sm" style={styles.documentButton} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text></Button>)}
+                {rootSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedItem]} variant="secondary"><FileIcon size="sm" /><Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text></Button>; })}
                 {rootSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
               </View> : archiveLocationLoading ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.loadingGrid]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={styles.rootDocuments}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
                 <View style={styles.rootFolderGrid}>
-                  {rootFolders.length ? rootFolders.map((folder) => (
-                    <View key={folder.key} style={[styles.rootFolderCard, folder.key.startsWith("optimistic-") && styles.optimisticCard, { width: archiveCardSize, height: archiveCardSize }]}>
+                  {rootFolders.length ? rootFolders.map((folder) => {
+                    const selected = selectedFolders.some(({ key }) => key === folder.key);
+                    return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, folder.key.startsWith("optimistic-") && styles.optimisticCard, { width: archiveCardSize, height: archiveCardSize }]}>
                       {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                      <Button contentMode="raw" disabled={folder.key.startsWith("optimistic-")} onPress={() => void (hasContentContext ? openFolder(folder) : selectFolder(folder))} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
-                    </View>
-                  )) : !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>No folders here yet.</Text><Button accessibilityLabel="Create folder" contentMode="raw" onPress={openNewFolder} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
+                      <Button accessibilityState={{ selected }} contentMode="raw" disabled={folder.key.startsWith("optimistic-")} onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                    </View>;
+                  }) : !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>No folders here yet.</Text><Button accessibilityLabel="Create folder" contentMode="raw" onPress={openNewFolder} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
                 </View>
               ) : (
                 <View style={styles.rootDocuments}>
                   {folderContentTab === "files" ? visibleUploadBatch.map((item) => <Button accessibilityLabel={`Uploading ${item.name}`} contentMode="raw" disabled key={item.id} size="sm" style={[styles.documentButton, styles.uploadingFileButton]} variant="secondary"><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={[styles.documentButtonLabel, styles.uploadingFileLabel]}>{item.name}</Text><Spinner size="small" variant="muted" /></Button>) : null}
                   {rootTabDocuments.length ? rootTabDocuments.map((document) => (
-                    <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
+                    <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedItem]} variant="secondary">
                       <FileIcon size="sm" />
                       <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                       <ScannedBadge document={document} />
@@ -2339,7 +2679,7 @@ export function KnowledgeWorkspace() {
         ) : workspaceMode === "folder" ? (
           <View style={styles.archiveFolder}>
             <View style={styles.folderTitleRow}>
-              <Button accessibilityLabel={`Back to ${folderStack.at(-2)?.name ?? "folders"}`} contentMode="raw" onPress={() => void goBackFolder()} size="xs" variant="icon"><ChevronLeftIcon size="sm" /></Button>
+              <Button accessibilityLabel={selectionActive ? "Clear selection" : `Back to ${folderStack.at(-2)?.name ?? "folders"}`} contentMode="raw" onPress={() => { if (selectionActive) clearSelection(); else void goBackFolder(); }} size="xs" variant="icon">{selectionActive ? <CloseIcon size="sm" /> : <ChevronLeftIcon size="sm" />}</Button>
               <Text numberOfLines={1} style={styles.folderTitle}>{currentFolder?.name ?? "Archive"}</Text>
               <View style={styles.folderTitleActions}>
                 {currentFolder ? <Button accessibilityLabel={`Manage ${currentFolder.name}`} contentMode="raw" onPress={() => showFolderActions(currentFolder)} size="xs" variant="icon"><MoreHorizontalIcon size="sm" /></Button> : null}
@@ -2352,6 +2692,7 @@ export function KnowledgeWorkspace() {
               <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
               {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
             </View>
+            {bulkToolbar}
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
@@ -2359,32 +2700,32 @@ export function KnowledgeWorkspace() {
             </Tabs>
             {query.trim() ? folderSearching || !folderSearchResults ? <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
               <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, styles.folderTabContent]}>
-                {folderSearchFolders.map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
+                {folderSearchFolders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: archiveCardSize, height: archiveCardSize }]}>
                   {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                  <Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
-                </View>)}
+                  <Button accessibilityState={{ selected }} contentMode="raw" onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                </View>; })}
                 {folderSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
               </View>
             ) : <View accessibilityLiveRegion="polite" style={[styles.folderDocuments, styles.folderTabContent]}>
-              {folderSearchDocuments.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
+              {folderSearchDocuments.map((document) => { const selected = selectedDocuments.some(({ key }) => key === document.documentKey); return <Button accessibilityState={{ selected }} contentMode="raw" key={document.documentKey} onLongPress={() => handleSearchDocumentLongPress(document)} onPress={() => handleSearchDocumentPress(document)} size="sm" style={[styles.documentButton, selected && styles.selectedItem]} variant="secondary">
                 <FileIcon size="sm" />
                 <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
-              </Button>)}
+              </Button>; })}
               {folderSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
             </View> : archiveLocationLoading ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
               <View style={[styles.rootFolderGrid, styles.folderTabContent, archiveLocationLoading && styles.loadingGrid]}>
-                {folders.length ? folders.map((folder) => (
-                  <View key={folder.key} style={[styles.rootFolderCard, folder.key.startsWith("optimistic-") && styles.optimisticCard, { width: archiveCardSize, height: archiveCardSize }]}>
+                {folders.length ? folders.map((folder) => { const selected = selectedFolders.some(({ key }) => key === folder.key); return (
+                  <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, folder.key.startsWith("optimistic-") && styles.optimisticCard, { width: archiveCardSize, height: archiveCardSize }]}>
                     {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
-                    <Button contentMode="raw" disabled={folder.key.startsWith("optimistic-")} onPress={() => void openFolder(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                    <Button accessibilityState={{ selected }} contentMode="raw" disabled={folder.key.startsWith("optimistic-")} onLongPress={() => handleFolderLongPress(folder)} onPress={() => handleFolderPress(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
                   </View>
-                )) : <View style={styles.folderEmptyState}><Text style={styles.empty}>No folders here yet.</Text><Button accessibilityLabel="Create folder" contentMode="raw" onPress={openNewFolder} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View>}
+                ); }) : <View style={styles.folderEmptyState}><Text style={styles.empty}>No folders here yet.</Text><Button accessibilityLabel="Create folder" contentMode="raw" onPress={openNewFolder} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View>}
               </View>
             ) : (
               <View style={[styles.folderDocuments, styles.folderTabContent]}>
                 {folderContentTab === "files" ? visibleUploadBatch.map((item) => <Button accessibilityLabel={`Uploading ${item.name}`} contentMode="raw" disabled key={item.id} size="sm" style={[styles.documentButton, styles.uploadingFileButton]} variant="secondary"><FileIcon size="sm" variant="muted" /><Text numberOfLines={1} style={[styles.documentButtonLabel, styles.uploadingFileLabel]}>{item.name}</Text><Spinner size="small" variant="muted" /></Button>) : null}
                 {folderTabDocuments.length ? folderTabDocuments.map((document) => (
-                  <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
+                  <Button accessibilityState={{ selected: selectedDocuments.some(({ key }) => key === document.key) }} contentMode="raw" key={document.key} onLongPress={() => handleDocumentLongPress(document)} onPress={() => handleDocumentPress(document)} size="sm" style={[styles.documentButton, selectedDocuments.some(({ key }) => key === document.key) && styles.selectedItem]} variant="secondary">
                     <FileIcon size="sm" />
                     <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
                     <ScannedBadge document={document} />
@@ -2573,15 +2914,15 @@ export function KnowledgeWorkspace() {
       /> : null}
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
-        dismissible={!versionActionKey && !generatingAudioVersion && !coverActionLoading && !destinationLoading && !documentActionLoading}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : activeSheet === "bulkDelete" ? `Delete ${selectedCount} selected ${selectedCount === 1 ? "item" : "items"} from Archive? Selected folders include everything inside them.` : undefined}
+        dismissible={!versionActionKey && !generatingAudioVersion && !coverActionLoading && !destinationLoading && !documentActionLoading && !bulkLoading}
         footer={mutationFooter()}
-        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser"}
-        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
+        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser" || activeSheet === "bulkActions"}
+        mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails" || activeSheet === "bulkDelete"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
         tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources" || activeSheet === "versions" || activeSheet === "audioVersions"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationFolder?.name ?? "Archive" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "historyChooser" ? "Document history" : activeSheet === "versions" ? "Document versions" : activeSheet === "audioVersions" ? "Audio versions" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "bulkDelete" ? "Delete selected items" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationAction === "upload" ? destinationFolder?.name ?? "Archive" : destinationAction === "move" ? "Move to folder" : "Copy to folders" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
@@ -2592,6 +2933,12 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} variant="secondary">Scan documents</BottomSheetItem>
           </>
         ) : null}
+        {activeSheet === "bulkActions" ? <View style={styles.bulkActionList}>
+          <Button disabled={bulkLoading} loading={bulkLoading} onPress={() => void updateSelectionFavorite()} size="lg" variant="secondary">{allSelectedFavorite ? "Unfavorite" : "Favorite"}</Button>
+          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("move")} size="lg" variant="secondary">Move to folder</Button>
+          <Button disabled={bulkLoading} onPress={() => void openDestinationPicker("copy")} size="lg" variant="secondary">Copy to folders</Button>
+          <Button disabled={bulkLoading} onPress={() => pushSheet("bulkDelete")} size="lg" variant="secondary">Delete</Button>
+        </View> : null}
         {activeSheet === "historyChooser" ? (
           <View style={styles.historyChoices}>
             <BottomSheetItem onPress={() => void openVersionHistory()}>Document versions</BottomSheetItem>
@@ -2604,8 +2951,8 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void toggleFavorite()}>{selectedDocument.isFavorite ? "Remove from favorites" : "Add to favorites"}</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()}>{selectedDocument.extension ? "Download original" : "Download as text"}</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => { setRenameName(selectedDocument.name); pushSheet("rename"); }}>Rename</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("move")}>Move to folder</BottomSheetItem>
-            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("copy")}>Copy to folder</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("move", { document: selectedDocument })}>Move to folder</BottomSheetItem>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("copy", { document: selectedDocument })}>Copy to folders</BottomSheetItem>
             {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()}>View scanned pages</BottomSheetItem> : null}
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
@@ -2619,7 +2966,10 @@ export function KnowledgeWorkspace() {
         {activeSheet === "folderActions" && selectedFolder ? (
           <>
             <BottomSheetItem onPress={openFolderDetails}>Edit name and description</BottomSheetItem>
-            <BottomSheetItem onPress={() => void openDestinationPicker("moveFolder")}>Move folder</BottomSheetItem>
+            <BottomSheetItem onPress={() => void toggleSelectedFolderFavorite()}>{selectedFolder.isFavorite ? "Unfavorite" : "Favorite"}</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openDestinationPicker("move", { folder: selectedFolder })}>Move folder</BottomSheetItem>
+            <BottomSheetItem onPress={() => void openDestinationPicker("copy", { folder: selectedFolder })}>Copy folder</BottomSheetItem>
+            <BottomSheetItem onPress={confirmSelectedFolderDelete}>Delete folder</BottomSheetItem>
             <BottomSheetItem disabled={coverActionLoading} loading={coverActionLoading} onPress={() => void chooseFolderCover()}>{selectedFolder.coverUrl ? "Change cover" : "Set cover"}</BottomSheetItem>
             {selectedFolder.coverUrl ? <BottomSheetItem disabled={coverActionLoading} onPress={() => void clearFolderCover()}>Remove cover</BottomSheetItem> : null}
           </>
@@ -2652,11 +3002,21 @@ export function KnowledgeWorkspace() {
           </View>
         ) : null}
         {activeSheet === "destinationBrowser" ? (
-          <ScrollView contentContainerStyle={styles.destinationFolderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
-            {destinationStack.length > 0 ? <View style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}><Button accessibilityLabel={`Back to ${destinationStack.at(-2)?.name ?? "Archive"}`} contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(undefined, true)} size="xl" style={styles.rootFolderMain} variant="ghost"><ChevronLeftIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{destinationStack.at(-2)?.name ?? "Archive"}</Text></Button></View> : null}
-            {destinationFolders.filter((folder) => destinationAction !== "moveFolder" || folder.key !== selectedFolder?.key).map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}>{folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}<Button contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button></View>)}
-            {!destinationLoading && destinationFolders.filter((folder) => destinationAction !== "moveFolder" || folder.key !== selectedFolder?.key).length === 0 ? <Text style={styles.empty}>No nested folders here.</Text> : null}
-          </ScrollView>
+          <View style={styles.destinationBrowser}>
+            {destinationAction !== "upload" ? <Button accessibilityState={{ selected: destinationChoices.some((choice) => choice.folder?.key === destinationFolder?.key) }} disabled={selectedFolders.some(({ key }) => key === destinationFolder?.key)} icon={destinationChoices.some((choice) => choice.folder?.key === destinationFolder?.key) ? <CheckIcon size="sm" /> : <ArchiveIcon size="sm" />} onPress={() => toggleDestinationChoice(destinationFolder, destinationStack)} size="sm" style={[styles.currentDestination, destinationChoices.some((choice) => choice.folder?.key === destinationFolder?.key) && styles.selectedItem]} variant="secondary">Select {destinationFolder?.name ?? "Archive"}</Button> : null}
+            <ScrollView contentContainerStyle={styles.destinationFolderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
+              {destinationStack.length > 0 ? <View style={[styles.rootFolderCard, { width: destinationCardSize, height: destinationCardSize }]}><Button accessibilityLabel={`Back to ${destinationStack.at(-2)?.name ?? "Archive"}`} contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(undefined, true)} size="xl" style={styles.rootFolderMain} variant="ghost"><ChevronLeftIcon size="lg" /><Text numberOfLines={1} style={styles.archiveCardLabel}>{destinationStack.at(-2)?.name ?? "Archive"}</Text></Button></View> : null}
+              {destinationFolders.filter((folder) => !selectedFolders.some(({ key }) => key === folder.key)).map((folder) => {
+                const selected = destinationChoices.some((choice) => choice.folder?.key === folder.key);
+                return <View key={folder.key} style={[styles.rootFolderCard, selected && styles.selectedItem, { width: destinationCardSize, height: destinationCardSize }]}>
+                  {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
+                  <Button accessibilityLabel={destinationAction === "upload" ? `Open ${folder.name}` : `${selected ? "Remove" : "Select"} ${folder.name}`} accessibilityState={{ selected }} contentMode="raw" disabled={destinationLoading} onPress={() => destinationAction === "upload" ? void browseDestination(folder) : toggleDestinationChoice(folder, [...destinationStack, folder])} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{selected ? <CheckIcon size="lg" /> : folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                  {destinationAction !== "upload" ? <Button accessibilityLabel={`Browse ${folder.name}`} contentMode="raw" disabled={destinationLoading} onPress={() => void browseDestination(folder)} size="xs" style={styles.destinationBrowseButton} variant="icon"><ChevronRightIcon size="sm" /></Button> : null}
+                </View>;
+              })}
+              {!destinationLoading && destinationFolders.filter((folder) => !selectedFolders.some(({ key }) => key === folder.key)).length === 0 ? <Text style={styles.empty}>No nested folders here.</Text> : null}
+            </ScrollView>
+          </View>
         ) : null}
         {activeSheet === "enhance" ? (
           <View style={styles.enhancePanel}>
@@ -2779,6 +3139,10 @@ const styles = StyleSheet.create({
   editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   editorHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
+  bulkToolbar: { minHeight: 44, marginBottom: spacing.md, paddingHorizontal: 2, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderTopColor: palette.hairline, borderBottomColor: palette.hairline, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
+  bulkToolbarAction: { minHeight: 44 },
+  bulkToolbarIcon: { height: 44, width: 44 },
+  bulkSelectionText: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12 },
   rootCreateButton: { height: 44, width: 44 },
   rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
   documentSearch: { flex: 0, width: "100%" },
@@ -2792,6 +3156,7 @@ const styles = StyleSheet.create({
   rootFolderGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10 },
   loadingGrid: { flex: 1 },
   rootFolderCard: { position: "relative", borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
+  selectedItem: { borderColor: palette.silver50, shadowColor: palette.silver50, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.62, shadowRadius: 5, elevation: 4 },
   optimisticCard: { opacity: 0.7 },
   rootFolderMain: { height: "100%", width: "100%", flexDirection: "column", justifyContent: "center", gap: 10, paddingHorizontal: 8 },
   folderCover: StyleSheet.absoluteFill,
@@ -2812,7 +3177,7 @@ const styles = StyleSheet.create({
   emptyPlusButton: { height: 44, width: 44 },
   documentButton: { width: "100%", minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 },
   documentButtonLabel: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "left" },
-  scannedBadge: { paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, backgroundColor: palette.panel },
+  scannedBadge: { marginRight: -6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, backgroundColor: palette.panel },
   scannedBadgeText: { color: palette.muted, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 0.4 },
   uploadingFileButton: { opacity: 0.62 },
   uploadingFileLabel: { color: palette.silver500 },
@@ -2877,8 +3242,12 @@ const styles = StyleSheet.create({
   summaryPanel: { gap: 16 },
   summaryText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 24 },
   destinationPanel: { flex: 1, gap: 12 },
+  bulkActionList: { width: "100%", gap: spacing.sm },
+  destinationBrowser: { flex: 1, minHeight: 0, gap: spacing.sm },
+  currentDestination: { width: "100%", justifyContent: "flex-start" },
   destinationFolders: { gap: 8, paddingVertical: 4 },
   destinationFolderGrid: { alignContent: "flex-start", flexDirection: "row", flexWrap: "wrap", gap: 10, paddingVertical: 4 },
+  destinationBrowseButton: { position: "absolute", right: 4, top: 4, height: 44, width: 44, backgroundColor: "rgba(8, 10, 13, 0.78)" },
   uploadDestinationButton: { justifyContent: "flex-start", paddingHorizontal: 14 },
   locationPreview: { gap: 4, marginTop: 10 },
   locationRow: { flexDirection: "row", alignItems: "center", gap: 4 },

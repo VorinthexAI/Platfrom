@@ -49,10 +49,12 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
 
 const {
   archiveContentDocument,
+  archiveContentSelection,
   askPersonalAssistant,
   createContentDocument,
   createContentFolder,
   copyContentDocument,
+  copyContentSelection,
   downloadContentDocument,
   enhanceContent,
   findContentDocumentVersion,
@@ -62,6 +64,7 @@ const {
   listContentDocumentAudioVersions,
   moveContentFolder,
   moveContentDocument,
+  moveContentSelection,
   readContentDocument,
   readContentDocumentPreview,
   readContentDocumentSources,
@@ -72,6 +75,7 @@ const {
   searchContentMatches,
   summarizeContentDocument,
   setContentDocumentFavorite,
+  setContentSelectionFavorite,
   translateContentDocument,
   updateContentFolder,
   setContentFolderCover,
@@ -247,6 +251,62 @@ test("updates folder details and moves folders with exact payloads", async () =>
   expect((await moveContentFolder("folder", "parent")).key).toBe("folder");
   expect(calls[0]?.body.input).toEqual({ updates: [{ folderKey: "folder", name: "Plans", description: "Current plans" }], atomic: false, idempotencyKey: expect.any(String) });
   expect(calls[1]?.body.input).toEqual({ moves: [{ folderKey: "folder", targetParentFolderKey: "parent" }], atomic: false, idempotencyKey: expect.any(String) });
+});
+
+test("executes mixed batches with exact payloads and stable operation keys", async () => {
+  responseForTool = (tool) => {
+    if (tool.startsWith("folder.")) return { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder-a", name: "Folder", isFavorite: true } } }] } } };
+    return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document-a", name: "Document", isFavorite: true, updatedAt: "after" } } }] } } };
+  };
+
+  const result = await setContentSelectionFavorite({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, true, "stable-favorite");
+  expect(result).toMatchObject({ requested: 2, succeeded: 2, failed: 0, folders: [{ key: "folder-a" }], documents: [{ key: "document-a" }], failures: [] });
+  expect(calls.map(({ url, body }) => ({ url, input: body.input }))).toEqual([
+    { url: "/api/v1/content/tools/folder.update", input: { updates: [{ folderKey: "folder-a", isFavorite: true }], atomic: false, idempotencyKey: "stable-favorite:folder.update" } },
+    { url: "/api/v1/content/tools/document.update", input: { updates: [{ documentKey: "document-a", isFavorite: true }], atomic: false, idempotencyKey: "stable-favorite:document.update" } },
+  ]);
+});
+
+test("returns copied records and surfaces item and tool partial failures", async () => {
+  responseForTool = (tool) => {
+    if (tool === "folder.copy") return { data: { success: true, data: { results: [
+      { success: true, data: { folder: { key: "folder-copy", name: "Folder copy" }, folderCount: 3, documentCount: 4 } },
+      { success: false, error: { message: "Folder destination denied" } },
+    ] } } };
+    if (tool === "document.copy") throw new Error("Document copy unavailable");
+  };
+
+  const result = await copyContentSelection(
+    { folderKeys: ["folder-a"], documentKeys: ["document-a"] },
+    ["destination-a", "destination-b"],
+    "stable-copy",
+  );
+  expect(result.copiedFolders).toEqual([{ folder: { key: "folder-copy", name: "Folder copy" }, folderCount: 3, documentCount: 4 }]);
+  expect(result).toMatchObject({ requested: 4, succeeded: 1, failed: 3 });
+  expect(result.failures).toEqual([
+    { kind: "folder", key: "folder-a", destinationFolderKey: "destination-b", tool: "folder.copy", message: "Folder destination denied" },
+    { kind: "document", key: "document-a", destinationFolderKey: "destination-a", tool: "document.copy", message: "Document copy unavailable" },
+    { kind: "document", key: "document-a", destinationFolderKey: "destination-b", tool: "document.copy", message: "Document copy unavailable" },
+  ]);
+  expect(calls[0]?.body.input.idempotencyKey).toBe("stable-copy:folder.copy");
+  expect(calls[1]?.body.input.idempotencyKey).toBe("stable-copy:document.copy");
+});
+
+test("moves and archives mixed selections through separate canonical tools", async () => {
+  responseForTool = (tool) => ({ data: { success: true, data: { results: [{ success: true, data: tool.startsWith("folder.")
+    ? { folder: { key: "folder-a", name: "Folder" } }
+    : { document: { key: "document-a", name: "Document", isFavorite: false, updatedAt: "after" } } }] } } });
+
+  await moveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "destination", "stable-move");
+  await archiveContentSelection({ folderKeys: ["folder-a"], documentKeys: ["document-a"] }, "stable-archive");
+  expect(calls.map(({ url }) => url)).toEqual([
+    "/api/v1/content/tools/folder.move", "/api/v1/content/tools/document.move",
+    "/api/v1/content/tools/folder.archive", "/api/v1/content/tools/document.archive",
+  ]);
+  expect(calls[0]?.body.input).toEqual({ moves: [{ folderKey: "folder-a", targetParentFolderKey: "destination" }], atomic: false, idempotencyKey: "stable-move:folder.move" });
+  expect(calls[1]?.body.input).toEqual({ moves: [{ documentKey: "document-a", targetScopeKey: "scope-authenticated", targetFolderKey: "destination" }], atomic: false, idempotencyKey: "stable-move:document.move" });
+  expect(calls[2]?.body.input).toEqual({ folderKeys: ["folder-a"], includeDescendants: true, atomic: false, idempotencyKey: "stable-archive:folder.archive" });
+  expect(calls[3]?.body.input).toEqual({ documentKeys: ["document-a"], atomic: false, idempotencyKey: "stable-archive:document.archive" });
 });
 
 test("sets and clears folder covers with exact payloads", async () => {

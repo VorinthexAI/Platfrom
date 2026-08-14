@@ -50,6 +50,7 @@ import { emailReadTool } from './email-read';
 import { emailThreadListTool } from './email-thread-list';
 import { emailThreadReadTool } from './email-thread-read';
 import { folderContentToolDefinition } from './folder-content';
+import { folderCopyToolDefinition } from './folder-copy';
 import { folderCreateToolDefinition } from './folder-create';
 import { folderDeleteToolDefinition } from './folder-delete';
 import { folderFindToolDefinition } from './folder-find';
@@ -162,7 +163,7 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   accessAgentEvaluateTool, accessAgentExplainTool, accessOrganizationEvaluateTool, accessOrganizationExplainTool, accessScopeEvaluateTool, accessScopeExplainTool,
   agentMemberGrantTool, agentMemberListTool, agentMemberReadTool, agentMemberRevokeTool, agentMemberSyncTool, artifactCreateTool,
   documentContentToolDefinition, documentCreateToolDefinition, documentCopyToolDefinition, documentCreateVersionToolDefinition, documentDeleteToolDefinition, documentDeleteVersionToolDefinition, documentDownloadToolDefinition, documentExportToolDefinition, documentFindToolDefinition, documentFindVersionToolDefinition, documentListToolDefinition, documentListAudioVersionsToolDefinition, documentListSharesToolDefinition, documentListVersionsToolDefinition, documentMoveToolDefinition, documentParseToolDefinition, documentReadToolDefinition, documentRenameToolDefinition, documentScanToolDefinition, documentRestoreToolDefinition, documentRestoreVersionToolDefinition, documentRewriteToolDefinition, documentShareToolDefinition, documentShareContentTool, documentShareRestoreTool, documentSummarizeToolDefinition, documentTranslateToolDefinition, documentUnshareToolDefinition, documentUpdateToolDefinition, documentVersionContentTool, documentVersionRestoreTool,
-  folderContentToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
+  folderContentToolDefinition, folderCopyToolDefinition, folderCreateToolDefinition, folderDeleteToolDefinition, folderFindToolDefinition, folderListToolDefinition, folderMoveToolDefinition, folderRenameToolDefinition, folderRestoreToolDefinition, folderUpdateToolDefinition,
   milestoneContentTool, milestoneChangeStatusTool, milestoneCompleteTool, milestoneCreateTool, milestoneDeleteTool, milestoneFindTool, milestoneListTool, milestoneMoveTool, milestoneRenameTool, milestoneReopenTool, milestoneRestoreTool, milestoneScheduleTool, milestoneUpdateTool,
   organizationContentTool, organizationDocumentSearchToolDefinition, organizationMemberActivateTool, organizationMemberAddTool, organizationMemberListTool, organizationMemberReadTool, organizationMemberRemoveTool, organizationMemberRoleUpdateTool, organizationMemberSuspendTool, organizationProjectSearchTool, organizationProviderDisableTool, organizationProviderEnableTool, organizationProviderListTool, organizationProviderReadTool, organizationProviderTestTool, organizationReadTool, organizationRestoreTool, organizationUpdateTool,
   projectContentTool, projectCreateTool, projectDeleteTool, projectFindTool, projectListTool, projectMoveTool, projectRenameTool, projectRestoreTool, projectUpdateTool,

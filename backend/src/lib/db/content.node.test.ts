@@ -31,7 +31,7 @@ describe('Content node contracts', () => {
       expect(schema.shape.deletedAt.parse('2026-07-22T00:00:00.000Z')).toBe('2026-07-22T00:00:00.000Z');
       expect(() => schema.shape.deletedAt.parse('yesterday')).toThrow();
     }
-    expect(folderSchema.shape).not.toHaveProperty('isFavorite');
+    expect(folderSchema.shape.isFavorite.parse(undefined)).toBe(false);
     expect(documentSchema.shape.isFavorite.parse(undefined)).toBe(false);
   });
 

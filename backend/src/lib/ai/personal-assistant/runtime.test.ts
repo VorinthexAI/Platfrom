@@ -32,7 +32,7 @@ describe('personal assistant runtime', () => {
 
     expect(request).toEqual({ mode: 'model', organizationKey, actionSlug: 'orchestrator-chat', modelSlug: 'amazon.nova-lite' });
     expect(chatInput.tools.map(({ name }: { name: string }) => name)).toEqual([
-      'folder.list', 'folder.create', 'folder.update', 'folder.move',
+      'folder.list', 'folder.create', 'folder.update', 'folder.move', 'folder.copy',
       'document.list', 'document.find', 'document.create', 'document.update',
       'document.rename', 'document.move', 'document.copy', 'document.translate',
       'document.list-versions', 'document.restore-version', 'document.download', 'knowledge.search', 'note.write', 'note.enhance', 'assistant.unsupported',

@@ -2,6 +2,17 @@ import { apiClient } from "./api-client";
 import * as Crypto from "expo-crypto";
 import { useAuthStore } from "@/state/auth";
 import type { AssistantChange } from "./assistant-changes";
+import {
+  planContentSelectionArchive,
+  planContentSelectionCopy,
+  planContentSelectionFavorite,
+  planContentSelectionMove,
+  type ContentSelection,
+  type ContentSelectionOperation,
+  type ContentSelectionPlan,
+} from "./content-selection-plans";
+
+export type { ContentSelection } from "./content-selection-plans";
 
 export type ContentContext = {
   organizationKey: string;
@@ -15,6 +26,7 @@ export type ContentFolder = {
   name: string;
   description?: string;
   coverUrl?: string;
+  isFavorite?: boolean;
 };
 
 export type ContentDocument = {
@@ -110,8 +122,73 @@ type ToolResponse<T> =
   | { success: true; data: T }
   | { success: false; error: { message: string } };
 
+type ContentBatchToolResult = {
+  success: boolean;
+  data?: { document?: ContentDocument; folder?: ContentFolder; folderCount?: number; documentCount?: number };
+  error?: { message: string };
+};
+
+export type ContentBatchFailure = ContentSelectionOperation & { tool: string; message: string };
+
+export type ContentBatchOutcome = {
+  folders: ContentFolder[];
+  documents: ContentDocument[];
+  copiedFolders: { folder: ContentFolder; folderCount: number; documentCount: number }[];
+  failures: ContentBatchFailure[];
+  requested: number;
+  succeeded: number;
+  failed: number;
+};
+
 function recordKey(value: Record<string, unknown> | null) {
   return typeof value?.key === "string" ? value.key : "";
+}
+
+async function executeContentSelectionPlan(plan: ContentSelectionPlan): Promise<ContentBatchOutcome> {
+  const callOutcomes = await Promise.all(plan.calls.map(async (call) => {
+    const folders: ContentFolder[] = [];
+    const documents: ContentDocument[] = [];
+    const copiedFolders: ContentBatchOutcome["copiedFolders"] = [];
+    const failures: ContentBatchFailure[] = [];
+    try {
+      const data = await callContentTool<{ results: ContentBatchToolResult[] }>(call.tool, call.input);
+      call.operations.forEach((operation, index) => {
+        const result = data.results[index];
+        if (!result?.success || !result.data) {
+          failures.push({ ...operation, tool: call.tool, message: result?.error?.message ?? "The Archive operation failed." });
+          return;
+        }
+        if (result.data.document) documents.push(result.data.document);
+        if (result.data.folder) {
+          folders.push(result.data.folder);
+          if (call.tool === "folder.copy") copiedFolders.push({ folder: result.data.folder, folderCount: result.data.folderCount ?? 1, documentCount: result.data.documentCount ?? 0 });
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The Archive operation failed.";
+      failures.push(...call.operations.map((operation) => ({ ...operation, tool: call.tool, message })));
+    }
+    return { folders, documents, copiedFolders, failures };
+  }));
+  const outcome: ContentBatchOutcome = {
+    folders: callOutcomes.flatMap(({ folders }) => folders),
+    documents: callOutcomes.flatMap(({ documents }) => documents),
+    copiedFolders: callOutcomes.flatMap(({ copiedFolders }) => copiedFolders),
+    failures: callOutcomes.flatMap(({ failures }) => failures),
+    requested: plan.operationCount,
+    succeeded: 0,
+    failed: 0,
+  };
+  outcome.failed = outcome.failures.length;
+  outcome.succeeded = outcome.requested - outcome.failed;
+  return outcome;
+}
+
+function singleBatchRecord<T>(outcome: ContentBatchOutcome, records: T[], fallback: string) {
+  if (outcome.failures[0]) throw new Error(outcome.failures[0].message);
+  const record = records[0];
+  if (!record) throw new Error(fallback);
+  return record;
 }
 
 export function getContentContext(): ContentContext {
@@ -389,59 +466,23 @@ export async function renameContentDocument(documentKey: string, name: string) {
 }
 
 export async function setContentDocumentFavorite(documentKey: string, isFavorite: boolean) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
-  }>("document.update", {
-    updates: [{ documentKey, isFavorite }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The favorite could not be updated.");
-  return result.data.document;
+  const outcome = await setContentSelectionFavorite({ folderKeys: [], documentKeys: [documentKey] }, isFavorite);
+  return singleBatchRecord(outcome, outcome.documents, "The favorite could not be updated.");
 }
 
 export async function moveContentDocument(documentKey: string, targetFolderKey?: string) {
-  const contentContext = getContentContext();
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
-  }>("document.move", {
-    moves: [{ documentKey, targetScopeKey: contentContext.scopeKey, ...(targetFolderKey ? { targetFolderKey } : {}) }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be moved.");
-  return result.data.document;
+  const outcome = await moveContentSelection({ folderKeys: [], documentKeys: [documentKey] }, targetFolderKey);
+  return singleBatchRecord(outcome, outcome.documents, "The document could not be moved.");
 }
 
 export async function copyContentDocument(documentKey: string, targetFolderKey?: string) {
-  const contentContext = getContentContext();
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
-  }>("document.copy", {
-    copies: [{
-      documentKey,
-      targetScopeKey: contentContext.scopeKey,
-      ...(targetFolderKey ? { targetFolderKey } : {}),
-      includeVersions: false,
-      includeShares: false,
-    }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be copied.");
-  return result.data.document;
+  const outcome = await copyContentSelection({ folderKeys: [], documentKeys: [documentKey] }, [targetFolderKey]);
+  return singleBatchRecord(outcome, outcome.documents, "The document could not be copied.");
 }
 
 export async function archiveContentDocument(documentKey: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
-  }>("document.archive", { documentKeys: [documentKey], atomic: false, idempotencyKey: createContentMutationKey() });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be deleted.");
-  return result.data.document;
+  const outcome = await archiveContentSelection({ folderKeys: [], documentKeys: [documentKey] });
+  return singleBatchRecord(outcome, outcome.documents, "The document could not be deleted.");
 }
 
 export async function downloadContentDocument(documentKey: string, format: "original" | "txt" = "original") {
@@ -493,16 +534,39 @@ export async function setContentFolderCover(folderKey: string, coverImageKey: st
 }
 
 export async function moveContentFolder(folderKey: string, targetParentFolderKey?: string) {
-  const data = await callContentTool<{
-    results: { success: boolean; data?: { folder: ContentFolder }; error?: { message: string } }[];
-  }>("folder.move", {
-    moves: [{ folderKey, ...(targetParentFolderKey ? { targetParentFolderKey } : {}) }],
-    atomic: false,
-    idempotencyKey: createContentMutationKey(),
-  });
-  const result = data.results[0];
-  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The folder could not be moved.");
-  return result.data.folder;
+  const outcome = await moveContentSelection({ folderKeys: [folderKey], documentKeys: [] }, targetParentFolderKey);
+  return singleBatchRecord(outcome, outcome.folders, "The folder could not be moved.");
+}
+
+export function setContentSelectionFavorite(selection: ContentSelection, isFavorite: boolean, idempotencyKey = createContentMutationKey()) {
+  return executeContentSelectionPlan(planContentSelectionFavorite(selection, isFavorite, idempotencyKey));
+}
+
+export function moveContentSelection(selection: ContentSelection, targetFolderKey?: string, idempotencyKey = createContentMutationKey()) {
+  return executeContentSelectionPlan(planContentSelectionMove(selection, getContentContext().scopeKey, targetFolderKey, idempotencyKey));
+}
+
+export function copyContentSelection(selection: ContentSelection, destinationFolderKeys: readonly (string | undefined)[], idempotencyKey = createContentMutationKey()) {
+  return executeContentSelectionPlan(planContentSelectionCopy(selection, getContentContext().scopeKey, destinationFolderKeys, idempotencyKey));
+}
+
+export function archiveContentSelection(selection: ContentSelection, idempotencyKey = createContentMutationKey()) {
+  return executeContentSelectionPlan(planContentSelectionArchive(selection, idempotencyKey));
+}
+
+export async function setContentFolderFavorite(folderKey: string, isFavorite: boolean) {
+  const outcome = await setContentSelectionFavorite({ folderKeys: [folderKey], documentKeys: [] }, isFavorite);
+  return singleBatchRecord(outcome, outcome.folders, "The favorite could not be updated.");
+}
+
+export async function copyContentFolder(folderKey: string, targetParentFolderKey?: string) {
+  const outcome = await copyContentSelection({ folderKeys: [folderKey], documentKeys: [] }, [targetParentFolderKey]);
+  return singleBatchRecord(outcome, outcome.copiedFolders, "The folder could not be copied.");
+}
+
+export async function archiveContentFolder(folderKey: string) {
+  const outcome = await archiveContentSelection({ folderKeys: [folderKey], documentKeys: [] });
+  return singleBatchRecord(outcome, outcome.folders, "The folder could not be deleted.");
 }
 
 export async function uploadContentDocument(file: { name: string; type: string; size: number; base64: string }, folderKey?: string, contentContext = getContentContext()) {

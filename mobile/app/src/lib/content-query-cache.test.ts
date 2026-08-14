@@ -8,11 +8,15 @@ import {
   invalidateContentHistories,
   invalidateContentLocations,
   replaceCachedContentDocument,
+  replaceCachedContentDocuments,
   replaceCachedContentDocumentDetail,
   replaceCachedContentFolder,
+  replaceCachedContentFolders,
   removeCachedContentDocument,
   removeCachedContentDocumentEverywhere,
+  removeCachedContentDocumentsEverywhere,
   removeCachedContentFolder,
+  removeCachedContentFoldersEverywhere,
 } from "./content-query-cache";
 import type { ContentContext } from "./content-client";
 
@@ -53,6 +57,32 @@ test("patches cached document and folder metadata without evicting note content"
     documents: [{ key: "document-a", name: "After", isFavorite: true, updatedAt: "after" }],
   });
   expect(client.getQueryData<any>(documentKey).content).toBe("Cached body");
+});
+
+test("patches and removes multiple mixed-selection cache records in one pass", () => {
+  const client = new QueryClient();
+  const locationKey = contentQueryKeys.location(context, "folder-a");
+  client.setQueryData(locationKey, {
+    folders: [{ key: "folder-a", name: "Before A" }, { key: "folder-b", name: "Before B" }],
+    documents: [
+      { key: "document-a", name: "Before A", isFavorite: false, updatedAt: "before" },
+      { key: "document-b", name: "Before B", isFavorite: false, updatedAt: "before" },
+    ],
+  });
+  client.setQueryData(contentQueryKeys.document(context, "document-b"), { key: "document-b", name: "Before B", isFavorite: false, updatedAt: "before", content: "Body" });
+
+  replaceCachedContentFolders(client, context, [{ key: "folder-a", name: "After A", isFavorite: true }, { key: "folder-b", name: "After B", isFavorite: true }]);
+  replaceCachedContentDocuments(client, context, [
+    { key: "document-a", name: "After A", isFavorite: true, updatedAt: "after" },
+    { key: "document-b", name: "After B", isFavorite: true, updatedAt: "after" },
+  ]);
+  removeCachedContentDocumentsEverywhere(client, context, ["document-a", "document-b"]);
+
+  expect(client.getQueryData<any>(locationKey)).toEqual({
+    folders: [{ key: "folder-a", name: "After A", isFavorite: true }, { key: "folder-b", name: "After B", isFavorite: true }],
+    documents: [],
+  });
+  expect(client.getQueryData(contentQueryKeys.document(context, "document-b"))).toBeUndefined();
 });
 
 test("invalidates only the affected source and destination locations", async () => {
@@ -110,7 +140,7 @@ test("optimistically adds and removes documents and folders in exact locations",
   });
 });
 
-test("removes deleted documents from every location and evicts detail and preview", () => {
+test("removes deleted documents and evicts detail, preview, and nested audio queries", () => {
   const client = new QueryClient();
   const first = contentQueryKeys.location(context, "first");
   const second = contentQueryKeys.location(context, "second");
@@ -119,11 +149,35 @@ test("removes deleted documents from every location and evicts detail and previe
   client.setQueryData(second, { folders: [], documents: [document] });
   client.setQueryData(contentQueryKeys.document(context, document.key), { ...document, content: "Body" });
   client.setQueryData(contentQueryKeys.preview(context, document.key), { ...document, blocks: [] });
+  client.setQueryData(contentQueryKeys.audioVersions(context, document.key), [{ key: "audio-a" }]);
   removeCachedContentDocumentEverywhere(client, context, document.key);
   expect(client.getQueryData<any>(first).documents).toEqual([]);
   expect(client.getQueryData<any>(second).documents).toEqual([]);
   expect(client.getQueryData(contentQueryKeys.document(context, document.key))).toBeUndefined();
   expect(client.getQueryData(contentQueryKeys.preview(context, document.key))).toBeUndefined();
+  expect(client.getQueryData(contentQueryKeys.audioVersions(context, document.key))).toBeUndefined();
+});
+
+test("evicts all scoped locations when archived folders may contain cached descendants", () => {
+  const client = new QueryClient();
+  const root = contentQueryKeys.location(context);
+  const selected = contentQueryKeys.location(context, "folder-a");
+  const descendant = contentQueryKeys.location(context, "folder-child");
+  const stale = contentQueryKeys.location(context, "unrelated-stale");
+  const other = contentQueryKeys.location(otherContext, "folder-a");
+  client.setQueryData(root, { folders: [{ key: "folder-a", name: "Folder" }], documents: [] });
+  client.setQueryData(selected, { folders: [{ key: "folder-child", name: "Child" }], documents: [] });
+  client.setQueryData(descendant, { folders: [], documents: [] });
+  client.setQueryData(stale, { folders: [], documents: [] });
+  client.setQueryData(other, { folders: [], documents: [] });
+
+  removeCachedContentFoldersEverywhere(client, context, ["folder-a"]);
+
+  expect(client.getQueryData(root)).toBeUndefined();
+  expect(client.getQueryData(selected)).toBeUndefined();
+  expect(client.getQueryData(descendant)).toBeUndefined();
+  expect(client.getQueryData(stale)).toBeUndefined();
+  expect(client.getQueryData(other)).toEqual({ folders: [], documents: [] });
 });
 
 test("invalidates affected histories and patches moved document detail without corrupting locations", async () => {

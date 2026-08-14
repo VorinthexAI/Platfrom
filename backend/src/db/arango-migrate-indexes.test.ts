@@ -218,7 +218,7 @@ describe('Arango migration indexes', () => {
     expect(patch).not.toHaveProperty('chunkEmbeddings');
   });
   test('physically normalizes and verifies favorite-bearing resources idempotently', async () => {
-    for (const collection of ['images', 'collections', 'documents', 'emailThreads'] as const) {
+    for (const collection of ['folders', 'images', 'collections', 'documents', 'emailThreads'] as const) {
       const calls: Array<{ query: string; bindVars?: Record<string, unknown> }> = [];
       const database = {
         async query(query: string, bindVars?: Record<string, unknown>) {

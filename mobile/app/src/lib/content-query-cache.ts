@@ -82,11 +82,16 @@ export async function refreshContentHistory(queryClient: QueryClient, context: C
 }
 
 export function replaceCachedContentDocument(queryClient: QueryClient, context: ContentContext, updated: ContentDocument) {
+  replaceCachedContentDocuments(queryClient, context, [updated]);
+}
+
+export function replaceCachedContentDocuments(queryClient: QueryClient, context: ContentContext, updated: readonly ContentDocument[]) {
+  const updates = new Map(updated.map((document) => [document.key, document]));
   queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
     ...location,
-    documents: location.documents.map((document) => document.key === updated.key ? updated : document),
+    documents: location.documents.map((document) => updates.get(document.key) ?? document),
   } : location);
-  queryClient.setQueryData<ContentDocument & { content: string }>(contentQueryKeys.document(context, updated.key), (document) => document ? { ...document, ...updated } : document);
+  updated.forEach((document) => queryClient.setQueryData<ContentDocument & { content: string }>(contentQueryKeys.document(context, document.key), (cached) => cached ? { ...cached, ...document } : cached));
 }
 
 export function addCachedContentDocument(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, document: ContentDocument) {
@@ -113,12 +118,19 @@ export function removeCachedContentDocument(queryClient: QueryClient, context: C
 }
 
 export function removeCachedContentDocumentEverywhere(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  removeCachedContentDocumentsEverywhere(queryClient, context, [documentKey]);
+}
+
+export function removeCachedContentDocumentsEverywhere(queryClient: QueryClient, context: ContentContext, documentKeys: readonly string[]) {
+  const removed = new Set(documentKeys);
   queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
     ...location,
-    documents: location.documents.filter((document) => document.key !== documentKey),
+    documents: location.documents.filter((document) => !removed.has(document.key)),
   } : location);
-  queryClient.removeQueries({ queryKey: contentQueryKeys.document(context, documentKey), exact: true });
-  queryClient.removeQueries({ queryKey: contentQueryKeys.preview(context, documentKey), exact: true });
+  documentKeys.forEach((documentKey) => {
+    queryClient.removeQueries({ queryKey: contentQueryKeys.document(context, documentKey) });
+    queryClient.removeQueries({ queryKey: contentQueryKeys.preview(context, documentKey), exact: true });
+  });
 }
 
 export function removeCachedContentFolder(queryClient: QueryClient, context: ContentContext, parentFolderKey: string | undefined, folderKey: string) {
@@ -128,10 +140,19 @@ export function removeCachedContentFolder(queryClient: QueryClient, context: Con
   } : location);
 }
 
+export function removeCachedContentFoldersEverywhere(queryClient: QueryClient, context: ContentContext, folderKeys: readonly string[]) {
+  if (folderKeys.length) queryClient.removeQueries({ queryKey: contentQueryKeys.locations(context) });
+}
+
 export function replaceCachedContentFolder(queryClient: QueryClient, context: ContentContext, updated: ContentFolder) {
+  replaceCachedContentFolders(queryClient, context, [updated]);
+}
+
+export function replaceCachedContentFolders(queryClient: QueryClient, context: ContentContext, updated: readonly ContentFolder[]) {
+  const updates = new Map(updated.map((folder) => [folder.key, folder]));
   queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
     ...location,
-    folders: location.folders.map((folder) => folder.key === updated.key ? updated : folder),
+    folders: location.folders.map((folder) => updates.get(folder.key) ?? folder),
   } : location);
 }
 

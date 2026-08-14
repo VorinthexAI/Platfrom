@@ -121,7 +121,7 @@ const PERSISTED_AUDIO_MAX_CHUNKS = 80;
 const PERSISTED_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -689,6 +689,14 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
   const foldersIn = async (scopeKey: string, includePendingDeletion = false) => (await repo.listFolders(scopeKey, true, includePendingDeletion))
     .filter((item) => includePendingDeletion || !item._internalDeletion);
   const descendants = (all: Folder[], key: string) => { const out: Folder[] = []; const pending = [key]; const seen = new Set(pending); while (pending.length) { const parentKey = pending.shift()!; for (const child of all.filter((f) => f.parentFolderKey === parentKey)) if (!seen.has(child.key)) { seen.add(child.key); out.push(child); pending.push(child.key); } } return out; };
+  const availableCopyName = (requested: string, names: Set<string>) => {
+    if (!names.has(requested)) return requested;
+    for (let copy = 1; ; copy += 1) {
+      const suffix = copy === 1 ? ' (copy)' : ` (copy ${copy})`;
+      const candidate = `${requested.slice(0, 255 - suffix.length)}${suffix}`;
+      if (!names.has(candidate)) return candidate;
+    }
+  };
   const activeFolderHierarchy = async (key: string | undefined, scopeKey: string) => {
     let currentKey: string | undefined = key;
     const visited = new Set<string>();
@@ -858,6 +866,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(item.description ? { description: item.description } : {}),
             ...(item.coverImageKey ? { coverImageKey: item.coverImageKey } : {}),
             embedding,
+            isFavorite: false,
             deletedAt: null,
             createdAt: timestamp,
             updatedAt: timestamp,
@@ -920,6 +929,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             ...(item.name !== undefined ? { name: item.name } : {}),
             ...(item.description !== undefined ? { description: item.description ?? undefined } : {}),
             ...(item.coverImageKey !== undefined ? { coverImageKey: item.coverImageKey ?? undefined } : {}),
+            ...(item.isFavorite !== undefined ? { isFavorite: item.isFavorite } : {}),
             ...(embedding ? { embedding } : {}),
             updatedAt: now(),
           };
@@ -946,6 +956,137 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return { folder: await folderView(moved, d) };
         },
       })), input.atomic, repo);
+    } else if (tool === 'folder.copy') {
+      if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder copy is unavailable because storage copy cannot be rolled back transactionally.', tool, 'storage');
+      result = await batch(tool, input.copies.map((item: any) => ({
+        key: item.folderKey,
+        run: async () => {
+          const source = await folder(item.folderKey, 'viewer', false);
+          const target = await location(item.targetScopeKey, item.targetParentFolderKey, 'moderator');
+          const sourceScopeFolders = (await foldersIn(source.scopeKey)).filter((candidate) => !candidate.deletedAt);
+          const sourceFolders = [source, ...descendants(sourceScopeFolders, source.key)];
+          const targetScopeFolders = source.scopeKey === item.targetScopeKey ? sourceScopeFolders : (await foldersIn(item.targetScopeKey)).filter((candidate) => !candidate.deletedAt);
+          const siblingNames = new Set(targetScopeFolders.filter((candidate) => candidate.parentFolderKey === target?.key).map((candidate) => candidate.name));
+          const rootName = availableCopyName(item.newName ?? source.name, siblingNames);
+          const sourceFolderKeys = new Set(sourceFolders.map((candidate) => candidate.key));
+          const sourceDocuments = (await repo.listDocuments(source.scopeKey)).filter((candidate) => candidate.folderKey && sourceFolderKeys.has(candidate.folderKey));
+          const folderKeys = new Map(sourceFolders.map((candidate) => [candidate.key, d.id()]));
+          const insertedFolderKeys: string[] = [];
+          const insertedDocumentKeys: string[] = [];
+          const copiedStorageKeys: string[] = [];
+          const documentStorageKeys = new Map<string, string[]>();
+          const timestamp = now();
+          const copyObject = async (sourceKey: string, destinationKey: string, mimeType?: string) => {
+            const copied = await storageOperation('copy', source.key, item.targetScopeKey, () => d.storage.copy({ sourceKey, destinationKey, mimeType }));
+            copiedStorageKeys.push(copied.storageKey);
+            return copied.storageKey;
+          };
+          try {
+            for (const current of sourceFolders) {
+              const key = folderKeys.get(current.key)!;
+              const parentFolderKey = current.key === source.key ? target?.key : folderKeys.get(current.parentFolderKey!);
+              const name = current.key === source.key ? rootName : current.name;
+              const embedding = current.key === source.key && name !== current.name
+                ? await embed([name, current.description].filter(Boolean).join('\n\n'), key, item.targetScopeKey)
+                : current.embedding;
+              const created = await repo.insertFolder({
+                ...current,
+                key,
+                scopeKey: item.targetScopeKey,
+                ...(parentFolderKey ? { parentFolderKey } : { parentFolderKey: undefined }),
+                name,
+                embedding,
+                ...(source.scopeKey === item.targetScopeKey ? {} : { coverImageKey: undefined }),
+                isFavorite: false,
+                deletedAt: null,
+                _internalDeletion: undefined,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+              insertedFolderKeys.push(created.key);
+            }
+            for (const current of sourceDocuments) {
+              const key = d.id();
+              const base = `content/${context.organizationKey}/${item.targetScopeKey}/${key}`;
+              const storageKey = current.storageKey && current.extension
+                ? await copyObject(current.storageKey, `${base}/original.${current.extension}`, current.mimeType)
+                : undefined;
+              const sourceStorageKeys: string[] = [];
+              for (let index = 0; index < (current.sourceStorageKeys?.length ?? 0); index += 1) {
+                const sourceKey = current.sourceStorageKeys![index]!;
+                const suffix = sourceKey.match(/\.[a-z0-9]+$/i)?.[0] ?? '';
+                sourceStorageKeys.push(await copyObject(sourceKey, `${base}/sources/${index + 1}${suffix}`));
+              }
+              const speechStorageKeys: string[] = [];
+              for (let index = 0; index < (current.speechStorageKeys?.length ?? 0); index += 1) {
+                const sourceKey = current.speechStorageKeys![index]!;
+                const suffix = sourceKey.match(/\.[a-z0-9]+$/i)?.[0] ?? '';
+                speechStorageKeys.push(await copyObject(sourceKey, `${base}/speech/${index + 1}${suffix}`));
+              }
+              const created = await repo.insertDocument({
+                ...current,
+                key,
+                scopeKey: item.targetScopeKey,
+                folderKey: folderKeys.get(current.folderKey!)!,
+                ...(storageKey ? { storageKey } : { storageKey: undefined }),
+                ...(sourceStorageKeys.length ? { sourceStorageKeys } : { sourceStorageKeys: undefined }),
+                ...(speechStorageKeys.length ? { speechStorageKeys } : { speechStorageKeys: undefined }),
+                isFavorite: false,
+                deletedAt: null,
+                _internalDeletion: undefined,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+              insertedDocumentKeys.push(created.key);
+              documentStorageKeys.set(created.key, [storageKey, ...sourceStorageKeys, ...speechStorageKeys].filter((value): value is string => Boolean(value)));
+            }
+            const copiedRoot = await repo.getFolder(folderKeys.get(source.key)!);
+            if (!copiedRoot) fail('CONTENT_CONFLICT', 'Copied folder root could not be read.', tool, 'read', source.key);
+            return { folder: await folderView(copiedRoot, d), folderCount: sourceFolders.length, documentCount: sourceDocuments.length };
+          } catch (error) {
+            const cleanupErrors: unknown[] = [];
+            const folderMarker = { kind: 'folder' as const, owner: invocationKey, startedAt: timestamp, folderKeys: insertedFolderKeys, documentKeys: insertedDocumentKeys, objectKeys: copiedStorageKeys };
+            try {
+              if (!repo.transaction) throw new Error('Transaction-bound copy compensation is unavailable.');
+              await repo.transaction(async (bound) => {
+                for (const key of insertedDocumentKeys) {
+                  const marker = { kind: 'document' as const, owner: invocationKey, startedAt: timestamp, objectKeys: documentStorageKeys.get(key) ?? [] };
+                  if (!await bound.setDocumentDeletion(key, marker)) throw new Error(`Copied document ${key} could not be frozen for compensation.`);
+                }
+                for (const key of [...insertedFolderKeys].reverse()) if (!await bound.setFolderDeletion(key, folderMarker)) throw new Error(`Copied folder ${key} could not be frozen for compensation.`);
+              });
+            } catch (cleanupError) {
+              cleanupErrors.push(cleanupError);
+            }
+            if (cleanupErrors.length === 0) {
+              const failedDocumentKeys = new Set<string>();
+              for (const key of [...insertedDocumentKeys].reverse()) await repo.deleteDocument(key).catch((cleanupError) => { failedDocumentKeys.add(key); cleanupErrors.push(cleanupError); });
+              const retainedStorageKeys = new Set([...failedDocumentKeys].flatMap((key) => documentStorageKeys.get(key) ?? []));
+              const failedStorageKeys = new Set(retainedStorageKeys);
+              for (const key of [...copiedStorageKeys].reverse()) if (!retainedStorageKeys.has(key)) {
+                await storageOperation('delete', source.key, item.targetScopeKey, () => d.storage.delete(key)).catch((cleanupError) => { failedStorageKeys.add(key); cleanupErrors.push(cleanupError); });
+              }
+              // Folder markers retain the manifest until every document pointer and object is gone.
+              const remainingFolderKeys = new Set(insertedFolderKeys);
+              if (cleanupErrors.length === 0) for (const key of [...insertedFolderKeys].reverse()) {
+                await repo.deleteFolder(key).then(() => remainingFolderKeys.delete(key)).catch((cleanupError) => cleanupErrors.push(cleanupError));
+              }
+              if (cleanupErrors.length > 0 && remainingFolderKeys.size > 0) {
+                const recoveryMarker = { ...folderMarker, folderKeys: [...remainingFolderKeys], documentKeys: [...failedDocumentKeys], objectKeys: [...failedStorageKeys] };
+                try {
+                  await repo.transaction!(async (bound) => {
+                    for (const key of remainingFolderKeys) if (!await bound.setFolderDeletion(key, recoveryMarker, invocationKey)) throw new Error(`Copied folder ${key} compensation manifest could not be updated.`);
+                  });
+                } catch (cleanupError) {
+                  cleanupErrors.push(cleanupError);
+                }
+              }
+            }
+            if (cleanupErrors.length) throw new ContentError('CONTENT_CONFLICT', 'Folder copy failed and compensation requires retry.', tool, { action: 'cleanup', resourceKey: insertedFolderKeys[0] ?? source.key, cause: new AggregateError([error, ...cleanupErrors]), retryable: true });
+            throw error;
+          }
+        },
+      })), false, repo);
     } else if (tool === 'folder.archive' || tool === 'folder.restore') {
       const restore = tool === 'folder.restore';
       const lifecycleItems = input.folderKeys.map((key: string) => ({
@@ -988,6 +1129,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         key,
         preflight: async () => {
           const root = await folder(key, 'owner', true, true);
+          if (root._internalDeletion) {
+            const manifest = root._internalDeletion;
+            if (input.atomic) fail('CONTENT_CONFLICT', 'Atomic folder deletion cannot resume an existing deletion manifest.', tool, 'transaction', key);
+            if (manifest.kind !== 'folder' || !manifest.folderKeys || !manifest.documentKeys || !manifest.folderKeys.includes(key)) fail('CONTENT_CONFLICT', 'Folder deletion manifest is incomplete.', tool, 'delete', key);
+            return;
+          }
           if (!root.deletedAt) fail('CONTENT_CONFLICT', 'Folder must be archived before permanent deletion.', tool, 'delete', key);
           if (!await canPermanentlyDelete({ kind: 'folder', deletedAt: root.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Folder retention policy denied permanent deletion.', tool, 'delete', key);
         },

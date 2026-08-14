@@ -212,7 +212,8 @@ suite('Content live E2E', () => {
     await call('document.scan', { scopeKey, folderKey: childFolderKey, name: 'Scanned note', pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }] });
     expect((await call('folder.find', { folderKeys: [rootFolderKey], includeChildrenCount: true, includeDocumentCount: true })).results[0].data.folder.childrenCount).toBe(1);
     expect((await call('folder.list', { scopeKey, includeDocuments: false })).folders.length).toBeGreaterThanOrEqual(2);
-    const folderUpdate = await call('folder.update', { updates: [{ folderKey: rootFolderKey, description: 'Canonical root metadata' }] });
+    const folderUpdate = await call('folder.update', { updates: [{ folderKey: rootFolderKey, description: 'Canonical root metadata', isFavorite: true }, { folderKey: destinationFolderKey, isFavorite: true }] });
+    expect(folderUpdate.results.map((result: any) => result.data.folder.isFavorite)).toEqual([true, true]);
     expect(folderUpdate.results[0].data.folder.description).toBe('Canonical root metadata');
     const partial = await call('folder.rename', { renames: [{ folderKey: childFolderKey, name: 'Renamed Child' }, { folderKey: newId(), name: 'Missing' }] }, { expectedFailures: 1 });
     expect(partial.summary).toEqual({ requested: 2, succeeded: 1, failed: 1 });
@@ -371,6 +372,11 @@ suite('Content live E2E', () => {
     expect(contentSearchReplay.cached).toBe(true);
     const contentSearchHistory = await call('scope.content.search-history', { scopeKey, limit: 8 });
     expect(contentSearchHistory.history.some((item: any) => item.normalizedQuery === 'semantic roadmap')).toBe(true);
+
+    const copiedFolder = await call('folder.copy', { copies: [{ folderKey: childFolderKey, targetScopeKey: scopeKey, targetParentFolderKey: destinationFolderKey, newName: 'Copied subtree' }] });
+    expect(copiedFolder.results[0].data).toMatchObject({ folder: { parentFolderKey: destinationFolderKey, name: 'Copied subtree', isFavorite: false }, folderCount: 1 });
+    const copiedFolderDocuments = await call('document.list', { scopeKey, folderKey: copiedFolder.results[0].data.folder.key });
+    expect(copiedFolderDocuments.documents.length).toBe(copiedFolder.results[0].data.documentCount);
 
     const unshared = await call('document.unshare', { shareKeys: [shareKey], atomic: true });
     expect(unshared.results[0].data.share.revokedAt).toBe(now);

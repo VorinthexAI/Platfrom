@@ -14,6 +14,7 @@ export const folderSchema = z.object({
   description: z.string().trim().min(1).optional(),
   coverImageKey: z.string().cuid().optional(),
   embedding: currentEmbeddingSchema,
+  isFavorite: z.boolean().default(false),
   deletedAt: z.string().datetime().nullable().default(null),
   _internalDeletion: z.object({
     kind: z.literal('folder'),

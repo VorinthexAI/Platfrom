@@ -13,7 +13,7 @@ import {
 const expectedNames = [
   'enhance',
   'book.create-context', 'book.write',
-  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete',
+  'folder.create', 'folder.find', 'folder.list', 'folder.update', 'folder.rename', 'folder.move', 'folder.copy', 'folder.archive', 'folder.restore', 'folder.delete',
   'document.parse', 'document.scan', 'document.create', 'document.find', 'document.list', 'document.read', 'document.list-audio-versions', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.download', 'document.export', 'document.share', 'document.unshare', 'document.list-shares', 'document.create-version', 'document.find-version', 'document.list-versions', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
   'scope.document.search', 'scope.content.search', 'scope.content.search-history', 'organization.document.search',
 ] as const;
@@ -21,7 +21,7 @@ const expectedNames = [
 describe('Content tool registry', () => {
   test('contains exactly the registered dotted names and no action-style kebab names', () => {
     expect([...CONTENT_TOOL_NAMES]).toEqual([...expectedNames]);
-    expect(CONTENT_TOOL_NAMES).toHaveLength(43);
+    expect(CONTENT_TOOL_NAMES).toHaveLength(44);
     for (const name of CONTENT_TOOL_NAMES) {
       expect(name).toMatch(/^[a-z]+(?:[.-][a-z]+)*$/);
       if (name !== 'enhance') expect(name).toContain('.');
@@ -50,6 +50,7 @@ describe('Content input contracts', () => {
     expect(contentToolInputSchemas['document.rewrite'].parse({ rewrites: [{ documentKey: key, instruction: 'Clarify' }] })).toMatchObject({ atomic: false, rewrites: [{ mode: 'preview' }] });
     expect(contentToolInputSchemas['document.restore-version'].parse({ restores: [{ documentKey: key, versionKey: newId() }] })).toMatchObject({ atomic: false, restores: [{ createBackupVersion: true }] });
     expect(contentToolInputSchemas['document.copy'].parse({ copies: [{ documentKey: key, targetScopeKey: newId(), targetFolderKey: newId() }] })).toMatchObject({ atomic: false, copies: [{ includeVersions: false, includeShares: false }] });
+    expect(contentToolInputSchemas['folder.copy'].parse({ copies: [{ folderKey: key, targetScopeKey: newId() }] })).toMatchObject({ atomic: false });
   });
 
   test('preserves specified optional controls', () => {
@@ -76,7 +77,7 @@ describe('Content input contracts', () => {
 
   test('enforces non-empty arrays for every batch-first contract', () => {
     const invalid: Array<[keyof typeof contentToolInputSchemas, object]> = [
-      ['folder.create', { folders: [] }], ['folder.update', { updates: [] }], ['folder.rename', { renames: [] }], ['folder.move', { moves: [] }],
+      ['folder.create', { folders: [] }], ['folder.update', { updates: [] }], ['folder.rename', { renames: [] }], ['folder.move', { moves: [] }], ['folder.copy', { copies: [] }],
       ['folder.archive', { folderKeys: [] }], ['folder.restore', { folderKeys: [] }], ['folder.delete', { folderKeys: [] }],
       ['document.find', { documentKeys: [] }], ['document.read', { documentKeys: [] }], ['document.update', { updates: [] }], ['document.rename', { renames: [] }],
       ['document.move', { moves: [] }], ['document.copy', { copies: [] }], ['document.archive', { documentKeys: [] }], ['document.restore', { documentKeys: [] }],
@@ -95,7 +96,7 @@ describe('Content input contracts', () => {
     expect(() => contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, createVersion: true }] })).toThrow();
     expect(contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, isFavorite: true }] }).updates[0]).toMatchObject({ isFavorite: true });
     expect(contentToolInputSchemas['document.update'].parse({ updates: [{ documentKey: key, content: 'x', isFavorite: true }] }).updates[0]).toMatchObject({ content: 'x', isFavorite: true });
-    expect(() => contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, isFavorite: true }] })).toThrow();
+    expect(contentToolInputSchemas['folder.update'].parse({ updates: [{ folderKey: key, isFavorite: true }] }).updates[0]).toMatchObject({ isFavorite: true });
     expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: { html: '<p>x</p>', content: 'x' } })).toThrow();
     expect(() => contentToolInputSchemas['document.create'].parse({ scopeKey: key, name: 'Notes', representation: {} })).toThrow();
   });
@@ -112,6 +113,7 @@ describe('Content input contracts', () => {
       ['folder.update', { updates: [{ folderKey: key, name: 'Folder' }] }],
       ['folder.rename', { renames: [{ folderKey: key, name: 'Folder' }] }],
       ['folder.move', { moves: [{ folderKey: key }] }],
+      ['folder.copy', { copies: [{ folderKey: key, targetScopeKey: newId() }] }],
       ['folder.archive', { folderKeys: [key] }], ['folder.restore', { folderKeys: [key] }], ['folder.delete', { folderKeys: [key] }],
       ['document.update', { updates: [{ documentKey: key, content: 'text' }] }],
       ['document.rename', { renames: [{ documentKey: key, name: 'Name' }] }],

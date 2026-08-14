@@ -23,6 +23,7 @@ export const contentFolderSchema = z.object({
   name: nameSchema,
   description: textSchema.optional(),
   coverUrl: z.string().url().optional(),
+  isFavorite: z.boolean().default(false),
   deletedAt: dateTimeSchema.nullable().default(null),
   createdAt: dateTimeSchema,
   updatedAt: dateTimeSchema,
@@ -127,6 +128,11 @@ const copiedDocumentDataSchema = z.object({
   document: contentDocumentSchema,
   shares: z.array(createdShareDataSchema).optional(),
 }).strict();
+const copiedFolderDataSchema = z.object({
+  folder: contentFolderSchema,
+  folderCount: z.number().int().positive(),
+  documentCount: z.number().int().nonnegative(),
+}).strict();
 const versionDataSchema = z.object({ version: contentDocumentVersionSchema }).strict();
 const projectedVersionDataSchema = z.object({ version: contentProjectedDocumentVersionSchema }).strict();
 const fileDataSchema = z.object({ documentKey: keySchema, format: z.string().trim().min(1), fileName: nameSchema, mimeType: textSchema, encoding: z.literal('base64'), content: z.string() }).strict();
@@ -150,8 +156,8 @@ const bookBriefShape = {
 } as const;
 const bookToolDataSchema = z.object({ bookKey: keySchema, status: z.enum(['planning', 'researching', 'generating', 'ready', 'failed']) }).strict();
 
-const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional(), coverImageKey: keySchema.nullable().optional() }).strict()
-  .refine((value) => value.name !== undefined || value.description !== undefined || value.coverImageKey !== undefined, 'folder metadata is required');
+const folderUpdateSchema = z.object({ folderKey: keySchema, name: nameSchema.optional(), description: textSchema.nullable().optional(), coverImageKey: keySchema.nullable().optional(), isFavorite: z.boolean().optional() }).strict()
+  .refine((value) => value.name !== undefined || value.description !== undefined || value.coverImageKey !== undefined || value.isFavorite !== undefined, 'folder metadata is required');
 const documentUpdateSchema = z.object({
   documentKey: keySchema,
   html: z.string().min(1).optional(),
@@ -269,6 +275,7 @@ export const contentToolContracts = {
   'folder.update': { description: 'Update folder metadata.', input: z.object({ updates: z.array(folderUpdateSchema).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.rename': { description: 'Rename folders.', input: z.object({ renames: z.array(z.object({ folderKey: keySchema, name: nameSchema }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.move': { description: 'Move folders to another parent or the scope root.', input: z.object({ moves: z.array(z.object({ folderKey: keySchema, targetParentFolderKey: keySchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
+  'folder.copy': { description: 'Copy folder subtrees, including descendant folders and documents, to scoped parent folders or roots.', input: z.object({ copies: z.array(z.object({ folderKey: keySchema, targetScopeKey: keySchema, targetParentFolderKey: keySchema.optional(), newName: nameSchema.optional() }).strict()).min(1).max(100), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(copiedFolderDataSchema) },
   'folder.archive': { description: 'Content folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.restore': { description: 'Restore archived folders.', input: z.object({ folderKeys: keysSchema, includeDescendants: z.boolean().optional(), restoreAncestors: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(folderDataSchema) },
   'folder.delete': { description: 'Permanently delete folders.', input: z.object({ folderKeys: keysSchema, recursive: z.boolean().optional(), atomic: atomicSchema, ...idempotencyShape }).strict(), output: contentBatchOutputSchema(emptyDataSchema) },

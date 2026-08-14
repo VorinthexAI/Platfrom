@@ -7,8 +7,8 @@ describe('unified tool registry', () => {
   test('has one unique definition for every public tool name', () => {
     expect(new Set(TOOL_NAMES).size).toBe(TOOL_NAMES.length);
     expect(new Set(TOOL_DEFINITIONS.map(({ name }) => name)).size).toBe(TOOL_DEFINITIONS.length);
-    expect(TOOL_NAMES).toHaveLength(178);
-    expect(TOOL_DEFINITIONS).toHaveLength(178);
+    expect(TOOL_NAMES).toHaveLength(179);
+    expect(TOOL_DEFINITIONS).toHaveLength(179);
     expect(TOOL_DEFINITIONS).toHaveLength(CONTENT_TOOL_NAMES.length + 135);
     expect(TOOL_DEFINITIONS.map(({ name }) => name)).toEqual([...TOOL_NAMES]);
     expect(TOOL_NAMES.filter((name) => name === 'chat')).toHaveLength(1);
@@ -27,6 +27,7 @@ describe('unified tool registry', () => {
     expect(TOOL_DEFINITIONS.filter(({ name }) => name === 'email.read')).toHaveLength(1);
     expect(TOOL_DEFINITIONS.find(({ name }) => name === 'email.read')?.inputSchema).toMatchObject({ type: 'object', additionalProperties: false });
     expect(TOOL_NAMES).toContain('folder.create');
+    expect(TOOL_NAMES).toContain('folder.copy');
     expect(TOOL_NAMES).toContain('collection.create');
     expect(TOOL_NAMES).toContain('trip.create');
     expect(TOOL_NAMES).toContain('email.draft.send');

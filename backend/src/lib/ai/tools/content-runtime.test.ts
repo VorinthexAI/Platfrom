@@ -21,7 +21,7 @@ function fixture(role: 'viewer' | 'moderator' | 'admin' | 'owner' = 'owner') {
     async allowedScopeKeys() { return [scopeKey]; },
     async getFolder(key) { return folders.get(key) ?? null; },
     async listFolders(key) { return [...folders.values()].filter((value) => value.scopeKey === key); },
-    async insertFolder(value) { const folder = { ...value, embedding }; folders.set(folder.key, folder); return folder; },
+    async insertFolder(value) { const folder = { ...value, embedding: value.embedding ?? embedding }; folders.set(folder.key, folder); return folder; },
     async updateFolder(key, patch) { patches.push(patch); const value = { ...folders.get(key), ...patch }; folders.set(key, value); return value; },
     async setFolderDeletion(key, marker, owner) { const current = folders.get(key); if (!current || (owner && current._internalDeletion?.owner !== owner)) return null; const value = { ...current, _internalDeletion: marker }; if (!marker) delete value._internalDeletion; folders.set(key, value); return value; },
     async deleteFolder(key) { folders.delete(key); },
@@ -747,10 +747,14 @@ describe('Content runtime', () => {
     expect([...f.versions.values()].at(-1)?.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
   });
 
-  test('keeps folders without favorites and resets copied documents to not favorite', async () => {
+  test('defaults folder favorites, batch-updates them, and resets copied document favorites', async () => {
     const f = fixture('moderator');
     const created = await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Default' }] }, f.context, { repository: f.repository, embed: async () => embedding });
-    expect(created.results[0]?.data?.folder).not.toHaveProperty('isFavorite');
+    expect(created.results[0]?.data?.folder.isFavorite).toBe(false);
+    const secondFolderKey = created.results[0]?.data?.folder.key;
+    const favorites = await runContentTool('folder.update', { updates: [{ folderKey: f.folderKey, isFavorite: true }, { folderKey: secondFolderKey!, isFavorite: true }], atomic: true }, f.context, { repository: f.repository });
+    expect(favorites.summary).toEqual({ requested: 2, succeeded: 2, failed: 0 });
+    expect(favorites.results.every((result) => result.data?.folder.isFavorite === true)).toBe(true);
 
     const documentKey = f.addDocument('Source');
     f.documents.get(documentKey).isFavorite = true;
@@ -758,6 +762,122 @@ describe('Content runtime', () => {
       copies: [{ documentKey, targetScopeKey: f.scopeKey, targetFolderKey: f.folderKey }],
     }, f.context, { repository: f.repository, embed: async () => embedding, storage: { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input) { return { storageKey: input.destinationKey }; }, async delete() {} } });
     expect(copied.results[0]?.data?.document.isFavorite).toBe(false);
+  });
+
+  test('copies complete folder subtrees with independent storage and compensates failed copies', async () => {
+    const f = fixture('moderator');
+    const childKey = newId(), nestedKey = newId(), targetKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, isFavorite: true, createdAt: now, updatedAt: now });
+    f.folders.set(nestedKey, { key: nestedKey, scopeKey: f.scopeKey, parentFolderKey: childKey, name: 'Nested', embedding, isFavorite: true, createdAt: now, updatedAt: now });
+    f.folders.set(targetKey, { key: targetKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const firstDocumentKey = f.addDocument('Root file');
+    const secondDocumentKey = f.addDocument('Child file');
+    f.documents.get(firstDocumentKey).folderKey = childKey;
+    f.documents.get(firstDocumentKey).sourceStorageKeys = ['docs/source-1.png'];
+    f.documents.get(firstDocumentKey).speechStorageKeys = ['docs/speech-1.mp3'];
+    f.documents.get(firstDocumentKey).isFavorite = true;
+    f.documents.get(secondDocumentKey).folderKey = nestedKey;
+    const copiedObjects: string[] = [], deletedObjects: string[] = [];
+    const renamedEmbedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.3);
+    const embeddedTexts: string[] = [];
+    const storage: any = {
+      async upload() { return { storageKey: '' }; },
+      async download() { return { bytes: new Uint8Array() }; },
+      async copy(input: any) { copiedObjects.push(input.destinationKey); return { storageKey: input.destinationKey }; },
+      async delete(key: string) { deletedObjects.push(key); },
+    };
+
+    const copied = await runContentTool('folder.copy', { copies: [{ folderKey: childKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey, newName: 'Child copy' }] }, f.context, { repository: f.repository, storage, embed: async (text) => { embeddedTexts.push(text); return renamedEmbedding; } });
+    expect(copied.results[0]).toMatchObject({ success: true, data: { folder: { name: 'Child copy', parentFolderKey: targetKey, isFavorite: false }, folderCount: 2, documentCount: 2 } });
+    const copiedRootKey = copied.results[0]?.data?.folder.key;
+    if (!copiedRootKey) throw new Error('Folder copy did not return its root.');
+    const copiedNested = [...f.folders.values()].find((candidate) => candidate.parentFolderKey === copiedRootKey);
+    expect(copiedNested).toMatchObject({ name: 'Nested', isFavorite: false });
+    expect(f.folders.get(copiedRootKey)?.embedding).toEqual(renamedEmbedding);
+    expect(embeddedTexts).toEqual(['Child copy']);
+    const copiedFolderKeys = new Set([copiedRootKey, copiedNested?.key]);
+    const copiedDocuments = [...f.documents.values()].filter((document) => copiedFolderKeys.has(document.folderKey));
+    expect(copiedDocuments).toHaveLength(2);
+    expect(copiedDocuments.every((document) => document.isFavorite === false && ![firstDocumentKey, secondDocumentKey].includes(document.key))).toBe(true);
+    expect(copiedDocuments.find((document) => document.sourceStorageKeys)?.sourceStorageKeys[0]).not.toBe('docs/source-1.png');
+    expect(copiedObjects).toHaveLength(4);
+
+    const insertDocument = f.repository.insertDocument.bind(f.repository);
+    let inserts = 0;
+    f.repository.insertDocument = async (document) => { inserts += 1; if (inserts === 2) throw new Error('insert failed'); return insertDocument(document); };
+    const beforeFolders = f.folders.size, beforeDocuments = f.documents.size;
+    const failed = await runContentTool('folder.copy', { copies: [{ folderKey: childKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }] }, f.context, { repository: f.repository, storage });
+    expect(failed.results[0]).toMatchObject({ success: false });
+    expect(f.folders.size).toBe(beforeFolders);
+    expect(f.documents.size).toBe(beforeDocuments);
+    expect(deletedObjects.length).toBeGreaterThan(0);
+  });
+
+  test('allocates deterministic collision-safe copied root names', async () => {
+    const f = fixture('moderator');
+    const targetKey = newId(), firstParentKey = newId(), secondParentKey = newId(), firstKey = newId(), secondKey = newId();
+    f.folders.set(targetKey, { key: targetKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(firstParentKey, { key: firstParentKey, scopeKey: f.scopeKey, name: 'First parent', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(secondParentKey, { key: secondParentKey, scopeKey: f.scopeKey, name: 'Second parent', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(firstKey, { key: firstKey, scopeKey: f.scopeKey, parentFolderKey: firstParentKey, name: 'Report', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(secondKey, { key: secondKey, scopeKey: f.scopeKey, parentFolderKey: secondParentKey, name: 'Report', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const dependencies = { repository: f.repository, embed: async () => embedding };
+
+    const sameParent = await runContentTool('folder.copy', { copies: [{ folderKey: f.folderKey, targetScopeKey: f.scopeKey }] }, f.context, dependencies);
+    expect(sameParent.results[0]?.data?.folder.name).toBe('Root (copy)');
+
+    const sameNames = await runContentTool('folder.copy', { copies: [{ folderKey: firstKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }, { folderKey: secondKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }] }, f.context, dependencies);
+    expect(sameNames.results.map((result) => result.data?.folder.name)).toEqual(['Report', 'Report (copy)']);
+  });
+
+  test('retains copied folders and referenced storage when document compensation deletion fails', async () => {
+    const f = fixture('moderator');
+    const childKey = newId(), targetKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(targetKey, { key: targetKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const sourceKeys = [f.addDocument('First'), f.addDocument('Second')];
+    for (const key of sourceKeys) f.documents.get(key).folderKey = childKey;
+    const insertDocument = f.repository.insertDocument.bind(f.repository);
+    const deleteDocument = f.repository.deleteDocument.bind(f.repository);
+    const deleteFolder = f.repository.deleteFolder.bind(f.repository);
+    let inserts = 0;
+    let folderDeletes = 0;
+    f.repository.insertDocument = async (document) => { inserts += 1; if (inserts === 2) throw new Error('insert failed'); return insertDocument(document); };
+    f.repository.deleteDocument = async (key) => { if (!sourceKeys.includes(key)) throw new Error('delete failed'); return deleteDocument(key); };
+    f.repository.deleteFolder = async (key) => { folderDeletes += 1; return deleteFolder(key); };
+    const deletedStorage: string[] = [];
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input: any) { return { storageKey: input.destinationKey }; }, async delete(key: string) { deletedStorage.push(key); } };
+
+    const failed = await runContentTool('folder.copy', { copies: [{ folderKey: childKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }] }, f.context, { repository: f.repository, storage });
+    expect(failed.results[0]).toMatchObject({ success: false, error: { retryable: true } });
+    const retainedDocument = [...f.documents.values()].find((document) => !sourceKeys.includes(document.key));
+    expect(retainedDocument?._internalDeletion).toMatchObject({ kind: 'document', objectKeys: [retainedDocument?.storageKey] });
+    expect(deletedStorage).not.toContain(retainedDocument?.storageKey);
+    const retainedFolders = [...f.folders.values()].filter((folder) => folder._internalDeletion?.owner);
+    expect(folderDeletes).toBe(0);
+    expect(retainedFolders).not.toHaveLength(0);
+    expect(failed.results[0]?.error?.resourceKey).toBe(retainedFolders[0]?.key);
+    expect(retainedFolders.every((folder) => folder._internalDeletion.documentKeys.includes(retainedDocument?.key))).toBe(true);
+  });
+
+  test('retains the folder cleanup manifest when copied storage deletion fails', async () => {
+    const f = fixture('moderator');
+    const childKey = newId(), targetKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    f.folders.set(targetKey, { key: targetKey, scopeKey: f.scopeKey, name: 'Target', embedding, isFavorite: false, createdAt: now, updatedAt: now });
+    const sourceKeys = [f.addDocument('First'), f.addDocument('Second')];
+    for (const key of sourceKeys) f.documents.get(key).folderKey = childKey;
+    const insertDocument = f.repository.insertDocument.bind(f.repository);
+    let inserts = 0;
+    f.repository.insertDocument = async (document) => { inserts += 1; if (inserts === 2) throw new Error('insert failed'); return insertDocument(document); };
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy(input: any) { return { storageKey: input.destinationKey }; }, async delete() { throw new Error('storage offline'); } };
+
+    const failed = await runContentTool('folder.copy', { copies: [{ folderKey: childKey, targetScopeKey: f.scopeKey, targetParentFolderKey: targetKey }] }, f.context, { repository: f.repository, storage });
+    expect(failed.results[0]).toMatchObject({ success: false, error: { retryable: true } });
+    expect([...f.documents.values()].filter((document) => !sourceKeys.includes(document.key))).toHaveLength(0);
+    const retainedFolders = [...f.folders.values()].filter((folder) => folder._internalDeletion?.owner);
+    expect(retainedFolders).not.toHaveLength(0);
+    expect(retainedFolders[0]?._internalDeletion.objectKeys).not.toHaveLength(0);
   });
 
   test('preserves the extension while bounding download filenames', async () => {
@@ -1021,6 +1141,31 @@ describe('Content runtime', () => {
     expect(f.folders.has(childKey)).toBe(false);
   });
 
+  test('resumes an unarchived copy-compensation manifest without retention bypass for normal deletes', async () => {
+    const f = fixture('owner');
+    const documentKey = f.addDocument('Compensating copy');
+    const owner = 'copy-compensation-owner';
+    const objectKeys = [`docs/${documentKey}`];
+    f.folders.get(f.folderKey)._internalDeletion = { kind: 'folder', owner, folderKeys: [f.folderKey], documentKeys: [documentKey], objectKeys, startedAt: now };
+    f.documents.get(documentKey)._internalDeletion = { kind: 'document', owner, objectKeys, startedAt: now };
+    const storageDeletes: string[] = [];
+    const storage: any = { async upload() { return { storageKey: '' }; }, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; }, async delete(key: string) { storageDeletes.push(key); } };
+    let retentionChecks = 0;
+    const dependencies = { repository: f.repository, storage, canPermanentlyDelete: () => { retentionChecks += 1; return false; } };
+
+    await expect(runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true, atomic: true }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_CONFLICT', action: 'transaction', resourceKey: f.folderKey });
+    expect(f.folders.has(f.folderKey)).toBe(true);
+    expect(f.documents.has(documentKey)).toBe(true);
+    expect(storageDeletes).toEqual([]);
+
+    const resumed = await runContentTool('folder.delete', { folderKeys: [f.folderKey], recursive: true }, f.context, dependencies);
+    expect(resumed.results[0]).toMatchObject({ success: true });
+    expect(retentionChecks).toBe(0);
+    expect(storageDeletes).toEqual(objectKeys);
+    expect(f.documents.has(documentKey)).toBe(false);
+    expect(f.folders.has(f.folderKey)).toBe(false);
+  });
+
   test('replays completed idempotent mutations and rejects changed or pending requests', async () => {
     const f = fixture('moderator');
     const records = new Map<string, { hash: string; status: 'pending' | 'completed'; response?: unknown }>();
@@ -1182,6 +1327,7 @@ describe('Content runtime', () => {
       else if (name === 'folder.update') input = { updates: [{ folderKey: childKey, description: 'Updated' }] };
       else if (name === 'folder.rename') input = { renames: [{ folderKey: childKey, name: 'Renamed' }] };
       else if (name === 'folder.move') input = { moves: [{ folderKey: childKey, targetParentFolderKey: siblingKey }] };
+      else if (name === 'folder.copy') input = { copies: [{ folderKey: childKey, targetScopeKey: f.scopeKey, targetParentFolderKey: siblingKey }] };
       else if (name === 'folder.archive') input = { folderKeys: [childKey] };
       else if (name === 'folder.restore') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
