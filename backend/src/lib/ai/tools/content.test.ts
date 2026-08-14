@@ -149,10 +149,10 @@ describe('Content output contracts', () => {
     const folderKey = newId();
     const output = contentToolOutputSchemas['scope.document.search'].parse({
       query: 'roadmap',
-      results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 0.9, matchedSource: { type: 'project', key: scopeKey }, scoreBreakdown: { vector: 0.9, lexical: 0.5, final: 0.8 } }],
+      results: [{ documentKey, name: 'Roadmap', extension: 'md', scopeKey, folderKey, score: 0.9, matchedSource: { type: 'project', key: scopeKey }, scoreBreakdown: { vector: 0.9, lexical: 0.5, final: 0.8 } }],
       totalCandidates: 12,
     });
-    expect(output).toMatchObject({ query: 'roadmap', results: [{ documentKey, scoreBreakdown: { vector: 0.9 } }], totalCandidates: 12 });
+    expect(output).toMatchObject({ query: 'roadmap', results: [{ documentKey, extension: 'md', scoreBreakdown: { vector: 0.9 } }], totalCandidates: 12 });
     expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [], total: 0 })).toThrow();
     expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 2 }], totalCandidates: 1 })).toThrow();
     expect(() => contentToolOutputSchemas['scope.document.search'].parse({ query: 'roadmap', results: [{ documentKey, name: 'Roadmap', scopeKey, folderKey, score: 0.5, source: { type: 'scope', scopeKeys: [scopeKey] } }] })).toThrow();

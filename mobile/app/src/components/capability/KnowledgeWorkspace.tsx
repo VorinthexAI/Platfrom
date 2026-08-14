@@ -307,6 +307,9 @@ export function KnowledgeWorkspace() {
   const folderFiles = documents.filter((document) => Boolean(document.extension));
   const rootTabDocuments = folderContentTab === "files" ? rootFiles : rootNotes;
   const folderTabDocuments = folderContentTab === "files" ? folderFiles : folderNotes;
+  const normalizedFolderSearch = query.trim().toLocaleLowerCase();
+  const folderSearchFolders = folders.filter((folder) => !normalizedFolderSearch || folder.name.toLocaleLowerCase().includes(normalizedFolderSearch) || folder.description?.toLocaleLowerCase().includes(normalizedFolderSearch));
+  const folderSearchDocuments = (folderSearchResults ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
   const visibleUploadBatch = uploadFolderKey === currentFolder?.key
     ? uploadBatch.filter(({ status }) => status === "pending" || status === "uploading")
     : [];
@@ -2076,19 +2079,26 @@ export function KnowledgeWorkspace() {
               <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search documents and files" style={styles.rootSearchInput} value={query} />
               {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
             </View>
-            {query.trim() ? <View accessibilityLiveRegion="polite" style={styles.rootSearchResults}>
-              {(folderSearchResults ?? []).map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchSummary(document)} size="sm" style={styles.documentButton} variant="secondary">
-                <FileIcon size="sm" />
-                <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
-              </Button>)}
-              {folderSearching || !folderSearchResults ? <Text style={styles.empty}>Searching...</Text> : folderSearchResults.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
-            </View> : <>
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "files" }} onPress={() => setFolderContentTab("files")} size="xs" style={styles.folderTab} variant={folderContentTab === "files" ? "secondary" : "ghost"}>Files</Button>
             </Tabs>
-            {archiveLocationLoading ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
+            {query.trim() ? folderSearching || !folderSearchResults ? <View accessibilityLabel="Loading search results" accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
+              <View accessibilityLiveRegion="polite" style={[styles.rootFolderGrid, styles.folderTabContent]}>
+                {folderSearchFolders.map((folder) => <View key={folder.key} style={[styles.rootFolderCard, { width: archiveCardSize, height: archiveCardSize }]}>
+                  {folder.coverUrl ? <Image contentFit="cover" source={folder.coverUrl} style={styles.folderCover} /> : null}
+                  <Button contentMode="raw" onPress={() => void openFolder(folder)} size="xl" style={[styles.rootFolderMain, folder.coverUrl && styles.coveredFolderMain]} variant="ghost">{folder.coverUrl ? null : <FolderIcon size="lg" />}<Text numberOfLines={1} style={[styles.archiveCardLabel, folder.coverUrl && styles.coveredFolderLabel]}>{folder.name}</Text></Button>
+                </View>)}
+                {folderSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
+              </View>
+            ) : <View accessibilityLiveRegion="polite" style={[styles.folderDocuments, styles.folderTabContent]}>
+              {folderSearchDocuments.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchSummary(document)} size="sm" style={styles.documentButton} variant="secondary">
+                <FileIcon size="sm" />
+                <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
+              </Button>)}
+              {folderSearchDocuments.length === 0 ? <Text style={styles.empty}>No {folderContentTab === "files" ? "files" : "documents"} matched this search.</Text> : null}
+            </View> : archiveLocationLoading ? folderContentTab === "folders" ? <View accessibilityLabel="Loading folders" accessibilityRole="progressbar" style={[styles.rootFolderGrid, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.rootFolderCard, styles.skeletonCard, { width: archiveCardSize, height: archiveCardSize }]} />)}</View> : <View accessibilityLabel={`Loading ${folderContentTab}`} accessibilityRole="progressbar" style={[styles.folderDocuments, styles.folderTabContent]}>{Array.from({ length: 3 }, (_, index) => <View key={index} style={[styles.documentSkeleton, styles.skeletonCard]} />)}</View> : folderContentTab === "folders" ? (
               <View style={[styles.rootFolderGrid, styles.folderTabContent, archiveLocationLoading && styles.loadingGrid]}>
                 {folders.length ? folders.map((folder) => (
                   <View key={folder.key} style={[styles.rootFolderCard, folder.key.startsWith("optimistic-") && styles.optimisticCard, { width: archiveCardSize, height: archiveCardSize }]}>
@@ -2109,7 +2119,6 @@ export function KnowledgeWorkspace() {
                 )) : visibleUploadBatch.length === 0 ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
               </View>
             )}
-            </>}
           </View>
         ) : (
         <View style={styles.editorScene}>

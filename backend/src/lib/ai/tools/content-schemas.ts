@@ -205,6 +205,7 @@ const searchScoreBreakdownSchema = z.object({ vector: normalizedScoreSchema.opti
 export const contentSearchResultSchema = z.object({
   documentKey: keySchema,
   name: nameSchema,
+  extension: documentExtensionSchema.optional(),
   scopeKey: keySchema,
   folderKey: keySchema.optional(),
   score: normalizedScoreSchema,

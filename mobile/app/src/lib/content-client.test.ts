@@ -302,10 +302,10 @@ test("scopes search and replayable history to a folder", async () => {
 
 test("runs fast top-ten semantic search without a score threshold and summarizes on demand", async () => {
   responseForTool = (tool) => tool === "scope.document.search"
-    ? { data: { success: true, data: { query: "roadmap", results: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", score: 0.12 }] } } }
+    ? { data: { success: true, data: { query: "roadmap", results: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.12 }] } } }
     : { data: { success: true, data: { results: [{ success: true, data: { text: "A concise roadmap summary." } }] } } };
 
-  expect(await searchContentMatches("roadmap")).toHaveLength(1);
+  expect((await searchContentMatches("roadmap"))[0]).toMatchObject({ documentKey: "document", extension: "docx" });
   expect(await summarizeContentDocument("document")).toBe("A concise roadmap summary.");
   expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", topK: 10 });
   expect(calls[0]?.body.input).not.toHaveProperty("minimumScore");

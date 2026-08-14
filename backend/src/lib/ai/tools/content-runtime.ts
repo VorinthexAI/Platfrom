@@ -1876,12 +1876,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
         }
       }
-      let embeddingTimer: number | undefined;
-      const embedding = await Promise.race<number[] | undefined>([
-        embed(input.query, undefined, undefined, 'query').catch(() => undefined),
-        new Promise<undefined>((resolve) => { embeddingTimer = setTimeout(resolve, dependencies.searchEmbeddingTimeoutMs ?? 500); }),
-      ]);
-      if (embeddingTimer) clearTimeout(embeddingTimer);
       const queryText = input.query.trim().toLocaleLowerCase();
       const queryTokens = [...new Set<string>(queryText.match(/[\p{L}\p{N}]+/gu) ?? [])];
       const documentsByScope = new Map<string, Document[]>();
@@ -1917,15 +1911,39 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         });
       };
       const candidates = new Map<string, { score: number; document: Document; matchedContent?: string; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
+      const searchableSources: Array<{ source: (typeof resolvedSources)[number]; scopeKeys: string[]; folderKeys?: string[] }> = [];
       for (const source of resolvedSources) {
         const scopeKeys = source.scopeKeys.filter((key) => allowed.includes(key) && filterScopeKeys.has(key));
         if (scopeKeys.length === 0) continue;
         let folderKeys = source.folderKeys;
         if (filterFolderKeys) folderKeys = folderKeys ? folderKeys.filter((key) => filterFolderKeys.includes(key)) : filterFolderKeys;
         if (folderKeys?.length === 0) continue;
-        const matches = [
-          ...await lexicalMatches(scopeKeys, folderKeys),
-          ...(embedding ? await repo.semanticSearch({
+        searchableSources.push({ source, scopeKeys, ...(folderKeys ? { folderKeys } : {}) });
+      }
+      const collectMatches = async (matches: Array<{ score: number; document: Document; matchedContent?: string }>, source: (typeof resolvedSources)[number]) => {
+        for (const match of matches) {
+          if (match.document._internalDeletion) continue;
+          if (!includeArchived && !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
+          if (!includeArchived && match.document.deletedAt) continue;
+          const previous = candidates.get(match.document.key);
+          if (!previous || match.score > previous.score) candidates.set(match.document.key, { ...match, source: { type: source.type, key: source.key } });
+        }
+      };
+      for (const { source, scopeKeys, folderKeys } of searchableSources) {
+        await collectMatches(await lexicalMatches(scopeKeys, folderKeys), source);
+      }
+      const exactFolderMatches = searchableSources.length > 0
+        && searchableSources.every(({ source }) => source.type === 'folder')
+        && [...candidates.values()].some(({ score }) => score >= 0.75);
+      if (!exactFolderMatches) {
+        let embeddingTimer: number | undefined;
+        const embedding = await Promise.race<number[] | undefined>([
+          embed(input.query, undefined, undefined, 'query').catch(() => undefined),
+          new Promise<undefined>((resolve) => { embeddingTimer = setTimeout(resolve, dependencies.searchEmbeddingTimeoutMs ?? 500); }),
+        ]);
+        if (embeddingTimer) clearTimeout(embeddingTimer);
+        if (embedding) for (const { source, scopeKeys, folderKeys } of searchableSources) {
+          await collectMatches(await repo.semanticSearch({
             embedding,
             authorizedScopeKeys: scopeKeys,
             folderKeys,
@@ -1938,14 +1956,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             includeArchived,
             minScore: input.minimumScore,
             limit: input.topK ?? 20,
-          }) : []),
-        ];
-        for (const match of matches) {
-          if (match.document._internalDeletion) continue;
-           if (!includeArchived && !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
-          if (!includeArchived && match.document.deletedAt) continue;
-          const previous = candidates.get(match.document.key);
-          if (!previous || match.score > previous.score) candidates.set(match.document.key, { ...match, source: { type: source.type, key: source.key } });
+          }), source);
         }
       }
       if (resolvedSources.length === 0 || candidates.size === 0 && !resolvedSources.some((source) => source.scopeKeys.some((key) => allowed.includes(key)))) fail('CONTENT_SEARCH_NO_ACCESSIBLE_SOURCES', 'No accessible Content search source remains.', tool, 'authorization');
@@ -1960,6 +1971,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {
             documentKey: current.key,
             name: current.name,
+            ...(current.extension ? { extension: current.extension } : {}),
             scopeKey: current.scopeKey,
             ...(current.folderKey ? { folderKey: current.folderKey } : {}),
             score: normalizedScore,

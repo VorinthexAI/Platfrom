@@ -48,6 +48,7 @@ export type ContentDocumentVersion = {
 export type ContentSearchDocument = {
   documentKey: string;
   name: string;
+  extension?: ContentDocument["extension"];
   score: number;
   summary: string;
   scopeKey?: string;
