@@ -21,10 +21,10 @@ function context(): DomainToolContext {
   };
 }
 
-function result(scopeKey: string) {
+function result(scopeKey: string, key = newId()) {
   return {
       image: {
-      key: newId(), scopeKey, filename: 'mountain.jpg', caption: 'Snow-covered mountains beneath a blue sky.',
+      key, scopeKey, filename: 'mountain.jpg', caption: 'Snow-covered mountains beneath a blue sky.',
       storageKey: 'private/mountain.jpg', mimeType: 'image/jpeg', sizeBytes: 100, width: 1_200, height: 800,
       embedding, imageCaptionKey: null, isFavorite: false, deletedAt: null, createdAt: now, updatedAt: now,
     },
@@ -72,6 +72,7 @@ describe('image.search tool', () => {
     await imageSearchTool.execute({ query: 'city', threshold: 0.7, limit: 12 }, {
       context: toolContext,
       executeEmbedding: async () => ({ output: { embedding } }) as never,
+      canAccessCollection: async () => true,
       async searchImages(input) { searched = input; return []; },
     });
     expect(searched).toMatchObject({ threshold: 0.7, limit: 12 });
@@ -82,6 +83,64 @@ describe('image.search tool', () => {
     });
     await expect(imageSearchTool.execute({ query: '', extra: true }, { context: toolContext })).rejects.toThrow();
     await expect(imageSearchTool.execute({ query: 'city', limit: 51 }, { context: toolContext })).rejects.toThrow();
+    await expect(imageSearchTool.execute({ query: 'city', imageKey: newId() }, { context: toolContext })).rejects.toThrow();
+    await expect(imageSearchTool.execute({ duplicates: true }, { context: toolContext })).rejects.toThrow();
+  });
+
+  test('scopes text retrieval to a verified collection', async () => {
+    const toolContext = context();
+    const collectionKey = newId();
+    let searched: any;
+    await imageSearchTool.execute({ query: 'city', collectionKey }, {
+      context: toolContext,
+      executeEmbedding: async () => ({ output: { embedding } }) as never,
+      canAccessCollection: async () => true,
+      getCollection: async (scopeKey, key) => {
+        expect({ scopeKey, key }).toEqual({ scopeKey: toolContext.runtimeScopeKey, key: collectionKey });
+        return { key: collectionKey } as never;
+      },
+      searchImages: async (input) => { searched = input; return []; },
+    });
+    expect(searched).toMatchObject({ collectionKey, scopeKey: toolContext.runtimeScopeKey });
+    await expect(imageSearchTool.execute({ query: 'city', collectionKey }, { context: toolContext, canAccessCollection: async () => true, getCollection: async () => null })).rejects.toThrow('not found');
+  });
+
+  test('finds source-image similarity through image.search and excludes the source', async () => {
+    const toolContext = context();
+    const sourceKey = newId(), targetKey = newId();
+    const source = result(toolContext.runtimeScopeKey, sourceKey).image;
+    let searched: any;
+    const output = await imageSearchTool.execute({ imageKey: sourceKey, threshold: 0.8, limit: 12 }, {
+      context: toolContext,
+      getImage: async () => source,
+      canAccessImage: async () => true,
+      searchImages: async (input) => { searched = input; return [result(toolContext.runtimeScopeKey, sourceKey), result(toolContext.runtimeScopeKey, targetKey)]; },
+    });
+    expect(searched).toMatchObject({ embedding: source.embedding, threshold: 0.8, limit: 13 });
+    expect(output.images.map(({ key }) => key)).toEqual([targetKey]);
+    await expect(imageSearchTool.execute({ imageKey: sourceKey }, { context: toolContext, getImage: async () => source, canAccessImage: async () => false })).rejects.toThrow('not found');
+  });
+
+  test('finds deterministic collection duplicates through image.search without inventing scores', async () => {
+    const toolContext = context();
+    const collectionKey = newId();
+    const duplicate = result(toolContext.runtimeScopeKey).image;
+    const output = await imageSearchTool.execute({ duplicates: true, collectionKey }, {
+      context: toolContext,
+      canAccessCollection: async () => true,
+      getCollection: async () => ({ key: collectionKey }) as never,
+      findDuplicateImages: async (scopeKey, key) => {
+        expect({ scopeKey, key }).toEqual({ scopeKey: toolContext.runtimeScopeKey, key: collectionKey });
+        return [duplicate];
+      },
+    });
+    expect(output.images).toEqual([expect.objectContaining({ key: duplicate.key })]);
+    expect(output.images[0]).not.toHaveProperty('score');
+    await expect(imageSearchTool.execute({ duplicates: true, collectionKey }, {
+      context: toolContext,
+      getCollection: async () => ({ key: collectionKey }) as never,
+      canAccessCollection: async () => false,
+    })).rejects.toThrow('not found');
   });
 
   test('rejects malformed embedding responses and invalid result scores', async () => {

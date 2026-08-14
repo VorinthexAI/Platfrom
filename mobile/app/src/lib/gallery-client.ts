@@ -160,7 +160,7 @@ export function fetchGalleryUploadStatus(uploadKeys: string[], timeout = 60_000)
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; collectionKey?: string; limit?: number }) {
+export function searchGalleryImages(input: { query?: string; imageKey?: string; duplicates?: true; collectionKey?: string; limit?: number }) {
   return postGallery<{ images: GalleryImage[] }>("/gallery/images/search", input, 4 * 60_000);
 }
 
@@ -168,8 +168,12 @@ export function setGalleryImageFavorite(imageKey: string, isFavorite: boolean) {
   return postGallery<{ image: GalleryImage }>("/gallery/images/favorite", { imageKey, isFavorite });
 }
 
+export function deleteGalleryImages(imageKeys: string[]) {
+  return postGallery<{ deletedImageKeys: string[] }>("/gallery/images/delete", { imageKeys });
+}
+
 export function findGalleryCollectionDuplicates(collectionKey: string) {
-  return postGallery<{ images: GalleryImage[] }>("/gallery/collections/duplicates", { collectionKey });
+  return searchGalleryImages({ duplicates: true, collectionKey });
 }
 
 export function deleteGalleryCollectionDuplicates(collectionKey: string, imageKeys: string[]) {

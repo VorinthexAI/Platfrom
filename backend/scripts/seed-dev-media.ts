@@ -7,11 +7,12 @@ import { closeDb, db, withTransaction } from '@/lib/db/client';
 import { collectionImageSchema, type CollectionImage } from '@/lib/db/collection-images.node';
 import { collectionMemberSchema, type CollectionMember } from '@/lib/db/collection-members.node';
 import { collectionSchema, type Collection } from '@/lib/db/collections.node';
-import { imageCaptionRecordSchema, type ImageCaptionRecord } from '@/lib/db/image-captions.node';
+import { imageCaptionRecordSchema, PERCEPTUAL_HASH_ALGORITHM, type ImageCaptionRecord } from '@/lib/db/image-captions.node';
 import { imageSchema, type Image } from '@/lib/db/images.node';
 import { getPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { getUserByEmailHash } from '@/lib/db/users.node';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
+import { computePerceptualHash, perceptualHashSegments } from '@/lib/perceptual-hash';
 import { S3_BUCKET } from '@/lib/s3';
 
 const EMAIL = process.env.DEV_SEED_EMAIL?.trim().toLowerCase() || 'oscar.burman005@gmail.com';
@@ -40,8 +41,11 @@ function requireLocalEndpoint(name: string, value: string | undefined) {
   }
 }
 
-function embedding() {
-  return Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+function embedding(collectionIndex: number, imageIndex?: number) {
+  const vector = Array<number>(EMBEDDING_DIMENSIONS).fill(0);
+  vector[collectionIndex] = 1;
+  if (imageIndex !== undefined) vector[collections.length + imageIndex] = 0.05;
+  return vector;
 }
 
 function fixtureSvg(index: number, colors: readonly [string, string, string]) {
@@ -84,7 +88,6 @@ async function main() {
 
   const scopeKey = context.scope.key;
   const actorKey = context.membership.key;
-  const vector = embedding();
   const collectionDocuments: Collection[] = [];
   const imageDocuments: Image[] = [];
   const captionDocuments: ImageCaptionRecord[] = [];
@@ -92,9 +95,10 @@ async function main() {
   const imageRelations: CollectionImage[] = [];
   let imageIndex = 0;
 
-  for (const fixtureCollection of collections) {
+  for (const [collectionIndex, fixtureCollection] of collections.entries()) {
     const collectionKey = fixtureKey(scopeKey, 'collection', fixtureCollection.slug);
     const collectionImages = [];
+    const collectionEmbedding = embedding(collectionIndex);
 
     for (let localIndex = 0; localIndex < fixtureCollection.count; localIndex += 1) {
       imageIndex += 1;
@@ -104,7 +108,11 @@ async function main() {
       const imageKey = fixtureKey(scopeKey, 'image', logicalName);
       const captionKey = fixtureKey(scopeKey, 'caption', logicalName);
       const caption = `${fixtureCollection.name} study ${localIndex + 1}: ${fixtureCollection.description.toLowerCase()}`;
-      const bytes = await sharp(Buffer.from(fixtureSvg(imageIndex, fixtureCollection.colors))).jpeg({ quality: 88, chromaSubsampling: '4:4:4' }).toBuffer();
+      const visualIndex = fixtureCollection.slug === 'studio-objects' && localIndex === 1 ? imageIndex - 1 : imageIndex;
+      const bytes = await sharp(Buffer.from(fixtureSvg(visualIndex, fixtureCollection.colors))).jpeg({ quality: 88, chromaSubsampling: '4:4:4' }).toBuffer();
+      const perceptualHash = await computePerceptualHash(bytes);
+      const hashSegments = perceptualHashSegments(perceptualHash);
+      const imageEmbedding = embedding(collectionIndex, localIndex);
       await documentStorage.upload({ key: storageKey, bytes, mimeType: 'image/jpeg' });
 
       captionDocuments.push(imageCaptionRecordSchema.parse({
@@ -112,13 +120,13 @@ async function main() {
         scopeKey,
         sourceImageKey: imageKey,
         caption,
-        embedding: vector,
-        perceptualHash: null,
-        hashAlgorithm: null,
-        hashSegment0: null,
-        hashSegment1: null,
-        hashSegment2: null,
-        hashSegment3: null,
+        embedding: imageEmbedding,
+        perceptualHash,
+        hashAlgorithm: PERCEPTUAL_HASH_ALGORITHM,
+        hashSegment0: hashSegments[0],
+        hashSegment1: hashSegments[1],
+        hashSegment2: hashSegments[2],
+        hashSegment3: hashSegments[3],
         createdAt: NOW,
         updatedAt: NOW,
       }));
@@ -132,7 +140,7 @@ async function main() {
         sizeBytes: bytes.byteLength,
         width: 720,
         height: 720,
-        embedding: vector,
+        embedding: imageEmbedding,
         imageCaptionKey: captionKey,
         isFavorite: imageIndex % 11 === 0,
         deletedAt: null,
@@ -149,7 +157,7 @@ async function main() {
       name: fixtureCollection.name,
       description: `${FIXTURE_MARKER} ${fixtureCollection.description}`,
       coverImageKey: collectionImages[0],
-      embedding: vector,
+      embedding: collectionEmbedding,
       isFavorite: fixtureCollection.slug === 'nordic-light',
       deletedAt: null,
       createdAt: NOW,

@@ -30,6 +30,7 @@ export interface MediaLibraryRepository {
   getCollection(scopeKey: string, collectionKey: string): Promise<Collection | null>;
   ownsImage(scopeKey: string, imageKey: string, ownerKey: string): Promise<boolean>;
   canAccessImage(scopeKey: string, imageKey: string, actorKey: string): Promise<boolean>;
+  canAccessCollection(scopeKey: string, collectionKey: string, actorKey: string): Promise<boolean>;
   canManageScope(scopeKey: string, actorKey: string): Promise<boolean>;
   ownsCollection(scopeKey: string, collectionKey: string, ownerKey: string): Promise<boolean>;
   addImageToCollection(relation: CollectionImage): Promise<CollectionImage>;
@@ -151,6 +152,7 @@ export function createMediaLibraryRepository(database: MediaLibraryDatabase = db
     async getCollection(scopeKey, collectionKey) { const value = await one(database, 'FOR collection IN collections FILTER collection._key == @collectionKey && collection.scopeKey == @scopeKey && collection.deletedAt == null LIMIT 1 RETURN collection', { scopeKey, collectionKey }); return value ? parse(collectionSchema, value) : null; },
     ownsImage: (scopeKey, imageKey, ownerKey) => owns('image', scopeKey, imageKey, ownerKey),
     canAccessImage: async (scopeKey, imageKey, actorKey) => Boolean(await one(database, `LET image = DOCUMENT(images, @imageKey) ${activeActor} FILTER image != null && image.scopeKey == @scopeKey && image.deletedAt == null FILTER scoped || elevated || LENGTH(FOR relation IN collectionImages FILTER relation.scopeKey == @scopeKey && relation.imageKey == @imageKey LET collection = DOCUMENT(collections, relation.collectionKey) FILTER collection != null && collection.deletedAt == null FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == relation.collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0 RETURN true`, { scopeKey, imageKey, actorKey })),
+    canAccessCollection: async (scopeKey, collectionKey, actorKey) => Boolean(await one(database, `LET collection = DOCUMENT(collections, @collectionKey) ${activeActor} FILTER collection != null && collection.scopeKey == @scopeKey && collection.deletedAt == null FILTER scoped || elevated || LENGTH(FOR member IN collectionMembers FILTER member.scopeKey == @scopeKey && member.collectionKey == @collectionKey && member.memberKey == @actorKey LIMIT 1 RETURN 1) > 0 RETURN true`, { scopeKey, collectionKey, actorKey })),
     canManageScope: async (scopeKey, actorKey) => Boolean(await one(database, `${activeActor} FILTER writable || elevated RETURN true`, { scopeKey, actorKey })),
     ownsCollection: (scopeKey, collectionKey, ownerKey) => owns('collection', scopeKey, collectionKey, ownerKey),
     addImageToCollection: add, copyImageToCollection: add,
