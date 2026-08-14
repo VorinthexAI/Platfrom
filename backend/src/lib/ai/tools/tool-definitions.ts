@@ -13,7 +13,6 @@ import { artifactCreateTool } from './artifact-create';
 import { audioGenerateTool } from './audio-generate';
 import { bookCreateContextToolDefinition } from './book-create-context';
 import { bookWriteToolDefinition } from './book-write';
-import { autocompleteToolDefinition } from './autocomplete';
 import { documentContentToolDefinition } from './document-content';
 import { documentCreateToolDefinition } from './document-create';
 import { documentCopyToolDefinition } from './document-copy';
@@ -156,7 +155,6 @@ export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   imageCaptionTool,
   imageCreateVisualIdentityTool,
   imageSearchTool,
-  autocompleteToolDefinition,
   enhanceToolDefinition,
   bookCreateContextToolDefinition,
   bookWriteToolDefinition,

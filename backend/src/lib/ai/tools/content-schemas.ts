@@ -131,7 +131,6 @@ const versionDataSchema = z.object({ version: contentDocumentVersionSchema }).st
 const projectedVersionDataSchema = z.object({ version: contentProjectedDocumentVersionSchema }).strict();
 const fileDataSchema = z.object({ documentKey: keySchema, format: z.string().trim().min(1), fileName: nameSchema, mimeType: textSchema, encoding: z.literal('base64'), content: z.string() }).strict();
 const generatedTextDataSchema = z.object({ documentKey: keySchema, text: z.string(), language: z.string().trim().min(1).optional(), persistedDocumentKey: keySchema.optional() }).strict();
-const autocompleteDataSchema = z.object({ completion: z.string().trim().min(1) }).strict();
 const enhancedContentDataSchema = z.object({ content: z.string().trim().min(1) }).strict();
 const canonicalRepresentationSchema = z.object({
   html: z.string().min(1).optional(),
@@ -261,7 +260,6 @@ const documentReadDataSchema = z.union([
 ]);
 
 export const contentToolContracts = {
-  autocomplete: { description: 'Complete the text immediately following a writing context.', input: z.object({ context: z.string().trim().min(1).max(12_000), wordCount: z.number().int().min(1).max(24) }).strict(), output: autocompleteDataSchema },
   enhance: { description: 'Correct spelling, grammar, wording, and clarity while preserving meaning and formatting.', input: z.object({ content: z.string().trim().min(1).max(40_000) }).strict(), output: enhancedContentDataSchema },
   'book.create-context': { description: 'Create a resumable book and its generation context from a broad reader brief.', input: z.object({ ...bookBriefShape, ...idempotencyShape }).strict(), output: bookToolDataSchema },
   'book.write': { description: 'Generate or resume an outlined book, chapter prose, speech, and cover.', input: z.object({ bookKey: keySchema, ...bookBriefShape, ...idempotencyShape }).strict(), output: bookToolDataSchema },

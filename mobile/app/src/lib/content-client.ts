@@ -167,7 +167,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    }, { signal, timeout: tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "autocomplete" ? 15_000 : 60_000 });
+    }, { signal, timeout: tool === "document.read" && input.persistAudio === true ? 15 * 60_000 : tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -175,10 +175,6 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
     if (failure && !failure.success) throw new Error(failure.error.message);
     throw error;
   }
-}
-
-export function autocompleteContent(context: string, wordCount: number, signal?: AbortSignal) {
-  return callContentTool<{ completion: string }>("autocomplete", { context, wordCount }, signal);
 }
 
 export function enhanceContent(content: string, signal?: AbortSignal) {

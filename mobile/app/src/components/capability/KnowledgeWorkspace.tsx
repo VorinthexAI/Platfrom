@@ -4,8 +4,8 @@ import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
 import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions, type NativeSyntheticEvent, type TextLayoutEventData } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
@@ -13,7 +13,7 @@ import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
-import { highlightedSegments, searchDocumentPassages, type DocumentPassage, type HighlightRange } from "@vorinthex/shared/ui/document-search";
+import { highlightedSegments, searchDocumentPassagesLiteral, type DocumentPassage, type HighlightRange } from "@vorinthex/shared/ui/document-search";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
@@ -45,7 +45,6 @@ import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-se
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
-  autocompleteContent,
   archiveContentDocument,
   askPersonalAssistant,
   createContentDocument,
@@ -130,18 +129,19 @@ type LocalDraft = {
   pendingCreate?: unknown;
 };
 
-function notePassages(title: string, content: string): DocumentPassage[] {
-  const passages: DocumentPassage[] = [{ id: "title", text: title }];
-  for (const [index, match] of [...content.matchAll(/\S[\s\S]*?(?=\n{2,}|$)/g)].entries()) passages.push({ id: `body.${index}`, text: match[0] });
+type NotePassage = DocumentPassage & { start?: number; end?: number };
+
+function notePassages(title: string, content: string): NotePassage[] {
+  const passages: NotePassage[] = [{ id: "title", text: title }];
+  for (const [index, match] of [...content.matchAll(/\S[\s\S]*?(?=\n{2,}|$)/g)].entries()) passages.push({ id: `body.${index}`, text: match[0], start: match.index, end: match.index + match[0].length });
   return passages;
 }
 
-function HighlightedText({ ranges, text, style }: { ranges?: HighlightRange[]; text: string; style: object }) {
-  return <Text selectable style={style}>{highlightedSegments(text, ranges ?? []).map((segment) => <Text key={`${segment.start}-${segment.end}`} style={segment.highlighted ? styles.documentSearchHighlight : undefined}>{segment.text}</Text>)}</Text>;
+function HighlightedText({ onTextLayout, ranges, text, style }: { onTextLayout?: (event: NativeSyntheticEvent<TextLayoutEventData>) => void; ranges?: HighlightRange[]; text: string; style: object }) {
+  return <Text onTextLayout={onTextLayout} selectable style={style}>{highlightedSegments(text, ranges ?? []).map((segment) => <Text key={`${segment.start}-${segment.end}`} style={segment.highlighted ? styles.documentSearchHighlight : undefined}>{segment.text}</Text>)}</Text>;
 }
 
 const MAX_MOBILE_UPLOAD_BYTES = 8 * 1024 * 1024;
-const AUTOCOMPLETE_WORD_COUNT = 8;
 const UPLOAD_MIME_TYPES = ["text/plain", "text/markdown", "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
 const CORE_PROMPTS = [
   "Summarize what I saved about systems",
@@ -161,10 +161,6 @@ function pendingCreateFrom(value: unknown): PendingCreate | undefined {
   if (typeof candidate.name !== "string" || typeof candidate.content !== "string" || typeof candidate.mutationKey !== "string") return undefined;
   if (candidate.folderKey !== undefined && typeof candidate.folderKey !== "string") return undefined;
   return { name: candidate.name, content: candidate.content, folderKey: candidate.folderKey, mutationKey: candidate.mutationKey };
-}
-
-function lastWords(value: string, count: number) {
-  return value.trim().split(/\s+/).filter(Boolean).slice(-count).join(" ");
 }
 
 function ScannedBadge({ document }: { document: ContentDocument }) {
@@ -196,14 +192,12 @@ export function KnowledgeWorkspace() {
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
   const [editorEditing, setEditorEditing] = useState(false);
-  const [editorTitleHeight, setEditorTitleHeight] = useState(58);
+  const [editorTitleHeight, setEditorTitleHeight] = useState(36);
   const [editorContentHeight, setEditorContentHeight] = useState(280);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [title, setTitle] = useState("Untitled document");
   const [content, setContent] = useState("");
-  const [completion, setCompletion] = useState("");
-  const [autocompleteRevision, setAutocompleteRevision] = useState(0);
   const [aiInstruction, setAiInstruction] = useState("");
   const [aiInstructionError, setAiInstructionError] = useState<string>();
   const [aiResponse, setAiResponse] = useState<PersonalAssistantResponse>();
@@ -244,6 +238,8 @@ export function KnowledgeWorkspace() {
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
   const [fileContent, setFileContent] = useState("");
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
+  const [documentSearchRevision, setDocumentSearchRevision] = useState(0);
+  const [documentSearchLayoutRevision, setDocumentSearchLayoutRevision] = useState(0);
   const [narrationState, setNarrationState] = useState<"idle" | "playing" | "paused" | "ready" | "error">("idle");
   const [narrationManifest, setNarrationManifest] = useState<NarrationChunk[]>([]);
   const [narrationActiveIndex, setNarrationActiveIndex] = useState(-1);
@@ -295,14 +291,13 @@ export function KnowledgeWorkspace() {
   const sheetBackStack = useRef<ArchiveSheet[]>([]);
   const currentFolderKeyRef = useRef<string | undefined>(undefined);
   const loadedContentContextKey = useRef<string | undefined>(undefined);
-  const selectionRef = useRef({ start: 0, end: 0 });
-  const autocompleteRequest = useRef<AbortController | undefined>(undefined);
-  const autocompleteGeneration = useRef(0);
   const instructionRequest = useRef<AbortController | undefined>(undefined);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
   const folderSearchRequest = useRef<AbortController | undefined>(undefined);
   const editorDocumentScroll = useRef<ScrollView | null>(null);
-  const documentPassageOffsets = useRef(new Map<string, number>());
+  const editorDocumentViewportHeight = useRef(0);
+  const documentPassageOffsets = useRef(new Map<string, { y: number; height: number }>());
+  const documentHighlightOffsets = useRef(new Map<string, number>());
   const narrationChunks = useRef<NarrationChunk[]>([]);
   const narrationPlaybackGeneration = useRef(0);
   const narrationChunkIndex = useRef(-1);
@@ -355,10 +350,10 @@ export function KnowledgeWorkspace() {
   const folderSearchDocuments = (folderSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
   const rootSearchFolders = rootSearchResults?.folders ?? [];
   const rootSearchDocuments = (rootSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
-  const deferredDocumentSearchQuery = useDeferredValue(documentSearchQuery);
   const currentNotePassages = useMemo(() => notePassages(title, content), [content, title]);
-  const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassages(currentNotePassages, deferredDocumentSearchQuery), [currentNotePassages, deferredDocumentSearchQuery, editorEditing]);
+  const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassagesLiteral(currentNotePassages, documentSearchQuery), [currentNotePassages, documentSearchQuery, editorEditing]);
   const documentSearchMatchesById = useMemo(() => new Map(documentSearchMatches.map((match) => [match.id, match])), [documentSearchMatches]);
+  const documentSearchTargetId = documentSearchMatches[0]?.id;
   const visibleUploadBatch = uploadFolderKey === currentFolder?.key
     ? uploadBatch.filter(({ status }) => status === "pending" || status === "uploading")
     : [];
@@ -449,18 +444,21 @@ export function KnowledgeWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (!editorEditing) return;
-    const frame = requestAnimationFrame(() => editorDocumentScroll.current?.scrollTo({ animated: false, y: 0 }));
+    if (!documentSearchTargetId) return;
+    const target = documentPassageOffsets.current.get(documentSearchTargetId);
+    if (!target) return;
+    const passage = currentNotePassages.find(({ id }) => id === documentSearchTargetId);
+    const range = documentSearchMatchesById.get(documentSearchTargetId)?.ranges[0];
+    const rangeCenter = passage && range ? (range.start + range.end) / 2 / Math.max(1, passage.text.length) : 0.5;
+    const highlightOffset = documentHighlightOffsets.current.get(documentSearchTargetId) ?? target.height * rangeCenter;
+    const centeredY = target.y + highlightOffset - editorDocumentViewportHeight.current * 0.2;
+    const frame = requestAnimationFrame(() => editorDocumentScroll.current?.scrollTo({ animated: true, y: Math.max(0, centeredY) }));
     return () => cancelAnimationFrame(frame);
-  }, [editorEditing]);
+  }, [currentNotePassages, documentSearchLayoutRevision, documentSearchMatchesById, documentSearchRevision, documentSearchTargetId]);
 
   useEffect(() => {
-    if (!deferredDocumentSearchQuery.trim() || !documentSearchMatches[0]) return;
-    const y = documentPassageOffsets.current.get(documentSearchMatches[0].id);
-    if (y === undefined) return;
-    const frame = requestAnimationFrame(() => editorDocumentScroll.current?.scrollTo({ animated: true, y: Math.max(0, y - spacing.sm) }));
-    return () => cancelAnimationFrame(frame);
-  }, [deferredDocumentSearchQuery, documentSearchMatches]);
+    documentHighlightOffsets.current.clear();
+  }, [documentSearchQuery]);
 
   useEffect(() => {
     if (!narrationAudio.isLoaded || !pendingNarrationSeek.current) return;
@@ -546,38 +544,9 @@ export function KnowledgeWorkspace() {
   useEffect(() => () => {
     if (sheetCloseTimer.current) clearTimeout(sheetCloseTimer.current);
     if (coreOpenTimer.current) clearTimeout(coreOpenTimer.current);
-    autocompleteRequest.current?.abort();
     instructionRequest.current?.abort();
     previewFileRef.current?.delete();
   }, []);
-
-  useEffect(() => {
-    if (!hasContentContext || autocompleteRevision === 0) return;
-    const generation = ++autocompleteGeneration.current;
-    const timeout = setTimeout(() => {
-      const current = contentRef.current;
-      if (!current.trim()) return;
-      const context = lastWords(current, 100);
-      if (!context) return;
-      autocompleteRequest.current?.abort();
-      const controller = new AbortController();
-      autocompleteRequest.current = controller;
-      void autocompleteContent(context, AUTOCOMPLETE_WORD_COUNT, controller.signal).then(({ completion: next }) => {
-        if (generation !== autocompleteGeneration.current || controller.signal.aborted || contentRef.current !== current) return;
-        setCompletion(next);
-      }).catch(() => undefined).finally(() => {
-        if (autocompleteRequest.current === controller) {
-          autocompleteRequest.current = undefined;
-        }
-      });
-    }, 500);
-    return () => {
-      clearTimeout(timeout);
-      autocompleteGeneration.current += 1;
-      autocompleteRequest.current?.abort();
-      autocompleteRequest.current = undefined;
-    };
-  }, [autocompleteRevision, hasContentContext]);
 
   useEffect(() => navigation.addListener("beforeRemove", (event) => {
     if (!hasContentContext || (saveState !== "dirty" && saveState !== "saving")) return;
@@ -668,7 +637,6 @@ export function KnowledgeWorkspace() {
       stopNarration();
       previewFileRef.current?.delete();
       previewFileRef.current = undefined;
-      setCompletion("");
       navigationGeneration.current += 1;
       destinationGeneration.current += 1;
       documentActionGeneration.current += 1;
@@ -863,27 +831,7 @@ export function KnowledgeWorkspace() {
     if (saveState === "error") setError(undefined);
   };
 
-  const clearCompletion = () => {
-    autocompleteGeneration.current += 1;
-    autocompleteRequest.current?.abort();
-    autocompleteRequest.current = undefined;
-    setCompletion("");
-  };
-
-  const acceptCompletion = () => {
-    if (!completion) return;
-    const separator = /\s$/.test(contentRef.current) || /^[,.;:!?)]/.test(completion) ? "" : " ";
-    const next = `${contentRef.current}${separator}${completion}`;
-    clearCompletion();
-    contentRef.current = next;
-    selectionRef.current = { start: next.length, end: next.length };
-    setContent(next);
-    markDirty();
-    persistLocalDraft(titleRef.current, next);
-  };
-
   const openEnhanceSheet = () => {
-    clearCompletion();
     openSheet("enhance");
   };
 
@@ -918,7 +866,6 @@ export function KnowledgeWorkspace() {
     const controller = new AbortController();
     instructionRequest.current?.abort();
     instructionRequest.current = controller;
-    clearCompletion();
     setInstructing(true);
     setAiInstructionError(undefined);
     setAiResponse(undefined);
@@ -935,7 +882,6 @@ export function KnowledgeWorkspace() {
       if (result.type === "note") {
         contentRef.current = result.content;
         if (documentKey) createVersionOnNextSave.current = true;
-        selectionRef.current = { start: result.content.length, end: result.content.length };
         setContent(result.content);
         markDirty();
         persistLocalDraft(titleRef.current, result.content);
@@ -978,7 +924,6 @@ export function KnowledgeWorkspace() {
   };
 
   function applyRemoteDocument(document: ContentDocument & { content: string }) {
-    clearCompletion();
     revision.current += 1;
     dirty.current = false;
     pendingCreate.current = undefined;
@@ -989,7 +934,6 @@ export function KnowledgeWorkspace() {
     contentRef.current = document.content;
     savedTitleRef.current = document.name;
     savedContentRef.current = document.content;
-    selectionRef.current = { start: document.content.length, end: document.content.length };
     setTitle(document.name);
     setContent(document.content);
     setSaveState("saved");
@@ -1109,10 +1053,8 @@ export function KnowledgeWorkspace() {
     try {
       const snapshot = await findContentDocumentVersion(version.key);
       if (generation !== restoreGeneration.current || !snapshot.content) return;
-      clearCompletion();
       createVersionOnNextSave.current = true;
       contentRef.current = snapshot.content;
-      selectionRef.current = { start: snapshot.content.length, end: snapshot.content.length };
       setContent(snapshot.content);
       markDirty();
       persistLocalDraft(titleRef.current, snapshot.content);
@@ -1162,7 +1104,6 @@ export function KnowledgeWorkspace() {
   };
 
   const resetEditor = (nextTitle = "Untitled document") => {
-    clearCompletion();
     instructionGeneration.current += 1;
     instructionRequest.current?.abort();
     instructionRequest.current = undefined;
@@ -1467,7 +1408,6 @@ export function KnowledgeWorkspace() {
       setError("Wait for the current document to save before opening a folder.");
       return;
     }
-    clearCompletion();
     const generation = ++navigationGeneration.current;
     const previousFolders = folders;
     const previousDocuments = documents;
@@ -1514,7 +1454,6 @@ export function KnowledgeWorkspace() {
       setError("Wait for the current document to save before navigating.");
       return;
     }
-    clearCompletion();
     if (!hasContentContext) {
       setFolders(rootFolders);
       setDocuments([]);
@@ -1622,7 +1561,6 @@ export function KnowledgeWorkspace() {
     if (!normalized || !hasContentContext) return;
     const generation = ++navigationGeneration.current;
     const folderKey = currentFolder?.key;
-    clearCompletion();
     setSearching(true);
     setError(undefined);
     try {
@@ -2250,6 +2188,10 @@ export function KnowledgeWorkspace() {
 
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={closeSheet} size="lg" variant="secondary">Close</Button>;
+    if (activeSheet === "audioVersions") return <>
+      <Button disabled={generatingAudioVersion || loadingAudioVersions} loading={generatingAudioVersion} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate audio</Button>
+      {close(generatingAudioVersion)}
+    </>;
     if (activeSheet === "folderDetails") return <>
       <Button disabled={!folderDetailsName.trim()} onPress={() => void submitFolderDetails()} size="lg" variant="primary">Save folder details</Button>
       {close(false)}
@@ -2466,10 +2408,9 @@ export function KnowledgeWorkspace() {
           </View>
           <View style={[styles.rootSearch, styles.documentSearch]}>
             <SearchIcon size="sm" variant="muted" />
-            <TextInput accessibilityLabel="Search in document" editable={!editorEditing} maxLength={200} onChangeText={setDocumentSearchQuery} placeholder="Search in document..." returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
+            <TextInput accessibilityLabel="Search in document" editable={!editorEditing} maxLength={200} onChangeText={setDocumentSearchQuery} onSubmitEditing={() => setDocumentSearchRevision((current) => current + 1)} placeholder="Search in document..." returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
             {documentSearchQuery.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" onPress={() => setDocumentSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
           </View>
-          {documentSearchQuery.trim() ? <Text accessibilityLiveRegion="polite" style={styles.documentSearchStatus}>{documentSearchMatches.length ? `${documentSearchMatches.length} ${documentSearchMatches.length === 1 ? "match" : "matches"}` : "No matches"}</Text> : null}
           {narrationError ? <Text accessibilityRole="alert" style={styles.documentSearchStatus}>{narrationError}</Text> : null}
           <View style={[styles.noteSheet, (editorFocused || aiInputFocused) && styles.noteSheetFocused]}>
           {openingDocumentKey ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.editorSkeleton}>
@@ -2477,7 +2418,6 @@ export function KnowledgeWorkspace() {
             <View style={styles.editorBodySkeleton} />
           </View> : <>
           {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
-          {saveState === "saving" || saveState === "dirty" ? <Text accessibilityLiveRegion="polite" style={styles.saveStatus}>{saveState === "saving" ? "Saving document..." : "Changes waiting to save..."}</Text> : null}
           {saveState === "error" ? (
             <View style={styles.saveErrorRow}>
               <Text style={styles.saveErrorText}>This draft is stored on this device but has not synced.</Text>
@@ -2485,26 +2425,20 @@ export function KnowledgeWorkspace() {
             </View>
           ) : null}
 
-          <ScrollView contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled ref={editorDocumentScroll} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
+          <ScrollView contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled onLayout={(event) => { editorDocumentViewportHeight.current = event.nativeEvent.layout.height; }} ref={editorDocumentScroll} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
             {editorEditing ? <>
               <TextInput
                 accessibilityLabel="Document title"
                 maxLength={255}
                 multiline
                 onChangeText={(value) => { titleRef.current = value; setTitle(value); markDirty(); persistLocalDraft(value, contentRef.current); }}
-                onContentSizeChange={(event) => setEditorTitleHeight(Math.max(58, Math.ceil(event.nativeEvent.contentSize.height)))}
+                onContentSizeChange={(event) => setEditorTitleHeight(Math.max(36, Math.ceil(event.nativeEvent.contentSize.height)))}
                 scrollEnabled={false}
                 style={[styles.titleInput, { height: editorTitleHeight }]}
                 textAlignVertical="top"
                 value={title}
               />
               <View style={[styles.editorFrame, (editorFocused || aiInputFocused) && styles.editorFrameFocused]}>
-                {completion ? (
-                  <Text accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none" style={styles.editorGhost}>
-                    <Text style={styles.editorGhostSpacer}>{content}</Text>
-                    <Text style={styles.completionText}>{/\s$/.test(content) || /^[,.;:!?)]/.test(completion) ? "" : " "}{completion}</Text>
-                  </Text>
-                ) : null}
                 <TextInput
                   accessibilityLabel="Document content"
                   multiline
@@ -2515,37 +2449,18 @@ export function KnowledgeWorkspace() {
                        setError("Saved documents must contain at least one character.");
                       return;
                     }
-                    const previousContent = contentRef.current;
-                    const previousLength = previousContent.length;
-                    const changedAtEnd = value.startsWith(previousContent) || previousContent.startsWith(value);
-                    const cursorWasAtEnd = selectionRef.current.start === previousLength && selectionRef.current.end === previousLength;
-                    const shouldAutocomplete = changedAtEnd || cursorWasAtEnd;
-                    if (shouldAutocomplete) {
-                      selectionRef.current = { start: value.length, end: value.length };
-                    }
                     contentRef.current = value;
-                    clearCompletion();
                     setContent(value);
-                    if (shouldAutocomplete) setAutocompleteRevision((current) => current + 1);
                     markDirty();
                     persistLocalDraft(titleRef.current, value);
                   }}
                   onContentSizeChange={(event) => setEditorContentHeight(Math.max(280, Math.ceil(event.nativeEvent.contentSize.height)))}
                   placeholder="Start writing from here..."
                   onFocus={() => setEditorFocused(true)}
-                  onSelectionChange={(event) => {
-                    selectionRef.current = event.nativeEvent.selection;
-                    if (event.nativeEvent.selection.end !== contentRef.current.length) clearCompletion();
-                  }}
                   style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused, { height: editorContentHeight }]}
                   textAlignVertical="top"
                   value={content}
                 />
-                {completion ? (
-                  <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" style={styles.completionAccept} variant="icon">
-                    <CheckIcon size="sm" />
-                  </Button>
-                ) : null}
               </View>
               {!content && (folders.length > 0 || documents.length > 0) ? (
                 <View style={styles.locationPreview}>
@@ -2560,8 +2475,25 @@ export function KnowledgeWorkspace() {
                 </View>
               ) : null}
             </> : <>
-              {currentNotePassages.map((passage, index) => <View key={passage.id} onLayout={(event) => documentPassageOffsets.current.set(passage.id, event.nativeEvent.layout.y)}>
-                <HighlightedText ranges={documentSearchMatchesById.get(passage.id)?.ranges} style={index === 0 ? styles.editorReadTitle : styles.editorReadText} text={passage.text} />
+              {currentNotePassages.map((passage, index) => <View key={passage.id} onLayout={(event) => documentPassageOffsets.current.set(passage.id, { y: event.nativeEvent.layout.y, height: event.nativeEvent.layout.height })}>
+                <HighlightedText onTextLayout={documentSearchMatchesById.has(passage.id) ? (event) => {
+                  const range = documentSearchMatchesById.get(passage.id)?.ranges[0];
+                  if (!range) return;
+                  const center = (range.start + range.end) / 2;
+                  let offset = 0;
+                  for (const line of event.nativeEvent.lines) {
+                    const next = offset + line.text.length;
+                    if (center <= next) {
+                      const measured = line.y + line.height / 2;
+                      if (Math.abs((documentHighlightOffsets.current.get(passage.id) ?? -1) - measured) > 1) {
+                        documentHighlightOffsets.current.set(passage.id, measured);
+                        setDocumentSearchLayoutRevision((current) => current + 1);
+                      }
+                      break;
+                    }
+                    offset = next;
+                  }
+                } : undefined} ranges={documentSearchMatchesById.get(passage.id)?.ranges} style={index === 0 ? styles.editorReadTitle : styles.editorReadText} text={passage.text} />
               </View>)}
             </>}
           </ScrollView>
@@ -2641,10 +2573,10 @@ export function KnowledgeWorkspace() {
       /> : null}
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "historyChooser" ? "Choose which history to explore." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "audioVersions" ? "Generated audio has its own history, independent from document versions." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
         dismissible={!versionActionKey && !generatingAudioVersion && !coverActionLoading && !destinationLoading && !documentActionLoading}
         footer={mutationFooter()}
-        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance"}
+        hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance" || activeSheet === "historyChooser"}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "audioVersions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
@@ -2746,7 +2678,6 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "audioVersions" ? (
           <View style={styles.audioVersionPanel}>
-            <Button disabled={generatingAudioVersion || loadingAudioVersions} loading={generatingAudioVersion} onPress={() => void generateAudioVersion()} size="lg" variant="primary">Generate full audio</Button>
             {selectedAudioVersion ? (
               <View style={styles.audioVersionPlayer}>
                 <View style={styles.audioVersionNowPlaying}>
@@ -2765,11 +2696,15 @@ export function KnowledgeWorkspace() {
                 </View>
               </View>
             ) : null}
-            {loadingAudioVersions ? <Text style={styles.empty}>Loading audio versions...</Text> : null}
             {!loadingAudioVersions && audioVersions.length === 0 ? <Text style={styles.empty}>No audio versions yet. Generate one whenever you want a new recording of this document.</Text> : null}
-            <ScrollView contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
-              {audioVersions.map((version) => (
-                <Button contentMode="raw" key={version.key} onPress={() => selectedAudioVersionKey === version.key ? controlSelectedAudioVersion() : void playAudioVersion(version)} size="lg" style={styles.versionMain} variant={selectedAudioVersionKey === version.key ? "secondary" : "ghost"}>
+            <ScrollView accessibilityLabel={loadingAudioVersions ? "Loading audio versions" : undefined} accessibilityRole={loadingAudioVersions ? "progressbar" : undefined} contentContainerStyle={styles.audioVersionList} showsVerticalScrollIndicator={false}>
+              {loadingAudioVersions ? Array.from({ length: 3 }, (_, index) => (
+                <View key={index} style={styles.audioVersionSkeletonRow}>
+                  <View style={styles.audioVersionSkeletonIcon} />
+                  <View style={styles.audioVersionSkeletonCopy}><View style={styles.audioVersionSkeletonTitle} /><View style={styles.audioVersionSkeletonSubtitle} /></View>
+                </View>
+              )) : audioVersions.map((version) => (
+                <Button contentMode="raw" key={version.key} onPress={() => selectedAudioVersionKey === version.key ? controlSelectedAudioVersion() : void playAudioVersion(version)} size="lg" style={styles.versionMain} variant="secondary">
                   {selectedAudioVersionKey === version.key && narrationState === "playing" ? <PauseIcon size="md" /> : <PlayIcon size="md" />}
                   <View style={styles.resultText}><Text style={styles.rowTitle}>Audio version {version.version}{version.current ? " · Current" : ""}</Text><Text style={styles.rowSubtitle}>{formatAudioTime(version.durationMs / 1_000)} · {new Date(version.createdAt).toLocaleString()}</Text></View>
                 </Button>
@@ -2897,22 +2832,17 @@ const styles = StyleSheet.create({
   folderContextBack: { flex: 1, justifyContent: "flex-start" },
   meta: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 1.5 },
   notice: { marginBottom: 12, padding: 10, borderRadius: radii.sm, color: palette.silver300, backgroundColor: "rgba(120, 76, 40, 0.24)", fontFamily: fonts.regular, fontSize: 12 },
-  saveStatus: { marginBottom: 8, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
   saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
   saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
-  titleInput: { minHeight: 58, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, textAlign: "left", writingDirection: "ltr" },
+  titleInput: { minHeight: 36, width: "100%", paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, lineHeight: 36, textAlign: "left", writingDirection: "ltr" },
   editorFrame: { minHeight: 280, width: "100%", position: "relative", overflow: "hidden" },
   editorFrameFocused: { minHeight: 280 },
-  editor: { minHeight: 280, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
+  editor: { minHeight: 280, width: "100%", paddingHorizontal: 0, paddingVertical: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorReadScroll: { flex: 1, minHeight: 0, width: "100%" },
   editorReadDocument: { flexGrow: 1, width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
-  editorReadTitle: { width: "100%", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, textAlign: "left", writingDirection: "ltr" },
+  editorReadTitle: { width: "100%", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, lineHeight: 36, textAlign: "left", writingDirection: "ltr" },
   editorReadText: { width: "100%", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorFocused: { minHeight: 280 },
-  editorGhost: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 1, paddingVertical: 10, color: "transparent", fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
-  editorGhostSpacer: { color: "transparent" },
-  completionText: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 26 },
-  completionAccept: { bottom: 8, position: "absolute", right: 0, zIndex: 2 },
   aiComposerError: { paddingHorizontal: 8, color: "#D98B8B", fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: 3, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   aiResponseText: { color: palette.text, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
@@ -2939,6 +2869,11 @@ const styles = StyleSheet.create({
   audioVersionNavigation: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.md },
   audioVersionPosition: { minWidth: 56, color: palette.silver300, fontFamily: fonts.medium, fontSize: 11, textAlign: "center" },
   audioVersionList: { gap: spacing.xs, paddingBottom: spacing.xl },
+  audioVersionSkeletonRow: { minHeight: 52, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, opacity: 0.72 },
+  audioVersionSkeletonIcon: { height: 24, width: 24, borderRadius: 12, backgroundColor: palette.hairlineBright },
+  audioVersionSkeletonCopy: { flex: 1, gap: 6 },
+  audioVersionSkeletonTitle: { height: 12, width: "42%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
+  audioVersionSkeletonSubtitle: { height: 9, width: "68%", borderRadius: radii.sm, backgroundColor: palette.hairlineBright },
   summaryPanel: { gap: 16 },
   summaryText: { color: palette.silver300, fontFamily: fonts.regular, fontSize: 15, lineHeight: 24 },
   destinationPanel: { flex: 1, gap: 12 },

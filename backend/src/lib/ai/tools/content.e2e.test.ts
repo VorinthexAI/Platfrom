@@ -151,7 +151,7 @@ suite('Content live E2E', () => {
       },
       runAction: async (action: string, input: any) => {
         if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: `Generated ${action}: deterministic archive result.` };
-        if (action === 'speak') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
+        if (action === 'speak' || action === 'generate-speech') return { audio: new TextEncoder().encode('deterministic audio'), mimeType: 'audio/mpeg', durationMs: 250 };
         if (action === 'document-generate-html') return documentGenerateHtml(input, { logger: () => undefined });
         if (action === 'document-generate-content') return documentGenerateContent(input, { logger: () => undefined });
         if (action === 'document-embed') return documentEmbed(input, { embed: async () => embedding, dimensions: 4096, logger: () => undefined });
@@ -196,7 +196,6 @@ suite('Content live E2E', () => {
     outputSchemas['folder.list']!.parse(agentList);
     covered.add('folder.list');
 
-    expect((await call('autocomplete', { context: 'Continue this note', wordCount: 4 })).completion).toBe('Generated ask: deterministic archive');
     expect((await call('enhance', { content: 'Improve teh note.' })).content).toContain('enhance');
     const bookInput = { scopeKey, topic: 'Deterministic systems', goal: 'Test the complete runtime', audience: 'Engineers', tone: 'Direct', length: 'short', language: 'English' } as const;
     const book = await call('book.create-context', bookInput);

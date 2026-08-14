@@ -6,6 +6,7 @@ import { documentKeyForRequest, DocumentProcessingError } from '@/lib/ai/documen
 import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { chatInputSchema, speechInputSchema } from '@/lib/ai/providers/types';
+import { ProviderExecutionError } from '@/lib/ai/router/errors';
 
 const now = '2026-07-22T12:00:00.000Z';
 const embedding = Array.from({ length: EMBEDDING_DIMENSIONS }, () => 0.1);
@@ -323,9 +324,21 @@ describe('Content runtime', () => {
       },
     });
     expect(output.results[0]?.success).toBe(false);
+    expect(output.results[0]?.error).toMatchObject({ code: 'DOCUMENT_SPEECH_FAILED', message: 'The generated audio version could not be saved.', action: 'audio-version' });
     expect(uploaded).toHaveLength(1);
     expect(uploaded[0]).toEndWith('.mp3');
     expect(deleted).toEqual(uploaded);
+  });
+
+  test('returns a specific error when persisted audio merging fails', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Narrate this document.');
+    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
+      repository: f.repository,
+      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
+      mergeAudio: async () => { throw new Error('ffmpeg unavailable'); },
+    });
+    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Generated audio segments could not be finalized.', action: 'audio-merge' } });
   });
 
   test('stops persisted audio generation when its request is aborted', async () => {
@@ -347,6 +360,30 @@ describe('Content runtime', () => {
     expect(f.audioVersions.size).toBe(0);
   });
 
+  test('cleans uploaded audio when its request is aborted after storage succeeds', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Narrate this document.');
+    const controller = new AbortController();
+    const uploaded: string[] = [], deleted: string[] = [];
+    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
+      repository: f.repository,
+      signal: controller.signal,
+      runAction: async () => ({ audio: new Uint8Array([1]), mimeType: 'audio/mpeg' }),
+      mergeAudio: async () => new Uint8Array([1]),
+      audioDuration: () => 100,
+      storage: {
+        async upload({ key }) { uploaded.push(key); controller.abort(); return { storageKey: key }; },
+        async delete(key) { deleted.push(key); },
+        async download() { return { bytes: new Uint8Array() }; },
+        async copy() { return { storageKey: '' }; },
+      },
+    });
+    expect(output.results[0]?.success).toBe(false);
+    expect(uploaded).toHaveLength(1);
+    expect(deleted).toEqual(uploaded);
+    expect(f.audioVersions.size).toBe(0);
+  });
+
   test('rejects oversized persisted narration before spending speech capacity', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument('x'.repeat(120_001));
@@ -357,6 +394,16 @@ describe('Content runtime', () => {
     });
     expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_TOO_LARGE' } });
     expect(speechCalls).toBe(0);
+  });
+
+  test('returns a specific error when persisted speech credentials are rejected', async () => {
+    const f = fixture('moderator');
+    const documentKey = f.addDocument('Narrate this document.');
+    const output = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', persistAudio: true }, f.context, {
+      repository: f.repository,
+      runAction: async () => { throw new ProviderExecutionError('generate-speech', [{ modelId: 'amazon.polly-generative', providerId: 'aws-polly', externalModelId: 'generative', code: 'authentication_failed', message: 'rejected' }]); },
+    });
+    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Audio generation is unavailable because the speech provider is not configured.', action: 'generate-speech' } });
   });
 
   test('versions audio independently from document snapshots and marks stale content', async () => {
@@ -381,6 +428,14 @@ describe('Content runtime', () => {
     current.html = '<p>Changed source text.</p>';
     const listed = await runContentTool('document.list-audio-versions', { documentKeys: [documentKey] }, f.context, dependencies);
     expect(listed.results[0]?.data?.audioVersions).toMatchObject([{ version: 2, current: false }, { version: 1, current: false }]);
+  });
+
+  test('returns a specific error when audio history storage is unavailable', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Document body.');
+    f.repository.listAudioVersions = async () => { throw new Error('collection missing'); };
+    const output = await runContentTool('document.list-audio-versions', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
+    expect(output.results[0]).toMatchObject({ success: false, error: { code: 'DOCUMENT_SPEECH_FAILED', message: 'Audio version history could not be loaded.', action: 'audio-history' } });
   });
 
   test('filters semantic search to authorized scopes and rejects unresolved projects', async () => {
@@ -461,7 +516,7 @@ describe('Content runtime', () => {
     const executeAction: any = async (request: { actionSlug: string; mode: string }, input: unknown) => {
       expect(request.mode).toBe('auto');
       calls.push({ actionSlug: request.actionSlug, input });
-      let output: { embedding: number[] } | { text: string } = { text: 'continued words' };
+      let output: { embedding: number[] } | { text: string } = { text: 'generated text' };
       if (request.actionSlug === 'embed') {
         const index = nextEmbedding++;
         activeEmbeddings += 1;
@@ -481,10 +536,8 @@ describe('Content runtime', () => {
     const dependencies = { repository: f.repository, executeAction };
     expect((await runContentTool('folder.create', { folders: [{ scopeKey: f.scopeKey, name: 'Routed folder' }] }, f.context, dependencies)).summary.failed).toBe(0);
     expect((await runContentTool('document.create', { scopeKey: f.scopeKey, name: 'Routed note', representation: { content: 'Routed body' } }, f.context, dependencies)).document.name).toBe('Routed note');
-    expect((await runContentTool('autocomplete', { context: 'Continue this', wordCount: 3 }, f.context, dependencies)).completion).toBe('continued words');
-    expect(calls.map(({ actionSlug }) => actionSlug)).toEqual(['embed', 'embed', 'ask']);
+    expect(calls.map(({ actionSlug }) => actionSlug)).toEqual(['embed', 'embed']);
     expect(calls.filter(({ actionSlug }) => actionSlug === 'embed').every(({ input }) => typeof (input as { text?: unknown }).text === 'string')).toBe(true);
-    expect(() => chatInputSchema.parse(calls.at(-1)?.input)).not.toThrow();
 
     calls.length = 0;
     nextEmbedding = 0;
@@ -1063,22 +1116,6 @@ describe('Content runtime', () => {
     expect(events.every((event: any) => typeof event.invocationKey === 'string')).toBe(true);
   });
 
-  test('generates a bounded autocomplete continuation', async () => {
-    const f = fixture('viewer');
-    let call: { action?: string; input?: any } = {};
-    const output = await runContentTool('autocomplete', { context: 'A private opening thought', wordCount: 3 }, f.context, {
-      repository: f.repository,
-      runAction: async (action, input) => {
-        call = { action, input };
-        return { text: 'continues with useful detail beyond limit' };
-      },
-    });
-    expect(output).toEqual({ completion: 'continues with useful' });
-    expect(call.action).toBe('ask');
-    expect(call.input.systemPrompt).toContain('vivid, specific, or subtly unexpected');
-    expect(call.input.options).toMatchObject({ temperature: 0.7, maxTokens: 16 });
-  });
-
   test('enhances supplied text without persistence', async () => {
     const f = fixture('viewer');
     let call: { action?: string; input?: any } = {};
@@ -1136,8 +1173,7 @@ describe('Content runtime', () => {
         },
       };
       let input: any;
-       if (name === 'autocomplete') input = { context: 'Continue this note', wordCount: 4 };
-       else if (name === 'enhance') input = { content: 'Improve teh wording.' };
+       if (name === 'enhance') input = { content: 'Improve teh wording.' };
        else if (name === 'book.create-context') input = { scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
        else if (name === 'book.write') input = { bookKey: newId(), scopeKey: f.scopeKey, topic: 'Useful systems', goal: 'Build a durable practice', audience: 'Curious beginners', tone: 'Warm and direct', length: 'short', language: 'English' };
       else if (name === 'folder.create') input = { folders: [{ scopeKey: f.scopeKey, name: 'Created' }] };

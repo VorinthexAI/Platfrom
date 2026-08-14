@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { highlightedSegments, mergeHighlightRanges, normalizeDocumentSearchText, searchDocumentPassages } from "@vorinthex/shared/ui/document-search";
+import { highlightedSegments, mergeHighlightRanges, normalizeDocumentSearchText, searchDocumentPassages, searchDocumentPassagesLiteral } from "@vorinthex/shared/ui/document-search";
 
 const passages = (text: string) => [{ id: "passage", text }];
 
@@ -67,5 +67,23 @@ describe("document search", () => {
 
   test("returns no matches for an empty normalized query", () => {
     expect(searchDocumentPassages(passages("anything"), " \n ")).toEqual([]);
+  });
+
+  test("performs instant regex-safe Control-F matching without fuzzy results", () => {
+    const matches = searchDocumentPassagesLiteral(passages("Thanks, THANKS, and thanks. Special [text]."), "thanks");
+    expect(matches[0]?.ranges).toEqual([{ start: 0, end: 6 }, { start: 8, end: 14 }, { start: 20, end: 26 }]);
+    expect(searchDocumentPassagesLiteral(passages("A searchable document"), "searachable")).toEqual([]);
+    expect(searchDocumentPassagesLiteral(passages("Special [text]."), "[text]")[0]?.ranges).toEqual([{ start: 8, end: 14 }]);
+  });
+
+  test("returns every literal occurrence without fuzzy-search result caps", () => {
+    const manyPassages = Array.from({ length: 120 }, (_, index) => ({ id: String(index), text: "match ".repeat(120) }));
+    const matches = searchDocumentPassagesLiteral(manyPassages, "match");
+    expect(matches).toHaveLength(120);
+    expect(matches[0]?.ranges).toHaveLength(120);
+  });
+
+  test("keeps literal occurrence ranges distinct", () => {
+    expect(searchDocumentPassagesLiteral(passages("aaa"), "aa")[0]?.ranges).toEqual([{ start: 0, end: 2 }]);
   });
 });

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { DomainToolContext } from './domain-execute';
 import type { DocumentParseDependencies, DocumentParseInput } from '@/lib/ai/document-processing';
 import type { RouterDependencies } from '@/lib/ai/router';
+import { NoEligibleRouteError, ProviderExecutionError } from '@/lib/ai/router/errors';
 import type { DocumentObjectStorage } from '@/lib/ai/document-processing/storage';
 import type { Folder } from '@/lib/db/folders.node';
 import type { Document } from '@/lib/db/documents.node';
@@ -144,6 +145,26 @@ function mappedError(error: unknown, tool: ContentToolName, action?: string, res
   }
   const validation = error && typeof error === 'object' && ('issues' in error || ('name' in error && error.name === 'ZodError'));
   return new ContentError(validation ? 'CONTENT_INVALID_INPUT' : 'CONTENT_CONFLICT', validation ? 'Content tool input or output was invalid.' : 'Content operation failed.', tool, { action, resourceKey, cause: error, retryable: !validation });
+}
+
+function speechError(error: unknown, tool: ContentToolName, action: string, resourceKey: string): ContentError {
+  if (error instanceof ProviderExecutionError) {
+    const codes = new Set(error.attempts.map(({ code }) => code));
+    if (codes.has('authentication_failed') || codes.has('not_configured') || codes.has('adapter_unavailable')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is unavailable because the speech provider is not configured.', tool, { action, resourceKey, cause: error });
+    }
+    if (codes.has('invalid_input') || codes.has('unsupported_action')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'The selected language or voice is not supported for audio generation.', tool, { action, resourceKey, cause: error });
+    }
+    if (codes.has('rate_limited')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is busy. Try again shortly.', tool, { action, resourceKey, cause: error, retryable: true });
+    }
+    if (codes.has('provider_unavailable') || codes.has('timeout')) {
+      return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is temporarily unavailable. Try again.', tool, { action, resourceKey, cause: error, retryable: true });
+    }
+  }
+  if (error instanceof NoEligibleRouteError) return new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio generation is not configured.', tool, { action, resourceKey, cause: error });
+  return new ContentError('DOCUMENT_SPEECH_FAILED', 'Document audio could not be generated.', tool, { action, resourceKey, cause: error, retryable: true });
 }
 
 async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'getFolderCoverImage' | 'signFolderCoverUrl'>) {
@@ -805,20 +826,6 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
     if (tool === 'book.create-context' || tool === 'book.write') {
       const { runBookContentTool } = await import('./book-runtime');
       result = await runBookContentTool(tool, input, context, dependencies);
-    } else if (tool === 'autocomplete') {
-      const response = await action('ask', {
-        systemPrompt: `Continue the user's writing with exactly ${input.wordCount} words or fewer. Match the writer's voice and direction while favoring a vivid, specific, or subtly unexpected continuation over generic filler. Keep it coherent with the supplied context. Return only the continuation, without quotation marks, labels, commentary, or repeating the supplied context.`,
-        messages: [{ role: 'user', content: [{ type: 'text', text: input.context }] }],
-        options: { temperature: 0.7, maxTokens: Math.max(16, input.wordCount * 3) },
-      });
-      const completion = z.string().trim().min(1).parse(response.text)
-        .replace(/^(?:continuation\s*:\s*)/i, '')
-        .replace(/^["'\u2018\u2019\u201c\u201d]+|["'\u2018\u2019\u201c\u201d]+$/g, '')
-        .trim()
-        .split(/\s+/)
-        .slice(0, input.wordCount)
-        .join(' ');
-      result = { completion: z.string().min(1).parse(completion) };
     } else if (tool === 'enhance') {
       const response = await action('enhance', {
         systemPrompt: 'Correct spelling, grammar, awkward wording, and unclear phrasing. Preserve the original meaning, facts, tone, paragraph structure, line breaks, and formatting. Do not add new claims or commentary. Return only the revised text.',
@@ -1225,6 +1232,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           if (input.includeTitle && documentChunks[0]) documentChunks[0] = { ...documentChunks[0], text: `${current.name}. ${documentChunks[0].text}` };
           const chunks = documentChunks;
           if (input.persistAudio && chunks.length > PERSISTED_AUDIO_MAX_CHUNKS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports at most ${PERSISTED_AUDIO_MAX_CHUNKS} speech segments.`, tool, 'generate-speech', key);
+          if (chunks.length === 0) fail('DOCUMENT_SPEECH_FAILED', 'This document has no text that can be narrated.', tool, input.persistAudio ? 'generate-speech' : 'speak', key);
           const audio: Array<{ index: number; url: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
           const generated: Uint8Array[] = [];
           let generatedBytes = 0;
@@ -1233,17 +1241,29 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             dependencies.signal?.throwIfAborted();
             const chunk = chunks[index]!;
             const speechAction = input.persistAudio ? 'generate-speech' : 'speak';
-            const spoken = await action(speechAction, {
-              text: chunk.text,
-              ...(input.language ? { language: input.language } : {}),
-              ...(input.voice ? { voice: input.voice } : input.persistAudio ? { voice: 'Joanna' } : {}),
-              ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
-              format: input.persistAudio ? 'mp3' : 'wav',
-            }, key, current.scopeKey);
-            const bytes = spoken.audio
-              ? z.instanceof(Uint8Array).parse(spoken.audio)
-              : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
-            const mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
+            let spoken: ContentActionResult;
+            try {
+              spoken = await action(speechAction, {
+                text: chunk.text,
+                ...(input.language ? { language: input.language } : {}),
+                ...(input.voice ? { voice: input.voice } : input.persistAudio ? { voice: 'Joanna' } : {}),
+                ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
+                format: input.persistAudio ? 'mp3' : 'wav',
+              }, key, current.scopeKey);
+            } catch (error) {
+              throw speechError(error, tool, speechAction, key);
+            }
+            let bytes: Uint8Array;
+            let mimeType: string;
+            try {
+              bytes = spoken.audio
+                ? z.instanceof(Uint8Array).parse(spoken.audio)
+                : new Uint8Array(Buffer.from(z.string().min(1).parse(spoken.audioBase64), 'base64'));
+              if (bytes.byteLength === 0) throw new Error('Speech output was empty.');
+              mimeType = z.string().min(1).parse(spoken.mimeType ?? 'audio/mpeg');
+            } catch (error) {
+              throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The speech provider returned invalid audio.', tool, { action: speechAction, resourceKey: key, cause: error, retryable: true });
+            }
             dependencies.signal?.throwIfAborted();
             const item = {
               index,
@@ -1261,15 +1281,30 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
           if (!input.persistAudio) return { documentKey: key, title: current.name, audio, ...(duration ? { totalDurationMs: duration } : {}) };
           if (!repo.createAudioVersion) fail('CONTENT_CONFLICT', 'Document audio persistence is unavailable.', tool, 'storage', key);
-          const bytes = await d.mergeAudio(generated, dependencies.signal);
+          let bytes: Uint8Array;
+          try {
+            bytes = await d.mergeAudio(generated, dependencies.signal);
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio segments could not be finalized.', tool, { action: 'audio-merge', resourceKey: key, cause: error, retryable: true });
+          }
           dependencies.signal?.throwIfAborted();
           if (bytes.byteLength > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated audio exceeds the 100 MiB storage limit.', tool, 'storage', key);
-          const durationMs = d.audioDuration(bytes);
+          let durationMs: number;
+          try {
+            durationMs = d.audioDuration(bytes);
+            if (!Number.isFinite(durationMs) || durationMs <= 0) throw new Error('Audio duration must be positive.');
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be validated.', tool, { action: 'audio-validate', resourceKey: key, cause: error, retryable: true });
+          }
           const audioKey = d.id();
           const requestedStorageKey = `content/${context.organizationKey}/${current.scopeKey}/${key}/audio/${audioKey}.mp3`;
           let storageKey: string | undefined;
           try {
             storageKey = (await storageOperation('upload', key, current.scopeKey, () => d.storage.upload({ key: requestedStorageKey, bytes, mimeType: 'audio/mpeg' }))).storageKey;
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Generated audio could not be stored.', tool, { action: 'storage', resourceKey: key, cause: error, retryable: true });
+          }
+          try {
             dependencies.signal?.throwIfAborted();
             const created = await repo.createAudioVersion({
               key: audioKey,
@@ -1294,9 +1329,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           } catch (error) {
             if (storageKey) {
               try { await storageOperation('delete', key, current.scopeKey, () => d.storage.delete(storageKey!)); }
-              catch (cleanupError) { throw new ContentError('CONTENT_CONFLICT', 'Audio generation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
+              catch (cleanupError) { throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio version creation failed and uploaded audio cleanup requires retry.', tool, { action: 'cleanup', resourceKey: key, cause: new AggregateError([error, cleanupError]), retryable: true }); }
             }
-            throw error;
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'The generated audio version could not be saved.', tool, { action: 'audio-version', resourceKey: key, cause: error, retryable: true });
           }
         },
       })), input.atomic, repo);
@@ -1674,7 +1709,12 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         run: async () => {
           const current = await document(key, 'viewer');
           if (!repo.listAudioVersions) fail('CONTENT_CONFLICT', 'Document audio history is unavailable.', tool, 'read', key);
-          const versions = await repo.listAudioVersions(current.scopeKey, [key]);
+          let versions: DocumentAudioVersion[];
+          try {
+            versions = await repo.listAudioVersions(current.scopeKey, [key]);
+          } catch (error) {
+            throw new ContentError('DOCUMENT_SPEECH_FAILED', 'Audio version history could not be loaded.', tool, { action: 'audio-history', resourceKey: key, cause: error, retryable: true });
+          }
           const offset = input.cursor ? Number(Buffer.from(input.cursor, 'base64url').toString()) || 0 : 0;
           const limit = input.limit ?? 50;
           return {

@@ -147,3 +147,15 @@ export function searchDocumentPassages(passages: DocumentPassage[], query: strin
     return score >= threshold ? [{ ...passage, passageIndex, score, ranges: mergeHighlightRanges(ranges) }] : [];
   }).sort((left, right) => right.score - left.score || left.passageIndex - right.passageIndex).slice(0, MAX_PASSAGE_MATCHES);
 }
+
+/** Control-F style case-insensitive literal matching with regex-safe input. */
+export function searchDocumentPassagesLiteral(passages: DocumentPassage[], query: string): DocumentSearchMatch[] {
+  const value = query.trim();
+  if (!value) return [];
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expression = new RegExp(escaped, "giu");
+  return passages.flatMap((passage, passageIndex) => {
+    const ranges = [...passage.text.matchAll(expression)].map((match) => ({ start: match.index, end: match.index + match[0].length }));
+    return ranges.length ? [{ ...passage, passageIndex, score: 1, ranges: mergeHighlightRanges(ranges) }] : [];
+  });
+}

@@ -19,6 +19,12 @@ interface StaticBedrockEnvironment extends AwsCredentialEnvironment {
   BEDROCK_AWS_SECRET_ACCESS_KEY?: string;
 }
 
+interface StaticPollyEnvironment extends StaticBedrockEnvironment {
+  POLLY_REGION?: string;
+  POLLY_AWS_ACCESS_KEY_ID?: string;
+  POLLY_AWS_SECRET_ACCESS_KEY?: string;
+}
+
 interface StaticOpenAIEnvironment {
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
@@ -44,6 +50,14 @@ export function resolveStaticBedrockEnvironment(env: StaticBedrockEnvironment): 
   };
 }
 
+export function resolveStaticPollyEnvironment(env: StaticPollyEnvironment): AwsCredentialEnvironment {
+  return {
+    AWS_REGION: env.POLLY_REGION ?? 'eu-central-1',
+    AWS_ACCESS_KEY_ID: env.POLLY_AWS_ACCESS_KEY_ID ?? env.BEDROCK_AWS_ACCESS_KEY_ID ?? env.AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: env.POLLY_AWS_SECRET_ACCESS_KEY ?? env.BEDROCK_AWS_SECRET_ACCESS_KEY ?? env.AWS_SECRET_ACCESS_KEY,
+  };
+}
+
 export function createStaticProviderAdapter(providerSlug: ProviderId): ProviderAdapter | undefined {
   if (!isStaticProvider(providerSlug)) return undefined;
   try {
@@ -57,7 +71,7 @@ export function createStaticProviderAdapter(providerSlug: ProviderId): ProviderA
       case 'openrouter': return createOpenRouterProvider(resolveOpenRouterEnvironment(process.env));
       case 'aws-bedrock': return createAwsBedrockProvider(undefined, resolveStaticBedrockEnvironment(process.env));
       case 'aws-bedrock-mantle': return createAwsBedrockMantleProvider(undefined, resolveStaticBedrockEnvironment(process.env));
-      case 'aws-polly': return createAwsPollyProvider();
+      case 'aws-polly': return createAwsPollyProvider(undefined, resolveStaticPollyEnvironment(process.env));
       case 'aws-transcribe': return createAwsTranscribeProvider();
     }
   } catch {

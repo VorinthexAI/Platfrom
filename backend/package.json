@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "load-local-env": "bun run ../.github/scripts/write-local-env.ts dev backend backend/.env.local",
-    "dev": "bun run load-local-env && bun --env-file=.env.local run --hot src/api/index.ts",
+    "dev": "bun run load-local-env && bun --env-file=.env.local run src/db/arango-migrate.ts && bun --env-file=.env.local run --hot src/api/index.ts",
     "dev:infra": "docker compose up -d arangodb redis localstack mailpit",
     "dev:services": "docker compose --profile services up",
     "start": "bun run scripts/dev-start.ts",

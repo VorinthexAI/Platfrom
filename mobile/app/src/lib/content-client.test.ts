@@ -48,7 +48,6 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
 };
 
 const {
-  autocompleteContent,
   archiveContentDocument,
   askPersonalAssistant,
   createContentDocument,
@@ -258,22 +257,19 @@ test("sets and clears folder covers with exact payloads", async () => {
   expect(calls[1]?.body.input).toEqual({ updates: [{ folderKey: "folder", coverImageKey: null }], atomic: false, idempotencyKey: expect.any(String) });
 });
 
-test("runs note autocomplete, enhancement, translation, and rename through document tools", async () => {
+test("runs note enhancement, translation, and rename through document tools", async () => {
   responseForTool = (tool) => {
-    if (tool === "autocomplete") return { data: { success: true, data: { completion: "next words" } } };
     if (tool === "enhance") return { data: { success: true, data: { content: "Improved note" } } };
     if (tool === "document.translate") return { data: { success: true, data: { results: [{ success: true, data: { text: "Nota", persistedDocumentKey: "document" } }] } } };
     if (tool === "document.rename") return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Renamed note", isFavorite: false, updatedAt: "2026-08-10T00:02:00.000Z" } } }] } } };
   };
 
-  expect(await autocompleteContent("Draft context", 8)).toEqual({ completion: "next words" });
   expect(await enhanceContent("Rough note")).toEqual({ content: "Improved note" });
   expect((await translateContentDocument("document", "Spanish")).persistedDocumentKey).toBe("document");
   expect((await renameContentDocument("document", "Renamed note")).name).toBe("Renamed note");
-  expect(calls[0]?.body.input).toEqual({ context: "Draft context", wordCount: 8 });
-  expect(calls[1]?.body.input).toEqual({ content: "Rough note" });
-  expect(calls[2]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
-  expect(calls[3]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
+  expect(calls[0]?.body.input).toEqual({ content: "Rough note" });
+  expect(calls[1]?.body.input).toMatchObject({ documentKeys: ["document"], targetLanguage: "Spanish", preserveFormatting: true, mode: "replace" });
+  expect(calls[2]?.body.input).toMatchObject({ renames: [{ documentKey: "document", name: "Renamed note" }], atomic: false });
 });
 
 test("sends Archive requests to the personal assistant surface", async () => {
