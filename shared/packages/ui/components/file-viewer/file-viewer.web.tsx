@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 
 import { Button } from "../button/button.web";
 
-export type FileViewerProps = { error?: string; html?: string; loading?: boolean; onBack: () => void; onMenu: () => void; onRenderError?: (message: string) => void; pdfUri?: string; title: string };
+export type FileViewerProps = { error?: string; html?: string; loading?: boolean; onBack: () => void; onMenu: () => void; onRead?: () => void; onRenderError?: (message: string) => void; pdfUri?: string; readLoading?: boolean; reading?: boolean; title: string };
 
 export function FileViewer({ error, html, loading, onBack, onMenu, pdfUri, title }: FileViewerProps) {
   return <section style={styles.root}>

@@ -22,7 +22,7 @@ export function createAwsPollyProvider(config?: Partial<AwsPollyProviderConfig>,
         const input = speechInputSchema.parse(request.input);
         const host = `polly.${parsed.region}.amazonaws.com`;
         const path = '/v1/speech';
-        const body = JSON.stringify({ Text: input.text, VoiceId: input.voice === 'alloy' ? 'Joanna' : input.voice, OutputFormat: input.format, Engine: request.externalModelId || 'generative' });
+        const body = JSON.stringify({ Text: input.text, VoiceId: input.voice === 'alloy' ? 'Joanna' : input.voice, OutputFormat: input.format, Engine: request.externalModelId || 'generative', ...(input.language ? { LanguageCode: input.language } : {}) });
         const signed = signAwsRequest(parsed, 'polly', host, path, body, { 'content-type': 'application/json' });
         const response = await fetch(`https://${host}${path}`, { method: 'POST', headers: { ...signed.headers, authorization: signed.authorization }, body, signal: resolveRequestSignal(request) });
         if (!response.ok) throw new ProviderError(PROVIDER_ID, providerErrorCodeForStatus(response.status), `aws-polly request failed with status ${response.status}`, { status: response.status });

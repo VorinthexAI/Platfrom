@@ -41,6 +41,25 @@ const agentKey = string(object(guest.content_execution).agent_key, 'content exec
 let accessToken = string(guestResponse.headers.get('x-access-token'), 'access token');
 let refreshToken = string(guestResponse.headers.get('x-refresh-token'), 'refresh token');
 
+if (process.env.ARCHIVE_E2E_AUDIO === 'true') {
+  const audioResponse = await fetch(`${apiBase}/api/v1/audio/generate`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+      'x-refresh-token': refreshToken,
+      'x-vorinthex-api-key': process.env.API_KEY ?? '',
+      'x-vorinthex-session-transport': 'header',
+    },
+    body: JSON.stringify({ organizationKey, agentKey, input: { text: Array.from({ length: 25 }, (_, index) => `narration${index}`).join(' '), wordsPerChunk: 20 } }),
+  });
+  const audioStream = await audioResponse.text();
+  if (!audioResponse.ok || audioResponse.headers.get('content-type')?.includes('text/event-stream') !== true) throw new Error(`Audio generation failed with ${audioResponse.status}: ${audioStream}`);
+  if ((audioStream.match(/event: chunk/g) ?? []).length !== 2 || !audioStream.includes('"mimeType":"audio/mpeg"') || !audioStream.includes('event: done')) throw new Error(`Audio generation did not stream two ordered MP3 chunks: ${(audioStream.match(/^event: .+|^data: \{"error".+$/gm) ?? []).join(' | ')}`);
+  accessToken = audioResponse.headers.get('x-access-token') ?? accessToken;
+  refreshToken = audioResponse.headers.get('x-refresh-token') ?? refreshToken;
+}
+
 async function tool(name: string, input: Record<string, unknown>) {
   const response = await fetch(`${apiBase}/api/v1/content/tools/${name}`, {
     method: 'POST',
@@ -152,4 +171,4 @@ await tool('document.archive', { documentKeys: [documentKey, uploadedDocumentKey
 await tool('document.delete', { documentKeys: [documentKey, uploadedDocumentKey], deleteVersions: true, deleteShares: true });
 await tool('folder.archive', { folderKeys: [folderKey], atomic: true });
 
-console.log('Archive API E2E passed: guest auth, folder/document creation, autosave, upload, fast folder/file search, semantic retrieval, and history.');
+console.log(`Archive API E2E passed: guest auth, ${process.env.ARCHIVE_E2E_AUDIO === 'true' ? 'streamed Polly narration, ' : ''}folder/document creation, autosave, upload, fast folder/file search, semantic retrieval, and history.`);

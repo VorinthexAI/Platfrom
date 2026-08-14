@@ -3,7 +3,8 @@ import { File, Paths } from "expo-file-system";
 import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { Image } from "expo-image";
-import { useEffect, useRef, useState } from "react";
+import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from "expo-audio";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,6 +13,7 @@ import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
+import { highlightedSegments, searchDocumentPassages, type DocumentPassage, type HighlightRange } from "@vorinthex/shared/ui/document-search";
 import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
@@ -28,6 +30,8 @@ import {
   FolderIcon,
   MoreHorizontalIcon,
   PlusIcon,
+  PauseIcon,
+  PlayIcon,
   SearchIcon,
   SendIcon,
   CloseIcon,
@@ -97,6 +101,8 @@ import {
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
 import { saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@/lib/device-download";
 import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
+import { streamGeneratedAudio, type GeneratedAudioChunk } from "@/lib/audio-client";
+import { BOOK_AUDIO_MODE } from "@/lib/book-audio";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 
@@ -116,6 +122,16 @@ type LocalDraft = {
   savedContent?: unknown;
   pendingCreate?: unknown;
 };
+
+function notePassages(title: string, content: string): DocumentPassage[] {
+  const passages: DocumentPassage[] = [{ id: "title", text: title }];
+  for (const [index, match] of [...content.matchAll(/\S[\s\S]*?(?=\n{2,}|$)/g)].entries()) passages.push({ id: `body.${index}`, text: match[0] });
+  return passages;
+}
+
+function HighlightedText({ ranges, text, style }: { ranges?: HighlightRange[]; text: string; style: object }) {
+  return <Text selectable style={style}>{highlightedSegments(text, ranges ?? []).map((segment) => <Text key={`${segment.start}-${segment.end}`} style={segment.highlighted ? styles.documentSearchHighlight : undefined}>{segment.text}</Text>)}</Text>;
+}
 
 const MAX_MOBILE_UPLOAD_BYTES = 8 * 1024 * 1024;
 const AUTOCOMPLETE_WORD_COUNT = 8;
@@ -164,6 +180,8 @@ export function KnowledgeWorkspace() {
   const hasContentContext = isContentContextConfigured({ organizationKey, scopeKey, agentKey });
   const contentContextKey = hasContentContext ? `${organizationKey}:${scopeKey}:${agentKey}` : "";
   const contentContext = { organizationKey, scopeKey, agentKey };
+  const narrationPlayer = useAudioPlayer(null, { updateInterval: 500, keepAudioSessionActive: true });
+  const narrationAudio = useAudioPlayerStatus(narrationPlayer);
   const draftIdentity = userKey && organizationKey && scopeKey ? `${userKey}:${organizationKey}:${scopeKey}` : "";
   const localDraftFile = draftFileFor(draftIdentity || "unavailable");
   const [activeSheet, setActiveSheet] = useState<ArchiveSheet>();
@@ -213,6 +231,11 @@ export function KnowledgeWorkspace() {
   const [filePreview, setFilePreview] = useState<ContentDocumentPreview>();
   const [filePreviewError, setFilePreviewError] = useState<string>();
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
+  const [fileContent, setFileContent] = useState("");
+  const [documentSearchQuery, setDocumentSearchQuery] = useState("");
+  const [narrationState, setNarrationState] = useState<"idle" | "generating" | "playing" | "paused" | "waiting" | "error">("idle");
+  const [narrationChunkCount, setNarrationChunkCount] = useState(0);
+  const [narrationError, setNarrationError] = useState<string>();
   const [selectedFolder, setSelectedFolder] = useState<ContentFolder>();
   const [documentActionLoading, setDocumentActionLoading] = useState<string>();
   const [sourceImages, setSourceImages] = useState<ContentDocumentSourceImage[]>([]);
@@ -265,6 +288,14 @@ export function KnowledgeWorkspace() {
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
   const folderSearchRequest = useRef<AbortController | undefined>(undefined);
   const editorDocumentScroll = useRef<ScrollView | null>(null);
+  const documentPassageOffsets = useRef(new Map<string, number>());
+  const narrationRequest = useRef<AbortController | undefined>(undefined);
+  const narrationGeneration = useRef(0);
+  const narrationChunks = useRef<GeneratedAudioChunk[]>([]);
+  const narrationChunkIndex = useRef(-1);
+  const narrationGenerating = useRef(false);
+  const narrationStateRef = useRef(narrationState);
+  const lastFinishedNarrationChunk = useRef(-1);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
   const previewFileRef = useRef<File | undefined>(undefined);
   const instructionGeneration = useRef(0);
@@ -310,10 +341,90 @@ export function KnowledgeWorkspace() {
   const folderSearchDocuments = (folderSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
   const rootSearchFolders = rootSearchResults?.folders ?? [];
   const rootSearchDocuments = (rootSearchResults?.documents ?? []).filter((document) => folderContentTab === "files" ? Boolean(document.extension) : !document.extension);
+  const deferredDocumentSearchQuery = useDeferredValue(documentSearchQuery);
+  const currentNotePassages = useMemo(() => notePassages(title, content), [content, title]);
+  const documentSearchMatches = useMemo(() => editorEditing ? [] : searchDocumentPassages(currentNotePassages, deferredDocumentSearchQuery), [currentNotePassages, deferredDocumentSearchQuery, editorEditing]);
+  const documentSearchMatchesById = useMemo(() => new Map(documentSearchMatches.map((match) => [match.id, match])), [documentSearchMatches]);
   const visibleUploadBatch = uploadFolderKey === currentFolder?.key
     ? uploadBatch.filter(({ status }) => status === "pending" || status === "uploading")
     : [];
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
+
+  const updateNarrationState = (state: typeof narrationState) => {
+    narrationStateRef.current = state;
+    setNarrationState(state);
+  };
+
+  const playNarrationChunk = (index: number, name: string) => {
+    const chunk = narrationChunks.current[index];
+    if (!chunk) return false;
+    narrationChunkIndex.current = index;
+    narrationPlayer.replace(`data:${chunk.mimeType};base64,${chunk.audioBase64}`);
+    narrationPlayer.setActiveForLockScreen(true, { title: name, artist: "Vorinthex Archive" }, { showSeekBackward: false, showSeekForward: false });
+    narrationPlayer.play();
+    updateNarrationState("playing");
+    return true;
+  };
+
+  const stopNarration = useCallback(() => {
+    narrationGeneration.current += 1;
+    narrationRequest.current?.abort();
+    narrationRequest.current = undefined;
+    narrationGenerating.current = false;
+    narrationChunks.current = [];
+    narrationChunkIndex.current = -1;
+    lastFinishedNarrationChunk.current = -1;
+    narrationPlayer.pause();
+    narrationPlayer.clearLockScreenControls();
+    narrationStateRef.current = "idle";
+    setNarrationState("idle");
+    setNarrationChunkCount(0);
+    setNarrationError(undefined);
+  }, [narrationPlayer]);
+
+  const startNarration = async (text: string, name: string) => {
+    if (!text.trim() || !organizationKey || !agentKey) return;
+    stopNarration();
+    const generation = ++narrationGeneration.current;
+    const controller = new AbortController();
+    narrationRequest.current = controller;
+    narrationGenerating.current = true;
+    updateNarrationState("generating");
+    try {
+      await setAudioModeAsync(BOOK_AUDIO_MODE);
+      await streamGeneratedAudio({ organizationKey, agentKey, text, wordsPerChunk: 100 }, (chunk) => {
+        if (generation !== narrationGeneration.current) return;
+        narrationChunks.current.push(chunk);
+        setNarrationChunkCount(narrationChunks.current.length);
+        if (narrationChunkIndex.current < 0 || narrationStateRef.current === "waiting") playNarrationChunk(narrationChunks.current.length - 1, name);
+      }, controller.signal);
+      if (generation !== narrationGeneration.current) return;
+      narrationGenerating.current = false;
+      narrationRequest.current = undefined;
+      if (narrationChunks.current.length === 0) throw new Error("No audio was generated.");
+      if (narrationStateRef.current === "waiting") updateNarrationState("idle");
+    } catch (cause) {
+      if (generation !== narrationGeneration.current || controller.signal.aborted) return;
+      narrationGenerating.current = false;
+      narrationRequest.current = undefined;
+      const message = cause instanceof Error ? cause.message : "The document could not be read aloud.";
+      setNarrationError(message);
+      showToast({ title: "Read aloud failed", description: message });
+      if (narrationChunkIndex.current < 0 || narrationStateRef.current === "waiting") updateNarrationState("error");
+    }
+  };
+
+  const toggleNarration = (text: string, name: string) => {
+    if (narrationStateRef.current === "playing") {
+      narrationPlayer.pause();
+      updateNarrationState("paused");
+    } else if (narrationStateRef.current === "paused") {
+      narrationPlayer.play();
+      updateNarrationState("playing");
+    } else if (narrationStateRef.current !== "generating" && narrationStateRef.current !== "waiting") {
+      void startNarration(text, name);
+    }
+  };
 
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
@@ -331,6 +442,36 @@ export function KnowledgeWorkspace() {
     const frame = requestAnimationFrame(() => editorDocumentScroll.current?.scrollTo({ animated: false, y: 0 }));
     return () => cancelAnimationFrame(frame);
   }, [editorEditing]);
+
+  useEffect(() => {
+    if (!deferredDocumentSearchQuery.trim() || !documentSearchMatches[0]) return;
+    const y = documentPassageOffsets.current.get(documentSearchMatches[0].id);
+    if (y === undefined) return;
+    const frame = requestAnimationFrame(() => editorDocumentScroll.current?.scrollTo({ animated: true, y: Math.max(0, y - spacing.sm) }));
+    return () => cancelAnimationFrame(frame);
+  }, [deferredDocumentSearchQuery, documentSearchMatches]);
+
+  useEffect(() => {
+    if (!narrationAudio.didJustFinish) return;
+    const current = narrationChunkIndex.current;
+    if (current < 0 || lastFinishedNarrationChunk.current === current) return;
+    lastFinishedNarrationChunk.current = current;
+    const name = selectedDocument?.name ?? title;
+    if (playNarrationChunk(current + 1, name)) return;
+    if (narrationGenerating.current) updateNarrationState("waiting");
+    else {
+      narrationPlayer.clearLockScreenControls();
+      updateNarrationState("idle");
+    }
+    // Completion is edge-triggered; queue and generation state live in refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [narrationAudio.didJustFinish]);
+
+  useEffect(() => () => {
+    narrationRequest.current?.abort();
+    narrationPlayer.pause();
+    narrationPlayer.clearLockScreenControls();
+  }, [narrationPlayer]);
 
   useEffect(() => {
     if (hasContentContext) return;
@@ -490,11 +631,26 @@ export function KnowledgeWorkspace() {
   }, [draftIdentity, hasContentContext]);
 
   useEffect(() => {
-    if (!hasContentContext) return;
+    if (!hasContentContext) {
+      if (loadedContentContextKey.current) {
+        stopNarration();
+        previewFileRef.current?.delete();
+        previewFileRef.current = undefined;
+        setFileContent("");
+        setFilePreview(undefined);
+        setFilePreviewUri(undefined);
+        setDocumentSearchQuery("");
+        loadedContentContextKey.current = undefined;
+      }
+      return;
+    }
     const requestContextKey = contentContextKey;
     const changedAccount = Boolean(loadedContentContextKey.current && loadedContentContextKey.current !== contentContextKey);
     loadedContentContextKey.current = contentContextKey;
     if (changedAccount) {
+      stopNarration();
+      previewFileRef.current?.delete();
+      previewFileRef.current = undefined;
       setCompletion("");
       navigationGeneration.current += 1;
       destinationGeneration.current += 1;
@@ -542,6 +698,11 @@ export function KnowledgeWorkspace() {
       setResults(undefined);
       setSelectedSummary(undefined);
       setSelectedDocument(undefined);
+      setFileContent("");
+      setFilePreview(undefined);
+      setFilePreviewError(undefined);
+      setFilePreviewUri(undefined);
+      setDocumentSearchQuery("");
       setSelectedFolder(undefined);
       setSheetOpen(false);
       sheetBackStack.current = [];
@@ -580,7 +741,7 @@ export function KnowledgeWorkspace() {
           setLocationLoading(false);
         }
       });
-  }, [contentContextKey, hasContentContext]);
+  }, [contentContextKey, hasContentContext, stopNarration]);
 
   useEffect(() => {
     if (!hasContentContext || !dirty.current) return;
@@ -946,6 +1107,7 @@ export function KnowledgeWorkspace() {
     }
     setError(undefined);
     resetEditor(nextTitle);
+    setDocumentSearchQuery("");
     setEditorEditing(true);
     workspaceModeRef.current = "editor";
     setWorkspaceMode("editor");
@@ -976,6 +1138,8 @@ export function KnowledgeWorkspace() {
       return false;
     }
     const generation = ++navigationGeneration.current;
+    stopNarration();
+    setDocumentSearchQuery("");
     instructionGeneration.current += 1;
     instructionRequest.current?.abort();
     instructionRequest.current = undefined;
@@ -1028,18 +1192,24 @@ export function KnowledgeWorkspace() {
   const openArchiveDocument = async (document: ContentDocument, fromSheet = false, preserveSearch = false) => {
     if (document.extension) {
       const generation = ++navigationGeneration.current;
+      stopNarration();
       setSelectedDocument(document);
       setFilePreview(undefined);
       setFilePreviewError(undefined);
       setFilePreviewUri(undefined);
+      setFileContent("");
       setOpeningDocumentKey(document.key);
       workspaceModeRef.current = "viewer";
       setWorkspaceMode("viewer");
       if (fromSheet) closeSheet();
       try {
-        const preview = await getContentDocumentPreview(queryClient, contentContext, document.key);
+        const [preview, detail] = await Promise.all([
+          getContentDocumentPreview(queryClient, contentContext, document.key),
+          getContentDocument(queryClient, contentContext, document.key),
+        ]);
         if (generation !== navigationGeneration.current) return;
         setFilePreview(preview);
+        setFileContent(detail.content);
         setSelectedDocument(preview);
         if (preview.extension === "pdf") {
           const original = await downloadContentDocument(preview.key, "original");
@@ -1294,6 +1464,8 @@ export function KnowledgeWorkspace() {
       return;
     }
     Keyboard.dismiss();
+    stopNarration();
+    setDocumentSearchQuery("");
     const nextMode = folderStack.length ? "folder" : "folders";
     workspaceModeRef.current = nextMode;
     setWorkspaceMode(nextMode);
@@ -1301,11 +1473,13 @@ export function KnowledgeWorkspace() {
 
   const leaveFileViewer = () => {
     navigationGeneration.current += 1;
+    stopNarration();
     previewFileRef.current?.delete();
     previewFileRef.current = undefined;
     setFilePreview(undefined);
     setFilePreviewError(undefined);
     setFilePreviewUri(undefined);
+    setFileContent("");
     const nextMode = folderStack.length ? "folder" : "folders";
     workspaceModeRef.current = nextMode;
     setWorkspaceMode(nextMode);
@@ -2001,8 +2175,11 @@ export function KnowledgeWorkspace() {
         loading={Boolean(!filePreviewError && (!filePreview || filePreview.extension === "pdf" && !filePreviewUri))}
         onBack={leaveFileViewer}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
+        onRead={fileContent.trim() ? () => toggleNarration(fileContent, selectedDocument?.name ?? "File") : undefined}
         onRenderError={setFilePreviewError}
         pdfUri={filePreviewUri}
+        readLoading={narrationState === "waiting" || narrationState === "generating" && narrationChunkCount === 0}
+        reading={narrationState === "playing"}
         title={selectedDocument?.name ?? "File"}
       /> : <>
       <ScrollView
@@ -2125,12 +2302,20 @@ export function KnowledgeWorkspace() {
             <View style={styles.editorHeaderActions}>
               {editorEditing
                 ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
-                : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => setEditorEditing(true)} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
+                : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
+              {!editorEditing && content.trim() ? <Button accessibilityLabel={narrationState === "playing" ? "Pause reading" : "Read document"} contentMode="raw" loading={narrationState === "waiting" || narrationState === "generating" && narrationChunkCount === 0} onPress={() => toggleNarration(content, title)} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button> : null}
               <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
               <Button accessibilityLabel="Document version history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => void openVersionHistory()} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
               <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
             </View>
           </View>
+          <View style={[styles.rootSearch, styles.documentSearch]}>
+            <SearchIcon size="sm" variant="muted" />
+            <TextInput accessibilityLabel="Search in document" editable={!editorEditing} maxLength={200} onChangeText={setDocumentSearchQuery} placeholder={editorEditing ? "Lock document to search" : "Search in document"} returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
+            {documentSearchQuery.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" onPress={() => setDocumentSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+          </View>
+          {documentSearchQuery.trim() ? <Text accessibilityLiveRegion="polite" style={styles.documentSearchStatus}>{documentSearchMatches.length ? `${documentSearchMatches.length} ${documentSearchMatches.length === 1 ? "match" : "matches"}` : "No matches"}</Text> : null}
+          {narrationError ? <Text accessibilityRole="alert" style={styles.documentSearchStatus}>{narrationError}</Text> : null}
           <View style={[styles.noteSheet, (editorFocused || aiInputFocused) && styles.noteSheetFocused]}>
           {openingDocumentKey ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.editorSkeleton}>
             <View style={styles.editorTitleSkeleton} />
@@ -2220,8 +2405,9 @@ export function KnowledgeWorkspace() {
                 </View>
               ) : null}
             </> : <>
-              <Text selectable style={styles.editorReadTitle}>{title}</Text>
-              <Text selectable style={styles.editorReadText}>{content}</Text>
+              {currentNotePassages.map((passage, index) => <View key={passage.id} onLayout={(event) => documentPassageOffsets.current.set(passage.id, event.nativeEvent.layout.y)}>
+                <HighlightedText ranges={documentSearchMatchesById.get(passage.id)?.ranges} style={index === 0 ? styles.editorReadTitle : styles.editorReadText} text={passage.text} />
+              </View>)}
             </>}
           </ScrollView>
           </>}
@@ -2463,6 +2649,9 @@ const styles = StyleSheet.create({
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
   rootCreateButton: { height: 44, width: 44 },
   rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  documentSearch: { flex: 0, width: "100%" },
+  documentSearchStatus: { minHeight: 16, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16, textAlign: "right" },
+  documentSearchHighlight: { color: palette.silver50, backgroundColor: "rgba(206, 170, 92, 0.36)" },
   folderScopedSearch: { flex: 0, width: "100%" },
   rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
   rootSearchResults: { gap: 7 },

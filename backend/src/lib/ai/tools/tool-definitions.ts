@@ -10,6 +10,7 @@ import { agentMemberReadTool } from './agent-member-read';
 import { agentMemberRevokeTool } from './agent-member-revoke';
 import { agentMemberSyncTool } from './agent-member-sync';
 import { artifactCreateTool } from './artifact-create';
+import { audioGenerateTool } from './audio-generate';
 import { bookCreateContextToolDefinition } from './book-create-context';
 import { bookWriteToolDefinition } from './book-write';
 import { autocompleteToolDefinition } from './autocomplete';
@@ -150,6 +151,7 @@ import { WORKSPACE_TOOL_DEFINITIONS } from './workspace-tool-definitions';
 export const PUBLIC_TOOL_DEFINITIONS = Object.freeze([
   orchestratorChatTool,
   transcribeTool,
+  audioGenerateTool,
   imageCaptionTool,
   imageCreateVisualIdentityTool,
   imageSearchTool,
