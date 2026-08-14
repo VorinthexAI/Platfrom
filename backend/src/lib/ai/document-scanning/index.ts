@@ -28,13 +28,13 @@ export async function scanDocumentImages(input: DocumentScanInput, organizationK
       uploaded.push(storageKeys[index]!);
     }));
     const urls = await Promise.all(storageKeys.map(signUrl));
-    const [textractPages, aiExtraction] = await Promise.all([
+    const [textractPages, visualPages] = await Promise.all([
       Promise.all(storageKeys.map(async (key, index) => (await ocr.extract(key, input.pages[index]!.bytes)).extractedText)),
-      caption({ imageUrls: urls, purpose: 'document-transcription' }, { organizationKey }),
+      Promise.all(urls.map(async (url) => (await caption({ imageUrls: [url], purpose: 'document-transcription' }, { organizationKey })).captions[0]!)),
     ]);
-    const reconciled = await caption({ imageUrls: urls, purpose: 'document-reconciliation', referenceTexts: textractPages.map((primary, index) => ({ primary, secondary: aiExtraction.captions[index]! })) }, { organizationKey });
-    await dependencies.onPageResults?.(textractPages.map((textract, index) => ({ textract, visual: aiExtraction.captions[index]!, unified: reconciled.captions[index]! })));
-    const content = reconciled.captions.map((page, index) => `## Page ${index + 1}\n\n${page.trim()}`).join('\n\n');
+    const unifiedPages = await Promise.all(urls.map(async (url, index) => (await caption({ imageUrls: [url], purpose: 'document-reconciliation', referenceTexts: [{ primary: textractPages[index]!, secondary: visualPages[index]! }] }, { organizationKey })).captions[0]!));
+    await dependencies.onPageResults?.(textractPages.map((textract, index) => ({ textract, visual: visualPages[index]!, unified: unifiedPages[index]! })));
+    const content = unifiedPages.map((page, index) => `## Page ${index + 1}\n\n${page.trim()}`).join('\n\n');
     if (!content.trim()) throw new Error('Document scan produced no readable text.');
     return { documentKey, content, storageKeys };
   } catch (error) {

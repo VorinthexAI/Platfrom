@@ -1,12 +1,13 @@
 import { File } from "expo-file-system";
 import { Image } from "expo-image";
-import * as ImageManipulator from "expo-image-manipulator";
-import * as ImagePicker from "expo-image-picker";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import type { CameraCapturedPicture } from "expo-camera";
+import { useEffect, useRef, useState } from "react";
 import { Modal, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CameraIcon, CloseIcon, TrashIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
+import { normalizeCapturedJpeg } from "@/lib/captured-image";
 import { palette, spacing } from "@/theme/tokens";
 
 export type DocumentScanPage = { id: string; uri: string; sizeBytes: number };
@@ -23,25 +24,18 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
   const insets = useSafeAreaInsets();
   const [pages, setPages] = useState<DocumentScanPage[]>([]);
   const [capturing, setCapturing] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(true);
   const [captureError, setCaptureError] = useState<string>();
   const pagesRef = useRef<DocumentScanPage[]>([]);
 
-  const capture = async () => {
+  const capture = async (picture: CameraCapturedPicture) => {
     if (capturing || busy || pages.length >= MAX_DOCUMENT_SCAN_PAGES) return;
     setCapturing(true);
     setCaptureError(undefined);
     try {
-      const permission = await ImagePicker.requestCameraPermissionsAsync();
-      if (!permission.granted) throw new Error("Camera access is required to scan documents.");
-      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 });
-      if (result.canceled || !result.assets[0]) return;
-      const asset = result.assets[0];
-      const maxSide = Math.max(asset.width, asset.height);
-      const actions: ImageManipulator.Action[] = maxSide > 1800 ? [{ resize: asset.width >= asset.height ? { width: 1800 } : { height: 1800 } }] : [];
-      const normalized = await ImageManipulator.manipulateAsync(asset.uri, actions, { compress: 0.76, format: ImageManipulator.SaveFormat.JPEG });
-      const file = new File(normalized.uri);
+      const normalized = await normalizeCapturedJpeg(picture, { maxSide: 1800, compress: 0.76 });
       setPages((current) => {
-        const next = current.length >= MAX_DOCUMENT_SCAN_PAGES ? current : [...current, { id: `${Date.now()}-${Math.random()}`, uri: normalized.uri, sizeBytes: file.size }];
+        const next = current.length >= MAX_DOCUMENT_SCAN_PAGES ? current : [...current, { id: `${Date.now()}-${Math.random()}`, uri: normalized.uri, sizeBytes: normalized.sizeBytes }];
         pagesRef.current = next;
         return next;
       });
@@ -52,11 +46,8 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
     }
   };
 
-  const startInitialCapture = useEffectEvent(() => { void capture(); });
   useEffect(() => {
-    const timeout = setTimeout(startInitialCapture, 0);
     return () => {
-      clearTimeout(timeout);
       for (const page of pagesRef.current) new File(page.uri).delete();
     };
   }, []);
@@ -93,9 +84,10 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
       </ScrollView>
       {error || captureError ? <Text accessibilityRole="alert" style={styles.error}>{error ?? captureError}</Text> : null}
       <View style={styles.actions}>
-        <Button disabled={busy || capturing || pages.length >= MAX_DOCUMENT_SCAN_PAGES} icon={<CameraIcon size="sm" />} loading={capturing} onPress={() => void capture()} size="lg" variant="secondary">Capture next</Button>
+        <Button disabled={busy || capturing || pages.length >= MAX_DOCUMENT_SCAN_PAGES} icon={<CameraIcon size="sm" />} loading={capturing} onPress={() => setCameraOpen(true)} size="lg" variant="secondary">Capture next</Button>
         <Button disabled={busy || capturing || pages.length === 0} loading={busy} onPress={() => onSubmit(pages)} size="lg" variant="primary">Done</Button>
       </View>
+      {cameraOpen ? <BrandedCameraModal count={pages.length} maximum={MAX_DOCUMENT_SCAN_PAGES} onCapture={capture} onClose={() => { if (pages.length) setCameraOpen(false); else close(); }} onDone={() => setCameraOpen(false)} title="Scan document" /> : null}
     </View>
   </Modal>;
 }

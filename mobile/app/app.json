@@ -66,6 +66,13 @@
         }
       ],
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Vorinthex to scan documents and capture images for Gallery.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
         "expo-audio",
         {
           "enableBackgroundPlayback": true,

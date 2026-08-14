@@ -1,8 +1,8 @@
 import { Image } from "expo-image";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
-import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
+import type { CameraCapturedPicture } from "expo-camera";
 import { useEffect, useRef, useState } from "react";
 import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +13,7 @@ import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { CameraIcon, CheckIcon, ChevronLeftIcon, ClockIcon, CloseIcon, CopyIcon, FolderIcon, GalleryIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, StarIcon, TrashIcon, UploadIcon, UsersIcon } from "@vorinthex/shared/ui/icons-mobile";
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
+import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
@@ -41,6 +42,7 @@ import {
 import { getContentContext } from "@/lib/content-client";
 import { galleryQueryKeys, invalidateAssistantChanges, patchGalleryImage } from "@/lib/workspace-query-cache";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
+import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image";
 
 type GallerySheet = "actions" | "source" | "destination" | "newCollection" | "image" | "collectionMenu" | "confirmDeleteDuplicates" | "createSubject" | "subjects" | "transferDestination";
 type CollectionTransferMode = "copy" | "move";
@@ -88,6 +90,7 @@ export function GalleryWorkspace() {
   const [status, setStatus] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [assistantBusy, setAssistantBusy] = useState(false);
   const [searching, setSearching] = useState(false);
   const [imageAction, setImageAction] = useState<"similar" | "favorite">();
@@ -166,22 +169,17 @@ export function GalleryWorkspace() {
     setShowingSearchResults(false);
   }
 
-  async function prepareAssets(assets: ImagePicker.ImagePickerAsset[]) {
+  async function prepareAssets(assets: CapturedImage[]) {
     setBusy(true);
     setSheetOpen(false);
     try {
       const files = await Promise.all(assets.slice(0, 20).map(async (asset, index) => {
-        const maxSide = Math.max(asset.width, asset.height);
-        const actions: ImageManipulator.Action[] = maxSide > 2400
-          ? [{ resize: asset.width >= asset.height ? { width: 2400 } : { height: 2400 } }]
-          : [];
-        const output = await ImageManipulator.manipulateAsync(asset.uri, actions, { compress: 0.88, format: ImageManipulator.SaveFormat.JPEG });
-        const blob = await (await fetch(output.uri)).blob();
+        const output = await normalizeCapturedJpeg(asset, { maxSide: 2400, compress: 0.88 });
         return {
           clientKey: `${Date.now()}-${index}-${Math.random().toString(36).slice(2)}`,
           filename: `gallery-${Date.now()}-${index + 1}.jpg`,
           uri: output.uri,
-          sizeBytes: blob.size,
+          sizeBytes: output.sizeBytes,
         };
       }));
       setPendingFiles(files);
@@ -202,10 +200,13 @@ export function GalleryWorkspace() {
   }
 
   async function takePhoto() {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) { setSheetOpen(false); setStatus("Camera access is required to take a photo."); return; }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 1 });
-    if (!result.canceled) await prepareAssets(result.assets);
+    setSheetOpen(false);
+    setCameraOpen(true);
+  }
+
+  async function useCapturedPhoto(picture: CameraCapturedPicture) {
+    setCameraOpen(false);
+    await prepareAssets([picture]);
   }
 
   async function uploadTo(collectionKey?: string) {
@@ -690,6 +691,7 @@ export function GalleryWorkspace() {
         </View> : null}
         </ScrollView>
       </BottomSheet>
+      {cameraOpen ? <BrandedCameraModal hint="Frame the moment and hold steady" onCapture={useCapturedPhoto} onClose={() => setCameraOpen(false)} title="Capture for Gallery" /> : null}
     </KeyboardAvoidingView>
   );
 }

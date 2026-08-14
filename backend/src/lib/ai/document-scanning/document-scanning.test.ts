@@ -22,13 +22,15 @@ test('preserves ordered pages and reconciles Textract with visual transcription'
     signUrl: async (key) => `https://images.example/${key}`,
     caption: async (input: any) => {
       captionInputs.push(input);
-      return input.purpose === 'document-transcription' ? { captions: ['visual one', 'visual two'] } : { captions: ['final one', 'final two'] };
+      const first = input.imageUrls[0].includes('page-01');
+      return { captions: [input.purpose === 'document-transcription' ? first ? 'visual one' : 'visual two' : first ? 'final one' : 'final two'] };
     },
   });
   expect(uploaded).toHaveLength(2);
   expect(uploaded[0]).toContain('/scan/page-01.jpg');
-  expect(captionInputs.map(({ purpose }) => purpose)).toEqual(['document-transcription', 'document-reconciliation']);
-  expect(captionInputs[1].referenceTexts[0]).toMatchObject({ secondary: 'visual one' });
+  expect(captionInputs.filter(({ purpose }) => purpose === 'document-transcription')).toHaveLength(2);
+  expect(captionInputs.filter(({ purpose }) => purpose === 'document-reconciliation')).toHaveLength(2);
+  expect(captionInputs.find((input) => input.purpose === 'document-reconciliation' && input.imageUrls[0].includes('page-01')).referenceTexts[0]).toMatchObject({ secondary: 'visual one' });
   expect(output.content).toBe('## Page 1\n\nfinal one\n\n## Page 2\n\nfinal two');
   expect(output.storageKeys).toEqual(uploaded);
 });
@@ -44,32 +46,43 @@ test('cleans retained scan objects when processing fails', async () => {
   expect(deleted).toHaveLength(1);
 });
 
-test('starts every page OCR and the visual extraction batch before either branch completes', async () => {
+test('starts every page in both visual stages concurrently while OCR runs in parallel', async () => {
   const pageCount = 12;
   let ocrStarted = 0;
-  let visualStarted = false;
-  let release!: () => void;
+  let visualStarted = 0;
+  let reconciliationStarted = 0;
+  let releaseExtraction!: () => void;
+  let releaseReconciliation!: () => void;
   let parallelStarted!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let allReconciliationsStarted!: () => void;
+  const extractionGate = new Promise<void>((resolve) => { releaseExtraction = resolve; });
+  const reconciliationGate = new Promise<void>((resolve) => { releaseReconciliation = resolve; });
   const allStarted = new Promise<void>((resolve) => { parallelStarted = resolve; });
-  const markStarted = () => { if (ocrStarted === pageCount && visualStarted) parallelStarted(); };
+  const reconciliationStartedSignal = new Promise<void>((resolve) => { allReconciliationsStarted = resolve; });
+  const markStarted = () => { if (ocrStarted === pageCount && visualStarted === pageCount) parallelStarted(); };
   const operation = scanDocumentImages({
     scopeKey: newId(),
     idempotencyKey: 'parallel-scan',
     pages: Array.from({ length: pageCount }, (_, index) => ({ filename: `${index}.jpg`, mimeType: 'image/jpeg' as const, sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, index]) })),
   }, 'organization', {
     storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
-    ocr: { extract: async () => { ocrStarted += 1; markStarted(); await gate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
+    ocr: { extract: async () => { ocrStarted += 1; markStarted(); await extractionGate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
     signUrl: async (key) => `https://images.example/${key}`,
     caption: async (input: any) => {
-      if (input.purpose === 'document-transcription') { visualStarted = true; markStarted(); await gate; return { captions: Array(pageCount).fill('secondary') }; }
-      return { captions: Array(pageCount).fill('unified') };
+      if (input.purpose === 'document-transcription') { visualStarted += 1; markStarted(); await extractionGate; return { captions: ['secondary'] }; }
+      reconciliationStarted += 1;
+      if (reconciliationStarted === pageCount) allReconciliationsStarted();
+      await reconciliationGate;
+      return { captions: ['unified'] };
     },
   });
   await allStarted;
   expect(ocrStarted).toBe(pageCount);
-  expect(visualStarted).toBe(true);
-  release();
+  expect(visualStarted).toBe(pageCount);
+  releaseExtraction();
+  await reconciliationStartedSignal;
+  expect(reconciliationStarted).toBe(pageCount);
+  releaseReconciliation();
   const result = await operation;
   expect(result.content.match(/## Page/g)).toHaveLength(pageCount);
 });
