@@ -172,6 +172,8 @@ export function KnowledgeWorkspace() {
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
   const [editorEditing, setEditorEditing] = useState(false);
+  const [editorTitleHeight, setEditorTitleHeight] = useState(58);
+  const [editorContentHeight, setEditorContentHeight] = useState(280);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [title, setTitle] = useState("Untitled document");
@@ -260,6 +262,7 @@ export function KnowledgeWorkspace() {
   const autocompleteGeneration = useRef(0);
   const instructionRequest = useRef<AbortController | undefined>(undefined);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
+  const editorDocumentScroll = useRef<ScrollView | null>(null);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
   const previewFileRef = useRef<File | undefined>(undefined);
   const instructionGeneration = useRef(0);
@@ -316,6 +319,12 @@ export function KnowledgeWorkspace() {
       hideSubscription.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!editorEditing) return;
+    const frame = requestAnimationFrame(() => editorDocumentScroll.current?.scrollTo({ animated: false, y: 0 }));
+    return () => cancelAnimationFrame(frame);
+  }, [editorEditing]);
 
   useEffect(() => {
     if (hasContentContext) return;
@@ -523,6 +532,7 @@ export function KnowledgeWorkspace() {
       workspaceModeRef.current = "folders";
       setWorkspaceMode("folders");
       setHistory([]);
+      setQuery("");
       setResults(undefined);
       setSelectedSummary(undefined);
       setSelectedDocument(undefined);
@@ -910,9 +920,12 @@ export function KnowledgeWorkspace() {
     contentRef.current = "";
     savedTitleRef.current = nextTitle;
     savedContentRef.current = "";
+    setEditorTitleHeight(58);
+    setEditorContentHeight(280);
     setTitle(nextTitle);
     setContent("");
     setSelectedSummary(undefined);
+    setQuery("");
     setResults(undefined);
     setSaveState(hasContentContext ? "saved" : "local");
     persistLocalDraft(nextTitle, "");
@@ -967,6 +980,8 @@ export function KnowledgeWorkspace() {
     setVersionActionKey(undefined);
     setOpeningDocumentKey(document.key);
     setEditorEditing(false);
+    setEditorTitleHeight(58);
+    setEditorContentHeight(280);
     setError(undefined);
     const previousMode = workspaceModeRef.current;
     titleRef.current = document.name;
@@ -989,6 +1004,7 @@ export function KnowledgeWorkspace() {
       workspaceModeRef.current = "editor";
       setWorkspaceMode("editor");
       setSelectedSummary(undefined);
+      setQuery("");
       setResults(undefined);
       return true;
     } catch (cause) {
@@ -1176,6 +1192,7 @@ export function KnowledgeWorkspace() {
     setFolderContentTab("folders");
     workspaceModeRef.current = "folder";
     setWorkspaceMode("folder");
+    setQuery("");
     setResults(undefined);
     try {
       const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, folder.key), getContentHistory(queryClient, contentContext, folder.key)]);
@@ -1233,6 +1250,7 @@ export function KnowledgeWorkspace() {
     const nextMode = nextStack.length > 0 ? "folder" : "folders";
     workspaceModeRef.current = nextMode;
     setWorkspaceMode(nextMode);
+    setQuery("");
     setResults(undefined);
     try {
       const [location, recent] = await Promise.all([getContentLocation(queryClient, contentContext, nextFolderKey), getContentHistory(queryClient, contentContext, nextFolderKey)]);
@@ -1321,6 +1339,22 @@ export function KnowledgeWorkspace() {
     } finally {
       if (generation === navigationGeneration.current) setSearching(false);
     }
+  };
+
+  const updateFolderSearch = (value: string) => {
+    setQuery(value);
+    if (!value.trim()) {
+      navigationGeneration.current += 1;
+      setSearching(false);
+      setResults(undefined);
+    }
+  };
+
+  const clearFolderSearch = () => {
+    navigationGeneration.current += 1;
+    setQuery("");
+    setSearching(false);
+    setResults(undefined);
   };
 
   useEffect(() => {
@@ -2021,6 +2055,32 @@ export function KnowledgeWorkspace() {
               </View>
             </View>
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
+            <View style={[styles.rootSearch, styles.folderScopedSearch]}>
+              <SearchIcon size="sm" variant="muted" />
+              <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={updateFolderSearch} onSubmitEditing={() => void runSearch()} placeholder="Search this folder and nested folders" returnKeyType="search" style={styles.rootSearchInput} value={query} />
+              {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" disabled={searching} onPress={clearFolderSearch} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+              <Button accessibilityLabel="Search folder" contentMode="raw" disabled={!query.trim() || searching} onPress={() => void runSearch()} size="xs" variant="icon">{searching ? <Spinner size="small" /> : <SearchIcon size="sm" />}</Button>
+            </View>
+            {results ? <View accessibilityLiveRegion="polite" style={styles.results}>
+              <View style={styles.resultsHeader}>
+                <View style={styles.resultText}>
+                  <Text style={styles.eyebrow}>FOLDER SEARCH</Text>
+                  <Text numberOfLines={1} style={styles.resultsTitle}>{results.query}</Text>
+                  <Text style={styles.rowSubtitle}>Scope: {currentFolder?.name ?? "Archive"} and nested folders</Text>
+                </View>
+                <Button accessibilityLabel="Close folder search results" contentMode="raw" onPress={clearFolderSearch} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+              </View>
+              {results.cached ? <Text style={styles.meta}>REUSED FROM SEARCH HISTORY</Text> : null}
+              {results.folders.map((folder) => <Button contentMode="raw" key={folder.key} onPress={() => void openFolder(folder)} size="lg" style={styles.resultRow} variant="secondary">
+                <FolderIcon size="md" variant="accent" />
+                <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{folder.name}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>Folder</Text></View>
+              </Button>)}
+              {results.documents.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => { setSelectedSummary(document); openSheet("summary"); }} size="lg" style={styles.resultRow} variant="secondary">
+                <FileIcon size="md" variant="accent" />
+                <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{document.name}</Text><Text numberOfLines={2} style={styles.rowSubtitle}>{document.summary}</Text></View>
+              </Button>)}
+              {results.folders.length === 0 && results.documents.length === 0 ? <Text style={styles.empty}>No folders, documents, or files matched this search.</Text> : null}
+            </View> : <>
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "documents" }} onPress={() => setFolderContentTab("documents")} size="xs" style={styles.folderTab} variant={folderContentTab === "documents" ? "secondary" : "ghost"}>Documents</Button>
@@ -2047,6 +2107,7 @@ export function KnowledgeWorkspace() {
                 )) : visibleUploadBatch.length === 0 ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
               </View>
             )}
+            </>}
           </View>
         ) : (
         <View style={styles.editorScene}>
@@ -2075,35 +2136,16 @@ export function KnowledgeWorkspace() {
             </View>
           ) : null}
 
-          {results ? (
-            <View style={styles.results}>
-              <View style={styles.resultsHeader}>
-                <View>
-                  <Text style={styles.eyebrow}>ARCHIVE SEARCH</Text>
-                  <Text style={styles.resultsTitle}>{results.query}</Text>
-                  <Text style={styles.rowSubtitle}>Scope: {currentFolder ? `${currentFolder.name} and nested folders` : "All Archive documents"}</Text>
-                </View>
-                <Button onPress={() => setResults(undefined)} size="xs" variant="ghost">Back</Button>
-              </View>
-              {results.cached ? <Text style={styles.meta}>REUSED FROM SEARCH HISTORY</Text> : null}
-              {results.documents.map((document) => (
-                <Button contentMode="raw" key={document.documentKey} onPress={() => { setSelectedSummary(document); openSheet("summary"); }} size="lg" style={styles.resultRow} variant="secondary">
-                  <FileIcon size="md" variant="accent" />
-                  <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{document.name}</Text><Text numberOfLines={2} style={styles.rowSubtitle}>{document.summary}</Text></View>
-                </Button>
-              ))}
-              {results.documents.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
-            </View>
-          ) : (
-            <>
-              {editorEditing ? <>
+          <ScrollView contentContainerStyle={styles.editorReadDocument} keyboardShouldPersistTaps="handled" nestedScrollEnabled ref={editorDocumentScroll} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
+            {editorEditing ? <>
               <TextInput
                 accessibilityLabel="Document title"
                 maxLength={255}
                 multiline
                 onChangeText={(value) => { titleRef.current = value; setTitle(value); markDirty(); persistLocalDraft(value, contentRef.current); }}
+                onContentSizeChange={(event) => setEditorTitleHeight(Math.max(58, Math.ceil(event.nativeEvent.contentSize.height)))}
                 scrollEnabled={false}
-                style={styles.titleInput}
+                style={[styles.titleInput, { height: editorTitleHeight }]}
                 textAlignVertical="top"
                 value={title}
               />
@@ -2117,7 +2159,7 @@ export function KnowledgeWorkspace() {
                 <TextInput
                   accessibilityLabel="Document content"
                   multiline
-                  scrollEnabled
+                  scrollEnabled={false}
                   onBlur={() => setEditorFocused(false)}
                   onChangeText={(value) => {
                     if (documentKeyRef.current && value.length === 0) {
@@ -2139,13 +2181,14 @@ export function KnowledgeWorkspace() {
                     markDirty();
                     persistLocalDraft(titleRef.current, value);
                   }}
+                  onContentSizeChange={(event) => setEditorContentHeight(Math.max(280, Math.ceil(event.nativeEvent.contentSize.height)))}
                   placeholder="Start writing from here..."
                   onFocus={() => setEditorFocused(true)}
                   onSelectionChange={(event) => {
                     selectionRef.current = event.nativeEvent.selection;
                     if (event.nativeEvent.selection.end !== contentRef.current.length) clearCompletion();
                   }}
-                  style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused]}
+                  style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused, { height: editorContentHeight }]}
                   textAlignVertical="top"
                   value={content}
                 />
@@ -2167,12 +2210,11 @@ export function KnowledgeWorkspace() {
                   {documents.slice(0, 3).map((document) => <Button key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" variant="ghost" icon={<FileIcon size="sm" />}>{document.name}</Button>)}
                 </View>
               ) : null}
-              </> : <ScrollView contentContainerStyle={styles.editorReadDocument} nestedScrollEnabled showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
-                <Text selectable style={styles.editorReadTitle}>{title}</Text>
-                <Text selectable style={styles.editorReadText}>{content}</Text>
-              </ScrollView>}
-            </>
-          )}
+            </> : <>
+              <Text selectable style={styles.editorReadTitle}>{title}</Text>
+              <Text selectable style={styles.editorReadText}>{content}</Text>
+            </>}
+          </ScrollView>
           </>}
           </View>
         </View>
@@ -2412,6 +2454,7 @@ const styles = StyleSheet.create({
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
   rootCreateButton: { height: 44, width: 44 },
   rootSearch: { minHeight: 44, flex: 1, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 999, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  folderScopedSearch: { flex: 0, width: "100%" },
   rootSearchInput: { minHeight: 40, flex: 1, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent" },
   rootSearchResults: { gap: 7 },
   rootContent: { gap: spacing.lg },
@@ -2463,14 +2506,14 @@ const styles = StyleSheet.create({
   saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
   saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
   titleInput: { minHeight: 58, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, textAlign: "left", writingDirection: "ltr" },
-  editorFrame: { flex: 1, minHeight: 80, width: "100%", position: "relative", overflow: "hidden" },
-  editorFrameFocused: { flex: 1, minHeight: 80 },
-  editor: { flex: 1, minHeight: 80, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
+  editorFrame: { minHeight: 280, width: "100%", position: "relative", overflow: "hidden" },
+  editorFrameFocused: { minHeight: 280 },
+  editor: { minHeight: 280, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorReadScroll: { flex: 1, minHeight: 0, width: "100%" },
-  editorReadDocument: { width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
+  editorReadDocument: { flexGrow: 1, width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
   editorReadTitle: { width: "100%", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, textAlign: "left", writingDirection: "ltr" },
   editorReadText: { width: "100%", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
-  editorFocused: { flex: 1, minHeight: 80 },
+  editorFocused: { minHeight: 280 },
   editorGhost: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 1, paddingVertical: 10, color: "transparent", fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
   editorGhostSpacer: { color: "transparent" },
   completionText: { color: palette.silver500, fontFamily: fonts.regular, fontSize: 16, fontStyle: "italic", lineHeight: 26 },
