@@ -97,6 +97,15 @@ export function removeCachedContentDocument(queryClient: QueryClient, context: C
   } : location);
 }
 
+export function removeCachedContentDocumentEverywhere(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  queryClient.setQueriesData<ContentLocation>({ queryKey: contentQueryKeys.locations(context) }, (location) => location ? {
+    ...location,
+    documents: location.documents.filter((document) => document.key !== documentKey),
+  } : location);
+  queryClient.removeQueries({ queryKey: contentQueryKeys.document(context, documentKey), exact: true });
+  queryClient.removeQueries({ queryKey: contentQueryKeys.preview(context, documentKey), exact: true });
+}
+
 export function removeCachedContentFolder(queryClient: QueryClient, context: ContentContext, parentFolderKey: string | undefined, folderKey: string) {
   queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, parentFolderKey), (location) => location ? {
     ...location,

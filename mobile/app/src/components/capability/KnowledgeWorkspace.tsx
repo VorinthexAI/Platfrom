@@ -8,6 +8,7 @@ import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, ScrollView, Styl
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
+import { Badge } from "@vorinthex/shared/ui/badge";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
 import { FileViewer } from "@vorinthex/shared/ui/file-viewer";
@@ -18,13 +19,14 @@ import { Spinner } from "@vorinthex/shared/ui/spinner";
 import {
   ArchiveIcon,
   BrainIcon,
-  CameraIcon,
   CheckIcon,
   ChevronLeftIcon,
   ClockIcon,
   DownloadIcon,
+  EditIcon,
   FileIcon,
   FolderIcon,
+  ImageIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
@@ -34,10 +36,12 @@ import {
 
 import { WorkspaceAppSwitcher } from "@/components/capability/WorkspaceAppSwitcher";
 import { DocumentScanModal, type DocumentScanPage } from "@/components/capability/DocumentScanModal";
+import { MAX_DOCUMENT_SCAN_BYTES, scanSessionSize } from "@/lib/document-scan-session";
 import { ChromeIcon } from "@/components/ChromeIcon";
 import { assistantIconSource } from "@/data/capability-icons";
 import {
   autocompleteContent,
+  archiveContentDocument,
   askPersonalAssistant,
   createContentDocument,
   createContentFolder,
@@ -51,6 +55,7 @@ import {
   moveContentFolder,
   moveContentDocument,
   renameContentDocument,
+  readContentDocumentSources,
   saveContentDocument,
   scanContentDocument,
   searchContent,
@@ -62,6 +67,7 @@ import {
   setContentFolderCover,
   type ContentDocument,
   type ContentDocumentPreview,
+  type ContentDocumentSourceImage,
   type ContentDocumentVersion,
   type ContentFolder,
   type ContentSearchHistoryItem,
@@ -87,6 +93,7 @@ import {
   replaceCachedContentDocumentDetail,
   replaceCachedContentFolder,
   removeCachedContentDocument,
+  removeCachedContentDocumentEverywhere,
   removeCachedContentFolder,
 } from "@/lib/content-query-cache";
 import { invalidateAssistantChanges } from "@/lib/workspace-query-cache";
@@ -98,7 +105,7 @@ import { useAuthStore } from "@/state/auth";
 type SaveState = "local" | "dirty" | "saving" | "saved" | "error";
 type WorkspaceMode = "auto" | "folders" | "folder" | "editor" | "viewer";
 type FolderContentTab = "folders" | "documents" | "files";
-type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "versions" | "documentActions" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails";
+type ArchiveSheet = "create" | "folder" | "library" | "documents" | "folders" | "enhance" | "versions" | "documentActions" | "deleteDocument" | "scanSources" | "destination" | "destinationBrowser" | "rename" | "summary" | "folderActions" | "folderDetails";
 type DestinationAction = "upload" | "move" | "copy" | "moveFolder";
 type UploadBatchItem = { id: string; file: File; name: string; status: "pending" | "uploading" | "success" | "error"; error?: string };
 type PendingCreate = { name: string; content: string; folderKey?: string; mutationKey: string };
@@ -139,6 +146,10 @@ function lastWords(value: string, count: number) {
   return value.trim().split(/\s+/).filter(Boolean).slice(-count).join(" ");
 }
 
+function ScannedBadge({ document }: { document: ContentDocument }) {
+  return document.sourceImageCount ? <Badge accessibilityLabel={`Scanned from ${document.sourceImageCount} ${document.sourceImageCount === 1 ? "image" : "images"}`} style={styles.scannedBadge}><Text style={styles.scannedBadgeText}>Scanned</Text></Badge> : null;
+}
+
 export function KnowledgeWorkspace() {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -161,6 +172,7 @@ export function KnowledgeWorkspace() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
+  const [editorEditing, setEditorEditing] = useState(false);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [title, setTitle] = useState("Untitled document");
@@ -203,6 +215,8 @@ export function KnowledgeWorkspace() {
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
   const [selectedFolder, setSelectedFolder] = useState<ContentFolder>();
   const [documentActionLoading, setDocumentActionLoading] = useState<string>();
+  const [sourceImages, setSourceImages] = useState<ContentDocumentSourceImage[]>([]);
+  const [sourceImagesLoading, setSourceImagesLoading] = useState(false);
   const [renameName, setRenameName] = useState("");
   const [destinationAction, setDestinationAction] = useState<DestinationAction>();
   const [destinationStack, setDestinationStack] = useState<ContentFolder[]>([]);
@@ -911,6 +925,7 @@ export function KnowledgeWorkspace() {
     }
     setError(undefined);
     resetEditor(nextTitle);
+    setEditorEditing(true);
     workspaceModeRef.current = "editor";
     setWorkspaceMode("editor");
     if (sheetOpen) closeSheet();
@@ -949,6 +964,7 @@ export function KnowledgeWorkspace() {
     setAiResponse(undefined);
     setVersionActionKey(undefined);
     setOpeningDocumentKey(document.key);
+    setEditorEditing(false);
     setError(undefined);
     const previousMode = workspaceModeRef.current;
     titleRef.current = document.name;
@@ -1629,8 +1645,7 @@ export function KnowledgeWorkspace() {
     setScanBusy(true);
     setScanError(undefined);
     try {
-      const total = pages.reduce((sum, page) => sum + page.sizeBytes, 0);
-      if (total > 16 * 1024 * 1024) throw new Error("Scanned pages must be 16 MB or smaller in total.");
+      if (scanSessionSize(pages) > MAX_DOCUMENT_SCAN_BYTES) throw new Error("Scanned pages must be 16 MB or smaller in total.");
       const prepared = await Promise.all(pages.map(async (page, index) => ({ name: `scan-page-${index + 1}.jpg`, size: page.sizeBytes, base64: await new File(page.uri).base64() })));
       const { document } = await scanContentDocument(prepared, folderKey, requestContext);
       if (contentContextKeyRef.current !== requestContextKey) return;
@@ -1797,6 +1812,52 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const openScanSources = async (document = selectedDocument) => {
+    if (!document?.sourceImageCount) return;
+    setSelectedDocument(document);
+    setSourceImages([]);
+    setSourceImagesLoading(true);
+    setSheetError(undefined);
+    if (sheetOpen) pushSheet("scanSources");
+    else openSheet("scanSources");
+    try {
+      setSourceImages(await readContentDocumentSources(document.key));
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The scanned pages could not be opened.");
+    } finally {
+      setSourceImagesLoading(false);
+    }
+  };
+
+  const deleteSelectedDocument = async () => {
+    if (!selectedDocument) return;
+    const target = selectedDocument;
+    setDocumentActionLoading("delete");
+    setSheetError(undefined);
+    try {
+      await archiveContentDocument(target.key);
+      removeCachedContentDocumentEverywhere(queryClient, contentContext, target.key);
+      setDocuments((current) => current.filter(({ key }) => key !== target.key));
+      setRootDocuments((current) => current.filter(({ key }) => key !== target.key));
+      closeSheet();
+      if (target.key === documentKeyRef.current) {
+        resetEditor();
+        workspaceModeRef.current = currentFolder ? "folder" : "folders";
+        setWorkspaceMode(workspaceModeRef.current);
+      } else if (workspaceModeRef.current === "viewer" && selectedDocument?.key === target.key) {
+        leaveFileViewer();
+      }
+      setSelectedDocument(undefined);
+      void invalidateContentLocations(queryClient, contentContext, [target.folderKey]);
+      void invalidateContentHistories(queryClient, contentContext, [target.folderKey, undefined]);
+      showToast({ title: target.extension ? "File deleted" : "Document deleted", description: "Moved to Archive trash." });
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The item could not be deleted.");
+    } finally {
+      setDocumentActionLoading(undefined);
+    }
+  };
+
   const submitRename = async () => {
     const name = renameName.trim();
     if (!selectedDocument || !name) return;
@@ -1847,6 +1908,10 @@ export function KnowledgeWorkspace() {
       <Button disabled={!renameName.trim()} onPress={() => void submitRename()} size="lg" variant="primary">Rename</Button>
       {close(false)}
     </>;
+    if (activeSheet === "deleteDocument") return <>
+      <Button disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "delete"} onPress={() => void deleteSelectedDocument()} size="lg" variant="danger">Delete</Button>
+      {close(Boolean(documentActionLoading))}
+    </>;
     if (activeSheet === "destinationBrowser") return <>
       <Button disabled={destinationLoading} loading={destinationLoading} onPress={() => { if (destinationAction === "upload") goBackSheet(); else void selectDestination(); }} size="lg" variant="primary">Choose folder</Button>
       {close(destinationLoading)}
@@ -1870,6 +1935,7 @@ export function KnowledgeWorkspace() {
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
         blocks={filePreview?.blocks}
+        headerAction={selectedDocument?.sourceImageCount ? <Button accessibilityLabel="View scanned pages" contentMode="raw" onPress={() => void openScanSources(selectedDocument)} size="sm" variant="icon"><ImageIcon size="sm" /></Button> : undefined}
         loading={Boolean(!filePreviewError && (!filePreview || filePreview.extension === "pdf" && !filePreviewUri))}
         onBack={leaveFileViewer}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
@@ -1879,8 +1945,8 @@ export function KnowledgeWorkspace() {
       /> : <>
       <ScrollView
         automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-        contentContainerStyle={[styles.scroll, { paddingBottom: workspaceMode === "editor"
-          ? aiInputFocused && keyboardVisible ? 64 : insets.bottom + 78
+        contentContainerStyle={[styles.scroll, workspaceMode === "editor" && styles.editorScroll, { paddingBottom: workspaceMode === "editor"
+          ? aiInputFocused && keyboardVisible ? 72 : insets.bottom + 78 + spacing.md
           : insets.bottom + 112 }]}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
@@ -1926,6 +1992,7 @@ export function KnowledgeWorkspace() {
                     <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
                       <FileIcon size="sm" />
                       <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
+                      <ScannedBadge document={document} />
                     </Button>
                   )) : visibleUploadBatch.length === 0 && !error ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
                 </View>
@@ -1964,6 +2031,7 @@ export function KnowledgeWorkspace() {
                   <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
                     <FileIcon size="sm" />
                     <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
+                    <ScannedBadge document={document} />
                   </Button>
                 )) : visibleUploadBatch.length === 0 ? <View style={styles.folderEmptyState}><Text style={styles.empty}>{folderContentTab === "files" ? "No files here yet." : "No documents here yet."}</Text><Button accessibilityLabel={folderContentTab === "files" ? "Upload files" : "Create document"} contentMode="raw" onPress={() => { if (folderContentTab === "files") void openDestinationPicker("upload"); else startNewNote(); }} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button></View> : null}
               </View>
@@ -1974,6 +2042,8 @@ export function KnowledgeWorkspace() {
           <View style={styles.editorHeader}>
             <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
             <View style={styles.editorHeaderActions}>
+              {activeDocument?.sourceImageCount ? <Button accessibilityLabel="View scanned pages" contentMode="raw" onPress={() => void openScanSources(activeDocument)} size="sm" variant="icon"><ImageIcon size="sm" /></Button> : null}
+              {activeDocument ? <Button accessibilityLabel={editorEditing ? "Finish editing" : "Edit document"} contentMode="raw" onPress={() => { Keyboard.dismiss(); setEditorEditing((value) => !value); }} size="sm" variant="icon"><EditIcon size="sm" /></Button> : null}
               <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
               <Button accessibilityLabel="Document version history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => void openVersionHistory()} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
               <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
@@ -2016,6 +2086,7 @@ export function KnowledgeWorkspace() {
             <>
               <TextInput
                  accessibilityLabel="Document title"
+                editable={editorEditing}
                 maxLength={255}
                 onChangeText={(value) => { titleRef.current = value; setTitle(value); markDirty(); persistLocalDraft(value, contentRef.current); }}
                 style={styles.titleInput}
@@ -2028,7 +2099,7 @@ export function KnowledgeWorkspace() {
                     <Text style={styles.completionText}>{/\s$/.test(content) || /^[,.;:!?)]/.test(completion) ? "" : " "}{completion}</Text>
                   </Text>
                 ) : null}
-                <TextInput
+                {editorEditing ? <TextInput
                    accessibilityLabel="Document content"
                   multiline
                   scrollEnabled
@@ -2062,7 +2133,7 @@ export function KnowledgeWorkspace() {
                   style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused]}
                   textAlignVertical="top"
                   value={content}
-                />
+                /> : <ScrollView contentContainerStyle={styles.editorReadContent} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}><Text selectable style={styles.editorReadText}>{content}</Text></ScrollView>}
                 {completion ? (
                   <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" style={styles.completionAccept} variant="icon">
                     <CheckIcon size="sm" />
@@ -2157,15 +2228,15 @@ export function KnowledgeWorkspace() {
       /> : null}
 
       <BottomSheet
-        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "summary" ? "Review the match, then open its source document." : undefined}
+        description={activeSheet === "create" ? "Choose what to add to the current folder." : activeSheet === "versions" ? "Choose a version of this document to open or download." : activeSheet === "summary" ? "Review the match, then open its source document." : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"} from Archive? It will move to trash.` : undefined}
         dismissible={!versionActionKey && !coverActionLoading && !destinationLoading && !documentActionLoading}
         footer={mutationFooter()}
         hideHeading={activeSheet === "create" || activeSheet === "documentActions" || activeSheet === "enhance"}
         mutation={activeSheet === "documents" || activeSheet === "folder" || activeSheet === "folders" || activeSheet === "versions" || activeSheet === "rename" || activeSheet === "destinationBrowser" || activeSheet === "folderDetails"}
         onOpenChange={(open) => { if (!open) closeSheet(); }}
         open={sheetOpen}
-        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders"}
-        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "versions" ? "Version history" : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationFolder?.name ?? "Archive" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
+        tall={activeSheet === "library" || activeSheet === "documents" || activeSheet === "folders" || activeSheet === "scanSources"}
+        title={activeSheet === "enhance" ? "AI actions" : activeSheet === "versions" ? "Version history" : activeSheet === "scanSources" ? "Scanned pages" : activeSheet === "deleteDocument" ? `Delete ${selectedDocument?.extension ? "file" : "document"}` : activeSheet === "folder" ? "Create folder" : activeSheet === "documents" ? "Documents and files" : activeSheet === "folders" ? "Folders" : activeSheet === "destinationBrowser" ? destinationFolder?.name ?? "Archive" : activeSheet === "library" ? "Browse Archive" : activeSheet === "documentActions" ? selectedDocument?.name ?? "Document actions" : activeSheet === "destination" ? destinationAction === "upload" ? "Upload files" : "Choose destination" : activeSheet === "rename" ? selectedDocument?.extension ? "Rename file" : "Rename document" : activeSheet === "summary" ? selectedSummary?.name ?? "Document summary" : activeSheet === "folderActions" ? selectedFolder?.name ?? "Folder actions" : activeSheet === "folderDetails" ? "Folder details" : "New in Archive"}
       >
         {sheetError ? <Text accessibilityRole="alert" style={styles.notice}>{sheetError}</Text> : null}
         {activeSheet === "create" ? (
@@ -2173,7 +2244,7 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem onPress={() => { void startNewNote(); }} variant="secondary">New document</BottomSheetItem>
             <BottomSheetItem onPress={openNewFolder} variant="secondary">New folder</BottomSheetItem>
             <BottomSheetItem disabled={uploading} loading={uploading} onPress={() => void openDestinationPicker("upload")} variant="secondary">Upload files</BottomSheetItem>
-            <BottomSheetItem disabled={uploading || scanBusy} icon={<CameraIcon size="md" />} onPress={startDocumentScan} variant="secondary">Scan documents</BottomSheetItem>
+            <BottomSheetItem disabled={uploading || scanBusy} onPress={startDocumentScan} variant="secondary">Scan documents</BottomSheetItem>
           </>
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
@@ -2183,7 +2254,15 @@ export function KnowledgeWorkspace() {
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => { setRenameName(selectedDocument.name); pushSheet("rename"); }}>Rename</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("move")}>Move to folder</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openDestinationPicker("copy")}>Copy to folder</BottomSheetItem>
+            {selectedDocument.sourceImageCount ? <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void openScanSources()}>View scanned pages</BottomSheetItem> : null}
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => pushSheet("deleteDocument")}>Delete {selectedDocument.extension ? "file" : "document"}</BottomSheetItem>
           </>
+        ) : null}
+        {activeSheet === "scanSources" ? (
+          <ScrollView contentContainerStyle={styles.sourceGrid} showsVerticalScrollIndicator={false}>
+            {sourceImagesLoading ? <View accessibilityLabel="Loading scanned pages" accessibilityRole="progressbar" style={styles.sourceLoading}><Spinner size="large" /></View> : null}
+            {sourceImages.map((source) => <View key={source.page} style={styles.sourceCard}><Image contentFit="cover" source={source.url} style={styles.sourceImage} /><Text style={styles.sourceLabel}>Page {source.page}</Text></View>)}
+          </ScrollView>
         ) : null}
         {activeSheet === "folderActions" && selectedFolder ? (
           <>
@@ -2285,8 +2364,8 @@ export function KnowledgeWorkspace() {
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (
-                <Button icon={<FileIcon size="md" />} key={document.key} onPress={() => void openArchiveDocument(document, true)} size="lg" style={styles.folderTile} variant="secondary">
-                  {document.name}
+                <Button contentMode="raw" key={document.key} onPress={() => void openArchiveDocument(document, true)} size="lg" style={styles.folderTile} variant="secondary">
+                  <FileIcon size="md" /><Text numberOfLines={1} style={styles.folderTileLabel}>{document.name}</Text><ScannedBadge document={document} />
                 </Button>
               ))}
               {visibleDocuments.length === 0 ? <Text style={styles.empty}>No documents or files match this search.</Text> : null}
@@ -2307,7 +2386,8 @@ const styles = StyleSheet.create({
   scroll: { flexGrow: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   archiveRoot: { flexGrow: 1 },
   archiveFolder: { flexGrow: 1, gap: spacing.md },
-  editorScene: { flexGrow: 1, gap: spacing.sm, paddingBottom: spacing.sm },
+  editorScroll: { flex: 1, minHeight: 0 },
+  editorScene: { flex: 1, minHeight: 0, gap: spacing.sm },
   editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   editorHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
@@ -2340,6 +2420,8 @@ const styles = StyleSheet.create({
   emptyPlusButton: { height: 44, width: 44 },
   documentButton: { width: "100%", minHeight: 38, justifyContent: "flex-start", paddingHorizontal: 14 },
   documentButtonLabel: { flex: 1, color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "left" },
+  scannedBadge: { paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, backgroundColor: palette.panel },
+  scannedBadgeText: { color: palette.muted, fontFamily: fonts.medium, fontSize: 9, letterSpacing: 0.4 },
   uploadingFileButton: { opacity: 0.62 },
   uploadingFileLabel: { color: palette.silver500 },
   sectionLabel: { marginTop: spacing.sm, color: palette.silver500, fontFamily: fonts.medium, fontSize: 9, letterSpacing: tracking.micro },
@@ -2365,6 +2447,9 @@ const styles = StyleSheet.create({
   editorFrame: { flex: 1, minHeight: 80, position: "relative", overflow: "hidden" },
   editorFrameFocused: { flex: 1, minHeight: 80 },
   editor: { flex: 1, minHeight: 80, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
+  editorReadScroll: { flex: 1, minHeight: 0 },
+  editorReadContent: { paddingBottom: spacing.xl },
+  editorReadText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
   editorFocused: { flex: 1, minHeight: 80 },
   editorGhost: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 1, paddingVertical: 10, color: "transparent", fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
   editorGhostSpacer: { color: "transparent" },
@@ -2408,6 +2493,12 @@ const styles = StyleSheet.create({
   folderGrid: { paddingTop: 14, flexDirection: "row", flexWrap: "wrap", gap: 10 },
   folderList: { flex: 1 },
   folderTile: { minHeight: 86, flexBasis: "48%", flexDirection: "column", gap: 8, paddingHorizontal: 10 },
+  folderTileLabel: { color: palette.silver100, fontFamily: fonts.medium, fontSize: 12, textAlign: "center" },
+  sourceGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: spacing.xl },
+  sourceCard: { flexBasis: "31%", aspectRatio: 0.72, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, overflow: "hidden", backgroundColor: palette.panelRaised },
+  sourceImage: { height: "100%", width: "100%" },
+  sourceLabel: { bottom: 0, left: 0, paddingHorizontal: 6, paddingVertical: 3, position: "absolute", color: palette.text, backgroundColor: "rgba(3,5,7,0.76)", fontFamily: fonts.medium, fontSize: 9 },
+  sourceLoading: { flexBasis: "100%", minHeight: 180, alignItems: "center", justifyContent: "center" },
   managedTile: { minHeight: 86, flexBasis: "31%", position: "relative" },
   managedTileMain: { minHeight: 86, width: "100%", flexDirection: "column", gap: 8, paddingHorizontal: 10 },
   managedTileAction: { position: "absolute", right: 4, top: 4 },

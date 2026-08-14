@@ -41,7 +41,7 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
   if (tool === "folder.create") {
     return { data: { success: true, data: { results: [{ success: true, data: { folder: { key: "folder", name: "Work" } } }] } } };
   }
-  if (tool === "document.update") {
+  if (tool === "document.update" || tool === "document.archive") {
     return { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:01:00.000Z" } } }] } } };
   }
   throw new Error(`Unexpected tool: ${tool}`);
@@ -49,6 +49,7 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
 
 const {
   autocompleteContent,
+  archiveContentDocument,
   askPersonalAssistant,
   createContentDocument,
   createContentFolder,
@@ -62,6 +63,7 @@ const {
   moveContentDocument,
   readContentDocument,
   readContentDocumentPreview,
+  readContentDocumentSources,
   renameContentDocument,
   saveContentDocument,
   scanContentDocument,
@@ -156,6 +158,18 @@ test("submits ordered scan pages as one editable Archive document", async () => 
     ],
   });
   expect(calls[0]?.body.input.idempotencyKey).toBe("scan-upload-digest-folder");
+});
+
+test("reads authorized scanned source images without requesting storage keys", async () => {
+  responseForTool = () => ({ data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Scan", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", sourceImages: [{ page: 1, url: "https://images.example/1" }] } } }] } } });
+  await expect(readContentDocumentSources("document")).resolves.toEqual([{ page: 1, url: "https://images.example/1" }]);
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["document"], include: ["sourceImages"] });
+});
+
+test("archives notes and uploaded files through the same document lifecycle", async () => {
+  await archiveContentDocument("document");
+  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.archive");
+  expect(calls[0]?.body.input).toMatchObject({ documentKeys: ["document"], atomic: false });
 });
 
 test("polls an offloaded upload using the same authenticated Archive context", async () => {

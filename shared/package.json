@@ -19,6 +19,10 @@
       "react-native": "./packages/ui/components/spinner/spinner.mobile.tsx",
       "default": "./packages/ui/components/spinner/spinner.web.tsx"
     },
+    "./ui/badge": {
+      "react-native": "./packages/ui/components/badge/badge.mobile.tsx",
+      "default": "./packages/ui/components/badge/badge.web.tsx"
+    },
     "./ui/bottom-sheet": {
       "react-native": "./packages/ui/components/bottom-sheet/bottom-sheet.mobile.tsx",
       "default": "./packages/ui/components/bottom-sheet/bottom-sheet.web.tsx"

@@ -25,13 +25,19 @@ const textract = new TextractClient({
   } : undefined,
 });
 
+const imageTextractAccessKeyId = process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID ?? process.env.BEDROCK_AWS_ACCESS_KEY_ID ?? process.env.AWS_ACCESS_KEY_ID;
+const imageTextractSecretAccessKey = process.env.CONTENT_SCAN_TEXTRACT_AWS_SECRET_ACCESS_KEY ?? process.env.BEDROCK_AWS_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY;
+const imageTextractSessionToken = process.env.CONTENT_SCAN_TEXTRACT_AWS_SESSION_TOKEN ?? process.env.BEDROCK_AWS_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN;
+const imageTextractUsesAwsCredentials = Boolean(process.env.CONTENT_SCAN_TEXTRACT_AWS_ACCESS_KEY_ID || process.env.BEDROCK_AWS_ACCESS_KEY_ID);
+const imageTextractRegion = process.env.CONTENT_SCAN_TEXTRACT_REGION ?? (imageTextractUsesAwsCredentials ? undefined : process.env.AWS_ENDPOINT_URL ? process.env.AWS_REGION : undefined) ?? 'eu-west-1';
+
 const imageTextract = new TextractClient({
-  region: process.env.CONTENT_SCAN_TEXTRACT_REGION ?? (process.env.AWS_ENDPOINT_URL ? process.env.AWS_REGION : undefined) ?? 'eu-west-1',
-  endpoint: process.env.AWS_ENDPOINT_URL,
-  credentials: process.env.AWS_ACCESS_KEY_ID ? {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
-    ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}),
+  region: imageTextractRegion,
+  endpoint: process.env.CONTENT_SCAN_TEXTRACT_ENDPOINT ?? (imageTextractUsesAwsCredentials ? `https://textract.${imageTextractRegion}.amazonaws.com` : process.env.AWS_ENDPOINT_URL),
+  credentials: imageTextractAccessKeyId ? {
+    accessKeyId: imageTextractAccessKeyId,
+    secretAccessKey: imageTextractSecretAccessKey ?? '',
+    ...(imageTextractSessionToken && imageTextractSessionToken !== 'undefined' ? { sessionToken: imageTextractSessionToken } : {}),
   } : undefined,
 });
 

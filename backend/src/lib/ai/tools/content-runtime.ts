@@ -101,6 +101,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   scanDocument?: (input: DocumentScanInput, organizationKey: string) => Promise<{ documentKey: string; content: string; storageKeys: string[] }>;
   getFolderCoverImage?: (scopeKey: string, imageKey: string) => Promise<{ storageKey: string } | null>;
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
+  signDocumentSourceUrl?: (storageKey: string) => Promise<string>;
 }
 
 const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4 };
@@ -142,7 +143,7 @@ async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'g
 
 function documentView(document: Document) {
   const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
-  return safe;
+  return { ...safe, ...(document.sourceStorageKeys?.length ? { sourceImageCount: document.sourceStorageKeys.length } : {}) };
 }
 
 function downloadFileName(name: string, extension: string) {
@@ -319,6 +320,7 @@ interface RuntimeDefaults {
   generateExport: typeof generateDocumentExport;
   getFolderCoverImage: NonNullable<ContentToolDependencies['getFolderCoverImage']>;
   signFolderCoverUrl: NonNullable<ContentToolDependencies['signFolderCoverUrl']>;
+  signDocumentSourceUrl: NonNullable<ContentToolDependencies['signDocumentSourceUrl']>;
 }
 
 async function defaults(deps: ContentToolDependencies, context: DomainToolContext): Promise<RuntimeDefaults> {
@@ -374,6 +376,7 @@ async function defaults(deps: ContentToolDependencies, context: DomainToolContex
     generateExport: deps.generateExport ?? exports.generateDocumentExport,
     getFolderCoverImage: deps.getFolderCoverImage ?? images.getImageInScope,
     signFolderCoverUrl: deps.signFolderCoverUrl ?? imageUrl.signedImageUrl,
+    signDocumentSourceUrl: deps.signDocumentSourceUrl ?? imageUrl.signedImageUrl,
   };
 }
 
@@ -1156,6 +1159,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               ...(parent ? { folder: await folderView(parent, d) } : {}),
               ...(include.includes('shares') ? { shares: (await repo.listShares(current.scopeKey, [current.key])).map(shareView) } : {}),
               ...(latest ? { latestVersion: versionView(latest) } : {}),
+              ...(include.includes('sourceImages') ? { sourceImages: await Promise.all((current.sourceStorageKeys ?? []).map(async (storageKey, index) => ({ page: index + 1, url: await d.signDocumentSourceUrl(storageKey) }))) } : {}),
             },
           };
         },

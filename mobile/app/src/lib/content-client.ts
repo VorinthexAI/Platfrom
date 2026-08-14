@@ -24,6 +24,7 @@ export type ContentDocument = {
   extension?: string;
   mimeType?: string;
   sizeBytes?: number;
+  sourceImageCount?: number;
   isFavorite: boolean;
   updatedAt: string;
 };
@@ -32,6 +33,8 @@ export type ContentDocumentPreview = ContentDocument & {
   extension: string;
   blocks: import("@vorinthex/shared/ui/file-viewer").FileViewerBlock[];
 };
+
+export type ContentDocumentSourceImage = { page: number; url: string };
 
 export type ContentDocumentVersion = {
   key: string;
@@ -297,6 +300,15 @@ export async function readContentDocumentPreview(documentKey: string) {
   return { ...document, extension: document.extension, blocks: document.blocks };
 }
 
+export async function readContentDocumentSources(documentKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { document: ContentDocument & { sourceImages?: ContentDocumentSourceImage[] } }; error?: { message: string } }[];
+  }>("document.find", { documentKeys: [documentKey], include: ["sourceImages"] });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The scanned pages could not be opened.");
+  return result.data.document.sourceImages ?? [];
+}
+
 export async function createContentDocument(name: string, content: string, folderKey?: string, mutationKey = createContentMutationKey()) {
   const contentContext = getContentContext();
   const data = await callContentTool<{ document: ContentDocument }>("document.create", {
@@ -379,6 +391,15 @@ export async function copyContentDocument(documentKey: string, targetFolderKey?:
   });
   const result = data.results[0];
   if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be copied.");
+  return result.data.document;
+}
+
+export async function archiveContentDocument(documentKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { document: ContentDocument }; error?: { message: string } }[];
+  }>("document.archive", { documentKeys: [documentKey], atomic: false, idempotencyKey: createContentMutationKey() });
+  const result = data.results[0];
+  if (!result?.success || !result.data) throw new Error(result?.error?.message ?? "The document could not be deleted.");
   return result.data.document;
 }
 

@@ -11,6 +11,7 @@ import {
   replaceCachedContentDocumentDetail,
   replaceCachedContentFolder,
   removeCachedContentDocument,
+  removeCachedContentDocumentEverywhere,
   removeCachedContentFolder,
 } from "./content-query-cache";
 import type { ContentContext } from "./content-client";
@@ -106,6 +107,22 @@ test("optimistically adds and removes documents and folders in exact locations",
     folders: [{ ...folder, parentFolderKey: "destination" }],
     documents: [{ ...document, folderKey: "destination" }],
   });
+});
+
+test("removes deleted documents from every location and evicts detail and preview", () => {
+  const client = new QueryClient();
+  const first = contentQueryKeys.location(context, "first");
+  const second = contentQueryKeys.location(context, "second");
+  const document = { key: "document-a", name: "Scan", isFavorite: false, updatedAt: "before" };
+  client.setQueryData(first, { folders: [], documents: [document] });
+  client.setQueryData(second, { folders: [], documents: [document] });
+  client.setQueryData(contentQueryKeys.document(context, document.key), { ...document, content: "Body" });
+  client.setQueryData(contentQueryKeys.preview(context, document.key), { ...document, blocks: [] });
+  removeCachedContentDocumentEverywhere(client, context, document.key);
+  expect(client.getQueryData<any>(first).documents).toEqual([]);
+  expect(client.getQueryData<any>(second).documents).toEqual([]);
+  expect(client.getQueryData(contentQueryKeys.document(context, document.key))).toBeUndefined();
+  expect(client.getQueryData(contentQueryKeys.preview(context, document.key))).toBeUndefined();
 });
 
 test("invalidates affected histories and patches moved document detail without corrupting locations", async () => {

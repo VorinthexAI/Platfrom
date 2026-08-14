@@ -2,16 +2,15 @@ import { File } from "expo-file-system";
 import { Image } from "expo-image";
 import type { CameraCapturedPicture } from "expo-camera";
 import { useEffect, useRef, useState } from "react";
-import { Modal, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { Button } from "@vorinthex/shared/ui/button";
-import { CameraIcon, CloseIcon, TrashIcon } from "@vorinthex/shared/ui/icons-mobile";
+import { CloseIcon } from "@vorinthex/shared/ui/icons-mobile";
 import { BrandedCameraModal } from "@/components/capability/BrandedCameraModal";
 import { normalizeCapturedJpeg } from "@/lib/captured-image";
-import { palette, spacing } from "@/theme/tokens";
+import { appendScanPage, MAX_DOCUMENT_SCAN_PAGES, removeScanPage, type ScanSessionPage } from "@/lib/document-scan-session";
+import { fonts, palette, radii, spacing } from "@/theme/tokens";
 
-export type DocumentScanPage = { id: string; uri: string; sizeBytes: number };
-export const MAX_DOCUMENT_SCAN_PAGES = 12;
+export type DocumentScanPage = ScanSessionPage;
 
 type Props = {
   busy: boolean;
@@ -20,11 +19,18 @@ type Props = {
   onSubmit: (pages: DocumentScanPage[]) => void;
 };
 
+function deleteCapturedFile(uri: string) {
+  try {
+    const file = new File(uri);
+    if (file.exists) file.delete();
+  } catch {
+    // Camera cache files may already have been removed by the platform.
+  }
+}
+
 export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
-  const insets = useSafeAreaInsets();
   const [pages, setPages] = useState<DocumentScanPage[]>([]);
   const [capturing, setCapturing] = useState(false);
-  const [cameraOpen, setCameraOpen] = useState(true);
   const [captureError, setCaptureError] = useState<string>();
   const pagesRef = useRef<DocumentScanPage[]>([]);
 
@@ -35,7 +41,7 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
     try {
       const normalized = await normalizeCapturedJpeg(picture, { maxSide: 1800, compress: 0.76 });
       setPages((current) => {
-        const next = current.length >= MAX_DOCUMENT_SCAN_PAGES ? current : [...current, { id: `${Date.now()}-${Math.random()}`, uri: normalized.uri, sizeBytes: normalized.sizeBytes }];
+        const next = appendScanPage(current, { id: `${Date.now()}-${Math.random()}`, uri: normalized.uri, sizeBytes: normalized.sizeBytes });
         pagesRef.current = next;
         return next;
       });
@@ -48,63 +54,45 @@ export function DocumentScanModal({ busy, error, onClose, onSubmit }: Props) {
 
   useEffect(() => {
     return () => {
-      for (const page of pagesRef.current) new File(page.uri).delete();
+      for (const page of pagesRef.current) deleteCapturedFile(page.uri);
     };
   }, []);
 
   const remove = (id: string) => {
     const page = pages.find((candidate) => candidate.id === id);
-    if (page) new File(page.uri).delete();
+    if (page) deleteCapturedFile(page.uri);
     setPages((current) => {
-      const next = current.filter((candidate) => candidate.id !== id);
+      const next = removeScanPage(current, id);
       pagesRef.current = next;
       return next;
     });
   };
 
-  const close = () => {
-    if (busy) return;
-    onClose();
-  };
-
-  return <Modal animationType="slide" onRequestClose={close} presentationStyle="fullScreen" visible>
-    <View style={[styles.root, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.md }]}>
-      <View style={styles.header}>
-        <Button accessibilityLabel="Close document scanner" contentMode="raw" disabled={busy} onPress={close} size="sm" variant="icon"><CloseIcon size="sm" /></Button>
-        <View style={styles.heading}><Text style={styles.title}>Scan documents</Text><Text accessibilityLiveRegion="polite" style={styles.count}>{pages.length} of {MAX_DOCUMENT_SCAN_PAGES} pages</Text></View>
-        <View style={styles.headerSpacer} />
-      </View>
-      <ScrollView contentContainerStyle={styles.pages}>
-        {pages.map((page, index) => <View key={page.id} style={styles.page}>
-          <Image contentFit="cover" source={page.uri} style={styles.preview} />
-          <Text style={styles.pageLabel}>Page {index + 1}</Text>
-          <Button accessibilityLabel={`Remove page ${index + 1}`} contentMode="raw" disabled={busy} onPress={() => remove(page.id)} size="xs" style={styles.remove} variant="icon"><TrashIcon size="sm" /></Button>
-        </View>)}
-        {!pages.length && !capturing ? <Text style={styles.empty}>Capture the first page to begin.</Text> : null}
-      </ScrollView>
-      {error || captureError ? <Text accessibilityRole="alert" style={styles.error}>{error ?? captureError}</Text> : null}
-      <View style={styles.actions}>
-        <Button disabled={busy || capturing || pages.length >= MAX_DOCUMENT_SCAN_PAGES} icon={<CameraIcon size="sm" />} loading={capturing} onPress={() => setCameraOpen(true)} size="lg" variant="secondary">Capture next</Button>
-        <Button disabled={busy || capturing || pages.length === 0} loading={busy} onPress={() => onSubmit(pages)} size="lg" variant="primary">Done</Button>
-      </View>
-      {cameraOpen ? <BrandedCameraModal count={pages.length} maximum={MAX_DOCUMENT_SCAN_PAGES} onCapture={capture} onClose={() => { if (pages.length) setCameraOpen(false); else close(); }} onDone={() => setCameraOpen(false)} title="Scan document" /> : null}
+  const drawer = <View style={styles.drawer}>
+    <View style={styles.drawerHeading}>
+      <Text style={styles.drawerTitle}>Pages</Text>
+      <Text accessibilityLiveRegion="polite" style={styles.drawerCount}>{pages.length} / {MAX_DOCUMENT_SCAN_PAGES}</Text>
     </View>
-  </Modal>;
+    <ScrollView contentContainerStyle={styles.pages} horizontal showsHorizontalScrollIndicator={false}>
+      {pages.map((page, index) => <View key={page.id} style={styles.page}>
+        <Image contentFit="cover" source={page.uri} style={styles.preview} />
+        <Text style={styles.pageLabel}>{index + 1}</Text>
+        <Button accessibilityLabel={`Remove page ${index + 1}`} contentMode="raw" disabled={busy || capturing} onPress={() => remove(page.id)} size="xs" style={styles.remove} variant="icon"><CloseIcon size="sm" /></Button>
+      </View>)}
+    </ScrollView>
+  </View>;
+
+  return <BrandedCameraModal bottomContent={drawer} count={pages.length} disabled={busy || capturing} doneLoading={busy} externalError={error ?? captureError} hint="" maximum={MAX_DOCUMENT_SCAN_PAGES} onCapture={capture} onClose={onClose} onDone={() => onSubmit(pages)} title="Scan documents" />;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: palette.page, paddingHorizontal: spacing.md },
-  header: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.md },
-  heading: { alignItems: "center", gap: 2 },
-  title: { color: palette.text, fontSize: 18, fontWeight: "700" },
-  count: { color: palette.muted, fontSize: 12 },
-  headerSpacer: { width: 40 },
-  pages: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, paddingBottom: spacing.md },
-  page: { backgroundColor: palette.surface, borderRadius: 16, overflow: "hidden", width: "48%" },
-  preview: { aspectRatio: 0.72, width: "100%" },
-  pageLabel: { color: palette.text, fontSize: 12, padding: spacing.sm },
-  remove: { position: "absolute", right: spacing.xs, top: spacing.xs },
-  empty: { color: palette.muted, paddingVertical: 80, textAlign: "center", width: "100%" },
-  error: { color: palette.danger, marginBottom: spacing.sm, textAlign: "center" },
-  actions: { gap: spacing.sm },
+  drawer: { gap: spacing.xs },
+  drawerHeading: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  drawerTitle: { color: palette.text, fontFamily: fonts.semibold, fontSize: 12 },
+  drawerCount: { color: palette.muted, fontFamily: fonts.medium, fontSize: 11 },
+  pages: { alignItems: "center", gap: spacing.xs, minHeight: 76 },
+  page: { backgroundColor: palette.surface, borderColor: palette.hairline, borderRadius: radii.md, borderWidth: 1, height: 76, overflow: "hidden", width: 58 },
+  preview: { height: 76, width: 58 },
+  pageLabel: { backgroundColor: "rgba(3,5,7,0.78)", bottom: 0, color: palette.text, fontFamily: fonts.semibold, fontSize: 10, left: 0, paddingHorizontal: spacing.xs, paddingVertical: 2, position: "absolute" },
+  remove: { position: "absolute", right: 2, top: 2 },
 });

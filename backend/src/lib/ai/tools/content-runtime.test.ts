@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { newId } from '@/lib/ids';
 import type { ContentRepository } from './content-runtime';
 import { authorizeDocumentParseLocation, CONTENT_TOOL_NAMES, ContentError, runContentTool, type ContentIdempotencyStore } from '.';
-import { DocumentProcessingError } from '@/lib/ai/document-processing';
+import { documentKeyForRequest, DocumentProcessingError } from '@/lib/ai/document-processing';
 import { documentEmbed, documentGenerateContent, documentGenerateHtml } from '@/lib/ai/document-processing';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embeddings';
 import { chatInputSchema, speechInputSchema } from '@/lib/ai/providers/types';
@@ -64,6 +64,63 @@ describe('Content runtime', () => {
     const archived = fixture('moderator');
     archived.folders.get(archived.folderKey).deletedAt = now;
     await expect(authorizeDocumentParseLocation({ scopeKey: archived.scopeKey, folderKey: archived.folderKey }, archived.context, archived.repository)).rejects.toMatchObject({ code: 'FOLDER_ARCHIVED' });
+  });
+
+  test('creates one editable document from scanned pages, retains sources, and replays idempotently', async () => {
+    const f = fixture('moderator');
+    let scanCalls = 0;
+    const input = {
+      scopeKey: f.scopeKey,
+      folderKey: f.folderKey,
+      name: 'Scanned receipt',
+      idempotencyKey: 'device-scan-1',
+      pages: [1, 2].map((index) => ({ filename: `${index}.jpg`, mimeType: 'image/jpeg' as const, sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, index]) })),
+    };
+    const idempotencyRecords = new Map<string, { hash: string; response?: unknown }>();
+    const dependencies: any = {
+      repository: f.repository,
+      idempotency: {
+        async claim(identity: any, hash: string) {
+          const record = idempotencyRecords.get(identity.idempotencyKey);
+          if (!record) { idempotencyRecords.set(identity.idempotencyKey, { hash }); return { status: 'claimed' }; }
+          return record.hash === hash && record.response ? { status: 'replay', response: record.response } : { status: 'conflict' };
+        },
+        async complete(identity: any, hash: string, _leaseOwner: string, response: unknown) { idempotencyRecords.set(identity.idempotencyKey, { hash, response }); },
+        async release(identity: any) { idempotencyRecords.delete(identity.idempotencyKey); },
+      },
+      storage: { async upload() { return { storageKey: '' }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+      signDocumentSourceUrl: async (storageKey: string) => `https://images.example/${storageKey}`,
+      clock: () => new Date(now),
+      scanDocument: async (scanInput: any) => {
+        scanCalls += 1;
+        return { documentKey: documentKeyForRequest(scanInput.scopeKey, scanInput.folderKey, scanInput.idempotencyKey), content: '## Page 1\n\nStore receipt\n\n## Page 2\n\nTotal: $42.00', storageKeys: ['scan/page-01.jpg', 'scan/page-02.jpg'] };
+      },
+      runAction: async (action: string, actionInput: any) => {
+        if (action === 'document-generate-html') return documentGenerateHtml(actionInput);
+        if (action === 'document-generate-content') return documentGenerateContent(actionInput);
+        if (action === 'document-embed') return documentEmbed(actionInput, { embed: async () => embedding, dimensions: EMBEDDING_DIMENSIONS });
+        throw new Error(`Unexpected action ${action}`);
+      },
+    };
+
+    const first = await runContentTool('document.scan', input, f.context, dependencies);
+    const replay = await runContentTool('document.scan', input, f.context, dependencies);
+
+    expect(scanCalls).toBe(1);
+    expect(replay.document.key).toBe(first.document.key);
+    expect(first.document).toMatchObject({ name: 'Scanned receipt', folderKey: f.folderKey });
+    const stored = f.documents.get(first.document.key);
+    expect(stored.content).toContain('Store receipt');
+    expect(stored.html).toContain('Total: $42.00');
+    expect(stored.sourceStorageKeys).toEqual(['scan/page-01.jpg', 'scan/page-02.jpg']);
+    expect(stored.embedding).toHaveLength(EMBEDDING_DIMENSIONS);
+    expect(first.document.sourceImageCount).toBe(2);
+    const sources = await runContentTool('document.find', { documentKeys: [first.document.key], include: ['sourceImages'] }, f.context, dependencies);
+    expect(sources.results[0]).toMatchObject({ success: true, data: { document: { sourceImageCount: 2, sourceImages: [
+      { page: 1, url: 'https://images.example/scan/page-01.jpg' },
+      { page: 2, url: 'https://images.example/scan/page-02.jpg' },
+    ] } } });
+    expect(sources.results[0]?.data?.document).not.toHaveProperty('sourceStorageKeys');
   });
 
   test('requires a resolved human principal for every registered tool', async () => {
