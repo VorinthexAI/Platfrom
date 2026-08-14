@@ -31,8 +31,10 @@ export type GalleryOverview = {
   images: GalleryImage[];
 };
 
-export function findInitialMediaCollection(collections: GalleryCollection[]) {
-  return collections.find(({ name }) => name === "My Images");
+export function filterCollections(collections: GalleryCollection[], query: string) {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return collections;
+  return collections.filter(({ name, description }) => `${name}\n${description ?? ""}`.toLocaleLowerCase().includes(normalized));
 }
 
 export type GallerySubject = {
@@ -125,7 +127,7 @@ export function fetchGalleryUploadStatus(uploadKeys: string[]) {
   );
 }
 
-export function searchGalleryImages(input: { query?: string; imageKey?: string; limit?: number }) {
+export function searchGalleryImages(input: { query?: string; imageKey?: string; collectionKey?: string; limit?: number }) {
   return postGallery<{ images: GalleryImage[] }>("/gallery/images/search", input, 4 * 60_000);
 }
 

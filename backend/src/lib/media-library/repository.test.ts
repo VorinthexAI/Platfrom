@@ -49,7 +49,7 @@ describe('MediaLibrary repository transactions', () => {
 
 describe('MediaLibrary image similarity search', () => {
   test('enforces Gallery access and returns descending cosine matches', async () => {
-    const organizationKey = newId(), scopeKey = newId(), actorKey = newId(), imageKey = newId();
+    const organizationKey = newId(), scopeKey = newId(), actorKey = newId(), collectionKey = newId(), imageKey = newId();
     const embedding = currentEmbeddingSchema.parse(Array.from({ length: 4_096 }, () => 0.25));
     const now = '2026-08-11T12:00:00.000Z';
     let query = '';
@@ -62,18 +62,19 @@ describe('MediaLibrary image similarity search', () => {
       },
     };
 
-    const results = await searchAccessibleImages({ organizationKey, scopeKey, actorKey, embedding, limit: 50 }, database);
+    const results = await searchAccessibleImages({ organizationKey, scopeKey, actorKey, collectionKey, embedding, limit: 50 }, database);
     expect(query).toContain('actorMembership.status == "active"');
     expect(query).toContain('actorMembership.organizationId == @organizationKey');
     expect(query).toContain('actorScope.organizationKey == @organizationKey');
     expect(query).toContain('FILTER elevated || scoped || collectionAccess');
+    expect(query).toContain('collectionImage.collectionKey == @collectionKey');
     expect(query).toContain('collection.deletedAt == null');
     expect(query).toContain('LENGTH(image.embedding) == @dimensions');
     expect(query).toContain('COSINE_SIMILARITY(image.embedding, @embedding)');
     expect(query).toContain('FILTER @threshold == null || score >= @threshold');
     expect(query).toContain('SORT score DESC, image._key ASC');
     expect(query).toContain('LIMIT @limit');
-    expect(bindVars).toMatchObject({ organizationKey, scopeKey, actorKey, dimensions: 4_096, threshold: null, limit: 50 });
+    expect(bindVars).toMatchObject({ organizationKey, scopeKey, actorKey, collectionKey, dimensions: 4_096, threshold: null, limit: 50 });
     expect(results).toEqual([{ image: expect.objectContaining({ key: imageKey, filename: 'image.jpg' }), score: 0.9 }]);
     expect(results[0]?.image).not.toHaveProperty('_key');
   });

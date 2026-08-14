@@ -50,6 +50,7 @@ export interface AccessibleImageSearchInput {
   organizationKey: string;
   scopeKey: string;
   actorKey: string;
+  collectionKey?: string;
   embedding: number[];
   threshold?: number;
   limit: number;
@@ -85,6 +86,14 @@ export async function searchAccessibleImages(
     FOR image IN images
       FILTER image.scopeKey == @scopeKey
       FILTER image.deletedAt == null
+      FILTER @collectionKey == null || LENGTH(
+        FOR collectionImage IN collectionImages
+          FILTER collectionImage.scopeKey == @scopeKey
+          FILTER collectionImage.collectionKey == @collectionKey
+          FILTER collectionImage.imageKey == image._key
+          LIMIT 1
+          RETURN 1
+      ) > 0
       LET collectionAccess = LENGTH(
         FOR relation IN collectionImages
           FILTER relation.scopeKey == @scopeKey
@@ -114,6 +123,7 @@ export async function searchAccessibleImages(
     organizationKey: input.organizationKey,
     scopeKey: input.scopeKey,
     actorKey: input.actorKey,
+    collectionKey: input.collectionKey ?? null,
     embedding: input.embedding,
     dimensions: input.embedding.length,
     threshold: input.threshold ?? null,
