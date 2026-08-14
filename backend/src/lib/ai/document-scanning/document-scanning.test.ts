@@ -43,3 +43,33 @@ test('cleans retained scan objects when processing fails', async () => {
   })).rejects.toThrow('offline');
   expect(deleted).toHaveLength(1);
 });
+
+test('starts every page OCR and the visual extraction batch before either branch completes', async () => {
+  const pageCount = 12;
+  let ocrStarted = 0;
+  let visualStarted = false;
+  let release!: () => void;
+  let parallelStarted!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const allStarted = new Promise<void>((resolve) => { parallelStarted = resolve; });
+  const markStarted = () => { if (ocrStarted === pageCount && visualStarted) parallelStarted(); };
+  const operation = scanDocumentImages({
+    scopeKey: newId(),
+    idempotencyKey: 'parallel-scan',
+    pages: Array.from({ length: pageCount }, (_, index) => ({ filename: `${index}.jpg`, mimeType: 'image/jpeg' as const, sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, index]) })),
+  }, 'organization', {
+    storage: { async upload(input) { return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } },
+    ocr: { extract: async () => { ocrStarted += 1; markStarted(); await gate; return { extractedText: 'primary', blocks: [], metadata: {} }; } },
+    signUrl: async (key) => `https://images.example/${key}`,
+    caption: async (input: any) => {
+      if (input.purpose === 'document-transcription') { visualStarted = true; markStarted(); await gate; return { captions: Array(pageCount).fill('secondary') }; }
+      return { captions: Array(pageCount).fill('unified') };
+    },
+  });
+  await allStarted;
+  expect(ocrStarted).toBe(pageCount);
+  expect(visualStarted).toBe(true);
+  release();
+  const result = await operation;
+  expect(result.content.match(/## Page/g)).toHaveLength(pageCount);
+});

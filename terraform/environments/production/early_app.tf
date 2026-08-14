@@ -146,7 +146,7 @@ resource "aws_iam_role_policy" "early_app_archive_processing" {
       },
       {
         Effect   = "Allow"
-        Action   = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis"]
+        Action   = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis", "textract:AnalyzeDocument"]
         Resource = ["*"]
       },
       {
@@ -224,7 +224,7 @@ resource "aws_iam_role_policy" "document_worker_runtime" {
         Action   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
         Resource = ["${module.storage.s3_bucket_arn}/content/*", "${module.storage.s3_bucket_arn}/pending/document-processing/*"]
       },
-      { Effect = "Allow", Action = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis"], Resource = ["*"] }
+      { Effect = "Allow", Action = ["textract:StartDocumentAnalysis", "textract:GetDocumentAnalysis", "textract:AnalyzeDocument"], Resource = ["*"] }
     ]
   })
 }

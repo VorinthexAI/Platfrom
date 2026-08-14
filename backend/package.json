@@ -24,6 +24,7 @@
     "test:e2e:media-library": "bun run scripts/media-library-e2e.ts",
     "test:e2e:travel": "bun run load-local-env && bun --env-file=.env.local run scripts/travel-e2e.ts",
     "test:e2e:rag-live": "bun run scripts/rag-live-e2e.ts",
+    "test:document-scan-live": "bun run scripts/document-scan-live.ts",
     "db:migrate": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",
     "db:migrate:dev": "bun run load-local-env && bun --env-file=.env.local src/db/arango-migrate.ts",
     "db:migrate:ci": "bun run src/db/arango-migrate.ts",

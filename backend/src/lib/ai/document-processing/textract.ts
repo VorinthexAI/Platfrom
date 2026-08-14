@@ -1,4 +1,5 @@
 import {
+  AnalyzeDocumentCommand,
   GetDocumentAnalysisCommand,
   StartDocumentAnalysisCommand,
   TextractClient,
@@ -20,6 +21,17 @@ const textract = new TextractClient({
   credentials: process.env.AWS_ACCESS_KEY_ID ? {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
+    ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}),
+  } : undefined,
+});
+
+const imageTextract = new TextractClient({
+  region: process.env.CONTENT_SCAN_TEXTRACT_REGION ?? (process.env.AWS_ENDPOINT_URL ? process.env.AWS_REGION : undefined) ?? 'eu-west-1',
+  endpoint: process.env.AWS_ENDPOINT_URL,
+  credentials: process.env.AWS_ACCESS_KEY_ID ? {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
+    ...(process.env.AWS_SESSION_TOKEN ? { sessionToken: process.env.AWS_SESSION_TOKEN } : {}),
   } : undefined,
 });
 
@@ -39,6 +51,10 @@ const wait = (milliseconds: number, signal: AbortSignal) => new Promise<void>((r
 
 export interface DocumentOcr {
   extract(storageKey: string): Promise<ExtractionResult>;
+}
+
+export interface DocumentImageOcr {
+  extract(storageKey: string, bytes: Uint8Array): Promise<ExtractionResult>;
 }
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
@@ -184,5 +200,16 @@ export const awsTextractDocumentOcr: DocumentOcr = {
     } finally {
       clearTimeout(timeout);
     }
+  },
+};
+
+export const awsTextractImageOcr: DocumentImageOcr = {
+  async extract(_storageKey, bytes) {
+    const timeoutMs = positiveLimit(process.env.CONTENT_TEXTRACT_TIMEOUT_MS, 300_000);
+    const maxCharacters = positiveLimit(process.env.CONTENT_MAX_EXTRACTED_CHARACTERS, 10_000_000);
+    const response = await imageTextract.send(new AnalyzeDocumentCommand({ Document: { Bytes: bytes }, FeatureTypes: ['LAYOUT', 'TABLES'] }), { abortSignal: AbortSignal.timeout(timeoutMs) });
+    const result = textractBlocksToExtractionResult(response.Blocks ?? []);
+    if (result.extractedText.length > maxCharacters) throw new Error('Extracted document content exceeds the configured limit.');
+    return result;
   },
 };
