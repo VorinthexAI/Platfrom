@@ -50,7 +50,7 @@ export type ContentSearchDocument = {
   name: string;
   extension?: ContentDocument["extension"];
   score: number;
-  summary: string;
+  summary?: string;
   scopeKey?: string;
   folderKey?: string;
 };
@@ -538,13 +538,13 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
 
 export async function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string) {
   const contentContext = getContentContext();
-  const data = await callContentTool<{ query: string; results: ContentSearchMatch[] }>("scope.document.search", {
+  return callContentTool<ContentSearchResponse>("scope.content.search", {
     scopeKey: contentContext.scopeKey,
     query,
-    topK: 10,
-    ...(folderKey ? { sources: [{ type: "folder", folderKeys: [folderKey], includeDescendants: true }] } : {}),
+    includeSummaries: false,
+    minimumScore: 0.55,
+    ...(folderKey ? { folderKey, includeDescendants: true } : {}),
   }, signal);
-  return data.results;
 }
 
 export async function summarizeContentDocument(documentKey: string, signal?: AbortSignal) {

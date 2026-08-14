@@ -300,26 +300,27 @@ test("scopes search and replayable history to a folder", async () => {
   expect(calls[1]?.body.input).toEqual({ scopeKey: "scope-authenticated", folderKey: "folder", includeDescendants: true, limit: 8 });
 });
 
-test("runs fast top-ten semantic search without a score threshold and summarizes on demand", async () => {
-  responseForTool = (tool) => tool === "scope.document.search"
-    ? { data: { success: true, data: { query: "roadmap", results: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.12 }] } } }
+test("runs fast combined search without summaries and summarizes on demand", async () => {
+  responseForTool = (tool) => tool === "scope.content.search"
+    ? { data: { success: true, data: { query: "roadmap", cached: false, folders: [{ key: "folder", scopeKey: "scope-authenticated", name: "Roadmaps", score: 0.8 }], documents: [{ documentKey: "document", scopeKey: "scope-authenticated", name: "Roadmap", extension: "docx", score: 0.72 }] } } }
     : { data: { success: true, data: { results: [{ success: true, data: { text: "A concise roadmap summary." } }] } } };
 
-  expect((await searchContentMatches("roadmap"))[0]).toMatchObject({ documentKey: "document", extension: "docx" });
+  expect(await searchContentMatches("roadmap")).toMatchObject({ folders: [{ key: "folder" }], documents: [{ documentKey: "document", extension: "docx" }] });
   expect(await summarizeContentDocument("document")).toBe("A concise roadmap summary.");
-  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", topK: 10 });
-  expect(calls[0]?.body.input).not.toHaveProperty("minimumScore");
+  expect(calls[0]?.body.input).toEqual({ scopeKey: "scope-authenticated", query: "roadmap", includeSummaries: false, minimumScore: 0.55 });
   expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], style: "brief", persist: false });
 });
 
 test("scopes fast semantic search to a folder and its descendants", async () => {
-  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", results: [] } } });
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", cached: false, folders: [], documents: [] } } });
   await searchContentMatches("roadmap", undefined, "folder");
   expect(calls[0]?.body.input).toEqual({
     scopeKey: "scope-authenticated",
     query: "roadmap",
-    topK: 10,
-    sources: [{ type: "folder", folderKeys: ["folder"], includeDescendants: true }],
+    includeSummaries: false,
+    minimumScore: 0.55,
+    folderKey: "folder",
+    includeDescendants: true,
   });
 });
 

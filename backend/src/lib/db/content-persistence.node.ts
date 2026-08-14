@@ -282,6 +282,7 @@ export function createContentPersistence(executor: ContentQueryExecutor) {
       return documentVersionSchema.parse(withArangoKey(created as Record<string, unknown>));
     },
     updateFolder(scopeKey: string, key: string, patch: ScopedFolderPatch) {
+      if (('name' in patch || 'description' in patch) && patch.embedding === undefined) throw new Error('Folder semantic updates require a fresh embedding.');
       if (patch.embedding !== undefined && patch.embedding.length) currentEmbeddingSchema.parse(patch.embedding);
       return scopedUpdate(executor, 'folders', scopeKey, key, patch, (value) => folderSchema.parse(value));
     },

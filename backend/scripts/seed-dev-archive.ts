@@ -1,12 +1,12 @@
 import { db, closeDb } from '@/lib/db/client';
-import { toArangoDoc } from '@/lib/db/base';
-import { folderSchema, FOLDERS_COLLECTION } from '@/lib/db/folders.node';
+import { buildEmbeddingText, toArangoDoc } from '@/lib/db/base';
+import { folderSchema, FOLDERS_COLLECTION, foldersEmbeddingFields } from '@/lib/db/folders.node';
 import { documentSchema, DOCUMENTS_COLLECTION } from '@/lib/db/documents.node';
 import { getUserByEmailHash } from '@/lib/db/users.node';
 import { getPersonalAuthContext } from '@/lib/db/personal-auth-context.node';
 import { hashUserEmail } from '@/api/users';
-import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
-import { chunkDocumentContent, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
+import { embedTexts } from '@/lib/embeddings';
+import { chunkDocumentContent, documentEmbeddingTexts, documentSemanticHash } from '@/lib/ai/document-processing/chunking';
 import { documentStorage } from '@/lib/ai/document-processing/storage';
 import { htmlToDocx } from '@/lib/ai/document-processing/exports';
 
@@ -18,6 +18,12 @@ const KEYS = {
   launch: 'cmsq7m4uk0003zk7k8xky303b',
   references: 'cmsq7m4uk0004zk7k2xwa8y5e',
   journal: 'cmsq7m4uk0005zk7k74ow1rtx',
+  launchOperations: 'cmtd1r8ya0000zk7k2vpc4m1a',
+  launchStrategy: 'cmtd1r8ya0001zk7k7kh9wq4e',
+  interviews: 'cmtd1r8ya0002zk7k9s4bn5hx',
+  synthesis: 'cmtd1r8ya0003zk7k3mp8df2q',
+  goals: 'cmtd1r8ya0004zk7k6tw1cj9r',
+  reading: 'cmtd1r8ya0005zk7k4yv7ng3s',
   welcome: 'cmsq7m4uk0006zk7kcyde7izf',
   roadmap: 'cmsq7m4ul0007zk7kbev12pfc',
   researchNote: 'cmsq7m4ul0008zk7k4qyzae0o',
@@ -47,16 +53,18 @@ const KEYS = {
   longTextTranscript: 'cmsrtkoe4000cos7ke5ita5ss',
   longTextJournal: 'cmsrtkoe4000dos7k9gr17azv',
   longTextBacklog: 'cmsrtkoe4000eos7k74iqglwl',
+  readinessNote: 'cmtd1r8yb0006zk7k8fq2lv5c',
+  positioningNote: 'cmtd1r8yb0007zk7k1hz6wr4n',
+  interviewThemes: 'cmtd1r8yb0008zk7k5jc9pt3m',
+  synthesisQuestions: 'cmtd1r8yb0009zk7k7rd4bv2x',
+  quarterlyGoals: 'cmtd1r8yb000azk7k3ns8kf6w',
+  readingQueue: 'cmtd1r8yb000bzk7k9gx2mq5d',
 } as const;
 
 function requireLocalEndpoint(name: string, value: string | undefined) {
   if (!value || !/^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.)/.test(value)) {
     throw new Error(`${name} must point to a local development service.`);
   }
-}
-
-function embedding() {
-  return Array<number>(EMBEDDING_DIMENSIONS).fill(0);
 }
 
 function escapeHtml(value: string) {
@@ -118,8 +126,6 @@ async function main() {
   if (!context) throw new Error(`Personal Archive context for ${EMAIL} is unavailable.`);
   const scopeKey = context.scope.key;
   const now = new Date().toISOString();
-  const vector = embedding();
-
   const folders = [
     { key: KEYS.projects, name: 'Projects', description: 'Active plans, launches, and working material.' },
     { key: KEYS.research, name: 'Research', description: 'Reading notes and source material.' },
@@ -127,9 +133,16 @@ async function main() {
     { key: KEYS.launch, parentFolderKey: KEYS.projects, name: '2026 Launch', description: 'Launch planning and execution.' },
     { key: KEYS.references, parentFolderKey: KEYS.research, name: 'References', description: 'Saved papers and reference files.' },
     { key: KEYS.journal, parentFolderKey: KEYS.personal, name: 'Journal', description: 'Daily reflections and observations.' },
+    { key: KEYS.launchOperations, parentFolderKey: KEYS.launch, name: 'Launch Operations', description: 'Release readiness, runbooks, incidents, and rollout coordination.' },
+    { key: KEYS.launchStrategy, parentFolderKey: KEYS.launch, name: 'Positioning Strategy', description: 'Audience research, messaging, positioning, and launch narrative.' },
+    { key: KEYS.interviews, parentFolderKey: KEYS.research, name: 'Customer Interviews', description: 'Interview transcripts, observations, and customer evidence.' },
+    { key: KEYS.synthesis, parentFolderKey: KEYS.interviews, name: 'Evidence Synthesis', description: 'Recurring themes, contradictions, findings, and open research questions.' },
+    { key: KEYS.goals, parentFolderKey: KEYS.personal, name: 'Quarterly Goals', description: 'Personal priorities, progress reviews, habits, and measurable outcomes.' },
+    { key: KEYS.reading, parentFolderKey: KEYS.personal, name: 'Reading Queue', description: 'Books, essays, saved reading, and notes to revisit.' },
   ];
-  for (const folder of folders) {
-    await upsert(FOLDERS_COLLECTION, folderSchema.parse({ ...folder, scopeKey, embedding: vector, deletedAt: null, createdAt: now, updatedAt: now }));
+  const folderEmbeddings = await embedTexts({ texts: folders.map((folder) => buildEmbeddingText(foldersEmbeddingFields, folder)!) });
+  for (const [index, folder] of folders.entries()) {
+    await upsert(FOLDERS_COLLECTION, folderSchema.parse({ ...folder, scopeKey, embedding: folderEmbeddings[index], deletedAt: null, createdAt: now, updatedAt: now }));
   }
 
   const pdfBytes = minimalPdf('Vorinthex Archive reference: calm systems for focused work.');
@@ -138,18 +151,18 @@ async function main() {
 
   const longDocuments = [
     [KEYS.longPdfStrategy, 'Product strategy narrative', KEYS.references, 'pdf', 'How Archive supports durable personal knowledge and deliberate action.'],
-    [KEYS.longPdfResearch, 'Research synthesis report', KEYS.research, 'pdf', 'A synthesis of interviews about retrieval, trust, organization, and collaboration.'],
+    [KEYS.longPdfResearch, 'Research synthesis report', KEYS.synthesis, 'pdf', 'A synthesis of interviews about retrieval, trust, organization, and collaboration.'],
     [KEYS.longPdfOperations, 'Operating model reference', KEYS.projects, 'pdf', 'An operating model for weekly planning, decision review, and cross-functional execution.'],
     [KEYS.longDocNarrative, 'Company narrative - legacy Word', KEYS.projects, 'doc', 'A detailed narrative connecting customer problems, product principles, and market direction.'],
-    [KEYS.longDocWorkshop, 'Discovery workshop transcript - legacy Word', KEYS.research, 'doc', 'Notes and conclusions from a long-form product discovery workshop.'],
-    [KEYS.longDocRetrospective, 'Launch retrospective - legacy Word', KEYS.launch, 'doc', 'A retrospective covering preparation, release execution, incidents, and follow-up actions.'],
+    [KEYS.longDocWorkshop, 'Discovery workshop transcript - legacy Word', KEYS.interviews, 'doc', 'Notes and conclusions from a long-form product discovery workshop.'],
+    [KEYS.longDocRetrospective, 'Launch retrospective - legacy Word', KEYS.launchOperations, 'doc', 'A retrospective covering preparation, release execution, incidents, and follow-up actions.'],
     [KEYS.longDocxPlan, 'Annual product plan', KEYS.projects, 'docx', 'A detailed annual plan with outcomes, sequencing, dependencies, and operating assumptions.'],
     [KEYS.longDocxReview, 'Customer evidence review', KEYS.research, 'docx', 'A review of customer evidence organized by repeated needs, objections, and behavior.'],
     [KEYS.longDocxHandbook, 'Team operating handbook', KEYS.references, 'docx', 'A practical handbook for decisions, meetings, documentation, and incident response.'],
-    [KEYS.longMarkdownGuide, 'Release engineering guide', KEYS.launch, 'md', 'A release guide covering readiness, deployment, smoke testing, communication, and rollback.'],
+    [KEYS.longMarkdownGuide, 'Release engineering guide', KEYS.launchOperations, 'md', 'A release guide covering readiness, deployment, smoke testing, communication, and rollback.'],
     [KEYS.longMarkdownArchitecture, 'Archive architecture notes', KEYS.references, 'md', 'Architecture notes for storage, signed access, canonical actions, and cache convergence.'],
-    [KEYS.longMarkdownResearch, 'Research repository guide', KEYS.research, 'md', 'A guide for capturing observations, tagging evidence, and turning research into decisions.'],
-    [KEYS.longTextTranscript, 'Extended customer transcript', KEYS.research, 'txt', 'An extended interview transcript about information overload, retrieval, and confidence.'],
+    [KEYS.longMarkdownResearch, 'Research repository guide', KEYS.synthesis, 'md', 'A guide for capturing observations, tagging evidence, and turning research into decisions.'],
+    [KEYS.longTextTranscript, 'Extended customer transcript', KEYS.interviews, 'txt', 'An extended interview transcript about information overload, retrieval, and confidence.'],
     [KEYS.longTextJournal, 'Monthly reflection', KEYS.journal, 'txt', 'A long reflection on attention, decisions, habits, energy, and lessons from the month.'],
     [KEYS.longTextBacklog, 'Detailed idea backlog', KEYS.personal, 'txt', 'A detailed backlog of product, workflow, writing, and research ideas with next steps.'],
   ] as const;
@@ -157,11 +170,11 @@ async function main() {
     { key: KEYS.pdfBrief, name: 'Product discovery brief', folderKey: KEYS.references, extension: 'pdf' as const, mimeType: 'application/pdf', content: 'Product discovery brief covering customer pain, desired outcomes, risks, and the next validation interviews.', html: '<h1>Product discovery brief</h1><p>Customer pain, desired outcomes, risks, and the next validation interviews.</p>', bytes: minimalPdf('Product discovery: customer pain, outcomes, risks, and next interviews.') },
     { key: KEYS.docBrief, name: 'Partner briefing - legacy Word', folderKey: KEYS.references, extension: 'doc' as const, mimeType: 'application/msword', content: 'Partner briefing with launch context, responsibilities, dependencies, and open commercial questions.', html: '<h1>Partner briefing</h1><p>Launch context, responsibilities, dependencies, and open commercial questions.</p>' },
     { key: KEYS.docAgenda, name: 'Workshop agenda - legacy Word', folderKey: KEYS.projects, extension: 'doc' as const, mimeType: 'application/msword', content: 'Workshop agenda: align on the problem, map assumptions, rank experiments, assign owners, and agree on follow-up dates.', html: '<h1>Workshop agenda</h1><p>Align on the problem, map assumptions, rank experiments, assign owners, and agree on follow-up dates.</p>' },
-    { key: KEYS.docxReview, name: 'Quarterly operating review', folderKey: KEYS.launch, extension: 'docx' as const, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content: 'Quarterly operating review covering activation, retention, reliability, customer evidence, and priorities for the next quarter.', html: '<h1>Quarterly operating review</h1><ul><li>Activation and retention</li><li>Reliability</li><li>Customer evidence</li><li>Next-quarter priorities</li></ul>' },
-    { key: KEYS.docxPlan, name: 'Launch communication plan', folderKey: KEYS.launch, extension: 'docx' as const, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content: 'Launch communication plan for internal readiness, customer announcements, support preparation, and the release-day timeline.', html: '<h1>Launch communication plan</h1><p>Internal readiness, customer announcements, support preparation, and the release-day timeline.</p>' },
-    { key: KEYS.markdownRunbook, name: 'Launch runbook', folderKey: KEYS.launch, extension: 'md' as const, mimeType: 'text/markdown', content: 'Launch runbook with readiness checks, deployment steps, smoke tests, communication tasks, and rollback ownership.', html: '<h1>Launch runbook</h1><ul><li>Confirm readiness</li><li>Deploy and smoke test</li><li>Send communication</li><li>Confirm rollback owner</li></ul>', source: '# Launch runbook\n\n- [ ] Confirm readiness\n- [ ] Deploy and smoke test\n- [ ] Send communication\n- [ ] Confirm rollback owner\n' },
+    { key: KEYS.docxReview, name: 'Quarterly operating review', folderKey: KEYS.launchOperations, extension: 'docx' as const, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content: 'Quarterly operating review covering activation, retention, reliability, customer evidence, and priorities for the next quarter.', html: '<h1>Quarterly operating review</h1><ul><li>Activation and retention</li><li>Reliability</li><li>Customer evidence</li><li>Next-quarter priorities</li></ul>' },
+    { key: KEYS.docxPlan, name: 'Launch communication plan', folderKey: KEYS.launchStrategy, extension: 'docx' as const, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content: 'Launch communication plan for internal readiness, customer announcements, support preparation, and the release-day timeline.', html: '<h1>Launch communication plan</h1><p>Internal readiness, customer announcements, support preparation, and the release-day timeline.</p>' },
+    { key: KEYS.markdownRunbook, name: 'Launch runbook', folderKey: KEYS.launchOperations, extension: 'md' as const, mimeType: 'text/markdown', content: 'Launch runbook with readiness checks, deployment steps, smoke tests, communication tasks, and rollback ownership.', html: '<h1>Launch runbook</h1><ul><li>Confirm readiness</li><li>Deploy and smoke test</li><li>Send communication</li><li>Confirm rollback owner</li></ul>', source: '# Launch runbook\n\n- [ ] Confirm readiness\n- [ ] Deploy and smoke test\n- [ ] Send communication\n- [ ] Confirm rollback owner\n' },
     { key: KEYS.markdownDecisions, name: 'Architecture decisions', folderKey: KEYS.research, extension: 'md' as const, mimeType: 'text/markdown', content: 'Architecture decisions documenting private storage, signed URLs, canonical actions, cache convergence, and product-neutral tool names.', html: '<h1>Architecture decisions</h1><p>Private storage, signed URLs, canonical actions, cache convergence, and product-neutral tool names.</p>', source: '# Architecture decisions\n\n1. Keep originals private.\n2. Return short-lived signed URLs.\n3. Share canonical actions across tools and APIs.\n4. Use product-neutral tool names.\n' },
-    { key: KEYS.textInterviews, name: 'Customer interview notes', folderKey: KEYS.research, extension: 'txt' as const, mimeType: 'text/plain', content: 'Customer interview notes\n\nPeople want faster retrieval, fewer duplicated decisions, and a clear next action after every research session.', html: '<pre><code>Customer interview notes\n\nPeople want faster retrieval, fewer duplicated decisions, and a clear next action after every research session.</code></pre>' },
+    { key: KEYS.textInterviews, name: 'Customer interview notes', folderKey: KEYS.interviews, extension: 'txt' as const, mimeType: 'text/plain', content: 'Customer interview notes\n\nPeople want faster retrieval, fewer duplicated decisions, and a clear next action after every research session.', html: '<pre><code>Customer interview notes\n\nPeople want faster retrieval, fewer duplicated decisions, and a clear next action after every research session.</code></pre>' },
     { key: KEYS.textIdeas, name: 'Idea inbox', folderKey: KEYS.personal, extension: 'txt' as const, mimeType: 'text/plain', content: 'Idea inbox\n\nCreate a weekly review ritual. Link decisions to evidence. Keep a short list of unanswered questions. Protect one quiet writing block.', html: '<pre><code>Idea inbox\n\nCreate a weekly review ritual. Link decisions to evidence. Keep a short list of unanswered questions. Protect one quiet writing block.</code></pre>' },
     ...longDocuments.map(([key, name, folderKey, extension, subject]) => {
       const content = longContent(name, subject);
@@ -197,18 +210,31 @@ async function main() {
     { key: KEYS.roadmap, name: 'Launch roadmap', folderKey: KEYS.launch, content: 'Confirm positioning, finish onboarding, test authentication, prepare launch communication, and review activation metrics.' },
     { key: KEYS.researchNote, name: 'Research notes', folderKey: KEYS.research, content: 'Useful systems reduce friction, preserve context, and make the next action obvious.' },
     { key: KEYS.journalNote, name: 'Monday reflection', folderKey: KEYS.journal, content: 'The best work today came from protecting one quiet hour and writing the decision down before acting.' },
+    { key: KEYS.readinessNote, name: 'Release readiness checklist', folderKey: KEYS.launchOperations, content: 'Confirm deployment ownership, smoke tests, rollback criteria, support coverage, status communication, and incident escalation before launch.' },
+    { key: KEYS.positioningNote, name: 'Positioning hypotheses', folderKey: KEYS.launchStrategy, content: 'Test whether durable context, private knowledge retrieval, and confident next actions resonate with independent teams preparing a launch.' },
+    { key: KEYS.interviewThemes, name: 'Recurring interview themes', folderKey: KEYS.interviews, content: 'Customers describe fragmented notes, duplicated decisions, slow retrieval, uncertain ownership, and difficulty turning research into a concrete next action.' },
+    { key: KEYS.synthesisQuestions, name: 'Synthesis open questions', folderKey: KEYS.synthesis, content: 'Determine which retrieval signals create trust, when the system should ask for clarification, and how evidence should remain connected to decisions.' },
+    { key: KEYS.quarterlyGoals, name: 'Quarterly focus', folderKey: KEYS.goals, content: 'Protect focused writing time, complete the launch milestone, review progress every Friday, and keep decisions linked to their evidence.' },
+    { key: KEYS.readingQueue, name: 'Systems reading queue', folderKey: KEYS.reading, content: 'Read about calm technology, information retrieval, resilient organizations, decision records, and humane tools for focused knowledge work.' },
     { key: KEYS.pdf, name: 'Focused work reference', folderKey: KEYS.references, content: 'A short PDF reference about calm systems for focused work.', extension: 'pdf' as const, mimeType: 'application/pdf', storageKey: pdfStorageKey, sizeBytes: pdfBytes.byteLength },
     ...importedDocuments,
   ];
-  for (const document of documents) {
+  const preparedDocuments = documents.map((document) => {
     const contentChunks = chunkDocumentContent(document.content);
+    return { document, contentChunks, embeddingTexts: documentEmbeddingTexts(document.name, contentChunks) };
+  });
+  const documentEmbeddings = await embedTexts({ texts: preparedDocuments.flatMap(({ embeddingTexts }) => embeddingTexts) });
+  let embeddingOffset = 0;
+  for (const { document, contentChunks, embeddingTexts } of preparedDocuments) {
+    const chunkEmbeddings = documentEmbeddings.slice(embeddingOffset, embeddingOffset + embeddingTexts.length);
+    embeddingOffset += embeddingTexts.length;
     await upsert(DOCUMENTS_COLLECTION, documentSchema.parse({
       ...document,
       scopeKey,
       html: 'html' in document ? document.html : `<p>${escapeHtml(document.content)}</p>`,
-      embedding: vector,
+      embedding: chunkEmbeddings[0],
       contentChunks,
-      chunkEmbeddings: contentChunks.map(() => vector),
+      chunkEmbeddings,
       semanticChunkCount: contentChunks.length,
       semanticContentHash: documentSemanticHash(document.content),
       isFavorite: document.key === KEYS.researchNote,

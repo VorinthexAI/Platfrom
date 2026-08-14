@@ -19,7 +19,7 @@ export const contentSearchQuerySchema = z.object({
   searchedAt: z.string().datetime(),
 }).strict();
 
-const storedDocumentSchema = z.object({ documentKey: z.string().cuid(), scopeKey: z.string().cuid(), folderKey: z.string().cuid().optional(), name: z.string().trim().min(1), score: z.number().min(0).max(1), summary: z.string().trim().min(1) }).strict();
+const storedDocumentSchema = z.object({ documentKey: z.string().cuid(), scopeKey: z.string().cuid(), folderKey: z.string().cuid().optional(), name: z.string().trim().min(1), extension: z.string().trim().min(1).optional(), score: z.number().min(0).max(1), summary: z.string().trim().min(1).optional() }).strict();
 
 export const contentSearchQueries = {
   async get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }) {

@@ -66,14 +66,14 @@ export interface ContentRepository {
   createVersion(version: Omit<DocumentVersion, 'key' | 'version' | 'createdAt' | 'deletedAt'>): Promise<DocumentVersion>;
   deleteVersion(key: string): Promise<void>;
   semanticSearch(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; documentKeys?: string[]; extensions?: Document['extension'][]; createdAfter?: string; createdBefore?: string; updatedAfter?: string; updatedBefore?: string; includeArchived?: boolean; minScore?: number; limit?: number }): Promise<Array<{ score: number; document: Document; matchedContent?: string }>>;
-  semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
+  semanticSearchFolders?(input: { embedding: number[]; authorizedScopeKeys: string[]; folderKeys?: string[]; minScore: number; limit: number }): Promise<Array<{ score: number; folder: Folder }>>;
   transaction?<T>(operation: (repository: ContentRepository) => Promise<T>): Promise<T>;
 }
 
 export interface ContentSearchQueryStore {
   get(input: { actorKey: string; scopeKey: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number }): Promise<{ output: unknown } | null>;
   record(input: { key: string; actorKey: string; scopeKey: string; query: string; normalizedQuery: string; folderKey: string | null; includeDescendants: boolean; cacheVersion: number; output: unknown; now: string }): Promise<void>;
-  list(input: { actorKey: string; scopeKey: string; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; score: number; summary: string }> }>>;
+  list(input: { actorKey: string; scopeKey: string; folderKey: string | null; includeDescendants: boolean; limit: number }): Promise<Array<{ query: string; normalizedQuery: string; searchedAt: string; count: number; folderKey?: string; includeDescendants?: boolean; documents: Array<{ documentKey: string; scopeKey: string; folderKey?: string; name: string; extension?: string; score: number; summary?: string }> }>>;
 }
 
 export interface ContentActionResult { text?: string; audio?: Uint8Array; audioBase64?: string; mimeType?: string; durationMs?: number; html?: string; content?: string; embedding?: number[]; contentChunks?: string[]; chunkEmbeddings?: number[][]; semanticChunkCount?: number; semanticContentHash?: string }
@@ -1767,7 +1767,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const allowed = await repo.allowedScopeKeys(context.organizationKey, member.userOrganization.key);
       if (!allowed.includes(input.scopeKey)) fail('CONTENT_FORBIDDEN', 'The principal lacks access to the requested scope.', tool, 'authorization', input.scopeKey);
       const normalizedQuery = input.query.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-      const cacheVersion = 2;
+      const cacheVersion = 3;
       const folderKey = input.folderKey ?? null;
       const includeDescendants = folderKey !== null && (input.includeDescendants ?? true);
       const store = dependencies.searchQueries ?? (await import('@/lib/db/content-search-queries.node')).contentSearchQueries;
@@ -1788,21 +1788,85 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
       const documentRevision = revisionDocuments.map((item) => `${item.key}:${item.name}:${item.folderKey ?? ''}:${item.semanticContentHash ?? ''}:${item.deletedAt ?? ''}:${item._internalDeletion ? 'pending' : ''}`);
       const sourceRevision = createHash('sha256').update([...folderRevision, ...documentRevision].sort().join('\n')).digest('hex');
       const cached = await store.get({ actorKey: member.user.key, scopeKey: input.scopeKey, normalizedQuery, folderKey, includeDescendants, cacheVersion });
-      const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; replayable?: boolean } | undefined;
-      const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore);
+      const cachedValue = cached?.output as { result?: unknown; sourceRevision?: string; minimumScore?: number; includeSummaries?: boolean; replayable?: boolean } | undefined;
+      const reusable = Boolean(cachedValue?.replayable && cachedValue.result && cachedValue.sourceRevision === sourceRevision && cachedValue.minimumScore === input.minimumScore && cachedValue.includeSummaries === input.includeSummaries);
       if (reusable) {
         const parsed = contentToolOutputSchemas[tool].parse({ ...(cachedValue!.result as object), query: input.query, cached: true });
         await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: cachedValue, now: now() });
         result = parsed;
+      } else if (!input.includeSummaries) {
+        const queryText = normalizedQuery;
+        const queryTokens = new Set<string>(queryText.match(/[\p{L}\p{N}]+/gu) ?? []);
+        const scoreText = (value: string) => {
+          const normalized = value.normalize('NFKC').toLocaleLowerCase('en-US');
+          if (normalized.includes(queryText)) return 0.75;
+          const tokens = new Set<string>(normalized.match(/[\p{L}\p{N}]+/gu) ?? []);
+          const matched = [...queryTokens].filter((token) => tokens.has(token)).length;
+          return matched > 0 ? 0.4 + 0.3 * (matched / Math.max(queryTokens.size, 1)) : 0;
+        };
+        const activeFolders = [];
+        for (const current of allFolders) {
+          if (folderKeys && !folderKeys.includes(current.key)) continue;
+          if (current.deletedAt || current._internalDeletion || !await activeFolderHierarchy(current.key, current.scopeKey)) continue;
+          const score = scoreText(`${current.name}\n${current.description ?? ''}`);
+          if (score >= input.minimumScore) activeFolders.push({ folder: current, score });
+        }
+        const activeDocuments = [];
+        for (const current of allDocuments) {
+          if (folderKeys && (!current.folderKey || !folderKeys.includes(current.folderKey))) continue;
+          if (current.deletedAt || current._internalDeletion || !await activeFolderHierarchy(current.folderKey, current.scopeKey)) continue;
+          const score = scoreText(`${current.name}\n${current.content}`);
+          if (score >= input.minimumScore) activeDocuments.push({ document: current, score });
+        }
+        const hasExactMatch = activeFolders.some(({ score }) => score >= 0.75) || activeDocuments.some(({ score }) => score >= 0.75);
+        if (!hasExactMatch) {
+          let embeddingTimer: number | undefined;
+          const queryEmbedding = await Promise.race<number[] | undefined>([
+            embed(input.query, undefined, input.scopeKey, 'query').catch(() => undefined),
+            new Promise<undefined>((resolve) => { embeddingTimer = setTimeout(resolve, dependencies.searchEmbeddingTimeoutMs ?? 500); }),
+          ]);
+          if (embeddingTimer) clearTimeout(embeddingTimer);
+          if (queryEmbedding) {
+            const [documentMatches, folderMatches] = await Promise.all([
+              repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 40 }),
+              repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
+            ]);
+            for (const match of folderMatches) {
+              if (match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder.deletedAt || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+              const previous = activeFolders.find(({ folder: current }) => current.key === match.folder.key);
+              if (previous) previous.score = Math.max(previous.score, match.score);
+              else activeFolders.push(match);
+            }
+            for (const match of documentMatches) {
+              if (match.document.scopeKey !== input.scopeKey || folderKeys && (!match.document.folderKey || !folderKeys.includes(match.document.folderKey)) || match.document.deletedAt || match.document._internalDeletion || !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
+              const previous = activeDocuments.find(({ document: current }) => current.key === match.document.key);
+              if (previous) previous.score = Math.max(previous.score, match.score);
+              else activeDocuments.push(match);
+            }
+          }
+        }
+        const folders = activeFolders.sort((left, right) => right.score - left.score || left.folder.key.localeCompare(right.folder.key)).slice(0, 4).map(({ folder: current, score }) => ({ key: current.key, scopeKey: current.scopeKey, ...(current.parentFolderKey ? { parentFolderKey: current.parentFolderKey } : {}), name: current.name, ...(current.description ? { description: current.description } : {}), score: Math.max(0, Math.min(1, score)) }));
+        const documents = activeDocuments.sort((left, right) => right.score - left.score || left.document.key.localeCompare(right.document.key)).slice(0, 10).map(({ document: current, score }) => ({ documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), score: Math.max(0, Math.min(1, score)) }));
+        const freshResult = { query: input.query, folders, documents, cached: false };
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: false, replayable: true }, now: now() });
+        result = freshResult;
       } else {
         let queryEmbedding: number[];
         try { queryEmbedding = await embed(input.query, undefined, input.scopeKey, 'query'); }
         catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
-        const documentMatches = await repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 100 });
-        const folders: never[] = [];
+        const [documentMatches, folderMatches] = await Promise.all([
+          repo.semanticSearch({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 100 }),
+          repo.semanticSearchFolders?.({ embedding: queryEmbedding, authorizedScopeKeys: [input.scopeKey], ...(folderKeys ? { folderKeys } : {}), minScore: input.minimumScore, limit: 20 }) ?? [],
+        ]);
+        const folders = [];
+        for (const match of folderMatches) {
+          if (match.score < input.minimumScore || match.folder.scopeKey !== input.scopeKey || folderKeys && !folderKeys.includes(match.folder.key) || match.folder.deletedAt || match.folder._internalDeletion || !await activeFolderHierarchy(match.folder.key, match.folder.scopeKey)) continue;
+          folders.push({ key: match.folder.key, scopeKey: match.folder.scopeKey, ...(match.folder.parentFolderKey ? { parentFolderKey: match.folder.parentFolderKey } : {}), name: match.folder.name, ...(match.folder.description ? { description: match.folder.description } : {}), score: Math.max(0, Math.min(1, match.score)) });
+          if (folders.length === 4) break;
+        }
         const selectedDocuments = [];
         for (const match of documentMatches) {
-          if (match.score >= input.minimumScore && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
+          if (match.score >= input.minimumScore && match.document.scopeKey === input.scopeKey && (!folderKeys || match.document.folderKey !== undefined && folderKeys.includes(match.document.folderKey)) && !match.document.deletedAt && !match.document._internalDeletion && await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) selectedDocuments.push(match);
           if (selectedDocuments.length === 10) break;
         }
         const documents = [];
@@ -1822,13 +1886,13 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               complete = false;
               summary = `This document contains semantically relevant information for "${input.query}".`;
             }
-            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, score: Math.max(0, Math.min(1, score)), summary } };
+            return { complete, document: { documentKey: current.key, scopeKey: current.scopeKey, ...(current.folderKey ? { folderKey: current.folderKey } : {}), name: current.name, ...(current.extension ? { extension: current.extension } : {}), score: Math.max(0, Math.min(1, score)), summary } };
           }));
           summariesComplete &&= batch.every(({ complete }) => complete);
           documents.push(...batch.map(({ document }) => document));
         }
         const freshResult = { query: input.query, folders, documents, cached: false };
-        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, replayable: summariesComplete }, now: now() });
+        await store.record({ key: d.id(), actorKey: member.user.key, scopeKey: input.scopeKey, query: input.query, normalizedQuery, folderKey, includeDescendants, cacheVersion, output: { result: freshResult, sourceRevision, minimumScore: input.minimumScore, includeSummaries: true, replayable: summariesComplete }, now: now() });
         result = freshResult;
       }
     } else {

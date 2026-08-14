@@ -448,7 +448,7 @@ describe('Content runtime', () => {
     let clock = new Date(now);
     const rows = new Map<string, any>();
     f.repository.allowedScopeKeys = async () => allowed ? [f.scopeKey] : [];
-    f.repository.semanticSearchFolders = async () => [...f.folders.values()].map((folder, index) => ({ score: index === 0 ? 0.54 : 0.9, folder }));
+    f.repository.semanticSearchFolders = async (input) => [...f.folders.values()].filter((folder) => !input.folderKeys || input.folderKeys.includes(folder.key)).map((folder, index) => ({ score: index === 0 ? 0.54 : 0.9, folder }));
     f.repository.semanticSearch = async (input) => [...f.documents.values()].filter((document) => !input.folderKeys || input.folderKeys.includes(document.folderKey)).map((document, index) => ({ score: index === 0 ? 0.54 : 0.9, document }));
     const searchQueries = {
       async get({ actorKey, scopeKey, normalizedQuery, folderKey, includeDescendants }: any) { return rows.get(`${actorKey}:${scopeKey}:${normalizedQuery}:${folderKey ?? 'root'}:${includeDescendants}`) ?? null; },
@@ -463,9 +463,10 @@ describe('Content runtime', () => {
       runAction: async (action: string, input: any) => { summaryCalls += 1; expect(action).toBe('reason'); const parsed = chatInputSchema.parse(input); const text = parsed.messages[0]?.content[0]?.type === 'text' ? parsed.messages[0].content[0].text : ''; expect(text).toContain('Launch Roadmap'); return { text: 'Relevant to Launch Roadmap' }; },
     };
     const first = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'Launch Roadmap' }, f.context, dependencies);
-    expect(first.folders).toEqual([]);
+    expect(first.folders).toHaveLength(4);
+    expect(first.folders.every((item) => item.score >= 0.55)).toBe(true);
     expect(first.documents).toHaveLength(10);
-    expect(first.documents.every((item) => item.score >= 0.55 && item.summary.includes('Launch Roadmap'))).toBe(true);
+    expect(first.documents.every((item) => item.score >= 0.55 && item.summary?.includes('Launch Roadmap') === true)).toBe(true);
     expect(embeddingCalls).toBe(1);
     expect(summaryCalls).toBe(10);
     clock = new Date(Date.parse(now) + 2 * 60 * 60 * 1000);
@@ -493,7 +494,7 @@ describe('Content runtime', () => {
     const nestedDocumentKey = [...f.documents.keys()][1]!;
     f.documents.get(nestedDocumentKey).folderKey = childKey;
     const folderReplay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'launch roadmap' }, f.context, dependencies);
-    expect(folderReplay.folders).toEqual([]);
+    expect(folderReplay.folders).toEqual([{ key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Child', score: 0.9 }]);
     expect(folderReplay.cached).toBe(false);
     expect(rows).toHaveLength(2);
     expect(folderReplay.documents.some((document) => document.documentKey === nestedDocumentKey)).toBe(true);
@@ -511,6 +512,48 @@ describe('Content runtime', () => {
     expect(isolated.history).toEqual([]);
     allowed = false;
     await expect(runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch roadmap' }, f.context, dependencies)).rejects.toMatchObject({ code: 'CONTENT_FORBIDDEN' });
+  });
+
+  test('returns fast recursive folder and document matches without generating summaries', async () => {
+    const f = fixture('viewer');
+    f.folders.get(f.folderKey).name = 'Launch plans';
+    f.folders.get(f.folderKey).description = 'Release coordination and launch readiness.';
+    const childKey = newId();
+    f.folders.set(childKey, { key: childKey, scopeKey: f.scopeKey, parentFolderKey: f.folderKey, name: 'Operations', description: 'Deployment procedures and rollback checks.', embedding, createdAt: now, updatedAt: now });
+    const noteKey = f.addDocument('Launch positioning and audience notes.');
+    const fileKey = f.addDocument('Deployment procedures for launch day.');
+    f.documents.get(noteKey).name = 'Launch narrative';
+    delete f.documents.get(noteKey).extension;
+    f.documents.get(fileKey).name = 'Deployment runbook';
+    f.documents.get(fileKey).folderKey = childKey;
+    f.documents.get(fileKey).extension = 'pdf';
+    let embeddingCalls = 0;
+    const cachedSearches = new Map<string, unknown>();
+    const cacheKey = (input: any) => `${input.normalizedQuery}:${input.folderKey ?? 'root'}:${input.includeDescendants}`;
+    const dependencies: any = {
+      repository: f.repository,
+      embed: async () => { embeddingCalls += 1; return embedding; },
+      searchQueries: {
+        async get(input: any) { const output = cachedSearches.get(cacheKey(input)); return output ? { output } : null; },
+        async record(input: any) { cachedSearches.set(cacheKey(input), input.output); },
+        async list() { return []; },
+      },
+    };
+
+    const root = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, query: 'launch', includeSummaries: false }, f.context, dependencies);
+    expect(root.folders).toMatchObject([{ key: f.folderKey, name: 'Launch plans' }]);
+    expect(root.documents).toContainEqual(expect.objectContaining({ documentKey: noteKey, name: 'Launch narrative' }));
+    expect(root.documents.find((item) => item.documentKey === noteKey)).not.toHaveProperty('summary');
+    expect(embeddingCalls).toBe(0);
+
+    const nested = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'deployment', includeSummaries: false }, f.context, dependencies);
+    expect(nested.documents).toContainEqual(expect.objectContaining({ documentKey: fileKey, folderKey: childKey, extension: 'pdf' }));
+    expect(embeddingCalls).toBe(0);
+
+    await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'semantically related', includeSummaries: false }, f.context, dependencies);
+    const replay = await runContentTool('scope.content.search', { scopeKey: f.scopeKey, folderKey: f.folderKey, query: 'semantically related', includeSummaries: false }, f.context, dependencies);
+    expect(embeddingCalls).toBe(1);
+    expect(replay.cached).toBe(true);
   });
 
   test('excludes semantic matches below archived folder ancestors before summary generation', async () => {
