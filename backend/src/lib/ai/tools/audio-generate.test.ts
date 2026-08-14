@@ -39,16 +39,17 @@ describe('audio.generate', () => {
         active -= 1;
         return { audioBase64: Buffer.from(input.text).toString('base64'), mimeType: 'audio/mpeg' };
       },
+      duration: () => 1_250,
     })) chunks.push(chunk);
     expect(chunks.map(({ index, startWord, endWord }) => [index, startWord, endWord])).toEqual([[0, 0, 20], [1, 20, 40], [2, 40, 45]]);
     expect(calls).toHaveLength(3);
     expect(maximumActive).toBe(1);
-    expect(chunks.every(({ mimeType, audioBase64 }) => mimeType === 'audio/mpeg' && audioBase64.length > 0)).toBe(true);
+    expect(chunks.every(({ mimeType, audioBase64, durationMs }) => mimeType === 'audio/mpeg' && audioBase64.length > 0 && durationMs === 1_250)).toBe(true);
   });
 
   test('collects the stream for ordinary tool execution and rejects unknown input', async () => {
-    const result = await audioGenerateTool.execute({ text: 'one two three', wordsPerChunk: 20 }, { synthesize: async () => ({ audioBase64: 'bXAz', mimeType: 'audio/mp3' }) });
-    expect(result).toMatchObject({ totalWords: 3, chunks: [{ index: 0, startWord: 0, endWord: 3, mimeType: 'audio/mpeg' }] });
+    const result = await audioGenerateTool.execute({ text: 'one two three', wordsPerChunk: 20 }, { synthesize: async () => ({ audioBase64: 'bXAz', mimeType: 'audio/mp3' }), duration: () => 400 });
+    expect(result).toMatchObject({ totalWords: 3, chunks: [{ index: 0, startWord: 0, endWord: 3, mimeType: 'audio/mpeg', durationMs: 400 }] });
     expect(() => audioGenerateInputSchema.parse({ text: 'hello', unexpected: true })).toThrow('Unrecognized key');
     expect(() => audioGenerateInputSchema.parse({ text: 'hello', wordsPerChunk: 19 })).toThrow();
   });

@@ -8,6 +8,7 @@ export const generatedAudioChunkSchema = z.object({
   endCharacter: z.number().int().positive(),
   audioBase64: z.string().min(1),
   mimeType: z.literal("audio/mpeg"),
+  durationMs: z.number().int().positive(),
 }).strict();
 
 export type GeneratedAudioChunk = z.infer<typeof generatedAudioChunkSchema>;

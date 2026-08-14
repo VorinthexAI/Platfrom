@@ -18,6 +18,7 @@ import { Tabs } from "@vorinthex/shared/ui/tabs";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { useToast } from "@vorinthex/shared/ui/toast";
 import { Spinner } from "@vorinthex/shared/ui/spinner";
+import { Slider } from "@vorinthex/shared/ui/slider";
 import {
   ArchiveIcon,
   BrainIcon,
@@ -103,6 +104,7 @@ import { saveBase64Download, saveTemporaryBase64File, saveTextDownload } from "@
 import { fetchGalleryUploadStatus, uploadGalleryImages } from "@/lib/gallery-client";
 import { streamGeneratedAudio, type GeneratedAudioChunk } from "@/lib/audio-client";
 import { BOOK_AUDIO_MODE } from "@/lib/book-audio";
+import { audioTimelineDuration, audioTimelinePosition, formatAudioTime, resolveAudioTimelinePosition } from "@/lib/audio-playback-timeline";
 import { fonts, palette, radii, spacing, tracking } from "@/theme/tokens";
 import { useAuthStore } from "@/state/auth";
 
@@ -233,8 +235,12 @@ export function KnowledgeWorkspace() {
   const [filePreviewUri, setFilePreviewUri] = useState<string>();
   const [fileContent, setFileContent] = useState("");
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
-  const [narrationState, setNarrationState] = useState<"idle" | "generating" | "playing" | "paused" | "waiting" | "error">("idle");
-  const [narrationChunkCount, setNarrationChunkCount] = useState(0);
+  const [narrationState, setNarrationState] = useState<"idle" | "generating" | "playing" | "paused" | "waiting" | "ready" | "error">("idle");
+  const [narrationManifest, setNarrationManifest] = useState<GeneratedAudioChunk[]>([]);
+  const [narrationActiveIndex, setNarrationActiveIndex] = useState(-1);
+  const [narrationGenerationComplete, setNarrationGenerationComplete] = useState(false);
+  const [narrationTitle, setNarrationTitle] = useState("");
+  const [narrationScrubValue, setNarrationScrubValue] = useState<number>();
   const [narrationError, setNarrationError] = useState<string>();
   const [selectedFolder, setSelectedFolder] = useState<ContentFolder>();
   const [documentActionLoading, setDocumentActionLoading] = useState<string>();
@@ -296,6 +302,9 @@ export function KnowledgeWorkspace() {
   const narrationGenerating = useRef(false);
   const narrationStateRef = useRef(narrationState);
   const lastFinishedNarrationChunk = useRef(-1);
+  const narrationTitleRef = useRef("");
+  const narrationDocumentKeyRef = useRef<string | undefined>(undefined);
+  const pendingNarrationSeek = useRef<{ index: number; seconds: number; play: boolean } | undefined>(undefined);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
   const previewFileRef = useRef<File | undefined>(undefined);
   const instructionGeneration = useRef(0);
@@ -349,18 +358,21 @@ export function KnowledgeWorkspace() {
     ? uploadBatch.filter(({ status }) => status === "pending" || status === "uploading")
     : [];
   const showArchiveRoot = !libraryQuery.trim() || "archive".includes(libraryQuery.trim().toLowerCase());
+  const narrationDuration = audioTimelineDuration(narrationManifest);
+  const narrationElapsed = narrationScrubValue ?? audioTimelinePosition(narrationManifest, narrationActiveIndex, narrationAudio.currentTime);
 
   const updateNarrationState = (state: typeof narrationState) => {
     narrationStateRef.current = state;
     setNarrationState(state);
   };
 
-  const playNarrationChunk = (index: number, name: string) => {
+  const playNarrationChunk = (index: number) => {
     const chunk = narrationChunks.current[index];
     if (!chunk) return false;
     narrationChunkIndex.current = index;
+    setNarrationActiveIndex(index);
     narrationPlayer.replace(`data:${chunk.mimeType};base64,${chunk.audioBase64}`);
-    narrationPlayer.setActiveForLockScreen(true, { title: name, artist: "Vorinthex Archive" }, { showSeekBackward: false, showSeekForward: false });
+    narrationPlayer.setActiveForLockScreen(true, { title: narrationTitleRef.current, artist: "Vorinthex Archive" }, { showSeekBackward: false, showSeekForward: false });
     narrationPlayer.play();
     updateNarrationState("playing");
     return true;
@@ -373,18 +385,28 @@ export function KnowledgeWorkspace() {
     narrationGenerating.current = false;
     narrationChunks.current = [];
     narrationChunkIndex.current = -1;
+    narrationTitleRef.current = "";
+    narrationDocumentKeyRef.current = undefined;
+    pendingNarrationSeek.current = undefined;
     lastFinishedNarrationChunk.current = -1;
     narrationPlayer.pause();
     narrationPlayer.clearLockScreenControls();
     narrationStateRef.current = "idle";
     setNarrationState("idle");
-    setNarrationChunkCount(0);
+    setNarrationManifest([]);
+    setNarrationActiveIndex(-1);
+    setNarrationGenerationComplete(false);
+    setNarrationTitle("");
+    setNarrationScrubValue(undefined);
     setNarrationError(undefined);
   }, [narrationPlayer]);
 
-  const startNarration = async (text: string, name: string) => {
+  const startNarration = async (text: string, name: string, documentKey?: string) => {
     if (!text.trim() || !organizationKey || !agentKey) return;
     stopNarration();
+    narrationTitleRef.current = name;
+    narrationDocumentKeyRef.current = documentKey;
+    setNarrationTitle(name);
     const generation = ++narrationGeneration.current;
     const controller = new AbortController();
     narrationRequest.current = controller;
@@ -395,35 +417,65 @@ export function KnowledgeWorkspace() {
       await streamGeneratedAudio({ organizationKey, agentKey, text, wordsPerChunk: 100 }, (chunk) => {
         if (generation !== narrationGeneration.current) return;
         narrationChunks.current.push(chunk);
-        setNarrationChunkCount(narrationChunks.current.length);
-        if (narrationChunkIndex.current < 0 || narrationStateRef.current === "waiting") playNarrationChunk(narrationChunks.current.length - 1, name);
+        setNarrationManifest([...narrationChunks.current]);
+        if (narrationChunkIndex.current < 0 || narrationStateRef.current === "waiting") playNarrationChunk(narrationChunks.current.length - 1);
       }, controller.signal);
       if (generation !== narrationGeneration.current) return;
       narrationGenerating.current = false;
       narrationRequest.current = undefined;
+      setNarrationGenerationComplete(true);
       if (narrationChunks.current.length === 0) throw new Error("No audio was generated.");
-      if (narrationStateRef.current === "waiting") updateNarrationState("idle");
+      if (narrationStateRef.current === "waiting") updateNarrationState("ready");
     } catch (cause) {
       if (generation !== narrationGeneration.current || controller.signal.aborted) return;
       narrationGenerating.current = false;
       narrationRequest.current = undefined;
+      setNarrationGenerationComplete(true);
       const message = cause instanceof Error ? cause.message : "The document could not be read aloud.";
       setNarrationError(message);
       showToast({ title: "Read aloud failed", description: message });
-      if (narrationChunkIndex.current < 0 || narrationStateRef.current === "waiting") updateNarrationState("error");
+      if (narrationChunkIndex.current < 0) updateNarrationState("error");
+      else if (narrationStateRef.current === "waiting") updateNarrationState("ready");
     }
   };
 
-  const toggleNarration = (text: string, name: string) => {
+  const toggleNarration = () => {
     if (narrationStateRef.current === "playing") {
       narrationPlayer.pause();
       updateNarrationState("paused");
     } else if (narrationStateRef.current === "paused") {
       narrationPlayer.play();
       updateNarrationState("playing");
-    } else if (narrationStateRef.current !== "generating" && narrationStateRef.current !== "waiting") {
-      void startNarration(text, name);
+    } else if (narrationStateRef.current === "ready") {
+      const target = resolveAudioTimelinePosition(narrationChunks.current, 0);
+      pendingNarrationSeek.current = { ...target, play: true };
+      narrationChunkIndex.current = target.index;
+      setNarrationActiveIndex(target.index);
+      narrationPlayer.replace(`data:${narrationChunks.current[target.index]!.mimeType};base64,${narrationChunks.current[target.index]!.audioBase64}`);
+      updateNarrationState("playing");
     }
+  };
+
+  const listenToNarration = (text: string, name: string, documentKey?: string) => {
+    if (narrationDocumentKeyRef.current === documentKey && narrationStateRef.current !== "idle" && narrationStateRef.current !== "error") toggleNarration();
+    else void startNarration(text, name, documentKey);
+  };
+
+  const seekNarration = (seconds: number) => {
+    if (narrationChunks.current.length === 0) return;
+    const target = resolveAudioTimelinePosition(narrationChunks.current, seconds);
+    const shouldPlay = narrationStateRef.current === "playing";
+    if (target.index === narrationChunkIndex.current) {
+      void narrationPlayer.seekTo(target.seconds);
+      if (!shouldPlay) updateNarrationState("paused");
+      return;
+    }
+    pendingNarrationSeek.current = { ...target, play: shouldPlay };
+    narrationChunkIndex.current = target.index;
+    setNarrationActiveIndex(target.index);
+    const chunk = narrationChunks.current[target.index]!;
+    narrationPlayer.replace(`data:${chunk.mimeType};base64,${chunk.audioBase64}`);
+    if (!shouldPlay) updateNarrationState("paused");
   };
 
   useEffect(() => {
@@ -452,16 +504,26 @@ export function KnowledgeWorkspace() {
   }, [deferredDocumentSearchQuery, documentSearchMatches]);
 
   useEffect(() => {
+    if (!narrationAudio.isLoaded || !pendingNarrationSeek.current) return;
+    const pending = pendingNarrationSeek.current;
+    if (pending.index !== narrationChunkIndex.current) return;
+    pendingNarrationSeek.current = undefined;
+    lastFinishedNarrationChunk.current = -1;
+    void narrationPlayer.seekTo(pending.seconds).then(() => {
+      if (pending.play) narrationPlayer.play();
+    });
+  }, [narrationAudio.isLoaded, narrationPlayer]);
+
+  useEffect(() => {
     if (!narrationAudio.didJustFinish) return;
     const current = narrationChunkIndex.current;
     if (current < 0 || lastFinishedNarrationChunk.current === current) return;
     lastFinishedNarrationChunk.current = current;
-    const name = selectedDocument?.name ?? title;
-    if (playNarrationChunk(current + 1, name)) return;
+    if (playNarrationChunk(current + 1)) return;
     if (narrationGenerating.current) updateNarrationState("waiting");
     else {
       narrationPlayer.clearLockScreenControls();
-      updateNarrationState("idle");
+      updateNarrationState("ready");
     }
     // Completion is edge-triggered; queue and generation state live in refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1207,28 +1269,44 @@ export function KnowledgeWorkspace() {
           getContentDocumentPreview(queryClient, contentContext, document.key),
           getContentDocument(queryClient, contentContext, document.key),
         ]);
-        if (generation !== navigationGeneration.current) return;
+        if (generation !== navigationGeneration.current) return false;
         setFilePreview(preview);
         setFileContent(detail.content);
         setSelectedDocument(preview);
         if (preview.extension === "pdf") {
           const original = await downloadContentDocument(preview.key, "original");
-          if (generation !== navigationGeneration.current) return;
+          if (generation !== navigationGeneration.current) return false;
           previewFileRef.current?.delete();
           const file = await saveTemporaryBase64File(original.fileName, original.content);
-          if (generation !== navigationGeneration.current) { file.delete(); return; }
+          if (generation !== navigationGeneration.current) { file.delete(); return false; }
           previewFileRef.current = file;
           setFilePreviewUri(file.uri);
         }
       } catch (cause) {
         if (generation === navigationGeneration.current) setFilePreviewError(cause instanceof Error ? cause.message : "The file could not be opened.");
+        return false;
       } finally {
         if (generation === navigationGeneration.current) setOpeningDocumentKey(undefined);
       }
-      return;
+      return true;
     }
-    if (await openNote(document, fromSheet ? setSheetError : setError, preserveSearch)) {
+    const opened = await openNote(document, fromSheet ? setSheetError : setError, preserveSearch);
+    if (opened) {
       if (fromSheet) closeSheet();
+    }
+    return opened;
+  };
+
+  const listenToSelectedDocument = async () => {
+    if (!selectedDocument) return;
+    setDocumentActionLoading("listen");
+    try {
+      const detail = await getContentDocument(queryClient, contentContext, selectedDocument.key);
+      if (await openArchiveDocument(selectedDocument, true)) listenToNarration(detail.content, detail.name, detail.key);
+    } catch (cause) {
+      setSheetError(cause instanceof Error ? cause.message : "The document could not be opened for listening.");
+    } finally {
+      setDocumentActionLoading(undefined);
     }
   };
 
@@ -2164,6 +2242,25 @@ export function KnowledgeWorkspace() {
     return null;
   }
 
+  const narrationAccessory = narrationState !== "idle" ? (
+    <View style={styles.narrationPlayer}>
+      <View style={styles.narrationHeading}>
+        <View style={styles.narrationTitleBlock}>
+          <Text numberOfLines={1} style={styles.narrationTitle}>{narrationTitle || "Document audio"}</Text>
+          <Text style={styles.narrationStatus}>{narrationGenerationComplete ? "LISTENING" : "GENERATING AUDIO"}</Text>
+        </View>
+        <Button accessibilityLabel="Close audio player" contentMode="raw" onPress={stopNarration} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
+      </View>
+      <View style={styles.narrationControls}>
+        <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Play audio"} contentMode="raw" disabled={narrationManifest.length === 0} loading={narrationManifest.length === 0 && narrationState !== "error"} onPress={toggleNarration} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button>
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationElapsed)}</Text>
+        <Slider accessibilityLabel="Audio progress" disabled={narrationDuration <= 0} max={Math.max(1, narrationDuration)} onSlidingComplete={(value) => { setNarrationScrubValue(undefined); seekNarration(value); }} onValueChange={setNarrationScrubValue} style={styles.narrationSlider} value={Math.min(narrationElapsed, narrationDuration)} />
+        <Text style={styles.narrationTime}>{formatAudioTime(narrationDuration)}{narrationGenerationComplete ? "" : "+"}</Text>
+      </View>
+      {narrationError ? <Text accessibilityRole="alert" numberOfLines={2} style={styles.narrationError}>{narrationError}</Text> : null}
+    </View>
+  ) : undefined;
+
   return (
     <KeyboardAvoidingView behavior={aiInputFocused ? "height" : undefined} style={styles.root}>
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
@@ -2175,10 +2272,10 @@ export function KnowledgeWorkspace() {
         loading={Boolean(!filePreviewError && (!filePreview || filePreview.extension === "pdf" && !filePreviewUri))}
         onBack={leaveFileViewer}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
-        onRead={fileContent.trim() ? () => toggleNarration(fileContent, selectedDocument?.name ?? "File") : undefined}
+        onRead={fileContent.trim() ? () => listenToNarration(fileContent, selectedDocument?.name ?? "File", selectedDocument?.key) : undefined}
         onRenderError={setFilePreviewError}
         pdfUri={filePreviewUri}
-        readLoading={narrationState === "waiting" || narrationState === "generating" && narrationChunkCount === 0}
+        readLoading={narrationState === "waiting" || narrationState === "generating" && narrationManifest.length === 0}
         reading={narrationState === "playing"}
         title={selectedDocument?.name ?? "File"}
       /> : <>
@@ -2303,7 +2400,7 @@ export function KnowledgeWorkspace() {
               {editorEditing
                 ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
                 : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => { stopNarration(); setDocumentSearchQuery(""); setEditorEditing(true); }} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
-              {!editorEditing && content.trim() ? <Button accessibilityLabel={narrationState === "playing" ? "Pause reading" : "Read document"} contentMode="raw" loading={narrationState === "waiting" || narrationState === "generating" && narrationChunkCount === 0} onPress={() => toggleNarration(content, title)} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button> : null}
+              {!editorEditing && content.trim() ? <Button accessibilityLabel={narrationState === "playing" ? "Pause listening" : "Listen to document"} contentMode="raw" loading={narrationState === "waiting" || narrationState === "generating" && narrationManifest.length === 0} onPress={() => listenToNarration(content, title, activeDocument?.key)} size="sm" variant="icon">{narrationState === "playing" ? <PauseIcon size="sm" /> : <PlayIcon size="sm" />}</Button> : null}
               <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
               <Button accessibilityLabel="Document version history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => void openVersionHistory()} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
               <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
@@ -2417,6 +2514,7 @@ export function KnowledgeWorkspace() {
       </ScrollView>
 
       <CoreComposer
+        accessory={narrationAccessory}
         accessibilityHint="Ask a question, search your Archive, or describe how to change the open document"
         accessibilityLabel="Ask Core about your Archive"
         disabled={!hasContentContext || instructing || saveState === "saving"}
@@ -2453,6 +2551,7 @@ export function KnowledgeWorkspace() {
       </>}
 
       {workspaceMode === "viewer" ? <CoreComposer
+        accessory={narrationAccessory}
         accessibilityHint="Ask a question about the open file"
         accessibilityLabel="Ask Core about this file"
         disabled={!hasContentContext || instructing || !filePreview}
@@ -2505,6 +2604,7 @@ export function KnowledgeWorkspace() {
         ) : null}
         {activeSheet === "documentActions" && selectedDocument ? (
           <>
+            <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "listen"} onPress={() => void listenToSelectedDocument()}>Listen</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => void toggleFavorite()}>{selectedDocument.isFavorite ? "Remove from favorites" : "Add to favorites"}</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} loading={documentActionLoading === "download"} onPress={() => void downloadOriginal()}>{selectedDocument.extension ? "Download original" : "Download as text"}</BottomSheetItem>
             <BottomSheetItem disabled={Boolean(documentActionLoading)} onPress={() => { setRenameName(selectedDocument.name); pushSheet("rename"); }}>Rename</BottomSheetItem>
@@ -2720,6 +2820,15 @@ const styles = StyleSheet.create({
   aiResponse: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: 3, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   aiResponseText: { color: palette.text, fontFamily: fonts.regular, fontSize: 14, lineHeight: 20 },
   aiResponseSources: { color: palette.muted, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
+  narrationPlayer: { marginHorizontal: 4, marginBottom: spacing.xs, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, gap: spacing.xs, borderRadius: radii.lg, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised },
+  narrationHeading: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  narrationTitleBlock: { flex: 1, gap: 2 },
+  narrationTitle: { color: palette.silver50, fontFamily: fonts.medium, fontSize: 13 },
+  narrationStatus: { color: palette.silver500, fontFamily: fonts.medium, fontSize: 8, letterSpacing: 1.3 },
+  narrationControls: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  narrationSlider: { flex: 1 },
+  narrationTime: { minWidth: 32, color: palette.silver300, fontFamily: fonts.regular, fontSize: 10, textAlign: "center" },
+  narrationError: { color: "#D98B8B", fontFamily: fonts.regular, fontSize: 10, lineHeight: 14 },
   enhancePanel: { gap: 18 },
   enhanceIdentity: { padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderRadius: radii.md, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panel },
   enhanceCopy: { flex: 1, gap: 4 },

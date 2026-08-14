@@ -4,6 +4,7 @@ import { Button } from "../button/button.web";
 import { TextInput } from "../text-input/text-input.web";
 
 export type CoreComposerProps = {
+  accessory?: ReactNode;
   accessibilityHint?: string;
   accessibilityLabel: string;
   disabled?: boolean;
@@ -25,6 +26,7 @@ export type CoreComposerProps = {
 };
 
 export function CoreComposer({
+  accessory,
   accessibilityLabel,
   disabled,
   editable = true,
@@ -45,6 +47,7 @@ export function CoreComposer({
 }: CoreComposerProps) {
   return (
     <div style={style}>
+      {accessory}
       {message}
       <div>
         {onLeadingPress ? (

@@ -28,8 +28,8 @@ describe('audio generation API', () => {
       authorize: async (input, options) => { calls.push({ input, authenticatedUserKey: options.authenticatedUserKey }); return {} as never; },
       generate: async function* (_input, dependencies) {
         expect(dependencies).toMatchObject({ organizationKey });
-        yield { index: 0, startWord: 0, endWord: 20, startCharacter: 0, endCharacter: 100, audioBase64: 'Zmlyc3Q=', mimeType: 'audio/mpeg' };
-        yield { index: 1, startWord: 20, endWord: 21, startCharacter: 101, endCharacter: 105, audioBase64: 'c2Vjb25k', mimeType: 'audio/mpeg' };
+        yield { index: 0, startWord: 0, endWord: 20, startCharacter: 0, endCharacter: 100, audioBase64: 'Zmlyc3Q=', mimeType: 'audio/mpeg', durationMs: 900 };
+        yield { index: 1, startWord: 20, endWord: 21, startCharacter: 101, endCharacter: 105, audioBase64: 'c2Vjb25k', mimeType: 'audio/mpeg', durationMs: 200 };
       },
     }));
     const response = await app.request('/audio/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ organizationKey, agentKey, input: { text: Array.from({ length: 21 }, () => 'word').join(' '), wordsPerChunk: 20 } }) });
@@ -62,7 +62,7 @@ describe('audio generation API', () => {
       getIdentity: async () => ({ key: newId(), identityType: 'user' }) as never,
       authorize: async () => ({} as never),
       generate: async function* () {
-        yield { index: 0, startWord: 0, endWord: 3, startCharacter: 0, endCharacter: 14, audioBase64: 'bXAz', mimeType: 'audio/mpeg' };
+        yield { index: 0, startWord: 0, endWord: 3, startCharacter: 0, endCharacter: 14, audioBase64: 'bXAz', mimeType: 'audio/mpeg', durationMs: 300 };
         throw new Error('provider failed');
       },
     }));

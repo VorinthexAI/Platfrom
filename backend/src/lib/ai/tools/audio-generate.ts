@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { executeAction, type ExecuteActionOptions } from '@/lib/ai/router';
 import { speechInputSchema, type SpeechOutput } from '@/lib/ai/providers';
+import { mp3DurationMs } from '@/lib/ai/audio/mp3-duration';
 
 export const AUDIO_GENERATE_MAX_TEXT_CHARACTERS = 120_000;
 const MAX_POLLY_CHUNK_CHARACTERS = 2_800;
@@ -40,6 +41,7 @@ export const audioGenerateChunkSchema = z.object({
   endCharacter: z.number().int().positive(),
   audioBase64: z.string().min(1),
   mimeType: z.literal('audio/mpeg'),
+  durationMs: z.number().int().positive(),
 }).strict();
 
 export const audioGenerateOutputSchema = z.object({
@@ -54,6 +56,7 @@ export type AudioGenerateOutput = z.infer<typeof audioGenerateOutputSchema>;
 export interface AudioGenerateDependencies extends ExecuteActionOptions {
   organizationKey?: string;
   synthesize?: (input: z.output<typeof speechInputSchema>, signal?: AbortSignal) => Promise<SpeechOutput>;
+  duration?: (bytes: Uint8Array) => number;
 }
 
 export function splitAudioText(rawInput: unknown) {
@@ -78,8 +81,9 @@ export async function* generateAudioChunks(rawInput: unknown, dependencies: Audi
           providerSlug: 'aws-polly',
         }, speechInput, dependencies)).output;
     const parsed = z.object({ audioBase64: z.string().min(1), mimeType: z.enum(['audio/mpeg', 'audio/mp3']) }).parse(output);
+    const audioBytes = new Uint8Array(Buffer.from(parsed.audioBase64, 'base64'));
     const { text: _text, ...metadata } = chunk;
-    yield audioGenerateChunkSchema.parse({ ...metadata, audioBase64: parsed.audioBase64, mimeType: 'audio/mpeg' });
+    yield audioGenerateChunkSchema.parse({ ...metadata, audioBase64: parsed.audioBase64, mimeType: 'audio/mpeg', durationMs: (dependencies.duration ?? mp3DurationMs)(audioBytes) });
   }
 }
 

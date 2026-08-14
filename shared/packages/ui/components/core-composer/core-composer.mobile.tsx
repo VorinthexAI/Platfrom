@@ -29,6 +29,7 @@ import { CloseIcon } from "../../icons/close/close.mobile";
 import { colors, spacing } from "../../tokens";
 
 export type CoreComposerProps = {
+  accessory?: ReactNode;
   accessibilityHint?: string;
   accessibilityLabel: string;
   disabled?: boolean;
@@ -152,6 +153,7 @@ function RotatingPrompt({ prompts }: { prompts: readonly string[] }) {
 }
 
 export function CoreComposer({
+  accessory,
   accessibilityHint,
   accessibilityLabel,
   disabled = false,
@@ -259,6 +261,7 @@ export function CoreComposer({
           },
         ]}
       >
+        {!sheetOpen ? accessory : null}
         {sheetOpen ? (
           <View style={styles.sheetHeader} {...panResponder.panHandlers}>
             <View style={styles.dragTarget}>

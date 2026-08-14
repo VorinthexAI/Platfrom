@@ -10,7 +10,7 @@ test("preserves explicit generation controls without adding empty options", () =
 });
 
 test("accepts complete MP3 chunks and rejects malformed stream data", () => {
-  expect(generatedAudioChunkSchema.parse({ index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 9, audioBase64: "bXAz", mimeType: "audio/mpeg" })).toMatchObject({ index: 0, endWord: 2 });
+  expect(generatedAudioChunkSchema.parse({ index: 0, startWord: 0, endWord: 2, startCharacter: 0, endCharacter: 9, audioBase64: "bXAz", mimeType: "audio/mpeg", durationMs: 900 })).toMatchObject({ index: 0, endWord: 2, durationMs: 900 });
   expect(() => generatedAudioChunkSchema.parse({ index: 0, audioBase64: "bXAz", mimeType: "audio/wav" })).toThrow();
 });
 

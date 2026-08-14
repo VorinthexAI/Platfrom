@@ -43,6 +43,10 @@
       "react-native": "./packages/ui/components/file-viewer/file-viewer.mobile.tsx",
       "default": "./packages/ui/components/file-viewer/file-viewer.web.tsx"
     },
+    "./ui/slider": {
+      "react-native": "./packages/ui/components/slider/slider.mobile.tsx",
+      "default": "./packages/ui/components/slider/slider.web.tsx"
+    },
     "./ui/document-search": "./packages/ui/document-search.ts",
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
