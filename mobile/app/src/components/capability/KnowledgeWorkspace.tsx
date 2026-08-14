@@ -2354,7 +2354,7 @@ export function KnowledgeWorkspace() {
             <View style={styles.rootActions}>
               <View style={styles.rootSearch}>
                 <SearchIcon size="sm" variant="muted" />
-                <TextInput accessibilityLabel="Search all Archive folders, documents, and files" onChangeText={setRootSearchQuery} placeholder="Search folders, documents, and files" style={styles.rootSearchInput} value={rootSearchQuery} />
+                <TextInput accessibilityLabel="Search all Archive folders, documents, and files" onChangeText={setRootSearchQuery} placeholder="Search..." style={styles.rootSearchInput} value={rootSearchQuery} />
                 {rootSearchQuery.trim() ? <Button accessibilityLabel="Clear Archive search" contentMode="raw" onPress={() => setRootSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
               </View>
               <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="md" style={styles.rootCreateButton} variant="icon"><PlusIcon size="sm" /></Button>
@@ -2407,7 +2407,7 @@ export function KnowledgeWorkspace() {
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
             <View style={[styles.rootSearch, styles.folderScopedSearch]}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search folders, documents, and files" style={styles.rootSearchInput} value={query} />
+              <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search..." style={styles.rootSearchInput} value={query} />
               {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
             </View>
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
@@ -2466,7 +2466,7 @@ export function KnowledgeWorkspace() {
           </View>
           <View style={[styles.rootSearch, styles.documentSearch]}>
             <SearchIcon size="sm" variant="muted" />
-            <TextInput accessibilityLabel="Search in document" editable={!editorEditing} maxLength={200} onChangeText={setDocumentSearchQuery} placeholder={editorEditing ? "Lock document to search" : "Search in document"} returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
+            <TextInput accessibilityLabel="Search in document" editable={!editorEditing} maxLength={200} onChangeText={setDocumentSearchQuery} placeholder="Search in document..." returnKeyType="search" style={styles.rootSearchInput} value={documentSearchQuery} />
             {documentSearchQuery.trim() ? <Button accessibilityLabel="Clear document search" contentMode="raw" onPress={() => setDocumentSearchQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
           </View>
           {documentSearchQuery.trim() ? <Text accessibilityLiveRegion="polite" style={styles.documentSearchStatus}>{documentSearchMatches.length ? `${documentSearchMatches.length} ${documentSearchMatches.length === 1 ? "match" : "matches"}` : "No matches"}</Text> : null}
@@ -2795,7 +2795,7 @@ export function KnowledgeWorkspace() {
           <>
             <View style={styles.folderSearch}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search folders" style={styles.folderSearchInput} value={libraryQuery} />
+              <TextInput accessibilityLabel="Search Archive folders" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {showArchiveRoot ? <Button icon={<ArchiveIcon size="md" />} onPress={() => void selectRootFolder()} size="lg" style={styles.folderTile} variant="secondary">Archive</Button> : null}
@@ -2813,7 +2813,7 @@ export function KnowledgeWorkspace() {
           <>
             <View style={styles.folderSearch}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel="Search Archive documents and files" autoFocus onChangeText={setLibraryQuery} placeholder="Search documents and files" style={styles.folderSearchInput} value={libraryQuery} />
+              <TextInput accessibilityLabel="Search Archive documents and files" autoFocus onChangeText={setLibraryQuery} placeholder="Search..." style={styles.folderSearchInput} value={libraryQuery} />
             </View>
             <ScrollView contentContainerStyle={styles.folderGrid} keyboardShouldPersistTaps="handled" style={styles.folderList}>
               {visibleDocuments.map((document) => (

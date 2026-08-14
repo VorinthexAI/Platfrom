@@ -282,8 +282,8 @@ describe('Content runtime', () => {
   test('returns playable audio with conservative document offsets and MIME-matched persistence', async () => {
     const f = fixture('moderator');
     const documentKey = f.addDocument(`0123456789Visible sentence. ${'More words. '.repeat(30)} \`secret code\``);
-    const spoken: string[] = [], uploaded: string[] = [];
-    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { expect(action).toBe('speak'); const parsed = speechInputSchema.parse(input); expect(parsed).toMatchObject({ language: 'English', speakingRate: 1.25 }); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
+    const spoken: string[] = [], actions: string[] = [], uploaded: string[] = [];
+    const dependencies: any = { repository: f.repository, maxSpeechChunkCharacters: 200, runAction: async (action: string, input: any) => { actions.push(action); const parsed = speechInputSchema.parse(input); expect(parsed).toMatchObject({ language: 'English', speakingRate: 1.25 }); spoken.push(parsed.text); return { audioBase64: Buffer.from([spoken.length]).toString('base64'), mimeType: parsed.format === 'mp3' ? 'audio/mpeg' : 'audio/ogg', durationMs: 10 }; }, mergeAudio: async () => new Uint8Array([1, 2, 3]), audioDuration: () => 900, storage: { async upload(input: any) { uploaded.push(input.key); return { storageKey: input.key }; }, async delete() {}, async download() { return { bytes: new Uint8Array() }; }, async copy() { return { storageKey: '' }; } } };
     const ephemeral = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', startOffset: 10, includeTitle: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
     const audio = (ephemeral.results[0]?.data as { audio: Array<{ index: number; url: string; startCharacter: number; endCharacter: number }> }).audio;
     expect(audio.map((item) => item.index)).toEqual([...spoken.keys()]);
@@ -291,8 +291,11 @@ describe('Content runtime', () => {
     expect(audio.every((item) => item.startCharacter >= 10 && item.endCharacter > item.startCharacter)).toBe(true);
     expect(spoken[0]).toStartWith('Notes. Visible sentence.');
     expect(spoken.join(' ')).not.toContain('secret code');
+    expect(actions).toEqual(Array(spoken.length).fill('speak'));
     expect(uploaded).toHaveLength(0);
+    const ephemeralChunkCount = spoken.length;
     const persisted = await runContentTool('document.read', { documentKeys: [documentKey], mode: 'audio', includeCode: false, persistAudio: true, language: 'English', speakingRate: 1.25 }, f.context, dependencies);
+    expect(actions.slice(ephemeralChunkCount)).toEqual(Array(spoken.length - ephemeralChunkCount).fill('generate-speech'));
     expect(uploaded).toHaveLength(1);
     expect(uploaded[0]).toEndWith('.mp3');
     expect(persisted.results[0]?.data).toMatchObject({ audioVersion: { version: 1, durationMs: 900 } });

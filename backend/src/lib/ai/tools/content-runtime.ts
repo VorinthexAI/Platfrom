@@ -22,7 +22,7 @@ import type { BookGenerator } from '@/lib/books/service';
 import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
-type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
+type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'generate-speech' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
 type SafeEvent = {
   type: 'authorization' | 'resolution' | 'action' | 'db' | 'embedding' | 'storage' | 'speech' | 'cleanup';
   status: 'started' | 'succeeded' | 'failed';
@@ -1216,15 +1216,15 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           const current = await document(key, input.mode === 'audio' && input.persistAudio ? 'moderator' : 'viewer', false);
           if (input.mode === 'content') return { documentKey: key, title: current.name, content: current.content };
           if (input.mode === 'html') return { documentKey: key, title: current.name, html: current.html };
-          if (input.persistAudio && current.content.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports documents up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'speak', key);
+          if (input.persistAudio && current.content.length > PERSISTED_AUDIO_MAX_CHARACTERS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports documents up to ${PERSISTED_AUDIO_MAX_CHARACTERS} characters.`, tool, 'generate-speech', key);
           const start = input.startOffset ?? 0;
           const end = Math.min(input.endOffset ?? current.content.length, current.content.length);
-          const maximum = Math.min(Math.max(dependencies.maxSpeechChunkCharacters ?? 1800, 200), 4000);
+          const maximum = Math.min(Math.max(dependencies.maxSpeechChunkCharacters ?? 1800, 200), input.persistAudio ? 2800 : 4000);
           const documentChunks = speechChunks(current.content.slice(start, end), input.includeCode ?? false, maximum)
             .map((chunk) => ({ ...chunk, start: start + chunk.start, end: start + chunk.end }));
           if (input.includeTitle && documentChunks[0]) documentChunks[0] = { ...documentChunks[0], text: `${current.name}. ${documentChunks[0].text}` };
           const chunks = documentChunks;
-          if (input.persistAudio && chunks.length > PERSISTED_AUDIO_MAX_CHUNKS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports at most ${PERSISTED_AUDIO_MAX_CHUNKS} speech segments.`, tool, 'speak', key);
+          if (input.persistAudio && chunks.length > PERSISTED_AUDIO_MAX_CHUNKS) fail('DOCUMENT_TOO_LARGE', `Full audio generation supports at most ${PERSISTED_AUDIO_MAX_CHUNKS} speech segments.`, tool, 'generate-speech', key);
           const audio: Array<{ index: number; url: string; durationMs?: number; startCharacter: number; endCharacter: number }> = [];
           const generated: Uint8Array[] = [];
           let generatedBytes = 0;
@@ -1232,10 +1232,11 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           for (let index = 0; index < chunks.length; index += 1) {
             dependencies.signal?.throwIfAborted();
             const chunk = chunks[index]!;
-            const spoken = await action('speak', {
+            const speechAction = input.persistAudio ? 'generate-speech' : 'speak';
+            const spoken = await action(speechAction, {
               text: chunk.text,
               ...(input.language ? { language: input.language } : {}),
-              ...(input.voice ? { voice: input.voice } : {}),
+              ...(input.voice ? { voice: input.voice } : input.persistAudio ? { voice: 'Joanna' } : {}),
               ...(input.speakingRate ? { speakingRate: input.speakingRate } : {}),
               format: input.persistAudio ? 'mp3' : 'wav',
             }, key, current.scopeKey);
@@ -1251,9 +1252,9 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               ...(spoken.durationMs !== undefined ? { durationMs: spoken.durationMs } : {}),
             };
             if (input.persistAudio) {
-              if (mimeType !== 'audio/mpeg' && mimeType !== 'audio/mp3') fail('DOCUMENT_SPEECH_FAILED', 'Persisted document audio requires MP3 speech output.', tool, 'speak', key);
+              if (mimeType !== 'audio/mpeg' && mimeType !== 'audio/mp3') fail('DOCUMENT_SPEECH_FAILED', 'Persisted document audio requires MP3 speech output.', tool, speechAction, key);
               generatedBytes += bytes.byteLength;
-              if (generatedBytes > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated speech segments exceed the 100 MiB processing limit.', tool, 'speak', key);
+              if (generatedBytes > PERSISTED_AUDIO_MAX_BYTES) fail('DOCUMENT_TOO_LARGE', 'Generated speech segments exceed the 100 MiB processing limit.', tool, 'generate-speech', key);
               generated.push(bytes);
             } else audio.push({ ...item, url: `data:${mimeType};base64,${Buffer.from(bytes).toString('base64')}` });
             duration += spoken.durationMs ?? 0;
