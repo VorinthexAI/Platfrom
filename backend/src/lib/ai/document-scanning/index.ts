@@ -15,12 +15,17 @@ export interface DocumentScanDependencies {
 }
 
 export function normalizeDocumentTranscription(value: string) {
-  return value.replace(/\r\n?/g, '\n')
+  const lines = value.replace(/\r\n?/g, '\n')
     .replace(/^\s*```[^\n]*\n?/, '')
     .replace(/\n?```\s*$/, '')
     .replace(/^\s*(?:final\s+)?transcription\s*:\s*/i, '')
-    .split('\n').map((line) => line.trimEnd()).join('\n')
-    .replace(/\n{3,}/g, '\n\n').trim();
+    .split('\n').map((line) => line.replace(/\t+/g, ' ').replace(/ {2,}/g, ' ').trim());
+  while (lines[0] === '') lines.shift();
+  while (lines.at(-1) === '') lines.pop();
+  const textLineCount = lines.filter(Boolean).length;
+  const blankLineCount = lines.length - textLineCount;
+  const textractLineSpacing = textLineCount >= 3 && blankLineCount >= textLineCount - 1;
+  return lines.join('\n').replace(textractLineSpacing ? /\n{2,}/g : /\n{3,}/g, textractLineSpacing ? '\n' : '\n\n').trim();
 }
 
 export async function scanDocumentImages(input: DocumentScanInput, organizationKey: string, dependencies: DocumentScanDependencies = {}) {

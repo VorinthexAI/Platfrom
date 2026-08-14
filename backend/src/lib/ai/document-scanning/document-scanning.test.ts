@@ -121,3 +121,12 @@ test('starts every page in both visual stages concurrently while OCR runs in par
 test('normalizes model wrappers without stripping visible document symbols', () => {
   expect(normalizeDocumentTranscription('```text\r\nTranscription: # Invoice\r\n\r\n\r\nTotal: *42*\r\n```')).toBe('# Invoice\n\nTotal: *42*');
 });
+
+test('removes tabs, indentation, repeated spaces, and excessive blank lines', () => {
+  expect(normalizeDocumentTranscription('\t  Invoice   number  42  \n   \n\t\n  Total:\t\t $10.00   ')).toBe('Invoice number 42\n\nTotal: $10.00');
+});
+
+test('collapses Textract-style blank lines between every detected line', () => {
+  expect(normalizeDocumentTranscription('Invoice\n\nNumber 42\n\nTotal $10.00\n\nPaid')).toBe('Invoice\nNumber 42\nTotal $10.00\nPaid');
+  expect(normalizeDocumentTranscription('Heading\n\nFirst paragraph\nSecond line\n\nClosing paragraph')).toBe('Heading\n\nFirst paragraph\nSecond line\n\nClosing paragraph');
+});

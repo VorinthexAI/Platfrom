@@ -23,6 +23,7 @@ import {
   ChevronLeftIcon,
   ClockIcon,
   DownloadIcon,
+  EditIcon,
   FileIcon,
   FolderIcon,
   MoreHorizontalIcon,
@@ -170,6 +171,7 @@ export function KnowledgeWorkspace() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
+  const [editorEditing, setEditorEditing] = useState(false);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [title, setTitle] = useState("Untitled document");
@@ -241,6 +243,7 @@ export function KnowledgeWorkspace() {
   const savedTitleRef = useRef(title);
   const savedContentRef = useRef(content);
   const saveInFlight = useRef<Promise<void> | null>(null);
+  const saveImmediately = useRef(false);
   const documentMetadataMutation = useRef<Promise<void> | null>(null);
   const pendingCreate = useRef<PendingCreate | undefined>(undefined);
   const createVersionOnNextSave = useRef(false);
@@ -566,6 +569,8 @@ export function KnowledgeWorkspace() {
   useEffect(() => {
     if (!hasContentContext || !dirty.current) return;
     const session = editorSession.current;
+    const delay = saveImmediately.current ? 0 : 500;
+    saveImmediately.current = false;
     const timeout = setTimeout(() => {
       const previous = saveInFlight.current;
       const save = (async () => {
@@ -653,7 +658,7 @@ export function KnowledgeWorkspace() {
       void save.finally(() => {
         if (saveInFlight.current === save) saveInFlight.current = null;
       });
-    }, 500);
+    }, delay);
     return () => clearTimeout(timeout);
   }, [content, contentContextKey, currentFolder?.key, hasContentContext, saveRetry, title]);
 
@@ -922,6 +927,7 @@ export function KnowledgeWorkspace() {
     }
     setError(undefined);
     resetEditor(nextTitle);
+    setEditorEditing(true);
     workspaceModeRef.current = "editor";
     setWorkspaceMode("editor");
     if (sheetOpen) closeSheet();
@@ -960,6 +966,7 @@ export function KnowledgeWorkspace() {
     setAiResponse(undefined);
     setVersionActionKey(undefined);
     setOpeningDocumentKey(document.key);
+    setEditorEditing(false);
     setError(undefined);
     const previousMode = workspaceModeRef.current;
     titleRef.current = document.name;
@@ -1893,6 +1900,16 @@ export function KnowledgeWorkspace() {
     }
   };
 
+  const finishEditing = () => {
+    Keyboard.dismiss();
+    setEditorFocused(false);
+    if (dirty.current) {
+      saveImmediately.current = true;
+      setSaveRetry((current) => current + 1);
+    }
+    setEditorEditing(false);
+  };
+
   function mutationFooter() {
     const close = (disabled: boolean) => <Button disabled={disabled} onPress={closeSheet} size="lg" variant="secondary">Close</Button>;
     if (activeSheet === "folderDetails") return <>
@@ -2036,6 +2053,9 @@ export function KnowledgeWorkspace() {
           <View style={styles.editorHeader}>
             <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
             <View style={styles.editorHeaderActions}>
+              {editorEditing
+                ? <Button accessibilityLabel="Save and lock document" accessibilityState={{ selected: true }} contentMode="raw" onPress={finishEditing} size="sm" variant="primary"><CheckIcon size="sm" variant="inverse" /></Button>
+                : <Button accessibilityLabel="Edit document" contentMode="raw" onPress={() => setEditorEditing(true)} size="sm" variant="icon"><EditIcon size="sm" /></Button>}
               <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
               <Button accessibilityLabel="Document version history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => void openVersionHistory()} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
               <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
@@ -2076,6 +2096,7 @@ export function KnowledgeWorkspace() {
             </View>
           ) : (
             <>
+              {editorEditing ? <>
               <TextInput
                 accessibilityLabel="Document title"
                 maxLength={255}
@@ -2146,6 +2167,10 @@ export function KnowledgeWorkspace() {
                   {documents.slice(0, 3).map((document) => <Button key={document.key} onPress={() => void openArchiveDocument(document)} size="sm" variant="ghost" icon={<FileIcon size="sm" />}>{document.name}</Button>)}
                 </View>
               ) : null}
+              </> : <ScrollView contentContainerStyle={styles.editorReadDocument} nestedScrollEnabled showsVerticalScrollIndicator={false} style={styles.editorReadScroll}>
+                <Text selectable style={styles.editorReadTitle}>{title}</Text>
+                <Text selectable style={styles.editorReadText}>{content}</Text>
+              </ScrollView>}
             </>
           )}
           </>}
@@ -2441,6 +2466,10 @@ const styles = StyleSheet.create({
   editorFrame: { flex: 1, minHeight: 80, width: "100%", position: "relative", overflow: "hidden" },
   editorFrameFocused: { flex: 1, minHeight: 80 },
   editor: { flex: 1, minHeight: 80, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
+  editorReadScroll: { flex: 1, minHeight: 0, width: "100%" },
+  editorReadDocument: { width: "100%", gap: spacing.md, paddingBottom: spacing.xl },
+  editorReadTitle: { width: "100%", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, textAlign: "left", writingDirection: "ltr" },
+  editorReadText: { width: "100%", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorFocused: { flex: 1, minHeight: 80 },
   editorGhost: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 1, paddingVertical: 10, color: "transparent", fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
   editorGhostSpacer: { color: "transparent" },
