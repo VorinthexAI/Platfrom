@@ -60,7 +60,6 @@ import {
   searchContent,
   searchContentMatches,
   setContentDocumentFavorite,
-  summarizeContentDocument,
   uploadContentDocument,
   updateContentFolder,
   setContentFolderCover,
@@ -1404,21 +1403,13 @@ export function KnowledgeWorkspace() {
     };
   }, [currentFolder?.key, hasContentContext, query, workspaceMode]);
 
-  const openSearchSummary = async (document: ContentSearchMatch) => {
-    summaryRequest.current?.abort();
-    const controller = new AbortController();
-    summaryRequest.current = controller;
-    setSelectedSummary({ ...document, summary: "" });
-    setSummaryLoading(true);
-    setSheetError(undefined);
-    openSheet("summary");
+  const openSearchDocument = async (document: ContentSearchMatch) => {
+    setError(undefined);
     try {
-      const summary = await summarizeContentDocument(document.documentKey, controller.signal);
-      if (!controller.signal.aborted) setSelectedSummary({ ...document, summary });
+      const opened = await getContentDocument(queryClient, contentContext, document.documentKey);
+      await openArchiveDocument(opened);
     } catch (cause) {
-      if (!controller.signal.aborted) setSheetError(cause instanceof Error ? cause.message : "The document summary could not be created.");
-    } finally {
-      if (!controller.signal.aborted) setSummaryLoading(false);
+      setError(cause instanceof Error ? cause.message : "The document could not be opened.");
     }
   };
 
@@ -2029,7 +2020,7 @@ export function KnowledgeWorkspace() {
               <Button accessibilityLabel="Create in Archive" contentMode="raw" disabled={locationLoading} onPress={() => openSheet("create")} size="md" style={styles.rootCreateButton} variant="icon"><PlusIcon size="sm" /></Button>
             </View>
             {rootSearchQuery.trim() ? <View accessibilityLiveRegion="polite" style={styles.rootSearchResults}>
-              {(rootSearchResults ?? []).map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchSummary(document)} size="sm" style={styles.documentButton} variant="secondary">
+              {(rootSearchResults ?? []).map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
                 <FileIcon size="sm" />
                 <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
               </Button>)}
@@ -2093,7 +2084,7 @@ export function KnowledgeWorkspace() {
                 {folderSearchFolders.length === 0 ? <Text style={styles.empty}>No folders matched this search.</Text> : null}
               </View>
             ) : <View accessibilityLiveRegion="polite" style={[styles.folderDocuments, styles.folderTabContent]}>
-              {folderSearchDocuments.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchSummary(document)} size="sm" style={styles.documentButton} variant="secondary">
+              {folderSearchDocuments.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchDocument(document)} size="sm" style={styles.documentButton} variant="secondary">
                 <FileIcon size="sm" />
                 <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
               </Button>)}
