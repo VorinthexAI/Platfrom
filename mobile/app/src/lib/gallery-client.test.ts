@@ -1,13 +1,22 @@
-import { expect, mock, test } from "bun:test";
+import { beforeEach, expect, mock, test } from "bun:test";
+
+const calls: Array<{ path: string; body: Record<string, unknown>; timeout?: number }> = [];
 
 mock.module("@/state/auth", () => ({
-  useAuthStore: { getState: () => ({}) },
+  useAuthStore: { getState: () => ({ organization: { key: "organization" }, scope: { key: "scope" } }) },
 }));
 mock.module("./api-client", () => ({
-  apiClient: { post: () => { throw new Error("Unexpected API call"); } },
+  apiClient: { post: async (path: string, body: Record<string, unknown>, options?: { timeout?: number }) => {
+    calls.push({ path, body, timeout: options?.timeout });
+    if (path === "/gallery/uploads/presign") return { data: { success: true, data: { uploads: [{ clientKey: "local-image", uploadKey: "upload", imageKey: "image", url: "https://uploads.example/image", headers: { "Content-Type": "image/jpeg" } }] } } };
+    if (path === "/gallery/uploads/complete") return { data: { success: true, data: { jobs: [{ key: "upload", imageKey: "image", status: "queued" }] } } };
+    return { data: { success: true, data: { images: [] } } };
+  } },
 }));
 
-const { filterCollections } = await import("./gallery-client");
+const { filterCollections, filterMediaItems, mergeMediaItems, searchGalleryImages, uploadGalleryImages } = await import("./gallery-client");
+
+beforeEach(() => calls.splice(0));
 
 const collection = (name: string, key: string) => ({
   key,
@@ -27,4 +36,81 @@ test("returns every collection for an empty search", () => {
   const collections = [collection("Trips", "trips"), collection("My Images", "default")];
 
   expect(filterCollections(collections, "  ")).toEqual(collections);
+});
+
+const image = (key: string, filename: string, caption: string) => ({
+  key,
+  filename,
+  caption,
+  imageCaptionKey: null,
+  mimeType: "image/jpeg",
+  sizeBytes: 100,
+  width: 10,
+  height: 10,
+  isFavorite: false,
+  createdAt: "2026-08-14T00:00:00.000Z",
+  updatedAt: "2026-08-14T00:00:00.000Z",
+  url: `https://images.example/${key}`,
+});
+
+test("matches collection images immediately by caption regardless of case", () => {
+  const items = [image("rain", "one.jpg", "City reflections after rain"), image("coast", "two.jpg", "Open coastal water")];
+
+  expect(filterMediaItems(items, "RAIN")).toEqual([items[0]]);
+});
+
+test("matches collection images by filename", () => {
+  const items = [image("rain", "night-walk.jpg", "City reflections"), image("coast", "shore.jpg", "Open water")];
+
+  expect(filterMediaItems(items, "night-walk")).toEqual([items[0]]);
+});
+
+test("requires every search term to match the same image", () => {
+  const items = [image("rain", "night.jpg", "City reflections after rain"), image("day", "daylight.jpg", "City daylight")];
+
+  expect(filterMediaItems(items, "city rain")).toEqual([items[0]]);
+});
+
+test("returns the full image set for an empty collection search", () => {
+  const items = [image("rain", "night.jpg", "Rain")];
+
+  expect(filterMediaItems(items, "  ")).toBe(items);
+});
+
+test("merges immediate and semantic matches without changing immediate order", () => {
+  const exact = image("exact", "exact.jpg", "Exact match");
+  const semantic = image("semantic", "semantic.jpg", "Related match");
+
+  expect(mergeMediaItems([exact], [exact, semantic])).toEqual([exact, semantic]);
+});
+
+test("sends collection-scoped semantic searches through the canonical endpoint", async () => {
+  await searchGalleryImages({ query: "rain", collectionKey: "collection", limit: 50 });
+
+  expect(calls).toEqual([{
+    path: "/gallery/images/search",
+    body: { organizationKey: "organization", scopeKey: "scope", query: "rain", collectionKey: "collection", limit: 50 },
+    timeout: 240_000,
+  }]);
+});
+
+test("maps accepted upload jobs back to optimistic client images", async () => {
+  const originalFetch = globalThis.fetch;
+  const uploads: Array<{ url: string; method?: string }> = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "file://image") return new Response(new Blob(["jpeg"]), { status: 200 });
+    uploads.push({ url, method: init?.method });
+    return new Response(null, { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const result = await uploadGalleryImages([{ clientKey: "local-image", filename: "image.jpg", uri: "file://image", sizeBytes: 4 }], "collection");
+
+    expect(result.jobs).toEqual([{ key: "upload", imageKey: "image", status: "queued", clientKey: "local-image" }]);
+    expect(uploads).toEqual([{ url: "https://uploads.example/image", method: "PUT" }]);
+    expect(calls.map(({ path }) => path)).toEqual(["/gallery/uploads/presign", "/gallery/uploads/complete"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
