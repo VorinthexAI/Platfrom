@@ -35,7 +35,7 @@ testRuntime.__archiveApiPost = async (url: string, body: Record<string, any>, co
   }
   const response = responseForTool?.(tool ?? "");
   if (response) return response;
-  if (tool === "document.create" || tool === "document.parse") {
+  if (tool === "document.create" || tool === "document.parse" || tool === "document.scan") {
     return { data: { success: true, data: { document: { key: "document", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z" } } } };
   }
   if (tool === "folder.create") {
@@ -60,8 +60,11 @@ const {
   listContentSearchHistory,
   moveContentFolder,
   moveContentDocument,
+  readContentDocument,
+  readContentDocumentPreview,
   renameContentDocument,
   saveContentDocument,
+  scanContentDocument,
   searchContent,
   searchContentMatches,
   summarizeContentDocument,
@@ -82,6 +85,23 @@ beforeEach(() => {
     scope: { key: "scope-authenticated" },
     contentExecution: { agentKey: "agent-authenticated" },
   };
+});
+
+test("loads editor content and native preview blocks through separate projections", async () => {
+  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "document", name: "Brief.pdf", extension: "pdf", mimeType: "application/pdf", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", content: "Brief", blocks: [{ type: "paragraph", content: [{ text: "Brief" }] }] } } }] } } } : undefined;
+
+  await expect(readContentDocument("document")).resolves.toMatchObject({ content: "Brief", extension: "pdf" });
+  await expect(readContentDocumentPreview("document")).resolves.toMatchObject({ blocks: [{ type: "paragraph", content: [{ text: "Brief" }] }], extension: "pdf" });
+  expect(calls.map(({ body }) => body.input)).toEqual([
+    { documentKeys: ["document"], include: ["content"] },
+    { documentKeys: ["document"], include: ["blocks"] },
+  ]);
+});
+
+test("rejects notes at the file-viewer boundary", async () => {
+  responseForTool = (tool) => tool === "document.find" ? { data: { success: true, data: { results: [{ success: true, data: { document: { key: "note", name: "Note", isFavorite: false, updatedAt: "2026-08-10T00:00:00.000Z", blocks: [{ type: "paragraph", content: [{ text: "Note body" }] }] } } }] } } } : undefined;
+  await expect(readContentDocumentPreview("note")).rejects.toThrow("Notes open in the document editor");
+  expect(calls[0]?.body.input).toEqual({ documentKeys: ["note"], include: ["blocks"] });
 });
 
 test("sends document and folder mutations with the authenticated Archive context", async () => {
@@ -122,6 +142,20 @@ test("uploads documents through the authenticated Archive context", async () => 
   expect(calls[0]?.config.timeout).toBe(5 * 60_000);
   expect(calls[0]?.body.input.idempotencyKey).toBe("upload-upload-digest-upload-digest-folder");
   expect(digestInputs).toEqual(["YWJj", "notes.txt\0text/plain"]);
+});
+
+test("submits ordered scan pages as one editable Archive document", async () => {
+  await scanContentDocument([{ name: "one.jpg", size: 4, base64: "/9j/2Q==" }, { name: "two.jpg", size: 4, base64: "/9j/2Q==" }], "folder");
+  expect(calls[0]?.url).toBe("/api/v1/content/tools/document.scan");
+  expect(calls[0]?.body.input).toMatchObject({
+    scopeKey: "scope-authenticated",
+    folderKey: "folder",
+    pages: [
+      { filename: "one.jpg", mimeType: "image/jpeg", sizeBytes: 4, encoding: "base64", content: "/9j/2Q==" },
+      { filename: "two.jpg", mimeType: "image/jpeg", sizeBytes: 4, encoding: "base64", content: "/9j/2Q==" },
+    ],
+  });
+  expect(calls[0]?.body.input.idempotencyKey).toBe("scan-upload-digest-folder");
 });
 
 test("polls an offloaded upload using the same authenticated Archive context", async () => {

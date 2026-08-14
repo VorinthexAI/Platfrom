@@ -2,12 +2,16 @@ import { expect, test } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 
 import {
+  addCachedContentDocument,
+  addCachedContentFolder,
   contentQueryKeys,
   invalidateContentHistories,
   invalidateContentLocations,
   replaceCachedContentDocument,
   replaceCachedContentDocumentDetail,
   replaceCachedContentFolder,
+  removeCachedContentDocument,
+  removeCachedContentFolder,
 } from "./content-query-cache";
 import type { ContentContext } from "./content-client";
 
@@ -63,6 +67,45 @@ test("invalidates only the affected source and destination locations", async () 
   expect(client.getQueryState(source)?.isInvalidated).toBe(true);
   expect(client.getQueryState(destination)?.isInvalidated).toBe(true);
   expect(client.getQueryState(unrelated)?.isInvalidated).toBe(false);
+});
+
+test("adds completed uploads to only their destination and deduplicates retries", () => {
+  const client = new QueryClient();
+  const destination = contentQueryKeys.location(context, "folder-a");
+  const unrelated = contentQueryKeys.location(context, "folder-b");
+  client.setQueryData(destination, { folders: [], documents: [{ key: "document-a", name: "Alpha", isFavorite: false, updatedAt: "before" }] });
+  client.setQueryData(unrelated, { folders: [], documents: [] });
+  const uploaded = { key: "file-a", name: "Brief.pdf", folderKey: "folder-a", extension: "pdf", isFavorite: false, updatedAt: "after" };
+
+  addCachedContentDocument(client, context, "folder-a", uploaded);
+  addCachedContentDocument(client, context, "folder-a", uploaded);
+
+  expect(client.getQueryData<any>(destination).documents).toEqual([
+    { key: "document-a", name: "Alpha", isFavorite: false, updatedAt: "before" },
+    uploaded,
+  ]);
+  expect(client.getQueryData<any>(unrelated).documents).toEqual([]);
+});
+
+test("optimistically adds and removes documents and folders in exact locations", () => {
+  const client = new QueryClient();
+  const source = contentQueryKeys.location(context, "source");
+  const destination = contentQueryKeys.location(context, "destination");
+  const document = { key: "document-a", name: "Document", folderKey: "source", isFavorite: false, updatedAt: "before" };
+  const folder = { key: "folder-a", name: "Folder", parentFolderKey: "source" };
+  client.setQueryData(source, { folders: [folder], documents: [document] });
+  client.setQueryData(destination, { folders: [], documents: [] });
+
+  removeCachedContentDocument(client, context, "source", document.key);
+  removeCachedContentFolder(client, context, "source", folder.key);
+  addCachedContentDocument(client, context, "destination", { ...document, folderKey: "destination" });
+  addCachedContentFolder(client, context, "destination", { ...folder, parentFolderKey: "destination" });
+
+  expect(client.getQueryData<any>(source)).toEqual({ folders: [], documents: [] });
+  expect(client.getQueryData<any>(destination)).toEqual({
+    folders: [{ ...folder, parentFolderKey: "destination" }],
+    documents: [{ ...document, folderKey: "destination" }],
+  });
 });
 
 test("invalidates affected histories and patches moved document detail without corrupting locations", async () => {

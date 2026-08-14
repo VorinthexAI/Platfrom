@@ -28,6 +28,11 @@ export type ContentDocument = {
   updatedAt: string;
 };
 
+export type ContentDocumentPreview = ContentDocument & {
+  extension: string;
+  blocks: import("@vorinthex/shared/ui/file-viewer").FileViewerBlock[];
+};
+
 export type ContentDocumentVersion = {
   key: string;
   documentKey: string;
@@ -138,7 +143,7 @@ async function callContentTool<T>(tool: string, input: Record<string, unknown>, 
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
       input,
-    }, { signal, timeout: tool === "document.parse" ? 5 * 60_000 : tool === "autocomplete" ? 15_000 : 60_000 });
+    }, { signal, timeout: tool === "document.parse" || tool === "document.scan" ? 5 * 60_000 : tool === "autocomplete" ? 15_000 : 60_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     return response.data.data;
   } catch (error) {
@@ -277,8 +282,19 @@ export async function readContentDocument(documentKey: string) {
   }>("document.find", { documentKeys: [documentKey], include: ["content"] });
   const result = data.results[0];
   const document = result?.data?.document;
-  if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The note could not be opened.");
+  if (!result?.success || !document || document.content === undefined) throw new Error(result?.error?.message ?? "The document could not be opened.");
   return { ...document, content: document.content };
+}
+
+export async function readContentDocumentPreview(documentKey: string) {
+  const data = await callContentTool<{
+    results: { success: boolean; data?: { document: ContentDocument & { blocks?: ContentDocumentPreview["blocks"] } }; error?: { message: string } }[];
+  }>("document.find", { documentKeys: [documentKey], include: ["blocks"] });
+  const result = data.results[0];
+  const document = result?.data?.document;
+  if (!result?.success || !document || document.blocks === undefined) throw new Error(result?.error?.message ?? "The file could not be opened.");
+  if (!document.extension) throw new Error("Notes open in the document editor, not the file viewer.");
+  return { ...document, extension: document.extension, blocks: document.blocks };
 }
 
 export async function createContentDocument(name: string, content: string, folderKey?: string, mutationKey = createContentMutationKey()) {
@@ -458,6 +474,30 @@ export async function uploadContentDocument(file: { name: string; type: string; 
       organizationKey: contentContext.organizationKey,
       agentKey: contentContext.agentKey,
     }, { timeout: 30_000 });
+    if (!response.data.success) throw new Error(response.data.error.message);
+    data = response.data.data;
+  }
+  return data;
+}
+
+export async function scanContentDocument(pages: { name: string; size: number; base64: string }[], folderKey?: string, contentContext = getContentContext()) {
+  if (!isContentContextConfigured(contentContext)) throw new Error("Archive is unavailable for this session.");
+  const contentDigest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, pages.map((page) => page.base64).join("\0"));
+  const idempotencyKey = `scan-${contentDigest}-${folderKey ?? "root"}`;
+  let data = await callContentTool<{ document: ContentDocument } | { job: { key: string; state: string } }>("document.scan", {
+    scopeKey: contentContext.scopeKey,
+    folderKey,
+    name: `Scanned document ${new Date().toISOString().slice(0, 10)}`,
+    pages: pages.map((page) => ({ filename: page.name, mimeType: "image/jpeg", sizeBytes: page.size, encoding: "base64", content: page.base64 })),
+    idempotencyKey,
+  }, undefined, contentContext);
+  const deadline = Date.now() + 30 * 60_000;
+  let firstPoll = true;
+  while (!("document" in data)) {
+    if (Date.now() >= deadline) throw new Error("The scan is still processing. Submit the same pages to reconnect.");
+    if (!firstPoll) await wait(2_000);
+    firstPoll = false;
+    const response = await apiClient.post<ToolResponse<{ document: ContentDocument } | { job: { key: string; state: string } }>>(`/api/v1/content/document-jobs/${data.job.key}`, { organizationKey: contentContext.organizationKey, agentKey: contentContext.agentKey, tool: "document.scan" }, { timeout: 30_000 });
     if (!response.data.success) throw new Error(response.data.error.message);
     data = response.data.data;
   }

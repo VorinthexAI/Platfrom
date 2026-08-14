@@ -18,7 +18,7 @@ describe('image.caption tool', () => {
     });
 
     expect(receivedOrganization).toBe('organization-key');
-    expect(receivedInput).toEqual({ imageUrls: ['https://cdn.example.com/one.jpg', 'https://cdn.example.com/two.jpg'] });
+    expect(receivedInput).toEqual({ imageUrls: ['https://cdn.example.com/one.jpg', 'https://cdn.example.com/two.jpg'], purpose: 'caption' });
     expect(output).toEqual({ captions: ['First rich caption.', 'Second rich caption.'] });
     await expect(imageCaptionTool.execute({ imageUrls: ['file:///private/image.jpg'] }, {
       executeImageCaption: async () => ({}) as never,

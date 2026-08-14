@@ -97,63 +97,28 @@ function ChromeGradient({ muted = false }: { muted?: boolean }) {
 
 function ButtonLoadingFill({ primary, reducedMotion }: { primary: boolean; reducedMotion: boolean }) {
   const rise = useRef(new Animated.Value(0)).current;
-  const firstBubble = useRef(new Animated.Value(0)).current;
-  const secondBubble = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     rise.stopAnimation();
-    firstBubble.stopAnimation();
-    secondBubble.stopAnimation();
     if (reducedMotion) {
       rise.setValue(1);
-      firstBubble.setValue(0);
-      secondBubble.setValue(0);
       return;
     }
 
     rise.setValue(0);
-    firstBubble.setValue(0);
-    secondBubble.setValue(0);
-    const bubbleLoop = (value: Animated.Value, delay: number) => Animated.sequence([
-      Animated.delay(delay),
-      Animated.loop(Animated.timing(value, {
-        duration: 1300,
-        easing: Easing.in(Easing.quad),
-        toValue: 1,
-        useNativeDriver: true,
-      })),
-    ]);
-    const animation = Animated.parallel([
-      Animated.timing(rise, {
-        duration: 1400,
-        easing: Easing.bezier(0.16, 1, 0.3, 1),
-        toValue: 1,
-        useNativeDriver: true,
-      }),
-      bubbleLoop(firstBubble, 250),
-      bubbleLoop(secondBubble, 850),
-    ]);
+    const animation = Animated.timing(rise, {
+      duration: 1400,
+      easing: Easing.bezier(0.16, 1, 0.3, 1),
+      toValue: 1,
+      useNativeDriver: true,
+    });
     animation.start();
     return () => animation.stop();
-  }, [firstBubble, reducedMotion, rise, secondBubble]);
-
-  const bubbleStyle = (value: Animated.Value) => ({
-    opacity: value.interpolate({ inputRange: [0, 0.25, 1], outputRange: [0, 0.85, 0] }),
-    transform: [
-      { translateY: value.interpolate({ inputRange: [0, 1], outputRange: [0, -34] }) },
-      { scale: value.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] }) },
-    ],
-  });
+  }, [reducedMotion, rise]);
 
   return (
     <Animated.View style={[styles.loadingFill, { transform: [{ scaleY: rise }] }]}>
       <ChromeGradient muted={!primary} />
-      {primary && !reducedMotion && (
-        <>
-          <Animated.View style={[styles.bubble, styles.firstBubble, bubbleStyle(firstBubble)]} />
-          <Animated.View style={[styles.bubble, styles.secondBubble, bubbleStyle(secondBubble)]} />
-        </>
-      )}
     </Animated.View>
   );
 }
@@ -359,14 +324,4 @@ const styles = StyleSheet.create({
     top: 0,
     transformOrigin: "bottom",
   },
-  bubble: {
-    backgroundColor: "rgba(255, 255, 255, 0.95)",
-    borderRadius: 999,
-    bottom: -6,
-    height: 10,
-    position: "absolute",
-    width: 10,
-  },
-  firstBubble: { left: "27%" },
-  secondBubble: { height: 7, left: "66%", width: 7 },
 });

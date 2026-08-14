@@ -104,6 +104,20 @@ describe('Content runtime', () => {
     expect(f.patches.at(-1)).not.toHaveProperty('embedding');
   });
 
+  test('projects native document blocks only when requested', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument();
+    f.documents.get(documentKey).html = '<h1><strong>Preview</strong></h1><p>Native body</p>';
+    const projected = await runContentTool('document.find', { documentKeys: [documentKey], include: ['blocks'] }, f.context, { repository: f.repository });
+    expect(projected.results[0]).toMatchObject({ success: true, data: { document: { blocks: [
+      { type: 'heading', level: 1, content: [{ text: 'Preview', bold: true }] },
+      { type: 'paragraph', content: [{ text: 'Native body' }] },
+    ] } } });
+    const summary = await runContentTool('document.find', { documentKeys: [documentKey] }, f.context, { repository: f.repository });
+    expect(summary.results[0]?.data?.document).not.toHaveProperty('blocks');
+    expect(projected.results[0]?.data?.document).not.toHaveProperty('html');
+  });
+
   test('sets, projects, clears, and scope-validates folder covers', async () => {
     const f = fixture('moderator');
     const imageKey = newId();
@@ -926,6 +940,7 @@ describe('Content runtime', () => {
         canPermanentlyDelete: () => true,
         generateExport: async (input: any) => ({ bytes: new TextEncoder().encode(input.format), mimeType: 'text/plain', extension: input.format }),
         parseDocument: async () => ({ document: f.documents.get(documentKey) }),
+        scanDocument: async () => ({ documentKey: newId(), content: 'Scanned body', storageKeys: ['scan/page-01.jpg'] }),
         bookRuntime: { create: async () => newId(), write: async () => {} },
         runAction: async (action: string, input: any) => {
           if (action === 'ask' || action === 'enhance' || action === 'translate' || action === 'reason' || action === 'deep-reason') return { text: 'Generated text' };
@@ -956,6 +971,7 @@ describe('Content runtime', () => {
       else if (name === 'folder.restore') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'folder.delete') { f.folders.get(childKey).deletedAt = now; input = { folderKeys: [childKey] }; }
       else if (name === 'document.parse') input = { file: { filename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 4, bytes: new Uint8Array([1, 2, 3, 4]) }, scopeKey: f.scopeKey, folderKey: f.folderKey };
+      else if (name === 'document.scan') input = { pages: [{ filename: 'page.jpg', mimeType: 'image/jpeg', sizeBytes: 4, bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]) }], scopeKey: f.scopeKey, folderKey: f.folderKey };
       else if (name === 'document.create') input = { scopeKey: f.scopeKey, folderKey: f.folderKey, name: 'Created document', representation: { content: 'Created body' } };
       else if (name === 'document.find') input = { documentKeys: [documentKey], include: ['content'] };
       else if (name === 'document.list') input = { scopeKey: f.scopeKey, folderKey: f.folderKey };

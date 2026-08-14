@@ -204,10 +204,11 @@ export function CoreComposer({
     if (!sheetOpen || Platform.OS !== "android") return;
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (keyboardVisible) Keyboard.dismiss();
+      else closeSheet();
       return true;
     });
     return () => subscription.remove();
-  }, [keyboardVisible, sheetOpen]);
+  }, [closeSheet, keyboardVisible, sheetOpen]);
 
   function openSheet() {
     if (sheetOpen) return;
@@ -245,7 +246,7 @@ export function CoreComposer({
 
   return (
     <View pointerEvents="box-none" style={styles.layer}>
-      {sheetOpen ? <View pointerEvents="none" style={styles.backdrop} /> : null}
+      {sheetOpen ? <View onStartShouldSetResponder={() => true} style={styles.backdrop} /> : null}
       <Animated.View
         pointerEvents="box-none"
         style={[
@@ -276,7 +277,7 @@ export function CoreComposer({
             </Button>
           </View>
         ) : null}
-        <View style={styles.sheetBody}>
+        <View onStartShouldSetResponder={() => sheetOpen} style={styles.sheetBody}>
           {sheetOpen ? message : null}
           <View style={[styles.composer, sheetOpen && styles.composerOpen]}>
           {onLeadingPress ? (
@@ -338,6 +339,9 @@ export function CoreComposer({
             {sendIcon}
           </Button>
           </View>
+          {sheetOpen ? <View style={styles.sheetFooter}>
+            <Button onPress={closeSheet} size="lg" variant="secondary">Close</Button>
+          </View> : null}
         </View>
       </Animated.View>
     </View>
@@ -416,6 +420,9 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 6,
     justifyContent: "flex-end",
+  },
+  sheetFooter: {
+    paddingTop: spacing.sm,
   },
   composer: {
     alignItems: "center",

@@ -31,6 +31,14 @@
       "react-native": "./packages/ui/components/tabs/tabs.mobile.tsx",
       "default": "./packages/ui/components/tabs/tabs.web.tsx"
     },
+    "./ui/toast": {
+      "react-native": "./packages/ui/components/toast/toast.mobile.tsx",
+      "default": "./packages/ui/components/toast/toast.web.tsx"
+    },
+    "./ui/file-viewer": {
+      "react-native": "./packages/ui/components/file-viewer/file-viewer.mobile.tsx",
+      "default": "./packages/ui/components/file-viewer/file-viewer.web.tsx"
+    },
     "./ui/components": "./packages/ui/components.ts",
     "./ui/icons": "./packages/ui/icons.ts",
     "./ui/icons-mobile": "./packages/ui/icons-mobile.ts",
@@ -62,6 +70,7 @@
   "peerDependencies": {
     "react": "19.2.3",
     "react-native": ">=0.86",
+    "react-native-pdf": ">=7",
     "react-native-safe-area-context": ">=5.7"
   },
   "devDependencies": {

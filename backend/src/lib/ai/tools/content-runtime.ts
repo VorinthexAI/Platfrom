@@ -14,10 +14,11 @@ import type { generateDocumentExport } from '@/lib/ai/document-processing/export
 import type { ContentToolName, ContentToolOutput } from './content-schemas';
 import { ContentError, type ContentErrorCode } from './content-errors';
 import { contentToolInputSchemas, contentToolOutputSchemas, isContentToolName } from './content-registry';
-import { htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
+import { htmlToDocumentPreviewBlocks, htmlToPlainText, sanitizeDocumentHtml } from '@/lib/ai/document-processing/representation';
 import { EMBEDDING_DIMENSIONS } from '@/lib/embedding-constants';
 import { chunkDocumentContent } from '@/lib/ai/document-processing/chunking';
 import type { BookGenerator } from '@/lib/books/service';
+import type { DocumentScanInput } from '@/lib/ai/document-scanning';
 
 type Role = 'viewer' | 'moderator' | 'admin' | 'owner';
 type Action = 'ask' | 'enhance' | 'translate' | 'read' | 'traverse' | 'insert' | 'update' | 'delete' | 'embed' | 'speak' | 'reason' | 'deep-reason' | 'document-generate-html' | 'document-generate-content' | 'document-embed';
@@ -97,6 +98,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   generateExport?: typeof generateDocumentExport;
   searchQueries?: ContentSearchQueryStore;
   bookRuntime?: BookGenerator;
+  scanDocument?: (input: DocumentScanInput, organizationKey: string) => Promise<{ documentKey: string; content: string; storageKeys: string[] }>;
   getFolderCoverImage?: (scopeKey: string, imageKey: string) => Promise<{ storageKey: string } | null>;
   signFolderCoverUrl?: (storageKey: string) => Promise<string>;
 }
@@ -105,7 +107,7 @@ const rank: Record<Role, number> = { viewer: 1, moderator: 2, admin: 3, owner: 4
 const ROUTED_EMBEDDING_CONCURRENCY = 8;
 const scrypt = promisify(nodeScrypt);
 const MUTATIONS = new Set<ContentToolName>([
-  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
+  'book.create-context', 'book.write', 'folder.create', 'folder.update', 'folder.rename', 'folder.move', 'folder.archive', 'folder.restore', 'folder.delete', 'document.parse', 'document.scan', 'document.create', 'document.update', 'document.rename', 'document.move', 'document.copy', 'document.archive', 'document.restore', 'document.delete', 'document.share', 'document.unshare', 'document.create-version', 'document.restore-version', 'document.delete-version', 'document.summarize', 'document.translate', 'document.rewrite',
 ]);
 
 function fail(code: ContentErrorCode, message: string, tool: ContentToolName, action?: string, resourceKey?: string, cause?: unknown, retryable = false): never {
@@ -139,7 +141,7 @@ async function folderView(folder: Folder, dependencies: Pick<RuntimeDefaults, 'g
 }
 
 function documentView(document: Document) {
-  const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
+  const { html: _html, content: _content, embedding: _embedding, contentChunks: _contentChunks, chunkEmbeddings: _chunkEmbeddings, semanticChunkCount: _semanticChunkCount, semanticContentHash: _semanticContentHash, _semanticChunkingSkipped: _semanticChunkingSkipped, storageKey: _storageKey, speechStorageKeys: _speechStorageKeys, sourceStorageKeys: _sourceStorageKeys, _internalDeletion: _internalDeletion, ...safe } = document;
   return safe;
 }
 
@@ -1035,7 +1037,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             for (const item of related) for (const version of item.versions) {
               if (!await canPermanentlyDelete({ kind: 'version', deletedAt: item.document.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
-            const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? [])]).filter((item): item is string => Boolean(item)))];
+            const inventoriedKeys = [...new Set(related.flatMap((item) => [item.document.storageKey, ...(item.document.speechStorageKeys ?? []), ...(item.document.sourceStorageKeys ?? [])]).filter((item): item is string => Boolean(item)))];
             const manifest = root._internalDeletion?.objectKeys ? root._internalDeletion : { ...root._internalDeletion!, objectKeys: inventoriedKeys };
             if (!root._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setFolderDeletion(root.key, manifest, root._internalDeletion!.owner));
@@ -1084,6 +1086,40 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         },
       });
       result = { document: documentView(processed.document) };
+    } else if (tool === 'document.scan') {
+      await location(input.scopeKey, input.folderKey, 'moderator');
+      const processingInput = { ...input, idempotencyKey: input.idempotencyKey ? createHash('sha256').update(member.user.key).update('\0').update(input.idempotencyKey).digest('hex') : invocationKey };
+      const scan = dependencies.scanDocument ?? (await import('@/lib/ai/document-scanning')).scanDocumentImages;
+      const deterministicKey = (await import('@/lib/ai/document-processing')).documentKeyForRequest(input.scopeKey, input.folderKey, processingInput.idempotencyKey);
+      const replay = await repo.getDocument(deterministicKey);
+      if (replay) result = { document: documentView(replay) };
+      else {
+        const processed = await scan(processingInput, context.organizationKey);
+        try {
+          const transformed = await representations({ content: processed.content }, input.name ?? `Scanned document ${d.clock().toISOString().slice(0, 10)}`, processed.documentKey, input.scopeKey);
+          const timestamp = now();
+          const created = await repo.insertDocument({
+            key: processed.documentKey,
+            scopeKey: input.scopeKey,
+            ...(input.folderKey ? { folderKey: input.folderKey } : {}),
+            name: input.name ?? `Scanned document ${timestamp.slice(0, 10)}`,
+            isFavorite: false,
+            sourceStorageKeys: processed.storageKeys,
+            ...transformed,
+            deletedAt: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+          result = { document: documentView(created) };
+        } catch (error) {
+          const committed = await repo.getDocument(processed.documentKey).catch(() => null);
+          if (committed) result = { document: documentView(committed) };
+          else {
+            await Promise.allSettled(processed.storageKeys.map((key) => d.storage.delete(key)));
+            throw error;
+          }
+        }
+      }
     } else if (tool === 'document.create') {
       await location(input.scopeKey, input.folderKey, 'moderator');
       const key = d.id();
@@ -1113,6 +1149,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           return {
             document: {
               ...documentView(current),
+              ...(include.includes('blocks') ? { blocks: htmlToDocumentPreviewBlocks(current.html) } : {}),
               ...(include.includes('html') ? { html: current.html } : {}),
               ...(include.includes('content') ? { content: current.content } : {}),
               ...(include.includes('embedding') ? { embedding: current.embedding } : {}),
@@ -1297,6 +1334,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
               isFavorite: false,
               ...semantics,
                ...(storageKey ? { storageKey } : {}),
+              sourceStorageKeys: undefined,
               deletedAt: null,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -1405,7 +1443,7 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
             for (const version of versions) {
               if (!await canPermanentlyDelete({ kind: 'version', deletedAt: current.deletedAt, context })) fail('CONTENT_FORBIDDEN', 'Version retention policy denied permanent deletion.', tool, 'delete', version.key);
             }
-            const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? [])].filter((item): item is string => Boolean(item)))];
+            const inventoriedKeys = [...new Set([current.storageKey, ...(current.speechStorageKeys ?? []), ...(current.sourceStorageKeys ?? [])].filter((item): item is string => Boolean(item)))];
             const deletion = current._internalDeletion?.objectKeys ? current._internalDeletion : { ...current._internalDeletion!, objectKeys: inventoriedKeys };
             if (!current._internalDeletion?.objectKeys) {
               const persisted = await repo.transaction((bound) => bound.setDocumentDeletion(key, deletion, current._internalDeletion!.owner));

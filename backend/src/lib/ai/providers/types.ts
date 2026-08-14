@@ -181,11 +181,16 @@ const httpImageUrlSchema = z.string().url().refine((value) => {
 
 export const imageCaptionInputSchema = z.object({
   imageUrls: z.array(httpImageUrlSchema).min(1).max(MAX_IMAGE_CAPTION_URLS),
-}).strict();
+  purpose: z.enum(['caption', 'document-transcription', 'document-reconciliation']).default('caption'),
+  referenceTexts: z.array(z.object({ primary: z.string().max(40_000), secondary: z.string().max(40_000) }).strict()).min(1).max(MAX_IMAGE_CAPTION_URLS).optional(),
+}).strict().superRefine((input, context) => {
+  if (input.purpose === 'document-reconciliation' && input.referenceTexts?.length !== input.imageUrls.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ['referenceTexts'], message: 'Reconciliation requires one text pair per image.' });
+  if (input.purpose !== 'document-reconciliation' && input.referenceTexts !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ['referenceTexts'], message: 'Reference texts are only valid for document reconciliation.' });
+});
 export type ImageCaptionInput = z.infer<typeof imageCaptionInputSchema>;
 
 export const imageCaptionOutputSchema = z.object({
-  captions: z.array(z.string().trim().min(1).max(4_000)).min(1).max(MAX_IMAGE_CAPTION_URLS),
+  captions: z.array(z.string().trim().min(1).max(20_000)).min(1).max(MAX_IMAGE_CAPTION_URLS),
 }).strict();
 export type ImageCaptionOutput = z.infer<typeof imageCaptionOutputSchema>;
 

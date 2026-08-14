@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { extractionResultSchema, type ExtractedBlock, type ExtractionResult } from './schemas';
+import { documentPreviewBlockSchema, extractionResultSchema, type DocumentInlineRun, type DocumentPreviewBlock, type ExtractedBlock, type ExtractionResult } from './schemas';
 
 const documentStringSchema = z.string().max(10_000_000).refine((value) => !value.includes('\0'), 'Document content cannot contain null bytes.');
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!);
@@ -140,6 +140,59 @@ function extracted(node: HtmlNode): ExtractedBlock[] {
 
 export function htmlToExtractedBlocks(input: string): ExtractedBlock[] {
   return parseDocumentHtml(input).children.flatMap((child) => typeof child === 'string' ? [] : extracted(child));
+}
+
+type InlineMarks = Omit<DocumentInlineRun, 'text'>;
+function inlineRuns(node: HtmlNode | string, marks: InlineMarks = {}): DocumentInlineRun[] {
+  if (typeof node === 'string') return node ? [{ text: node.replace(/\s+/g, ' '), ...marks }] : [];
+  if (node.tag === 'br') return [{ text: '\n', ...marks }];
+  if (node.tag === 'img') return node.attrs.alt ? [{ text: node.attrs.alt, ...marks }] : [];
+  const next = {
+    ...marks,
+    ...(['strong', 'b'].includes(node.tag) ? { bold: true } : {}),
+    ...(['em', 'i'].includes(node.tag) ? { italic: true } : {}),
+    ...(node.tag === 'u' ? { underline: true } : {}),
+    ...(node.tag === 's' ? { strike: true } : {}),
+    ...(node.tag === 'code' ? { code: true } : {}),
+    ...(node.tag === 'a' && /^https?:\/\//i.test(node.attrs.href ?? '') ? { href: node.attrs.href } : {}),
+  };
+  const runs = node.children.flatMap((child) => inlineRuns(child, next));
+  return runs.reduce<DocumentInlineRun[]>((result, run) => {
+    const previous = result.at(-1);
+    if (previous && JSON.stringify({ ...previous, text: undefined }) === JSON.stringify({ ...run, text: undefined })) previous.text += run.text;
+    else result.push(run);
+    return result;
+  }, []);
+}
+
+function childElements(node: HtmlNode, tags?: string[]) {
+  return node.children.filter((child): child is HtmlNode => typeof child !== 'string' && (!tags || tags.includes(child.tag)));
+}
+
+function previewBlocks(node: HtmlNode): DocumentPreviewBlock[] {
+  if (/^h[1-6]$/.test(node.tag)) return [{ type: 'heading', level: Number(node.tag[1]), content: inlineRuns(node) }];
+  if (node.tag === 'p' || node.tag === 'figcaption') return [{ type: 'paragraph', content: inlineRuns(node) }];
+  if (node.tag === 'blockquote') return [{ type: 'blockquote', children: childElements(node).flatMap(previewBlocks) }];
+  if (node.tag === 'pre') return [{ type: 'codeBlock', text: treeText(node, true).trimEnd() }];
+  if (node.tag === 'hr') return [{ type: 'horizontalRule' }];
+  if (node.tag === 'section' && node.attrs.class === 'doc-page' && /^\d{1,5}$/.test(node.attrs['data-page'] ?? '')) return [{ type: 'page', page: Number(node.attrs['data-page']), children: childElements(node).flatMap(previewBlocks) }];
+  if (node.tag === 'ul' || node.tag === 'ol') {
+    const items = childElements(node, ['li']).map((item) => ({
+      content: item.children.filter((child) => typeof child === 'string' || !['ul', 'ol'].includes(child.tag)).flatMap((child) => inlineRuns(child)),
+      children: childElements(item, ['ul', 'ol']).flatMap(previewBlocks),
+    }));
+    return node.tag === 'ul' ? [{ type: 'bulletList', items }] : [{ type: 'orderedList', start: /^\d+$/.test(node.attrs.start ?? '') ? Number(node.attrs.start) : 1, items }];
+  }
+  if (node.tag === 'table') {
+    const rows = childElements(node).flatMap((child) => ['tbody', 'thead'].includes(child.tag) ? childElements(child, ['tr']) : child.tag === 'tr' ? [child] : []);
+    return [{ type: 'table', rows: rows.map((row) => ({ cells: childElements(row, ['td', 'th']).map((cell) => ({ header: cell.tag === 'th', colSpan: Number(cell.attrs.colspan) || 1, rowSpan: Number(cell.attrs.rowspan) || 1, content: inlineRuns(cell) })) })) }];
+  }
+  const children = node.children.flatMap((child) => typeof child === 'string' ? child.trim() ? [{ type: 'paragraph' as const, content: inlineRuns(child) }] : [] : previewBlocks(child));
+  return children;
+}
+
+export function htmlToDocumentPreviewBlocks(input: string): DocumentPreviewBlock[] {
+  return z.array(documentPreviewBlockSchema).parse(previewBlocks(parseDocumentHtml(sanitizeDocumentHtml(input))));
 }
 
 const escapeMarkdown = (value: string) => value.replace(/([\\`*_[\]<>])/g, '\\$1');

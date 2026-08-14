@@ -135,12 +135,19 @@ async function captionImages<TInput, TOutput>(
     throw new ProviderError(PROVIDER_ID, 'unsupported_action', `OpenRouter image captions require ${IMAGE_CAPTION_EXTERNAL_MODEL_ID}`);
   }
   const input = imageCaptionInputSchema.parse(request.input);
+  const instruction = input.purpose === 'document-transcription'
+    ? `Transcribe all visible text from each of the ${input.imageUrls.length} document images below, preserving order, paragraphs, headings, lists, tables, punctuation, and line relationships. Return only the detailed transcription for each image. Do not summarize, correct, infer, or omit uncertain text; mark genuinely unreadable fragments as [unreadable].`
+    : input.purpose === 'document-reconciliation'
+      ? `Produce the best faithful transcription for each of the ${input.imageUrls.length} document images below. Compare the primary AWS Textract text with the secondary visual-model text against the image itself. Treat the primary text as authoritative when sources conflict, but repair clear OCR mistakes and restore layout or text the primary source missed when the image supports it. Preserve headings, paragraphs, lists, tables, punctuation, and page order. Return only each final transcription without commentary.`
+      : `Write one rich, factual caption for each of the ${input.imageUrls.length} images below, preserving their order. Each caption must be a detailed paragraph that clearly describes visible people, objects, actions, setting, composition, colors, lighting, visual style, and readable text when present. Describe only clearly visible content, do not speculate about identity, intent, location, or events, and do not add metadata or commentary.`;
   const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [{
     type: 'text',
-    text: `Write one rich, factual caption for each of the ${input.imageUrls.length} images below, preserving their order. Each caption must be a detailed paragraph that clearly describes visible people, objects, actions, setting, composition, colors, lighting, visual style, and readable text when present. Describe only clearly visible content, do not speculate about identity, intent, location, or events, and do not add metadata or commentary.`,
+    text: instruction,
   }];
   input.imageUrls.forEach((url, index) => {
     content.push({ type: 'text', text: `Image ${index + 1}:` });
+    const references = input.referenceTexts?.[index];
+    if (references) content.push({ type: 'text', text: `Primary AWS Textract text:\n${references.primary}\n\nSecondary visual transcription:\n${references.secondary}` });
     content.push({ type: 'image_url', image_url: { url, detail: 'high' } });
   });
 
@@ -151,7 +158,7 @@ async function captionImages<TInput, TOutput>(
       model: request.externalModelId,
       messages: [{ role: 'user', content }],
       temperature: 0.2,
-      max_tokens: Math.min(input.imageUrls.length * 300, MAX_IMAGE_CAPTION_URLS * 300),
+      max_tokens: Math.min(input.imageUrls.length * (input.purpose === 'caption' ? 300 : 1_500), 16_000),
       provider: { data_collection: 'deny', zdr: true },
       response_format: {
         type: 'json_schema',
@@ -167,7 +174,7 @@ async function captionImages<TInput, TOutput>(
                 type: 'array',
                 minItems: input.imageUrls.length,
                 maxItems: input.imageUrls.length,
-                items: { type: 'string', minLength: 1, maxLength: 4_000 },
+                items: { type: 'string', minLength: 1, maxLength: 20_000 },
               },
             },
           },

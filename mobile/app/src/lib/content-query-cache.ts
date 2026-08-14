@@ -4,6 +4,7 @@ import {
   listContentLocation,
   listContentSearchHistory,
   readContentDocument,
+  readContentDocumentPreview,
   type ContentContext,
   type ContentDocument,
   type ContentFolder,
@@ -18,6 +19,7 @@ export const contentQueryKeys = {
   locations: (context: ContentContext) => [...contentQueryKeys.all(context), "locations"] as const,
   location: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.locations(context), folderKey ?? null] as const,
   document: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "documents", documentKey] as const,
+  preview: (context: ContentContext, documentKey: string) => [...contentQueryKeys.all(context), "previews", documentKey] as const,
   history: (context: ContentContext, folderKey?: string) => [...contentQueryKeys.all(context), "history", folderKey ?? null] as const,
 };
 
@@ -37,6 +39,13 @@ export function getContentDocument(queryClient: QueryClient, context: ContentCon
   return queryClient.fetchQuery({
     queryKey: contentQueryKeys.document(context, documentKey),
     queryFn: () => readContentDocument(documentKey),
+  });
+}
+
+export function getContentDocumentPreview(queryClient: QueryClient, context: ContentContext, documentKey: string) {
+  return queryClient.fetchQuery({
+    queryKey: contentQueryKeys.preview(context, documentKey),
+    queryFn: () => readContentDocumentPreview(documentKey),
   });
 }
 
@@ -63,6 +72,36 @@ export function replaceCachedContentDocument(queryClient: QueryClient, context: 
     documents: location.documents.map((document) => document.key === updated.key ? updated : document),
   } : location);
   queryClient.setQueryData<ContentDocument & { content: string }>(contentQueryKeys.document(context, updated.key), (document) => document ? { ...document, ...updated } : document);
+}
+
+export function addCachedContentDocument(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, document: ContentDocument) {
+  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, folderKey), (location) => location ? {
+    ...location,
+    documents: [...location.documents.filter((current) => current.key !== document.key), document]
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  } : location);
+}
+
+export function addCachedContentFolder(queryClient: QueryClient, context: ContentContext, parentFolderKey: string | undefined, folder: ContentFolder) {
+  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, parentFolderKey), (location) => location ? {
+    ...location,
+    folders: [...location.folders.filter((current) => current.key !== folder.key), folder]
+      .sort((left, right) => left.name.localeCompare(right.name)),
+  } : location);
+}
+
+export function removeCachedContentDocument(queryClient: QueryClient, context: ContentContext, folderKey: string | undefined, documentKey: string) {
+  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, folderKey), (location) => location ? {
+    ...location,
+    documents: location.documents.filter((document) => document.key !== documentKey),
+  } : location);
+}
+
+export function removeCachedContentFolder(queryClient: QueryClient, context: ContentContext, parentFolderKey: string | undefined, folderKey: string) {
+  queryClient.setQueryData<ContentLocation>(contentQueryKeys.location(context, parentFolderKey), (location) => location ? {
+    ...location,
+    folders: location.folders.filter((folder) => folder.key !== folderKey),
+  } : location);
 }
 
 export function replaceCachedContentFolder(queryClient: QueryClient, context: ContentContext, updated: ContentFolder) {

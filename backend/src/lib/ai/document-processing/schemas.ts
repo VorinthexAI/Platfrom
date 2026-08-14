@@ -70,6 +70,43 @@ export const extractionResultSchema = z.object({
 
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;
 
+export const documentInlineRunSchema = z.object({
+  text: z.string(),
+  bold: z.boolean().optional(),
+  italic: z.boolean().optional(),
+  underline: z.boolean().optional(),
+  strike: z.boolean().optional(),
+  code: z.boolean().optional(),
+  href: z.string().url().refine((value) => /^https?:\/\//i.test(value)).optional(),
+}).strict();
+export type DocumentInlineRun = z.infer<typeof documentInlineRunSchema>;
+
+export type DocumentPreviewBlock =
+  | { type: 'heading'; level: number; content: DocumentInlineRun[] }
+  | { type: 'paragraph'; content: DocumentInlineRun[] }
+  | { type: 'blockquote'; children: DocumentPreviewBlock[] }
+  | { type: 'bulletList'; items: DocumentPreviewListItem[] }
+  | { type: 'orderedList'; start: number; items: DocumentPreviewListItem[] }
+  | { type: 'codeBlock'; text: string }
+  | { type: 'table'; rows: DocumentPreviewTableRow[] }
+  | { type: 'horizontalRule' }
+  | { type: 'page'; page: number; children: DocumentPreviewBlock[] };
+export type DocumentPreviewListItem = { content: DocumentInlineRun[]; children: DocumentPreviewBlock[] };
+export type DocumentPreviewTableRow = { cells: DocumentPreviewTableCell[] };
+export type DocumentPreviewTableCell = { header: boolean; colSpan: number; rowSpan: number; content: DocumentInlineRun[] };
+
+export const documentPreviewBlockSchema: z.ZodType<DocumentPreviewBlock> = z.lazy(() => z.discriminatedUnion('type', [
+  z.object({ type: z.literal('heading'), level: z.number().int().min(1).max(6), content: z.array(documentInlineRunSchema) }).strict(),
+  z.object({ type: z.literal('paragraph'), content: z.array(documentInlineRunSchema) }).strict(),
+  z.object({ type: z.literal('blockquote'), children: z.array(documentPreviewBlockSchema) }).strict(),
+  z.object({ type: z.literal('bulletList'), items: z.array(z.object({ content: z.array(documentInlineRunSchema), children: z.array(documentPreviewBlockSchema) }).strict()) }).strict(),
+  z.object({ type: z.literal('orderedList'), start: z.number().int().positive(), items: z.array(z.object({ content: z.array(documentInlineRunSchema), children: z.array(documentPreviewBlockSchema) }).strict()) }).strict(),
+  z.object({ type: z.literal('codeBlock'), text: z.string() }).strict(),
+  z.object({ type: z.literal('table'), rows: z.array(z.object({ cells: z.array(z.object({ header: z.boolean(), colSpan: z.number().int().positive(), rowSpan: z.number().int().positive(), content: z.array(documentInlineRunSchema) }).strict()) }).strict()) }).strict(),
+  z.object({ type: z.literal('horizontalRule') }).strict(),
+  z.object({ type: z.literal('page'), page: z.number().int().positive(), children: z.array(documentPreviewBlockSchema) }).strict(),
+]));
+
 export const normalizedDocumentSchema = z.object({
   name: z.string().trim().min(1).max(255),
   extension: documentExtensionSchema,

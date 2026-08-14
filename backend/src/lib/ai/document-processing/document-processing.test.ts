@@ -9,6 +9,7 @@ import {
   documentExtract,
   documentGenerateContent,
   documentGenerateHtml,
+  htmlToDocumentPreviewBlocks,
   htmlToExtractedBlocks,
   documentInsert,
   documentKeyForRequest,
@@ -137,6 +138,58 @@ describe('document-extract action', () => {
     const blocks = htmlToExtractedBlocks('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
     const { html } = await documentGenerateHtml({ extractedText: 'Bold and italic with link.', blocks }, { logger: quiet });
     expect(html).toBe('<p><strong>Bold</strong> and <em>italic</em> with <a href="https://example.com">link</a>.</p>');
+  });
+
+  test('projects canonical HTML into strict native preview blocks', () => {
+    expect(htmlToDocumentPreviewBlocks('<h2><strong>Native</strong> preview</h2><ol start="3"><li>First<ul><li><code>Nested</code></li></ul></li></ol><table><thead><tr><th colspan="2">Header</th></tr></thead><tbody><tr><td><a href="https://example.com">Link</a></td><td>Value</td></tr></tbody></table><section class="doc-page" data-page="2"><p>Page body</p></section>')).toEqual([
+      { type: 'heading', level: 2, content: [{ text: 'Native', bold: true }, { text: ' preview' }] },
+      { type: 'orderedList', start: 3, items: [{ content: [{ text: 'First' }], children: [{ type: 'bulletList', items: [{ content: [{ text: 'Nested', code: true }], children: [] }] }] }] },
+      { type: 'table', rows: [{ cells: [{ header: true, colSpan: 2, rowSpan: 1, content: [{ text: 'Header' }] }] }, { cells: [{ header: false, colSpan: 1, rowSpan: 1, content: [{ text: 'Link', href: 'https://example.com' }] }, { header: false, colSpan: 1, rowSpan: 1, content: [{ text: 'Value' }] }] }] },
+      { type: 'page', page: 2, children: [{ type: 'paragraph', content: [{ text: 'Page body' }] }] },
+    ]);
+  });
+
+  test('creates native previews for every supported uploaded file format', async () => {
+    const cases = [
+      ['txt', { logger: quiet }, 'codeBlock'],
+      ['md', { logger: quiet }, 'heading'],
+      ['doc', { logger: quiet, extractDoc: async () => 'Legacy Word body' }, 'paragraph'],
+      ['docx', { logger: quiet, extractDocx: async () => 'Modern Word body' }, 'paragraph'],
+      ['pdf', { logger: quiet, ocr: { extract: async () => ({ extractedText: 'PDF body', blocks: [{ type: 'paragraph' as const, text: 'PDF body' }] }) } }, 'paragraph'],
+    ] as const;
+    for (const [extension, options, expectedType] of cases) {
+      const extracted = await documentExtract({ ...normalized(extension), storageKey: extension }, options);
+      const { html } = await documentGenerateHtml(extracted, { logger: quiet });
+      expect(htmlToDocumentPreviewBlocks(html)[0]?.type).toBe(expectedType);
+    }
+  });
+
+  test('sanitizes unsafe preview input and tolerates layout edge cases', () => {
+    const longToken = 'x'.repeat(20_000);
+    const blocks = htmlToDocumentPreviewBlocks(`<script><p>hidden</p></script><p><a href="javascript:alert(1)">Unsafe</a> <a href="https://example.com/path">Safe</a> ${longToken}</p><ol start="99"><li>Deep<ul><li>Nested<ul><li>Again</li></ul></li></ul></li></ol><table><tr><td colspan="999">Wide</td>${Array.from({ length: 20 }, (_, index) => `<td>C${index}</td>`).join('')}</tr></table><hr>`);
+    expect(blocks[0]).toMatchObject({ type: 'paragraph' });
+    if (blocks[0]?.type !== 'paragraph') throw new Error('Expected a paragraph preview.');
+    expect(blocks[0].content.slice(0, 2)).toEqual([{ text: 'Unsafe ' }, { text: 'Safe', href: 'https://example.com/path' }]);
+    expect(JSON.stringify(blocks)).not.toContain('hidden');
+    expect(JSON.stringify(blocks)).not.toContain('javascript:');
+    expect(JSON.stringify(blocks)).toContain(longToken);
+    expect(blocks).toContainEqual(expect.objectContaining({ type: 'orderedList', start: 99 }));
+    expect(blocks).toContainEqual(expect.objectContaining({ type: 'table' }));
+    expect(blocks.at(-1)).toEqual({ type: 'horizontalRule' });
+    const table = blocks.find((block) => block.type === 'table');
+    expect(table?.rows[0]?.cells).toHaveLength(21);
+    expect(table?.rows[0]?.cells[0]?.colSpan).toBe(1);
+  });
+
+  test('returns an empty preview for empty content and rejects malformed HTML', () => {
+    expect(htmlToDocumentPreviewBlocks('')).toEqual([]);
+    expect(() => htmlToDocumentPreviewBlocks('<p>Unclosed')).toThrow('unclosed');
+    expect(() => htmlToDocumentPreviewBlocks('<p>Wrong</div>')).toThrow('closing div');
+  });
+
+  test('rejects empty and invalid UTF-8 text files during extraction', async () => {
+    await expect(documentExtract({ ...normalized('txt', bytes('   ')), storageKey: 'txt' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
+    await expect(documentExtract({ ...normalized('md', new Uint8Array([0xff, 0xfe])), storageKey: 'md' }, { logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_EXTRACTION_FAILED' });
   });
 
   test('uses extracted DOCX HTML without flattening table layout', async () => {
@@ -368,8 +421,20 @@ describe('document.parse tool', () => {
     }
   });
 
-  test('cleans S3 after every post-upload stage failure', async () => {
-    for (const step of ['extract', 'generateHtml', 'generateContent', 'embed', 'insert'] as const) {
+  test('preserves PDFs when text extraction fails', async () => {
+    const context = harness('extract');
+    context.actions.validate = async (value) => normalized('pdf', (value.file as ReturnType<typeof fileFor>).bytes);
+    context.actions.generateHtml = async () => ({ html: '<p>Text extraction is unavailable for this PDF file.</p>' });
+    context.actions.generateContent = async ({ html }) => ({ content: html.replace(/<[^>]+>/g, '') });
+    context.actions.embed = async ({ content }) => ({ embedding: [1, 2], contentChunks: [content], chunkEmbeddings: [[1, 2]], semanticChunkCount: 1, semanticContentHash: documentSemanticHash(content) });
+    const result = await parseDocument({ ...input, file: fileFor('pdf') }, { ...context, logger: quiet }) as DocumentParseResult;
+    expect(result.document).toMatchObject({ extension: 'pdf', content: 'Text extraction is unavailable for this PDF file.' });
+    expect(context.calls).not.toContain('storage-delete');
+    expect(context.calls.at(-1)).toBe('document-insert');
+  });
+
+  test('cleans S3 after non-recoverable post-upload stage failures', async () => {
+    for (const step of ['generateHtml', 'generateContent', 'embed', 'insert'] as const) {
       const context = harness(step);
       await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toThrow();
       expect(context.calls.at(-1)).toBe('storage-delete');
@@ -436,7 +501,7 @@ describe('document.parse tool', () => {
   });
 
   test('returns a structured error when compensating cleanup cannot complete', async () => {
-    const context = harness('extract');
+    const context = harness('generateHtml');
     context.storage.delete = async () => { throw new Error('delete failed'); };
     await expect(parseDocument(input, { ...context, logger: quiet })).rejects.toMatchObject({ code: 'DOCUMENT_CLEANUP_FAILED', action: 'document.parse', retryable: true });
   });
