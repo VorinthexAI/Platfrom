@@ -312,6 +312,17 @@ test("runs fast top-ten semantic search without a score threshold and summarizes
   expect(calls[1]?.body.input).toEqual({ documentKeys: ["document"], style: "brief", persist: false });
 });
 
+test("scopes fast semantic search to a folder and its descendants", async () => {
+  responseForTool = () => ({ data: { success: true, data: { query: "roadmap", results: [] } } });
+  await searchContentMatches("roadmap", undefined, "folder");
+  expect(calls[0]?.body.input).toEqual({
+    scopeKey: "scope-authenticated",
+    query: "roadmap",
+    topK: 10,
+    sources: [{ type: "folder", folderKeys: ["folder"], includeDescendants: true }],
+  });
+});
+
 test("loads an existing My Documents folder as the initial Archive location", async () => {
   responseForTool = (tool) => {
     if (tool === "folder.list") {

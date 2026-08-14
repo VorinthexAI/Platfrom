@@ -535,12 +535,13 @@ export function searchContent(query: string, folderKey?: string, includeDescenda
   });
 }
 
-export async function searchContentMatches(query: string, signal?: AbortSignal) {
+export async function searchContentMatches(query: string, signal?: AbortSignal, folderKey?: string) {
   const contentContext = getContentContext();
   const data = await callContentTool<{ query: string; results: ContentSearchMatch[] }>("scope.document.search", {
     scopeKey: contentContext.scopeKey,
     query,
     topK: 10,
+    ...(folderKey ? { sources: [{ type: "folder", folderKeys: [folderKey], includeDescendants: true }] } : {}),
   }, signal);
   return data.results;
 }

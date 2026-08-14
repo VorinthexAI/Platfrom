@@ -233,6 +233,8 @@ export function KnowledgeWorkspace() {
   const [rootSearchQuery, setRootSearchQuery] = useState("");
   const [rootSearchResults, setRootSearchResults] = useState<ContentSearchMatch[]>();
   const [rootSearching, setRootSearching] = useState(false);
+  const [folderSearchResults, setFolderSearchResults] = useState<ContentSearchMatch[]>();
+  const [folderSearching, setFolderSearching] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [error, setError] = useState<string>();
   const editorSession = useRef(0);
@@ -262,6 +264,7 @@ export function KnowledgeWorkspace() {
   const autocompleteGeneration = useRef(0);
   const instructionRequest = useRef<AbortController | undefined>(undefined);
   const rootSearchRequest = useRef<AbortController | undefined>(undefined);
+  const folderSearchRequest = useRef<AbortController | undefined>(undefined);
   const editorDocumentScroll = useRef<ScrollView | null>(null);
   const summaryRequest = useRef<AbortController | undefined>(undefined);
   const previewFileRef = useRef<File | undefined>(undefined);
@@ -1341,22 +1344,6 @@ export function KnowledgeWorkspace() {
     }
   };
 
-  const updateFolderSearch = (value: string) => {
-    setQuery(value);
-    if (!value.trim()) {
-      navigationGeneration.current += 1;
-      setSearching(false);
-      setResults(undefined);
-    }
-  };
-
-  const clearFolderSearch = () => {
-    navigationGeneration.current += 1;
-    setQuery("");
-    setSearching(false);
-    setResults(undefined);
-  };
-
   useEffect(() => {
     const normalized = rootSearchQuery.trim();
     rootSearchRequest.current?.abort();
@@ -1384,6 +1371,35 @@ export function KnowledgeWorkspace() {
       controller.abort();
     };
   }, [hasContentContext, rootSearchQuery]);
+
+  useEffect(() => {
+    const normalized = query.trim();
+    const folderKey = currentFolder?.key;
+    folderSearchRequest.current?.abort();
+    if (!normalized || !hasContentContext || workspaceMode !== "folder" || !folderKey) {
+      setFolderSearching(false);
+      setFolderSearchResults(undefined);
+      return;
+    }
+    setFolderSearchResults(undefined);
+    const controller = new AbortController();
+    folderSearchRequest.current = controller;
+    const timeout = setTimeout(() => {
+      setFolderSearching(true);
+      setError(undefined);
+      void searchContentMatches(normalized, controller.signal, folderKey).then((matches) => {
+        if (!controller.signal.aborted) setFolderSearchResults(matches);
+      }).catch((cause) => {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Search failed.");
+      }).finally(() => {
+        if (!controller.signal.aborted) setFolderSearching(false);
+      });
+    }, 300);
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [currentFolder?.key, hasContentContext, query, workspaceMode]);
 
   const openSearchSummary = async (document: ContentSearchMatch) => {
     summaryRequest.current?.abort();
@@ -2057,29 +2073,15 @@ export function KnowledgeWorkspace() {
             {error ? <Text accessibilityRole="alert" style={styles.notice}>{error}</Text> : null}
             <View style={[styles.rootSearch, styles.folderScopedSearch]}>
               <SearchIcon size="sm" variant="muted" />
-              <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={updateFolderSearch} onSubmitEditing={() => void runSearch()} placeholder="Search this folder and nested folders" returnKeyType="search" style={styles.rootSearchInput} value={query} />
-              {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" disabled={searching} onPress={clearFolderSearch} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
-              <Button accessibilityLabel="Search folder" contentMode="raw" disabled={!query.trim() || searching} onPress={() => void runSearch()} size="xs" variant="icon">{searching ? <Spinner size="small" /> : <SearchIcon size="sm" />}</Button>
+              <TextInput accessibilityLabel={`Search ${currentFolder?.name ?? "folder"}`} onChangeText={setQuery} placeholder="Search documents and files" style={styles.rootSearchInput} value={query} />
+              {query.trim() ? <Button accessibilityLabel="Clear folder search" contentMode="raw" onPress={() => setQuery("")} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
             </View>
-            {results ? <View accessibilityLiveRegion="polite" style={styles.results}>
-              <View style={styles.resultsHeader}>
-                <View style={styles.resultText}>
-                  <Text style={styles.eyebrow}>FOLDER SEARCH</Text>
-                  <Text numberOfLines={1} style={styles.resultsTitle}>{results.query}</Text>
-                  <Text style={styles.rowSubtitle}>Scope: {currentFolder?.name ?? "Archive"} and nested folders</Text>
-                </View>
-                <Button accessibilityLabel="Close folder search results" contentMode="raw" onPress={clearFolderSearch} size="xs" variant="icon"><CloseIcon size="sm" /></Button>
-              </View>
-              {results.cached ? <Text style={styles.meta}>REUSED FROM SEARCH HISTORY</Text> : null}
-              {results.folders.map((folder) => <Button contentMode="raw" key={folder.key} onPress={() => void openFolder(folder)} size="lg" style={styles.resultRow} variant="secondary">
-                <FolderIcon size="md" variant="accent" />
-                <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{folder.name}</Text><Text numberOfLines={1} style={styles.rowSubtitle}>Folder</Text></View>
+            {query.trim() ? <View accessibilityLiveRegion="polite" style={styles.rootSearchResults}>
+              {(folderSearchResults ?? []).map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => void openSearchSummary(document)} size="sm" style={styles.documentButton} variant="secondary">
+                <FileIcon size="sm" />
+                <Text numberOfLines={1} style={styles.documentButtonLabel}>{document.name}</Text>
               </Button>)}
-              {results.documents.map((document) => <Button contentMode="raw" key={document.documentKey} onPress={() => { setSelectedSummary(document); openSheet("summary"); }} size="lg" style={styles.resultRow} variant="secondary">
-                <FileIcon size="md" variant="accent" />
-                <View style={styles.resultText}><Text numberOfLines={1} style={styles.rowTitle}>{document.name}</Text><Text numberOfLines={2} style={styles.rowSubtitle}>{document.summary}</Text></View>
-              </Button>)}
-              {results.folders.length === 0 && results.documents.length === 0 ? <Text style={styles.empty}>No folders, documents, or files matched this search.</Text> : null}
+              {folderSearching || !folderSearchResults ? <Text style={styles.empty}>Searching...</Text> : folderSearchResults.length === 0 ? <Text style={styles.empty}>No documents matched this search.</Text> : null}
             </View> : <>
             <Tabs accessibilityRole="tablist" style={styles.folderTabs}>
               <Button accessibilityRole="tab" accessibilityState={{ selected: folderContentTab === "folders" }} onPress={() => setFolderContentTab("folders")} size="xs" style={styles.folderTab} variant={folderContentTab === "folders" ? "secondary" : "ghost"}>Folders</Button>
