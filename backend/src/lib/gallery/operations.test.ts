@@ -11,6 +11,7 @@ const validInputs = {
   uploadStatus: { uploadKeys: [key()] },
   search: { query: 'red dog', limit: 25 },
   setFavorite: { imageKey: key(), isFavorite: true },
+  deleteImages: { imageKeys: [key()] },
   findDuplicates: { collectionKey: key() },
   deleteDuplicates: { collectionKey: key(), imageKeys: [key()] },
   transferCollectionImages: { sourceCollectionKey: key(), destinationCollectionKeys: [key()], imageKeys: [key()], mode: 'copy' },
@@ -39,13 +40,15 @@ describe('Gallery operation boundaries', () => {
   test('accepts an optional collection search boundary', () => {
     const collectionKey = key();
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', collectionKey })).toEqual({ query: 'mountains', collectionKey, limit: 50 });
+    expect(galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey })).toEqual({ duplicates: true, collectionKey });
   });
 
   test('enforces mutually exclusive search sources', () => {
-    expect(() => galleryOperationInputSchemas.search.parse({})).toThrow('exactly one');
-    expect(() => galleryOperationInputSchemas.search.parse({ query: 'dog', imageKey: key() })).toThrow('exactly one');
-    expect(galleryOperationInputSchemas.search.parse({ imageKey: key() })).toBeDefined();
-    expect(() => galleryOperationInputSchemas.search.parse({ imageKey: key(), collectionKey: key() })).toThrow('text query');
+    expect(() => galleryOperationInputSchemas.search.parse({})).toThrow();
+    expect(() => galleryOperationInputSchemas.search.parse({ query: 'dog', imageKey: key() })).toThrow();
+    expect(galleryOperationInputSchemas.search.parse({ imageKey: key() })).toEqual(expect.objectContaining({ limit: 50 }));
+    expect(galleryOperationInputSchemas.search.parse({ imageKey: key(), collectionKey: key() })).toEqual(expect.objectContaining({ limit: 50 }));
+    expect(() => galleryOperationInputSchemas.search.parse({ duplicates: true, collectionKey: key(), threshold: 0.9 })).toThrow();
   });
 
   test('enforces transfer and subject uniqueness invariants', () => {
@@ -53,6 +56,7 @@ describe('Gallery operation boundaries', () => {
     expect(() => galleryOperationInputSchemas.transferCollectionImages.parse({ sourceCollectionKey, destinationCollectionKeys: [sourceCollectionKey], imageKeys: [image], mode: 'move' })).toThrow('source collection');
     expect(() => galleryOperationInputSchemas.transferCollectionImages.parse({ sourceCollectionKey, destinationCollectionKeys: [destination, destination], imageKeys: [image], mode: 'copy' })).toThrow('unique');
     expect(() => galleryOperationInputSchemas.createSubject.parse({ name: 'Alex', imageKeys: [image, image] })).toThrow('unique');
+    expect(() => galleryOperationInputSchemas.deleteImages.parse({ imageKeys: [image, image] })).toThrow('unique');
   });
 
   test('preserves operation errors and sanitizes validation and unknown failures', () => {

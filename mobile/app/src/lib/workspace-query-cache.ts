@@ -1,4 +1,4 @@
-import type { QueryClient } from "@tanstack/react-query";
+import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { AssistantChange } from "./assistant-changes";
 import type { Book, BookDetail } from "./books-client";
 import type { ContentContext } from "./content-client";
@@ -59,6 +59,77 @@ export function patchGalleryImage(queryClient: QueryClient, context: WorkspaceCo
     ...overview,
     images: overview.images.map((candidate) => candidate.key === image.key ? image : candidate),
   } : overview);
+}
+
+export type GalleryOverviewSnapshot = Array<[QueryKey, GalleryOverview | undefined]>;
+
+export function snapshotGalleryOverviews(queryClient: QueryClient, context: WorkspaceContext): GalleryOverviewSnapshot {
+  return queryClient.getQueriesData<GalleryOverview>({ queryKey: galleryQueryKeys.overviews(context) });
+}
+
+export function restoreGalleryOverviews(queryClient: QueryClient, snapshot: GalleryOverviewSnapshot) {
+  for (const [queryKey, overview] of snapshot) queryClient.setQueryData(queryKey, overview);
+}
+
+export function transferCachedGalleryImages(queryClient: QueryClient, context: WorkspaceContext, input: {
+  sourceCollectionKey: string;
+  destinationCollectionKeys: string[];
+  images: GalleryImage[];
+  mode: "copy" | "move";
+}) {
+  const imageKeys = new Set(input.images.map(({ key }) => key));
+  const destinationKeys = new Set(input.destinationCollectionKeys);
+  const snapshots = snapshotGalleryOverviews(queryClient, context);
+  const destinationAdditions = new Map(input.destinationCollectionKeys.map((key) => [key, input.images.length]));
+  for (const [queryKey, overview] of snapshots) {
+    const location = queryKey.at(-1);
+    if (!overview || typeof location !== "string" || !destinationKeys.has(location)) continue;
+    destinationAdditions.set(location, input.images.filter(({ key }) => !overview.images.some((image) => image.key === key)).length);
+  }
+  for (const [queryKey, overview] of snapshots) {
+    if (!overview) continue;
+    const location = queryKey.at(-1);
+    const removeFromLocation = input.mode === "move" && location === input.sourceCollectionKey;
+    const addToLocation = typeof location === "string" && destinationKeys.has(location);
+    const existingKeys = new Set(overview.images.map(({ key }) => key));
+    const added = input.images.filter(({ key }) => !existingKeys.has(key));
+    const images = removeFromLocation
+      ? overview.images.filter(({ key }) => !imageKeys.has(key))
+      : addToLocation ? [...added, ...overview.images] : overview.images;
+    const collections = overview.collections.map((collection) => {
+      if (input.mode === "move" && collection.key === input.sourceCollectionKey) return { ...collection, count: Math.max(0, collection.count - input.images.length) };
+      if (destinationKeys.has(collection.key)) return { ...collection, count: collection.count + (destinationAdditions.get(collection.key) ?? 0), coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null };
+      return collection;
+    });
+    queryClient.setQueryData(queryKey, { ...overview, collections, images });
+  }
+  const root = snapshots.find(([queryKey]) => queryKey.at(-1) === null)?.[1];
+  if (!root) return;
+  for (const collectionKey of input.destinationCollectionKeys) {
+    const queryKey = galleryQueryKeys.overview(context, collectionKey);
+    if (queryClient.getQueryData(queryKey)) continue;
+    queryClient.setQueryData<GalleryOverview>(queryKey, { collections: root.collections.map((collection) => collection.key === collectionKey ? { ...collection, count: collection.count + input.images.length, coverUrl: collection.coverUrl ?? input.images[0]?.url ?? null } : collection), images: input.images });
+  }
+}
+
+export function removeCachedGalleryImages(queryClient: QueryClient, context: WorkspaceContext, images: GalleryImage[]) {
+  const removed = new Set(images.map(({ key }) => key));
+  const removedUrls = new Set(images.map(({ url }) => url));
+  const membershipCounts = new Map<string, number>();
+  const snapshots = snapshotGalleryOverviews(queryClient, context);
+  for (const [queryKey, overview] of snapshots) {
+    const collectionKey = queryKey.at(-1);
+    if (!overview || typeof collectionKey !== "string") continue;
+    membershipCounts.set(collectionKey, overview.images.filter(({ key }) => removed.has(key)).length);
+  }
+  for (const [queryKey, overview] of snapshots) {
+    if (!overview) continue;
+    queryClient.setQueryData(queryKey, {
+      ...overview,
+      collections: overview.collections.map((collection) => ({ ...collection, count: Math.max(0, collection.count - (membershipCounts.get(collection.key) ?? 0)), coverUrl: collection.coverUrl && removedUrls.has(collection.coverUrl) ? null : collection.coverUrl })),
+      images: overview.images.filter(({ key }) => !removed.has(key)),
+    });
+  }
 }
 
 export function patchCompassOverview(queryClient: QueryClient, context: WorkspaceContext, update: Place | Trip) {

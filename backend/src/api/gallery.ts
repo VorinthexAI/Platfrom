@@ -42,6 +42,7 @@ export const completeGalleryUploads = handler('completeUploads', 202);
 export const galleryUploadStatus = handler('uploadStatus');
 export const searchGalleryImages = handler('search');
 export const setGalleryImageFavorite = handler('setFavorite');
+export const deleteGalleryImages = handler('deleteImages');
 export const findGalleryCollectionDuplicates = handler('findDuplicates');
 export const deleteGalleryCollectionDuplicates = handler('deleteDuplicates');
 export const transferGalleryCollectionImages = handler('transferCollectionImages');

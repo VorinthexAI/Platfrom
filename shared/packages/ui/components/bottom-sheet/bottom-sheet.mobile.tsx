@@ -86,7 +86,10 @@ export type BottomSheetProps = {
   description?: string;
   dismissible?: boolean;
   footer?: ReactNode;
+  headerLeading?: ReactNode;
+  headerTrailing?: ReactNode;
   hideHeading?: boolean;
+  hideCloseButton?: boolean;
   mutation?: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
@@ -99,7 +102,10 @@ export function BottomSheet({
   description,
   dismissible = true,
   footer,
+  headerLeading,
+  headerTrailing,
   hideHeading = false,
+  hideCloseButton = false,
   mutation = false,
   onOpenChange,
   open,
@@ -264,7 +270,9 @@ export function BottomSheet({
               {!hideHeading ? <Text accessibilityRole="header" style={styles.title}>{title}</Text> : null}
               {!hideHeading && description ? <Text style={styles.description}>{description}</Text> : null}
             </View>
-            <Button
+            {headerLeading ? <View style={[styles.headerSlot, styles.headerLeading]}>{headerLeading}</View> : null}
+            {headerTrailing ? <View style={[styles.headerSlot, styles.headerTrailing]}>{headerTrailing}</View> : null}
+            {!hideCloseButton && !headerTrailing ? <Button
               accessibilityLabel="Close bottom sheet"
               contentMode="raw"
               disabled={!dismissible}
@@ -274,7 +282,7 @@ export function BottomSheet({
               variant="icon"
             >
               <CloseIcon size="sm" />
-            </Button>
+            </Button> : null}
           </View>
           <View style={[styles.content, (tall || mutation) && styles.flexContent]}>{children}</View>
           {footer ? <View style={styles.footer}>{footer}</View> : null}
@@ -349,6 +357,9 @@ const styles = StyleSheet.create({
   header: { gap: 6, paddingBottom: 18, paddingHorizontal: 4, paddingRight: 48 },
   headerWithoutHeading: { minHeight: 42 },
   closeButton: { position: "absolute", right: 20, top: 20, zIndex: 1 },
+  headerSlot: { position: "absolute", top: 20, zIndex: 1 },
+  headerLeading: { left: 20 },
+  headerTrailing: { right: 20 },
   title: {
     color: "#F5F7F8",
     fontFamily: "Geist_600SemiBold",

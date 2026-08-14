@@ -62,7 +62,7 @@ import { communicationHandlers } from './communication';
 import { bootstrapGuestAuth, getAuthAccount, logoutAuthAccount, patchAuthAccount } from './auth-account';
 import { recordPlatformEvent } from './platform-events';
 import { postPersonalAssistantResponse } from './personal-assistant';
-import { completeGalleryUploads, createGalleryCollection, createGallerySubject, deleteGalleryCollectionDuplicates, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, restoreGallerySubject, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages } from './gallery';
+import { completeGalleryUploads, createGalleryCollection, createGallerySubject, deleteGalleryCollectionDuplicates, deleteGalleryImages, deleteGallerySubject, findGalleryCollectionDuplicates, galleryOverview, galleryUploadStatus, listGallerySubjectImages, listGallerySubjects, presignGalleryUploads, restoreGallerySubject, searchGalleryImages, setGalleryImageFavorite, transferGalleryCollectionImages } from './gallery';
 import { travelHandlers } from './travel';
 import { emailHandlers } from './email-inbox';
 import { bookHandlers } from './books';
@@ -456,6 +456,7 @@ export function registerRoutes(app: Hono) {
   app.post('/gallery/uploads/status', galleryUploadStatus);
   app.post('/gallery/images/search', searchGalleryImages);
   app.post('/gallery/images/favorite', setGalleryImageFavorite);
+  app.post('/gallery/images/delete', deleteGalleryImages);
   app.post('/gallery/collections/duplicates', findGalleryCollectionDuplicates);
   app.post('/gallery/collections/duplicates/delete', deleteGalleryCollectionDuplicates);
   app.post('/gallery/collections/images/transfer', transferGalleryCollectionImages);
