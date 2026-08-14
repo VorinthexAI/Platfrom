@@ -329,6 +329,19 @@ describe('Content runtime', () => {
     await expect(runContentTool('scope.document.search', { scopeKey: f.scopeKey, query: 'roadmap', sources: [{ type: 'project', projectKeys: [newId()] }] }, f.context, { repository: f.repository, embed: async () => embedding })).rejects.toMatchObject({ code: 'CONTENT_SEARCH_INVALID_SOURCE' });
   });
 
+  test('returns fast lexical folder matches when query embedding is unavailable', async () => {
+    const f = fixture('viewer');
+    const documentKey = f.addDocument('Quasar timeline velocity roadmap');
+    f.repository.semanticSearch = async () => { throw new Error('semantic search should not run'); };
+    const output = await runContentTool('scope.document.search', {
+      scopeKey: f.scopeKey,
+      query: 'quasar',
+      sources: [{ type: 'folder', folderKeys: [f.folderKey], includeDescendants: true }],
+    }, f.context, { repository: f.repository, embed: async () => { throw new Error('provider unavailable'); } });
+    expect(output.results).toHaveLength(1);
+    expect(output.results[0]).toMatchObject({ documentKey, matchedSource: { type: 'folder', key: f.folderKey } });
+  });
+
   test('search includes archived folder hierarchies only when explicitly requested', async () => {
     const f = fixture('viewer');
     const documentKey = f.addDocument('Archived roadmap');

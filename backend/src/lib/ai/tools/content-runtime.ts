@@ -97,6 +97,7 @@ export interface ContentToolDependencies extends RouterDependencies {
   maxDownloadBytes?: number;
   generateExport?: typeof generateDocumentExport;
   searchQueries?: ContentSearchQueryStore;
+  searchEmbeddingTimeoutMs?: number;
   bookRuntime?: BookGenerator;
   scanDocument?: (input: DocumentScanInput, organizationKey: string) => Promise<{ documentKey: string; content: string; storageKeys: string[] }>;
   getFolderCoverImage?: (scopeKey: string, imageKey: string) => Promise<{ storageKey: string } | null>;
@@ -1875,9 +1876,46 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
           }
         }
       }
-      let embedding: number[];
-      try { embedding = await embed(input.query, undefined, undefined, 'query'); }
-      catch (error) { fail('CONTENT_SEARCH_EMBEDDING_FAILED', 'Search query embedding failed.', tool, 'embed', undefined, error, true); }
+      let embeddingTimer: number | undefined;
+      const embedding = await Promise.race<number[] | undefined>([
+        embed(input.query, undefined, undefined, 'query').catch(() => undefined),
+        new Promise<undefined>((resolve) => { embeddingTimer = setTimeout(resolve, dependencies.searchEmbeddingTimeoutMs ?? 500); }),
+      ]);
+      if (embeddingTimer) clearTimeout(embeddingTimer);
+      const queryText = input.query.trim().toLocaleLowerCase();
+      const queryTokens = [...new Set<string>(queryText.match(/[\p{L}\p{N}]+/gu) ?? [])];
+      const documentsByScope = new Map<string, Document[]>();
+      const lexicalMatches = async (scopeKeys: string[], folderKeys?: string[]) => {
+        const documents = (await Promise.all(scopeKeys.map(async (scopeKey) => {
+          let values = documentsByScope.get(scopeKey);
+          if (!values) {
+            values = await repo.listDocuments(scopeKey, includeArchived);
+            documentsByScope.set(scopeKey, values);
+          }
+          return values;
+        }))).flat();
+        return documents.flatMap((document) => {
+          if (document._internalDeletion || !includeArchived && document.deletedAt) return [];
+          if (folderKeys && (!document.folderKey || !folderKeys.includes(document.folderKey))) return [];
+          if (input.filters?.documentKeys && !input.filters.documentKeys.includes(document.key)) return [];
+          if (input.filters?.extensions && (!document.extension || !input.filters.extensions.includes(document.extension))) return [];
+          if (input.filters?.createdAfter && document.createdAt < input.filters.createdAfter) return [];
+          if (input.filters?.createdBefore && document.createdAt > input.filters.createdBefore) return [];
+          if (input.filters?.updatedAfter && document.updatedAt < input.filters.updatedAfter) return [];
+          if (input.filters?.updatedBefore && document.updatedAt > input.filters.updatedBefore) return [];
+          const searchable = `${document.name}\n${document.content}`.toLocaleLowerCase();
+          const documentTokens = new Set(searchable.match(/[\p{L}\p{N}]+/gu) ?? []);
+          const matchedTokens = queryTokens.filter((token) => documentTokens.has(token));
+          const exactMatch = searchable.includes(queryText);
+          if (!exactMatch && matchedTokens.length === 0) return [];
+          const score = exactMatch ? 0.75 : 0.4 + 0.3 * (matchedTokens.length / Math.max(queryTokens.length, 1));
+          if (input.minimumScore !== undefined && score < input.minimumScore) return [];
+          const contentText = document.content.toLocaleLowerCase();
+          const contentMatchAt = contentText.indexOf(exactMatch ? queryText : matchedTokens[0]!);
+          const matchAt = Math.max(0, contentMatchAt - 80);
+          return [{ score, document, matchedContent: document.content.slice(matchAt, matchAt + 300) }];
+        });
+      };
       const candidates = new Map<string, { score: number; document: Document; matchedContent?: string; source: { type: 'scope' | 'project' | 'folder'; key: string } }>();
       for (const source of resolvedSources) {
         const scopeKeys = source.scopeKeys.filter((key) => allowed.includes(key) && filterScopeKeys.has(key));
@@ -1885,20 +1923,23 @@ export async function runContentTool<Name extends ContentToolName>(name: Name, r
         let folderKeys = source.folderKeys;
         if (filterFolderKeys) folderKeys = folderKeys ? folderKeys.filter((key) => filterFolderKeys.includes(key)) : filterFolderKeys;
         if (folderKeys?.length === 0) continue;
-        const matches = await repo.semanticSearch({
-          embedding,
-          authorizedScopeKeys: scopeKeys,
-          folderKeys,
-          documentKeys: input.filters?.documentKeys,
-          extensions: input.filters?.extensions,
-          createdAfter: input.filters?.createdAfter,
-          createdBefore: input.filters?.createdBefore,
-          updatedAfter: input.filters?.updatedAfter,
-          updatedBefore: input.filters?.updatedBefore,
-          includeArchived,
-          minScore: input.minimumScore,
-          limit: input.topK ?? 20,
-        });
+        const matches = [
+          ...await lexicalMatches(scopeKeys, folderKeys),
+          ...(embedding ? await repo.semanticSearch({
+            embedding,
+            authorizedScopeKeys: scopeKeys,
+            folderKeys,
+            documentKeys: input.filters?.documentKeys,
+            extensions: input.filters?.extensions,
+            createdAfter: input.filters?.createdAfter,
+            createdBefore: input.filters?.createdBefore,
+            updatedAfter: input.filters?.updatedAfter,
+            updatedBefore: input.filters?.updatedBefore,
+            includeArchived,
+            minScore: input.minimumScore,
+            limit: input.topK ?? 20,
+          }) : []),
+        ];
         for (const match of matches) {
           if (match.document._internalDeletion) continue;
            if (!includeArchived && !await activeFolderHierarchy(match.document.folderKey, match.document.scopeKey)) continue;
