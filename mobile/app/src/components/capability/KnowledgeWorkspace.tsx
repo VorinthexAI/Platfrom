@@ -23,10 +23,8 @@ import {
   ChevronLeftIcon,
   ClockIcon,
   DownloadIcon,
-  EditIcon,
   FileIcon,
   FolderIcon,
-  ImageIcon,
   MoreHorizontalIcon,
   PlusIcon,
   SearchIcon,
@@ -172,7 +170,6 @@ export function KnowledgeWorkspace() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetError, setSheetError] = useState<string>();
   const [editorFocused, setEditorFocused] = useState(false);
-  const [editorEditing, setEditorEditing] = useState(false);
   const [aiInputFocused, setAiInputFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [title, setTitle] = useState("Untitled document");
@@ -925,7 +922,6 @@ export function KnowledgeWorkspace() {
     }
     setError(undefined);
     resetEditor(nextTitle);
-    setEditorEditing(true);
     workspaceModeRef.current = "editor";
     setWorkspaceMode("editor");
     if (sheetOpen) closeSheet();
@@ -964,7 +960,6 @@ export function KnowledgeWorkspace() {
     setAiResponse(undefined);
     setVersionActionKey(undefined);
     setOpeningDocumentKey(document.key);
-    setEditorEditing(false);
     setError(undefined);
     const previousMode = workspaceModeRef.current;
     titleRef.current = document.name;
@@ -1935,7 +1930,6 @@ export function KnowledgeWorkspace() {
       {workspaceMode === "viewer" ? <FileViewer
         error={filePreviewError}
         blocks={filePreview?.blocks}
-        headerAction={selectedDocument?.sourceImageCount ? <Button accessibilityLabel="View scanned pages" contentMode="raw" onPress={() => void openScanSources(selectedDocument)} size="sm" variant="icon"><ImageIcon size="sm" /></Button> : undefined}
         loading={Boolean(!filePreviewError && (!filePreview || filePreview.extension === "pdf" && !filePreviewUri))}
         onBack={leaveFileViewer}
         onMenu={() => { if (selectedDocument) showDocumentActions(selectedDocument); }}
@@ -2042,8 +2036,6 @@ export function KnowledgeWorkspace() {
           <View style={styles.editorHeader}>
             <Button accessibilityLabel={`Back to ${currentFolder?.name ?? "folders"}`} contentMode="raw" onPress={leaveEditor} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button>
             <View style={styles.editorHeaderActions}>
-              {activeDocument?.sourceImageCount ? <Button accessibilityLabel="View scanned pages" contentMode="raw" onPress={() => void openScanSources(activeDocument)} size="sm" variant="icon"><ImageIcon size="sm" /></Button> : null}
-              {activeDocument ? <Button accessibilityLabel={editorEditing ? "Finish editing" : "Edit document"} contentMode="raw" onPress={() => { Keyboard.dismiss(); setEditorEditing((value) => !value); }} size="sm" variant="icon"><EditIcon size="sm" /></Button> : null}
               <Button accessibilityLabel="AI document actions" contentMode="raw" disabled={!content.trim()} onPress={openEnhanceSheet} size="sm" variant="icon"><BrainIcon size="sm" /></Button>
               <Button accessibilityLabel="Document version history" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => void openVersionHistory()} size="sm" variant="icon"><ClockIcon size="sm" /></Button>
               <Button accessibilityLabel="Manage document" contentMode="raw" disabled={!activeDocument || saveState !== "saved"} onPress={() => { if (activeDocument) showDocumentActions(activeDocument); }} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button>
@@ -2085,11 +2077,13 @@ export function KnowledgeWorkspace() {
           ) : (
             <>
               <TextInput
-                 accessibilityLabel="Document title"
-                editable={editorEditing}
+                accessibilityLabel="Document title"
                 maxLength={255}
+                multiline
                 onChangeText={(value) => { titleRef.current = value; setTitle(value); markDirty(); persistLocalDraft(value, contentRef.current); }}
+                scrollEnabled={false}
                 style={styles.titleInput}
+                textAlignVertical="top"
                 value={title}
               />
               <View style={[styles.editorFrame, (editorFocused || aiInputFocused) && styles.editorFrameFocused]}>
@@ -2099,8 +2093,8 @@ export function KnowledgeWorkspace() {
                     <Text style={styles.completionText}>{/\s$/.test(content) || /^[,.;:!?)]/.test(completion) ? "" : " "}{completion}</Text>
                   </Text>
                 ) : null}
-                {editorEditing ? <TextInput
-                   accessibilityLabel="Document content"
+                <TextInput
+                  accessibilityLabel="Document content"
                   multiline
                   scrollEnabled
                   onBlur={() => setEditorFocused(false)}
@@ -2133,7 +2127,7 @@ export function KnowledgeWorkspace() {
                   style={[styles.editor, (editorFocused || aiInputFocused) && styles.editorFocused]}
                   textAlignVertical="top"
                   value={content}
-                /> : <ScrollView contentContainerStyle={styles.editorReadContent} showsVerticalScrollIndicator={false} style={styles.editorReadScroll}><Text selectable style={styles.editorReadText}>{content}</Text></ScrollView>}
+                />
                 {completion ? (
                   <Button accessibilityLabel="Accept suggested continuation" contentMode="raw" onPress={acceptCompletion} size="sm" style={styles.completionAccept} variant="icon">
                     <CheckIcon size="sm" />
@@ -2387,7 +2381,7 @@ const styles = StyleSheet.create({
   archiveRoot: { flexGrow: 1 },
   archiveFolder: { flexGrow: 1, gap: spacing.md },
   editorScroll: { flex: 1, minHeight: 0 },
-  editorScene: { flex: 1, minHeight: 0, gap: spacing.sm },
+  editorScene: { flex: 1, minHeight: 0, width: "100%", gap: spacing.sm },
   editorHeader: { minHeight: 40, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   editorHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   rootActions: { minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8, marginBottom: spacing.md },
@@ -2429,7 +2423,7 @@ const styles = StyleSheet.create({
   folderEmpty: { flexGrow: 1, minHeight: 220, alignItems: "center", justifyContent: "center" },
   emptyAction: { minHeight: 34, paddingHorizontal: spacing.sm },
   emptyActionText: { color: palette.muted, letterSpacing: 0.4, textTransform: "none" },
-  noteSheet: { flex: 1, minHeight: 0, padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
+  noteSheet: { flex: 1, minHeight: 0, width: "100%", padding: spacing.md, borderRadius: radii.xl, borderColor: palette.hairline, borderWidth: 1, backgroundColor: palette.panelRaised, overflow: "hidden" },
   editorSkeleton: { flex: 1, gap: spacing.lg },
   editorTitleSkeleton: { width: "72%", height: 52, borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   editorBodySkeleton: { flex: 1, minHeight: 280, borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
@@ -2443,13 +2437,10 @@ const styles = StyleSheet.create({
   saveStatus: { marginBottom: 8, color: palette.silver500, fontFamily: fonts.regular, fontSize: 11 },
   saveErrorRow: { marginBottom: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radii.sm, borderColor: palette.hairline, borderWidth: 1 },
   saveErrorText: { flex: 1, color: palette.silver300, fontFamily: fonts.regular, fontSize: 11, lineHeight: 16 },
-  titleInput: { minHeight: 58, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28 },
-  editorFrame: { flex: 1, minHeight: 80, position: "relative", overflow: "hidden" },
+  titleInput: { minHeight: 58, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver50, fontFamily: fonts.medium, fontSize: 28, textAlign: "left", writingDirection: "ltr" },
+  editorFrame: { flex: 1, minHeight: 80, width: "100%", position: "relative", overflow: "hidden" },
   editorFrameFocused: { flex: 1, minHeight: 80 },
-  editor: { flex: 1, minHeight: 80, paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
-  editorReadScroll: { flex: 1, minHeight: 0 },
-  editorReadContent: { paddingBottom: spacing.xl },
-  editorReadText: { color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
+  editor: { flex: 1, minHeight: 80, width: "100%", paddingHorizontal: 0, borderWidth: 0, backgroundColor: "transparent", color: palette.silver100, fontFamily: fonts.regular, fontSize: 16, lineHeight: 26, textAlign: "left", writingDirection: "ltr" },
   editorFocused: { flex: 1, minHeight: 80 },
   editorGhost: { bottom: 0, left: 0, position: "absolute", right: 0, top: 0, zIndex: 1, paddingVertical: 10, color: "transparent", fontFamily: fonts.regular, fontSize: 16, lineHeight: 26 },
   editorGhostSpacer: { color: "transparent" },

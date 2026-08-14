@@ -1,8 +1,6 @@
 import { Linking, ScrollView, StyleSheet, Text, View } from "react-native";
 import Pdf from "react-native-pdf";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { ReactNode } from "react";
-
 import { Button } from "../button/button.mobile";
 import { Spinner } from "../spinner/spinner.mobile";
 import { ChevronLeftIcon } from "../../icons/chevron-left/chevron-left.mobile";
@@ -21,7 +19,7 @@ export type FileViewerBlock =
   | { type: "horizontalRule" }
   | { type: "page"; page: number; children: FileViewerBlock[] };
 
-export type FileViewerProps = { blocks?: FileViewerBlock[]; error?: string; headerAction?: ReactNode; loading?: boolean; onBack: () => void; onMenu: () => void; onRenderError?: (message: string) => void; pdfUri?: string; title: string };
+export type FileViewerProps = { blocks?: FileViewerBlock[]; error?: string; loading?: boolean; onBack: () => void; onMenu: () => void; onRenderError?: (message: string) => void; pdfUri?: string; title: string };
 
 function InlineContent({ runs, style }: { runs: FileViewerInlineRun[]; style?: object }) {
   return <Text style={[styles.bodyText, style]}>{runs.map((run, index) => <Text accessibilityRole={run.href ? "link" : undefined} key={index} onPress={run.href ? () => void Linking.openURL(run.href!) : undefined} style={[run.bold && styles.bold, run.italic && styles.italic, run.underline && styles.underline, run.strike && styles.strike, run.code && styles.inlineCode, run.href && styles.link]}>{run.text}</Text>)}</Text>;
@@ -38,9 +36,9 @@ function Block({ block, depth = 0 }: { block: FileViewerBlock; depth?: number })
   return <View style={styles.table}>{block.rows.map((row, rowIndex) => <View key={rowIndex} style={styles.tableRow}>{row.cells.map((cell, cellIndex) => <View key={cellIndex} style={[styles.tableCell, { flex: cell.colSpan }]}><InlineContent runs={cell.content} style={cell.header ? styles.bold : undefined} /></View>)}</View>)}</View>;
 }
 
-export function FileViewer({ blocks, error, headerAction, loading = false, onBack, onMenu, onRenderError, pdfUri, title }: FileViewerProps) {
+export function FileViewer({ blocks, error, loading = false, onBack, onMenu, onRenderError, pdfUri, title }: FileViewerProps) {
   const insets = useSafeAreaInsets();
-  return <View style={[styles.root, { paddingBottom: insets.bottom + 78 + spacing.md }]}><View style={styles.scene}><View style={styles.header}><Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><View style={styles.headerSpacer} />{headerAction}<Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button></View><View style={styles.documentArea}>{loading ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.center}><Spinner size="large" /></View> : error ? <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{error}</Text></View> : pdfUri ? <View style={styles.content}><Text numberOfLines={2} style={styles.title}>{title}</Text><Pdf enableDoubleTapZoom={false} enablePaging={false} fitPolicy={0} horizontal={false} maxScale={1} minScale={1} onError={(cause) => onRenderError?.(cause.message || "The PDF could not be rendered.")} source={{ uri: pdfUri, cache: false }} style={styles.pdf} trustAllCerts={false} /></View> : blocks ? <ScrollView contentContainerStyle={styles.document} horizontal={false} showsHorizontalScrollIndicator={false}><Text numberOfLines={2} style={styles.title}>{title}</Text>{blocks.map((block, index) => <Block block={block} key={index} />)}</ScrollView> : <View style={styles.center}><Text style={styles.error}>Preview unavailable.</Text></View>}</View></View></View>;
+  return <View style={[styles.root, { paddingBottom: insets.bottom + 78 + spacing.md }]}><View style={styles.scene}><View style={styles.header}><Button accessibilityLabel="Back" contentMode="raw" onPress={onBack} size="sm" variant="icon"><ChevronLeftIcon size="sm" /></Button><View style={styles.headerSpacer} /><Button accessibilityLabel={`Manage ${title}`} contentMode="raw" onPress={onMenu} size="sm" variant="icon"><MoreHorizontalIcon size="sm" /></Button></View><View style={styles.documentArea}>{loading ? <View accessibilityLabel={`Loading ${title}`} accessibilityRole="progressbar" style={styles.center}><Spinner size="large" /></View> : error ? <View style={styles.center}><Text accessibilityRole="alert" style={styles.error}>{error}</Text></View> : pdfUri ? <View style={styles.content}><Text numberOfLines={2} style={styles.title}>{title}</Text><Pdf enableDoubleTapZoom={false} enablePaging={false} fitPolicy={0} horizontal={false} maxScale={1} minScale={1} onError={(cause) => onRenderError?.(cause.message || "The PDF could not be rendered.")} source={{ uri: pdfUri, cache: false }} style={styles.pdf} trustAllCerts={false} /></View> : blocks ? <ScrollView contentContainerStyle={styles.document} horizontal={false} showsHorizontalScrollIndicator={false}><Text numberOfLines={2} style={styles.title}>{title}</Text>{blocks.map((block, index) => <Block block={block} key={index} />)}</ScrollView> : <View style={styles.center}><Text style={styles.error}>Preview unavailable.</Text></View>}</View></View></View>;
 }
 
 const headingStyles: Record<number, object> = { 1: { fontSize: 30 }, 2: { fontSize: 25 }, 3: { fontSize: 21 }, 4: { fontSize: 18 }, 5: { fontSize: 16 }, 6: { fontSize: 14 } };
