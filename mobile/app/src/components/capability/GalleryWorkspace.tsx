@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BottomSheet, BottomSheetItem } from "@vorinthex/shared/ui/bottom-sheet";
 import { Button } from "@vorinthex/shared/ui/button";
 import { CoreComposer } from "@vorinthex/shared/ui/core-composer";
+import { Spinner } from "@vorinthex/shared/ui/spinner";
 import { TextInput } from "@vorinthex/shared/ui/text-input";
 import { CameraIcon, CheckIcon, ChevronLeftIcon, ClockIcon, CloseIcon, CopyIcon, FolderIcon, MoreHorizontalIcon, PlusIcon, SearchIcon, SendIcon, StarIcon, TrashIcon, UploadIcon, UsersIcon } from "@vorinthex/shared/ui/icons-mobile";
 
@@ -25,10 +26,12 @@ import {
   fetchGalleryOverview,
   fetchGalleryUploadStatus,
   filterCollections,
+  filterMediaItems,
   findGalleryCollectionDuplicates,
   getGalleryContext,
   listGallerySubjectImages,
   listGallerySubjects,
+  mergeMediaItems,
   restoreGallerySubject,
   searchGalleryImages,
   setGalleryImageFavorite,
@@ -46,6 +49,7 @@ import { normalizeCapturedJpeg, type CapturedImage } from "@/lib/captured-image"
 
 type GallerySheet = "actions" | "destination" | "newCollection" | "image" | "collectionMenu" | "confirmDeleteDuplicates" | "createSubject" | "subjects" | "transferDestination";
 type CollectionTransferMode = "copy" | "move";
+type OptimisticMediaItem = PreparedGalleryUpload & { batchKey: string; collectionKey: string };
 const COLLECTION_COLUMNS = 3;
 const IMAGE_COLUMNS = 5;
 const GRID_GAP = 5;
@@ -78,6 +82,8 @@ export function GalleryWorkspace() {
   const [activeSheet, setActiveSheet] = useState<GallerySheet>();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [collectionSearchResults, setCollectionSearchResults] = useState<GalleryImage[]>();
+  const [optimisticMediaItems, setOptimisticMediaItems] = useState<OptimisticMediaItem[]>([]);
   const [showingSearchResults, setShowingSearchResults] = useState(false);
   const [showingDuplicates, setShowingDuplicates] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
@@ -97,32 +103,43 @@ export function GalleryWorkspace() {
   const [imageAction, setImageAction] = useState<"similar" | "favorite">();
   const [imageError, setImageError] = useState<string>();
   const viewRequest = useRef(0);
+  const backgroundLoadRequest = useRef(0);
+  const searchRequest = useRef(0);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const activeSearch = useRef<string | undefined>(undefined);
   const imageSheetRequest = useRef(0);
   const activeCollectionKey = useRef<string | undefined>(undefined);
   const visibleGalleryView = useRef<"root" | "collection" | "search" | "duplicates" | "contextual">("root");
   const longPressedImage = useRef<{ key: string; at: number } | undefined>(undefined);
   activeCollectionKey.current = activeCollection?.key;
   visibleGalleryView.current = activeCollection
-    ? showingDuplicates ? "duplicates" : showingSearchResults ? "search" : "collection"
+    ? showingDuplicates ? "duplicates" : query.trim() ? "search" : "collection"
     : activeSubject || showingSearchResults ? "contextual" : "root";
 
   const contentWidth = width - spacing.md * 2;
   const collectionSize = Math.floor((contentWidth - COLLECTION_GAP * (COLLECTION_COLUMNS - 1)) / COLLECTION_COLUMNS);
   const imageSize = Math.floor((contentWidth - GRID_GAP * (IMAGE_COLUMNS - 1)) / IMAGE_COLUMNS);
 
-  async function load(collection = activeCollection) {
-    const request = ++viewRequest.current;
-    setLoading(true);
+  async function load(collection = activeCollection, silent = false) {
+    const request = silent ? ++backgroundLoadRequest.current : ++viewRequest.current;
+    const expectedView = visibleGalleryView.current;
+    const isCurrent = () => silent
+      ? request === backgroundLoadRequest.current && activeCollectionKey.current === collection?.key && visibleGalleryView.current === expectedView
+      : request === viewRequest.current;
+    if (!silent) setLoading(true);
     try {
       const overview = await queryClient.fetchQuery({ queryKey: galleryQueryKeys.overview(galleryContext, collection?.key), queryFn: () => fetchGalleryOverview(collection?.key) });
-      if (request !== viewRequest.current) return;
+      if (!isCurrent()) return false;
       setCollections(overview.collections);
       setImages(overview.images);
-      setStatus(undefined);
+      setCollectionSearchResults(undefined);
+      if (!silent) setStatus(undefined);
+      return true;
     } catch (error) {
-      if (request === viewRequest.current) setStatus(errorMessage(error));
+      if (isCurrent() && !silent) setStatus(errorMessage(error));
+      return false;
     } finally {
-      if (request === viewRequest.current) setLoading(false);
+      if (!silent && isCurrent()) setLoading(false);
     }
   }
 
@@ -134,6 +151,7 @@ export function GalleryWorkspace() {
       if (request !== viewRequest.current) return;
       setCollections(overview.collections);
       setImages(overview.images);
+      setCollectionSearchResults(undefined);
       setStatus(undefined);
     }).catch((error: unknown) => { if (request === viewRequest.current) setStatus(errorMessage(error)); }).finally(() => { if (request === viewRequest.current) setLoading(false); });
   }, [activeCollection?.key, activeSubject?.key, showingSearchResults, galleryContext.organizationKey, galleryContext.scopeKey, queryClient]);
@@ -148,6 +166,17 @@ export function GalleryWorkspace() {
 
   useEffect(() => { void loadSubjects(); }, []);
 
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const value = query.trim();
+    if (!activeCollection || activeSubject || showingDuplicates || !value) {
+      setSearching(false);
+      return;
+    }
+    searchTimer.current = setTimeout(() => { void search(value, activeCollection); }, 300);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [activeCollection?.key, activeSubject?.key, query, showingDuplicates]);
+
   function openSheet(sheet: GallerySheet) {
     setActiveSheet(sheet);
     setSheetOpen(true);
@@ -158,6 +187,8 @@ export function GalleryWorkspace() {
     setShowingCollectionOverview(true);
     setLoading(true);
     setQuery("");
+    setCollectionSearchResults(undefined);
+    searchRequest.current += 1;
     setSelectedImageKeys([]);
     setActiveCollection(undefined);
     setActiveSubject(undefined);
@@ -165,24 +196,67 @@ export function GalleryWorkspace() {
     setShowingSearchResults(false);
   }
 
-  async function completeUpload(files: PreparedGalleryUpload[], collectionKey: string) {
+  async function completeUpload(files: PreparedGalleryUpload[], collectionKey: string, optimisticBatchKey?: string) {
     const uploadLocation = activeCollection?.key;
     const uploadCollection = activeCollection?.key === collectionKey ? activeCollection : undefined;
     const uploadView = uploadCollection ? "collection" : "root";
+    const uploadStatusIsVisible = () => activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView
+      || !activeCollectionKey.current && visibleGalleryView.current === "root";
     const result = await uploadGalleryImages(files, collectionKey);
     setPendingFiles([]);
     const uploadKeys = result.jobs.map(({ key }) => key);
-    setStatus("Upload complete. Gallery is describing your images in the background.");
+    const jobsByKey = new Map(result.jobs.map((job) => [job.key, job]));
+    await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+    if (uploadStatusIsVisible()) setStatus("Upload complete. Gallery is describing your images in the background.");
     void (async () => {
+      const settledKeys = new Set<string>();
+      let failedCount = 0;
+      let allSettled = false;
+      let refreshFailed = false;
+      let lastPollingError: unknown;
+      const refreshVisibleOverview = async () => {
+        if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) return { attempted: true, success: await load(uploadCollection, true) };
+        if (!activeCollectionKey.current && visibleGalleryView.current === "root") return { attempted: true, success: await load(undefined, true) };
+        return { attempted: false, success: true };
+      };
       for (let attempt = 0; attempt < 40; attempt += 1) {
         await wait(3_000);
-        const current = await fetchGalleryUploadStatus(uploadKeys);
-        if (current.jobs.every(({ status: jobStatus }) => jobStatus === "completed" || jobStatus === "failed")) break;
+        try {
+          const current = await fetchGalleryUploadStatus(uploadKeys, 5_000);
+          const newlySettled = current.jobs.filter(({ key, status: jobStatus }) => !settledKeys.has(key) && (jobStatus === "completed" || jobStatus === "failed"));
+          for (const job of newlySettled) {
+            settledKeys.add(job.key);
+            if (job.status === "failed") failedCount += 1;
+          }
+          if (newlySettled.length > 0) {
+            await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
+            const refresh = await refreshVisibleOverview();
+            if (refresh.attempted && !refresh.success) refreshFailed = true;
+            if (optimisticBatchKey && refresh.success) {
+              const clientKeys = new Set(newlySettled.map(({ key }) => jobsByKey.get(key)?.clientKey).filter((key): key is string => Boolean(key)));
+              setOptimisticMediaItems((currentItems) => currentItems.filter((item) => item.batchKey !== optimisticBatchKey || !clientKeys.has(item.clientKey)));
+            }
+          }
+          allSettled = current.jobs.every(({ status: jobStatus }) => jobStatus === "completed" || jobStatus === "failed");
+          if (allSettled) break;
+        } catch (error) {
+          lastPollingError = error;
+        }
       }
       await queryClient.invalidateQueries({ queryKey: galleryQueryKeys.overviews(galleryContext) });
-      if (activeCollectionKey.current === uploadLocation && visibleGalleryView.current === uploadView) await load(uploadCollection);
+      const finalRefresh = await refreshVisibleOverview();
+      refreshFailed = finalRefresh.attempted && !finalRefresh.success;
+      if (optimisticBatchKey && (!allSettled || !refreshFailed)) setOptimisticMediaItems((currentItems) => currentItems.filter(({ batchKey }) => batchKey !== optimisticBatchKey));
+      if (uploadStatusIsVisible()) {
+        if (!allSettled) setStatus(lastPollingError ? `Images were uploaded, but processing status could not be confirmed: ${errorMessage(lastPollingError)}` : "Images were uploaded, but processing is taking longer than expected.");
+        else if (refreshFailed) setStatus("Images finished processing, but Gallery could not refresh them yet.");
+        else if (failedCount > 0) setStatus(`${failedCount} image${failedCount === 1 ? "" : "s"} could not be processed.`);
+        else setStatus("Images are ready.");
+      }
       await loadSubjects();
-    })().catch((error: unknown) => setStatus(errorMessage(error)));
+    })().catch((error: unknown) => {
+      setStatus(errorMessage(error));
+    });
   }
 
   async function prepareAssets(assets: CapturedImage[]) {
@@ -200,8 +274,20 @@ export function GalleryWorkspace() {
         };
       }));
       if (activeCollection) {
-        if (showingSearchResults || query.trim()) await clearCollectionSearch();
-        await completeUpload(files, activeCollection.key);
+        const targetCollection = activeCollection;
+        clearCollectionSearch(false);
+        const batchKey = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        setOptimisticMediaItems((current) => [...files.map((file) => ({ ...file, batchKey, collectionKey: targetCollection.key })), ...current]);
+        setCollections((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: collection.count + files.length } : collection));
+        setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: current.count + files.length } : current);
+        try {
+          await completeUpload(files, targetCollection.key, batchKey);
+        } catch (error) {
+          setOptimisticMediaItems((current) => current.filter((item) => item.batchKey !== batchKey));
+          setCollections((current) => current.map((collection) => collection.key === targetCollection.key ? { ...collection, count: Math.max(0, collection.count - files.length) } : collection));
+          setActiveCollection((current) => current?.key === targetCollection.key ? { ...current, count: Math.max(0, current.count - files.length) } : current);
+          throw error;
+        }
         setSheetOpen(false);
       } else {
         setPendingFiles(files);
@@ -262,30 +348,50 @@ export function GalleryWorkspace() {
     }
   }
 
-  async function search() {
-    const value = query.trim();
-    if (!activeCollection) return;
-    if (!value) { setShowingSearchResults(false); await load(activeCollection); return; }
-    const request = ++viewRequest.current;
+  function updateCollectionSearch(value: string) {
+    searchRequest.current += 1;
+    activeSearch.current = undefined;
+    setSearching(Boolean(value.trim()));
+    setCollectionSearchResults(undefined);
+    setStatus(undefined);
+    setQuery(value);
+  }
+
+  async function search(value = query.trim(), collection = activeCollection) {
+    if (!collection || !value) return;
+    const searchKey = `${collection.key}:${value.toLocaleLowerCase()}`;
+    if (activeSearch.current === searchKey) return;
+    activeSearch.current = searchKey;
+    const request = ++searchRequest.current;
+    const immediateMatches = filterMediaItems(images, value);
     setSearching(true);
     try {
-      const result = await searchGalleryImages({ query: value, collectionKey: activeCollection.key, limit: 50 });
-      if (request !== viewRequest.current) return;
-      setShowingSearchResults(true);
+      const result = await searchGalleryImages({ query: value, collectionKey: collection.key, limit: 50 });
+      if (request !== searchRequest.current || activeCollectionKey.current !== collection.key || visibleGalleryView.current !== "search") return;
       setSelectedImageKeys([]);
-      setImages(result.images);
-      setStatus(`${result.images.length} result${result.images.length === 1 ? "" : "s"} in ${activeCollection.name}`);
+      const matches = mergeMediaItems(immediateMatches, result.images);
+      setCollectionSearchResults(matches);
+      setStatus(`${matches.length} result${matches.length === 1 ? "" : "s"} in ${collection.name}`);
     } catch (error) {
-      if (request === viewRequest.current) setStatus(errorMessage(error));
+      if (request === searchRequest.current && activeCollectionKey.current === collection.key && visibleGalleryView.current === "search") setStatus(errorMessage(error));
     } finally {
-      setSearching(false);
+      if (activeSearch.current === searchKey) activeSearch.current = undefined;
+      if (request === searchRequest.current) setSearching(false);
     }
   }
 
-  async function clearCollectionSearch() {
+  function clearCollectionSearch(refresh = true) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchRequest.current += 1;
+    activeSearch.current = undefined;
     setQuery("");
-    setShowingSearchResults(false);
-    if (activeCollection) await load(activeCollection);
+    setCollectionSearchResults(undefined);
+    setSearching(false);
+    setStatus(undefined);
+    if (refresh && activeCollection) {
+      const collection = activeCollection;
+      setTimeout(() => { void load(collection, true); }, 0);
+    }
   }
 
   async function showImage(image: GalleryImage) {
@@ -334,6 +440,7 @@ export function GalleryWorkspace() {
 
   async function showDuplicates() {
     if (!activeCollection) return;
+    clearCollectionSearch(false);
     const request = ++viewRequest.current;
     setBusy(true);
     setSheetOpen(false);
@@ -537,11 +644,17 @@ export function GalleryWorkspace() {
               : activeSheet === "subjects" ? "Manage subjects"
                 : activeSheet === "transferDestination" ? `${transferMode === "move" ? "Move" : "Copy"} images`
                   : "Image";
+  const collectionSearchActive = Boolean(activeCollection && query.trim() && !showingDuplicates);
+  const immediateSearchResults = collectionSearchActive ? filterMediaItems(images, query) : images;
+  const visibleImages = collectionSearchActive && collectionSearchResults ? collectionSearchResults : immediateSearchResults;
+  const visibleOptimisticItems = activeCollection && !collectionSearchActive && !showingDuplicates
+    ? optimisticMediaItems.filter(({ collectionKey }) => collectionKey === activeCollection.key)
+    : [];
   const emptyGridMessage = showingDuplicates
     ? "No duplicate images were found in this collection."
     : activeSubject
       ? `No images are currently identified as ${activeSubject.name}.`
-      : showingSearchResults
+      : collectionSearchActive || showingSearchResults
         ? "No images matched this search."
         : activeCollection
           ? "This collection has no images yet."
@@ -595,15 +708,21 @@ export function GalleryWorkspace() {
               </>}
             </View>
           </View>
-          {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
           {normalCollectionView ? <View style={styles.collectionSearch}>
             <SearchIcon size="sm" variant="muted" />
-            <TextInput accessibilityLabel={`Search images in ${activeCollection.name}`} onChangeText={setQuery} onSubmitEditing={() => void search()} placeholder="Search this collection" returnKeyType="search" style={styles.rootSearchInput} value={query} />
-            {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" disabled={searching} hitSlop={8} onPress={() => void clearCollectionSearch()} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
+            <TextInput accessibilityLabel={`Search images in ${activeCollection.name}`} onChangeText={updateCollectionSearch} onSubmitEditing={() => { if (searchTimer.current) clearTimeout(searchTimer.current); void search(); }} placeholder="Search this collection" returnKeyType="search" style={styles.rootSearchInput} value={query} />
+            {query.trim() ? <Button accessibilityLabel="Clear image search" contentMode="raw" hitSlop={8} onPress={() => clearCollectionSearch()} size="xs" variant="icon"><CloseIcon size="sm" /></Button> : null}
           </View> : null}
-          {loading || searching ? <View style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS * 3 }, (_, index) => <View key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : images.length === 0 && normalCollectionView ? <View style={styles.emptyState}><Text style={styles.emptyText}>{emptyGridMessage}</Text>{showingSearchResults ? null : <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("actions")} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : images.length === 0 ? <Text style={styles.emptyText}>{emptyGridMessage}</Text> : (
+          {status ? <View accessibilityLiveRegion="polite" style={styles.statusCard}><Text style={styles.status}>{status}</Text></View> : null}
+          {loading || searching && visibleImages.length === 0 ? <View accessibilityLabel={searching ? "Searching images" : "Loading images"} accessibilityRole="progressbar" style={styles.grid}>{Array.from({ length: IMAGE_COLUMNS }, (_, index) => <View key={index} style={[styles.imageSkeleton, { width: imageSize, height: imageSize }]} />)}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 && normalCollectionView ? <View style={styles.emptyState}><Text style={styles.emptyText}>{emptyGridMessage}</Text>{collectionSearchActive ? null : <Button accessibilityLabel={`Add images to ${activeCollection.name}`} contentMode="raw" onPress={() => openSheet("actions")} size="md" style={styles.emptyPlusButton} variant="icon"><PlusIcon size="sm" /></Button>}</View> : visibleImages.length === 0 && visibleOptimisticItems.length === 0 ? <Text style={styles.emptyText}>{emptyGridMessage}</Text> : (
             <View style={styles.grid}>
-              {images.map((image) => (
+              {visibleOptimisticItems.map((item) => <View key={item.clientKey} accessibilityLabel={`Uploading ${item.filename}`} accessibilityRole="progressbar" style={[styles.imageButton, { width: imageSize, height: imageSize }]}>
+                <View style={styles.imageFrame}>
+                  <Image source={item.uri} contentFit="cover" style={styles.image} />
+                  <View style={styles.optimisticOverlay}><Spinner size="small" /></View>
+                </View>
+              </View>)}
+              {visibleImages.map((image) => (
                 <Button key={image.key} accessibilityLabel={image.caption || image.filename} accessibilityState={{ selected: selectedImageKeys.includes(image.key) }} contentMode="raw" onLongPress={activeCollection && !showingDuplicates ? () => handleImageLongPress(image.key) : undefined} onPress={() => handleImagePress(image)} size="xl" style={[styles.imageButton, { width: imageSize, height: imageSize }]} variant="ghost">
                   <View style={[styles.imageFrame, selectedImageKeys.includes(image.key) && styles.imageFrameSelected]}>
                     <Image source={image.url} contentFit="cover" style={styles.image} transition={150} />
@@ -752,6 +871,7 @@ const styles = StyleSheet.create({
   imageSkeleton: { borderRadius: radii.md, backgroundColor: palette.hairlineBright, opacity: 0.72 },
   imageFrame: { width: "100%", height: "100%", overflow: "hidden", borderWidth: 1, borderColor: "transparent", borderRadius: radii.md, backgroundColor: palette.panelRaised },
   imageFrameSelected: { borderColor: palette.silver50, borderWidth: 2 },
+  optimisticOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0, 0, 0, 0.28)" },
   selectionBadge: { position: "absolute", top: 4, right: 4, width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 10, backgroundColor: palette.silver50 },
   image: { width: "100%", height: "100%" },
   emptyState: { flex: 1, width: "100%", minHeight: 360, alignItems: "center", justifyContent: "center", gap: 14 },
