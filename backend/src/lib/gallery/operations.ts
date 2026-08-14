@@ -26,7 +26,9 @@ const collectionCreateSchema = strictObject({ name: z.string().trim().min(1).max
 const uploadFileSchema = strictObject({ clientKey: z.string().min(1).max(120), filename: z.string().trim().regex(/^[^/\\]+\.jpe?g$/i), sizeBytes: z.number().int().positive().max(20 * 1024 * 1024) });
 const presignSchema = strictObject({ collectionKey: z.string().cuid().nullable().optional(), files: z.array(uploadFileSchema).min(1).max(20) });
 const completeSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
-const searchSchema = strictObject({ query: z.string().trim().min(1).max(12_000).optional(), imageKey: z.string().cuid().optional(), threshold: z.number().min(-1).max(1).optional(), limit: z.number().int().min(1).max(50).default(50) }).refine((value) => Boolean(value.query) !== Boolean(value.imageKey), 'Provide exactly one of query or imageKey');
+const searchSchema = strictObject({ query: z.string().trim().min(1).max(12_000).optional(), imageKey: z.string().cuid().optional(), collectionKey: z.string().cuid().optional(), threshold: z.number().min(-1).max(1).optional(), limit: z.number().int().min(1).max(50).default(50) })
+  .refine((value) => Boolean(value.query) !== Boolean(value.imageKey), 'Provide exactly one of query or imageKey')
+  .refine((value) => !(value.imageKey && value.collectionKey), 'Collection search requires a text query');
 const statusSchema = strictObject({ uploadKeys: z.array(z.string().cuid()).min(1).max(20) });
 const favoriteSchema = strictObject({ imageKey: z.string().cuid(), isFavorite: z.boolean() });
 const duplicatesSchema = strictObject({ collectionKey: z.string().cuid() });
@@ -195,12 +197,13 @@ async function uploadStatus(rawInput: unknown, context: GalleryOperationContext)
 async function search(rawInput: unknown, context: GalleryOperationContext) {
     const input = { ...searchSchema.parse(rawInput), ...context };
     const membership = await authorize(context);
+    if (input.collectionKey && !await repository.getCollection(input.scopeKey, input.collectionKey)) throw new GalleryOperationError(404, 'GALLERY_COLLECTION_NOT_FOUND', 'Collection not found.');
     let matches: Array<{ image: z.infer<typeof imageSchema>; score: number }>;
     if (input.query) {
-      const output = await imageSearchTool.execute({ query: input.query, threshold: input.threshold, limit: input.limit }, { context: { organizationKey: input.organizationKey, runtimeScopeKey: input.scopeKey, principal: { kind: 'member', user: { key: membership.userId }, userOrganization: membership, scopeMember: null } as never } });
+      const output = await imageSearchTool.execute({ query: input.query, threshold: input.threshold, limit: input.limit }, { context: { organizationKey: input.organizationKey, runtimeScopeKey: input.scopeKey, principal: { kind: 'member', user: { key: membership.userId }, userOrganization: membership, scopeMember: null } as never }, searchImages: (searchInput) => repository.searchAccessibleImages({ ...searchInput, ...(input.collectionKey ? { collectionKey: input.collectionKey } : {}) }) });
       const namedIdentities = await repository.listMatchingIdentityNames(input.scopeKey, input.query);
       await Promise.all(namedIdentities.map((identity) => reconcileVisualIdentity(identity, input.organizationKey, membership.key)));
-      const named = await repository.listImagesForMatchingIdentityNames(input.scopeKey, input.query);
+      const named = await repository.listImagesForMatchingIdentityNames(input.scopeKey, input.query, input.collectionKey);
       const semantic = await Promise.all(output.images.map(async ({ key, score }) => { const image = await repository.getImage(key); if (!image) throw new GalleryOperationError(404, 'GALLERY_IMAGE_NOT_FOUND', 'Image not found.'); return { image, score }; }));
       const unique = new Map(named.map((match) => [match.image.key, match]));
       for (const match of semantic) if (!unique.has(match.image.key)) unique.set(match.image.key, match);

@@ -36,10 +36,16 @@ describe('Gallery operation boundaries', () => {
     expect(galleryOperationInputSchemas.search.parse({ query: 'mountains' })).toEqual({ query: 'mountains', limit: 50 });
   });
 
+  test('accepts an optional collection search boundary', () => {
+    const collectionKey = key();
+    expect(galleryOperationInputSchemas.search.parse({ query: 'mountains', collectionKey })).toEqual({ query: 'mountains', collectionKey, limit: 50 });
+  });
+
   test('enforces mutually exclusive search sources', () => {
     expect(() => galleryOperationInputSchemas.search.parse({})).toThrow('exactly one');
     expect(() => galleryOperationInputSchemas.search.parse({ query: 'dog', imageKey: key() })).toThrow('exactly one');
     expect(galleryOperationInputSchemas.search.parse({ imageKey: key() })).toBeDefined();
+    expect(() => galleryOperationInputSchemas.search.parse({ imageKey: key(), collectionKey: key() })).toThrow('text query');
   });
 
   test('enforces transfer and subject uniqueness invariants', () => {

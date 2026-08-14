@@ -7,7 +7,7 @@ mock.module("./api-client", () => ({
   apiClient: { post: () => { throw new Error("Unexpected API call"); } },
 }));
 
-const { findInitialMediaCollection } = await import("./gallery-client");
+const { filterCollections } = await import("./gallery-client");
 
 const collection = (name: string, key: string) => ({
   key,
@@ -17,15 +17,14 @@ const collection = (name: string, key: string) => ({
   coverUrl: null,
 });
 
-test("selects the provisioned My Images collection for initial Gallery navigation", () => {
-  const collections = [collection("Trips", "trips"), collection("My Images", "default")];
+test("filters collections by name without changing their hierarchy", () => {
+  const collections = [collection("Alpine Trips", "trips"), collection("My Images", "default")];
 
-  expect(findInitialMediaCollection(collections)).toEqual(collections[1]);
+  expect(filterCollections(collections, "alpine")).toEqual([collections[0]]);
 });
 
-test("leaves legacy users on the collections overview", () => {
-  const collections = [collection("Trips", "trips"), collection("my images", "legacy")];
+test("returns every collection for an empty search", () => {
+  const collections = [collection("Trips", "trips"), collection("My Images", "default")];
 
-  expect(findInitialMediaCollection(collections)).toBeUndefined();
-  expect(collections).toHaveLength(2);
+  expect(filterCollections(collections, "  ")).toEqual(collections);
 });
